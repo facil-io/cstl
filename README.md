@@ -2924,7 +2924,7 @@ struct timespec fio_time_real();
 
 Returns human (watch) time... this value isn't as safe for measurements.
 
-#### `timespec`
+#### `fio_time_mono`
 
 ```c
 struct timespec fio_time_mono();
