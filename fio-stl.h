@@ -8687,6 +8687,10 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
   fio_str_info_s dest;
   {
     const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s);
+#if !FIO_STR_OPTIMIZE4IMMUTABILITY
+    /* often, after `write_escape` come quotes */
+    FIO_NAME(FIO_STR_NAME, reserve)(s, org_len + extra_len + len + 4);
+#endif
     dest = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + extra_len + len);
     dest.len = org_len;
   }
