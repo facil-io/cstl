@@ -2263,6 +2263,18 @@ Unlocks the sub-lock, no matter which thread owns the lock.
 
 Returns 1 if the specified sub-lock is engaged. Otherwise returns 0.
 
+#### `fio_trylock_full(fio_lock_i *lock)`
+
+Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
+
+#### `fio_lock_full(fio_lock_i *lock)`
+
+Busy waits for all sub-locks to become available - not recommended.
+
+#### `fio_unlock_full(fio_lock_i *lock)`
+
+Unlocks all sub-locks, no matter which thread owns which lock.
+
 -------------------------------------------------------------------------------
 
 ## Bit-Byte operations:
@@ -3593,6 +3605,51 @@ Zero (0) is a valid number and may indicate that the buffer's memory contains a 
 
 **Note!**: partial Numeral objects may be result in errors, as the number 1234 may be fragmented as 12 and 34 when streaming data. facil.io doesn't protect against this possible error.
 
+
+
+#### `fio_json_parser_is_in_array`
+
+```c
+uint8_t fio_json_parser_is_in_array(fio_json_parser_s *parser);
+```
+
+Tests the state of the JSON parser.
+
+Returns 1 if the parser is currently within an Array or 0 if it isn't.
+
+
+#### `fio_json_parser_is_in_object`
+
+```c
+uint8_t fio_json_parser_is_in_object(fio_json_parser_s *parser);
+```
+
+Tests the state of the JSON parser.
+
+Returns 1 if the parser is currently within an Object or 0 if it isn't.
+
+
+#### `fio_json_parser_is_key`
+
+```c
+uint8_t fio_json_parser_is_key(fio_json_parser_s *parser);
+```
+
+Tests the state of the JSON parser.
+
+Returns 1 if the parser is currently parsing a "key" within an object or 0 if it isn't.
+
+
+#### `fio_json_parser_is_value`
+
+```c
+uint8_t fio_json_parser_is_value(fio_json_parser_s *parser);
+```
+
+Tests the state of the JSON parser.
+
+Returns 1 if the parser is currently parsing a "value" (within a array, an object or stand-alone) or 0 if it isn't (it's parsing a key).
+
 ### JSON Required Callbacks
 
 The JSON parser requires the following callbacks to be defined as static functions.
@@ -3603,7 +3660,7 @@ The JSON parser requires the following callbacks to be defined as static functio
 static void fio_json_on_null(fio_json_parser_s *p);
 ```
 
-A NULL object was detected
+A `null` object was detected
 
 #### `fio_json_on_true`
 
@@ -3611,7 +3668,7 @@ A NULL object was detected
 static void fio_json_on_true(fio_json_parser_s *p);
 ```
 
-A TRUE object was detected
+A `true` object was detected
 
 #### `fio_json_on_false`
 
@@ -3619,7 +3676,7 @@ A TRUE object was detected
 static void fio_json_on_false(fio_json_parser_s *p);
 ```
 
-A FALSE object was detected
+A `false` object was detected
 
 #### `fio_json_on_number`
 
@@ -4399,6 +4456,14 @@ In addition, all the functions documented above as `MAP_x`, are defined as `fiob
 * [`fiobj_hash_each_get_key`](#map_each_get_key)
 
 ### `FIOBJ` JSON Helpers
+
+Parsing, editing and outputting JSON in C can be easily accomplished using `FIOBJ` types.
+
+There are [faster alternatives as well as slower alternatives out there](json_performance.html) (i.e., the [Qajson4c library](https://github.com/DeHecht/qajson4c) is a wonderful alternative for embedded systems).
+
+However, `facil.io` offers the added benefit of complete parsing from JSON to object. This allows the result to be manipulated, updated, sliced or merged with ease. This is in contrast to some parsers that offer a mid-way structure or lazy (delayed) parsing for types such as `true`, `false` and Numbers.
+
+`facil.io` also offers the added benefit of complete formatting from a framework wide object type (`FIOBJ`) to JSON, allowing the same soft type system to be used throughout the project (rather than having a JSON dedicated type system).
 
 #### `fiobj2json`
 
