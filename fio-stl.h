@@ -934,26 +934,65 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #endif
 
 #define FIO_LOCK_INIT 0
+#define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
 typedef volatile unsigned char fio_lock_i;
 
-/** Tries to lock a sublock. Returns 0 on success and 1 on failure. */
+/** Tries to lock a specific sublock. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_sublock(fio_lock_i *lock, uint8_t sub) {
   __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
   sub = 1U << (sub & 7);
   return fio_atomic_or(lock, sub) & sub;
 }
 
-/** Busy waits for a sub lock to become available - not recommended. */
+/** Busy waits for a specific sublock to become available - not recommended. */
 FIO_IFUNC void fio_lock_sublock(fio_lock_i *lock, uint8_t sub) {
   while (fio_trylock_sublock(lock, sub)) {
     FIO_THREAD_RESCHEDULE();
   }
 }
 
-/** Unlocks the sub lock, no matter which thread owns the lock. */
+/** Unlocks the specific sublock, no matter which thread owns the lock. */
 FIO_IFUNC void fio_unlock_sublock(fio_lock_i *lock, uint8_t sub) {
   sub = 1U << (sub & 7);
   fio_atomic_and(lock, (~(fio_lock_i)sub));
+}
+
+/**
+ * Tries to lock a group of sublocks.
+ *
+ * Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+ * macro. i.e.:
+ *
+ *      if(!fio_trylock_group(&lock,
+ *                            FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
+ *         // act in lock
+ *      }
+ *
+ * Returns 0 on success and non-zero on failure.
+ */
+FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, const uint8_t group) {
+  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  uint8_t state = fio_atomic_or(lock, group) & group;
+  if (!state)
+    return 0;
+  fio_atomic_and(lock, state);
+  return 1;
+}
+
+/**
+ * Busy waits for a group lock to become available - not recommended.
+ *
+ * See `fio_trylock_group` for details.
+ */
+FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
+  while (fio_trylock_group(lock, group)) {
+    FIO_THREAD_RESCHEDULE();
+  }
+}
+
+/** Unlocks a sublock group, no matter which thread owns which sublock. */
+FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
+  fio_atomic_and(lock, ~group);
 }
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
@@ -976,19 +1015,23 @@ FIO_IFUNC void fio_lock_full(fio_lock_i *lock) {
 /** Unlocks all sub locks, no matter which thread owns the lock. */
 FIO_IFUNC void fio_unlock_full(fio_lock_i *lock) { fio_atomic_and(lock, 0); }
 
-/** Tries to acquire a lock. Returns 0 on success and 1 on failure. */
+/**
+ * Tries to acquire the default lock (sublock 0).
+ *
+ * Returns 0 on success and 1 on failure.
+ */
 FIO_IFUNC uint8_t fio_trylock(fio_lock_i *lock) {
   return fio_trylock_sublock(lock, 0);
 }
 
-/** Busy waits for a lock to become available - not recommended. */
+/** Busy waits for the default lock to become available - not recommended. */
 FIO_IFUNC void fio_lock(fio_lock_i *lock) {
   while (fio_trylock(lock)) {
     FIO_THREAD_RESCHEDULE();
   }
 }
 
-/** Unlocks the lock, no matter which thread owns the lock. */
+/** Unlocks the default lock, no matter which thread owns the lock. */
 FIO_IFUNC void fio_unlock(fio_lock_i *lock) { fio_unlock_sublock(lock, 0); }
 
 /** Returns 1 if the lock is locked, 0 otherwise. */
@@ -11741,29 +11784,38 @@ SFUNC size_t fio_json_parse(fio_json_parser_s *parser,
                             const char *buffer,
                             const size_t len);
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_in_array(fio_json_parser_s *parser);
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_in_object(fio_json_parser_s *parser);
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_key(fio_json_parser_s *parser);
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_value(fio_json_parser_s *parser);
-
 /* *****************************************************************************
-JSON Parsing - Implementation - Callbacks
+JSON Parsing - Implementation - Helpers and Callbacks
 
 
 Note: static Callacks must be implemented in the C file that uses the parser
-***************************************************************************** */
 
+Note: a Helper API is provided for the parsing implementation.
+***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
 /** common FIO_JSON callback function properties */
 #define FIO_JSON_CB static inline __attribute__((unused))
+
+/* *****************************************************************************
+JSON Parsing - Helpers API
+***************************************************************************** */
+
+/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
+FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *parser);
+
+/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
+FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *parser);
+
+/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
+FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *parser);
+
+/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
+FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *parser);
+
+/* *****************************************************************************
+JSON Parsing - Implementation - Callbacks
+***************************************************************************** */
 
 /** a NULL object was detected */
 FIO_JSON_CB void fio_json_on_null(fio_json_parser_s *p);
@@ -11792,29 +11844,29 @@ FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p);
 FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p);
 
 /* *****************************************************************************
-JSON Parsing - Implementation - Parser
+JSON Parsing - Implementation - Helpers and Parsing
 
 
 Note: static Callacks must be implemented in the C file that uses the parser
 ***************************************************************************** */
 
 /** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_in_array(fio_json_parser_s *p) {
+FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *p) {
   return p->depth && fio_bitmap_get(p->nesting, p->depth);
 }
 
 /** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_in_object(fio_json_parser_s *p) {
+FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *p) {
   return p->depth && !fio_bitmap_get(p->nesting, p->depth);
 }
 
 /** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_key(fio_json_parser_s *p) {
+FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *p) {
   return fio_json_parser_is_in_object(p) && !p->expect;
 }
 
 /** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-SFUNC uint8_t fio_json_parser_is_value(fio_json_parser_s *p) {
+FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *p) {
   return !fio_json_parser_is_key(p);
 }
 
@@ -14846,6 +14898,14 @@ TEST_FUNC void fio___dynamic_types_test___atomic(void) {
     FIO_T_ASSERT(fio_trylock_sublock(&lock, i), "fio_trylock should fail");
     FIO_T_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
     FIO_T_ASSERT(fio_is_sublocked(&lock, i), "lock should be engaged");
+    {
+      uint8_t g =
+          fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
+      FIO_T_ASSERT((i != 1 && i != 3 && !g) || ((i == 1 || i == 3) && g),
+                   "fio_trylock_group should succeed / fail");
+      if (!g)
+        fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
+    }
     for (uint8_t j = 1; j < 8; ++j) {
       FIO_T_ASSERT(i == j || !fio_is_sublocked(&lock, j),
                    "another sublock was flagged, though it wasn't engaged");
