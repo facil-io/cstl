@@ -859,8 +859,8 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
 ***************************************************************************** */
 
-#if defined(FIO_ATOMIC) && !defined(fio_atomic_exchange)
-
+#if defined(FIO_ATOMIC) && !defined(H___FIO_ATOMIC___H)
+#define H___FIO_ATOMIC___H 1
 /* C11 Atomics are defined? */
 #if defined(__ATOMIC_RELAXED)
 /** An atomic load operation, returns value in pointer. */
@@ -871,6 +871,8 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
 // clang-format off
 
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __atomic_compare_exchange((p_obj), (p_expected), (p_desired), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) __atomic_exchange_n((p_obj), (value), __ATOMIC_SEQ_CST)
 /** An atomic addition operation, returns previous value */
@@ -906,9 +908,12 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
   do {                                                                         \
     dest = *(p_obj);                                                           \
   } while (!__sync_bool_compare_and_swap((p_obj), dest, dest))
+
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __sync_bool_compare_and_swap((p_obj), (p_expected), *(p_desired))
 /** An atomic exchange operation, ruturns previous value */
-#define fio_atomic_exchange(p_obj, value)                                      \
-  __sync_val_compare_and_swap((p_obj), *(p_obj), (value))
+#define fio_atomic_exchange(p_obj, value) __sync_val_compare_and_swap((p_obj), *(p_obj), (value))
 /** An atomic addition operation, returns new value */
 #define fio_atomic_add(p_obj, value) __sync_fetch_and_add((p_obj), (value))
 /** An atomic subtraction operation, returns new value */
@@ -985,7 +990,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
-  fio_atomic_and(lock, state);
+  fio_atomic_and(lock, (state | (~group)));
   return 1;
 }
 
@@ -1004,7 +1009,7 @@ FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
 FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
   if (!group)
     group = 1;
-  fio_atomic_and(lock, ~group);
+  fio_atomic_and(lock, (~group));
 }
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
@@ -1084,6 +1089,7 @@ FIO_IFUNC uint8_t FIO_NAME_BL(fio, sublocked)(fio_lock_i *lock, uint8_t sub) {
 
 ***************************************************************************** */
 #if defined(FIO_LOCK2) && !defined(H___FIO_LOCK2___H)
+#define H___FIO_LOCK2___H 1
 
 #ifndef FIO_THREAD_T
 #include <pthread.h>
@@ -1097,12 +1103,13 @@ FIO_IFUNC uint8_t FIO_NAME_BL(fio, sublocked)(fio_lock_i *lock, uint8_t sub) {
 #ifndef FIO_THREAD_PAUSE
 #define FIO_THREAD_PAUSE(id)                                                   \
   do {                                                                         \
-    sigset_t set;                                                              \
-    sigemptyset(&set);                                                         \
-    sigaddset(&set, SIGINT);                                                   \
-    sigaddset(&set, SIGTERM);                                                  \
-    sigaddset(&set, SIGCONT);                                                  \
-    sigwait(&set, NULL);                                                       \
+    sigset_t set___;                                                           \
+    int got___sig;                                                             \
+    sigemptyset(&set___);                                                      \
+    sigaddset(&set___, SIGINT);                                                \
+    sigaddset(&set___, SIGTERM);                                               \
+    sigaddset(&set___, SIGCONT);                                               \
+    sigwait(&set___, &got___sig);                                              \
   } while (0)
 #endif
 
@@ -1110,7 +1117,7 @@ FIO_IFUNC uint8_t FIO_NAME_BL(fio, sublocked)(fio_lock_i *lock, uint8_t sub) {
 #define FIO_THREAD_RESUME(id) pthread_kill((id), SIGCONT)
 #endif
 
-typedef volatile struct fio___lock2_wait_s fio___lock2_wait_s;
+typedef struct fio___lock2_wait_s fio___lock2_wait_s;
 
 /* *****************************************************************************
 Public API
@@ -1127,7 +1134,7 @@ Public API
  */
 typedef struct {
   volatile size_t lock;
-  fio___lock2_wait_s *waiting;
+  fio___lock2_wait_s *volatile waiting;
 } fio_lock2_s;
 
 /**
@@ -1192,7 +1199,7 @@ FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return 0;
-  fio_atomic_and(&lock->lock, state);
+  fio_atomic_and(&lock->lock, (state | (~group)));
   return 1;
 }
 
@@ -1203,7 +1210,7 @@ Implementation - Extern
 
 struct fio___lock2_wait_s {
   FIO_THREAD_T t;
-  fio___lock2_wait_s *next;
+  fio___lock2_wait_s *volatile next;
 };
 
 /**
@@ -1232,14 +1239,16 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   if (!(state & group))
     return;
 
+  /* initialize self-waiting node memory (using stack memory) */
+  self_thread.t = FIO_THREAD_ID();
+  self_thread.next = NULL; // lock->waiting;
+
   /* enter waitlist lock */
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
 
-  /* add thread to end of waitlist */
-  self_thread.t = FIO_THREAD_ID();
-  self_thread.next = NULL; // lock->waiting;
+  /* add self-thread to end of waitlist */
   {
     fio___lock2_wait_s *volatile *i = &(lock->waiting);
     while (i[0]) {
@@ -1249,6 +1258,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   }
 
   /* release waitlist lock and return lock's state */
+  state = (state | (~group)) & (~inner_lock);
   fio_atomic_and(&lock->lock, (state & (~inner_lock)));
 
   for (;;) {
@@ -1258,7 +1268,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
     // `next` may have been added while we didn't look
     if (self_thread.next) {
       /* resume next thread if this isn't for us (possibly different group) */
-      fio_atomic_and(&lock->lock, state);
+      fio_atomic_and(&lock->lock, (state | (~group)));
       FIO_THREAD_RESUME(self_thread.next->t);
     }
     FIO_THREAD_PAUSE(self_thread.t);
@@ -1317,8 +1327,8 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
 
 #endif /* FIO_EXTERN_COMPLETE */
 
-#endif /* FIO_LOCK2 */
 #undef FIO_LOCK2
+#endif /* FIO_LOCK2 */
 
 /* *****************************************************************************
 
@@ -2726,10 +2736,10 @@ FIO_SFUNC fio___mem_block_s *fio___mem_block_alloc(void) {
                  (void *)b);
 #endif
   /* initialize and push all block slices into memory pool */
-  for (uint16_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
+  for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
     fio___mem_block_s *tmp =
         FIO_PTR_MATH_ADD(fio___mem_block_s, b, (FIO_MEMORY_BLOCK_SIZE * i));
-    *tmp = (fio___mem_block_s){.root = i, .ref = 0};
+    *tmp = (fio___mem_block_s){.root = (uint16_t)i, .ref = 0};
     fio___mem_available_blocks_push(&fio___mem_state->available,
                                     (fio___mem_block_node_s *)tmp);
   }
@@ -2761,7 +2771,7 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
     return;
   }
   /* remove all block slices from memory pool */
-  for (uint16_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION); ++i) {
+  for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION); ++i) {
     fio___mem_block_node_s *tmp = FIO_PTR_MATH_ADD(
         fio___mem_block_node_s, b, (FIO_MEMORY_BLOCK_SIZE * i));
     fio___mem_available_blocks_remove(tmp);
@@ -3347,7 +3357,7 @@ Random - Implementation
 #endif
 
 static __thread uint64_t fio___rand_state[4]; /* random state */
-static __thread uint32_t fio___rand_counter;  /* seed counter */
+static __thread size_t fio___rand_counter;    /* seed counter */
 /* feeds random data to the algorithm through this 256 bit feed. */
 static __thread uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
                                                  0x7cc568e838f6a40d,
@@ -3436,7 +3446,7 @@ IFUNC void fio_rand_reseed(void) {
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
   const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
-  if (((fio___rand_counter++) & (((uint32_t)1 << 19) - 1)) == 0) {
+  if (((fio___rand_counter++) & (((size_t)1 << 19) - 1)) == 0) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
@@ -5459,7 +5469,7 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) tmp = *ary;
   *ary = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
-  for (uint32_t i = tmp.start; i < tmp.end; ++i) {
+  for (size_t i = tmp.start; i < tmp.end; ++i) {
     FIO_ARRAY_TYPE_DESTROY(tmp.ary[i]);
   }
 #endif
@@ -5535,7 +5545,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
 #if FIO_ARRAY_TYPE_COPY_SIMPLE && FIO_ARRAY_TYPE_CONCAT_SIMPLE
   memcpy(dest->ary + dest->end, src->ary + src->start, src->end - src->start);
 #else
-  for (uint32_t i = 0; i + src->start < src->end; ++i) {
+  for (size_t i = 0; i + src->start < src->end; ++i) {
     FIO_ARRAY_TYPE_CONCAT_COPY((dest->ary + dest->end + i)[0],
                                (src->ary + i + src->start)[0]);
   }
@@ -5593,7 +5603,7 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
       memset(ary->ary + ary->end, 0, (index - ary->end) * sizeof(*ary->ary));
 #else
-      for (uint32_t i = ary->end; i <= (uint32_t)index; ++i) {
+      for (size_t i = ary->end; i <= (size_t)index; ++i) {
         FIO_ARRAY_TYPE_COPY(ary->ary[i], FIO_ARRAY_TYPE_INVALID);
       }
 #endif
@@ -5758,8 +5768,8 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
                                                  FIO_ARRAY_TYPE data) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
-  uint32_t c = 0;
-  uint32_t i = ary->start;
+  size_t c = 0;
+  size_t i = ary->start;
   while (i < ary->end) {
     if (!(FIO_ARRAY_TYPE_CMP(ary->ary[i + c], data))) {
       ary->ary[i] = ary->ary[i + c];
@@ -5924,9 +5934,9 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
     start_at += ary->end - ary->start;
   if (start_at < 0)
     start_at = 0;
-  for (uint32_t i = ary->start + start_at; i < ary->end; ++i) {
+  for (size_t i = ary->start + start_at; i < ary->end; ++i) {
     if (task(ary->ary[i], arg) == -1) {
-      return (i + 1) - ary->start;
+      return (uint32_t)((i + 1) - ary->start);
     }
   }
   return ary->end - ary->start;
@@ -7008,12 +7018,12 @@ SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
                                       FIO_MAP_HASH hash,
                                       FIO_MAP_SIZE_TYPE ihash,
                                       FIO_MAP_OBJ_KEY key) {
-  const FIO_MAP_SIZE_TYPE imask = ((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1;
-  const FIO_MAP_SIZE_TYPE test_mask = ~imask;
+  const size_t imask = ((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1;
+  const size_t test_mask = ~imask;
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   r = {.i = FIO_MAP_INDEX_INVALID, .imap = FIO_MAP_INDEX_INVALID};
-  FIO_MAP_SIZE_TYPE i = ihash;
+  size_t i = ihash;
   if (!m->map)
     return r;
   ihash &= test_mask;
@@ -7040,8 +7050,8 @@ SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
           FIO_MAP_OBJ_KEY_CMP(m->map[(imap[i] & imask)].obj, key)) {
         /* object found */
         r = (FIO_NAME(FIO_MAP_NAME, __pos_s)){
-            .i = (imap[i] & imask),
-            .imap = i,
+            .i = (FIO_MAP_SIZE_TYPE)(imap[i] & imask),
+            .imap = (FIO_MAP_SIZE_TYPE)i,
         };
         return r;
       }
@@ -7060,8 +7070,8 @@ seek_as_array:
     if (m->map[i].hash == hash &&
         FIO_MAP_OBJ_KEY_CMP(m->map[(i & imask)].obj, key)) {
       r = (FIO_NAME(FIO_MAP_NAME, __pos_s)){
-          .i = i,
-          .imap = i,
+          .i = (FIO_MAP_SIZE_TYPE)i,
+          .imap = (FIO_MAP_SIZE_TYPE)i,
       };
       return r;
     }
@@ -7079,7 +7089,7 @@ Hash Map / Set - Internal API (Helpers) - Rehashing
 
 /** Internal: rehashes the map. */
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __rehash_no_holes)(FIO_MAP_S *m) {
-  FIO_MAP_SIZE_TYPE pos = 0;
+  size_t pos = 0;
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   FIO_NAME(FIO_MAP_NAME, each_s) *map = m->map;
   while (pos < m->w) {
@@ -13779,7 +13789,7 @@ FIOBJ Complex Iteration
 ***************************************************************************** */
 typedef struct {
   FIOBJ obj;
-  uint32_t pos;
+  size_t pos;
 } fiobj____stack_element_s;
 
 #define FIO_ARRAY_NAME fiobj____active_stack
@@ -14047,7 +14057,7 @@ FIOBJ JSON support - output
 
 FIO_IFUNC void fiobj___json_format_internal_beauty_pad(FIOBJ json,
                                                        size_t level) {
-  uint32_t pos = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json);
+  size_t pos = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json);
   fio_str_info_s tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                                 resize)(json, (level << 1) + pos + 2);
   tmp.buf[pos++] = '\r';
@@ -14092,7 +14102,7 @@ fiobj___json_format_internal__(fiobj___json_format_internal__s *args, FIOBJ o) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "[", 1);
       const uint32_t len =
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-      for (uint32_t i = 0; i < len; ++i) {
+      for (size_t i = 0; i < len; ++i) {
         if (args->beautify) {
           fiobj___json_format_internal_beauty_pad(args->json, args->level);
         }
@@ -14118,7 +14128,7 @@ fiobj___json_format_internal__(fiobj___json_format_internal__s *args, FIOBJ o) {
     {
       ++args->level;
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "{", 1);
-      uint32_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
+      size_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
       if (i) {
         FIO_MAP_EACH2(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
           if (args->beautify) {
@@ -14431,7 +14441,7 @@ TEST_FUNC void fio___dynamic_types_test___atol(void) {
     FIO_T_ASSERT(
         i == i2, "fio_ltoa-fio_atol roundtrip error %lld != %lld", i, i2);
   }
-  for (uint8_t bit = 0; bit < sizeof(int64_t) * 8; ++bit) {
+  for (size_t bit = 0; bit < sizeof(int64_t) * 8; ++bit) {
     uint64_t i = (uint64_t)1 << bit;
     size_t tmp = fio_ltoa(buffer, (int64_t)i, 0);
     FIO_T_ASSERT(tmp > 0, "fio_ltoa return length error");
@@ -15119,6 +15129,21 @@ TEST_FUNC void fio___dynamic_types_test___atomic(void) {
   FIO_T_ASSERT(r1.s == 1 && s.s == 99, "fio_atomic_exchange failed for s");
   FIO_T_ASSERT(r1.l == 1 && s.l == 99, "fio_atomic_exchange failed for l");
   FIO_T_ASSERT(r1.w == 1 && s.w == 99, "fio_atomic_exchange failed for w");
+  // clang-format off
+  FIO_T_ASSERT(!fio_atomic_compare_exchange_p(&s.c, &r1.c, &r1.c), "fio_atomic_compare_exchange_p didn't fail for c");
+  FIO_T_ASSERT(!fio_atomic_compare_exchange_p(&s.s, &r1.s, &r1.s), "fio_atomic_compare_exchange_p didn't fail for s");
+  FIO_T_ASSERT(!fio_atomic_compare_exchange_p(&s.l, &r1.l, &r1.l), "fio_atomic_compare_exchange_p didn't fail for l");
+  FIO_T_ASSERT(!fio_atomic_compare_exchange_p(&s.w, &r1.w, &r1.w), "fio_atomic_compare_exchange_p didn't fail for w");
+  r1.c = 1;s.c = 99; r1.s = 1;s.s = 99; r1.l = 1;s.l = 99; r1.w = 1;s.w = 99; /* ignore system spefcific behavior. */
+  r1.c = fio_atomic_compare_exchange_p(&s.c,&s.c, &r1.c);
+  r1.s = fio_atomic_compare_exchange_p(&s.s,&s.s, &r1.s);
+  r1.l = fio_atomic_compare_exchange_p(&s.l,&s.l, &r1.l);
+  r1.w = fio_atomic_compare_exchange_p(&s.w,&s.w, &r1.w);
+  FIO_T_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c");
+  FIO_T_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s");
+  FIO_T_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l");
+  FIO_T_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w");
+  // clang-format on
 
   uint64_t val = 1;
   FIO_T_ASSERT(fio_atomic_and(&val, 2) == 1,
@@ -15182,6 +15207,7 @@ TEST_FUNC void fio___dynamic_types_test___atomic(void) {
       FIO_T_ASSERT(i == j || !fio_is_sublocked(&lock, j),
                    "another sublock was flagged, though it wasn't engaged");
     }
+    FIO_T_ASSERT(fio_is_sublocked(&lock, i), "lock should remain engaged");
     fio_unlock_sublock(&lock, i);
     FIO_T_ASSERT(!fio_is_sublocked(&lock, i), "sublock should be released");
     FIO_T_ASSERT(!fio_trylock_full(&lock), "fio_trylock_full should succeed");
@@ -15276,18 +15302,6 @@ TEST_FUNC void fio___dynamic_types_test___lock2_speed(void) {
             test_funcs[fn].type_size);
   }
 
-  fprintf(stderr,
-          "\n* Speed testing locking schemes, long work calculation...");
-  start = clock();
-  for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-    size_t result = 0;
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
-    fio___lock_speedtest_task_inner(&result);
-  }
-  end = clock();
-  fprintf(stderr, " %zu CPU/c\n", end - start);
-  clock_t long_work = end - start;
-
   start = clock();
   for (size_t i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
     __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
@@ -15318,9 +15332,17 @@ TEST_FUNC void fio___dynamic_types_test___lock2_speed(void) {
   }
 
   fprintf(stderr,
-          "\n* Speed testing locking schemes - no contention, long work (%zu "
-          "CPU/c):\n",
-          long_work);
+          "\n* Speed testing locking schemes - no contention, long work ");
+  start = clock();
+  for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
+    size_t result = 0;
+    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    fio___lock_speedtest_task_inner(&result);
+  }
+  end = clock();
+  fprintf(stderr, " %zu CPU/c\n", end - start);
+  clock_t long_work = end - start;
+  fprintf(stderr, "(%zu CPU/c):\n", long_work);
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
