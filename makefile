@@ -123,10 +123,10 @@ endif
 
 # Tests are performed unless the value is empty / missing
 
-TEST4POLL:=1      # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
-TEST4SOCKET:=1    # --- adds linker flags, not compilation flags
-TEST4SSL:=1       # HAVE_OPENSSL / HAVE_BEARSSL + HAVE_S2N
-TEST4SENDFILE:=1  # HAVE_SENDFILE
+TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
+TEST4SOCKET:=     # --- adds linker flags, not compilation flags
+TEST4SSL:=        # HAVE_OPENSSL / HAVE_BEARSSL + HAVE_S2N
+TEST4SENDFILE:=   # HAVE_SENDFILE
 TEST4TM_ZONE:=1   # HAVE_TM_TM_ZONE
 TEST4ZLIB:=       # HAVE_ZLIB
 TEST4PG:=         # HAVE_POSTGRESQL
@@ -704,15 +704,23 @@ test_set_test_flag___:
 	$(eval CXXFLAGS+=-DTEST=1 -DFIO_WEAK_TLS)
 	@echo "* Set testing flags."
 
-# test/build/XXX will compile and run tests/XXX.c
+# test/cpp will try to compile a source file using C++ to test header integration
 .PHONY : test/cpp
 test/cpp: | test_set_test_flag___ 
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
 	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
+	@echo "* Compilation of C++ variation successful."
+
+# test/cpp will try to compile a source file using C++ to test header integration
+.PHONY : test/db/cpp
+test/db/cpp: | set_debug_flags___ test_set_test_flag___ 
+	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
+	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
+	@echo "* Linking"
+	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) $(OPTIMIZATION)
+	@echo "* Compilation of C++ variation successful."
 
 # test/build/db/XXX will set DEBUG, compile the library and run tests/XXX.c
 .PHONY : test/lib/db/%
