@@ -13,9 +13,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Test Cpp compilation
-    #   run: make test/cpp
-    # - name: Test STL
+    - name: Test STL
       run: make test/stl
     - name: clean
       run: make clean
