@@ -13,7 +13,7 @@ script:
   - DEBUG=1 make vars
   - make test/cpp
   - make clean
-  - ASAN_OPTIONS=detect_leaks=0 make test/db/ci
+  - ASAN_OPTIONS=detect_leaks=0 make test/db/stl
 notifications:
   email: false
 after_success:
