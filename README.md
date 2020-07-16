@@ -14,6 +14,25 @@ The header could be included multiple times with different results, creating dif
 
 This single-header library was extracted from the facil.io source code repo (the 0.8.x branch) and will be updated periodically from the source code in [the main facil.io repository](https://github.com/boazsegev/facil.io).
 
+### Running Tests
+
+Testing the STL locally is easy using:
+
+```bash
+make test/stl
+```
+
+The GNU `make` command will compile and run any file in the `tests` folder if it is explicitly listed. i.e.,
+
+```bash
+make test/malloc      # speed test facil.io's memory allocator
+make test/json        # test JSON roundtrip with external JSON files
+make test/json_minify # JSON minification example
+make test/malloc      # Test template compilation in a C++ file (no run).
+```
+
+It is possible to use the same `makefile` to compile source code and static library code. See the makefile for details.
+
 ### Contribution Notice
 
 Contributions **should** be made to [the main facil.io repository](https://github.com/boazsegev/facil.io). Contributions made here will be moved to the main repository.

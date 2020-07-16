@@ -44,7 +44,7 @@ MAIN_SUBFOLDERS=
 LIB_ROOT=lib
 
 # publicly used subfolders in the lib root
-LIB_PUBLIC_SUBFOLDERS=facil facil/tls facil/fiobj facil/http facil/http/parsers facil/redis
+LIB_PUBLIC_SUBFOLDERS=
 
 # privately used subfolders in the lib root (this distinction is only relevant for CMake)
 LIB_PRIVATE_SUBFOLDERS=
@@ -655,6 +655,7 @@ $(TMP_ROOT)/%.o: %.cpp $(TMP_ROOT)/%.d
 	@echo "* Compiling $<"
 	@$(CC) -c $< -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
+	$(eval LINKER_FLAGS+= -lc++)
 
 $(TMP_ROOT)/%.o: %.c++ $(TMP_ROOT)/%.d
 	@echo "* Compiling $<"
@@ -672,12 +673,14 @@ $(TMP_ROOT)/%.o: %.cpp $(TMP_ROOT)/%.d
 	@echo "* Compiling $<"
 	@$(CXX) -o $@ -c $< $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
+	$(eval LINKER_FLAGS+= -lc++)
 	@$(DISAMS) $@ > $@.s
 
 $(TMP_ROOT)/%.o: %.c++ $(TMP_ROOT)/%.d
 	@echo "* Compiling $<"
 	@$(CXX) -o $@ -c $< $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
+	$(eval LINKER_FLAGS+= -lc++)
 	@$(DISAMS) $@ > $@.s
 endif
 
@@ -710,7 +713,7 @@ test/cpp: | test_set_test_flag___
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) $(OPTIMIZATION)
+	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) -lc++ $(OPTIMIZATION)
 	@echo "* Compilation of C++ variation successful."
 
 # test/cpp will try to compile a source file using C++ to test header integration
@@ -719,7 +722,7 @@ test/db/cpp: | set_debug_flags___ test_set_test_flag___
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) $(OPTIMIZATION)
+	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) -lc++ $(OPTIMIZATION)
 	@echo "* Compilation of C++ variation successful."
 
 # test/build/db/XXX will set DEBUG, compile the library and run tests/XXX.c
