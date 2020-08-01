@@ -51,6 +51,13 @@ LIB_PRIVATE_SUBFOLDERS=
 
 
 #############################################################################
+# Single Library Concatenation
+#############################################################################
+
+LIB_CONCAT_FOLDER=stl_slices
+LIB_CONCAT_TARGET=fio-stl
+
+#############################################################################
 # Test Source Code Folder
 #############################################################################
 
@@ -225,6 +232,36 @@ TRY_RUN=$(shell $(1) >> /dev/null 2> /dev/null; echo $$?;)
 TRY_COMPILE=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(LDFLAGS) $(2) -xc -o /dev/null - >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
 TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(2) -xc -o ./___fio_tmp_test_ - 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___fio_tmp_test_ 2> /dev/null)
 EMPTY:=
+
+
+#############################################################################
+# Combining single-file library
+#############################################################################
+
+ifdef LIB_CONCAT_FOLDER
+ifdef LIB_CONCAT_TARGET
+LIB_CONCAT_HEADERS=$(wildcard $(LIB_CONCAT_FOLDER)/*.h)
+LIB_CONCAT_SOURCES=$(wildcard $(LIB_CONCAT_FOLDER)/*.c)
+LIB_CONCAT_DOCS=$(wildcard $(LIB_CONCAT_FOLDER)/*.md)
+ifneq ($(LIB_CONCAT_HEADERS), $(EMPTY))
+  $(info * Building single-file header: $(LIB_CONCAT_TARGET).h)
+  $(shell rm $(LIB_CONCAT_TARGET).h)
+  $(shell cat $(LIB_CONCAT_FOLDER)/*.h >> $(LIB_CONCAT_TARGET).h)
+endif
+ifneq ($(LIB_CONCAT_SOURCES), $(EMPTY))
+  $(info * Building single-file source: $(LIB_CONCAT_TARGET).c)
+  $(shell rm $(LIB_CONCAT_TARGET).c)
+  $(shell cat $(LIB_CONCAT_FOLDER)/*.c >> $(LIB_CONCAT_TARGET).c)
+endif
+ifneq ($(LIB_CONCAT_DOCS), $(EMPTY))
+  $(info * Building documentation: $(LIB_CONCAT_TARGET).md)
+  $(shell rm $(LIB_CONCAT_TARGET).md)
+  $(shell cat $(LIB_CONCAT_FOLDER)/*.md >> $(LIB_CONCAT_TARGET).md)
+endif
+
+endif
+endif
+
 
 #############################################################################
 # kqueue / epoll / poll Selection / Detection
