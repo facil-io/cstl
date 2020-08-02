@@ -655,6 +655,49 @@ SFUNC void fio_cli_set(char const *name, char const *value) {
 }
 
 /* *****************************************************************************
+CLI - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(cli)(void) {
+  const char *argv[] = {
+      "appname", "-i11", "-i2=2", "-i3", "3", "-t", "-s", "test", "unnamed",
+  };
+  const int argc = sizeof(argv) / sizeof(argv[0]);
+  fprintf(stderr, "* Testing CLI helpers.\n");
+  { /* avoid macro for C++ */
+    const char *arguments[] = {
+        FIO_CLI_INT("-integer1 -i1 first integer"),
+        FIO_CLI_INT("-integer2 -i2 second integer"),
+        FIO_CLI_INT("-integer3 -i3 third integer"),
+        FIO_CLI_BOOL("-boolean -t boolean"),
+        FIO_CLI_BOOL("-boolean_false -f boolean"),
+        FIO_CLI_STRING("-str -s a string"),
+        NULL,
+    };
+    fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
+  }
+  FIO_ASSERT(fio_cli_get_i("-i2") == 2, "CLI second integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i3") == 3, "CLI third integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i1") == 1, "CLI first integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i2") == fio_cli_get_i("-integer2"),
+             "CLI second integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i3") == fio_cli_get_i("-integer3"),
+             "CLI third integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i1") == fio_cli_get_i("-integer1"),
+             "CLI first integer error.");
+  FIO_ASSERT(fio_cli_get_i("-t") == 1, "CLI boolean true error.");
+  FIO_ASSERT(fio_cli_get_i("-f") == 0, "CLI boolean false error.");
+  FIO_ASSERT(!strcmp(fio_cli_get("-s"), "test"), "CLI string error.");
+  FIO_ASSERT(fio_cli_unnamed_count() == 1, "CLI unnamed count error.");
+  FIO_ASSERT(!strcmp(fio_cli_unnamed(0), "unnamed"), "CLI unnamed error.");
+  fio_cli_set("-manual", "okay");
+  FIO_ASSERT(!strcmp(fio_cli_get("-manual"), "okay"), "CLI set/get error.");
+  fio_cli_end();
+  FIO_ASSERT(fio_cli_get_i("-i1") == 0, "CLI cleanup error.");
+}
+#endif /* FIO_TEST_CSTL */
+
+/* *****************************************************************************
 CLI - cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE*/

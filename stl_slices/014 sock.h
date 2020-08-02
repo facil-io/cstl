@@ -172,14 +172,30 @@ IO Poll - API
   }
 
 typedef struct {
+  /** Called after polling but before any events are processed. */
   void (*before_events)(void *udata);
+  /** Called when the fd can be written too (available outgoing buffer). */
   void (*on_ready)(int fd, size_t index, void *udata);
+  /** Called when data iis available to be read from the fd. */
   void (*on_data)(int fd, size_t index, void *udata);
+  /** Called on error or when the fd was closed. */
   void (*on_error)(int fd, size_t index, void *udata);
+  /** Called after polling and after all events are processed. */
   void (*after_events)(void *udata);
+  /** An opaque user data pointer. */
   void *udata;
-  int timeout;
+  /** A pointer to the fd pollin array. */
   struct pollfd *fds;
+  /**
+   * the number of fds to listen to.
+   *
+   * If zero, and `fds` is set, it will be auto-calculated trying to find the
+   * first array member where `events == 0`. Make sure to supply this end
+   * marker, of the buffer may overrun!
+   */
+  uint32_t count;
+  /** timeout for the polling system call. */
+  int timeout;
 } fio_sock_poll_args;
 
 /**
@@ -253,21 +269,21 @@ IO Poll - Implementation (always static / inlined)
 
 int fio_sock_poll____(void); /* sublime text marker */
 FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
-  size_t poll_count = 0;
   size_t event_count = 0;
   size_t limit = 0;
   if (!args.fds)
     goto empty_list;
-  while (args.fds[poll_count].events)
-    ++poll_count;
-  if (!poll_count)
+  if (!args.count)
+    while (args.fds[args.count].events)
+      ++args.count;
+  if (!args.count)
     goto empty_list;
-  event_count = poll(args.fds, poll_count, args.timeout);
+  event_count = poll(args.fds, args.count, args.timeout);
   if (args.before_events)
     args.before_events(args.udata);
   if (event_count <= 0)
     goto finish;
-  for (size_t i = 0; i < poll_count && limit < event_count; ++i) {
+  for (size_t i = 0; i < args.count && limit < event_count; ++i) {
     if (!args.fds[i].revents)
       continue;
     ++limit;
@@ -505,7 +521,224 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
 
 #endif
 /* *****************************************************************************
+Socket helper testing
+***************************************************************************** */
+FIO_SFUNC void fio___sock_test_before_events(void *udata) {
+  *(size_t *)udata = 0;
+}
+FIO_SFUNC void fio___sock_test_on_event(int fd, size_t index, void *udata) {
+  *(size_t *)udata += 1;
+  if (errno) {
+    FIO_LOG_WARNING("(possibly expected) %s", strerror(errno));
+    errno = 0;
+  }
+  (void)fd;
+  (void)index;
+}
+FIO_SFUNC void fio___sock_test_after_events(void *udata) {
+  if (*(size_t *)udata)
+    *(size_t *)udata += 1;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(sock)(void) {
+  fprintf(stderr,
+          "* Testing socket helpers (FIO_SOCK) - partial tests only!\n");
+#ifdef __cplusplus
+  FIO_LOG_WARNING("fio_sock_poll test only runs in C - the FIO_SOCK_POLL_LIST "
+                  "macro doesn't work in C++ and writing the test without it "
+                  "is a headache.");
+#else
+  struct {
+    const char *address;
+    const char *port;
+    const char *msg;
+    uint16_t flag;
+  } server_tests[] = {
+      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+#ifdef P_tmpdir
+      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock", NULL, "Unix",
+       FIO_SOCK_UNIX},
+#else
+      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+#endif
+      /* accept doesn't work with UDP, not like this... UDP test is seperate */
+      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+      {.address = NULL},
+  };
+  for (size_t i = 0; server_tests[i].address; ++i) {
+    size_t flag = (size_t)-1;
+    errno = 0;
+    fprintf(stderr, "* Testing %s socket API\n", server_tests[i].msg);
+    int srv = fio_sock_open(server_tests[i].address, server_tests[i].port,
+                            server_tests[i].flag | FIO_SOCK_SERVER);
+    FIO_ASSERT(srv != -1, "server socket failed to open: %s", strerror(errno));
+    flag = (size_t)-1;
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = NULL,
+                  .on_error = fio___sock_test_on_event,
+                  .after_events = fio___sock_test_after_events, .udata = &flag);
+    FIO_ASSERT(!flag, "before_events not called for missing list! (%zu)", flag);
+    flag = (size_t)-1;
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = NULL,
+                  .on_error = fio___sock_test_on_event,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST({.fd = -1}));
+    FIO_ASSERT(!flag, "before_events not called for empty list! (%zu)", flag);
+    flag = (size_t)-1;
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = NULL,
+                  .on_error = fio___sock_test_on_event,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+    flag = (size_t)-1;
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = fio___sock_test_on_event,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+    flag = (size_t)-1;
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = fio___sock_test_on_event, .on_data = NULL,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+
+    int cl = fio_sock_open(server_tests[i].address, server_tests[i].port,
+                           server_tests[i].flag | FIO_SOCK_CLIENT);
+    FIO_ASSERT(cl != -1, "client socket failed to open");
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = NULL,
+                  .on_error = fio___sock_test_on_event,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = fio___sock_test_on_event,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+    // // is it possible to write to a still-connecting socket?
+    // fio_sock_poll(.before_events = fio___sock_test_before_events,
+    //               .after_events = fio___sock_test_after_events,
+    //               .on_ready = fio___sock_test_on_event, .on_data = NULL,
+    //               .on_error = NULL, .udata = &flag,
+    //               .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    // FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+    FIO_LOG_INFO("error may print when polling server for `write`.");
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = fio___sock_test_on_event,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .timeout = 100,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
+    FIO_ASSERT(flag == 2, "Event should have occured here! (%zu)", flag);
+    FIO_LOG_INFO("error may have been emitted.");
+
+    int accepted = accept(srv, NULL, NULL);
+    FIO_ASSERT(accepted != -1, "client socket failed to open");
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = fio___sock_test_on_event, .on_data = NULL,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .timeout = 100,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = fio___sock_test_on_event, .on_data = NULL,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .timeout = 100,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(accepted)));
+    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = fio___sock_test_on_event,
+                  .on_error = NULL,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
+
+    if (write(accepted, "hello", 5) > 0) {
+      // wait for read
+      fio_sock_poll(.before_events = fio___sock_test_before_events,
+                    .on_ready = NULL, .on_data = fio___sock_test_on_event,
+                    .on_error = NULL,
+                    .after_events = fio___sock_test_after_events,
+                    .udata = &flag, .timeout = 100,
+                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_R(cl)));
+      // test read/write
+      fio_sock_poll(.before_events = fio___sock_test_before_events,
+                    .on_ready = fio___sock_test_on_event,
+                    .on_data = fio___sock_test_on_event, .on_error = NULL,
+                    .after_events = fio___sock_test_after_events,
+                    .udata = &flag, .timeout = 100,
+                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+      {
+        char buf[64];
+        errno = 0;
+        FIO_ASSERT(read(cl, buf, 64) > 0,
+                   "Read should have read some data...\n\t"
+                   "error: %s",
+                   strerror(errno));
+      }
+      FIO_ASSERT(flag == 3, "Event should have occured here! (%zu)", flag);
+    } else
+      FIO_ASSERT(0, "write failed! error: %s", strerror(errno));
+    close(accepted);
+    close(cl);
+    close(srv);
+    fio_sock_poll(.before_events = fio___sock_test_before_events,
+                  .on_ready = NULL, .on_data = NULL,
+                  .on_error = fio___sock_test_on_event,
+                  .after_events = fio___sock_test_after_events, .udata = &flag,
+                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+    if (FIO_SOCK_UNIX == server_tests[i].flag)
+      unlink(server_tests[i].address);
+  }
+  {
+    /* UDP semi test */
+    fprintf(stderr, "* Testing UDP socket (abbreviated test)\n");
+    int srv = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
+    int n = 0; /* try for 32Mb */
+    socklen_t sn = sizeof(n);
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+        sizeof(n) == sn)
+      fprintf(stderr, "\t- UDP default receive buffer is %d bytes\n", n);
+    n = 32 * 1024 * 1024; /* try for 32Mb */
+    sn = sizeof(n);
+    while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, sn) == -1) {
+      /* failed - repeat attempt at 0.5Mb interval */
+      if (n >= (1024 * 1024)) // OS may have returned max value
+        n -= 512 * 1024;
+      else
+        break;
+    }
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+        sizeof(n) == sn)
+      fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);
+    FIO_ASSERT(srv != -1, "Couldn't open UDP server socket: %s",
+               strerror(errno));
+    int cl = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
+    FIO_ASSERT(cl != -1, "Couldn't open UDP client socket: %s",
+               strerror(errno));
+    FIO_ASSERT(send(cl, "hello", 5, 0) != -1,
+               "couldn't send datagram from client");
+    char buf[64];
+    FIO_ASSERT(recvfrom(srv, buf, 64, 0, NULL, NULL) != -1,
+               "couldn't read datagram");
+    FIO_ASSERT(!memcmp(buf, "hello", 5), "transmission error");
+    close(srv);
+    close(cl);
+  }
+#endif /* __cplusplus */
+}
+/* *****************************************************************************
 FIO_SOCK - cleanup
 ***************************************************************************** */
-#endif
 #undef FIO_SOCK
+#endif

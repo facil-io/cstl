@@ -100,9 +100,9 @@ C_EXTRA_OPT:=
 # C++ specific compiler options
 CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros
 # c standard (if any, prefix using `-std=`, i.e.: -std=c11)
-CSTD?=
+CSTD?=-std=gnu17
 # c++ standard (if any, prefix using `-std=`, i.e.: -std=c++11)
-CXXSTD?=
+CXXSTD?=-std=gnu++17
 # pkg-config
 PKG_CONFIG?=pkg-config
 # for internal use - don't change
