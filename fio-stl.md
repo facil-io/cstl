@@ -58,7 +58,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Custom JSON Parser](#custom-json-parser) - defined by `FIO_JSON`
 
-* [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
+* [Basic Socket / IO Helpers](#basic-socket--io-helpers) - defined by `FIO_SOCK`
 
 * [Custom Memory Allocation](#memory-allocation) - defined by `FIO_MALLOC`
 
