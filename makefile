@@ -99,10 +99,10 @@ CXX?=g++
 C_EXTRA_OPT:=
 # C++ specific compiler options
 CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros
-# c standard (if any, prefix using `-std=`)
-CSTD?=-std=c11
-# c++ standard (if any, prefix using `-std=`)
-CXXSTD?=-std=c++11
+# c standard (if any, prefix using `-std=`, i.e.: -std=c11)
+CSTD?=
+# c++ standard (if any, prefix using `-std=`, i.e.: -std=c++11)
+CXXSTD?=
 # pkg-config
 PKG_CONFIG?=pkg-config
 # for internal use - don't change
