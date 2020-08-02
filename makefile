@@ -746,7 +746,7 @@ test_set_test_flag___:
 
 # test/cpp will try to compile a source file using C++ to test header integration
 .PHONY : test/cpp
-test/cpp: | test_set_test_flag___ 
+test/cpp: | create_tree test_set_test_flag___ 
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -755,7 +755,7 @@ test/cpp: | test_set_test_flag___
 
 # test/cpp will try to compile a source file using C++ to test header integration
 .PHONY : test/db/cpp
-test/db/cpp: | set_debug_flags___ test_set_test_flag___ 
+test/db/cpp: | create_tree set_debug_flags___ test_set_test_flag___ 
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -764,7 +764,7 @@ test/db/cpp: | set_debug_flags___ test_set_test_flag___
 
 # test/build/db/XXX will set DEBUG, compile the library and run tests/XXX.c
 .PHONY : test/lib/db/%
-test/lib/db/%: | set_debug_flags___ test_set_test_flag___ $(LIB_OBJS)
+test/lib/db/%: | create_tree set_debug_flags___ test_set_test_flag___ $(LIB_OBJS)
 	@echo "* Compiling $(TEST_ROOT)/$*.c"
 	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -775,7 +775,7 @@ test/lib/db/%: | set_debug_flags___ test_set_test_flag___ $(LIB_OBJS)
 
 # test/build/XXX will compile the library and compile and run tests/XXX.c
 .PHONY : test/lib/%
-test/lib/%: | test_set_test_flag___  $(LIB_OBJS)
+test/lib/%: | create_tree test_set_test_flag___  $(LIB_OBJS)
 	@echo "* Compiling $(TEST_ROOT)/$*.c"
 	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -785,7 +785,7 @@ test/lib/%: | test_set_test_flag___  $(LIB_OBJS)
 
 # test/build/XXX will set DEBUG and compile and run tests/XXX.c
 .PHONY : test/db/%
-test/db/%: | set_debug_flags___ test_set_test_flag___
+test/db/%: | create_tree set_debug_flags___ test_set_test_flag___
 	@echo "* Compiling $(TEST_ROOT)/$*.c"
 	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -796,7 +796,7 @@ test/db/%: | set_debug_flags___ test_set_test_flag___
 
 # test/build/XXX will compile and run tests/XXX.c
 .PHONY : test/%
-test/%: | test_set_test_flag___ 
+test/%: | create_tree test_set_test_flag___ 
 	@echo "* Compiling $(TEST_ROOT)/$*.c"
 	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
