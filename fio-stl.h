@@ -4030,7 +4030,7 @@ Memory Allocation - API
 #else
 #define FIO_ALIGN
 #define FIO_ALIGN_NEW
-#endif
+#endif /* (__clang__ || __GNUC__)... */
 
 /**
  * Allocates memory using a per-CPU core block memory pool.
@@ -4200,9 +4200,8 @@ SFUNC void *FIO_ALIGN_NEW fio_mmap(size_t size) { return calloc(size, 1); }
 SFUNC void fio_malloc_after_fork(void) {}
 
 /* *****************************************************************************
-Memory Allocation - forced bypass
+Memory Allocation - custom implementation
 ***************************************************************************** */
-
 #elif defined(FIO_EXTERN_COMPLETE)
 
 #if FIO_HAVE_UNIX_TOOLS
@@ -4284,7 +4283,7 @@ FIO_IFUNC void fio___memcpy_16byte(void *dest_, const void *src_,
   fio___memcpy_4b(dest_, src_, units << 2);
 #else                              /* unknown... assume 16 bit? */
   fio___memcpy_2b(dest_, src_, units << 3);
-#endif
+#endif                             /* SIZE_MAX */
 }
 
 /* *****************************************************************************
@@ -4294,7 +4293,7 @@ Big memory allocation macros and helpers (page allocation / mmap)
 
 #ifndef FIO_MEM_PAGE_SIZE_LOG
 #define FIO_MEM_PAGE_SIZE_LOG 12 /* 4096 bytes per page */
-#endif
+#endif                           /* FIO_MEM_PAGE_SIZE_LOG */
 
 #if FIO_HAVE_UNIX_TOOLS || __has_include("sys/mman.h")
 #include <sys/mman.h>
@@ -4305,8 +4304,8 @@ Big memory allocation macros and helpers (page allocation / mmap)
 #define MAP_ANONYMOUS MAP_ANON
 #else
 #define MAP_ANONYMOUS 0
-#endif
-#endif
+#endif /* defined(MAP_ANONYMOUS) */
+#endif /* FIO_MEM_PAGE_ALLOC */
 
 /*
  * allocates memory using `mmap`, but enforces alignment.
@@ -4328,7 +4327,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
 #else
   result = mmap(next_alloc, pages, PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-#endif
+#endif /* MAP_ALIGNED */
   if (result == MAP_FAILED)
     return (void *)NULL;
   if (((uintptr_t)result & alignment_mask)) {
@@ -4393,7 +4392,7 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
   munmap(mem, (pages << FIO_MEM_PAGE_SIZE_LOG));
 }
 
-#else
+#else /* FIO_HAVE_UNIX_TOOLS */
 
 FIO_IFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
                                             uint8_t alignment_log) {
@@ -4416,7 +4415,7 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
   (void)pages;
 }
 
-#endif
+#endif /* FIO_HAVE_UNIX_TOOLS */
 
 #define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
   FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
@@ -4503,11 +4502,11 @@ struct fio___mem_block_node_s {
 #define FIO_LIST_TYPE fio___mem_block_node_s
 #ifndef FIO_STL_KEEP__
 #define FIO_STL_KEEP__ 1
-#endif
+#endif /* FIO_STL_KEEP__ */
 #include __FILE__
 #if FIO_STL_KEEP__ == 1
 #undef FIO_STL_KEEP__
-#endif
+#endif /* FIO_STL_KEEP__ */
 /* Address returned when allocating 0 bytes ( fio_malloc(0) ) */
 static long double fio___mem_on_malloc_zero;
 
@@ -4534,13 +4533,13 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
   size_t cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
   if ((intptr_t)cores <= 0)
     cores = 1;
-#endif
+#endif /* _SC_NPROCESSORS_ONLN */
 #if FIO_MEMORY_ARENA_COUNT_MAX
   if (cores >= FIO_MEMORY_ARENA_COUNT_MAX)
     cores = FIO_MEMORY_ARENA_COUNT_MAX;
   if ((intptr_t)cores <= 0)
     cores = 1;
-#endif
+#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
   const size_t pages = FIO_MEM_BYTES2PAGES(sizeof(*fio___mem_state) +
                                            (cores * sizeof(fio___mem_arena_s)));
   fio___mem_state = (fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
@@ -4563,7 +4562,7 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
       (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
       (size_t)FIO_MEMORY_BLOCK_SIZE, (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
       (size_t)FIO_MEMORY_BLOCK_HEADER_SIZE);
-#endif
+#endif /* DEBUG */
 }
 
 FIO_SFUNC void fio___mem_state_deallocate(void) {
@@ -4675,7 +4674,7 @@ static size_t fio___mem_block_count;
 #define FIO_MEMORY_ON_BLOCK_FREE()
 #define FIO_MEMORY_PRINT_BLOCK_STAT()
 #define FIO_MEMORY_PRINT_BLOCK_STAT_END()
-#endif
+#endif /* DEBUG */
 
 /* *****************************************************************************
 Block allocation and rotation
@@ -4692,7 +4691,7 @@ FIO_SFUNC fio___mem_block_s *fio___mem_block_alloc(void) {
                  (size_t)FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
                                              FIO_MEMORY_BLOCK_SIZE),
                  (void *)b);
-#endif
+#endif /* DEBUG */
   /* initialize and push all block slices into memory pool */
   for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
     fio___mem_block_s *tmp =
@@ -4741,7 +4740,7 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
   FIO_MEMORY_ON_BLOCK_FREE();
 #if DEBUG
   FIO_LOG_DEBUG2("memory allocator returned %p to the system", (void *)b);
-#endif
+#endif /* DEBUG */
 }
 
 /* rotates block in arena */
@@ -4812,7 +4811,7 @@ FIO_SFUNC void __attribute__((destructor)) fio___mem_destroy(void) {
   FIO_MEMORY_PRINT_BLOCK_STAT_END();
 #if DEBUG && defined(FIO_LOG_INFO)
   FIO_LOG_INFO("facil.io memory allocation cleanup complete.");
-#endif
+#endif /* DEBUG */
 }
 
 /* *****************************************************************************
@@ -4978,7 +4977,59 @@ void *malloc(size_t size) { return fio_malloc(size); }
 void *calloc(size_t size, size_t count) { return fio_calloc(size, count); }
 void free(void *ptr) { fio_free(ptr); }
 void *realloc(void *ptr, size_t new_size) { return fio_realloc(ptr, new_size); }
-#endif
+#endif /* FIO_MALLOC_OVERRIDE_SYSTEM */
+
+/* *****************************************************************************
+Memory Allocation - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+#ifdef FIO_MALLOC_FORCE_SYSTEM
+FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+  fprintf(stderr, "* Custom memory allocator bypassed.\n");
+}
+
+#else /* FIO_MALLOC_FORCE_SYSTEM */
+FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+  fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
+  const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
+                              << FIO_MEMORY_BLOCK_SIZE_LOG;
+  for (int cycles = 4; cycles < FIO_MEMORY_BLOCK_SIZE_LOG; ++cycles) {
+    fprintf(stderr, "* Testing %zu byte allocation blocks.\n",
+            (size_t)(1UL << cycles));
+    const size_t limit = (three_blocks >> cycles);
+    char **ary = (char **)fio_calloc(sizeof(*ary), limit);
+    FIO_ASSERT(ary, "allocation failed for test container");
+    for (size_t i = 0; i < limit; ++i) {
+      ary[i] = (char *)fio_malloc(1UL << cycles);
+      FIO_ASSERT(ary[i], "allocation failed!")
+      FIO_ASSERT(!ary[i][0], "allocated memory not zero");
+      memset(ary[i], 0xff, (1UL << cycles));
+    }
+    for (size_t i = 0; i < limit; ++i) {
+      char *tmp =
+          (char *)fio_realloc2(ary[i], (2UL << cycles), (1UL << cycles));
+      FIO_ASSERT(tmp, "re-allocation failed!")
+      ary[i] = tmp;
+      FIO_ASSERT(!ary[i][(2UL << cycles) - 1], "fio_realloc2 copy overflow!");
+      tmp = (char *)fio_realloc2(ary[i], (1UL << cycles), (2UL << cycles));
+      FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
+      ary[i] = tmp;
+      FIO_ASSERT(ary[i][(1UL << cycles) - 1] == (char)0xFF,
+                 "fio_realloc2 copy underflow!");
+    }
+    for (size_t i = 0; i < limit; ++i) {
+      fio_free(ary[i]);
+    }
+    fio_free(ary);
+  }
+#if DEBUG && FIO_EXTERN_COMPLETE
+  fio___mem_destroy();
+  FIO_ASSERT(fio___mem_block_count <= 1, "memory leaks?");
+#endif /* DEBUG && FIO_EXTERN_COMPLETE */
+}
+#endif /* FIO_MALLOC_FORCE_SYSTEM */
+
+#endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
 Memory Allocation - cleanup
@@ -4995,8 +5046,8 @@ Memory Allocation - cleanup
 #undef FIO_MEMORY_MAX_SLICES_PER_BLOCK
 #undef FIO_ALIGN
 #undef FIO_ALIGN_NEW
-#endif
 #undef FIO_MALLOC
+#endif /* FIO_MALLOC */
 
 /* *****************************************************************************
 
@@ -5032,12 +5083,12 @@ Memory management macros
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_INTERNAL_MALLOC_ 0
-#else
+#else /* FIO_MALLOC_TMP_USE_SYSTEM */
 #define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
 #define FIO_MEM_INTERNAL_MALLOC_ FIO_MEM_INTERNAL_MALLOC
-#endif
+#endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -5474,6 +5525,116 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
   pos += 4;
   return pos - target;
 }
+
+/* *****************************************************************************
+Time - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+#define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
+#define FIO___GMTIME_TEST_RANGE (4093L * 365) /* test ~4 millenium  */
+
+FIO_SFUNC void FIO_NAME_TEST(time)(void) {
+  fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
+  struct tm tm1, tm2;
+  const time_t now = fio_time_real().tv_sec;
+  const time_t end =
+      now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  while (t < end) {
+    time_t tmp = t;
+    t += FIO___GMTIME_TEST_INTERVAL;
+    tm2 = fio_time2gm(tmp);
+    FIO_ASSERT(fio_gm2time(tm2) == tmp,
+               "fio_gm2time roundtrip error (%ld != %ld)",
+               (long)fio_gm2time(tm2), (long)tmp);
+    gmtime_r(&tmp, &tm1);
+    if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
+        tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
+        tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
+        tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
+      char buf[256];
+      fio_time2rfc7231(buf, tmp);
+      FIO_ASSERT(0,
+                 "system gmtime_r != fio_time2gm for %ld!\n"
+                 "-- System:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- facil.io:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- As String:\n"
+                 "\t%s",
+                 (long)t, tm1.tm_year, tm1.tm_mon, tm1.tm_mday, tm1.tm_yday,
+                 tm1.tm_hour, tm1.tm_min, tm1.tm_sec, tm1.tm_wday, tm2.tm_year,
+                 tm2.tm_mon, tm2.tm_mday, tm2.tm_yday, tm2.tm_hour, tm2.tm_min,
+                 tm2.tm_sec, tm2.tm_wday, buf);
+    }
+  }
+  {
+    uint64_t start, stop;
+#if DEBUG
+    fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
+#endif
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm = fio_time2gm(now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)tm;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- fio_time2gm speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm;
+      time_t tmp = now;
+      gmtime_r(&tmp, (struct tm *)&tm);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- gmtime_r speed test took:  \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+    struct tm tm_now = fio_time2gm(now);
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      time_t t_tmp = fio_gm2time(tm_now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- fio_gm2time speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- mktime speed test took:    \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+  }
+}
+#undef FIO___GMTIME_TEST_INTERVAL
+#undef FIO___GMTIME_TEST_RANGE
+#endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
 Time Cleanup
@@ -6029,6 +6190,246 @@ SFUNC void fio_timer_clear(fio_timer_queue_s *tq) {
     fio___timer_event_free(NULL, tmp);
   }
 }
+
+/* *****************************************************************************
+Queue - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+#ifndef FIO___QUEUE_TEST_PRINT
+#define FIO___QUEUE_TEST_PRINT 0
+#endif
+
+#include "pthread.h"
+
+#define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
+
+typedef struct {
+  fio_queue_s *q;
+  uintptr_t count;
+} fio___queue_test_s;
+
+FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
+  (void)(unused2);
+  fio_atomic_add((uintptr_t *)i_count, 1);
+}
+
+FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
+  fio___queue_test_s *t = (fio___queue_test_s *)t_;
+  for (size_t i = 0; i < t->count; i++) {
+    fio_queue_push(t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count);
+  }
+}
+
+FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
+  fio_atomic_add((uintptr_t *)i_count, 1);
+  return (unused2 ? -1 : 0);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(queue)(void) {
+  fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
+  fio_queue_s *q = fio_queue_new();
+
+  fprintf(stderr, "\t- size of queue object (fio_queue_s): %zu\n", sizeof(*q));
+  fprintf(stderr, "\t- size of queue ring buffer (per allocation): %zu\n",
+          sizeof(q->mem));
+  fprintf(stderr, "\t- event slots per queue allocation: %zu\n",
+          (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
+
+  const size_t max_threads = 12; // assumption / pure conjuncture...
+  uintptr_t i_count;
+  clock_t start, end;
+  i_count = 0;
+  start = clock();
+  for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
+    fio___queue_test_sample_task(&i_count, NULL);
+  }
+  end = clock();
+  if (FIO___QUEUE_TEST_PRINT) {
+    fprintf(
+        stderr,
+        "\t- Queueless (direct call) counter: %lu cycles with i_count = %lu\n",
+        (unsigned long)(end - start), (unsigned long)i_count);
+  }
+  size_t i_count_should_be = i_count;
+  i_count = 0;
+  start = clock();
+  for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
+    fio_queue_push(q, .fn = fio___queue_test_sample_task,
+                   .udata1 = (void *)&i_count);
+    fio_queue_perform(q);
+  }
+  end = clock();
+  if (FIO___QUEUE_TEST_PRINT) {
+    fprintf(stderr, "\t- single task counter: %lu cycles with i_count = %lu\n",
+            (unsigned long)(end - start), (unsigned long)i_count);
+  }
+  FIO_ASSERT(i_count == i_count_should_be, "ERROR: queue count invalid\n");
+
+  if (FIO___QUEUE_TEST_PRINT) {
+    fprintf(stderr, "\n");
+  }
+
+  for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
+    i_count = 0;
+    fio___queue_test_s info = {
+        .q = q, .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
+    const size_t tasks = 1 << i;
+    start = clock();
+    for (size_t j = 0; j < tasks; ++j) {
+      fio_queue_push(q, fio___queue_test_sched_sample_task, (void *)&info,
+                     &i_count);
+    }
+    FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
+    {
+      const size_t t_count = (i % max_threads) + 1;
+      union {
+        void *(*t)(void *);
+        void (*act)(fio_queue_s *);
+      } thread_tasks;
+      thread_tasks.act = fio_queue_perform_all;
+      pthread_t *threads =
+          (pthread_t *)FIO_MEM_CALLOC(sizeof(*threads), t_count);
+      for (size_t j = 0; j < t_count; ++j) {
+        if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
+          abort();
+        }
+      }
+      for (size_t j = 0; j < t_count; ++j) {
+        pthread_join(threads[j], NULL);
+      }
+      FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
+    }
+
+    end = clock();
+    if (FIO___QUEUE_TEST_PRINT) {
+      fprintf(stderr,
+              "- queue performed using %zu threads, %zu scheduling loops (%zu "
+              "each):\n"
+              "    %lu cycles with i_count = %lu\n",
+              ((i % max_threads) + 1), tasks, info.count,
+              (unsigned long)(end - start), (unsigned long)i_count);
+    } else {
+      fprintf(stderr, ".");
+    }
+    FIO_ASSERT(i_count == i_count_should_be, "ERROR: queue count invalid\n");
+  }
+  if (!(FIO___QUEUE_TEST_PRINT))
+    fprintf(stderr, "\n");
+  FIO_ASSERT(q->w == &q->mem,
+             "queue library didn't release dynamic queue (should be static)");
+  fio_queue_free(q);
+  {
+    fprintf(stderr, "* testing urgent insertion\n");
+    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
+      FIO_ASSERT(!fio_queue_push_urgent(&q2,
+                                        .fn = (void (*)(void *, void *))(i + 1),
+                                        .udata1 = (void *)(i + 1)),
+                 "fio_queue_push_urgent failed");
+    }
+    FIO_ASSERT(q2.r->next && q2.r->next->next && !q2.r->next->next->next,
+               "should have filled only three task blocks");
+    for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
+      fio_queue_task_s t = fio_queue_pop(&q2);
+      FIO_ASSERT(
+          t.fn && (size_t)t.udata1 == (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
+          "fio_queue_push_urgent pop ordering error [%zu] %zu != %zu (%p)", i,
+          (size_t)t.udata1, (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
+          (void *)(uintptr_t)t.fn);
+    }
+    FIO_ASSERT(fio_queue_pop(&q2).fn == NULL,
+               "pop overflow after urgent tasks");
+    fio_queue_destroy(&q2);
+  }
+  {
+    fprintf(stderr,
+            "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
+    fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
+    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    uintptr_t tester = 0;
+    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
+
+    /* test failuers */
+    fio_timer_schedule(&tq, .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 100,
+                       .repetitions = -1);
+    FIO_ASSERT(tester == 1,
+               "fio_timer_schedule should have called `on_finish`");
+    tester = 0;
+    fio_timer_schedule(NULL, .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 100,
+                       .repetitions = -1);
+    FIO_ASSERT(tester == 1,
+               "fio_timer_schedule should have called `on_finish`");
+    tester = 0;
+    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 0,
+                       .repetitions = -1);
+    FIO_ASSERT(tester == 1,
+               "fio_timer_schedule should have called `on_finish`");
+
+    /* test endless task */
+    tester = 0;
+    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 1,
+                       .repetitions = -1, .start_at = fio_time_milli() - 10);
+    FIO_ASSERT(tester == 0,
+               "fio_timer_schedule should have scheduled the task.");
+    for (size_t i = 0; i < 10; ++i) {
+      fio_timer_push2queue(&q2, &tq, fio_time_milli());
+      FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+      fio_queue_perform(&q2);
+      FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
+      FIO_ASSERT(tester == i + 1, "task should have been performed (%zu).",
+                 (size_t)tester);
+    }
+    tester = 0;
+    fio_timer_clear(&tq);
+    FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
+
+    /* test single-use task */
+    tester = 0;
+    uint64_t milli_now = fio_time_milli();
+    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 100,
+                       .repetitions = 1, .start_at = milli_now - 10);
+    FIO_ASSERT(tester == 0,
+               "fio_timer_schedule should have scheduled the task.");
+    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task, .every = 1,
+                       // .repetitions = 1, // auto-value is 1
+                       .start_at = milli_now - 10);
+    FIO_ASSERT(tester == 0,
+               "fio_timer_schedule should have scheduled the task.");
+    FIO_ASSERT(fio_timer_next_at(&tq) == milli_now - 9,
+               "fio_timer_next_at value error.");
+    fio_timer_push2queue(&q2, &tq, milli_now);
+    FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+    FIO_ASSERT(fio_timer_next_at(&tq) == milli_now + 90,
+               "fio_timer_next_at value error for unscheduled task.");
+    fio_queue_perform(&q2);
+    FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
+    FIO_ASSERT(tester == 2,
+               "task should have been performed and on_finish called (%zu).",
+               (size_t)tester);
+    fio_timer_clear(&tq);
+    FIO_ASSERT(
+        tester == 3,
+        "fio_timer_clear should have called on_finish of future task (%zu).",
+        (size_t)tester);
+    FIO_ASSERT(!tq.next, "timer queue should be empty.");
+    fio_queue_destroy(&q2);
+  }
+  fprintf(stderr, "* passed.\n");
+}
+#endif /* FIO_TEST_CSTL */
+
 /* *****************************************************************************
 Queue/Timer Cleanup
 ***************************************************************************** */
@@ -17109,414 +17510,24 @@ Time - test
 ***************************************************************************** */
 #define FIO_TIME
 #include __FILE__
-
-#define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
-#define FIO___GMTIME_TEST_RANGE (4093L * 365) /* test ~4 millenium  */
-
-TEST_FUNC void fio___dynamic_types_test___gmtime(void) {
-  fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
-  struct tm tm1, tm2;
-  const time_t now = fio_time_real().tv_sec;
-  const time_t end =
-      now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
-  time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
-  while (t < end) {
-    time_t tmp = t;
-    t += FIO___GMTIME_TEST_INTERVAL;
-    tm2 = fio_time2gm(tmp);
-    FIO_ASSERT(fio_gm2time(tm2) == tmp,
-               "fio_gm2time roundtrip error (%ld != %ld)",
-               (long)fio_gm2time(tm2), (long)tmp);
-    gmtime_r(&tmp, &tm1);
-    if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
-        tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
-        tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
-        tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
-      char buf[256];
-      fio_time2rfc7231(buf, tmp);
-      FIO_ASSERT(0,
-                 "system gmtime_r != fio_time2gm for %ld!\n"
-                 "-- System:\n"
-                 "\ttm_year: %d\n"
-                 "\ttm_mon: %d\n"
-                 "\ttm_mday: %d\n"
-                 "\ttm_yday: %d\n"
-                 "\ttm_hour: %d\n"
-                 "\ttm_min: %d\n"
-                 "\ttm_sec: %d\n"
-                 "\ttm_wday: %d\n"
-                 "-- facil.io:\n"
-                 "\ttm_year: %d\n"
-                 "\ttm_mon: %d\n"
-                 "\ttm_mday: %d\n"
-                 "\ttm_yday: %d\n"
-                 "\ttm_hour: %d\n"
-                 "\ttm_min: %d\n"
-                 "\ttm_sec: %d\n"
-                 "\ttm_wday: %d\n"
-                 "-- As String:\n"
-                 "\t%s",
-                 (long)t, tm1.tm_year, tm1.tm_mon, tm1.tm_mday, tm1.tm_yday,
-                 tm1.tm_hour, tm1.tm_min, tm1.tm_sec, tm1.tm_wday, tm2.tm_year,
-                 tm2.tm_mon, tm2.tm_mday, tm2.tm_yday, tm2.tm_hour, tm2.tm_min,
-                 tm2.tm_sec, tm2.tm_wday, buf);
-    }
-  }
-  {
-    uint64_t start, stop;
-#if DEBUG
-    fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
-#endif
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm = fio_time2gm(now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
-      (void)tm;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr, "\t- fio_time2gm speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm;
-      time_t tmp = now;
-      gmtime_r(&tmp, (struct tm *)&tm);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
-    }
-    stop = fio_time_micro();
-    fprintf(stderr, "\t- gmtime_r speed test took:  \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-    struct tm tm_now = fio_time2gm(now);
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      time_t t_tmp = fio_gm2time(tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr, "\t- fio_gm2time speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr, "\t- mktime speed test took:    \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-  }
-}
-
 /* *****************************************************************************
 Queue - test
 ***************************************************************************** */
 #define FIO_QUEUE
 #include __FILE__
-
-#ifndef FIO___QUEUE_TEST_PRINT
-#define FIO___QUEUE_TEST_PRINT 0
-#endif
-
-#include "pthread.h"
-
-#define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
-
-typedef struct {
-  fio_queue_s *q;
-  uintptr_t count;
-} fio___queue_test_s;
-
-TEST_FUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
-  (void)(unused2);
-  fio_atomic_add((uintptr_t *)i_count, 1);
-}
-
-TEST_FUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
-  fio___queue_test_s *t = (fio___queue_test_s *)t_;
-  for (size_t i = 0; i < t->count; i++) {
-    fio_queue_push(t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count);
-  }
-}
-
-TEST_FUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
-  fio_atomic_add((uintptr_t *)i_count, 1);
-  return (unused2 ? -1 : 0);
-}
-
-TEST_FUNC void fio___dynamic_types_test___queue(void) {
-  fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
-  fio_queue_s *q = fio_queue_new();
-
-  fprintf(stderr, "\t- size of queue object (fio_queue_s): %zu\n", sizeof(*q));
-  fprintf(stderr, "\t- size of queue ring buffer (per allocation): %zu\n",
-          sizeof(q->mem));
-  fprintf(stderr, "\t- event slots per queue allocation: %zu\n",
-          (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
-
-  const size_t max_threads = 12; // assumption / pure conjuncture...
-  uintptr_t i_count;
-  clock_t start, end;
-  i_count = 0;
-  start = clock();
-  for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
-    fio___queue_test_sample_task(&i_count, NULL);
-  }
-  end = clock();
-  if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(
-        stderr,
-        "\t- Queueless (direct call) counter: %lu cycles with i_count = %lu\n",
-        (unsigned long)(end - start), (unsigned long)i_count);
-  }
-  size_t i_count_should_be = i_count;
-  i_count = 0;
-  start = clock();
-  for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
-    fio_queue_push(q, .fn = fio___queue_test_sample_task,
-                   .udata1 = (void *)&i_count);
-    fio_queue_perform(q);
-  }
-  end = clock();
-  if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(stderr, "\t- single task counter: %lu cycles with i_count = %lu\n",
-            (unsigned long)(end - start), (unsigned long)i_count);
-  }
-  FIO_ASSERT(i_count == i_count_should_be, "ERROR: queue count invalid\n");
-
-  if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(stderr, "\n");
-  }
-
-  for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
-    i_count = 0;
-    fio___queue_test_s info = {
-        .q = q, .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
-    const size_t tasks = 1 << i;
-    start = clock();
-    for (size_t j = 0; j < tasks; ++j) {
-      fio_queue_push(q, fio___queue_test_sched_sample_task, (void *)&info,
-                     &i_count);
-    }
-    FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
-    {
-      const size_t t_count = (i % max_threads) + 1;
-      union {
-        void *(*t)(void *);
-        void (*act)(fio_queue_s *);
-      } thread_tasks;
-      thread_tasks.act = fio_queue_perform_all;
-      pthread_t *threads =
-          (pthread_t *)FIO_MEM_CALLOC(sizeof(*threads), t_count);
-      for (size_t j = 0; j < t_count; ++j) {
-        if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
-          abort();
-        }
-      }
-      for (size_t j = 0; j < t_count; ++j) {
-        pthread_join(threads[j], NULL);
-      }
-      FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
-    }
-
-    end = clock();
-    if (FIO___QUEUE_TEST_PRINT) {
-      fprintf(stderr,
-              "- queue performed using %zu threads, %zu scheduling loops (%zu "
-              "each):\n"
-              "    %lu cycles with i_count = %lu\n",
-              ((i % max_threads) + 1), tasks, info.count,
-              (unsigned long)(end - start), (unsigned long)i_count);
-    } else {
-      fprintf(stderr, ".");
-    }
-    FIO_ASSERT(i_count == i_count_should_be, "ERROR: queue count invalid\n");
-  }
-  if (!(FIO___QUEUE_TEST_PRINT))
-    fprintf(stderr, "\n");
-  FIO_ASSERT(q->w == &q->mem,
-             "queue library didn't release dynamic queue (should be static)");
-  fio_queue_free(q);
-  {
-    fprintf(stderr, "* testing urgent insertion\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
-    for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
-      FIO_ASSERT(!fio_queue_push_urgent(&q2,
-                                        .fn = (void (*)(void *, void *))(i + 1),
-                                        .udata1 = (void *)(i + 1)),
-                 "fio_queue_push_urgent failed");
-    }
-    FIO_ASSERT(q2.r->next && q2.r->next->next && !q2.r->next->next->next,
-               "should have filled only three task blocks");
-    for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
-      fio_queue_task_s t = fio_queue_pop(&q2);
-      FIO_ASSERT(
-          t.fn && (size_t)t.udata1 == (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
-          "fio_queue_push_urgent pop ordering error [%zu] %zu != %zu (%p)", i,
-          (size_t)t.udata1, (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
-          (void *)(uintptr_t)t.fn);
-    }
-    FIO_ASSERT(fio_queue_pop(&q2).fn == NULL,
-               "pop overflow after urgent tasks");
-    fio_queue_destroy(&q2);
-  }
-  {
-    fprintf(stderr,
-            "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
-    fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
-    uintptr_t tester = 0;
-    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
-
-    /* test failuers */
-    fio_timer_schedule(&tq, .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
-                       .repetitions = -1);
-    FIO_ASSERT(tester == 1,
-               "fio_timer_schedule should have called `on_finish`");
-    tester = 0;
-    fio_timer_schedule(NULL, .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
-                       .repetitions = -1);
-    FIO_ASSERT(tester == 1,
-               "fio_timer_schedule should have called `on_finish`");
-    tester = 0;
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 0,
-                       .repetitions = -1);
-    FIO_ASSERT(tester == 1,
-               "fio_timer_schedule should have called `on_finish`");
-
-    /* test endless task */
-    tester = 0;
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 1,
-                       .repetitions = -1, .start_at = fio_time_milli() - 10);
-    FIO_ASSERT(tester == 0,
-               "fio_timer_schedule should have scheduled the task.");
-    for (size_t i = 0; i < 10; ++i) {
-      fio_timer_push2queue(&q2, &tq, fio_time_milli());
-      FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
-      fio_queue_perform(&q2);
-      FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
-      FIO_ASSERT(tester == i + 1, "task should have been performed (%zu).",
-                 (size_t)tester);
-    }
-    tester = 0;
-    fio_timer_clear(&tq);
-    FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
-
-    /* test single-use task */
-    tester = 0;
-    uint64_t milli_now = fio_time_milli();
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
-                       .repetitions = 1, .start_at = milli_now - 10);
-    FIO_ASSERT(tester == 0,
-               "fio_timer_schedule should have scheduled the task.");
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 1,
-                       // .repetitions = 1, // auto-value is 1
-                       .start_at = milli_now - 10);
-    FIO_ASSERT(tester == 0,
-               "fio_timer_schedule should have scheduled the task.");
-    FIO_ASSERT(fio_timer_next_at(&tq) == milli_now - 9,
-               "fio_timer_next_at value error.");
-    fio_timer_push2queue(&q2, &tq, milli_now);
-    FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
-    FIO_ASSERT(fio_timer_next_at(&tq) == milli_now + 90,
-               "fio_timer_next_at value error for unscheduled task.");
-    fio_queue_perform(&q2);
-    FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
-    FIO_ASSERT(tester == 2,
-               "task should have been performed and on_finish called (%zu).",
-               (size_t)tester);
-    fio_timer_clear(&tq);
-    FIO_ASSERT(
-        tester == 3,
-        "fio_timer_clear should have called on_finish of future task (%zu).",
-        (size_t)tester);
-    FIO_ASSERT(!tq.next, "timer queue should be empty.");
-    fio_queue_destroy(&q2);
-  }
-  fprintf(stderr, "* passed.\n");
-}
-
 /* *****************************************************************************
 CLI - test
 ***************************************************************************** */
-
 #define FIO_CLI
 #include __FILE__
-
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-
-#ifdef FIO_MALLOC_FORCE_SYSTEM
-
-TEST_FUNC void fio___dynamic_types_test___mem(void) {
-  fprintf(stderr, "* Custom memory allocator bypassed.\n");
-}
-
-#else
-
 #define FIO_MALLOC
 #include __FILE__
-
-TEST_FUNC void fio___dynamic_types_test___mem(void) {
-  fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
-  const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
-                              << FIO_MEMORY_BLOCK_SIZE_LOG;
-  for (int cycles = 4; cycles < FIO_MEMORY_BLOCK_SIZE_LOG; ++cycles) {
-    fprintf(stderr, "* Testing %zu byte allocation blocks.\n",
-            (size_t)(1UL << cycles));
-    const size_t limit = (three_blocks >> cycles);
-    char **ary = (char **)fio_calloc(sizeof(*ary), limit);
-    FIO_ASSERT(ary, "allocation failed for test container");
-    for (size_t i = 0; i < limit; ++i) {
-      ary[i] = (char *)fio_malloc(1UL << cycles);
-      FIO_ASSERT(ary[i], "allocation failed!")
-      FIO_ASSERT(!ary[i][0], "allocated memory not zero");
-      memset(ary[i], 0xff, (1UL << cycles));
-    }
-    for (size_t i = 0; i < limit; ++i) {
-      char *tmp =
-          (char *)fio_realloc2(ary[i], (2UL << cycles), (1UL << cycles));
-      FIO_ASSERT(tmp, "re-allocation failed!")
-      ary[i] = tmp;
-      FIO_ASSERT(!ary[i][(2UL << cycles) - 1], "fio_realloc2 copy overflow!");
-      tmp = (char *)fio_realloc2(ary[i], (1UL << cycles), (2UL << cycles));
-      FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
-      ary[i] = tmp;
-      FIO_ASSERT(ary[i][(1UL << cycles) - 1] == (char)0xFF,
-                 "fio_realloc2 copy underflow!");
-    }
-    for (size_t i = 0; i < limit; ++i) {
-      fio_free(ary[i]);
-    }
-    fio_free(ary);
-  }
-#if DEBUG && FIO_EXTERN_COMPLETE
-  fio___mem_destroy();
-  FIO_ASSERT(fio___mem_block_count <= 1, "memory leaks?");
-#endif
-}
-#endif
-
 /* *****************************************************************************
 Socket helper testing
 ***************************************************************************** */
-
 #define FIO_SOCK
 #include __FILE__
 
@@ -17744,13 +17755,13 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___str();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___gmtime();
+  FIO_NAME_TEST(time)();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___queue();
+  FIO_NAME_TEST(queue)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(cli)();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___mem();
+  FIO_NAME_TEST(mem)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(sock)();
   fprintf(stderr, "===============\n");

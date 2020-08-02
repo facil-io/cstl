@@ -436,6 +436,116 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
 }
 
 /* *****************************************************************************
+Time - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+#define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
+#define FIO___GMTIME_TEST_RANGE (4093L * 365) /* test ~4 millenium  */
+
+FIO_SFUNC void FIO_NAME_TEST(time)(void) {
+  fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
+  struct tm tm1, tm2;
+  const time_t now = fio_time_real().tv_sec;
+  const time_t end =
+      now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  while (t < end) {
+    time_t tmp = t;
+    t += FIO___GMTIME_TEST_INTERVAL;
+    tm2 = fio_time2gm(tmp);
+    FIO_ASSERT(fio_gm2time(tm2) == tmp,
+               "fio_gm2time roundtrip error (%ld != %ld)",
+               (long)fio_gm2time(tm2), (long)tmp);
+    gmtime_r(&tmp, &tm1);
+    if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
+        tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
+        tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
+        tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
+      char buf[256];
+      fio_time2rfc7231(buf, tmp);
+      FIO_ASSERT(0,
+                 "system gmtime_r != fio_time2gm for %ld!\n"
+                 "-- System:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- facil.io:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- As String:\n"
+                 "\t%s",
+                 (long)t, tm1.tm_year, tm1.tm_mon, tm1.tm_mday, tm1.tm_yday,
+                 tm1.tm_hour, tm1.tm_min, tm1.tm_sec, tm1.tm_wday, tm2.tm_year,
+                 tm2.tm_mon, tm2.tm_mday, tm2.tm_yday, tm2.tm_hour, tm2.tm_min,
+                 tm2.tm_sec, tm2.tm_wday, buf);
+    }
+  }
+  {
+    uint64_t start, stop;
+#if DEBUG
+    fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
+#endif
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm = fio_time2gm(now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)tm;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- fio_time2gm speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm;
+      time_t tmp = now;
+      gmtime_r(&tmp, (struct tm *)&tm);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- gmtime_r speed test took:  \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+    struct tm tm_now = fio_time2gm(now);
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      time_t t_tmp = fio_gm2time(tm_now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- fio_gm2time speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
+      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr, "\t- mktime speed test took:    \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+  }
+}
+#undef FIO___GMTIME_TEST_INTERVAL
+#undef FIO___GMTIME_TEST_RANGE
+#endif /* FIO_TEST_CSTL */
+
+/* *****************************************************************************
 Time Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */

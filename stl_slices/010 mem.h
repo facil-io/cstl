@@ -45,7 +45,7 @@ Memory Allocation - API
 #else
 #define FIO_ALIGN
 #define FIO_ALIGN_NEW
-#endif
+#endif /* (__clang__ || __GNUC__)... */
 
 /**
  * Allocates memory using a per-CPU core block memory pool.
@@ -215,9 +215,8 @@ SFUNC void *FIO_ALIGN_NEW fio_mmap(size_t size) { return calloc(size, 1); }
 SFUNC void fio_malloc_after_fork(void) {}
 
 /* *****************************************************************************
-Memory Allocation - forced bypass
+Memory Allocation - custom implementation
 ***************************************************************************** */
-
 #elif defined(FIO_EXTERN_COMPLETE)
 
 #if FIO_HAVE_UNIX_TOOLS
@@ -299,7 +298,7 @@ FIO_IFUNC void fio___memcpy_16byte(void *dest_, const void *src_,
   fio___memcpy_4b(dest_, src_, units << 2);
 #else                              /* unknown... assume 16 bit? */
   fio___memcpy_2b(dest_, src_, units << 3);
-#endif
+#endif                             /* SIZE_MAX */
 }
 
 /* *****************************************************************************
@@ -309,7 +308,7 @@ Big memory allocation macros and helpers (page allocation / mmap)
 
 #ifndef FIO_MEM_PAGE_SIZE_LOG
 #define FIO_MEM_PAGE_SIZE_LOG 12 /* 4096 bytes per page */
-#endif
+#endif                           /* FIO_MEM_PAGE_SIZE_LOG */
 
 #if FIO_HAVE_UNIX_TOOLS || __has_include("sys/mman.h")
 #include <sys/mman.h>
@@ -320,8 +319,8 @@ Big memory allocation macros and helpers (page allocation / mmap)
 #define MAP_ANONYMOUS MAP_ANON
 #else
 #define MAP_ANONYMOUS 0
-#endif
-#endif
+#endif /* defined(MAP_ANONYMOUS) */
+#endif /* FIO_MEM_PAGE_ALLOC */
 
 /*
  * allocates memory using `mmap`, but enforces alignment.
@@ -343,7 +342,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
 #else
   result = mmap(next_alloc, pages, PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-#endif
+#endif /* MAP_ALIGNED */
   if (result == MAP_FAILED)
     return (void *)NULL;
   if (((uintptr_t)result & alignment_mask)) {
@@ -408,7 +407,7 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
   munmap(mem, (pages << FIO_MEM_PAGE_SIZE_LOG));
 }
 
-#else
+#else /* FIO_HAVE_UNIX_TOOLS */
 
 FIO_IFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
                                             uint8_t alignment_log) {
@@ -431,7 +430,7 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
   (void)pages;
 }
 
-#endif
+#endif /* FIO_HAVE_UNIX_TOOLS */
 
 #define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
   FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
@@ -518,11 +517,11 @@ struct fio___mem_block_node_s {
 #define FIO_LIST_TYPE fio___mem_block_node_s
 #ifndef FIO_STL_KEEP__
 #define FIO_STL_KEEP__ 1
-#endif
+#endif /* FIO_STL_KEEP__ */
 #include __FILE__
 #if FIO_STL_KEEP__ == 1
 #undef FIO_STL_KEEP__
-#endif
+#endif /* FIO_STL_KEEP__ */
 /* Address returned when allocating 0 bytes ( fio_malloc(0) ) */
 static long double fio___mem_on_malloc_zero;
 
@@ -549,13 +548,13 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
   size_t cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
   if ((intptr_t)cores <= 0)
     cores = 1;
-#endif
+#endif /* _SC_NPROCESSORS_ONLN */
 #if FIO_MEMORY_ARENA_COUNT_MAX
   if (cores >= FIO_MEMORY_ARENA_COUNT_MAX)
     cores = FIO_MEMORY_ARENA_COUNT_MAX;
   if ((intptr_t)cores <= 0)
     cores = 1;
-#endif
+#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
   const size_t pages = FIO_MEM_BYTES2PAGES(sizeof(*fio___mem_state) +
                                            (cores * sizeof(fio___mem_arena_s)));
   fio___mem_state = (fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
@@ -578,7 +577,7 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
       (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
       (size_t)FIO_MEMORY_BLOCK_SIZE, (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
       (size_t)FIO_MEMORY_BLOCK_HEADER_SIZE);
-#endif
+#endif /* DEBUG */
 }
 
 FIO_SFUNC void fio___mem_state_deallocate(void) {
@@ -690,7 +689,7 @@ static size_t fio___mem_block_count;
 #define FIO_MEMORY_ON_BLOCK_FREE()
 #define FIO_MEMORY_PRINT_BLOCK_STAT()
 #define FIO_MEMORY_PRINT_BLOCK_STAT_END()
-#endif
+#endif /* DEBUG */
 
 /* *****************************************************************************
 Block allocation and rotation
@@ -707,7 +706,7 @@ FIO_SFUNC fio___mem_block_s *fio___mem_block_alloc(void) {
                  (size_t)FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
                                              FIO_MEMORY_BLOCK_SIZE),
                  (void *)b);
-#endif
+#endif /* DEBUG */
   /* initialize and push all block slices into memory pool */
   for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
     fio___mem_block_s *tmp =
@@ -756,7 +755,7 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
   FIO_MEMORY_ON_BLOCK_FREE();
 #if DEBUG
   FIO_LOG_DEBUG2("memory allocator returned %p to the system", (void *)b);
-#endif
+#endif /* DEBUG */
 }
 
 /* rotates block in arena */
@@ -827,7 +826,7 @@ FIO_SFUNC void __attribute__((destructor)) fio___mem_destroy(void) {
   FIO_MEMORY_PRINT_BLOCK_STAT_END();
 #if DEBUG && defined(FIO_LOG_INFO)
   FIO_LOG_INFO("facil.io memory allocation cleanup complete.");
-#endif
+#endif /* DEBUG */
 }
 
 /* *****************************************************************************
@@ -993,7 +992,59 @@ void *malloc(size_t size) { return fio_malloc(size); }
 void *calloc(size_t size, size_t count) { return fio_calloc(size, count); }
 void free(void *ptr) { fio_free(ptr); }
 void *realloc(void *ptr, size_t new_size) { return fio_realloc(ptr, new_size); }
-#endif
+#endif /* FIO_MALLOC_OVERRIDE_SYSTEM */
+
+/* *****************************************************************************
+Memory Allocation - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+#ifdef FIO_MALLOC_FORCE_SYSTEM
+FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+  fprintf(stderr, "* Custom memory allocator bypassed.\n");
+}
+
+#else /* FIO_MALLOC_FORCE_SYSTEM */
+FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+  fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
+  const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
+                              << FIO_MEMORY_BLOCK_SIZE_LOG;
+  for (int cycles = 4; cycles < FIO_MEMORY_BLOCK_SIZE_LOG; ++cycles) {
+    fprintf(stderr, "* Testing %zu byte allocation blocks.\n",
+            (size_t)(1UL << cycles));
+    const size_t limit = (three_blocks >> cycles);
+    char **ary = (char **)fio_calloc(sizeof(*ary), limit);
+    FIO_ASSERT(ary, "allocation failed for test container");
+    for (size_t i = 0; i < limit; ++i) {
+      ary[i] = (char *)fio_malloc(1UL << cycles);
+      FIO_ASSERT(ary[i], "allocation failed!")
+      FIO_ASSERT(!ary[i][0], "allocated memory not zero");
+      memset(ary[i], 0xff, (1UL << cycles));
+    }
+    for (size_t i = 0; i < limit; ++i) {
+      char *tmp =
+          (char *)fio_realloc2(ary[i], (2UL << cycles), (1UL << cycles));
+      FIO_ASSERT(tmp, "re-allocation failed!")
+      ary[i] = tmp;
+      FIO_ASSERT(!ary[i][(2UL << cycles) - 1], "fio_realloc2 copy overflow!");
+      tmp = (char *)fio_realloc2(ary[i], (1UL << cycles), (2UL << cycles));
+      FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
+      ary[i] = tmp;
+      FIO_ASSERT(ary[i][(1UL << cycles) - 1] == (char)0xFF,
+                 "fio_realloc2 copy underflow!");
+    }
+    for (size_t i = 0; i < limit; ++i) {
+      fio_free(ary[i]);
+    }
+    fio_free(ary);
+  }
+#if DEBUG && FIO_EXTERN_COMPLETE
+  fio___mem_destroy();
+  FIO_ASSERT(fio___mem_block_count <= 1, "memory leaks?");
+#endif /* DEBUG && FIO_EXTERN_COMPLETE */
+}
+#endif /* FIO_MALLOC_FORCE_SYSTEM */
+
+#endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
 Memory Allocation - cleanup
@@ -1010,8 +1061,8 @@ Memory Allocation - cleanup
 #undef FIO_MEMORY_MAX_SLICES_PER_BLOCK
 #undef FIO_ALIGN
 #undef FIO_ALIGN_NEW
-#endif
 #undef FIO_MALLOC
+#endif /* FIO_MALLOC */
 
 /* *****************************************************************************
 
@@ -1047,9 +1098,9 @@ Memory management macros
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_INTERNAL_MALLOC_ 0
-#else
+#else /* FIO_MALLOC_TMP_USE_SYSTEM */
 #define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
 #define FIO_MEM_INTERNAL_MALLOC_ FIO_MEM_INTERNAL_MALLOC
-#endif
+#endif /* FIO_MALLOC_TMP_USE_SYSTEM */
