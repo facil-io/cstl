@@ -105,10 +105,17 @@ The `fio_sock_poll` function is shadowed by the `fio_sock_poll` MACRO, which all
 
 * `fds`:
 
-    A list of `struct pollfd` with file descriptors to be polled. The list MUST end with a `struct pollfd` containing an empty `events` field (and no empty `events` field should appear in the middle of the list).
+    A list of `struct pollfd` with file descriptors to be polled. The list **should** end with a `struct pollfd` containing an empty `events` field (and no empty `events` field should appear in the middle of the list).
 
     Use the `FIO_SOCK_POLL_LIST(...)`, `FIO_SOCK_POLL_RW(fd)`, `FIO_SOCK_POLL_R(fd)` and `FIO_SOCK_POLL_W(fd)` macros to build the list.
 
+* `count`:
+
+    If supplied, should contain the valid length of the `fds` array.
+
+    If `0` or empty and `fds` isn't `NULL`, the length of the `fds` array will be auto-calculated by seeking through the array for a member in which `events == 0`.
+
+    **Note**: this could cause a buffer overflow, which is why the last member of the `fds` array **should** end with a `struct pollfd` member containing an empty `events` field. Use the `FIO_SOCK_POLL_LIST` macro as a helper.
 
 The `fio_sock_poll` function uses the `poll` system call to poll a simple IO list.
 
@@ -126,6 +133,45 @@ int count = fio_sock_poll(.on_ready = on_ready,
 
 **Note**: The `poll` system call should perform reasonably well for light loads (short lists). However, for complex IO needs or heavier loads, use the system's native IO API, such as `kqueue` or `epoll`.
 
+
+#### `FIO_SOCK_POLL_RW` (macro)
+
+```c
+#define FIO_SOCK_POLL_RW(fd_)                                                  \
+  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for both read and write events (data availability and/or space in the outgoing buffer).
+
+#### `FIO_SOCK_POLL_R` (macro)
+
+```c
+#define FIO_SOCK_POLL_R(fd_)                                                   \
+  (struct pollfd) { .fd = fd_, .events = POLLIN }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for incoming data availability.
+
+
+#### `FIO_SOCK_POLL_W` (macro)
+
+```c
+#define FIO_SOCK_POLL_W(fd_)                                                   \
+  (struct pollfd) { .fd = fd_, .events = POLLOUT }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for space in the outgoing `fd`'s buffer.
+
+#### `FIO_SOCK_POLL_LIST` (macro)
+
+```c
+#define FIO_SOCK_POLL_LIST(...)                                                \
+  (struct pollfd[]) {                                                          \
+    __VA_ARGS__, (struct pollfd) { .fd = -1 }                                  \
+  }
+```
+
+This helper macro helps to author a `struct pollfd` array who's last member has an empty `events` value (for auto-length detection).
 
 #### `fio_sock_address_new`
 
