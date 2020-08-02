@@ -10,7 +10,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
-#include "022 hashmap.h"            /* Development inclusion - ignore line */
+#include "202 hashmap.h"            /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
