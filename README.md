@@ -24,7 +24,7 @@ The GNU `make` command will compile and run any file in the `tests` folder if it
 make test/malloc      # speed test facil.io's memory allocator
 make test/json        # test JSON roundtrip with external JSON files
 make test/json_minify # JSON minification example
-make test/malloc      # Test template compilation in a C++ file (no run).
+make test/cpp         # Test template compilation in a C++ file (no run)... may fail on some compilers
 ```
 
 It is possible to use the same `makefile` to compile source code and static library code. See the makefile for details.
