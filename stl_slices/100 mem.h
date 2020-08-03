@@ -204,7 +204,8 @@ SFUNC void *FIO_ALIGN fio_realloc(void *ptr, size_t new_size) {
   return realloc(ptr, new_size);
 }
 
-SFUNC void *FIO_ALIGN fio_realloc2(void *ptr, size_t new_size,
+SFUNC void *FIO_ALIGN fio_realloc2(void *ptr,
+                                   size_t new_size,
                                    size_t copy_len) {
   return realloc(ptr, new_size);
   (void)copy_len;
@@ -290,8 +291,8 @@ FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint32_t, 4)
 FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint64_t, 8)
 
 /** Copies 16 byte `units` of size_t aligned memory blocks */
-FIO_IFUNC void fio___memcpy_16byte(void *dest_, const void *src_,
-                                   size_t units) {
+FIO_IFUNC void
+fio___memcpy_16byte(void *dest_, const void *src_, size_t units) {
 #if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
   fio___memcpy_8b(dest_, src_, units << 1);
 #elif SIZE_MAX == 0xFFFFFFFF       /* 32 bit size_t */
@@ -336,19 +337,30 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
       (void *)(((uintptr_t)next_alloc + alignment_mask) & alignment_mask);
 /* hope for the best? */
 #ifdef MAP_ALIGNED
-  result =
-      mmap(next_alloc, pages, PROT_READ | PROT_WRITE,
-           MAP_PRIVATE | MAP_ANONYMOUS | MAP_ALIGNED(alignment_log), -1, 0);
+  result = mmap(next_alloc,
+                pages,
+                PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_ALIGNED(alignment_log),
+                -1,
+                0);
 #else
-  result = mmap(next_alloc, pages, PROT_READ | PROT_WRITE,
-                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  result = mmap(next_alloc,
+                pages,
+                PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS,
+                -1,
+                0);
 #endif /* MAP_ALIGNED */
   if (result == MAP_FAILED)
     return (void *)NULL;
   if (((uintptr_t)result & alignment_mask)) {
     munmap(result, pages);
-    result = mmap(NULL, pages + alignment_size, PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    result = mmap(NULL,
+                  pages + alignment_size,
+                  PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS,
+                  -1,
+                  0);
     if (result == MAP_FAILED) {
       return (void *)NULL;
     }
@@ -367,7 +379,8 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
 /*
  * Re-allocates memory using `mmap`, enforcing alignment.
  */
-FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem, size_t prev_pages,
+FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
+                                              size_t prev_pages,
                                               size_t new_pages,
                                               uint8_t alignment_log) {
   const size_t prev_len = prev_pages << FIO_MEM_PAGE_SIZE_LOG;
@@ -379,8 +392,12 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem, size_t prev_pages,
     if (result != MAP_FAILED)
       return result;
 #endif
-    result = mmap((void *)((uintptr_t)mem + prev_len), new_len - prev_len,
-                  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    result = mmap((void *)((uintptr_t)mem + prev_len),
+                  new_len - prev_len,
+                  PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS,
+                  -1,
+                  0);
     if (result == (void *)((uintptr_t)mem + prev_len)) {
       result = mem;
     } else {
@@ -417,7 +434,8 @@ FIO_IFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
   (void)alignment_log;
 }
 
-FIO_IFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem, size_t prev_pages,
+FIO_IFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
+                                              size_t prev_pages,
                                               size_t new_pages,
                                               uint8_t alignment_log) {
   (void)prev_pages;
@@ -435,8 +453,8 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
 #define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
   FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
 #define FIO_MEM_PAGE_REALLOC(ptr, old_pages, new_pages, alignment_log)         \
-  FIO_MEM_PAGE_REALLOC_def_func((ptr), (old_pages), (new_pages),               \
-                                (alignment_log))
+  FIO_MEM_PAGE_REALLOC_def_func(                                               \
+      (ptr), (old_pages), (new_pages), (alignment_log))
 #define FIO_MEM_PAGE_FREE(ptr, pages) FIO_MEM_PAGE_FREE_def_func((ptr), (pages))
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
@@ -527,8 +545,8 @@ static long double fio___mem_on_malloc_zero;
 
 /* retrieve root block */
 FIO_SFUNC fio___mem_block_s *fio___mem_block_root(fio___mem_block_s *b) {
-  return FIO_PTR_MATH_SUB(fio___mem_block_s, b,
-                          b->root * FIO_MEMORY_BLOCK_SIZE);
+  return FIO_PTR_MATH_SUB(
+      fio___mem_block_s, b, b->root * FIO_MEMORY_BLOCK_SIZE);
 }
 
 /* *****************************************************************************
@@ -573,9 +591,13 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
       "\t* memory block size (allocation slice / bin): %zu bytes\n"
       "\t* memory blocks per system allocation:        %zu blocks\n"
       "\t* memory block overhead:                      %zu bytes\n",
-      cores, (void *)fio___mem_state, (size_t)pages, (size_t)(pages << 12),
+      cores,
+      (void *)fio___mem_state,
+      (size_t)pages,
+      (size_t)(pages << 12),
       (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
-      (size_t)FIO_MEMORY_BLOCK_SIZE, (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
+      (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
       (size_t)FIO_MEMORY_BLOCK_HEADER_SIZE);
 #endif /* DEBUG */
 }
@@ -668,7 +690,8 @@ static size_t fio___mem_block_count;
   FIO_LOG_INFO(                                                                \
       "(fio) Total memory blocks allocated before cleanup %zu\n"               \
       "       Maximum memory blocks allocated at a single time %zu\n",         \
-      fio___mem_block_count, fio___mem_block_count_max)
+      fio___mem_block_count,                                                   \
+      fio___mem_block_count_max)
 #define FIO_MEMORY_PRINT_BLOCK_STAT_END()                                      \
   do {                                                                         \
     if (fio___mem_block_count) {                                               \
@@ -717,7 +740,8 @@ FIO_SFUNC fio___mem_block_s *fio___mem_block_alloc(void) {
   }
   /* initialize and return last slice (it's in the cache) */
   b = FIO_PTR_MATH_ADD(
-      fio___mem_block_s, b,
+      fio___mem_block_s,
+      b,
       (FIO_MEMORY_BLOCK_SIZE * (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1)));
   b->root = (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1);
   /* debug counter */
@@ -743,14 +767,15 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
   }
   /* remove all block slices from memory pool */
   for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION); ++i) {
-    fio___mem_block_node_s *tmp = FIO_PTR_MATH_ADD(fio___mem_block_node_s, b,
-                                                   (FIO_MEMORY_BLOCK_SIZE * i));
+    fio___mem_block_node_s *tmp = FIO_PTR_MATH_ADD(
+        fio___mem_block_node_s, b, (FIO_MEMORY_BLOCK_SIZE * i));
     fio___mem_available_blocks_remove(tmp);
   }
   fio_unlock(&fio___mem_state->lock);
   /* return memory to system */
-  FIO_MEM_PAGE_FREE(b, FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
-                                           FIO_MEMORY_BLOCK_SIZE));
+  FIO_MEM_PAGE_FREE(b,
+                    FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
+                                        FIO_MEMORY_BLOCK_SIZE));
   /* debug counter */
   FIO_MEMORY_ON_BLOCK_FREE();
 #if DEBUG
@@ -797,8 +822,8 @@ FIO_SFUNC void *fio___mem_block_slice(size_t bytes) {
   if (!b)
     goto finish;
   fio_atomic_add(&b->ref, 1);
-  r = FIO_PTR_MATH_ADD(void, b,
-                       FIO_MEMORY_BLOCK_HEADER_SIZE + ((size_t)b->pos << 4));
+  r = FIO_PTR_MATH_ADD(
+      void, b, FIO_MEMORY_BLOCK_HEADER_SIZE + ((size_t)b->pos << 4));
   fio_atomic_add(&b->pos, bytes);
 finish:
   fio___mem_arena_release();
@@ -894,7 +919,8 @@ SFUNC void *FIO_ALIGN fio_realloc(void *ptr, size_t new_size) {
  *
  * This variation is slightly faster as it might copy less data.
  */
-SFUNC void *FIO_ALIGN fio_realloc2(void *ptr, size_t new_size,
+SFUNC void *FIO_ALIGN fio_realloc2(void *ptr,
+                                   size_t new_size,
                                    size_t copy_len) {
   if (!ptr || ptr == &fio___mem_on_malloc_zero)
     return fio_malloc(new_size);
@@ -941,7 +967,9 @@ big_realloc:
     return mem;
   }
   fio___mem_block_s *tmp = (fio___mem_block_s *)FIO_MEM_PAGE_REALLOC(
-      b, b->reserved >> FIO_MEM_PAGE_SIZE_LOG, new_page_len,
+      b,
+      b->reserved >> FIO_MEM_PAGE_SIZE_LOG,
+      new_page_len,
       FIO_MEMORY_BLOCK_SIZE_LOG);
   if (!tmp)
     return NULL;
@@ -1009,7 +1037,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
                               << FIO_MEMORY_BLOCK_SIZE_LOG;
   for (int cycles = 4; cycles < FIO_MEMORY_BLOCK_SIZE_LOG; ++cycles) {
-    fprintf(stderr, "* Testing %zu byte allocation blocks.\n",
+    fprintf(stderr,
+            "* Testing %zu byte allocation blocks.\n",
             (size_t)(1UL << cycles));
     const size_t limit = (three_blocks >> cycles);
     char **ary = (char **)fio_calloc(sizeof(*ary), limit);

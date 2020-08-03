@@ -61,11 +61,14 @@ FIO_LOG2STDERR(const char *format, ...) {
   va_end(argv);
   if (len___log <= 0 || len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
-      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER, "...\n\tWARNING: TRUNCATED!",
+      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER,
+             "...\n\tWARNING: TRUNCATED!",
              24);
       len___log = FIO_LOG____LENGTH_BORDER + 24;
     } else {
-      fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n", 39, 1,
+      fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
+             39,
+             1,
              stderr);
       return;
     }

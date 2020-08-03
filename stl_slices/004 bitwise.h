@@ -497,8 +497,10 @@ Byte masking (XOR)
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[], size_t byte_len,
-                                         uint64_t mask, uint64_t nonce) {
+FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[],
+                                         size_t byte_len,
+                                         uint64_t mask,
+                                         uint64_t nonce) {
 
   register uint64_t m = mask;
   for (size_t i = byte_len >> 3; i; --i) {
@@ -547,7 +549,8 @@ FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[], size_t byte_len,
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_, size_t len,
+FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_,
+                                               size_t len,
                                                uint64_t mask,
                                                const uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
@@ -595,7 +598,9 @@ FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_, size_t len,
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio_xmask(char *buf, size_t len, uint64_t mask,
+FIO_IFUNC uint64_t fio_xmask(char *buf,
+                             size_t len,
+                             uint64_t mask,
                              uint64_t nonce) {
   if (!((uintptr_t)buf & 7)) {
     union {

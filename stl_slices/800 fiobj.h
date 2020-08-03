@@ -164,7 +164,8 @@ size_t __attribute__((weak)) FIOBJ_MARK_MEMORY_FREE_COUNTER;
            ? "INFO: total FIOBJ allocations: %zu (%zu/%zu)"                    \
            : "WARNING: LEAKED! FIOBJ allocations: %zu (%zu/%zu)"),             \
       FIOBJ_MARK_MEMORY_ALLOC_COUNTER - FIOBJ_MARK_MEMORY_FREE_COUNTER,        \
-      FIOBJ_MARK_MEMORY_FREE_COUNTER, FIOBJ_MARK_MEMORY_ALLOC_COUNTER)
+      FIOBJ_MARK_MEMORY_FREE_COUNTER,                                          \
+      FIOBJ_MARK_MEMORY_ALLOC_COUNTER)
 #define FIOBJ_MARK_MEMORY_ENABLED 1
 
 #else
@@ -253,8 +254,10 @@ FIOBJ Containers (iteration)
  *
  * Returns the "stop" position - the number of elements processed + `start_at`.
  */
-FIO_SFUNC uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
-                               int (*task)(FIOBJ child, void *arg), void *arg);
+FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
+                               int32_t start_at,
+                               int (*task)(FIOBJ child, void *arg),
+                               void *arg);
 
 /**
  * Performs a task for the object itself and each element held by the FIOBJ
@@ -267,7 +270,8 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
  *
  * Returns the number of elements processed.
  */
-FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(FIOBJ child, void *arg),
+FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
+                                int (*task)(FIOBJ child, void *arg),
                                 void *arg);
 
 /* *****************************************************************************
@@ -312,8 +316,10 @@ typedef struct {
   /** Returns the number of exposed elements held by the object, if any. */
   uint32_t (*count)(FIOBJ o);
   /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-  uint32_t (*each1)(FIOBJ o, int32_t start_at,
-                    int (*task)(FIOBJ child, void *arg), void *arg);
+  uint32_t (*each1)(FIOBJ o,
+                    int32_t start_at,
+                    int (*task)(FIOBJ child, void *arg),
+                    void *arg);
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
@@ -474,7 +480,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
     uint64_t i2;                                                               \
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), s) s;                       \
   } FIO_NAME(str_name,                                                         \
-             __auto_mem_tmp) = {0x7f7f7f7f7f7f7f7fULL, 0x7f7f7f7f7f7f7f7fULL,  \
+             __auto_mem_tmp) = {0x7f7f7f7f7f7f7f7fULL,                         \
+                                0x7f7f7f7f7f7f7f7fULL,                         \
                                 FIO_STR_INIT_STATIC2((buf_), (len_))};         \
   FIOBJ str_name =                                                             \
       (FIOBJ)(((uintptr_t) & (FIO_NAME(str_name, __auto_mem_tmp).s)) |         \
@@ -492,7 +499,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
     uint64_t i2;                                                               \
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), s) s;                       \
   } FIO_NAME(str_name, __auto_mem_tmp) = {                                     \
-      0x7f7f7f7f7f7f7f7fULL, 0x7f7f7f7f7f7f7f7fULL,                            \
+      0x7f7f7f7f7f7f7f7fULL,                                                   \
+      0x7f7f7f7f7f7f7f7fULL,                                                   \
       FIO_STR_INIT_EXISTING((buf_), (len_), (capa_))};                         \
   FIOBJ str_name =                                                             \
       (FIOBJ)(((uintptr_t) & (FIO_NAME(str_name, __auto_mem_tmp).s)) |         \
@@ -595,9 +603,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * Removes a String value in a hash map, using a temporary String and
  * automatically calculating the hash value.
  */
-FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove3)(FIOBJ hash, const char *buf, size_t len,
-                                FIOBJ *old);
+FIO_IFUNC int
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+             remove3)(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
 
 /* *****************************************************************************
 FIOBJ JSON support
@@ -1043,8 +1051,10 @@ FIOBJ Basic Iteration
  *
  * Returns the "stop" position - the number of elements processed + `start_at`.
  */
-FIO_SFUNC uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
-                               int (*task)(FIOBJ child, void *arg), void *arg) {
+FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
+                               int32_t start_at,
+                               int (*task)(FIOBJ child, void *arg),
+                               void *arg) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE: /* fallthrough */
   case FIOBJ_T_NUMBER:    /* fallthrough */
@@ -1052,11 +1062,11 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
   case FIOBJ_T_FLOAT:
     return 0;
   case FIOBJ_T_ARRAY:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each)(o, start_at,
-                                                               task, arg);
+    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
+                    each)(o, start_at, task, arg);
   case FIOBJ_T_HASH:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each)(o, start_at, task,
-                                                              arg);
+    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                    each)(o, start_at, task, arg);
   case FIOBJ_T_OTHER:
     return (*fiobj_object_metadata(o))->each1(o, start_at, task, arg);
   }
@@ -1143,7 +1153,9 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set3)(FIOBJ hash, const char *key, size_t len,
+                         set3)(FIOBJ hash,
+                               const char *key,
+                               size_t len,
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
@@ -1171,9 +1183,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * Removes a String value in a hash map, using a temporary String and
  * automatically calculating the hash value.
  */
-FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove3)(FIOBJ hash, const char *buf, size_t len,
-                                FIOBJ *old) {
+FIO_IFUNC int
+FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+         remove3)(FIOBJ hash, const char *buf, size_t len, FIOBJ *old) {
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
   int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(
       hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp, old);
@@ -1305,7 +1317,8 @@ FIO_SFUNC int fiobj____each2_wrapper_task(FIOBJ child, void *arg) {
  *
  * Returns the number of elements processed.
  */
-FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(FIOBJ child, void *arg),
+FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
+                                int (*task)(FIOBJ child, void *arg),
                                 void *arg) {
   /* TODO - move to recursion with nesting limiter? */
   fiobj_____each2_data_s d = {
@@ -1424,9 +1437,9 @@ FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
                                     cstr)(FIOBJ i) {
-  size_t len =
-      fio_ltoa(fiobj___tmp_buffer,
-               FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i), 10);
+  size_t len = fio_ltoa(fiobj___tmp_buffer,
+                        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i),
+                        10);
   fiobj___tmp_buffer[len] = 0;
   return (fio_str_info_s){.buf = fiobj___tmp_buffer, .len = len};
 }
@@ -1466,9 +1479,9 @@ FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
                                     cstr)(FIOBJ i) {
-  size_t len =
-      fio_ftoa(fiobj___tmp_buffer,
-               FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i), 10);
+  size_t len = fio_ftoa(fiobj___tmp_buffer,
+                        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i),
+                        10);
   fiobj___tmp_buffer[len] = 0;
   return (fio_str_info_s){.buf = fiobj___tmp_buffer, .len = len};
 }
@@ -1663,8 +1676,8 @@ static inline void fio_json_on_float(fio_json_parser_s *p, double f) {
                         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(f));
 }
 /** a String was detected (int / float). update `pos` to point at ending */
-static inline void fio_json_on_string(fio_json_parser_s *p, const void *start,
-                                      size_t len) {
+static inline void
+fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
   FIOBJ str = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_unescape)
   (str, start, len);
@@ -1787,11 +1800,14 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(FIOBJ o, void *e_) {
   int *expect = (int *)e_;
   if (expect[index] == -1) {
     FIO_ASSERT(FIOBJ_TYPE(o) == FIOBJ_T_ARRAY,
-               "each2 ordering issue [%zu] (array).", index);
+               "each2 ordering issue [%zu] (array).",
+               index);
   } else {
     FIO_ASSERT(FIO_NAME2(fiobj, i)(o) == expect[index],
-               "each2 ordering issue [%zu] (number) %ld != %d", index,
-               FIO_NAME2(fiobj, i)(o), expect[index]);
+               "each2 ordering issue [%zu] (number) %ld != %d",
+               index,
+               FIO_NAME2(fiobj, i)(o),
+               expect[index]);
   }
   ++index;
   return 0;
@@ -1843,8 +1859,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       uintptr_t i = (uintptr_t)1 << bit;
       o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)i);
       FIO_ASSERT(FIO_NAME2(fiobj, i)(o) == (intptr_t)i,
-                 "Number not reversible at bit %d (%zd != %zd)!", (int)bit,
-                 (ssize_t)FIO_NAME2(fiobj, i)(o), (ssize_t)i);
+                 "Number not reversible at bit %d (%zd != %zd)!",
+                 (int)bit,
+                 (ssize_t)FIO_NAME2(fiobj, i)(o),
+                 (ssize_t)i);
       allocation_flags |= (FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER) ? 1 : 2;
       fiobj_free(o);
     }
@@ -1863,8 +1881,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       punned.i = (uint64_t)1 << bit;
       o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(punned.d);
       FIO_ASSERT(FIO_NAME2(fiobj, f)(o) == punned.d,
-                 "Float not reversible at bit %d (%lf != %lf)!", (int)bit,
-                 FIO_NAME2(fiobj, f)(o), punned.d);
+                 "Float not reversible at bit %d (%lf != %lf)!",
+                 (int)bit,
+                 FIO_NAME2(fiobj, f)(o),
+                 punned.d);
       allocation_flags |= (FIOBJ_TYPE_CLASS(o) == FIOBJ_T_FLOAT) ? 1 : 2;
       fiobj_free(o);
     }
@@ -2118,10 +2138,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       FIOBJ json = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, h, 0);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(json, "\n", 1);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), reserve)
-      (json, FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json)
-                 << 1); /* prevent memory realloc */
+      (json,
+       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json)
+           << 1); /* prevent memory realloc */
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
-      (json, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(json),
+      (json,
+       FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(json),
        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json) - 1);
       fprintf(stderr, "%s\n", FIO_NAME2(fiobj, cstr)(json).buf);
       fiobj_free(json);
@@ -2131,7 +2153,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIO_ASSERT(FIOBJ_MARK_MEMORY_ALLOC_COUNTER ==
                    FIOBJ_MARK_MEMORY_FREE_COUNTER,
                "FIOBJ leak detected (freed %zu/%zu)",
-               FIOBJ_MARK_MEMORY_FREE_COUNTER, FIOBJ_MARK_MEMORY_ALLOC_COUNTER);
+               FIOBJ_MARK_MEMORY_FREE_COUNTER,
+               FIOBJ_MARK_MEMORY_ALLOC_COUNTER);
   }
 #endif
   fprintf(stderr, "* Passed.\n");

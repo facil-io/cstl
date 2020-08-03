@@ -64,7 +64,8 @@ typedef struct {
  * error or end of data). Stops as close as possible to the end of the buffer or
  * once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *parser, const char *buffer,
+SFUNC size_t fio_json_parse(fio_json_parser_s *parser,
+                            const char *buffer,
                             const size_t len);
 
 /* *****************************************************************************
@@ -111,8 +112,8 @@ FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i);
 /** a Float was detected (double). */
 FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f);
 /** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void fio_json_on_string(fio_json_parser_s *p, const void *start,
-                                    size_t len);
+FIO_JSON_CB void
+fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len);
 /** a dictionary object was detected, should return 0 unless error occurred. */
 FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p);
 /** a dictionary object closure detected */
@@ -413,38 +414,48 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
 
 missing_separator:
   FIO_LOG_DEBUG("missing JSON separator '%c' at (%d):\n%.*s",
-                (p->expect == 2 ? ':' : ','), p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+                (p->expect == 2 ? ':' : ','),
+                p->expect,
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 unexpected_separator:
   FIO_LOG_DEBUG("unexpected JSON separator at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 unterminated_string:
   FIO_LOG_DEBUG("unterminated JSON string at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 bad_number_format:
   FIO_LOG_DEBUG("bad JSON numeral format at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 array_closure_unexpected:
   FIO_LOG_DEBUG("JSON array closure unexpected at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 object_closure_unexpected:
-  FIO_LOG_DEBUG("JSON object closure unexpected at (%d):\n%.*s", p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+  FIO_LOG_DEBUG("JSON object closure unexpected at (%d):\n%.*s",
+                p->expect,
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 too_deep:
-  FIO_LOG_DEBUG("JSON object nesting too deep at:\n%.*s", p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))), buffer);
+  FIO_LOG_DEBUG("JSON object nesting too deep at:\n%.*s",
+                p->expect,
+                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
+                buffer);
   fio_json_on_error(p);
   return NULL;
 }
@@ -453,7 +464,8 @@ too_deep:
  * Returns the number of bytes consumed. Stops as close as possible to the end
  * of the buffer or once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *p, const char *buffer,
+SFUNC size_t fio_json_parse(fio_json_parser_s *p,
+                            const char *buffer,
                             const size_t len) {
   const char *start = buffer;
   const char *stop = buffer + len;
@@ -487,7 +499,8 @@ finish:
   return buffer - start;
 failed:
   FIO_LOG_DEBUG("JSON parsing failed after:\n%.*s",
-                ((stop - last > 48) ? 48 : ((int)(stop - last))), last);
+                ((stop - last > 48) ? 48 : ((int)(stop - last))),
+                last);
   return last - start;
 }
 

@@ -210,9 +210,10 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest,
  *
  * Returns a pointer to the new object, or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
-                               set)(FIO_ARRAY_PTR ary, int32_t index,
-                                    FIO_ARRAY_TYPE data, FIO_ARRAY_TYPE *old);
+IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary,
+                                                    int32_t index,
+                                                    FIO_ARRAY_TYPE data,
+                                                    FIO_ARRAY_TYPE *old);
 
 /**
  * Returns the value located at `index` (no copying is performed).
@@ -245,7 +246,8 @@ IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
  * This action is O(n) where n in the length of the array.
  * It could get expensive.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary, int32_t index,
+IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary,
+                                           int32_t index,
                                            FIO_ARRAY_TYPE *old);
 
 /**
@@ -317,7 +319,8 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
  * the starting point.
  */
 IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
-                        each)(FIO_ARRAY_PTR ary, int32_t start_at,
+                        each)(FIO_ARRAY_PTR ary,
+                              int32_t start_at,
                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
                               void *arg);
 
@@ -451,9 +454,11 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   if (dest->capa + src->start < src->end + dest->end) {
     /* insufficiant memory, (re)allocate */
     uint32_t new_capa = dest->end + (src->end - src->start);
-    FIO_ARRAY_TYPE *tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
-        dest->ary, dest->capa * sizeof(*tmp), new_capa * sizeof(*tmp),
-        dest->end * sizeof(*tmp));
+    FIO_ARRAY_TYPE *tmp =
+        (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(dest->ary,
+                                           dest->capa * sizeof(*tmp),
+                                           new_capa * sizeof(*tmp),
+                                           dest->end * sizeof(*tmp));
     if (!tmp)
       return (FIO_ARRAY_PTR)(NULL);
     dest->ary = tmp;
@@ -484,9 +489,10 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
  *
  * Returns a pointer to the new object, or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
-                               set)(FIO_ARRAY_PTR ary_, int32_t index,
-                                    FIO_ARRAY_TYPE data, FIO_ARRAY_TYPE *old) {
+IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
+                                                    int32_t index,
+                                                    FIO_ARRAY_TYPE data,
+                                                    FIO_ARRAY_TYPE *old) {
 #if FIO_ARRAY_EXPONENTIAL
 #define FIO_ARRAY_ADD2CAPA ary->capa + FIO_ARRAY_PADDING
 #else
@@ -505,9 +511,11 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
         /* we need more memory */
         uint32_t new_capa =
             FIO_ARRAY_SIZE2WORDS(((uint32_t)index + FIO_ARRAY_ADD2CAPA));
-        FIO_ARRAY_TYPE *tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
-            ary->ary, ary->capa * sizeof(*tmp), new_capa * sizeof(*tmp),
-            ary->end * sizeof(*tmp));
+        FIO_ARRAY_TYPE *tmp =
+            (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(ary->ary,
+                                               ary->capa * sizeof(*tmp),
+                                               new_capa * sizeof(*tmp),
+                                               ary->end * sizeof(*tmp));
         if (!tmp)
           return NULL;
         ary->ary = tmp;
@@ -540,7 +548,8 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
         if (!tmp)
           return NULL;
         if (valid_data)
-          memcpy(tmp + new_capa - valid_data, ary->ary + ary->start,
+          memcpy(tmp + new_capa - valid_data,
+                 ary->ary + ary->start,
                  valid_data * sizeof(*tmp));
         FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
         ary->end = ary->capa = new_capa;
@@ -648,7 +657,8 @@ IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
  *
  * Returns 0 on success and -1 on error.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_, int32_t index,
+IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
+                                           int32_t index,
                                            FIO_ARRAY_TYPE *old) {
   FIO_PTR_TAG_VALID_OR_RETURN(ary_, -1);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
@@ -673,7 +683,8 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_, int32_t index,
     /* pop? */
     --ary->end;
     if (ary->end != (uint32_t)index) {
-      memmove(ary->ary + index, ary->ary + index + 1,
+      memmove(ary->ary + index,
+              ary->ary + index + 1,
               (ary->end - index) * sizeof(*old));
     }
   }
@@ -717,8 +728,8 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   tmp = (FIO_ARRAY_TYPE *)FIO_MEM_CALLOC((ary->end - ary->start), sizeof(*tmp));
   if (!tmp)
     return;
-  memcpy(tmp, ary->ary + ary->start,
-         (ary->end - ary->start) * sizeof(*ary->ary));
+  memcpy(
+      tmp, ary->ary + ary->start, (ary->end - ary->start) * sizeof(*ary->ary));
 finish:
   if (ary->ary) {
     FIO_MEM_FREE_(ary->ary, ary->capa * sizeof(*ary->ary));
@@ -862,7 +873,8 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
  * the starting point.
  */
 IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
-                        each)(FIO_ARRAY_PTR ary_, int32_t start_at,
+                        each)(FIO_ARRAY_PTR ary_,
+                              int32_t start_at,
                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
                               void *arg) {
   FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);

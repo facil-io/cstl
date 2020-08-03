@@ -261,7 +261,8 @@ char *fio_version_string(void);
                  fio_version_minor() == FIO_VERSION_MINOR &&                   \
                  fio_version_patch() == FIO_VERSION_PATCH &&                   \
                  fio_version_beta() == FIO_VERSION_BETA,                       \
-             "facil.io version mismatch, not %s", fio_version_string())
+             "facil.io version mismatch, not %s",                              \
+             fio_version_string())
 
 /**
  * To implement the fio_version_* functions and FIO_VERSION_VALIDATE guard, the

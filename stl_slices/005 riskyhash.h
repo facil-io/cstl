@@ -133,7 +133,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 
   for (size_t i = len >> 5; i; --i) {
     /* vectorized 32 bytes / 256 bit access */
-    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data), FIO_RISKY_BUF2U64(data + 8),
+    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
+                        FIO_RISKY_BUF2U64(data + 8),
                         FIO_RISKY_BUF2U64(data + 16),
                         FIO_RISKY_BUF2U64(data + 24));
     data += 32;
@@ -202,8 +203,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 #else
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t v[4] = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2,
-                   FIO_RISKY3_IV3};
+  uint64_t v[4] = {
+      FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
   uint64_t w[4];
   const uint8_t *data = (const uint8_t *)data_;
 
@@ -233,7 +234,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 
   for (size_t i = len >> 5; i; --i) {
     /* vectorized 32 bytes / 256 bit access */
-    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data), FIO_RISKY_BUF2U64(data + 8),
+    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
+                        FIO_RISKY_BUF2U64(data + 8),
                         FIO_RISKY_BUF2U64(data + 16),
                         FIO_RISKY_BUF2U64(data + 24));
     data += 32;
@@ -381,9 +383,10 @@ Random - Implementation
 static __thread uint64_t fio___rand_state[4]; /* random state */
 static __thread size_t fio___rand_counter;    /* seed counter */
 /* feeds random data to the algorithm through this 256 bit feed. */
-static __thread uint64_t fio___rand_buffer[4] = {
-    0x9c65875be1fce7b9ULL, 0x7cc568e838f6a40d, 0x4bb8d885a0fe47d5,
-    0x95561f0927ad7ecd};
+static __thread uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
+                                                 0x7cc568e838f6a40d,
+                                                 0x4bb8d885a0fe47d5,
+                                                 0x95561f0927ad7ecd};
 
 IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
   len &= 1023;
@@ -450,11 +453,12 @@ IFUNC void fio_rand_reseed(void) {
         &clk, sizeof(clk), fio___rand_state[1] + fio___rand_counter);
   }
   fio___rand_state[2] =
-      fio_risky_hash(fio___rand_buffer, sizeof(fio___rand_buffer),
+      fio_risky_hash(fio___rand_buffer,
+                     sizeof(fio___rand_buffer),
                      fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] =
-      fio_risky_hash(fio___rand_state, sizeof(fio___rand_state),
-                     fio___rand_state[1] + jitter_samples);
+  fio___rand_state[3] = fio_risky_hash(fio___rand_state,
+                                       sizeof(fio___rand_state),
+                                       fio___rand_state[1] + jitter_samples);
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
   fio___rand_buffer[2] ^= fio___rand_buffer[0];

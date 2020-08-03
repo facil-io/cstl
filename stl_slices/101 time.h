@@ -283,8 +283,8 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   return time;
 }
 
-static const char *FIO___DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed",
-                                        "Thu", "Fri", "Sat"};
+static const char *FIO___DAY_NAMES[] =
+    {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 // clang-format off
 static const char *FIO___MONTH_NAMES[] =
     {"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
@@ -456,7 +456,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     tm2 = fio_time2gm(tmp);
     FIO_ASSERT(fio_gm2time(tm2) == tmp,
                "fio_gm2time roundtrip error (%ld != %ld)",
-               (long)fio_gm2time(tm2), (long)tmp);
+               (long)fio_gm2time(tm2),
+               (long)tmp);
     gmtime_r(&tmp, &tm1);
     if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
         tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
@@ -486,10 +487,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  "\ttm_wday: %d\n"
                  "-- As String:\n"
                  "\t%s",
-                 (long)t, tm1.tm_year, tm1.tm_mon, tm1.tm_mday, tm1.tm_yday,
-                 tm1.tm_hour, tm1.tm_min, tm1.tm_sec, tm1.tm_wday, tm2.tm_year,
-                 tm2.tm_mon, tm2.tm_mday, tm2.tm_yday, tm2.tm_hour, tm2.tm_min,
-                 tm2.tm_sec, tm2.tm_wday, buf);
+                 (long)t,
+                 tm1.tm_year,
+                 tm1.tm_mon,
+                 tm1.tm_mday,
+                 tm1.tm_yday,
+                 tm1.tm_hour,
+                 tm1.tm_min,
+                 tm1.tm_sec,
+                 tm1.tm_wday,
+                 tm2.tm_year,
+                 tm2.tm_mon,
+                 tm2.tm_mday,
+                 tm2.tm_yday,
+                 tm2.tm_hour,
+                 tm2.tm_min,
+                 tm2.tm_sec,
+                 tm2.tm_wday,
+                 buf);
     }
   }
   {
@@ -504,7 +519,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       (void)tm;
     }
     stop = fio_time_micro();
-    fprintf(stderr, "\t- fio_time2gm speed test took:\t%zuus\n",
+    fprintf(stderr,
+            "\t- fio_time2gm speed test took:\t%zuus\n",
             (size_t)(stop - start));
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
@@ -514,7 +530,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
     }
     stop = fio_time_micro();
-    fprintf(stderr, "\t- gmtime_r speed test took:  \t%zuus\n",
+    fprintf(stderr,
+            "\t- gmtime_r speed test took:  \t%zuus\n",
             (size_t)(stop - start));
     fprintf(stderr, "\n");
     struct tm tm_now = fio_time2gm(now);
@@ -526,7 +543,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       (void)t_tmp;
     }
     stop = fio_time_micro();
-    fprintf(stderr, "\t- fio_gm2time speed test took:\t%zuus\n",
+    fprintf(stderr,
+            "\t- fio_gm2time speed test took:\t%zuus\n",
             (size_t)(stop - start));
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
@@ -536,7 +554,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       (void)t_tmp;
     }
     stop = fio_time_micro();
-    fprintf(stderr, "\t- mktime speed test took:    \t%zuus\n",
+    fprintf(stderr,
+            "\t- mktime speed test took:    \t%zuus\n",
             (size_t)(stop - start));
     fprintf(stderr, "\n");
   }

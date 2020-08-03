@@ -126,14 +126,21 @@ CLI API
  * This function is NOT thread safe.
  */
 #define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
-  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
+  fio_cli_start((argc),                                                        \
+                (argv),                                                        \
+                (unnamed_min),                                                 \
+                (unnamed_max),                                                 \
+                (description),                                                 \
                 (char const *[]){__VA_ARGS__, (char const *)NULL})
 /**
  * Never use the function directly, always use the MACRO, because the macro
  * attaches a NULL marker at the end of the `names` argument collection.
  */
-SFUNC void fio_cli_start FIO_NOOP(int argc, char const *argv[], int unnamed_min,
-                                  int unnamed_max, char const *description,
+SFUNC void fio_cli_start FIO_NOOP(int argc,
+                                  char const *argv[],
+                                  int unnamed_min,
+                                  int unnamed_max,
+                                  char const *description,
                                   char const **names);
 /**
  * Clears the memory used by the CLI dictionary, removing all parsed data.
@@ -248,14 +255,15 @@ FIO_SFUNC void fio___cli_map_line2alias(char const *line) {
       ++n.len;
     }
     const char *old = NULL;
-    fio___cli_hash_set(&fio___cli_aliases, FIO_CLI_HASH_VAL(n), n,
-                       (char const *)line, &old);
+    fio___cli_hash_set(
+        &fio___cli_aliases, FIO_CLI_HASH_VAL(n), n, (char const *)line, &old);
 #ifdef FIO_LOG_ERROR
     if (old) {
       FIO_LOG_ERROR("CLI argument name conflict detected\n"
                     "         The following two directives conflict:\n"
                     "\t%s\n\t%s\n",
-                    old, line);
+                    old,
+                    line);
     }
 #endif
     while (n.buf[n.len] && (n.buf[n.len] == ' ' || n.buf[n.len] == ',')) {
@@ -300,7 +308,8 @@ found:
   return NULL;
 }
 
-FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg, char const *value,
+FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
+                                 char const *value,
                                  char const *line,
                                  fio_cli_parser_data_s *parser) {
   char const *type = NULL;
@@ -359,11 +368,11 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg, char const *value,
       while (n.buf[n.len] && n.buf[n.len] != ' ' && n.buf[n.len] != ',') {
         ++n.len;
       }
-      fio___cli_hash_set(&fio___cli_values, FIO_CLI_HASH_VAL(n), n, value,
-                         NULL);
+      fio___cli_hash_set(
+          &fio___cli_values, FIO_CLI_HASH_VAL(n), n, value, NULL);
       FIO_LOG_DEBUG2("(CLI) set argument %.*s = %s", (int)n.len, n.buf, value);
-      FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values,
-                                          FIO_CLI_HASH_VAL(n), n) == value,
+      FIO_ASSERT_DEBUG(fio___cli_hash_get(
+                           &fio___cli_values, FIO_CLI_HASH_VAL(n), n) == value,
                        "(CLI) set argument failed!");
       while (n.buf[n.len] && (n.buf[n.len] == ' ' || n.buf[n.len] == ',')) {
         ++n.len;
@@ -383,8 +392,11 @@ finish:
 
 error: /* handle errors*/
   FIO_LOG_DEBUG2("(CLI) error detected, printing help and exiting.");
-  fprintf(stderr, "\n\r\x1B[31mError:\x1B[0m invalid argument %.*s %s %s\n\n",
-          (int)arg.len, arg.buf, arg.len ? "with value" : "",
+  fprintf(stderr,
+          "\n\r\x1B[31mError:\x1B[0m invalid argument %.*s %s %s\n\n",
+          (int)arg.len,
+          arg.buf,
+          arg.len ? "with value" : "",
           value ? (value[0] ? value : "(empty)") : "(null)");
 print_help:
   if (parser->description) {
@@ -419,7 +431,8 @@ print_help:
     const char *name_tmp = parser->argv[0];
     while (name_tmp[0] == '.' || name_tmp[0] == '/')
       ++name_tmp;
-    fprintf(stderr, "\nAvailable command-line options for \x1B[1m%s\x1B[0m:\n",
+    fprintf(stderr,
+            "\nAvailable command-line options for \x1B[1m%s\x1B[0m:\n",
             name_tmp);
   }
   /* print out each line's arguments */
@@ -468,15 +481,21 @@ print_help:
     }
     switch ((size_t)type) {
     case FIO_CLI_STRING__TYPE_I:
-      fprintf(stderr, " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%s\n",
-              first_len, p, p + tmp);
+      fprintf(stderr,
+              " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%s\n",
+              first_len,
+              p,
+              p + tmp);
       break;
     case FIO_CLI_BOOL__TYPE_I:
       fprintf(stderr, " \x1B[1m%-10.*s\x1B[0m\t   %s\n", first_len, p, p + tmp);
       break;
     case FIO_CLI_INT__TYPE_I:
-      fprintf(stderr, " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%s\n",
-              first_len, p, p + tmp);
+      fprintf(stderr,
+              " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%s\n",
+              first_len,
+              p,
+              p + tmp);
       break;
     }
     /* print aliase information */
@@ -497,31 +516,47 @@ print_help:
         fprintf(stderr,
                 " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
-                (int)(tmp - start), p + start, padding, "", first_len, p);
+                (int)(tmp - start),
+                p + start,
+                padding,
+                "",
+                first_len,
+                p);
         break;
       case FIO_CLI_BOOL__TYPE_I:
         fprintf(stderr,
                 " \x1B[1m%-10.*s\x1B[0m\t   %*s\x1B[2msame as %.*s\x1B[0m\n",
-                (int)(tmp - start), p + start, padding, "", first_len, p);
+                (int)(tmp - start),
+                p + start,
+                padding,
+                "",
+                first_len,
+                p);
         break;
       case FIO_CLI_INT__TYPE_I:
         fprintf(stderr,
                 " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
-                (int)(tmp - start), p + start, padding, "", first_len, p);
+                (int)(tmp - start),
+                p + start,
+                padding,
+                "",
+                first_len,
+                p);
         break;
       }
     }
 
     ++pos;
   }
-  fprintf(stderr, "\nUse any of the following input formats:\n"
-                  "\t-arg <value>\t-arg=<value>\t-arg<value>\n"
-                  "\n"
-                  "Use \x1B[1m-h\x1B[0m , \x1B[1m-help\x1B[0m or "
-                  "\x1B[1m-?\x1B[0m "
-                  "to get this information again.\n"
-                  "\n");
+  fprintf(stderr,
+          "\nUse any of the following input formats:\n"
+          "\t-arg <value>\t-arg=<value>\t-arg<value>\n"
+          "\n"
+          "Use \x1B[1m-h\x1B[0m , \x1B[1m-help\x1B[0m or "
+          "\x1B[1m-?\x1B[0m "
+          "to get this information again.\n"
+          "\n");
   fio_cli_end();
   exit(0);
 }
@@ -531,8 +566,11 @@ CLI Initialization
 ***************************************************************************** */
 
 void fio_cli_start___(void); /* sublime text marker */
-SFUNC void fio_cli_start FIO_NOOP(int argc, char const *argv[], int unnamed_min,
-                                  int unnamed_max, char const *description,
+SFUNC void fio_cli_start FIO_NOOP(int argc,
+                                  char const *argv[],
+                                  int unnamed_min,
+                                  int unnamed_max,
+                                  char const *description,
                                   char const **names) {
   if (unnamed_max >= 0 && unnamed_max < unnamed_min)
     unnamed_max = unnamed_min;
@@ -579,8 +617,8 @@ SFUNC void fio_cli_start FIO_NOOP(int argc, char const *argv[], int unnamed_min,
       value = argv[parser.pos + 1];
     }
     const char *l = NULL;
-    while (n.len && !(l = fio___cli_hash_get(&fio___cli_aliases,
-                                             FIO_CLI_HASH_VAL(n), n))) {
+    while (n.len && !(l = fio___cli_hash_get(
+                          &fio___cli_aliases, FIO_CLI_HASH_VAL(n), n))) {
       --n.len;
       value = n.buf + n.len;
     }
@@ -660,7 +698,15 @@ CLI - test
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   const char *argv[] = {
-      "appname", "-i11", "-i2=2", "-i3", "3", "-t", "-s", "test", "unnamed",
+      "appname",
+      "-i11",
+      "-i2=2",
+      "-i3",
+      "3",
+      "-t",
+      "-s",
+      "test",
+      "unnamed",
   };
   const int argc = sizeof(argv) / sizeof(argv[0]);
   fprintf(stderr, "* Testing CLI helpers.\n");

@@ -348,8 +348,8 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s);
  *
  * Returns -1 on error and 0 on success.
  */
-SFUNC int FIO_NAME(FIO_STR_NAME, utf8_select)(FIO_STR_PTR s, intptr_t *pos,
-                                              size_t *len);
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   utf8_select)(FIO_STR_PTR s, intptr_t *pos, size_t *len);
 
 /* *****************************************************************************
 String API - Content Manipulation and Review
@@ -399,10 +399,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, join)(FIO_STR_PTR dest,
  * If `src_len == 0` than `src` will be ignored and the data marked for
  * replacement will be erased.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              replace)(FIO_STR_PTR s, intptr_t start_pos,
-                                       size_t old_len, const void *src,
-                                       size_t src_len);
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s,
+                                                     intptr_t start_pos,
+                                                     size_t old_len,
+                                                     const void *src,
+                                                     size_t src_len);
 
 /**
  * Writes to the String using a vprintf like interface.
@@ -418,8 +419,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, vprintf)(FIO_STR_PTR s,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s,
-                                                    const char *format, ...);
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                              printf)(FIO_STR_PTR s, const char *format, ...);
 
 #if FIO_HAVE_UNIX_TOOLS
 /**
@@ -434,7 +435,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s,
  *
  * Currently implemented only on POSIX systems.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s, int fd,
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s,
+                                                    int fd,
                                                     intptr_t start_at,
                                                     intptr_t limit);
 /**
@@ -447,9 +449,10 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s, int fd,
  *
  * Currently implemented only on POSIX systems.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              readfile)(FIO_STR_PTR s, const char *filename,
-                                        intptr_t start_at, intptr_t limit);
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s,
+                                                      const char *filename,
+                                                      intptr_t start_at,
+                                                      intptr_t limit);
 #endif
 
 /* *****************************************************************************
@@ -482,7 +485,8 @@ String API - Base64 support
  * data.
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              write_base64enc)(FIO_STR_PTR s, const void *data,
+                              write_base64enc)(FIO_STR_PTR s,
+                                               const void *data,
                                                size_t data_len,
                                                uint8_t url_encoded);
 
@@ -965,8 +969,8 @@ FIO_IFUNC uint64_t FIO_NAME(FIO_STR_NAME, hash)(const FIO_STR_PTR s_,
   if (!s || !s_)
     return fio_risky_hash(NULL, 0, seed);
   if (FIO_STR_IS_SMALL(s))
-    return fio_risky_hash((void *)FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_LEN(s),
-                          seed);
+    return fio_risky_hash(
+        (void *)FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_LEN(s), seed);
   return fio_risky_hash((void *)FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s), seed);
 }
 
@@ -1028,7 +1032,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
       /* shrink from allocated(?) string */
       FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
       FIO_NAME(FIO_STR_NAME, init_copy)
-      ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), FIO_STR_BIG_DATA(s),
+      ((FIO_STR_PTR)FIO_PTR_TAG(&tmp),
+       FIO_STR_BIG_DATA(s),
        ((FIO_STR_SMALL_CAPA(s) > FIO_STR_BIG_LEN(s)) ? FIO_STR_BIG_LEN(s)
                                                      : FIO_STR_SMALL_CAPA(s)));
       if (FIO_STR_BIG_IS_DYNAMIC(s))
@@ -1049,8 +1054,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
     FIO_NAME(FIO_STR_NAME, init_copy)
     ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), NULL, amount);
-    memcpy(FIO_STR_BIG_DATA(&tmp), FIO_STR_SMALL_DATA(s),
-           FIO_STR_SMALL_CAPA(s));
+    memcpy(
+        FIO_STR_BIG_DATA(&tmp), FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_CAPA(s));
     FIO_STR_BIG_LEN_SET(&tmp, FIO_STR_SMALL_LEN(s));
     *s = tmp;
     i = (fio_str_info_s){
@@ -1076,8 +1081,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     }
     char *tmp = NULL;
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
-      tmp = (char *)FIO_MEM_REALLOC_(FIO_STR_BIG_DATA(s), old_capa, amount + 1,
-                                     data_len);
+      tmp = (char *)FIO_MEM_REALLOC_(
+          FIO_STR_BIG_DATA(s), old_capa, amount + 1, data_len);
       (void)old_capa; /* might not be used by macro */
     } else {
       tmp = (char *)FIO_MEM_CALLOC_(amount + 1, sizeof(char));
@@ -1236,8 +1241,8 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s_) {
  *
  * Returns -1 on error and 0 on success.
  */
-SFUNC int FIO_NAME(FIO_STR_NAME, utf8_select)(FIO_STR_PTR s_, intptr_t *pos,
-                                              size_t *len) {
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   utf8_select)(FIO_STR_PTR s_, intptr_t *pos, size_t *len) {
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
   int32_t c = 0;
   char *p = state.buf;
@@ -1424,10 +1429,11 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest_,
  * If `src_len == 0` than `src` will be ignored and the data marked for
  * replacement will be erased.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              replace)(FIO_STR_PTR s_, intptr_t start_pos,
-                                       size_t old_len, const void *src,
-                                       size_t src_len) {
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
+                                                     intptr_t start_pos,
+                                                     size_t old_len,
+                                                     const void *src,
+                                                     size_t src_len) {
   FIO_NAME(FIO_STR_NAME, s) *s = (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!s_ || !s || FIO_STR_IS_FROZEN(s) || (!old_len && !src_len) ||
@@ -1461,7 +1467,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
       const size_t offset = src_len - old_len;
       state = FIO_NAME(FIO_STR_NAME, resize)(s_, state.len + offset);
     }
-    memmove(state.buf + start_pos + src_len, state.buf + start_pos + old_len,
+    memmove(state.buf + start_pos + src_len,
+            state.buf + start_pos + old_len,
             (state.len - start_pos) - old_len);
   }
   if (src_len) {
@@ -1477,8 +1484,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
  * Data is written to the end of the String.
  */
 SFUNC fio_str_info_s __attribute__((format(printf, 2, 0)))
-FIO_NAME(FIO_STR_NAME, vprintf)(FIO_STR_PTR s_, const char *format,
-                                va_list argv) {
+FIO_NAME(FIO_STR_NAME,
+         vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
   va_list argv_cpy;
   va_copy(argv_cpy, argv);
   int len = vsnprintf(NULL, 0, format, argv_cpy);
@@ -1864,7 +1871,8 @@ String - Base64 support
  * data.
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              write_base64enc)(FIO_STR_PTR s_, const void *data,
+                              write_base64enc)(FIO_STR_PTR s_,
+                                               const void *data,
                                                size_t len,
                                                uint8_t url_encoded) {
   if (!s_ || !FIO_PTR_UNTAG(s_) || !len ||
@@ -2101,7 +2109,8 @@ String - read file
  *
  * Currently implemented only on POSIX systems.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_, int fd,
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
+                                                    int fd,
                                                     intptr_t start_at,
                                                     intptr_t limit) {
   struct stat f_data;
@@ -2157,9 +2166,10 @@ error:
  *
  * Currently implemented only on POSIX systems.
  */
-SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
-                              readfile)(FIO_STR_PTR s_, const char *filename,
-                                        intptr_t start_at, intptr_t limit) {
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
+                                                      const char *filename,
+                                                      intptr_t start_at,
+                                                      intptr_t limit) {
   fio_str_info_s state = {.buf = NULL};
   /* POSIX implementations. */
   if (filename == NULL || !s_)
@@ -2221,11 +2231,14 @@ finish:
 SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
-  fprintf(stderr, "* Testing core string features for " FIO_MACRO2STR(
-                      FIO_STR_NAME) ".\n");
-  fprintf(stderr, "* String container size (without wrapper): %zu\n",
+  fprintf(
+      stderr,
+      "* Testing core string features for " FIO_MACRO2STR(FIO_STR_NAME) ".\n");
+  fprintf(stderr,
+          "* String container size (without wrapper): %zu\n",
           sizeof(FIO_NAME(FIO_STR_NAME, s)));
-  fprintf(stderr, "* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
+  fprintf(stderr,
+          "* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
           FIO__STR_SMALL_CAPA);
   FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(&str), "new string is frozen");
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == FIO__STR_SMALL_CAPA,
@@ -2333,9 +2346,11 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
                "Compacting didn't change String to small!");
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == strlen("Hello Big World!"),
                "Compacting altered String length! (%zu != %zu)!",
-               FIO_NAME(FIO_STR_NAME, len)(&str), strlen("Hello Big World!"));
+               FIO_NAME(FIO_STR_NAME, len)(&str),
+               strlen("Hello Big World!"));
     FIO_ASSERT(!strcmp(FIO_NAME2(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
-               "Compact data error (%s)!", FIO_NAME2(FIO_STR_NAME, ptr)(&str));
+               "Compact data error (%s)!",
+               FIO_NAME2(FIO_STR_NAME, ptr)(&str));
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
@@ -2361,7 +2376,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
   }
   FIO_NAME(FIO_STR_NAME, printf)(&str, " %u", 42);
   FIO_ASSERT(!strcmp(FIO_NAME2(FIO_STR_NAME, ptr)(&str), "Hello Big World! 42"),
-             "`printf` data error (%s)!", FIO_NAME2(FIO_STR_NAME, ptr)(&str));
+             "`printf` data error (%s)!",
+             FIO_NAME2(FIO_STR_NAME, ptr)(&str));
 
   {
     FIO_NAME(FIO_STR_NAME, s) str2 = FIO_STR_INIT;
@@ -2395,11 +2411,12 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
-    FIO_ASSERT(FIO_PTR_UNTAG(s), "error, string not allocated (%p)!",
-               (void *)s);
+    FIO_ASSERT(
+        FIO_PTR_UNTAG(s), "error, string not allocated (%p)!", (void *)s);
     fio_str_info_s state = FIO_NAME(FIO_STR_NAME, readfile)(s, __FILE__, 0, 0);
 
-    FIO_ASSERT(state.len && state.buf, "error, no data was read for file %s!",
+    FIO_ASSERT(state.len && state.buf,
+               "error, no data was read for file %s!",
                __FILE__);
 
     FIO_ASSERT(!memcmp(state.buf,
@@ -2407,7 +2424,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
                        "******************************************************"
                        "***********************",
                        80),
-               "content error, header mismatch!\n %s", state.buf);
+               "content error, header mismatch!\n %s",
+               state.buf);
     fprintf(stderr, "* Testing UTF-8 validation and length.\n");
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_valid)(s),
                "`utf8_valid` error, code in this file "
@@ -2430,7 +2448,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(s, &pos, &len) == 0,
                  "`select` returned error for negative "
                  "pos! (%zd, %zu)",
-                 (ssize_t)pos, len);
+                 (ssize_t)pos,
+                 len);
       FIO_ASSERT(pos ==
                      (intptr_t)state.len - 10, /* no UTF-8 bytes in this file */
                  "`utf8_select` error, negative position "
@@ -2443,10 +2462,14 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
       pos = 10;
       len = 20;
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(s, &pos, &len) == 0,
-                 "`utf8_select` returned error! (%zd, %zu)", (ssize_t)pos, len);
-      FIO_ASSERT(pos == 10, "`utf8_select` error, position invalid! (%zd)",
+                 "`utf8_select` returned error! (%zd, %zu)",
+                 (ssize_t)pos,
+                 len);
+      FIO_ASSERT(pos == 10,
+                 "`utf8_select` error, position invalid! (%zd)",
                  (ssize_t)pos);
-      FIO_ASSERT(len == 20, "`utf8_select` error, length invalid! (%zd)",
+      FIO_ASSERT(len == 20,
+                 "`utf8_select` error, length invalid! (%zd)",
                  (ssize_t)len);
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
@@ -2462,7 +2485,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
                "`utf8_select` returned error for negative pos on "
                "UTF-8 data! (%zd, %zu)",
-               (ssize_t)pos, len);
+               (ssize_t)pos,
+               len);
     FIO_ASSERT(pos == (intptr_t)FIO_NAME(FIO_STR_NAME, len)(&str) -
                           4, /* 4 byte emoji */
                "`utf8_select` error, negative position invalid on "
@@ -2477,7 +2501,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
                "`utf8_select` returned error on UTF-8 data! "
                "(%zd, %zu)",
-               (ssize_t)pos, len);
+               (ssize_t)pos,
+               len);
     FIO_ASSERT(pos == 4,
                "`utf8_select` error, position invalid on "
                "UTF-8 data! (%zd)",
@@ -2491,7 +2516,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
                "`utf8_select` returned error on UTF-8 data "
                "(2)! (%zd, %zu)",
-               (ssize_t)pos, len);
+               (ssize_t)pos,
+               len);
     FIO_ASSERT(len ==
                    10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte codes == 10 */
                "`utf8_select` error, length invalid on UTF-8 data! "
@@ -2548,8 +2574,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
 
     char *cstr = FIO_NAME(FIO_STR_NAME, detach)(&str);
     FIO_ASSERT(cstr, "`detach` returned NULL");
-    FIO_ASSERT(!memcmp(cstr, "Welcome Home\0", 13), "`detach` string error: %s",
-               cstr);
+    FIO_ASSERT(
+        !memcmp(cstr, "Welcome Home\0", 13), "`detach` string error: %s", cstr);
     FIO_MEM_FREE(cstr, state.capa);
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
                "`detach` data wasn't cleared.");
@@ -2568,7 +2594,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
       b64i = FIO_NAME(FIO_STR_NAME, write)(&b64message, &c, 1);
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&b64message) == (size_t)(42 + i),
                  "Base64 message length error (%zu != %zu)",
-                 FIO_NAME(FIO_STR_NAME, len)(&b64message), (size_t)(42 + i));
+                 FIO_NAME(FIO_STR_NAME, len)(&b64message),
+                 (size_t)(42 + i));
       FIO_ASSERT(FIO_NAME2(FIO_STR_NAME, ptr)(&b64message)[41 + i] == (char)c,
                  "Base64 message data error");
     }
@@ -2581,22 +2608,27 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
       FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
-      decoded = FIO_NAME(FIO_STR_NAME, write_base64dec)(
-          &str, FIO_NAME2(FIO_STR_NAME, ptr)(&tmps),
-          FIO_NAME(FIO_STR_NAME, len)(&tmps));
+      decoded = FIO_NAME(FIO_STR_NAME,
+                         write_base64dec)(&str,
+                                          FIO_NAME2(FIO_STR_NAME, ptr)(&tmps),
+                                          FIO_NAME(FIO_STR_NAME, len)(&tmps));
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
       encoded.buf = decoded.buf;
     }
     FIO_ASSERT(encoded.len, "Base64 encoding failed");
-    FIO_ASSERT(decoded.len > encoded.len, "Base64 decoding failed:\n%s",
-               encoded.buf);
+    FIO_ASSERT(
+        decoded.len > encoded.len, "Base64 decoding failed:\n%s", encoded.buf);
     FIO_ASSERT(b64i.len == decoded.len - encoded.len,
                "Base 64 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-               b64i.len, decoded.len - encoded.len, decoded.len, encoded.len,
+               b64i.len,
+               decoded.len - encoded.len,
+               decoded.len,
+               encoded.len,
                decoded.buf);
 
     FIO_ASSERT(!memcmp(b64i.buf, decoded.buf + encoded.len, b64i.len),
-               "Base 64 roundtrip failed:\n %s", decoded.buf);
+               "Base 64 roundtrip failed:\n %s",
+               decoded.buf);
     FIO_NAME(FIO_STR_NAME, destroy)(&b64message);
     FIO_NAME(FIO_STR_NAME, destroy)(&str);
   }
@@ -2618,25 +2650,32 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
       FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
-      decoded = FIO_NAME(FIO_STR_NAME, write_unescape)(
-          &str, FIO_NAME2(FIO_STR_NAME, ptr)(&tmps),
-          FIO_NAME(FIO_STR_NAME, len)(&tmps));
+      decoded = FIO_NAME(FIO_STR_NAME,
+                         write_unescape)(&str,
+                                         FIO_NAME2(FIO_STR_NAME, ptr)(&tmps),
+                                         FIO_NAME(FIO_STR_NAME, len)(&tmps));
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
       encoded.buf = decoded.buf;
     }
     FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, strlen(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
-               (int)encoded.len, encoded.buf, decoded.buf);
+               (int)encoded.len,
+               encoded.buf,
+               decoded.buf);
     FIO_ASSERT(encoded.len, "JSON encoding failed");
-    FIO_ASSERT(decoded.len > encoded.len, "JSON decoding failed:\n%s",
-               encoded.buf);
+    FIO_ASSERT(
+        decoded.len > encoded.len, "JSON decoding failed:\n%s", encoded.buf);
     FIO_ASSERT(ue.len == decoded.len - encoded.len,
                "JSON roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-               ue.len, decoded.len - encoded.len, decoded.len, encoded.len,
+               ue.len,
+               decoded.len - encoded.len,
+               decoded.len,
+               encoded.len,
                decoded.buf);
 
     FIO_ASSERT(!memcmp(ue.buf, decoded.buf + encoded.len, ue.len),
-               "JSON roundtrip failed:\n %s", decoded.buf);
+               "JSON roundtrip failed:\n %s",
+               decoded.buf);
     FIO_NAME(FIO_STR_NAME, destroy)(&unescaped);
     FIO_NAME(FIO_STR_NAME, destroy)(&str);
   }

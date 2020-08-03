@@ -484,7 +484,8 @@ SFUNC void fio___timer_perform(void *timer_, void *t_) {
 }
 
 /** Pushes due events from the timer queue to an event queue. */
-SFUNC size_t fio_timer_push2queue(fio_queue_s *queue, fio_timer_queue_s *timer,
+SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
+                                  fio_timer_queue_s *timer,
                                   uint64_t start_at) {
   size_t r = 0;
   if (!start_at)
@@ -493,8 +494,8 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue, fio_timer_queue_s *timer,
     return 0;
   fio___timer_event_s *t;
   while ((t = fio___timer_pop(&timer->next, start_at))) {
-    fio_queue_push(queue, .fn = fio___timer_perform, .udata1 = timer,
-                   .udata2 = t);
+    fio_queue_push(
+        queue, .fn = fio___timer_perform, .udata1 = timer, .udata2 = t);
     ++r;
   }
   fio_unlock(&timer->lock);
@@ -587,9 +588,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fio_queue_s *q = fio_queue_new();
 
   fprintf(stderr, "\t- size of queue object (fio_queue_s): %zu\n", sizeof(*q));
-  fprintf(stderr, "\t- size of queue ring buffer (per allocation): %zu\n",
+  fprintf(stderr,
+          "\t- size of queue ring buffer (per allocation): %zu\n",
           sizeof(q->mem));
-  fprintf(stderr, "\t- event slots per queue allocation: %zu\n",
+  fprintf(stderr,
+          "\t- event slots per queue allocation: %zu\n",
           (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
 
   const size_t max_threads = 12; // assumption / pure conjuncture...
@@ -605,20 +608,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(
         stderr,
         "\t- Queueless (direct call) counter: %lu cycles with i_count = %lu\n",
-        (unsigned long)(end - start), (unsigned long)i_count);
+        (unsigned long)(end - start),
+        (unsigned long)i_count);
   }
   size_t i_count_should_be = i_count;
   i_count = 0;
   start = clock();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
-    fio_queue_push(q, .fn = fio___queue_test_sample_task,
-                   .udata1 = (void *)&i_count);
+    fio_queue_push(
+        q, .fn = fio___queue_test_sample_task, .udata1 = (void *)&i_count);
     fio_queue_perform(q);
   }
   end = clock();
   if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(stderr, "\t- single task counter: %lu cycles with i_count = %lu\n",
-            (unsigned long)(end - start), (unsigned long)i_count);
+    fprintf(stderr,
+            "\t- single task counter: %lu cycles with i_count = %lu\n",
+            (unsigned long)(end - start),
+            (unsigned long)i_count);
   }
   FIO_ASSERT(i_count == i_count_should_be, "ERROR: queue count invalid\n");
 
@@ -633,8 +639,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     const size_t tasks = 1 << i;
     start = clock();
     for (size_t j = 0; j < tasks; ++j) {
-      fio_queue_push(q, fio___queue_test_sched_sample_task, (void *)&info,
-                     &i_count);
+      fio_queue_push(
+          q, fio___queue_test_sched_sample_task, (void *)&info, &i_count);
     }
     FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
     {
@@ -663,8 +669,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
               "- queue performed using %zu threads, %zu scheduling loops (%zu "
               "each):\n"
               "    %lu cycles with i_count = %lu\n",
-              ((i % max_threads) + 1), tasks, info.count,
-              (unsigned long)(end - start), (unsigned long)i_count);
+              ((i % max_threads) + 1),
+              tasks,
+              info.count,
+              (unsigned long)(end - start),
+              (unsigned long)i_count);
     } else {
       fprintf(stderr, ".");
     }
@@ -690,8 +699,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       fio_queue_task_s t = fio_queue_pop(&q2);
       FIO_ASSERT(
           t.fn && (size_t)t.udata1 == (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
-          "fio_queue_push_urgent pop ordering error [%zu] %zu != %zu (%p)", i,
-          (size_t)t.udata1, (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
+          "fio_queue_push_urgent pop ordering error [%zu] %zu != %zu (%p)",
+          i,
+          (size_t)t.udata1,
+          (FIO_QUEUE_TASKS_PER_ALLOC * 3) - i,
           (void *)(uintptr_t)t.fn);
     }
     FIO_ASSERT(fio_queue_pop(&q2).fn == NULL,
@@ -707,32 +718,41 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
     /* test failuers */
-    fio_timer_schedule(&tq, .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
+    fio_timer_schedule(&tq,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
     tester = 0;
-    fio_timer_schedule(NULL, .fn = fio___queue_test_timer_task,
+    fio_timer_schedule(NULL,
+                       .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
     tester = 0;
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+    fio_timer_schedule(&tq,
+                       .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 0,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 0,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
 
     /* test endless task */
     tester = 0;
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+    fio_timer_schedule(&tq,
+                       .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 1,
-                       .repetitions = -1, .start_at = fio_time_milli() - 10);
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 1,
+                       .repetitions = -1,
+                       .start_at = fio_time_milli() - 10);
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
     for (size_t i = 0; i < 10; ++i) {
@@ -740,7 +760,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
       fio_queue_perform(&q2);
       FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
-      FIO_ASSERT(tester == i + 1, "task should have been performed (%zu).",
+      FIO_ASSERT(tester == i + 1,
+                 "task should have been performed (%zu).",
                  (size_t)tester);
     }
     tester = 0;
@@ -750,15 +771,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     /* test single-use task */
     tester = 0;
     uint64_t milli_now = fio_time_milli();
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+    fio_timer_schedule(&tq,
+                       .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 100,
-                       .repetitions = 1, .start_at = milli_now - 10);
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
+                       .repetitions = 1,
+                       .start_at = milli_now - 10);
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
-    fio_timer_schedule(&tq, .fn = fio___queue_test_timer_task,
+    fio_timer_schedule(&tq,
+                       .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,
-                       .on_finish = fio___queue_test_sample_task, .every = 1,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 1,
                        // .repetitions = 1, // auto-value is 1
                        .start_at = milli_now - 10);
     FIO_ASSERT(tester == 0,
