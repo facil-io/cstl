@@ -1782,7 +1782,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
 FIOBJ and JSON testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC int FIO_NAME_TEST(fiobj_task)(FIOBJ o, void *e_) {
+FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(FIOBJ o, void *e_) {
   static size_t index = 0;
   int *expect = (int *)e_;
   if (expect[index] == -1) {
@@ -1797,7 +1797,7 @@ FIO_SFUNC int FIO_NAME_TEST(fiobj_task)(FIOBJ o, void *e_) {
   return 0;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(fiobj)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   FIOBJ o = FIOBJ_INVALID;
   if (!FIOBJ_MARK_MEMORY_ENABLED) {
     FIO_LOG_WARNING("FIOBJ defined without allocation counter. "
@@ -1888,7 +1888,8 @@ FIO_SFUNC void FIO_NAME_TEST(fiobj)(void) {
     }
     int expectation[] = {
         -1 /* array */, -1, 1, 2, 3, -1, 4, 5, 6, -1, 7, 8, 9, -1};
-    size_t c = fiobj_each2(o, FIO_NAME_TEST(fiobj_task), (void *)expectation);
+    size_t c =
+        fiobj_each2(o, FIO_NAME_TEST(stl, fiobj_task), (void *)expectation);
     FIO_ASSERT(c == FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o) +
                         9 + 1,
                "each2 repetition count error");

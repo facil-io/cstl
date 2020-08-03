@@ -540,7 +540,7 @@ FIO_SFUNC void fio___sock_test_after_events(void *udata) {
     *(size_t *)udata += 1;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(sock)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
   fprintf(stderr,
           "* Testing socket helpers (FIO_SOCK) - partial tests only!\n");
 #ifdef __cplusplus

@@ -3,11 +3,14 @@ Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
+********************************************************************************
+
+********************************************************************************
+NOTE: this file is auto-generated from: https://github.com/facil-io/cstl
 ***************************************************************************** */
 
-/* *****************************************************************************
+/** ****************************************************************************
 # facil.io's C STL - Simple (type) Template Library
-
 
 This file contains macros that create generic / common core types, such as:
 
@@ -411,8 +414,8 @@ Naming Macros
   FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
 
 /** Used internally to name test functions. */
-#define FIO_NAME_TEST(postfix)                                                    \
-  FIO_NAME(fio___stl_test_function, postfix)
+#define FIO_NAME_TEST(prefix, postfix)                                         \
+  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
@@ -4984,12 +4987,12 @@ Memory Allocation - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 #ifdef FIO_MALLOC_FORCE_SYSTEM
-FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   fprintf(stderr, "* Custom memory allocator bypassed.\n");
 }
 
 #else /* FIO_MALLOC_FORCE_SYSTEM */
-FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
   const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
                               << FIO_MEMORY_BLOCK_SIZE_LOG;
@@ -5534,7 +5537,7 @@ Time - test
 #define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
 #define FIO___GMTIME_TEST_RANGE (4093L * 365) /* test ~4 millenium  */
 
-FIO_SFUNC void FIO_NAME_TEST(time)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
   struct tm tm1, tm2;
   const time_t now = fio_time_real().tv_sec;
@@ -6226,7 +6229,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
   return (unused2 ? -1 : 0);
 }
 
-FIO_SFUNC void FIO_NAME_TEST(queue)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
   fio_queue_s *q = fio_queue_new();
 
@@ -7096,7 +7099,7 @@ SFUNC void fio_cli_set(char const *name, char const *value) {
 CLI - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(cli)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   const char *argv[] = {
       "appname", "-i11", "-i2=2", "-i3", "3", "-t", "-s", "test", "unnamed",
   };
@@ -7683,7 +7686,7 @@ FIO_SFUNC void fio___sock_test_after_events(void *udata) {
     *(size_t *)udata += 1;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(sock)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
   fprintf(stderr,
           "* Testing socket helpers (FIO_SOCK) - partial tests only!\n");
 #ifdef __cplusplus
@@ -15196,7 +15199,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
 FIOBJ and JSON testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC int FIO_NAME_TEST(fiobj_task)(FIOBJ o, void *e_) {
+FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(FIOBJ o, void *e_) {
   static size_t index = 0;
   int *expect = (int *)e_;
   if (expect[index] == -1) {
@@ -15211,7 +15214,7 @@ FIO_SFUNC int FIO_NAME_TEST(fiobj_task)(FIOBJ o, void *e_) {
   return 0;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(fiobj)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   FIOBJ o = FIOBJ_INVALID;
   if (!FIOBJ_MARK_MEMORY_ENABLED) {
     FIO_LOG_WARNING("FIOBJ defined without allocation counter. "
@@ -15302,7 +15305,8 @@ FIO_SFUNC void FIO_NAME_TEST(fiobj)(void) {
     }
     int expectation[] = {
         -1 /* array */, -1, 1, 2, 3, -1, 4, 5, 6, -1, 7, 8, 9, -1};
-    size_t c = fiobj_each2(o, FIO_NAME_TEST(fiobj_task), (void *)expectation);
+    size_t c =
+        fiobj_each2(o, FIO_NAME_TEST(stl, fiobj_task), (void *)expectation);
     FIO_ASSERT(c == FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o) +
                         9 + 1,
                "each2 repetition count error");
@@ -17755,17 +17759,17 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___str();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(time)();
+  FIO_NAME_TEST(stl, time)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(queue)();
+  FIO_NAME_TEST(stl, queue)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(cli)();
+  FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(mem)();
+  FIO_NAME_TEST(stl, mem)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(sock)();
+  FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(fiobj)();
+  FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___risky();
   fprintf(stderr, "===============\n");

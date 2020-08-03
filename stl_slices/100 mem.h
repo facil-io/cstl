@@ -999,12 +999,12 @@ Memory Allocation - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 #ifdef FIO_MALLOC_FORCE_SYSTEM
-FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   fprintf(stderr, "* Custom memory allocator bypassed.\n");
 }
 
 #else /* FIO_MALLOC_FORCE_SYSTEM */
-FIO_SFUNC void FIO_NAME_TEST(mem)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
   const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
                               << FIO_MEMORY_BLOCK_SIZE_LOG;

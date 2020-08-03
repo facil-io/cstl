@@ -3,11 +3,14 @@ Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
+********************************************************************************
+
+********************************************************************************
+NOTE: this file is auto-generated from: https://github.com/facil-io/cstl
 ***************************************************************************** */
 
-/* *****************************************************************************
+/** ****************************************************************************
 # facil.io's C STL - Simple (type) Template Library
-
 
 This file contains macros that create generic / common core types, such as:
 
@@ -411,8 +414,8 @@ Naming Macros
   FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
 
 /** Used internally to name test functions. */
-#define FIO_NAME_TEST(postfix)                                                    \
-  FIO_NAME(fio___stl_test_function, postfix)
+#define FIO_NAME_TEST(prefix, postfix)                                         \
+  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros

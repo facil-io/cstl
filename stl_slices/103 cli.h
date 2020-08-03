@@ -658,7 +658,7 @@ SFUNC void fio_cli_set(char const *name, char const *value) {
 CLI - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(cli)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   const char *argv[] = {
       "appname", "-i11", "-i2=2", "-i3", "3", "-t", "-s", "test", "unnamed",
   };

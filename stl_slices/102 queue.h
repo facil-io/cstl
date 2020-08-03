@@ -582,7 +582,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
   return (unused2 ? -1 : 0);
 }
 
-FIO_SFUNC void FIO_NAME_TEST(queue)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
   fio_queue_s *q = fio_queue_new();
 

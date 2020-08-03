@@ -69,7 +69,7 @@ TEST_ROOT=tests
 #############################################################################
 
 # The library details for CMake incorporation. Can be safely removed.
-CMAKE_FILENAME=CMakeLists.txt
+CMAKE_FILENAME=
 # Project name to be stated in the CMakeFile
 CMAKE_PROJECT=facil.io
 # Space delimited list of required packages
