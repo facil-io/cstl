@@ -245,17 +245,17 @@ LIB_CONCAT_SOURCES=$(wildcard $(LIB_CONCAT_FOLDER)/*.c)
 LIB_CONCAT_DOCS=$(wildcard $(LIB_CONCAT_FOLDER)/*.md)
 ifneq ($(LIB_CONCAT_HEADERS), $(EMPTY))
   $(info * Building single-file header: $(LIB_CONCAT_TARGET).h)
-  $(shell rm $(LIB_CONCAT_TARGET).h)
+  $(shell rm $(LIB_CONCAT_TARGET).h 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.h >> $(LIB_CONCAT_TARGET).h)
 endif
 ifneq ($(LIB_CONCAT_SOURCES), $(EMPTY))
   $(info * Building single-file source: $(LIB_CONCAT_TARGET).c)
-  $(shell rm $(LIB_CONCAT_TARGET).c)
+  $(shell rm $(LIB_CONCAT_TARGET).c 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.c >> $(LIB_CONCAT_TARGET).c)
 endif
 ifneq ($(LIB_CONCAT_DOCS), $(EMPTY))
   $(info * Building documentation: $(LIB_CONCAT_TARGET).md)
-  $(shell rm $(LIB_CONCAT_TARGET).md)
+  $(shell rm $(LIB_CONCAT_TARGET).md 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.md >> $(LIB_CONCAT_TARGET).md)
 endif
 
