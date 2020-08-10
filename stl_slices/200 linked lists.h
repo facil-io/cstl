@@ -106,16 +106,17 @@ IFUNC int FIO_NAME_BL(FIO_LIST_NAME, empty)(const FIO_LIST_HEAD *head);
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, remove)(FIO_LIST_TYPE_PTR node);
 
 /** Pushes an existing node to the end of the list. Returns node. */
-IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, push)(FIO_LIST_HEAD *head,
-                                                      FIO_LIST_TYPE_PTR node);
+IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
+                                 push)(FIO_LIST_HEAD *restrict head,
+                                       FIO_LIST_TYPE_PTR restrict node);
 
 /** Pops a node from the end of the list. Returns NULL if list is empty. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, pop)(FIO_LIST_HEAD *head);
 
 /** Adds an existing node to the beginning of the list. Returns node. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
-                                 unshift)(FIO_LIST_HEAD *head,
-                                          FIO_LIST_TYPE_PTR node);
+                                 unshift)(FIO_LIST_HEAD *restrict head,
+                                          FIO_LIST_TYPE_PTR restrict node);
 
 /** Removed a node from the start of the list. Returns NULL if list is empty. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, shift)(FIO_LIST_HEAD *head);
@@ -169,12 +170,13 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
 }
 
 /** Pushes an existing node to the end of the list. Returns node or NULL. */
-IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, push)(FIO_LIST_HEAD *head,
-                                                      FIO_LIST_TYPE_PTR node_) {
+IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
+                                 push)(FIO_LIST_HEAD *restrict head,
+                                       FIO_LIST_TYPE_PTR restrict node_) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
   FIO_PTR_TAG_VALID_OR_RETURN(node_, (FIO_LIST_TYPE_PTR)NULL);
   head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
-  FIO_LIST_TYPE *node = (FIO_LIST_TYPE *)(FIO_PTR_UNTAG(node_));
+  FIO_LIST_TYPE *restrict node = (FIO_LIST_TYPE *)(FIO_PTR_UNTAG(node_));
   node->FIO_LIST_NODE_NAME.prev = head->prev;
   node->FIO_LIST_NODE_NAME.next = head;
   head->prev->next = &node->FIO_LIST_NODE_NAME;
@@ -192,8 +194,8 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, pop)(FIO_LIST_HEAD *head) {
 
 /** Adds an existing node to the beginning of the list. Returns node or NULL. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
-                                 unshift)(FIO_LIST_HEAD *head,
-                                          FIO_LIST_TYPE_PTR node) {
+                                 unshift)(FIO_LIST_HEAD *restrict head,
+                                          FIO_LIST_TYPE_PTR restrict node) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
   FIO_PTR_TAG_VALID_OR_RETURN(node, (FIO_LIST_TYPE_PTR)NULL);
   head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
