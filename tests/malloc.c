@@ -17,6 +17,7 @@
 #define TEST_CYCLES_START 128
 #define TEST_CYCLES_END 256
 #define TEST_CYCLES_REPEAT 3
+#define TEST_WARMUP 1
 
 /**
  * facil.io doesn't keep metadata in memory slices, panelizing realloc.
@@ -68,25 +69,28 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
     clock_calloc /= repetitions;
     fio_optimized /= repetitions;
     fio_optimized2 /= repetitions;
-    fprintf(stderr, "* Avrg. micro-seconds per malloc: %zu\n", clock_alloc);
-    fprintf(stderr, "* Avrg. micro-seconds per calloc: %zu\n", clock_calloc);
-    fprintf(stderr, "* Avrg. micro-seconds per realloc: %zu\n", clock_realloc);
-    fprintf(
-        stderr, "* Avrg. micro-seconds per free (realloc): %zu\n", clock_free);
-    fprintf(stderr,
-            "* Avrg. micro-seconds per free (re-cycle): %zu\n",
-            clock_free2);
-    fprintf(stderr,
-            "* Avrg. micro-seconds per a facil.io use-case round"
-            " (medium-short life): %zu\n",
-            fio_optimized);
-    fprintf(stderr,
-            "* Avrg. micro-seconds per a zero-life span"
-            " (malloc-free): %zu\n",
-            fio_optimized2);
-    fprintf(stderr, "* Failed allocations: %zu\n", errors);
-    fprintf(stderr, "Total CPU Time (micros): %zu\n", total);
-
+    if (!calloc_func) {
+      fprintf(stderr, "* Avrg. micro-seconds per malloc: %zu\n", clock_alloc);
+      fprintf(stderr, "* Avrg. micro-seconds per calloc: %zu\n", clock_calloc);
+      fprintf(
+          stderr, "* Avrg. micro-seconds per realloc: %zu\n", clock_realloc);
+      fprintf(stderr,
+              "* Avrg. micro-seconds per free (realloc): %zu\n",
+              clock_free);
+      fprintf(stderr,
+              "* Avrg. micro-seconds per free (re-cycle): %zu\n",
+              clock_free2);
+      fprintf(stderr,
+              "* Avrg. micro-seconds per a facil.io use-case round"
+              " (medium-short life): %zu\n",
+              fio_optimized);
+      fprintf(stderr,
+              "* Avrg. micro-seconds per a zero-life span"
+              " (malloc-free): %zu\n",
+              fio_optimized2);
+      fprintf(stderr, "* Failed allocations: %zu\n", errors);
+      fprintf(stderr, "Total CPU Time (micros): %zu\n", total);
+    }
     clock_alloc = 0;
     clock_realloc = 0;
     clock_free = 0;
@@ -251,21 +255,6 @@ int main(int argc, char const *argv[]) {
           "\n      Test allocation ranges: %zu - %zu bytes.\n",
           ((size_t)(TEST_CYCLES_START) << 4),
           ((size_t)(TEST_CYCLES_END) << 5));
-  fprintf(stderr, "========================================\n");
-
-  /* test system allocations */
-  fprintf(stderr,
-          "Performance Testing system memory allocator with %zu threads "
-          "(please wait):\n\n",
-          thread_count);
-  for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) == 0,
-               "Couldn't spawn thread.");
-  }
-  for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
-  }
-  test_mem_functions(NULL, NULL, NULL, NULL);
 
   /* test facil.io allocations */
   fprintf(stderr, "========================================\n");
@@ -273,8 +262,31 @@ int main(int argc, char const *argv[]) {
           "Performance Testing facil.io memory allocator with %zu threads "
           "(please wait):\n\n",
           thread_count);
+#if defined(TEST_WARMUP) && TEST_WARMUP
+  test_facil_malloc(NULL);                      /* warmup? */
+  test_mem_functions(NULL, calloc, NULL, NULL); /* warmup? */
+#endif
   for (size_t i = 0; i < thread_count; ++i) {
     FIO_ASSERT(pthread_create(threads + i, NULL, test_facil_malloc, NULL) == 0,
+               "Couldn't spawn thread.");
+  }
+  for (size_t i = 0; i < thread_count; ++i) {
+    FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+  }
+  test_mem_functions(NULL, NULL, NULL, NULL);
+
+  /* test system allocations */
+  fprintf(stderr, "========================================\n");
+  fprintf(stderr,
+          "Performance Testing system memory allocator with %zu threads "
+          "(please wait):\n\n",
+          thread_count);
+#if defined(TEST_WARMUP) && TEST_WARMUP
+  test_system_malloc(NULL);                     /* warmup? */
+  test_mem_functions(NULL, calloc, NULL, NULL); /* warmup? */
+#endif
+  for (size_t i = 0; i < thread_count; ++i) {
+    FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) == 0,
                "Couldn't spawn thread.");
   }
   for (size_t i = 0; i < thread_count; ++i) {
