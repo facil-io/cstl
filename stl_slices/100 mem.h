@@ -5,8 +5,10 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_ATOMIC                  /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#define FIO_MALLOC                  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -27,8 +29,76 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
+The allocator has multiple allocation "arenas" that elevate thread contention.
 
+Arenas are "sticky", which means that each thread will first try to access it's
+previoiusly accessed arena. Only if the previously accessed arena is busy will
+the thread attempt to access a different arena.
 
+Each Arena has a "block" of memory which is used for memory allocation.
+
+Once the user frees all of a block's memory, the block will be placed in an
+"available" list until the memory can be returned to the system (or cached).
+
+Allocations
+==============
+
+Memory "chunks" are allocated from the system (by default through `mmap`).
+
+Chunks are divided into "blocks" that are used for actual memory allocation.
+
+Both chunks and blocks are always allocated on a specific memory boundary where
+a specific amount of least significant bits are always zero.
+
+Allocations are performed by "slicing" the block and passing the pointer to the
+user. No metadata is attached to the allocated "slices" since both the block and
+the chunk (where metadata is stored) can be easily inferred using a bit mask.
+
+Once a block was fully utiliized, the allocator will no longer keep a record of
+that block until the user frees all it's memory.
+
+It should be noted that the first block header and the chunk header occupy the
+same 16 bytes (interleaved).
+
+Deallocations
+==============
+
+Deallocations are performed by atomically marking a deallocation in the block.
+
+Once all the block slices were deallocated, and assuming the block isn't the
+active allocation block, that block is marked as free and placed in an
+"available" list.
+
+If all the blocks in a chunk were marked as available, all it's blocks are
+removed from the list and the chunk will be returned to the system (or cached).
+
+Cons
+==============
+
+By avoiding a detailed "free list", there is no way to re-use parts of a "dirty"
+block. This increases the price of fragmentation may be the whole block that
+contains withheld memory.
+
+This approach shouldn't be used for objects with mixed lifetime, as it will
+result in fragmentation where the cost of a single allocation (i.e., a
+persistent 16 byte allocation) could be a whole block that can't be utilized.
+
+Pros
+==============
+
+Consecative allocations in the same thread are likely to be from the same block,
+resulting in improved memory locality.
+
+The use of multiple arenas for allocation minimizes thread contention during
+allocation.
+
+The use of atomic operations for deallocations minimizes thread contention until
+a whole block is placed in the available list or a chunk is ready to be freed.
+
+The allocator's overrhead for even the smallest of allocations is fairly low, in
+addition to a set memory consumption (~1 page for core data + 16 bytes for
+`fio_malloc(0)` + 8 bytes per thread), only 16 bytes per block are
+used by the allocator (%0.006), the rest is available for the application.
 
 ***************************************************************************** */
 #if defined(FIO_MALLOC) && !defined(H___FIO_MALLOC_H)
@@ -101,33 +171,23 @@ SFUNC void *FIO_ALIGN_NEW fio_mmap(size_t size);
  */
 SFUNC void fio_malloc_after_fork(void);
 
-#ifndef FIO_MEMORY_BLOCK_SIZE_LOG
+/* *****************************************************************************
+Memory Allocation - configuration macros
+
+NOTE: most configuration values should be a power of 2 or a logarithmic value.
+***************************************************************************** */
+
+#ifndef FIO_MEMORY_ARENA_COUNT_MAX
 /**
- * The logarithmic value for a memory block, 15 == 32Kb, 16 == 64Kb, etc'
- *
- * Breaks at FIO_MEMORY_BLOCK_SIZE_LOG >= 20 || FIO_MEMORY_BLOCK_SIZE_LOG < 10
- *
- * By default, a block of memory is 256Kb silce from an 8Mb allocation.
- */
-#define FIO_MEMORY_BLOCK_SIZE_LOG (18)
-#endif
-
-/* The number of blocks pre-allocated each system call, 8Mb by default */
-#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION
-#define FIO_MEMORY_BLOCKS_PER_ALLOCATION                                       \
-  ((1 << 23) >> FIO_MEMORY_BLOCK_SIZE_LOG)
-#endif
-
-/*
  * The maximum number of memory arenas to initialize.
  *
- * When 0 - maximum detected cores.
+ * When 0 - maximum detected cores X 2.
  */
-#ifndef FIO_MEMORY_ARENA_COUNT_MAX
 #define FIO_MEMORY_ARENA_COUNT_MAX 64
 #endif
 
-/*
+#ifndef FIO_MEMORY_ARENA_COUNT_DEFAULT
+/**
  * The default number of memory arenas to initialize when CPU core detection
  * fails.
  *
@@ -135,24 +195,67 @@ SFUNC void fio_malloc_after_fork(void);
  * the number of CPU cores. This value will only be used if core detection isn't
  * available or fails.
  */
-#ifndef FIO_MEMORY_ARENA_COUNT_DEFAULT
 #define FIO_MEMORY_ARENA_COUNT_DEFAULT 5
 #endif
 
-#undef FIO_MEMORY_BLOCK_SIZE
-/** The resulting memory block size, depends on `FIO_MEMORY_BLOCK_SIZE_LOG` */
-#define FIO_MEMORY_BLOCK_SIZE ((uintptr_t)1 << FIO_MEMORY_BLOCK_SIZE_LOG)
+#ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
+/**
+ * The logarithmic size of a single allocatiion "chunk" (16 blocks).
+ *
+ * Limited to >=17 and <=24.
+ *
+ * By default 22, whch is a ~4Mb allocation per system call.
+ *
+ * A block is always 1/16 of this value. A default block size is ~256Kb.
+ */
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 23
+#endif
 
+#ifndef FIO_MEMORY_BLOCK_SIZE_LOG
+/** The each system allocation is divided into blocks, by default: 256Kb */
+#define FIO_MEMORY_BLOCK_SIZE_LOG 18
+#endif
+
+#ifndef FIO_MEMORY_BLOCK_ALLOC_LIMIT
 /**
  * The maximum allocation size, after which `mmap` will be called instead of the
  * facil.io allocator.
  *
  * Defaults to 75% of the block (192Kb), after which `mmap` is used instead.
  */
-#ifndef FIO_MEMORY_BLOCK_ALLOC_LIMIT
 #define FIO_MEMORY_BLOCK_ALLOC_LIMIT                                           \
-  ((uintptr_t)3 << (FIO_MEMORY_BLOCK_SIZE_LOG - 2))
+  ((FIO_MEMORY_BLOCK_SIZE >> 1) + (FIO_MEMORY_BLOCK_SIZE >> 2))
 #endif
+
+#ifndef FIO_MEMORY_CHUNK_CACHE
+/**
+ * The number of memory "chunks" to cache even if they are not in use.
+ */
+#define FIO_MEMORY_CHUNK_CACHE 8
+#endif
+
+#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
+/** Uses a pthread mutex instead of a spinlock. */
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#endif
+
+/* *****************************************************************************
+Memory Allocation - configuration value - results and constants
+***************************************************************************** */
+
+/* Helper macro, don't change this */
+#undef FIO_MEMORY_BLOCKS_PER_ALLOCATION
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION                                       \
+  (1UL << (FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG - FIO_MEMORY_BLOCK_SIZE_LOG))
+
+/* Helper macro, don't change this */
+#undef FIO_MEMORY_SYS_ALLOCATION_SIZE
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE                                         \
+  (1UL << FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG)
+
+#undef FIO_MEMORY_BLOCK_SIZE
+/** The resulting memory block size = chunk size / 16, defaults to 256Kb */
+#define FIO_MEMORY_BLOCK_SIZE (1UL << FIO_MEMORY_BLOCK_SIZE_LOG)
 
 /* *****************************************************************************
 Memory Allocation - redefine default allocation macros
@@ -303,6 +406,16 @@ fio___memcpy_16byte(void *dest_, const void *src_, size_t units) {
 }
 
 /* *****************************************************************************
+Override the system's malloc functions if required
+***************************************************************************** */
+#ifdef FIO_MALLOC_OVERRIDE_SYSTEM
+void *malloc(size_t size) { return fio_malloc(size); }
+void *calloc(size_t size, size_t count) { return fio_calloc(size, count); }
+void free(void *ptr) { fio_free(ptr); }
+void *realloc(void *ptr, size_t new_size) { return fio_realloc(ptr, new_size); }
+#endif /* FIO_MALLOC_OVERRIDE_SYSTEM */
+
+/* *****************************************************************************
 Big memory allocation macros and helpers (page allocation / mmap)
 ***************************************************************************** */
 #ifndef FIO_MEM_PAGE_ALLOC
@@ -414,7 +527,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
     }
     return result;
   }
-  if (new_len + 4096 < prev_len) /* more than a single dangling page */
+  if (prev_len != new_len) /* remove dangling pages */
     munmap((void *)((uintptr_t)mem + new_len), prev_len - new_len);
   return mem;
 }
@@ -463,100 +576,249 @@ FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
 #endif /* FIO_MEM_PAGE_ALLOC */
 
 /* *****************************************************************************
-Allocator default
+Allocator debugging helpers
 ***************************************************************************** */
 
-/* don't change these */
-#undef FIO_MEMORY_BLOCK_SLICES
-#undef FIO_MEMORY_BLOCK_HEADER_SIZE
-#undef FIO_MEMORY_BLOCK_START_POS
-#undef FIO_MEMORY_MAX_SLICES_PER_BLOCK
-#undef FIO_MEMORY_BLOCK_MASK
+#if DEBUG
+/* maximum block allocation count. */
+static size_t fio___mem_chunk_count_max;
+/* current block allocation count. */
+static size_t fio___mem_chunk_count;
 
-#define FIO_MEMORY_BLOCK_SLICES (FIO_MEMORY_BLOCK_SIZE >> 4) /* 16B slices */
+#define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)                                         \
+  do {                                                                         \
+    FIO_LOG_DEBUG2("MEMORY SYS-ALLOC - retrieved %p from system", ptr);        \
+    fio_atomic_add(&fio___mem_chunk_count, 1);                                 \
+    if (fio___mem_chunk_count > fio___mem_chunk_count_max)                     \
+      fio___mem_chunk_count_max = fio___mem_chunk_count;                       \
+  } while (0)
+#define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
+  do {                                                                         \
+    FIO_LOG_DEBUG2("MEMORY SYS-DEALLOC- returned %p to system", ptr);          \
+    fio_atomic_sub_fetch(&fio___mem_chunk_count, 1);                           \
+  } while (0)
+#define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
+  do {                                                                         \
+    FIO_LOG_DEBUG2("MEMORY CACHE-DEALLOC placed %p in cache", ptr);            \
+  } while (0);
+#define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)                                       \
+  do {                                                                         \
+    FIO_LOG_DEBUG2("MEMORY CACHE-ALLOC retrieved %p from cache", ptr);         \
+  } while (0);
+#define FIO_MEMORY_PRINT_STATS()                                               \
+  FIO_LOG_INFO(                                                                \
+      "(fio) Total memory chunks allocated before cleanup %zu\n"               \
+      "       Maximum memory blocks allocated at a single time %zu\n",         \
+      fio___mem_chunk_count,                                                   \
+      fio___mem_chunk_count_max)
+#define FIO_MEMORY_PRINT_STATS_END()                                           \
+  do {                                                                         \
+    if (fio___mem_chunk_count) {                                               \
+      FIO_LOG_ERROR("(fio) Total memory chunks allocated "                     \
+                    "after cleanup (POSSIBLE LEAKS): %zu\n",                   \
+                    fio___mem_chunk_count);                                    \
+    } else {                                                                   \
+      FIO_LOG_INFO("(fio) Total memory chunks allocated after cleanup: %zu\n", \
+                   fio___mem_chunk_count);                                     \
+    }                                                                          \
+  } while (0)
+#else /* DEBUG */
+#define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)
+#define FIO_MEMORY_ON_CHUNK_FREE(ptr)
+#define FIO_MEMORY_ON_CHUNK_CACHE(ptr)
+#define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)
+#define FIO_MEMORY_PRINT_STATS()
+#define FIO_MEMORY_PRINT_STATS_END()
+#endif /* DEBUG */
 
-#define FIO_MEMORY_BLOCK_MASK (FIO_MEMORY_BLOCK_SIZE - 1) /* 0b0...1... */
+/* *****************************************************************************
+Lock type choice
+***************************************************************************** */
+#if defined(FIO_MEMORY_USE_PTHREAD_MUTEX) && FIO_MEMORY_USE_PTHREAD_MUTEX
+#include "pthread.h"
+#define FIO_MEMORY_LOCK_TYPE pthread_mutex_t
+#define FIO_MEMORY_LOCK_TYPE_INIT (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER
+#define FIO_MEMORY_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
+#define FIO_MEMORY_LOCK(lock) pthread_mutex_lock(&(lock))
+#define FIO_MEMORY_UNLOCK(lock) pthread_mutex_unlock(&(lock))
+#else
+#define FIO_MEMORY_LOCK_TYPE fio_lock_i
+#define FIO_MEMORY_LOCK_TYPE_INIT FIO_LOCK_INIT
+#define FIO_MEMORY_TRYLOCK(lock) fio_trylock(&(lock))
+#define FIO_MEMORY_LOCK(lock) fio_lock(&(lock))
+#define FIO_MEMORY_UNLOCK(lock) fio_unlock(&(lock))
+#endif
+/* *****************************************************************************
+Memory Allocator Types
+***************************************************************************** */
 
-/* must be divisable by 16 bytes, bigger than min(sizeof(FIO_MEM_BLOCK), 16) */
-#define FIO_MEMORY_BLOCK_HEADER_SIZE                                           \
-  ((sizeof(fio___mem_block_s) + 15UL) & (~15UL))
+#ifndef FIO_LOCK_INIT
+#define FIO_ATOMIC
+#include __FILE__
+#endif
 
-/* allocation counter position (start) */
-#define FIO_MEMORY_BLOCK_START_POS (FIO_MEMORY_BLOCK_HEADER_SIZE >> 4)
-
-#define FIO_MEMORY_MAX_SLICES_PER_BLOCK                                        \
-  (FIO_MEMORY_BLOCK_SLICES - FIO_MEMORY_BLOCK_START_POS)
-
-/* The basic block header. Starts a 32Kib memory block */
 typedef struct fio___mem_block_s fio___mem_block_s;
-/* A memory caching "arena"  */
+typedef struct fio___mem_chunk_s fio___mem_chunk_s;
 typedef struct fio___mem_arena_s fio___mem_arena_s;
 
-/* *****************************************************************************
-Memory state machine
-***************************************************************************** */
+/* must consume exactly 16 bytes for allocation alignment - overlays chunk */
+struct fio___mem_block_s {
+  uint32_t marker;
+  uint32_t ref;
+  uint32_t pos;
+  uint32_t reserved;
+};
 
+/* must consume exactly 16 bytes for allocation alignment - overlays block */
+struct fio___mem_chunk_s {
+  /** if marker is non-zero, it contains the number of pages allocated */
+  int32_t marker;
+  int32_t reserved[2];
+  uint32_t ref;
+};
+
+/* must consume exactly 16 bytes for allocation alignment - overlays block */
 struct fio___mem_arena_s {
   fio___mem_block_s *block;
-  fio_lock_i lock;
+  FIO_MEMORY_LOCK_TYPE lock;
 };
-
-typedef struct {
-  FIO_LIST_HEAD available; /* free list for memory blocks */
-  // intptr_t count;          /* free list counter */
-  size_t cores;    /* the number of detected CPU cores*/
-  fio_lock_i lock; /* a global lock */
-  uint8_t forked;  /* a forked collection indicator. */
-  fio___mem_arena_s arenas[];
-} fio___mem_state_s;
-/* The memory allocators persistent state */
-static fio___mem_state_s *fio___mem_state = (fio___mem_state_s *)NULL;
 
 /* *****************************************************************************
-Slices and Blocks - types
+Helpers for system allocation / deallocation of chunks.
 ***************************************************************************** */
 
-struct fio___mem_block_s {
-  uint64_t reserved;          /* should always be zero, or page sized */
-  uint16_t root;              /* REQUIRED, root == 0 => is root to self */
-  volatile uint16_t root_ref; /* root reference memory padding */
-  volatile uint16_t ref;      /* reference count (per memory page) */
-  uint16_t pos;               /* position into the block */
-};
+FIO_IFUNC void fio___mem_chunk_dealloc(fio___mem_chunk_s *c) {
+  FIO_MEM_PAGE_FREE(
+      c, (1UL << (FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG - FIO_MEM_PAGE_SIZE_LOG)));
+  FIO_MEMORY_ON_CHUNK_FREE(c);
+}
 
-typedef struct fio___mem_block_node_s fio___mem_block_node_s;
-struct fio___mem_block_node_s {
-  fio___mem_block_s
-      dont_touch;     /* prevent block internal data from being corrupted */
-  FIO_LIST_NODE node; /* next block */
-};
-
-#define FIO_LIST_NAME fio___mem_available_blocks
-#define FIO_LIST_TYPE fio___mem_block_node_s
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif /* FIO_STL_KEEP__ */
-#include __FILE__
-#if FIO_STL_KEEP__ == 1
-#undef FIO_STL_KEEP__
-#endif /* FIO_STL_KEEP__ */
-/* Address returned when allocating 0 bytes ( fio_malloc(0) ) */
-static long double fio___mem_on_malloc_zero;
-
-/* retrieve root block */
-FIO_SFUNC fio___mem_block_s *fio___mem_block_root(fio___mem_block_s *b) {
-  return FIO_PTR_MATH_SUB(
-      fio___mem_block_s, b, b->root * FIO_MEMORY_BLOCK_SIZE);
+FIO_IFUNC fio___mem_chunk_s *fio___mem_chunk_alloc(void) {
+  fio___mem_chunk_s *c = (fio___mem_chunk_s *)FIO_MEM_PAGE_ALLOC(
+      (1UL << (FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG - FIO_MEM_PAGE_SIZE_LOG)),
+      FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  FIO_MEMORY_ON_CHUNK_ALLOC(c);
+  return c;
 }
 
 /* *****************************************************************************
-Arena allocation / deallocation
+Helpers for pointer mathematics
 ***************************************************************************** */
 
-/* see destructor at: fio___mem_destroy */
+FIO_IFUNC fio___mem_chunk_s *fio___mem_ptr2chunk(void *p) {
+  /* use a bit mask to find the original chunk, adjust for header offset */
+  fio___mem_chunk_s *c = FIO_PTR_MATH_RMASK(
+      fio___mem_chunk_s, ((uintptr_t)p), FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  return c;
+}
+
+FIO_IFUNC fio___mem_block_s *fio___mem_ptr2block(void *p) {
+  /* use a bit mask to find the offset of the block
+   *  + adjust for the 16 byte chunk header offset
+   */
+  fio___mem_block_s *b = FIO_PTR_MATH_RMASK(
+      fio___mem_block_s, ((uintptr_t)p), (FIO_MEMORY_BLOCK_SIZE_LOG));
+  return b;
+}
+
+/* *****************************************************************************
+Dirty list push / pop / remove
+***************************************************************************** */
+
+FIO_IFUNC void fio___mem_list___push_node(fio___list_node_s *restrict head,
+                                          fio___list_node_s *restrict n) {
+  // FIO_LOG_DEBUG("available block list pushing node %p", (void *)n);
+  if (!n || n->next || n->prev)
+    return; /* if non-zero, the  node is in use */
+  n->prev = head->prev;
+  n->next = head;
+  head->prev->next = n;
+  head->prev = n;
+}
+FIO_IFUNC void fio___mem_list___remove_node(fio___list_node_s *n) {
+  // FIO_LOG_DEBUG("available block list popping node %p", (void *)n);
+  if (!n || !n->next || !n->prev) {
+    FIO_LOG_FATAL("refused to remove node at %p where next = %p prev = %p",
+                  (void *)n,
+                  (void *)(n ? n->next : n),
+                  (void *)(n ? n->prev : n));
+    abort();
+    return; /* node isn't in list */
+  }
+  n->prev->next = n->next;
+  n->next->prev = n->prev;
+  n->next = n->prev = NULL;
+}
+
+FIO_IFUNC fio___list_node_s *fio___mem_block2node(fio___mem_block_s *b) {
+  return (fio___list_node_s *)(b + 1);
+}
+
+FIO_IFUNC fio___mem_block_s *fio___mem_node2block(fio___list_node_s *n) {
+  return ((fio___mem_block_s *)n) - 1;
+}
+
+FIO_IFUNC fio___mem_block_s *
+fio___mem_list___pop_block(fio___list_node_s *head) {
+  fio___mem_block_s *b = NULL;
+  if (!head || head->next == head->prev)
+    return b;
+  fio___list_node_s *n = head->prev;
+  fio___mem_list___remove_node(n);
+  b = fio___mem_node2block(n);
+  return b;
+}
+
+/** removes a chunk from the dirty list, returns -1 on failure. */
+FIO_IFUNC void fio___mem_list___remove(fio___list_node_s *head,
+                                       fio___mem_chunk_s *c) {
+  if (!c || !head)
+    return;
+  if (head->next == head)
+    return;
+  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
+    fio___list_node_s *n = fio___mem_block2node(
+        (fio___mem_block_s *)((uintptr_t)c + (FIO_MEMORY_BLOCK_SIZE * i)));
+    fio___mem_list___remove_node(n);
+  }
+}
+
+/* *****************************************************************************
+Memory Allocator State Containers
+***************************************************************************** */
+
+struct fio___mem_state_s {
+  size_t cores;
+#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
+  struct {
+    fio___mem_chunk_s *store[FIO_MEMORY_CHUNK_CACHE];
+    size_t pos;
+  } cache;
+#endif
+  fio___list_node_s available;
+  FIO_MEMORY_LOCK_TYPE
+  lock; /* locks the cache and the available block linked list. */
+  fio___mem_arena_s a[];
+} *fio___mem_state = NULL;
+
+#undef FIO_MEMORY___STATE_SIZE
+#define FIO_MEMORY___STATE_SIZE(cores)                                         \
+  FIO_MEM_BYTES2PAGES(                                                         \
+      (sizeof(*fio___mem_state) + (sizeof(fio___mem_arena_s *) * cores)))
+
+/* *****************************************************************************
+Core allocator state Construction
+***************************************************************************** */
+
 FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
   if (fio___mem_state)
     return;
+
+  FIO_ASSERT_DEBUG(sizeof(fio___mem_block_s) == 16,
+                   "fio___mem_block_s size error");
+  FIO_ASSERT_DEBUG(sizeof(fio___mem_chunk_s) == 16,
+                   "fio___mem_chunk_s size error");
+
 #ifdef _SC_NPROCESSORS_ONLN
   size_t cores = sysconf(_SC_NPROCESSORS_ONLN);
   if ((intptr_t)cores <= 0)
@@ -570,263 +832,222 @@ FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
 #if FIO_MEMORY_ARENA_COUNT_MAX
   if (cores >= FIO_MEMORY_ARENA_COUNT_MAX)
     cores = FIO_MEMORY_ARENA_COUNT_MAX;
+#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
   if ((intptr_t)cores <= 0)
     cores = 1;
-#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
-  const size_t pages = FIO_MEM_BYTES2PAGES(sizeof(*fio___mem_state) +
-                                           (cores * sizeof(fio___mem_arena_s)));
-  fio___mem_state = (fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
+
+  const size_t pages = FIO_MEMORY___STATE_SIZE(cores);
+  fio___mem_state = (struct fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
   FIO_ASSERT_ALLOC(fio___mem_state);
-  *fio___mem_state = (fio___mem_state_s){
-      .available = FIO_LIST_INIT(fio___mem_state->available),
+  *fio___mem_state = (struct fio___mem_state_s){
       .cores = cores,
-      .lock = FIO_LOCK_INIT,
+      .available.next = &fio___mem_state->available,
+      .available.prev = &fio___mem_state->available,
+      .lock = FIO_MEMORY_LOCK_TYPE_INIT,
   };
+  for (size_t i = 0; i < cores; ++i) {
+    fio___mem_state->a[i].lock = FIO_MEMORY_LOCK_TYPE_INIT;
+  }
+
 #if DEBUG && defined(FIO_LOG_INFO)
   FIO_LOG_INFO(
       "facil.io memory allocation initialized:\n"
       "\t* %zu concurrent arenas (@%p).\n"
       "\t* %zu pages required for arenas (~%zu bytes).\n"
       "\t* system allocation size:                     %zu bytes\n"
+      "\t* system allocation overhead:                 %zu bytes\n"
       "\t* memory block size (allocation slice / bin): %zu bytes\n"
       "\t* memory blocks per system allocation:        %zu blocks\n"
-      "\t* memory block overhead:                      %zu bytes\n",
+      "\t* memory block overhead:                      %zu bytes\n"
+      "\t* allocator limit (revert to mmap):           %zu bytes\n",
       cores,
       (void *)fio___mem_state,
       (size_t)pages,
-      (size_t)(pages << 12),
+      (size_t)(pages << FIO_MEM_PAGE_SIZE_LOG),
       (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
+      sizeof(fio___mem_chunk_s),
       (size_t)FIO_MEMORY_BLOCK_SIZE,
       (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
-      (size_t)FIO_MEMORY_BLOCK_HEADER_SIZE);
+      sizeof(fio___mem_block_s),
+      (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT);
 #endif /* DEBUG */
 }
 
 FIO_SFUNC void fio___mem_state_deallocate(void) {
   if (!fio___mem_state)
     return;
-  const size_t pages =
-      FIO_MEM_BYTES2PAGES(sizeof(*fio___mem_state) +
-                          (fio___mem_state->cores * sizeof(fio___mem_arena_s)));
+  const size_t pages = FIO_MEMORY___STATE_SIZE(fio___mem_state->cores);
   FIO_MEM_PAGE_FREE(fio___mem_state, pages);
-  fio___mem_state = (fio___mem_state_s *)NULL;
+  fio___mem_state = (struct fio___mem_state_s *)NULL;
 }
 
 /* *****************************************************************************
-Memory arena management and selection
+Arena selection / locking
 ***************************************************************************** */
 
-/* Last available arena for thread. */
-static __thread volatile fio___mem_arena_s *fio___mem_arena =
-    (fio___mem_arena_s *)NULL;
+static __thread size_t fio___mem_arena_index = 0;
 
-FIO_SFUNC void fio___mem_arena_aquire(void) {
-  if (!fio___mem_state) {
+fio___mem_arena_s *fio___mem_arena_lock(void) {
+  size_t a = fio___mem_arena_index;
+  if (!fio___mem_state)
     fio___mem_state_allocate();
-  }
-  if (fio___mem_arena)
-    if (!fio_trylock(&fio___mem_arena->lock))
-      return;
   for (;;) {
-    const size_t cores = fio___mem_state->cores;
-    for (size_t i = 0; i < cores; ++i) {
-      if (!fio_trylock(&fio___mem_state->arenas[i].lock)) {
-        fio___mem_arena = fio___mem_state->arenas + i;
-        return;
+    for (size_t i = 0; i < fio___mem_state->cores; ++i) {
+      if (a >= fio___mem_state->cores)
+        a = 0;
+      if (!FIO_MEMORY_TRYLOCK(fio___mem_state->a[a].lock)) {
+        fio___mem_arena_index = a;
+        return &fio___mem_state->a[a];
       }
+      ++a;
     }
     FIO_THREAD_RESCHEDULE();
   }
 }
 
-FIO_IFUNC void fio___mem_arena_release() { fio_unlock(&fio___mem_arena->lock); }
+void fio___mem_arena_unlock(fio___mem_arena_s *a) {
+  FIO_MEMORY_UNLOCK(a->lock);
+}
 
 /* *****************************************************************************
-Allocator debugging helpers
+Chunk allocation / deallocation
 ***************************************************************************** */
 
-#if DEBUG
-/* maximum block allocation count. */
-static size_t fio___mem_block_count_max;
-/* current block allocation count. */
-static size_t fio___mem_block_count;
+/* seeks the cache first, then allocates from the system*/
+FIO_SFUNC fio___mem_chunk_s *fio___mem_chunk_new(void) {
+  fio___mem_chunk_s *c = NULL;
 
-// void fio_memory_dump_missing(void) {
-//   fprintf(stderr, "\n ==== Attempting Memory Dump (will crash) ====\n");
-//   if (available_blocks_is_empty(&memory.available)) {
-//     fprintf(stderr, "- Memory dump attempt canceled\n");
-//     return;
-//   }
-//   block_node_s *smallest = available_blocks_root(memory.available.next);
-//   FIO_LIST_EACH(block_node_s, node, &memory.available, tmp) {
-//     if (smallest > tmp)
-//       smallest = tmp;
-//   }
-
-//   for (size_t i = 0;
-//        i < FIO_MEMORY_BLOCK_SIZE * FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
-//     if ((((uintptr_t)smallest + i) & FIO_MEMORY_BLOCK_MASK) == 0) {
-//       i += 32;
-//       fprintf(stderr, "---block jump---\n");
-//       continue;
-//     }
-//     if (((char *)smallest)[i])
-//       fprintf(stderr, "%c", ((char *)smallest)[i]);
-//   }
-// }
-
-#define FIO_MEMORY_ON_BLOCK_ALLOC()                                            \
-  do {                                                                         \
-    fio_atomic_add(&fio___mem_block_count, 1);                                 \
-    if (fio___mem_block_count > fio___mem_block_count_max)                     \
-      fio___mem_block_count_max = fio___mem_block_count;                       \
-  } while (0)
-#define FIO_MEMORY_ON_BLOCK_FREE()                                             \
-  do {                                                                         \
-    fio_atomic_sub_fetch(&fio___mem_block_count, 1);                           \
-  } while (0)
-#ifdef FIO_LOG_INFO
-#define FIO_MEMORY_PRINT_BLOCK_STAT()                                          \
-  FIO_LOG_INFO(                                                                \
-      "(fio) Total memory blocks allocated before cleanup %zu\n"               \
-      "       Maximum memory blocks allocated at a single time %zu\n",         \
-      fio___mem_block_count,                                                   \
-      fio___mem_block_count_max)
-#define FIO_MEMORY_PRINT_BLOCK_STAT_END()                                      \
-  do {                                                                         \
-    if (fio___mem_block_count) {                                               \
-      FIO_LOG_ERROR("(fio) Total memory blocks allocated "                     \
-                    "after cleanup (POSSIBLE LEAKS): %zu\n",                   \
-                    fio___mem_block_count);                                    \
-    } else {                                                                   \
-      FIO_LOG_INFO("(fio) Total memory blocks allocated after cleanup: %zu\n", \
-                   fio___mem_block_count);                                     \
-    }                                                                          \
-  } while (0)
-#else /* FIO_LOG_INFO */
-#define FIO_MEMORY_PRINT_BLOCK_STAT()
-#define FIO_MEMORY_PRINT_BLOCK_STAT_END()
-#endif /* FIO_LOG_INFO */
-#else  /* DEBUG */
-#define FIO_MEMORY_ON_BLOCK_ALLOC()
-#define FIO_MEMORY_ON_BLOCK_FREE()
-#define FIO_MEMORY_PRINT_BLOCK_STAT()
-#define FIO_MEMORY_PRINT_BLOCK_STAT_END()
-#endif /* DEBUG */
-
-/* *****************************************************************************
-Block allocation and rotation
-***************************************************************************** */
-
-FIO_SFUNC fio___mem_block_s *fio___mem_block_alloc(void) {
-  fio___mem_block_s *b = (fio___mem_block_s *)FIO_MEM_PAGE_ALLOC(
-      FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
-                          FIO_MEMORY_BLOCK_SIZE),
-      FIO_MEMORY_BLOCK_SIZE_LOG);
-  FIO_ASSERT_ALLOC(b);
-#if DEBUG
-  FIO_LOG_DEBUG2("memory allocator allocated %zu pages from the system: %p",
-                 (size_t)FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
-                                             FIO_MEMORY_BLOCK_SIZE),
-                 (void *)b);
-#endif /* DEBUG */
-  /* initialize and push all block slices into memory pool */
-  for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
-    fio___mem_block_s *tmp =
-        FIO_PTR_MATH_ADD(fio___mem_block_s, b, (FIO_MEMORY_BLOCK_SIZE * i));
-    *tmp = (fio___mem_block_s){.root = (uint16_t)i, .ref = 0};
-    fio___mem_available_blocks_push(&fio___mem_state->available,
-                                    (fio___mem_block_node_s *)tmp);
+#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
+  if (fio___mem_state->cache.pos) {
+    c = fio___mem_state->cache.store[--fio___mem_state->cache.pos];
+    FIO_MEMORY_ON_CHUNK_UNCACHE(c);
   }
-  /* initialize and return last slice (it's in the cache) */
-  b = FIO_PTR_MATH_ADD(
-      fio___mem_block_s,
-      b,
-      (FIO_MEMORY_BLOCK_SIZE * (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1)));
-  b->root = (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1);
-  /* debug counter */
-  FIO_MEMORY_ON_BLOCK_ALLOC();
+#endif
+  if (!c) {
+    c = fio___mem_chunk_alloc();
+  }
+  return c;
+}
+
+FIO_SFUNC void fio___mem_chunk_free(fio___mem_chunk_s *c) {
+  FIO_ASSERT(!c->marker,
+             "memory allocator corruption, block header overwritten?\n\t%p "
+             "marked with %p",
+             (void *)c,
+             (void *)(*(uintptr_t *)c));
+  if (!c || fio_atomic_sub_fetch(&c->ref, 1))
+    return;
+  if (fio___mem_state) {
+    fio___mem_list___remove(&fio___mem_state->available, c);
+#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
+    if (fio___mem_state->cache.pos < FIO_MEMORY_CHUNK_CACHE) {
+      fio___mem_state->cache.store[fio___mem_state->cache.pos++] = c;
+      FIO_MEMORY_ON_CHUNK_CACHE(c);
+      return;
+    }
+#endif
+  }
+  fio___mem_chunk_dealloc(c);
+}
+
+/* *****************************************************************************
+Block allocation / deallocation
+***************************************************************************** */
+
+/* seeks the cache first, then allocates from the system*/
+FIO_SFUNC fio___mem_block_s *fio___mem_block_new(void) {
+  fio___mem_block_s *b = NULL;
+  FIO_MEMORY_LOCK(fio___mem_state->lock);
+  b = fio___mem_list___pop_block(&fio___mem_state->available);
+  if (!b) {
+    fio___mem_chunk_s *c = fio___mem_chunk_new();
+    if (!c)
+      goto finish;
+
+    for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1); ++i) {
+      fio___mem_list___push_node(
+          &fio___mem_state->available,
+          fio___mem_block2node(
+              (fio___mem_block_s *)((uintptr_t)c +
+                                    (FIO_MEMORY_BLOCK_SIZE * i))));
+    }
+    b = (fio___mem_block_s *)((uintptr_t)c +
+                              (FIO_MEMORY_BLOCK_SIZE *
+                               (FIO_MEMORY_BLOCKS_PER_ALLOCATION - 1)));
+  }
+
+finish:
+  if (b) {
+    b->pos = 1; /* 1st unit is the block header */
+    b->ref = 1; /* block reference */
+    fio_atomic_add(&fio___mem_ptr2chunk(b)->ref, 1); /* mark chunk reference */
+  }
+  FIO_MEMORY_UNLOCK(fio___mem_state->lock);
   return b;
 }
 
 FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
-  b = FIO_PTR_MATH_RMASK(fio___mem_block_s, b, FIO_MEMORY_BLOCK_SIZE_LOG);
-  if (!b || fio_atomic_sub_fetch(&b->ref, 1)) {
-    /* block slice still in use */
-    return;
-  }
-  memset(b + 1, 0, (FIO_MEMORY_BLOCK_SIZE - sizeof(*b)));
-  fio_lock(&fio___mem_state->lock);
-  fio___mem_available_blocks_push(&fio___mem_state->available,
-                                  (fio___mem_block_node_s *)b);
-  b = fio___mem_block_root(b);
-  if (fio_atomic_sub_fetch(&b->root_ref, 1)) {
-    /* block still has at least one used slice */
-    fio_unlock(&fio___mem_state->lock);
-    return;
-  }
-  /* remove all block slices from memory pool */
-  for (size_t i = 0; i < (FIO_MEMORY_BLOCKS_PER_ALLOCATION); ++i) {
-    fio___mem_block_node_s *tmp = FIO_PTR_MATH_ADD(
-        fio___mem_block_node_s, b, (FIO_MEMORY_BLOCK_SIZE * i));
-    fio___mem_available_blocks_remove(tmp);
-  }
-  fio_unlock(&fio___mem_state->lock);
-  /* return memory to system */
-  FIO_MEM_PAGE_FREE(b,
-                    FIO_MEM_BYTES2PAGES(FIO_MEMORY_BLOCKS_PER_ALLOCATION *
-                                        FIO_MEMORY_BLOCK_SIZE));
-  /* debug counter */
-  FIO_MEMORY_ON_BLOCK_FREE();
-#if DEBUG
-  FIO_LOG_DEBUG2("memory allocator returned %p to the system", (void *)b);
-#endif /* DEBUG */
-}
-
-/* rotates block in arena */
-FIO_SFUNC void fio___mem_block_rotate(void) {
-  fio___mem_block_s *to_free = fio___mem_arena->block; /* keep memory pool */
-  fio___mem_arena->block = (fio___mem_block_s *)NULL;
-  fio_lock(&fio___mem_state->lock);
-  fio___mem_arena->block = (fio___mem_block_s *)fio___mem_available_blocks_pop(
-      &fio___mem_state->available);
-  if (!fio___mem_arena->block) {
-    /* allocate block */
-    fio___mem_arena->block = fio___mem_block_alloc();
-  } else {
-    FIO_ASSERT(!fio___mem_arena->block->reserved,
-               "memory header corruption, overflowed right?");
-  }
-  /* update the root reference count before releasing the lock */
-  fio_atomic_add(&fio___mem_block_root(fio___mem_arena->block)->root_ref, 1);
-  fio_unlock(&fio___mem_state->lock);
-  /* zero out memory used for available block linked list, keep root data */
-  fio___mem_arena->block->ref = 1;
-  fio___mem_arena->block->pos = 0;
-  ((fio___mem_block_node_s *)fio___mem_arena->block)->node =
-      (FIO_LIST_NODE){.next = NULL};
-  fio___mem_block_free(to_free);
-}
-
-FIO_SFUNC void *fio___mem_block_slice(size_t bytes) {
-  const uint16_t max =
-      ((FIO_MEMORY_BLOCK_SIZE - FIO_MEMORY_BLOCK_HEADER_SIZE) >> 4);
-  void *r = NULL;
-  bytes = (bytes + 15) >> 4; /* convert to 16 byte units */
-  fio___mem_arena_aquire();
-  fio___mem_block_s *b = fio___mem_arena->block;
-  if (!b || ((size_t)b->pos + bytes) >= (size_t)max) {
-    fio___mem_block_rotate();
-    b = fio___mem_arena->block;
-  }
   if (!b)
-    goto finish;
+    return;
+  FIO_ASSERT(!b->marker,
+             "memory allocator corruption, block header overwritten?\n\t%p "
+             "marked with %p",
+             (void *)b,
+             (void *)(*(uintptr_t *)b));
+  if (fio_atomic_sub_fetch(&b->ref, 1))
+    return;
+  memset(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
+  fio___mem_chunk_s *c = fio___mem_ptr2chunk(b);
+
+  FIO_MEMORY_LOCK(fio___mem_state->lock);
+  fio___mem_list___push_node(&fio___mem_state->available,
+                             fio___mem_block2node(b));
+  fio___mem_chunk_free(c);
+  FIO_MEMORY_UNLOCK(fio___mem_state->lock);
+}
+
+/* *****************************************************************************
+Slice allocation / deallocation (slicing the block)
+***************************************************************************** */
+
+FIO_IFUNC void *fio___mem_slice(fio___mem_block_s *b, size_t units) {
+  /* Note: each unit is 16 bytes long */
+  void *ret = NULL;
+  if (!b || (b->pos + units >= (FIO_MEMORY_BLOCK_SIZE >> 4)))
+    return ret;
+  ret = (void *)(b + b->pos);
+  b->pos += units;
   fio_atomic_add(&b->ref, 1);
-  r = FIO_PTR_MATH_ADD(
-      void, b, FIO_MEMORY_BLOCK_HEADER_SIZE + ((size_t)b->pos << 4));
-  fio_atomic_add(&b->pos, bytes);
-finish:
-  fio___mem_arena_release();
+  return ret;
+}
+
+FIO_IFUNC void fio___mem_slice_free(void *p) {
+  fio___mem_block_s *b = fio___mem_ptr2block(p);
+  fio___mem_block_free(b);
+}
+
+/* *****************************************************************************
+Arena based allocations
+***************************************************************************** */
+
+FIO_IFUNC void *fio___mem_alloc_normal(size_t size) {
+  void *r = NULL;
+  /* convert bytes to units */
+  size = (size + 15) >> 4;
+  fio___mem_arena_s *a = fio___mem_arena_lock();
+  if (!a->block)
+    a->block = fio___mem_block_new();
+  r = fio___mem_slice(a->block, size);
+  if (!r)
+    goto rotate;
+  fio___mem_arena_unlock(a);
+  return r;
+rotate:
+  // FIO_LOG_DEBUG2("ROTATING memory block / chunk");
+  fio___mem_block_free(a->block);
+  a->block = fio___mem_block_new();
+  r = fio___mem_slice(a->block, size);
+  fio___mem_arena_unlock(a);
   return r;
 }
 
@@ -837,47 +1058,34 @@ Allocator Destruction
 FIO_SFUNC void __attribute__((destructor)) fio___mem_destroy(void) {
   if (!fio___mem_state)
     return;
-  FIO_MEMORY_PRINT_BLOCK_STAT();
+  FIO_MEMORY_PRINT_STATS();
   for (size_t i = 0; i < fio___mem_state->cores; ++i) {
-    /* free all blocks in the arean memory pools */
-    /* this should return memory to system unless a memory leak occurred */
-    fio___mem_block_s *b = fio___mem_state->arenas[i].block;
-    fio___mem_state->arenas[i].block = NULL;
-    fio___mem_state->arenas[i].lock = FIO_LOCK_INIT;
+    /* free all blocks in the arenas */
+    /* this may place chunks in the cache */
+    fio___mem_block_s *b = fio___mem_state->a[i].block;
+    fio___mem_state->a[i].block = NULL;
     fio___mem_block_free(b);
   }
-  fio___mem_arena = NULL;
+#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
+  while (fio___mem_state->cache.pos) {
+    fio___mem_chunk_s *c =
+        fio___mem_state->cache.store[--fio___mem_state->cache.pos];
+    fio___mem_chunk_dealloc(c);
+  }
+#endif
   fio___mem_state_deallocate();
-  FIO_MEMORY_PRINT_BLOCK_STAT_END();
+  FIO_MEMORY_PRINT_STATS_END();
 #if DEBUG && defined(FIO_LOG_INFO)
   FIO_LOG_INFO("facil.io memory allocation cleanup complete.");
 #endif /* DEBUG */
 }
 
 /* *****************************************************************************
-API implementation
+Public facing API
 ***************************************************************************** */
 
-/** Frees memory that was allocated using this library. */
-SFUNC void fio_free(void *ptr) {
-  if (ptr == &fio___mem_on_malloc_zero)
-    return;
-  fio___mem_block_s *b =
-      FIO_PTR_MATH_RMASK(fio___mem_block_s, ptr, FIO_MEMORY_BLOCK_SIZE_LOG);
-  if (!b)
-    return;
-  if (b->reserved)
-    goto test_reserved;
-  fio___mem_block_free(b);
-  return;
-test_reserved:
-  FIO_ASSERT(!(b->reserved & ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)),
-             "memory allocator corruption, block header overwritten?");
-  /* zero out memory before returning it to the system */
-  memset(ptr, 0, (b->reserved) - sizeof(*b));
-  FIO_MEM_PAGE_FREE(b, (b->reserved >> FIO_MEM_PAGE_SIZE_LOG));
-  FIO_MEMORY_ON_BLOCK_FREE();
-}
+/* Address returned when allocating 0 bytes ( fio_malloc(0) ) */
+static long double fio___mem_on_malloc_zero;
 
 /**
  * Allocates memory using a per-CPU core block memory pool.
@@ -885,12 +1093,17 @@ test_reserved:
  *
  * Allocations above FIO_MEMORY_BLOCK_ALLOC_LIMIT (16Kb when using 32Kb blocks)
  * will be redirected to `mmap`, as if `fio_mmap` was called.
+ *
+ * `fio_malloc` promises a best attempt at providing locality between
+ * consecutive calls, but locality can't be guaranteed.
  */
 SFUNC void *FIO_ALIGN_NEW fio_malloc(size_t size) {
   if (!size)
     return &fio___mem_on_malloc_zero;
+  if (!fio___mem_state)
+    fio___mem_state_allocate();
   if (size <= FIO_MEMORY_BLOCK_ALLOC_LIMIT) {
-    return fio___mem_block_slice(size);
+    return fio___mem_alloc_normal(size);
   }
   return fio_mmap(size);
 }
@@ -905,12 +1118,45 @@ SFUNC void *FIO_ALIGN_NEW fio_calloc(size_t size_per_unit, size_t unit_count) {
   return fio_malloc(size_per_unit * unit_count);
 }
 
+/** Frees memory that was allocated using this library. */
+SFUNC void fio_free(void *ptr) {
+  if (!ptr || ptr == &fio___mem_on_malloc_zero)
+    return;
+  fio___mem_chunk_s *c = fio___mem_ptr2chunk(ptr);
+  /* if the allocation is after a marked chunk header it was fio_mmap */
+  if ((uintptr_t)(c + 1) == (uintptr_t)ptr && c->marker)
+    goto big_free;
+  fio___mem_slice_free(ptr);
+  return;
+big_free:
+  /* zero out memory before returning it to the system */
+  memset(ptr, 0, (c->marker) - sizeof(*c));
+  FIO_MEM_PAGE_FREE(c, (c->marker >> FIO_MEM_PAGE_SIZE_LOG));
+  FIO_MEMORY_ON_CHUNK_FREE(c);
+}
+
 /**
  * Re-allocates memory. An attempt to avoid copying the data is made only for
  * big memory allocations (larger than FIO_MEMORY_BLOCK_ALLOC_LIMIT).
  */
 SFUNC void *FIO_ALIGN fio_realloc(void *ptr, size_t new_size) {
   return fio_realloc2(ptr, new_size, new_size);
+}
+
+/**
+ * Uses system page maps for reallocation.
+ */
+FIO_SFUNC void *fio_realloc2_big(fio___mem_chunk_s *c, size_t new_size) {
+  const size_t new_page_len = FIO_MEM_BYTES2PAGES(new_size + sizeof(*c));
+  c = (fio___mem_chunk_s *)FIO_MEM_PAGE_REALLOC(
+      c,
+      c->marker >> FIO_MEM_PAGE_SIZE_LOG,
+      new_page_len,
+      FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  if (!c)
+    return NULL;
+  c->marker = new_page_len;
+  return (void *)(c + 1);
 }
 
 /**
@@ -922,59 +1168,47 @@ SFUNC void *FIO_ALIGN fio_realloc(void *ptr, size_t new_size) {
 SFUNC void *FIO_ALIGN fio_realloc2(void *ptr,
                                    size_t new_size,
                                    size_t copy_len) {
-  if (!ptr || ptr == &fio___mem_on_malloc_zero)
-    return fio_malloc(new_size);
-  const size_t max_len = ((0 - (uintptr_t)FIO_PTR_MATH_LMASK(
-                                   void, ptr, FIO_MEMORY_BLOCK_SIZE_LOG)) +
-                          FIO_MEMORY_BLOCK_SIZE);
-
-  fio___mem_block_s *b =
-      FIO_PTR_MATH_RMASK(fio___mem_block_s, ptr, FIO_MEMORY_BLOCK_SIZE_LOG);
   void *mem = NULL;
+  if (!new_size) {
+    fio_free(ptr);
+    mem = (void *)&fio___mem_on_malloc_zero;
+    return mem;
+  }
+  if (!ptr || ptr == (void *)&fio___mem_on_malloc_zero) {
+    mem = fio_malloc(new_size);
+    return mem;
+  }
 
-  if (copy_len > new_size)
-    copy_len = new_size;
-  if (b->reserved)
-    goto big_realloc;
-  if (copy_len > max_len)
-    copy_len = max_len;
+  { /* test for big-paged malloc and limit copy_len */
+    register fio___mem_chunk_s *c = fio___mem_ptr2chunk(ptr);
+    register fio___mem_block_s *const b = fio___mem_ptr2block(ptr);
+    register size_t max_len =
+        ((uintptr_t)b + FIO_MEMORY_BLOCK_SIZE) - ((uintptr_t)ptr);
+
+    if ((uintptr_t)(c + 1) == (uintptr_t)ptr && c->marker &&
+        new_size > FIO_MEMORY_BLOCK_ALLOC_LIMIT) {
+      mem = fio_realloc2_big(c, new_size);
+      return mem;
+    }
+
+    if (copy_len > max_len)
+      copy_len = max_len;
+    if (copy_len > new_size)
+      copy_len = new_size;
+  }
 
   mem = fio_malloc(new_size);
   if (!mem) {
-    return NULL;
+    return mem;
   }
   fio___memcpy_16byte(mem, ptr, ((copy_len + 15) >> 4));
-  fio___mem_block_free(b);
+  fio_free(ptr);
   // zero out leftover bytes, if any.
   while (copy_len & 15) {
     ((uint8_t *)mem)[(copy_len++) & 15] = 0;
   }
-  return mem;
 
-big_realloc:
-  FIO_ASSERT(!(b->reserved & ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)),
-             "memory allocator corruption, block header overwritten?");
-  const size_t new_page_len =
-      FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_BLOCK_HEADER_SIZE);
-  if (new_page_len <= 2) {
-    /* shrink from big allocation to small one */
-    mem = fio_malloc(new_size);
-    if (!mem) {
-      return NULL;
-    }
-    fio___memcpy_16byte(mem, ptr, (copy_len >> 4));
-    FIO_MEM_PAGE_FREE(b, b->reserved);
-    return mem;
-  }
-  fio___mem_block_s *tmp = (fio___mem_block_s *)FIO_MEM_PAGE_REALLOC(
-      b,
-      b->reserved >> FIO_MEM_PAGE_SIZE_LOG,
-      new_page_len,
-      FIO_MEMORY_BLOCK_SIZE_LOG);
-  if (!tmp)
-    return NULL;
-  tmp->reserved = new_page_len << FIO_MEM_PAGE_SIZE_LOG;
-  return (void *)(tmp + 1);
+  return mem;
 }
 
 /**
@@ -989,39 +1223,80 @@ big_realloc:
 SFUNC void *FIO_ALIGN_NEW fio_mmap(size_t size) {
   if (!size)
     return &fio___mem_on_malloc_zero;
-  size_t pages = FIO_MEM_BYTES2PAGES(size + FIO_MEMORY_BLOCK_HEADER_SIZE);
-  fio___mem_block_s *b =
-      (fio___mem_block_s *)FIO_MEM_PAGE_ALLOC(pages, FIO_MEMORY_BLOCK_SIZE_LOG);
-  if (!b)
+  size_t pages = FIO_MEM_BYTES2PAGES(size + sizeof(fio___mem_chunk_s));
+  if (((uint64_t)pages >> 32))
     return NULL;
-  FIO_MEMORY_ON_BLOCK_ALLOC();
-  b->reserved = pages << FIO_MEM_PAGE_SIZE_LOG;
-  return (void *)(b + 1);
+  fio___mem_chunk_s *c = (fio___mem_chunk_s *)FIO_MEM_PAGE_ALLOC(
+      pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  if (!c)
+    return NULL;
+  FIO_MEMORY_ON_CHUNK_ALLOC(c);
+  c->marker = pages;
+  return (void *)(c + 1);
 }
 
 /**
  * When forking is called manually, call this function to reset the facil.io
  * memory allocator's locks.
  */
-void fio_malloc_after_fork(void) {
+SFUNC void fio_malloc_after_fork(void) {
   if (!fio___mem_state)
     return;
   for (size_t i = 0; i < fio___mem_state->cores; ++i) {
-    fio___mem_state->arenas[i].lock = FIO_LOCK_INIT;
+    fio___mem_state->a[i].lock = FIO_MEMORY_LOCK_TYPE_INIT;
   }
-  fio___mem_state->lock = FIO_LOCK_INIT;
+  fio___mem_state->lock = FIO_MEMORY_LOCK_TYPE_INIT;
 }
 
 /* *****************************************************************************
-Override the system's malloc functions if required
+Print Memory Allocator State (for debugging)
 ***************************************************************************** */
-#ifdef FIO_MALLOC_OVERRIDE_SYSTEM
-void *malloc(size_t size) { return fio_malloc(size); }
-void *calloc(size_t size, size_t count) { return fio_calloc(size, count); }
-void free(void *ptr) { fio_free(ptr); }
-void *realloc(void *ptr, size_t new_size) { return fio_realloc(ptr, new_size); }
-#endif /* FIO_MALLOC_OVERRIDE_SYSTEM */
 
+SFUNC void fio_malloc_print_state(void) {
+  if (!fio___mem_state) {
+    FIO_LOG_INFO("Printing facil.io allocator memory state: UNINITIALIZED!");
+  } else {
+    char buffer[FIO_LOG_LENGTH_LIMIT];
+    size_t pos = 0;
+    memcpy(buffer + pos, "Printing facil.io allocator memory state:\n", 42);
+    pos += 42;
+    pos += snprintf(buffer + pos,
+                    FIO_LOG_LENGTH_LIMIT - pos,
+                    "\tCores: %zu",
+                    fio___mem_state->cores);
+    for (size_t i = 0; i < fio___mem_state->cores; ++i) {
+      size_t w;
+      w = snprintf(buffer + pos,
+                   FIO_LOG_LENGTH_LIMIT - pos,
+                   "\n\t[%zu] block: %p",
+                   i,
+                   (void *)fio___mem_state->a[i].block);
+      if (w + pos + 32 > FIO_LOG_LENGTH_LIMIT)
+        goto flush;
+      if (fio___mem_state->a[i].block) {
+        w += snprintf(buffer + pos + w,
+                      FIO_LOG_LENGTH_LIMIT - (pos + w),
+                      "\n\t[%zu] block ref: %u"
+                      "\n\t[%zu] block pos: %u",
+                      i,
+                      fio___mem_state->a[i].block->ref,
+                      i,
+                      fio___mem_state->a[i].block->pos);
+        if (w + pos + 32 > FIO_LOG_LENGTH_LIMIT)
+          goto flush;
+      }
+      pos += w;
+      continue;
+    flush:
+      buffer[pos] = 0;
+      FIO_LOG_INFO("%s", buffer);
+      pos = 0;
+      --i;
+    }
+    buffer[pos] = 0;
+    FIO_LOG_INFO("%s", buffer);
+  }
+}
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
@@ -1032,43 +1307,241 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
 }
 
 #else /* FIO_MALLOC_FORCE_SYSTEM */
+
+#include "pthread.h"
+
+FIO_IFUNC void
+fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
+  uint64_t *dest = (uint64_t *)dest_;
+  size_t units = bytes >> 3;
+  while (units >= 16) {
+    dest[0] = data;
+    dest[1] = data;
+    dest[2] = data;
+    dest[3] = data;
+    dest[4] = data;
+    dest[5] = data;
+    dest[6] = data;
+    dest[7] = data;
+    dest[8] = data;
+    dest[9] = data;
+    dest[10] = data;
+    dest[11] = data;
+    dest[12] = data;
+    dest[13] = data;
+    dest[14] = data;
+    dest[15] = data;
+    dest += 16;
+    units -= 16;
+  }
+  switch (units) {
+  case 15:
+    *(dest++) = data; /* fallthrough */
+  case 14:
+    *(dest++) = data; /* fallthrough */
+  case 13:
+    *(dest++) = data; /* fallthrough */
+  case 12:
+    *(dest++) = data; /* fallthrough */
+  case 11:
+    *(dest++) = data; /* fallthrough */
+  case 10:
+    *(dest++) = data; /* fallthrough */
+  case 9:
+    *(dest++) = data; /* fallthrough */
+  case 8:
+    *(dest++) = data; /* fallthrough */
+  case 7:
+    *(dest++) = data; /* fallthrough */
+  case 6:
+    *(dest++) = data; /* fallthrough */
+  case 5:
+    *(dest++) = data; /* fallthrough */
+  case 4:
+    *(dest++) = data; /* fallthrough */
+  case 3:
+    *(dest++) = data; /* fallthrough */
+  case 2:
+    *(dest++) = data; /* fallthrough */
+  case 1:
+    *(dest++) = data;
+  }
+}
+
+FIO_IFUNC void
+fio___memset_test_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
+  uint64_t *dest = (uint64_t *)dest_;
+  size_t units = bytes >> 3;
+  FIO_ASSERT(*(dest) = data, "memory data was overwritten (first 8 bytes)");
+  while (units >= 16) {
+    FIO_ASSERT(dest[0] == data && dest[1] == data && dest[2] == data &&
+                   dest[3] == data && dest[4] == data && dest[5] == data &&
+                   dest[6] == data && dest[7] == data && dest[8] == data &&
+                   dest[9] == data && dest[10] == data && dest[11] == data &&
+                   dest[12] == data && dest[13] == data && dest[14] == data &&
+                   dest[15] == data,
+               "memory data was overwritten");
+    dest += 16;
+    units -= 16;
+  }
+  switch (units) {
+  case 15:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 14:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 13:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 12:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 11:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 10:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 9:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 8:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 7:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 6:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 5:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 4:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 3:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 2:
+    FIO_ASSERT(*(dest++) = data,
+               "memory data was overwritten"); /* fallthrough */
+  case 1:
+    FIO_ASSERT(*(dest++) = data, "memory data was overwritten (last 8 bytes)");
+  }
+}
+
+FIO_IFUNC void *FIO_NAME_TEST(stl, mem_tsk)(void *i_) {
+  uintptr_t cycles = (uintptr_t)i_;
+  const size_t test_block_count = (2UL << FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  uint64_t marker;
+  do {
+    marker = fio_rand64();
+  } while (!marker);
+
+  const size_t limit = (test_block_count >> cycles);
+  char **ary = (char **)fio_calloc(sizeof(*ary), limit);
+  FIO_ASSERT(ary, "allocation failed for test container");
+  for (size_t i = 0; i < limit; ++i) {
+    ary[i] = (char *)fio_malloc(1UL << cycles);
+    FIO_ASSERT(ary[i], "allocation failed!");
+    {
+      char *tmp;
+      fio_free((tmp = (char *)fio_malloc(16))); /* add some fragmentation */
+      FIO_ASSERT(tmp, "allocation failed!")
+    }
+    FIO_ASSERT(!ary[i][0], "allocated memory not zero");
+    FIO_ASSERT(!ary[i][((1UL << cycles) - 1)],
+               "allocated memory not zero (end)");
+    fio___memset_aligned(ary[i], marker, (1UL << cycles));
+  }
+  for (size_t i = 0; i < limit; ++i) {
+    char *tmp = (char *)fio_realloc2(ary[i], (2UL << cycles), (1UL << cycles));
+    FIO_ASSERT(tmp, "re-allocation failed!")
+    ary[i] = tmp;
+    FIO_ASSERT(!ary[i][(1UL << cycles)], "fio_realloc2 copy overflow!");
+    fio___memset_test_aligned(ary[i], marker, (1UL << cycles));
+    tmp = (char *)fio_realloc2(ary[i], (1UL << cycles), (2UL << cycles));
+    FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
+    ary[i] = tmp;
+    fio___memset_test_aligned(ary[i], marker, (1UL << cycles));
+  }
+  for (size_t i = 0; i < limit; ++i) {
+    fio___memset_test_aligned(ary[i], marker, (1UL << cycles));
+    fio_free(ary[i]);
+  }
+  fio_free(ary);
+  return NULL;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
   fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
-  const size_t three_blocks = ((size_t)3ULL * FIO_MEMORY_BLOCKS_PER_ALLOCATION)
-                              << FIO_MEMORY_BLOCK_SIZE_LOG;
-  for (int cycles = 4; cycles < FIO_MEMORY_BLOCK_SIZE_LOG; ++cycles) {
+  FIO_ASSERT(fio___mem_state, "memory state machine uninitialized");
+
+#if 0 /* help in bug tracking  */
+  fprintf(stderr, "* State before allocating 1 unit (16 bytes).\n");
+  fio_malloc_print_state();
+  void *ptr = fio_malloc(16);
+  fprintf(stderr, "* allocated 1 unit (16 bytes) at %p.\n", ptr);
+  fprintf(
+      stderr, "* Should be from block %p\n", (void *)fio___mem_ptr2block(ptr));
+  fio_malloc_print_state();
+  fio_free(ptr);
+  fprintf(stderr, "* deallocated 1 unit (16 bytes) at %p.\n", ptr);
+  fprintf(
+      stderr, "* Should be from block %p\n", (void *)fio___mem_ptr2block(ptr));
+  fio_malloc_print_state();
+  ptr = NULL;
+  for (size_t i = 1; i < ((FIO_MEMORY_BLOCK_SIZE >> 4) - 2); ++i) {
+    fio_free(ptr);
+    ptr = fio_malloc(16);
+  }
+  fprintf(stderr,
+          "* allocated and deallocated a block worth of units (%zu units) "
+          "(last: %p).\n",
+          (size_t)((FIO_MEMORY_BLOCK_SIZE >> 4) - 1),
+          ptr);
+  fprintf(
+      stderr, "* Should be from block %p\n", (void *)fio___mem_ptr2block(ptr));
+  fio_malloc_print_state();
+  {
+    void *tmp2 = fio_malloc(16);
+    fio_free(tmp2);
+    fio_free(ptr);
+    ptr = tmp2;
+  }
+  fprintf(stderr,
+          "* deallocated block's last unit after 1 unit allocation at %p.\n",
+          ptr);
+  fprintf(
+      stderr, "* Should be from block %p\n", (void *)fio___mem_ptr2block(ptr));
+  fio_malloc_print_state();
+
+#endif
+
+  for (uintptr_t cycles = 4; cycles < (FIO_MEMORY_BLOCK_SIZE_LOG); ++cycles) {
+    const size_t thread_count = ((fio___mem_state->cores >> 1) | 1);
+    pthread_t threads[thread_count];
     fprintf(stderr,
-            "* Testing %zu byte allocation blocks.\n",
-            (size_t)(1UL << cycles));
-    const size_t limit = (three_blocks >> cycles);
-    char **ary = (char **)fio_calloc(sizeof(*ary), limit);
-    FIO_ASSERT(ary, "allocation failed for test container");
-    for (size_t i = 0; i < limit; ++i) {
-      ary[i] = (char *)fio_malloc(1UL << cycles);
-      FIO_ASSERT(ary[i], "allocation failed!")
-      FIO_ASSERT(!ary[i][0], "allocated memory not zero");
-      memset(ary[i], 0xff, (1UL << cycles));
+            "* Testing %zu byte allocation blocks with %zu threads.\n",
+            (size_t)(1UL << cycles),
+            (thread_count + 1));
+    for (size_t i = 1; i < thread_count; ++i) {
+      if (pthread_create(
+              threads + i, NULL, FIO_NAME_TEST(stl, mem_tsk), (void *)cycles)) {
+        abort();
+      }
     }
-    for (size_t i = 0; i < limit; ++i) {
-      char *tmp =
-          (char *)fio_realloc2(ary[i], (2UL << cycles), (1UL << cycles));
-      FIO_ASSERT(tmp, "re-allocation failed!")
-      ary[i] = tmp;
-      FIO_ASSERT(!ary[i][(2UL << cycles) - 1], "fio_realloc2 copy overflow!");
-      tmp = (char *)fio_realloc2(ary[i], (1UL << cycles), (2UL << cycles));
-      FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
-      ary[i] = tmp;
-      FIO_ASSERT(ary[i][(1UL << cycles) - 1] == (char)0xFF,
-                 "fio_realloc2 copy underflow!");
+    FIO_NAME_TEST(stl, mem_tsk)((void *)cycles);
+    for (size_t i = 1; i < thread_count; ++i) {
+      pthread_join(threads[i], NULL);
     }
-    for (size_t i = 0; i < limit; ++i) {
-      fio_free(ary[i]);
-    }
-    fio_free(ary);
   }
 #if DEBUG && FIO_EXTERN_COMPLETE
+  // fio_malloc_print_state();
   fio___mem_destroy();
-  FIO_ASSERT(fio___mem_block_count <= 1, "memory leaks?");
+  FIO_ASSERT(!fio___mem_chunk_count, "memory leaks?");
 #endif /* DEBUG && FIO_EXTERN_COMPLETE */
 }
 #endif /* FIO_MALLOC_FORCE_SYSTEM */
