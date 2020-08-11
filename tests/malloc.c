@@ -14,10 +14,9 @@
 #include <sys/resource.h>
 #include <time.h>
 
-#define TEST_CYCLES_START 128
-#define TEST_CYCLES_END 256
-#define TEST_CYCLES_REPEAT 3
-#define TEST_WARMUP 1
+static size_t TEST_CYCLES_START;
+static size_t TEST_CYCLES_END;
+static size_t TEST_CYCLES_REPEAT;
 
 /**
  * facil.io doesn't keep metadata in memory slices, panelizing realloc.
@@ -28,18 +27,7 @@
  * previously allocated memory should be copied (but no risk of copy overflow
  * performance hit).
  */
-#define TEST_WITH_REALLOC2 0
-
-/*
- * VALUES: 0 == 1 thread, no contention; 1 == 2 threads; etc'
- *
- *
- * NOTE:
- * Since facil.io makes a point of returning memory to the system (keeping only
- * a small rotating cache), a high contention rate will result in more system
- * calls to collect memory from the system and to return it to the system.
- */
-#define TEST_THREAD_CONTENTION 0
+#define TEST_WITH_REALLOC2 1
 
 #if TEST_WITH_REALLOC2
 FIO_SFUNC void *sys_realloc2(void *ptr, size_t new_size, size_t copy_len) {
@@ -105,8 +93,8 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
   fio_atomic_add(&repetitions,
                  (TEST_CYCLES_END - TEST_CYCLES_START) * TEST_CYCLES_REPEAT);
 
-  for (int i = TEST_CYCLES_START; i < TEST_CYCLES_END; ++i) {
-    for (int repeat = 0; repeat < TEST_CYCLES_REPEAT; ++repeat) {
+  for (size_t i = TEST_CYCLES_START; i < TEST_CYCLES_END; ++i) {
+    for (size_t repeat = 0; repeat < TEST_CYCLES_REPEAT; ++repeat) {
       void **pointers = calloc_func(sizeof(*pointers), 4096);
       uint64_t start;
 
@@ -230,11 +218,28 @@ int main(int argc, char const *argv[]) {
       argv,
       0,
       0,
-      "This program tests malloc speed vs. fio_malloc. It also tests for "
-      "failed allocations as reported to the user. It does not test the "
-      "actual allocators, this is performed in the STL test unit.",
+      "This program speed tests fio_malloc vs. system's malloc.\n"
+      "It also tests for failed allocations as reported to the user.\n"
+      "It does not test the actual allocators, this is performed in the STL "
+      "test unit.\n\n"
+      "the following arguments are available:",
       FIO_CLI_INT(
-          "--threads -t runs the test concurrently, adding contention."));
+          "--threads -t (1) runs the test concurrently, adding contention. "),
+      FIO_CLI_INT(
+          "--cycles -c (4) the amount of times to run through the test."),
+      FIO_CLI_INT(
+          "--start-from -s (64) the minimal amount of bytes to allocate "
+          "(rounded up by 16)."),
+      FIO_CLI_INT("--end-at -e (4096) the maximum amount of bytes to allocate "
+                  "(rounded up by 16)."));
+
+  TEST_CYCLES_REPEAT = (size_t)fio_cli_get_i("-c");
+  TEST_CYCLES_START = (15 + (size_t)fio_cli_get_i("-s")) >> 4;
+  TEST_CYCLES_END = (15 + (size_t)fio_cli_get_i("-e")) >> 5;
+  if (TEST_CYCLES_START == TEST_CYCLES_END)
+    TEST_CYCLES_END += 1;
+  if (!TEST_CYCLES_REPEAT)
+    TEST_CYCLES_REPEAT = 1;
 
 #if DEBUG
   fprintf(stderr,

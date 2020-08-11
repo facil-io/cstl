@@ -11,6 +11,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "202 hashmap.h"            /* Development inclusion - ignore line */
+#define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -245,11 +246,82 @@ typedef struct {
   fio_risky_hash((s).buf, (s).len, (uint64_t)fio_cli_start)
 
 /* *****************************************************************************
+Default parameter storage
+***************************************************************************** */
+
+static fio___cli_cstr_s fio___cli_default_values;
+
+/** extracts the "default" marker from a string's line */
+FIO_SFUNC fio___cli_cstr_s fio___cli_map_line2default(char const *line) {
+  fio___cli_cstr_s n = {.buf = line};
+  /* skip aliases */
+  while (n.buf[n.len] == '-') {
+    while (n.buf[n.len] && n.buf[n.len] != ' ' && n.buf[n.len] != ',')
+      ++n.len;
+    while (n.buf[n.len] && (n.buf[n.len] == ' ' || n.buf[n.len] == ',')) {
+      ++n.len;
+    }
+    n.buf += n.len;
+    n.len = 0;
+  }
+  /* a default is maked with (value) or ("value"), both escapable with '\\' */
+  if (n.buf[0] != '(')
+    goto no_default;
+  ++n.buf;
+  if (n.buf[0] == '"') {
+    ++n.buf;
+    /* seek default value end with `")` */
+    while (n.buf[n.len] && !(n.buf[n.len] == '"' && n.buf[n.len + 1] == ')'))
+      ++n.len;
+    if ((n.buf[n.len] != '"' || n.buf[n.len + 1] != ')'))
+      goto no_default;
+  } else {
+    /* seek default value end with `)` */
+    while (n.buf[n.len] && n.buf[n.len] != ')')
+      ++n.len;
+    if (n.buf[n.len] != ')')
+      goto no_default;
+  }
+
+  return n;
+no_default:
+  n.buf = NULL;
+  n.len = 0;
+  return n;
+}
+
+FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
+  fio___cli_cstr_s val = {.buf = NULL, .len = 0};
+  if (!d.len || !d.buf)
+    return val;
+  {
+    void *tmp = FIO_MEM_REALLOC((void *)fio___cli_default_values.buf,
+                                fio___cli_default_values.len,
+                                fio___cli_default_values.len + d.len + 1,
+                                fio___cli_default_values.len);
+    if (!tmp)
+      return val;
+    fio___cli_default_values.buf = (const char *)tmp;
+  }
+  val.buf = fio___cli_default_values.buf + fio___cli_default_values.len;
+  val.len = d.len;
+  fio___cli_default_values.len += d.len + 1;
+
+  ((char *)val.buf)[val.len] = 0;
+  memcpy((char *)val.buf, d.buf, val.len);
+  FIO_LOG_DEBUG("CLI stored a default value: %s", val.buf);
+  return val;
+}
+
+/* *****************************************************************************
 CLI Parsing
 ***************************************************************************** */
 
 FIO_SFUNC void fio___cli_map_line2alias(char const *line) {
   fio___cli_cstr_s n = {.buf = line};
+  /* if a line contains a default value, store that value with the aliases. */
+  fio___cli_cstr_s def =
+      fio___cli_map_store_default(fio___cli_map_line2default(line));
   while (n.buf[0] == '-') {
     while (n.buf[n.len] && n.buf[n.len] != ' ' && n.buf[n.len] != ',') {
       ++n.len;
@@ -257,6 +329,10 @@ FIO_SFUNC void fio___cli_map_line2alias(char const *line) {
     const char *old = NULL;
     fio___cli_hash_set(
         &fio___cli_aliases, FIO_CLI_HASH_VAL(n), n, (char const *)line, &old);
+    if (def.buf) {
+      fio___cli_hash_set(
+          &fio___cli_values, FIO_CLI_HASH_VAL(n), n, def.buf, NULL);
+    }
 #ifdef FIO_LOG_ERROR
     if (old) {
       FIO_LOG_ERROR("CLI argument name conflict detected\n"
@@ -468,6 +544,7 @@ print_help:
     int first_len = 0;
     size_t tmp = 0;
     char const *const p = *pos;
+    fio___cli_cstr_s def = fio___cli_map_line2default(p);
     while (p[tmp] == '-') {
       while (p[tmp] && p[tmp] != ' ' && p[tmp] != ',') {
         if (!alias_count)
@@ -475,6 +552,13 @@ print_help:
         ++tmp;
       }
       ++alias_count;
+      while (p[tmp] && (p[tmp] == ' ' || p[tmp] == ',')) {
+        ++tmp;
+      }
+    }
+    if (def.len) {
+      tmp = (size_t)((def.buf + def.len + 1) - p);
+      tmp += (p[tmp] == ')'); /* in case of `")` */
       while (p[tmp] && (p[tmp] == ' ' || p[tmp] == ',')) {
         ++tmp;
       }
@@ -546,7 +630,12 @@ print_help:
         break;
       }
     }
-
+    /* print default information */
+    if (def.len)
+      fprintf(stderr,
+              "           \t\x1B[2mdefault value: %.*s\x1B[0m\n",
+              (int)def.len,
+              def.buf);
     ++pos;
   }
   fprintf(stderr,
@@ -645,6 +734,12 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_hash_destroy(&fio___cli_values);
   fio___cli_hash_destroy(&fio___cli_aliases);
   fio___cli_unnamed_count = 0;
+  if (fio___cli_default_values.buf) {
+    FIO_MEM_FREE((void *)fio___cli_default_values.buf,
+                 fio___cli_default_values.len);
+    fio___cli_default_values.buf = NULL;
+    fio___cli_default_values.len = 0;
+  }
 }
 /* *****************************************************************************
 CLI Data Access API
@@ -715,6 +810,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_INT("-integer1 -i1 first integer"),
         FIO_CLI_INT("-integer2 -i2 second integer"),
         FIO_CLI_INT("-integer3 -i3 third integer"),
+        FIO_CLI_INT("-integer4 -i4 (4) fourth integer"),
+        FIO_CLI_INT("-integer5 -i5 (\"5\") fifth integer"),
         FIO_CLI_BOOL("-boolean -t boolean"),
         FIO_CLI_BOOL("-boolean_false -f boolean"),
         FIO_CLI_STRING("-str -s a string"),
@@ -724,6 +821,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   }
   FIO_ASSERT(fio_cli_get_i("-i2") == 2, "CLI second integer error.");
   FIO_ASSERT(fio_cli_get_i("-i3") == 3, "CLI third integer error.");
+  FIO_ASSERT(fio_cli_get_i("-i4") == 4,
+             "CLI fourth integer error (%s).",
+             fio_cli_get("-i4"));
+  FIO_ASSERT(fio_cli_get_i("-i5") == 5,
+             "CLI fifth integer error (%s).",
+             fio_cli_get("-i5"));
   FIO_ASSERT(fio_cli_get_i("-i1") == 1, "CLI first integer error.");
   FIO_ASSERT(fio_cli_get_i("-i2") == fio_cli_get_i("-integer2"),
              "CLI second integer error.");
