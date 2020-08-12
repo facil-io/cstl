@@ -7114,14 +7114,14 @@ CLI API
  * Example use:
  *
  *    fio_cli_start(argc, argv, 0, 0, "The NAME example accepts the following:",
- *                  FIO_CLI_PRINT_HREADER("Concurrency:"),
- *                  FIO_CLI_INT("-t -thread number of threads to run."),
- *                  FIO_CLI_INT("-w -workers number of workers to run."),
- *                  FIO_CLI_PRINT_HREADER("Address Binding:"),
+ *                  FIO_CLI_PRINT_HEADER("Concurrency:"),
+ *                  FIO_CLI_INT("-t -thread (2) number of threads to run."),
+ *                  FIO_CLI_INT("-w -workers (-1) number of workers to run."),
+ *                  FIO_CLI_PRINT_HEADER("Address Binding:"),
  *                  "-b, -address the address to bind to.",
  *                  FIO_CLI_INT("-p,-port the port to bind to."),
  *                  FIO_CLI_PRINT("\t\tset port to zero (0) for Unix s."),
- *                  FIO_CLI_PRINT_HREADER("Logging:"),
+ *                  FIO_CLI_PRINT_HEADER("Logging:"),
  *                  FIO_CLI_BOOL("-v -log enable logging."));
  *
  *

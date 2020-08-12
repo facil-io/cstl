@@ -231,13 +231,16 @@ int main(int argc, char const *argv[]) {
           "--start-from -s (64) the minimal amount of bytes to allocate "
           "(rounded up by 16)."),
       FIO_CLI_INT("--end-at -e (4096) the maximum amount of bytes to allocate "
-                  "(rounded up by 16)."));
+                  "(rounded up by 16)."),
+      FIO_CLI_BOOL(
+          "--warmup -w perform a warmup cycle before testing allocator."));
 
   TEST_CYCLES_REPEAT = (size_t)fio_cli_get_i("-c");
   TEST_CYCLES_START = (15 + (size_t)fio_cli_get_i("-s")) >> 4;
   TEST_CYCLES_END = (15 + (size_t)fio_cli_get_i("-e")) >> 5;
-  if (TEST_CYCLES_START == TEST_CYCLES_END)
-    TEST_CYCLES_END += 1;
+  size_t warmup = fio_cli_get_bool("-w");
+  if (TEST_CYCLES_START >= TEST_CYCLES_END)
+    TEST_CYCLES_END = TEST_CYCLES_START + 1;
   if (!TEST_CYCLES_REPEAT)
     TEST_CYCLES_REPEAT = 1;
 
@@ -267,10 +270,11 @@ int main(int argc, char const *argv[]) {
           "Performance Testing facil.io memory allocator with %zu threads "
           "(please wait):\n\n",
           thread_count);
-#if defined(TEST_WARMUP) && TEST_WARMUP
-  test_facil_malloc(NULL);                      /* warmup? */
-  test_mem_functions(NULL, calloc, NULL, NULL); /* warmup? */
-#endif
+  if (warmup) {
+    test_facil_malloc(NULL);
+    test_mem_functions(NULL, calloc, NULL, NULL);
+  }
+
   for (size_t i = 0; i < thread_count; ++i) {
     FIO_ASSERT(pthread_create(threads + i, NULL, test_facil_malloc, NULL) == 0,
                "Couldn't spawn thread.");
@@ -286,10 +290,10 @@ int main(int argc, char const *argv[]) {
           "Performance Testing system memory allocator with %zu threads "
           "(please wait):\n\n",
           thread_count);
-#if defined(TEST_WARMUP) && TEST_WARMUP
-  test_system_malloc(NULL);                     /* warmup? */
-  test_mem_functions(NULL, calloc, NULL, NULL); /* warmup? */
-#endif
+  if (warmup) {
+    test_system_malloc(NULL);
+    test_mem_functions(NULL, calloc, NULL, NULL);
+  }
   for (size_t i = 0; i < thread_count; ++i) {
     FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) == 0,
                "Couldn't spawn thread.");
