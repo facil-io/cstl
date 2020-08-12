@@ -684,6 +684,29 @@ struct fio___mem_arena_s {
 };
 
 /* *****************************************************************************
+Memory Allocator State Containers
+***************************************************************************** */
+
+struct fio___mem_state_s {
+  size_t cores;
+#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
+  struct {
+    fio___mem_chunk_s *store[FIO_MEMORY_CHUNK_CACHE];
+    size_t pos;
+  } cache;
+#endif
+  fio___list_node_s available;
+  FIO_MEMORY_LOCK_TYPE
+  lock; /* locks the cache and the available block linked list. */
+  fio___mem_arena_s a[];
+} *fio___mem_state = NULL;
+
+#undef FIO_MEMORY___STATE_SIZE
+#define FIO_MEMORY___STATE_SIZE(cores)                                         \
+  FIO_MEM_BYTES2PAGES(                                                         \
+      (sizeof(*fio___mem_state) + (sizeof(fio___mem_arena_s *) * cores)))
+
+/* *****************************************************************************
 Helpers for system allocation / deallocation of chunks.
 ***************************************************************************** */
 
@@ -784,104 +807,6 @@ FIO_IFUNC void fio___mem_list___remove(fio___list_node_s *head,
 }
 
 /* *****************************************************************************
-Memory Allocator State Containers
-***************************************************************************** */
-
-struct fio___mem_state_s {
-  size_t cores;
-#if defined(FIO_MEMORY_CHUNK_CACHE) && FIO_MEMORY_CHUNK_CACHE
-  struct {
-    fio___mem_chunk_s *store[FIO_MEMORY_CHUNK_CACHE];
-    size_t pos;
-  } cache;
-#endif
-  fio___list_node_s available;
-  FIO_MEMORY_LOCK_TYPE
-  lock; /* locks the cache and the available block linked list. */
-  fio___mem_arena_s a[];
-} *fio___mem_state = NULL;
-
-#undef FIO_MEMORY___STATE_SIZE
-#define FIO_MEMORY___STATE_SIZE(cores)                                         \
-  FIO_MEM_BYTES2PAGES(                                                         \
-      (sizeof(*fio___mem_state) + (sizeof(fio___mem_arena_s *) * cores)))
-
-/* *****************************************************************************
-Core allocator state Construction
-***************************************************************************** */
-
-FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
-  if (fio___mem_state)
-    return;
-
-  FIO_ASSERT_DEBUG(sizeof(fio___mem_block_s) == 16,
-                   "fio___mem_block_s size error");
-  FIO_ASSERT_DEBUG(sizeof(fio___mem_chunk_s) == 16,
-                   "fio___mem_chunk_s size error");
-
-#ifdef _SC_NPROCESSORS_ONLN
-  size_t cores = sysconf(_SC_NPROCESSORS_ONLN);
-  if ((intptr_t)cores <= 0)
-    cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
-#else
-#warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_DEFAULT cores.
-  size_t cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
-  if ((intptr_t)cores <= 0)
-    cores = 1;
-#endif /* _SC_NPROCESSORS_ONLN */
-#if FIO_MEMORY_ARENA_COUNT_MAX
-  if (cores >= FIO_MEMORY_ARENA_COUNT_MAX)
-    cores = FIO_MEMORY_ARENA_COUNT_MAX;
-#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
-  if ((intptr_t)cores <= 0)
-    cores = 1;
-
-  const size_t pages = FIO_MEMORY___STATE_SIZE(cores);
-  fio___mem_state = (struct fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
-  FIO_ASSERT_ALLOC(fio___mem_state);
-  *fio___mem_state = (struct fio___mem_state_s){
-      .cores = cores,
-      .available.next = &fio___mem_state->available,
-      .available.prev = &fio___mem_state->available,
-      .lock = FIO_MEMORY_LOCK_TYPE_INIT,
-  };
-  for (size_t i = 0; i < cores; ++i) {
-    fio___mem_state->a[i].lock = FIO_MEMORY_LOCK_TYPE_INIT;
-  }
-
-#if DEBUG && defined(FIO_LOG_INFO)
-  FIO_LOG_INFO(
-      "facil.io memory allocation initialized:\n"
-      "\t* %zu concurrent arenas (@%p).\n"
-      "\t* %zu pages required for arenas (~%zu bytes).\n"
-      "\t* system allocation size:                     %zu bytes\n"
-      "\t* system allocation overhead:                 %zu bytes\n"
-      "\t* memory block size (allocation slice / bin): %zu bytes\n"
-      "\t* memory blocks per system allocation:        %zu blocks\n"
-      "\t* memory block overhead:                      %zu bytes\n"
-      "\t* allocator limit (revert to mmap):           %zu bytes\n",
-      cores,
-      (void *)fio___mem_state,
-      (size_t)pages,
-      (size_t)(pages << FIO_MEM_PAGE_SIZE_LOG),
-      (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
-      sizeof(fio___mem_chunk_s),
-      (size_t)FIO_MEMORY_BLOCK_SIZE,
-      (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
-      sizeof(fio___mem_block_s),
-      (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT);
-#endif /* DEBUG */
-}
-
-FIO_SFUNC void fio___mem_state_deallocate(void) {
-  if (!fio___mem_state)
-    return;
-  const size_t pages = FIO_MEMORY___STATE_SIZE(fio___mem_state->cores);
-  FIO_MEM_PAGE_FREE(fio___mem_state, pages);
-  fio___mem_state = (struct fio___mem_state_s *)NULL;
-}
-
-/* *****************************************************************************
 Arena selection / locking
 ***************************************************************************** */
 
@@ -889,8 +814,6 @@ static __thread size_t fio___mem_arena_index = 0;
 
 fio___mem_arena_s *fio___mem_arena_lock(void) {
   size_t a = fio___mem_arena_index;
-  if (!fio___mem_state)
-    fio___mem_state_allocate();
   for (;;) {
     for (size_t i = 0; i < fio___mem_state->cores; ++i) {
       if (a >= fio___mem_state->cores)
@@ -1049,6 +972,81 @@ rotate:
   r = fio___mem_slice(a->block, size);
   fio___mem_arena_unlock(a);
   return r;
+}
+
+/* *****************************************************************************
+Core allocator state Construction
+***************************************************************************** */
+
+FIO_SFUNC void __attribute__((constructor)) fio___mem_state_allocate(void) {
+  if (fio___mem_state)
+    return;
+
+  FIO_ASSERT_DEBUG(sizeof(fio___mem_block_s) == 16,
+                   "fio___mem_block_s size error");
+  FIO_ASSERT_DEBUG(sizeof(fio___mem_chunk_s) == 16,
+                   "fio___mem_chunk_s size error");
+
+#ifdef _SC_NPROCESSORS_ONLN
+  size_t cores = sysconf(_SC_NPROCESSORS_ONLN);
+  if ((intptr_t)cores <= 0)
+    cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
+#else
+#warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_DEFAULT cores.
+  size_t cores = FIO_MEMORY_ARENA_COUNT_DEFAULT;
+  if ((intptr_t)cores <= 0)
+    cores = 1;
+#endif /* _SC_NPROCESSORS_ONLN */
+#if FIO_MEMORY_ARENA_COUNT_MAX
+  if (cores >= FIO_MEMORY_ARENA_COUNT_MAX)
+    cores = FIO_MEMORY_ARENA_COUNT_MAX;
+#endif /* FIO_MEMORY_ARENA_COUNT_MAX */
+  if ((intptr_t)cores <= 0)
+    cores = 1;
+
+  const size_t pages = FIO_MEMORY___STATE_SIZE(cores);
+  fio___mem_state = (struct fio___mem_state_s *)FIO_MEM_PAGE_ALLOC(pages, 1);
+  FIO_ASSERT_ALLOC(fio___mem_state);
+  *fio___mem_state = (struct fio___mem_state_s){
+      .cores = cores,
+      .available.next = &fio___mem_state->available,
+      .available.prev = &fio___mem_state->available,
+      .lock = FIO_MEMORY_LOCK_TYPE_INIT,
+  };
+  for (size_t i = 0; i < cores; ++i) {
+    fio___mem_state->a[i].lock = FIO_MEMORY_LOCK_TYPE_INIT;
+  }
+
+#if DEBUG && defined(FIO_LOG_INFO)
+  FIO_LOG_INFO(
+      "facil.io memory allocation initialized:\n"
+      "\t* %zu concurrent arenas (@%p).\n"
+      "\t* %zu pages required for arenas (~%zu bytes).\n"
+      "\t* system allocation size:                     %zu bytes\n"
+      "\t* system allocation overhead:                 %zu bytes\n"
+      "\t* memory block size (allocation slice / bin): %zu bytes\n"
+      "\t* memory blocks per system allocation:        %zu blocks\n"
+      "\t* memory block overhead:                      %zu bytes\n"
+      "\t* allocator limit (revert to mmap):           %zu bytes\n",
+      cores,
+      (void *)fio___mem_state,
+      (size_t)pages,
+      (size_t)(pages << FIO_MEM_PAGE_SIZE_LOG),
+      (size_t)(FIO_MEMORY_BLOCKS_PER_ALLOCATION * FIO_MEMORY_BLOCK_SIZE),
+      sizeof(fio___mem_chunk_s),
+      (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
+      sizeof(fio___mem_block_s),
+      (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT);
+#endif /* DEBUG */
+}
+
+FIO_SFUNC void fio___mem_state_deallocate(void) {
+  if (!fio___mem_state)
+    return;
+  const size_t pages = FIO_MEMORY___STATE_SIZE(fio___mem_state->cores);
+  FIO_MEM_PAGE_FREE(fio___mem_state, pages);
+  fio___mem_state = (struct fio___mem_state_s *)NULL;
 }
 
 /* *****************************************************************************
