@@ -155,23 +155,37 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
       }
       fio_atomic_add(&clock_free2, fio_time_micro() - start);
 
-      /* facil.io use-case */
+      /* facil.io use-case - keep a while and free */
       start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        pointers[j] = malloc_func(i << 4);
-        if (i) {
-          if (!pointers[j])
-            ++errors;
-          else
-            ((char *)pointers[j])[0] = '1';
+      for (int j = 0; j < 128; ++j) {
+        for (int m = 0; m < 32; ++m) {
+          /* NOTE: facil.io use case usually uses calloc...
+           * ... but using calloc will be an easy win over the system.
+           * Using malloc exposes facil.io stress and makes it easier to measure
+           * allocator development improvements.
+           */
+#if 1
+          pointers[m] = malloc_func((i << ((m & 3) + 1)));
+#else
+          pointers[m] = calloc_func((i << ((m & 3) + 1)), 1);
+#endif
+          if (i) {
+            if (!pointers[m])
+              ++errors;
+            else
+              ((char *)pointers[m])[0] = '1';
+          }
         }
-      }
-      for (int j = 0; j < 4096; ++j) {
-        free_func(pointers[j]);
+        for (int m = 0; m < 32; m += 2) {
+          free_func(pointers[m]);
+        }
+        for (int m = 1; m < 32; m += 2) {
+          free_func(pointers[m]);
+        }
       }
       fio_atomic_add(&fio_optimized, fio_time_micro() - start);
 
-      /* facil.io use-case */
+      /* immediate use-release */
       start = fio_time_micro();
       for (int j = 0; j < 4096; ++j) {
         pointers[j] = malloc_func(i << 4);
@@ -230,8 +244,11 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_INT(
           "--start-from -s (64) the minimal amount of bytes to allocate "
           "(rounded up by 16)."),
-      FIO_CLI_INT("--end-at -e (4096) the maximum amount of bytes to allocate "
+      FIO_CLI_INT("--end-at -e (8192) the maximum amount of bytes to allocate "
                   "(rounded up by 16)."),
+      FIO_CLI_PRINT("Note (due to realloc testing):"),
+      FIO_CLI_PRINT(
+          "maximum amount of bytes allocated is at least twice the minimal."),
       FIO_CLI_BOOL(
           "--warmup -w perform a warmup cycle before testing allocator."));
 
@@ -271,7 +288,14 @@ int main(int argc, char const *argv[]) {
           "(please wait):\n\n",
           thread_count);
   if (warmup) {
-    test_facil_malloc(NULL);
+    for (size_t i = 0; i < thread_count; ++i) {
+      FIO_ASSERT(pthread_create(threads + i, NULL, test_facil_malloc, NULL) ==
+                     0,
+                 "Couldn't spawn thread.");
+    }
+    for (size_t i = 0; i < thread_count; ++i) {
+      FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+    }
     test_mem_functions(NULL, calloc, NULL, NULL);
   }
 
@@ -291,7 +315,14 @@ int main(int argc, char const *argv[]) {
           "(please wait):\n\n",
           thread_count);
   if (warmup) {
-    test_system_malloc(NULL);
+    for (size_t i = 0; i < thread_count; ++i) {
+      FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) ==
+                     0,
+                 "Couldn't spawn thread.");
+    }
+    for (size_t i = 0; i < thread_count; ++i) {
+      FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+    }
     test_mem_functions(NULL, calloc, NULL, NULL);
   }
   for (size_t i = 0; i < thread_count; ++i) {
