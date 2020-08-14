@@ -526,7 +526,7 @@ print_help:
     type = (char *)FIO_CLI_STRING__TYPE_I;
     switch ((intptr_t)pos[1]) {
     case FIO_CLI_PRINT__TYPE_I:
-      fprintf(stderr, "%s\n", pos[0]);
+      fprintf(stderr, "          \t%s\n", pos[0]);
       pos += 2;
       continue;
     case FIO_CLI_PRINT_HEADER__TYPE_I:
