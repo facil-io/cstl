@@ -35,9 +35,10 @@ Arenas are "sticky", which means that each thread will first try to access it's
 previoiusly accessed arena. Only if the previously accessed arena is busy will
 the thread attempt to access a different arena.
 
-Each Arena has a "block" of memory which is used for memory allocation.
+Each Arena has both  a "block" and a "big-block" of memory which are used for
+memory allocation.
 
-Once the user frees all of a block's memory, the block will be placed in an
+Once the user frees all of a block's memory, the blocks will be placed in an
 "available" list until the memory can be returned to the system (or cached).
 
 Allocations
@@ -46,6 +47,8 @@ Allocations
 Memory "chunks" are allocated from the system (by default through `mmap`).
 
 Chunks are divided into "blocks" that are used for actual memory allocation.
+
+Big blocks are used for larger allocations and they use the whole chunk.
 
 Both chunks and blocks are always allocated on a specific memory boundary where
 a specific amount of least significant bits are always zero.
@@ -57,8 +60,8 @@ the chunk (where metadata is stored) can be easily inferred using a bit mask.
 Once a block was fully utiliized, the allocator will no longer keep a record of
 that block until the user frees all it's memory.
 
-It should be noted that the first block header and the chunk header occupy the
-same 16 bytes (interleaved).
+It should be noted that the first block header on every chunk and the chunk
+header occupy the same 16 bytes (interleaved).
 
 Deallocations
 ==============
@@ -417,6 +420,7 @@ Aligned memory copying
 FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint16_t, 2)
 FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint32_t, 4)
 FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint64_t, 8)
+#undef FIO_MEMCOPY_FIO_IFUNC_ALIGNED
 
 /** Copies 16 byte `units` of size_t aligned memory blocks */
 FIO_IFUNC void
@@ -702,6 +706,9 @@ struct fio___mem_big_block_s {
   uint32_t pos;
   uint32_t reserved;
 };
+
+#undef FIO_MEMORY_BIG_BLOCK_MARKER
+#define FIO_MEMORY_BIG_BLOCK_MARKER (~(uint32_t)1)
 
 /* must consume exactly 16 bytes for allocation alignment - overlays block */
 struct fio___mem_chunk_s {
@@ -1018,7 +1025,7 @@ FIO_IFUNC fio___mem_big_block_s *fio___mem_big_block_new(void) {
   FIO_MEMORY_UNLOCK(fio___mem_state->lock);
   b->ref = 1;
   b->pos = 1;
-  b->marker = ~(uint32_t)0;
+  b->marker = FIO_MEMORY_BIG_BLOCK_MARKER;
   return b;
 }
 FIO_IFUNC void *fio___mem_big_slice(fio___mem_big_block_s *b, size_t units) {
@@ -1257,7 +1264,7 @@ SFUNC void fio_free(void *ptr) {
     return;
   fio___mem_chunk_s *c = fio___mem_ptr2chunk(ptr);
   /* big slice allocation? */
-  if (c->marker == ~(uint32_t)0)
+  if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER)
     goto big_free;
   /* if the allocation is after a marked chunk header it was fio_mmap */
   if ((uintptr_t)(c + 1) == (uintptr_t)ptr && c->marker)
@@ -1323,7 +1330,7 @@ SFUNC void *FIO_ALIGN fio_realloc2(void *ptr,
     register fio___mem_block_s *const b = fio___mem_ptr2block(ptr);
     register size_t max_len =
         ((uintptr_t)b + FIO_MEMORY_BLOCK_SIZE) - ((uintptr_t)ptr);
-    if (c->marker == ~(uint32_t)0) {
+    if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER) {
       /* big-slice reallocation */
       max_len =
           ((uintptr_t)c + FIO_MEMORY_SYS_ALLOCATION_SIZE) - ((uintptr_t)ptr);
@@ -1712,16 +1719,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
 /* *****************************************************************************
 Memory Allocation - cleanup
 ***************************************************************************** */
-#undef FIO_MEMORY_ON_BLOCK_ALLOC
-#undef FIO_MEMORY_ON_BLOCK_FREE
-#undef FIO_MEMORY_PRINT_BLOCK_STAT
-#undef FIO_MEMORY_PRINT_BLOCK_STAT_END
+#undef FIO_MEMORY_ON_CHUNK_ALLOC
+#undef FIO_MEMORY_ON_CHUNK_FREE
+#undef FIO_MEMORY_ON_CHUNK_CACHE
+#undef FIO_MEMORY_ON_CHUNK_UNCACHE
+#undef FIO_MEMORY_PRINT_STATS
+#undef FIO_MEMORY_PRINT_STATS_END
+#undef FIO_MEMORY_BIG_BLOCK_MARKER
+#undef FIO_MEMORY_USE_PTHREAD_MUTEX
+#undef FIO_MEMORY_LOCK_TYPE
+#undef FIO_MEMORY_LOCK_TYPE_INIT
+#undef FIO_MEMORY_TRYLOCK
+#undef FIO_MEMORY_LOCK
+#undef FIO_MEMORY_UNLOCK
+
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_MEMORY_BLOCK_HEADER_SIZE
-#undef FIO_MEMORY_BLOCK_MASK
-#undef FIO_MEMORY_BLOCK_SLICES
-#undef FIO_MEMORY_BLOCK_START_POS
-#undef FIO_MEMORY_MAX_SLICES_PER_BLOCK
 #undef FIO_ALIGN
 #undef FIO_ALIGN_NEW
 #undef FIO_MALLOC
