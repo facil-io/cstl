@@ -5290,8 +5290,8 @@ big_free:
   return;
 mmap_free:
   /* zero out memory before returning it to the system */
-  memset(ptr, 0, (c->marker) - sizeof(*c));
-  FIO_MEM_PAGE_FREE(c, (c->marker >> FIO_MEM_PAGE_SIZE_LOG));
+  memset(ptr, 0, ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - sizeof(*c));
+  FIO_MEM_PAGE_FREE(c, c->marker);
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 

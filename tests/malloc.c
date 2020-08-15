@@ -29,14 +29,26 @@ static size_t TEST_CYCLES_REPEAT;
  */
 #define TEST_WITH_REALLOC2 1
 
+/**
+ * Tests interleaved allocation-free pattern
+ */
+#define TEST_WITH_INTERLEAVED_FREE 1
+
+/* *****************************************************************************
+Testing implementation
+***************************************************************************** */
+
 #if TEST_WITH_REALLOC2
 FIO_SFUNC void *sys_realloc2(void *ptr, size_t new_size, size_t copy_len) {
   return realloc(ptr, new_size);
   (void)copy_len;
 }
 typedef void *(*realloc_func_p)(void *, size_t, size_t);
+#define REALLOC_FUNC(func, ptr, new_size, copy_len)                            \
+  func(ptr, new_size, copy_len)
 #else
 typedef void *(*realloc_func_p)(void *, size_t);
+#define REALLOC_FUNC(func, ptr, new_size, copy_len) func(ptr, new_size)
 #endif
 
 static size_t test_mem_functions(void *(*malloc_func)(size_t),
@@ -46,6 +58,11 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
   static size_t clock_alloc = 0, clock_realloc = 0, clock_free = 0,
                 clock_free2 = 0, clock_calloc = 0, fio_optimized = 0,
                 fio_optimized2 = 0, errors = 0, repetitions = 0;
+
+  const size_t size_units = TEST_CYCLES_END - TEST_CYCLES_START;
+  const size_t pointers_per_unit =
+      ((size_units >= 4096) ? 1 : (4096 / size_units));
+  const size_t total_pointers = pointers_per_unit * size_units;
 
   if (!malloc_func) {
     size_t total = clock_alloc + clock_realloc + clock_free + clock_free2 +
@@ -58,6 +75,10 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
     fio_optimized /= repetitions;
     fio_optimized2 /= repetitions;
     if (!calloc_func) {
+      FIO_LOG_DEBUG2("* size_units: %zu, ppu: %zu, total pointers: %zu \n",
+                     size_units,
+                     pointers_per_unit,
+                     total_pointers);
       fprintf(stderr, "* Avrg. micro-seconds per malloc: %zu\n", clock_alloc);
       fprintf(stderr, "* Avrg. micro-seconds per calloc: %zu\n", clock_calloc);
       fprintf(
@@ -69,13 +90,15 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
               "* Avrg. micro-seconds per free (re-cycle): %zu\n",
               clock_free2);
       fprintf(stderr,
-              "* Avrg. micro-seconds per a facil.io use-case round"
-              " (medium-short life): %zu\n",
-              fio_optimized);
-      fprintf(stderr,
               "* Avrg. micro-seconds per a zero-life span"
               " (malloc-free): %zu\n",
+              fio_optimized);
+#if TEST_WITH_INTERLEAVED_FREE
+      fprintf(stderr,
+              "* Avrg. micro-seconds per a facil.io use-case round"
+              " (medium-short life): %zu\n",
               fio_optimized2);
+#endif
       fprintf(stderr, "* Failed allocations: %zu\n", errors);
       fprintf(stderr, "Total CPU Time (micros): %zu\n", total);
     }
@@ -90,118 +113,130 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
     repetitions = 0;
     return 0;
   }
-  fio_atomic_add(&repetitions,
-                 (TEST_CYCLES_END - TEST_CYCLES_START) * TEST_CYCLES_REPEAT);
 
-  for (size_t i = TEST_CYCLES_START; i < TEST_CYCLES_END; ++i) {
-    for (size_t repeat = 0; repeat < TEST_CYCLES_REPEAT; ++repeat) {
-      void **pointers = calloc_func(sizeof(*pointers), 4096);
-      uint64_t start;
+  void **pointers = fio_mmap(sizeof(*pointers) * (total_pointers + 1));
 
-      /* malloc */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        pointers[j] = malloc_func(i << 4);
-        if (i) {
-          if (!pointers[j])
+  fio_atomic_add(&repetitions, TEST_CYCLES_REPEAT);
+  for (size_t repeat = 0; repeat < TEST_CYCLES_REPEAT; ++repeat) {
+    uint64_t start;
+    /* malloc */
+    start = fio_time_micro();
+    for (size_t unit = 0; unit < size_units; ++unit) {
+      const size_t bytes = (TEST_CYCLES_START + unit) << 4;
+      for (size_t pi = 0; pi < pointers_per_unit; ++pi) {
+        const size_t i = ((pointers_per_unit * unit) + pi);
+        pointers[i] = malloc_func(bytes);
+        if (bytes) {
+          if (!pointers[i])
             ++errors;
           else
-            ((char *)pointers[j])[0] = '1';
+            ((char *)pointers[i])[0] = '1';
         }
       }
-      fio_atomic_add(&clock_alloc, fio_time_micro() - start);
-
-      /* realloc */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-#if TEST_WITH_REALLOC2
-        void *tmp = realloc_func(pointers[j], i << 5, i << 4);
-#else
-        void *tmp = realloc_func(pointers[j], i << 5);
-#endif
-        if (tmp) {
-          pointers[j] = tmp;
-          ((char *)pointers[j])[0] = '1';
-        } else if (i)
-          ++errors;
-      }
-      fio_atomic_add(&clock_realloc, fio_time_micro() - start);
-
-      /* free (bigger sizes, due to realloc) */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        free_func(pointers[j]);
-        pointers[j] = NULL;
-      }
-      fio_atomic_add(&clock_free, fio_time_micro() - start);
-
-      /* calloc */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        pointers[j] = calloc_func(16, i);
-        if (i) {
-          if (!pointers[j])
-            ++errors;
-          else
-            ((char *)pointers[j])[0] = '1';
-        }
-      }
-      fio_atomic_add(&clock_calloc, fio_time_micro() - start);
-
-      /* free (smaller sizes, no realloc) */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        free_func(pointers[j]);
-      }
-      fio_atomic_add(&clock_free2, fio_time_micro() - start);
-
-      /* facil.io use-case - keep a while and free */
-      start = fio_time_micro();
-      for (int j = 0; j < 128; ++j) {
-        for (int m = 0; m < 32; ++m) {
-          /* NOTE: facil.io use case usually uses calloc...
-           * ... but using calloc will be an easy win over the system.
-           * Using malloc exposes facil.io stress and makes it easier to measure
-           * allocator development improvements.
-           */
-#if 1
-          pointers[m] = malloc_func((i << ((m & 3) + 1)));
-#else
-          pointers[m] = calloc_func((i << ((m & 3) + 1)), 1);
-#endif
-          if (i) {
-            if (!pointers[m])
-              ++errors;
-            else
-              ((char *)pointers[m])[0] = '1';
-          }
-        }
-        for (int m = 0; m < 32; m += 2) {
-          free_func(pointers[m]);
-        }
-        for (int m = 1; m < 32; m += 2) {
-          free_func(pointers[m]);
-        }
-      }
-      fio_atomic_add(&fio_optimized, fio_time_micro() - start);
-
-      /* immediate use-release */
-      start = fio_time_micro();
-      for (int j = 0; j < 4096; ++j) {
-        pointers[j] = malloc_func(i << 4);
-        if (i) {
-          if (!pointers[j])
-            ++errors;
-          else
-            ((char *)pointers[j])[(i << 4) - 1] = '1';
-        }
-        free_func(pointers[j]);
-      }
-      fio_atomic_add(&fio_optimized2, fio_time_micro() - start);
-
-      free_func(pointers);
     }
+    fio_atomic_add(&clock_alloc, fio_time_micro() - start);
+
+    /* realloc */
+    start = fio_time_micro();
+    for (size_t unit = 0; unit < size_units; ++unit) {
+      const size_t bytes = (TEST_CYCLES_START + unit) << 4;
+      for (size_t pi = 0; pi < pointers_per_unit; ++pi) {
+        const size_t i = (pointers_per_unit * unit) + pi;
+        void *tmp =
+            REALLOC_FUNC(realloc_func, pointers[i], (bytes << 1), bytes);
+        if (bytes) {
+          if (tmp) {
+            pointers[i] = tmp;
+          } else
+            ++errors;
+        }
+      }
+    }
+    fio_atomic_add(&clock_realloc, fio_time_micro() - start);
+
+    /* free (bigger sizes, due to realloc) */
+    start = fio_time_micro();
+    for (size_t i = 0; i < total_pointers; ++i) {
+      free_func(pointers[i]);
+      pointers[i] = NULL;
+    }
+    fio_atomic_add(&clock_free, fio_time_micro() - start);
+
+    /* calloc */
+    start = fio_time_micro();
+    for (size_t unit = 0; unit < size_units; ++unit) {
+      const size_t bytes = (TEST_CYCLES_START + unit) << 4;
+      for (size_t pi = 0; pi < pointers_per_unit; ++pi) {
+        const size_t i = (pointers_per_unit * unit) + pi;
+        pointers[i] = calloc_func(bytes, 1);
+        if (bytes) {
+          if (!pointers[i])
+            ++errors;
+          else
+            ((char *)pointers[i])[0] = '1';
+        }
+      }
+    }
+    fio_atomic_add(&clock_calloc, fio_time_micro() - start);
+
+    /* free (smaller sizes, no realloc) */
+    start = fio_time_micro();
+    for (size_t i = 0; i < total_pointers; ++i) {
+      free_func(pointers[i]);
+      pointers[i] = NULL;
+    }
+    fio_atomic_add(&clock_free2, fio_time_micro() - start);
+
+    /* immediate use-release */
+    start = fio_time_micro();
+    for (size_t pi = 0; pi < pointers_per_unit; ++pi) {
+      for (size_t unit = 0; unit < size_units; ++unit) {
+        const size_t bytes = (TEST_CYCLES_START + unit) << 4;
+        const size_t i = (pointers_per_unit * unit) + pi;
+        pointers[i] = malloc_func(bytes);
+        if (bytes) {
+          if (!pointers[i])
+            ++errors;
+          else
+            ((char *)pointers[i])[0] = '1';
+        }
+        free_func(pointers[i]);
+        pointers[i] = NULL;
+      }
+    }
+    fio_atomic_add(&fio_optimized, fio_time_micro() - start);
+
+    /* facil.io use-case - keep a while and free */
+    for (size_t i = 0; i < 64; ++i) {
+      pointers[i] = NULL;
+    }
+    start = fio_time_micro();
+#if TEST_WITH_INTERLEAVED_FREE
+    for (size_t unit = 0; unit < size_units; ++unit) {
+      const size_t bytes = (TEST_CYCLES_START + unit) << 4;
+      for (size_t i = 0; i < 32; ++i) {
+        pointers[i + 32] = pointers[i];
+        pointers[i] = malloc_func(bytes);
+        if (bytes) {
+          if (!pointers[i])
+            ++errors;
+          else
+            ((char *)pointers[i])[0] = '1';
+        }
+      }
+      for (size_t i = 0; i < 32; ++i) {
+        free_func(pointers[i + 32]);
+        pointers[i + 32] = NULL;
+      }
+    }
+    for (size_t i = 0; i < 64; ++i) {
+      free_func(pointers[i]);
+      pointers[i] = NULL;
+    }
+#endif
+    fio_atomic_add(&fio_optimized2, fio_time_micro() - start);
   }
+  fio_free(pointers);
   return clock_alloc + clock_realloc + clock_free + clock_calloc + clock_free2;
 }
 
@@ -226,6 +261,11 @@ void *test_facil_malloc(void *ignr) {
   return (void *)result;
 }
 
+/* *****************************************************************************
+Main function
+*****************************************************************************
+*/
+
 int main(int argc, char const *argv[]) {
   fio_cli_start(
       argc,
@@ -240,11 +280,11 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_INT(
           "--threads -t (1) runs the test concurrently, adding contention. "),
       FIO_CLI_INT(
-          "--cycles -c (4) the amount of times to run through the test."),
+          "--cycles -c (8) the amount of times to run through the test."),
       FIO_CLI_INT(
           "--start-from -s (64) the minimal amount of bytes to allocate "
           "(rounded up by 16)."),
-      FIO_CLI_INT("--end-at -e (8192) the maximum amount of bytes to allocate "
+      FIO_CLI_INT("--end-at -e (65536) the maximum amount of bytes to allocate "
                   "(rounded up by 16)."),
       FIO_CLI_PRINT("Note (due to realloc testing):"),
       FIO_CLI_PRINT(
