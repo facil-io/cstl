@@ -226,7 +226,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * The maximum allocation size, after which a "big block" allocation will be
  * used.
  *
- * Defaults to 12.5% of the block (16KB), after which big-blocks are used.
+ * Defaults to 6.25% of the block (16KB), after which big-blocks are used.
  */
 #define FIO_MEMORY_BLOCK_ALLOC_LIMIT (1UL << (FIO_MEMORY_BLOCK_SIZE_LOG - 4))
 #endif
@@ -236,7 +236,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * The maximum allocation size, after which `mmap` will be called instead of the
  * facil.io allocator.
  *
- * Defaults to 25% of the big-block/chubk (0.5Mb), after which `mmap` is used
+ * Defaults to 6.25% of the big-block/chunk (0.5Mb), after which `mmap` is used
  * instead.
  */
 // #define FIO_MEMORY_BIG_BLOCK_ALLOC_LIMIT FIO_MEMORY_BLOCK_ALLOC_LIMIT

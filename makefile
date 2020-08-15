@@ -54,7 +54,12 @@ LIB_PRIVATE_SUBFOLDERS=
 # Single Library Concatenation
 #############################################################################
 
+# a folder containing code that should be unified into a single file
+#
+# Note: files will be unified in the same order the system provides (usually, file anme)
 LIB_CONCAT_FOLDER=stl_slices
+
+# the path and file name to use when unifying *.c, *.h, and *.md files (without extension).
 LIB_CONCAT_TARGET=fio-stl
 
 #############################################################################
@@ -63,6 +68,9 @@ LIB_CONCAT_TARGET=fio-stl
 
 # Testing folder
 TEST_ROOT=tests
+
+# The default test file to run when running: make test (without the  C extension)
+TEST_DEFAULT=stl
 
 #############################################################################
 # CMake Support
@@ -803,6 +811,26 @@ test/%: | create_tree test_set_test_flag___
 	@$(CCL) -o $(BIN) $(TMP_ROOT)/$*.o $(LINKER_FLAGS) $(OPTIMIZATION)
 	@echo "* Starting test:"
 	@$(BIN)
+
+ifneq ($(TEST_DEFAULT),)
+.PHONY : test%
+test: | create_tree test_set_test_flag___ 
+	@echo "* Compiling $(TEST_ROOT)/$(TEST_DEFAULT).c"
+	@$(CC) -c $(TEST_ROOT)/$(TEST_DEFAULT).c -o $(TMP_ROOT)/$(TEST_DEFAULT).o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
+	@echo "* Linking"
+	@$(CCL) -o $(BIN) $(TMP_ROOT)/$(TEST_DEFAULT).o $(LINKER_FLAGS) $(OPTIMIZATION)
+	@echo "* Starting test:"
+	@$(BIN)
+
+.PHONY : test/db%
+test/db: | create_tree set_debug_flags___ test_set_test_flag___
+	@echo "* Compiling $(TEST_ROOT)/$(TEST_DEFAULT).c"
+	@$(CC) -c $(TEST_ROOT)/$(TEST_DEFAULT).c -o $(TMP_ROOT)/$(TEST_DEFAULT).o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
+	@echo "* Linking"
+	@$(CCL) -o $(BIN) $(TMP_ROOT)/$(TEST_DEFAULT).o $(LINKER_FLAGS) $(OPTIMIZATION)
+	@echo "* Starting test:"
+	@$(BIN)
+endif
 
 #############################################################################
 # Tasks - library code dumping & CMake
