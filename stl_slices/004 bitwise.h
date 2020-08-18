@@ -228,44 +228,7 @@ FIO_IFUNC uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
 Unaligned memory read / write operations
 ***************************************************************************** */
 
-#if __has_builtin(__builtin_memcpy)
-/** Converts an unaligned byte stream to a 16 bit number (local byte order). */
-FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
-  uint16_t tmp; /* fio_buf2u16 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-/** Converts an unaligned byte stream to a 32 bit number (local byte order). */
-FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
-  uint32_t tmp; /* fio_buf2u32 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-/** Converts an unaligned byte stream to a 64 bit number (local byte order). */
-FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
-  /* fio_buf2u64 */
-  uint64_t tmp;
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-
-/** Writes a local 16 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf,
-                                             uint16_t i) { /* fio_u2buf16 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-/** Writes a local 32 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf,
-                                             uint32_t i) { /* fio_u2buf32 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-/** Writes a local 64 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf,
-                                             uint64_t i) { /* fio_u2buf64 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-
-#elif FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   const uint16_t *tmp = (const uint16_t *)c; /* fio_buf2u16 */
@@ -295,17 +258,24 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   *((uint64_t *)buf) = i; /* fio_u2buf64 */
 }
 
-#else  /* no unaligned access, no builtin memcpy, use hope.. */
+#else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+
+#if __has_builtin(__builtin_memcpy)
+#define FIO___MEMCPY __builtin_memcpy
+#else
+#define FIO___MEMCPY memcpy
+#endif
+
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO___MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO___MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
@@ -317,18 +287,19 @@ FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf16 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf32 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf64 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
-#endif /* __has_builtin(__builtin_memcpy) /                                    \
-          FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#undef FIO___MEMCPY
+
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (reversed order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_bswap)(const void *c) {
@@ -458,6 +429,50 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
 }
 
 #endif
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_local)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_bswap)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_bswap)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_little)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_little)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
 
 /* *****************************************************************************
 Constant-Time Selectors
@@ -688,5 +703,163 @@ FIO_IFUNC void fio_bitmap_flip(void *map, size_t bit) {
   fio_atomic_xor((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
 }
 
-#endif
+/* *****************************************************************************
+Bit-Byte operations - testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
+  fprintf(stderr, "* Testing fio_bswapX macros.\n");
+  FIO_ASSERT(fio_bswap16(0x0102) == (uint16_t)0x0201, "fio_bswap16 failed");
+  FIO_ASSERT(fio_bswap32(0x01020304) == (uint32_t)0x04030201,
+             "fio_bswap32 failed");
+  FIO_ASSERT(fio_bswap64(0x0102030405060708ULL) == 0x0807060504030201ULL,
+             "fio_bswap64 failed");
+
+  fprintf(stderr, "* Testing fio_lrotX and fio_rrotX macros.\n");
+  {
+    uint64_t tmp = 1;
+    tmp = FIO_RROT(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
+               "fio_rrot failed");
+    tmp = FIO_LROT(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
+    tmp = 1;
+    tmp = fio_rrot32(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
+    tmp = fio_lrot32(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
+    tmp = 1;
+    tmp = fio_rrot64(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 63), "fio_rrot64 failed");
+    tmp = fio_lrot64(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
+  }
+
+  fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
+#define FIO___BITMAP_TEST_BITS(bits)                                           \
+  for (size_t i = 0; i <= (bits); ++i) {                                       \
+    char tmp_buf[16];                                                          \
+    int##bits##_t n = ((uint##bits##_t)1 << i);                                \
+    FIO_NAME2(fio_u, buf##bits)(tmp_buf, n);                                   \
+    int##bits##_t r = FIO_NAME2(fio_buf, u##bits)(tmp_buf);                    \
+    FIO_ASSERT(r == n,                                                         \
+               "roundtrip failed for U" #bits " at bit %zu\n\t%zu != %zu",     \
+               i,                                                              \
+               (size_t)n,                                                      \
+               (size_t)r);                                                     \
+  }
+  FIO___BITMAP_TEST_BITS(8);
+  FIO___BITMAP_TEST_BITS(16);
+  FIO___BITMAP_TEST_BITS(32);
+  FIO___BITMAP_TEST_BITS(64);
+#undef FIO___BITMAP_TEST_BITS
+
+  fprintf(stderr, "* Testing constant-time helpers.\n");
+  FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
+  for (uintptr_t i = 1; i; i <<= 1) {
+    FIO_ASSERT(
+        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+  }
+  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
+    FIO_ASSERT(
+        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+  }
+  FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
+             "fio_ct_true(%p) should be true!",
+             (void *)(~0ULL));
+
+  FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
+  for (uintptr_t i = 1; i; i <<= 1) {
+    FIO_ASSERT(
+        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+  }
+  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
+    FIO_ASSERT(
+        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+  }
+  FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
+             "fio_ct_false(%p) should be zero!",
+             (void *)(~0ULL));
+  FIO_ASSERT(fio_ct_true(8), "fio_ct_true should be true.");
+  FIO_ASSERT(!fio_ct_true(0), "fio_ct_true should be false.");
+  FIO_ASSERT(!fio_ct_false(8), "fio_ct_false should be false.");
+  FIO_ASSERT(fio_ct_false(0), "fio_ct_false should be true.");
+  FIO_ASSERT(fio_ct_if_bool(0, 1, 2) == 2,
+             "fio_ct_if_bool selection error (false).");
+  FIO_ASSERT(fio_ct_if_bool(1, 1, 2) == 1,
+             "fio_ct_if_bool selection error (true).");
+  FIO_ASSERT(fio_ct_if(0, 1, 2) == 2, "fio_ct_if selection error (false).");
+  FIO_ASSERT(fio_ct_if(8, 1, 2) == 1, "fio_ct_if selection error (true).");
+  {
+    uint8_t bitmap[1024];
+    memset(bitmap, 0, 1024);
+    fprintf(stderr, "* Testing bitmap helpers.\n");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 97), "fio_bitmap_get should be 0.");
+    fio_bitmap_set(bitmap, 97);
+    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
+               "fio_bitmap_get should be 1 after being set");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
+               "other bits shouldn't be effected by set.");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 98),
+               "other bits shouldn't be effected by set.");
+    fio_bitmap_flip(bitmap, 96);
+    fio_bitmap_flip(bitmap, 97);
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 97),
+               "fio_bitmap_get should be 0 after flip.");
+    FIO_ASSERT(fio_bitmap_get(bitmap, 96) == 1,
+               "other bits shouldn't be effected by flip");
+    fio_bitmap_unset(bitmap, 96);
+    fio_bitmap_flip(bitmap, 97);
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
+               "fio_bitmap_get should be 0 after unset.");
+    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
+               "other bits shouldn't be effected by unset");
+    fio_bitmap_unset(bitmap, 96);
+  }
+  {
+    fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
+    for (int i = 0; i < 64; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
+                 "fio_popcount error for 1 bit");
+    }
+    for (int i = 0; i < 63; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
+                 "fio_popcount error for 2 bits");
+    }
+    for (int i = 0; i < 62; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
+                 "fio_popcount error for 3 bits");
+    }
+    for (int i = 0; i < 59; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
+                 "fio_popcount error for 3 alternating bits");
+    }
+    for (int i = 0; i < 64; ++i) {
+      FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
+                 "fio_hemming_dist error at %d",
+                 i);
+    }
+  }
+  {
+    struct test_s {
+      int a;
+      char force_padding;
+      int b;
+    } stst = {.a = 1};
+    struct test_s *stst_p = FIO_PTR_FROM_FIELD(struct test_s, b, &stst.b);
+    FIO_ASSERT(stst_p == &stst, "FIO_PTR_FROM_FIELD failed to retrace pointer");
+  }
+}
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Bit-Byte operations - cleanup
+***************************************************************************** */
 #undef FIO_BITMAP
+#endif /* FIO_BITMAP */

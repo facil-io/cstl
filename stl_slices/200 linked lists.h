@@ -124,18 +124,6 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, shift)(FIO_LIST_HEAD *head);
 /** Returns a pointer to a list's element, from a pointer to a node. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, root)(FIO_LIST_HEAD *ptr);
 
-#ifndef FIO_LIST_EACH
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(                                \
-                 type, node_name, next____p_ls->node_name.next)))
-#endif
-
 /* *****************************************************************************
 Linked Lists (embeded) - Implementation
 ***************************************************************************** */

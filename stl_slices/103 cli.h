@@ -309,7 +309,7 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
 
   ((char *)val.buf)[val.len] = 0;
   memcpy((char *)val.buf, d.buf, val.len);
-  FIO_LOG_DEBUG("CLI stored a default value: %s", val.buf);
+  FIO_LOG_DEBUG("CLI stored a string: %s", val.buf);
   return val;
 }
 

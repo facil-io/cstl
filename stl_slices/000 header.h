@@ -395,6 +395,18 @@ typedef struct fio___list_node_s {
 #define FIO_LIST_INIT(obj)                                                     \
   { .next = &(obj), .prev = &(obj) }
 
+#ifndef FIO_LIST_EACH
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls =                                                    \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls),                                                   \
+            (next____p_ls = FIO_PTR_FROM_FIELD(                                \
+                 type, node_name, next____p_ls->node_name.next)))
+#endif
+
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
@@ -507,8 +519,12 @@ Miscellaneous helper macros
 
 /** Marks a function as `static`, `inline` and possibly unused. */
 #define FIO_IFUNC static inline __attribute__((unused))
+
 /** Marks a function as `static` and possibly unused. */
 #define FIO_SFUNC static __attribute__((unused))
+
+/** Marks a function as weak */
+#define FIO_WEAK __attribute__((weak))
 
 /* *****************************************************************************
 End persistent segment (end include-once guard)

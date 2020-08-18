@@ -395,6 +395,18 @@ typedef struct fio___list_node_s {
 #define FIO_LIST_INIT(obj)                                                     \
   { .next = &(obj), .prev = &(obj) }
 
+#ifndef FIO_LIST_EACH
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls =                                                    \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls),                                                   \
+            (next____p_ls = FIO_PTR_FROM_FIELD(                                \
+                 type, node_name, next____p_ls->node_name.next)))
+#endif
+
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
@@ -507,8 +519,12 @@ Miscellaneous helper macros
 
 /** Marks a function as `static`, `inline` and possibly unused. */
 #define FIO_IFUNC static inline __attribute__((unused))
+
 /** Marks a function as `static` and possibly unused. */
 #define FIO_SFUNC static __attribute__((unused))
+
+/** Marks a function as weak */
+#define FIO_WEAK __attribute__((weak))
 
 /* *****************************************************************************
 End persistent segment (end include-once guard)
@@ -1625,44 +1641,7 @@ FIO_IFUNC uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
 Unaligned memory read / write operations
 ***************************************************************************** */
 
-#if __has_builtin(__builtin_memcpy)
-/** Converts an unaligned byte stream to a 16 bit number (local byte order). */
-FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
-  uint16_t tmp; /* fio_buf2u16 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-/** Converts an unaligned byte stream to a 32 bit number (local byte order). */
-FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
-  uint32_t tmp; /* fio_buf2u32 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-/** Converts an unaligned byte stream to a 64 bit number (local byte order). */
-FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
-  /* fio_buf2u64 */
-  uint64_t tmp;
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
-  return tmp;
-}
-
-/** Writes a local 16 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf,
-                                             uint16_t i) { /* fio_u2buf16 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-/** Writes a local 32 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf,
-                                             uint32_t i) { /* fio_u2buf32 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-/** Writes a local 64 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf,
-                                             uint64_t i) { /* fio_u2buf64 */
-  __builtin_memcpy(buf, &i, sizeof(i));
-}
-
-#elif FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   const uint16_t *tmp = (const uint16_t *)c; /* fio_buf2u16 */
@@ -1692,17 +1671,24 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   *((uint64_t *)buf) = i; /* fio_u2buf64 */
 }
 
-#else  /* no unaligned access, no builtin memcpy, use hope.. */
+#else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+
+#if __has_builtin(__builtin_memcpy)
+#define FIO___MEMCPY __builtin_memcpy
+#else
+#define FIO___MEMCPY memcpy
+#endif
+
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO___MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO___MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
@@ -1714,18 +1700,19 @@ FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf16 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf32 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  memcpy(buf, &i, sizeof(i)); /* fio_u2buf64 */
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
-#endif /* __has_builtin(__builtin_memcpy) /                                    \
-          FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#undef FIO___MEMCPY
+
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (reversed order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_bswap)(const void *c) {
@@ -1855,6 +1842,50 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
 }
 
 #endif
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_local)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_bswap)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_bswap)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_little)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8_little)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
+
+/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8)(const void *c) {
+  const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
+  return *tmp;
+}
+
+/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf8)(void *buf, uint8_t i) {
+  *((uint8_t *)buf) = i; /* fio_u2buf16 */
+}
 
 /* *****************************************************************************
 Constant-Time Selectors
@@ -2085,8 +2116,166 @@ FIO_IFUNC void fio_bitmap_flip(void *map, size_t bit) {
   fio_atomic_xor((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
 }
 
-#endif
+/* *****************************************************************************
+Bit-Byte operations - testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
+  fprintf(stderr, "* Testing fio_bswapX macros.\n");
+  FIO_ASSERT(fio_bswap16(0x0102) == (uint16_t)0x0201, "fio_bswap16 failed");
+  FIO_ASSERT(fio_bswap32(0x01020304) == (uint32_t)0x04030201,
+             "fio_bswap32 failed");
+  FIO_ASSERT(fio_bswap64(0x0102030405060708ULL) == 0x0807060504030201ULL,
+             "fio_bswap64 failed");
+
+  fprintf(stderr, "* Testing fio_lrotX and fio_rrotX macros.\n");
+  {
+    uint64_t tmp = 1;
+    tmp = FIO_RROT(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
+               "fio_rrot failed");
+    tmp = FIO_LROT(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
+    tmp = 1;
+    tmp = fio_rrot32(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
+    tmp = fio_lrot32(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
+    tmp = 1;
+    tmp = fio_rrot64(tmp, 1);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 63), "fio_rrot64 failed");
+    tmp = fio_lrot64(tmp, 3);
+    __asm__ volatile("" ::: "memory");
+    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
+  }
+
+  fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
+#define FIO___BITMAP_TEST_BITS(bits)                                           \
+  for (size_t i = 0; i <= (bits); ++i) {                                       \
+    char tmp_buf[16];                                                          \
+    int##bits##_t n = ((uint##bits##_t)1 << i);                                \
+    FIO_NAME2(fio_u, buf##bits)(tmp_buf, n);                                   \
+    int##bits##_t r = FIO_NAME2(fio_buf, u##bits)(tmp_buf);                    \
+    FIO_ASSERT(r == n,                                                         \
+               "roundtrip failed for U" #bits " at bit %zu\n\t%zu != %zu",     \
+               i,                                                              \
+               (size_t)n,                                                      \
+               (size_t)r);                                                     \
+  }
+  FIO___BITMAP_TEST_BITS(8);
+  FIO___BITMAP_TEST_BITS(16);
+  FIO___BITMAP_TEST_BITS(32);
+  FIO___BITMAP_TEST_BITS(64);
+#undef FIO___BITMAP_TEST_BITS
+
+  fprintf(stderr, "* Testing constant-time helpers.\n");
+  FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
+  for (uintptr_t i = 1; i; i <<= 1) {
+    FIO_ASSERT(
+        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+  }
+  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
+    FIO_ASSERT(
+        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+  }
+  FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
+             "fio_ct_true(%p) should be true!",
+             (void *)(~0ULL));
+
+  FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
+  for (uintptr_t i = 1; i; i <<= 1) {
+    FIO_ASSERT(
+        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+  }
+  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
+    FIO_ASSERT(
+        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+  }
+  FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
+             "fio_ct_false(%p) should be zero!",
+             (void *)(~0ULL));
+  FIO_ASSERT(fio_ct_true(8), "fio_ct_true should be true.");
+  FIO_ASSERT(!fio_ct_true(0), "fio_ct_true should be false.");
+  FIO_ASSERT(!fio_ct_false(8), "fio_ct_false should be false.");
+  FIO_ASSERT(fio_ct_false(0), "fio_ct_false should be true.");
+  FIO_ASSERT(fio_ct_if_bool(0, 1, 2) == 2,
+             "fio_ct_if_bool selection error (false).");
+  FIO_ASSERT(fio_ct_if_bool(1, 1, 2) == 1,
+             "fio_ct_if_bool selection error (true).");
+  FIO_ASSERT(fio_ct_if(0, 1, 2) == 2, "fio_ct_if selection error (false).");
+  FIO_ASSERT(fio_ct_if(8, 1, 2) == 1, "fio_ct_if selection error (true).");
+  {
+    uint8_t bitmap[1024];
+    memset(bitmap, 0, 1024);
+    fprintf(stderr, "* Testing bitmap helpers.\n");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 97), "fio_bitmap_get should be 0.");
+    fio_bitmap_set(bitmap, 97);
+    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
+               "fio_bitmap_get should be 1 after being set");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
+               "other bits shouldn't be effected by set.");
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 98),
+               "other bits shouldn't be effected by set.");
+    fio_bitmap_flip(bitmap, 96);
+    fio_bitmap_flip(bitmap, 97);
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 97),
+               "fio_bitmap_get should be 0 after flip.");
+    FIO_ASSERT(fio_bitmap_get(bitmap, 96) == 1,
+               "other bits shouldn't be effected by flip");
+    fio_bitmap_unset(bitmap, 96);
+    fio_bitmap_flip(bitmap, 97);
+    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
+               "fio_bitmap_get should be 0 after unset.");
+    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
+               "other bits shouldn't be effected by unset");
+    fio_bitmap_unset(bitmap, 96);
+  }
+  {
+    fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
+    for (int i = 0; i < 64; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
+                 "fio_popcount error for 1 bit");
+    }
+    for (int i = 0; i < 63; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
+                 "fio_popcount error for 2 bits");
+    }
+    for (int i = 0; i < 62; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
+                 "fio_popcount error for 3 bits");
+    }
+    for (int i = 0; i < 59; ++i) {
+      FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
+                 "fio_popcount error for 3 alternating bits");
+    }
+    for (int i = 0; i < 64; ++i) {
+      FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
+                 "fio_hemming_dist error at %d",
+                 i);
+    }
+  }
+  {
+    struct test_s {
+      int a;
+      char force_padding;
+      int b;
+    } stst = {.a = 1};
+    struct test_s *stst_p = FIO_PTR_FROM_FIELD(struct test_s, b, &stst.b);
+    FIO_ASSERT(stst_p == &stst, "FIO_PTR_FROM_FIELD failed to retrace pointer");
+  }
+}
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Bit-Byte operations - cleanup
+***************************************************************************** */
 #undef FIO_BITMAP
+#endif /* FIO_BITMAP */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -2636,9 +2825,278 @@ small_random:
   }
 }
 
-#endif /* FIO_EXTERN_COMPLETE */
+/* *****************************************************************************
+Hashing speed test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+#include <math.h>
+
+typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
+
+SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
+                                  char *name,
+                                  uint8_t mem_alignment_ofset) {
+#ifdef DEBUG
+  fprintf(stderr,
+          "* Testing %s speed "
+          "(DEBUG mode detected - speed may be affected).\n",
+          name);
+  uint64_t cycles_start_at = (8192 << 4);
+#else
+  fprintf(stderr, "* Testing %s speed.\n", name);
+  uint64_t cycles_start_at = (8192 << 8);
 #endif
+  /* test based on code from BearSSL with credit to Thomas Pornin */
+  size_t const buffer_len = 8192;
+  uint8_t buffer_[8200];
+  uint8_t *buffer = buffer_ + (mem_alignment_ofset & 7);
+  // uint64_t buffer[1024];
+  memset(buffer, 'T', buffer_len);
+  /* warmup */
+  uint64_t hash = 0;
+  for (size_t i = 0; i < 4; i++) {
+    hash += h((char *)buffer, buffer_len);
+    memcpy(buffer, &hash, sizeof(hash));
+  }
+  /* loop until test runs for more than 2 seconds */
+  for (uint64_t cycles = cycles_start_at;;) {
+    clock_t start, end;
+    start = clock();
+    for (size_t i = cycles; i > 0; i--) {
+      hash += h((char *)buffer, buffer_len);
+      __asm__ volatile("" ::: "memory");
+    }
+    end = clock();
+    memcpy(buffer, &hash, sizeof(hash));
+    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
+        cycles >= ((uint64_t)1 << 62)) {
+      fprintf(stderr,
+              "\t%-40s %8.2f MB/s\n",
+              name,
+              (double)(buffer_len * cycles) /
+                  (((end - start) * (1000000.0 / CLOCKS_PER_SEC))));
+      break;
+    }
+    cycles <<= 1;
+  }
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
+  return fio_risky_hash(buf, len, 1);
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
+                                                           size_t len) {
+  fio_risky_mask(buf, len, 0, 0);
+  return len;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+  for (int i = 0; i < 8; ++i) {
+    char buf[128];
+    uint64_t nonce = fio_rand64();
+    const char *str = "this is a short text, to test risky masking";
+    char *tmp = buf + i;
+    memcpy(tmp, str, strlen(str));
+    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
+    size_t err = 0;
+    for (size_t b = 0; b < strlen(str); ++b) {
+      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
+                 "Risky Hash masking didn't mask buf[%zu] on offset "
+                 "%d (statistical deviation?)",
+                 b,
+                 i);
+      err += (tmp[b] == str[b]);
+    }
+    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
+  }
+  const uint8_t alignment_test_offset = 0;
+  if (alignment_test_offset)
+    fprintf(stderr,
+            "The following speed tests use a memory alignment offset of %d "
+            "bytes.\n",
+            (int)(alignment_test_offset & 7));
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         alignment_test_offset);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (Risky XOR + counter)",
+                         alignment_test_offset);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (unaligned)",
+                         1);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
+                                                 size_t len,
+                                                 const char *name,
+                                                 size_t clk) {
+  size_t totals[2] = {0};
+  size_t freq[256] = {0};
+  const size_t total_bits = (len * sizeof(*stream) * 8);
+  uint64_t hemming = 0;
+  /* collect data */
+  for (size_t i = 1; i < len; i += 2) {
+    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
+    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
+      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
+      ++freq[val];
+      for (int bit = 0; bit < 8; ++bit) {
+        ++totals[(val >> bit) & 1];
+      }
+    }
+  }
+  hemming /= len;
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
+          name,
+          clk);
+#else
+  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
+#endif
+  fprintf(stderr,
+          "\t  zeros / ones (bit frequency)\t%.05f\n",
+          ((float)1.0 * totals[0]) / totals[1]);
+  FIO_ASSERT(totals[0] < totals[1] + (total_bits / 20) &&
+                 totals[1] < totals[0] + (total_bits / 20),
+             "randomness isn't random?");
+  fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
+  /* expect avarage hemming distance of 25% == 16 bits */
+  FIO_ASSERT(hemming >= 14 && hemming <= 18,
+             "randomness isn't random (hemming distance failed)?");
+  /* test chi-square ... I think */
+  if (len * sizeof(*stream) > 2560) {
+    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
+    double chi_square = 0;
+    for (unsigned int i = 0; i < 256; ++i) {
+      double f = freq[i] - n_r;
+      chi_square += (f * f);
+    }
+    chi_square /= n_r;
+    double chi_square_r_abs =
+        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
+    fprintf(
+        stderr,
+        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
+        chi_square_r_abs,
+        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
+             ? "good"
+             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
+                                                      : "\x1B[1mBAD\x1B[0m")),
+        2 * (sqrt(n_r)));
+  }
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
+  fprintf(stderr,
+          "* Testing randomness "
+          "- bit frequency / hemming distance / chi-square.\n");
+  const size_t test_len = (TEST_REPEAT << 7);
+  uint64_t *rs = (uint64_t *)FIO_MEM_CALLOC(sizeof(*rs), test_len);
+  clock_t start, end;
+  FIO_ASSERT_ALLOC(rs);
+
+  rand(); /* warmup */
+  if (sizeof(int) < sizeof(uint64_t)) {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
+    }
+    end = clock();
+  } else {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = (uint64_t)rand();
+    }
+    end = clock();
+  }
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  {
+    if (RAND_MAX == ~(uint64_t)0ULL) {
+      /* RAND_MAX fills all bits */
+      start = clock();
+      for (size_t i = 0; i < test_len; ++i) {
+        rs[i] = (uint64_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
+      /* RAND_MAX fill at least 32 bits per call */
+      uint32_t *rs_adjusted = (uint32_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 1); ++i) {
+        rs_adjusted[i] = (uint32_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint16_t)0U)) {
+      /* RAND_MAX fill at least 16 bits per call */
+      uint16_t *rs_adjusted = (uint16_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint16_t)rand();
+      }
+      end = clock();
+    } else {
+      /* assume RAND_MAX fill at least 8 bits per call */
+      uint8_t *rs_adjusted = (uint8_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint8_t)rand();
+      }
+      end = clock();
+    }
+    /* test RAND_MAX value */
+    uint8_t rand_bits = 63;
+    while (rand_bits) {
+      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
+        break;
+      --rand_bits;
+    }
+    rand_bits = 64 - rand_bits;
+    char buffer[128] = {0};
+    snprintf(buffer,
+             128 - 14,
+             "rand (system - fixed, testing %d random bits)",
+             (int)rand_bits);
+    FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
+  }
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  fio_rand64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio_rand64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
+  memset(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio_rand_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "fio_rand_bytes", end - start);
+
+  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
+  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
+#endif /* DEBUG */
+}
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Random - Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_RAND
+#endif
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -3495,6 +3953,329 @@ finish:
 
   return r;
 }
+
+/* *****************************************************************************
+URL parsing - Test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+/* Test for URI variations:
+ *
+ * * `/complete_path?query#target`
+ *
+ *   i.e.: /index.html?page=1#list
+ *
+ * * `host:port/complete_path?query#target`
+ *
+ *   i.e.:
+ *      example.com
+ *      example.com:8080
+ *      example.com/index.html
+ *      example.com:8080/index.html
+ *      example.com:8080/index.html?key=val#target
+ *
+ * * `user:password@host:port/path?query#target`
+ *
+ *   i.e.: user:1234@example.com:8080/index.html
+ *
+ * * `username[:password]@host[:port][...]`
+ *
+ *   i.e.: john:1234@example.com
+ *
+ * * `schema://user:password@host:port/path?query#target`
+ *
+ *   i.e.: http://example.com/index.html?page=1#list
+ */
+TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
+  fprintf(stderr, "* Testing URL (URI) parser.\n");
+  struct {
+    char *url;
+    size_t len;
+    fio_url_s expected;
+  } tests[] = {
+      {
+          .url = (char *)"file://go/home/",
+          .len = 15,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"file", .len = 4},
+                  .path = {.buf = (char *)"go/home/", .len = 8},
+              },
+      },
+      {
+          .url = (char *)"unix:///go/home/",
+          .len = 16,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"unix", .len = 4},
+                  .path = {.buf = (char *)"/go/home/", .len = 9},
+              },
+      },
+      {
+          .url = (char *)"schema://user:password@host:port/path?query#target",
+          .len = 50,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"schema", .len = 6},
+                  .user = {.buf = (char *)"user", .len = 4},
+                  .password = {.buf = (char *)"password", .len = 8},
+                  .host = {.buf = (char *)"host", .len = 4},
+                  .port = {.buf = (char *)"port", .len = 4},
+                  .path = {.buf = (char *)"/path", .len = 5},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
+              },
+      },
+      {
+          .url = (char *)"schema://user@host:port/path?query#target",
+          .len = 41,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"schema", .len = 6},
+                  .user = {.buf = (char *)"user", .len = 4},
+                  .host = {.buf = (char *)"host", .len = 4},
+                  .port = {.buf = (char *)"port", .len = 4},
+                  .path = {.buf = (char *)"/path", .len = 5},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
+              },
+      },
+      {
+          .url = (char *)"http://localhost.com:3000/home?is=1",
+          .len = 35,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"http", .len = 4},
+                  .host = {.buf = (char *)"localhost.com", .len = 13},
+                  .port = {.buf = (char *)"3000", .len = 4},
+                  .path = {.buf = (char *)"/home", .len = 5},
+                  .query = {.buf = (char *)"is=1", .len = 4},
+              },
+      },
+      {
+          .url = (char *)"/complete_path?query#target",
+          .len = 27,
+          .expected =
+              {
+                  .path = {.buf = (char *)"/complete_path", .len = 14},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
+              },
+      },
+      {
+          .url = (char *)"/index.html?page=1#list",
+          .len = 23,
+          .expected =
+              {
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .query = {.buf = (char *)"page=1", .len = 6},
+                  .target = {.buf = (char *)"list", .len = 4},
+              },
+      },
+      {
+          .url = (char *)"example.com",
+          .len = 11,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+              },
+      },
+
+      {
+          .url = (char *)"example.com:8080",
+          .len = 16,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+              },
+      },
+      {
+          .url = (char *)"example.com/index.html",
+          .len = 22,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+              },
+      },
+      {
+          .url = (char *)"example.com:8080/index.html",
+          .len = 27,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+              },
+      },
+      {
+          .url = (char *)"example.com:8080/index.html?key=val#target",
+          .len = 42,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .query = {.buf = (char *)"key=val", .len = 7},
+                  .target = {.buf = (char *)"target", .len = 6},
+              },
+      },
+      {
+          .url = (char *)"user:1234@example.com:8080/index.html",
+          .len = 37,
+          .expected =
+              {
+                  .user = {.buf = (char *)"user", .len = 4},
+                  .password = {.buf = (char *)"1234", .len = 4},
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+              },
+      },
+      {
+          .url = (char *)"user@example.com:8080/index.html",
+          .len = 32,
+          .expected =
+              {
+                  .user = {.buf = (char *)"user", .len = 4},
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+              },
+      },
+      {.url = NULL},
+  };
+  for (size_t i = 0; tests[i].url; ++i) {
+    fio_url_s result = fio_url_parse(tests[i].url, tests[i].len);
+    FIO_LOG_DEBUG2("Result for: %s"
+                   "\n\t     scheme   (%zu bytes):  %.*s"
+                   "\n\t     user     (%zu bytes):  %.*s"
+                   "\n\t     password (%zu bytes):  %.*s"
+                   "\n\t     host     (%zu bytes):  %.*s"
+                   "\n\t     port     (%zu bytes):  %.*s"
+                   "\n\t     path     (%zu bytes):  %.*s"
+                   "\n\t     query    (%zu bytes):  %.*s"
+                   "\n\t     target   (%zu bytes):  %.*s\n",
+                   tests[i].url,
+                   result.scheme.len,
+                   (int)result.scheme.len,
+                   result.scheme.buf,
+                   result.user.len,
+                   (int)result.user.len,
+                   result.user.buf,
+                   result.password.len,
+                   (int)result.password.len,
+                   result.password.buf,
+                   result.host.len,
+                   (int)result.host.len,
+                   result.host.buf,
+                   result.port.len,
+                   (int)result.port.len,
+                   result.port.buf,
+                   result.path.len,
+                   (int)result.path.len,
+                   result.path.buf,
+                   result.query.len,
+                   (int)result.query.len,
+                   result.query.buf,
+                   result.target.len,
+                   (int)result.target.len,
+                   result.target.buf);
+    FIO_ASSERT(
+        result.scheme.len == tests[i].expected.scheme.len &&
+            (!result.scheme.len || !memcmp(result.scheme.buf,
+                                           tests[i].expected.scheme.buf,
+                                           tests[i].expected.scheme.len)),
+        "scheme result failed for:\n\ttest[%zu]: %s\n\texpected: "
+        "%s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.scheme.buf,
+        (int)result.scheme.len,
+        result.scheme.buf);
+    FIO_ASSERT(
+        result.user.len == tests[i].expected.user.len &&
+            (!result.user.len || !memcmp(result.user.buf,
+                                         tests[i].expected.user.buf,
+                                         tests[i].expected.user.len)),
+        "user result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.user.buf,
+        (int)result.user.len,
+        result.user.buf);
+    FIO_ASSERT(
+        result.password.len == tests[i].expected.password.len &&
+            (!result.password.len || !memcmp(result.password.buf,
+                                             tests[i].expected.password.buf,
+                                             tests[i].expected.password.len)),
+        "password result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: "
+        "%.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.password.buf,
+        (int)result.password.len,
+        result.password.buf);
+    FIO_ASSERT(
+        result.host.len == tests[i].expected.host.len &&
+            (!result.host.len || !memcmp(result.host.buf,
+                                         tests[i].expected.host.buf,
+                                         tests[i].expected.host.len)),
+        "host result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.host.buf,
+        (int)result.host.len,
+        result.host.buf);
+    FIO_ASSERT(
+        result.port.len == tests[i].expected.port.len &&
+            (!result.port.len || !memcmp(result.port.buf,
+                                         tests[i].expected.port.buf,
+                                         tests[i].expected.port.len)),
+        "port result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.port.buf,
+        (int)result.port.len,
+        result.port.buf);
+    FIO_ASSERT(
+        result.path.len == tests[i].expected.path.len &&
+            (!result.path.len || !memcmp(result.path.buf,
+                                         tests[i].expected.path.buf,
+                                         tests[i].expected.path.len)),
+        "path result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.path.buf,
+        (int)result.path.len,
+        result.path.buf);
+    FIO_ASSERT(result.query.len == tests[i].expected.query.len &&
+                   (!result.query.len || !memcmp(result.query.buf,
+                                                 tests[i].expected.query.buf,
+                                                 tests[i].expected.query.len)),
+               "query result failed for:\n\ttest[%zu]: %s\n\texpected: "
+               "%s\n\tgot: %.*s",
+               i,
+               tests[i].url,
+               tests[i].expected.query.buf,
+               (int)result.query.len,
+               result.query.buf);
+    FIO_ASSERT(
+        result.target.len == tests[i].expected.target.len &&
+            (!result.target.len || !memcmp(result.target.buf,
+                                           tests[i].expected.target.buf,
+                                           tests[i].expected.target.len)),
+        "target result failed for:\n\ttest[%zu]: %s\n\texpected: "
+        "%s\n\tgot: %.*s",
+        i,
+        tests[i].url,
+        tests[i].expected.target.buf,
+        (int)result.target.len,
+        result.target.buf);
+  }
+}
+#endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
 FIO_URL - Cleanup
@@ -7496,7 +8277,7 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
 
   ((char *)val.buf)[val.len] = 0;
   memcpy((char *)val.buf, d.buf, val.len);
-  FIO_LOG_DEBUG("CLI stored a default value: %s", val.buf);
+  FIO_LOG_DEBUG("CLI stored a string: %s", val.buf);
   return val;
 }
 
@@ -8945,18 +9726,6 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, shift)(FIO_LIST_HEAD *head);
 
 /** Returns a pointer to a list's element, from a pointer to a node. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, root)(FIO_LIST_HEAD *ptr);
-
-#ifndef FIO_LIST_EACH
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(                                \
-                 type, node_name, next____p_ls->node_name.next)))
-#endif
 
 /* *****************************************************************************
 Linked Lists (embeded) - Implementation
@@ -16996,338 +17765,6 @@ TEST_FUNC void fio___dynamic_types_test___atol(void) {
 }
 
 /* *****************************************************************************
-Bit-Byte operations - test
-***************************************************************************** */
-
-TEST_FUNC void fio___dynamic_types_test___bitwise(void) {
-  fprintf(stderr, "* Testing fio_bswapX macros.\n");
-  FIO_ASSERT(fio_bswap16(0x0102) == (uint16_t)0x0201, "fio_bswap16 failed");
-  FIO_ASSERT(fio_bswap32(0x01020304) == (uint32_t)0x04030201,
-             "fio_bswap32 failed");
-  FIO_ASSERT(fio_bswap64(0x0102030405060708ULL) == 0x0807060504030201ULL,
-             "fio_bswap64 failed");
-
-  fprintf(stderr, "* Testing fio_lrotX and fio_rrotX macros.\n");
-  {
-    uint64_t tmp = 1;
-    tmp = FIO_RROT(tmp, 1);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
-               "fio_rrot failed");
-    tmp = FIO_LROT(tmp, 3);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
-    tmp = 1;
-    tmp = fio_rrot32(tmp, 1);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
-    tmp = fio_lrot32(tmp, 3);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
-    tmp = 1;
-    tmp = fio_rrot64(tmp, 1);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << 63), "fio_rrot64 failed");
-    tmp = fio_lrot64(tmp, 3);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
-  }
-
-  fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
-  char buffer[32];
-  for (int64_t i = -TEST_REPEAT; i < TEST_REPEAT; ++i) {
-    FIO_NAME2(fio_u, buf64)(buffer, i);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT((int64_t)FIO_NAME2(fio_buf, u64)(buffer) == i,
-               "fio_u2buf64 / fio_buf2u64  mismatch %zd != %zd",
-               (ssize_t)FIO_NAME2(fio_buf, u64)(buffer),
-               (ssize_t)i);
-  }
-  for (int32_t i = -TEST_REPEAT; i < TEST_REPEAT; ++i) {
-    FIO_NAME2(fio_u, buf32)(buffer, i);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT((int32_t)FIO_NAME2(fio_buf, u32)(buffer) == i,
-               "fio_u2buf32 / fio_buf2u32  mismatch %zd != %zd",
-               (ssize_t)(FIO_NAME2(fio_buf, u32)(buffer)),
-               (ssize_t)i);
-  }
-  for (int16_t i = -TEST_REPEAT; i < TEST_REPEAT; ++i) {
-    FIO_NAME2(fio_u, buf16)(buffer, i);
-    __asm__ volatile("" ::: "memory");
-    FIO_ASSERT((int16_t)FIO_NAME2(fio_buf, u16)(buffer) == i,
-               "fio_u2buf16 / fio_buf2u16  mismatch %zd != %zd",
-               (ssize_t)(FIO_NAME2(fio_buf, u16)(buffer)),
-               (ssize_t)i);
-  }
-
-  fprintf(stderr, "* Testing constant-time helpers.\n");
-  FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
-  for (uintptr_t i = 1; i; i <<= 1) {
-    FIO_ASSERT(
-        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
-  }
-  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
-    FIO_ASSERT(
-        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
-  }
-  FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
-             "fio_ct_true(%p) should be true!",
-             (void *)(~0ULL));
-
-  FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
-  for (uintptr_t i = 1; i; i <<= 1) {
-    FIO_ASSERT(
-        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
-  }
-  for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
-    FIO_ASSERT(
-        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
-  }
-  FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
-             "fio_ct_false(%p) should be zero!",
-             (void *)(~0ULL));
-  FIO_ASSERT(fio_ct_true(8), "fio_ct_true should be true.");
-  FIO_ASSERT(!fio_ct_true(0), "fio_ct_true should be false.");
-  FIO_ASSERT(!fio_ct_false(8), "fio_ct_false should be false.");
-  FIO_ASSERT(fio_ct_false(0), "fio_ct_false should be true.");
-  FIO_ASSERT(fio_ct_if_bool(0, 1, 2) == 2,
-             "fio_ct_if_bool selection error (false).");
-  FIO_ASSERT(fio_ct_if_bool(1, 1, 2) == 1,
-             "fio_ct_if_bool selection error (true).");
-  FIO_ASSERT(fio_ct_if(0, 1, 2) == 2, "fio_ct_if selection error (false).");
-  FIO_ASSERT(fio_ct_if(8, 1, 2) == 1, "fio_ct_if selection error (true).");
-  {
-    uint8_t bitmap[1024];
-    memset(bitmap, 0, 1024);
-    fprintf(stderr, "* Testing bitmap helpers.\n");
-    FIO_ASSERT(!fio_bitmap_get(bitmap, 97), "fio_bitmap_get should be 0.");
-    fio_bitmap_set(bitmap, 97);
-    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
-               "fio_bitmap_get should be 1 after being set");
-    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
-               "other bits shouldn't be effected by set.");
-    FIO_ASSERT(!fio_bitmap_get(bitmap, 98),
-               "other bits shouldn't be effected by set.");
-    fio_bitmap_flip(bitmap, 96);
-    fio_bitmap_flip(bitmap, 97);
-    FIO_ASSERT(!fio_bitmap_get(bitmap, 97),
-               "fio_bitmap_get should be 0 after flip.");
-    FIO_ASSERT(fio_bitmap_get(bitmap, 96) == 1,
-               "other bits shouldn't be effected by flip");
-    fio_bitmap_unset(bitmap, 96);
-    fio_bitmap_flip(bitmap, 97);
-    FIO_ASSERT(!fio_bitmap_get(bitmap, 96),
-               "fio_bitmap_get should be 0 after unset.");
-    FIO_ASSERT(fio_bitmap_get(bitmap, 97) == 1,
-               "other bits shouldn't be effected by unset");
-    fio_bitmap_unset(bitmap, 96);
-  }
-  {
-    fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
-    for (int i = 0; i < 64; ++i) {
-      FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
-                 "fio_popcount error for 1 bit");
-    }
-    for (int i = 0; i < 63; ++i) {
-      FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
-                 "fio_popcount error for 2 bits");
-    }
-    for (int i = 0; i < 62; ++i) {
-      FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
-                 "fio_popcount error for 3 bits");
-    }
-    for (int i = 0; i < 59; ++i) {
-      FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
-                 "fio_popcount error for 3 alternating bits");
-    }
-    for (int i = 0; i < 64; ++i) {
-      FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
-                 "fio_hemming_dist error at %d",
-                 i);
-    }
-  }
-  {
-    struct test_s {
-      int a;
-      char force_padding;
-      int b;
-    } stst = {.a = 1};
-    struct test_s *stst_p = FIO_PTR_FROM_FIELD(struct test_s, b, &stst.b);
-    FIO_ASSERT(stst_p == &stst, "FIO_PTR_FROM_FIELD failed to retrace pointer");
-  }
-}
-
-/* *****************************************************************************
-Psedo Random Generator - test
-***************************************************************************** */
-
-TEST_FUNC void fio___dynamic_types_test___random_buffer(uint64_t *stream,
-                                                        size_t len,
-                                                        const char *name,
-                                                        size_t clk) {
-  size_t totals[2] = {0};
-  size_t freq[256] = {0};
-  const size_t total_bits = (len * sizeof(*stream) * 8);
-  uint64_t hemming = 0;
-  /* collect data */
-  for (size_t i = 1; i < len; i += 2) {
-    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
-    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
-      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
-      ++freq[val];
-      for (int bit = 0; bit < 8; ++bit) {
-        ++totals[(val >> bit) & 1];
-      }
-    }
-  }
-  hemming /= len;
-  fprintf(stderr, "\n");
-#if DEBUG
-  fprintf(stderr,
-          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
-          name,
-          clk);
-#else
-  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
-#endif
-  fprintf(stderr,
-          "\t  zeros / ones (bit frequency)\t%.05f\n",
-          ((float)1.0 * totals[0]) / totals[1]);
-  FIO_ASSERT(totals[0] < totals[1] + (total_bits / 20) &&
-                 totals[1] < totals[0] + (total_bits / 20),
-             "randomness isn't random?");
-  fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
-  /* expect avarage hemming distance of 25% == 16 bits */
-  FIO_ASSERT(hemming >= 14 && hemming <= 18,
-             "randomness isn't random (hemming distance failed)?");
-  /* test chi-square ... I think */
-  if (len * sizeof(*stream) > 2560) {
-    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
-    double chi_square = 0;
-    for (unsigned int i = 0; i < 256; ++i) {
-      double f = freq[i] - n_r;
-      chi_square += (f * f);
-    }
-    chi_square /= n_r;
-    double chi_square_r_abs =
-        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
-    fprintf(
-        stderr,
-        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
-        chi_square_r_abs,
-        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
-             ? "good"
-             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
-                                                      : "\x1B[1mBAD\x1B[0m")),
-        2 * (sqrt(n_r)));
-  }
-}
-
-TEST_FUNC void fio___dynamic_types_test___random(void) {
-  fprintf(stderr,
-          "* Testing randomness "
-          "- bit frequency / hemming distance / chi-square.\n");
-  const size_t test_len = (TEST_REPEAT << 7);
-  uint64_t *rs = (uint64_t *)FIO_MEM_CALLOC(sizeof(*rs), test_len);
-  clock_t start, end;
-  FIO_ASSERT_ALLOC(rs);
-
-  rand(); /* warmup */
-  if (sizeof(int) < sizeof(uint64_t)) {
-    start = clock();
-    for (size_t i = 0; i < test_len; ++i) {
-      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
-    }
-    end = clock();
-  } else {
-    start = clock();
-    for (size_t i = 0; i < test_len; ++i) {
-      rs[i] = (uint64_t)rand();
-    }
-    end = clock();
-  }
-  fio___dynamic_types_test___random_buffer(
-      rs,
-      test_len,
-      "rand (system - naive, ignoring missing bits)",
-      end - start);
-
-  memset(rs, 0, sizeof(*rs) * test_len);
-  {
-    if (RAND_MAX == ~(uint64_t)0ULL) {
-      /* RAND_MAX fills all bits */
-      start = clock();
-      for (size_t i = 0; i < test_len; ++i) {
-        rs[i] = (uint64_t)rand();
-      }
-      end = clock();
-    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
-      /* RAND_MAX fill at least 32 bits per call */
-      uint32_t *rs_adjusted = (uint32_t *)rs;
-      start = clock();
-      for (size_t i = 0; i < (test_len << 1); ++i) {
-        rs_adjusted[i] = (uint32_t)rand();
-      }
-      end = clock();
-    } else if (RAND_MAX >= (~(uint16_t)0U)) {
-      /* RAND_MAX fill at least 16 bits per call */
-      uint16_t *rs_adjusted = (uint16_t *)rs;
-      start = clock();
-      for (size_t i = 0; i < (test_len << 2); ++i) {
-        rs_adjusted[i] = (uint16_t)rand();
-      }
-      end = clock();
-    } else {
-      /* assume RAND_MAX fill at least 8 bits per call */
-      uint8_t *rs_adjusted = (uint8_t *)rs;
-      start = clock();
-      for (size_t i = 0; i < (test_len << 2); ++i) {
-        rs_adjusted[i] = (uint8_t)rand();
-      }
-      end = clock();
-    }
-    /* test RAND_MAX value */
-    uint8_t rand_bits = 63;
-    while (rand_bits) {
-      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
-        break;
-      --rand_bits;
-    }
-    rand_bits = 64 - rand_bits;
-    char buffer[128] = {0};
-    snprintf(buffer,
-             128 - 14,
-             "rand (system - fixed, testing %d random bits)",
-             (int)rand_bits);
-    fio___dynamic_types_test___random_buffer(rs, test_len, buffer, end - start);
-  }
-
-  memset(rs, 0, sizeof(*rs) * test_len);
-  fio_rand64(); /* warmup */
-  start = clock();
-  for (size_t i = 0; i < test_len; ++i) {
-    rs[i] = fio_rand64();
-  }
-  end = clock();
-  fio___dynamic_types_test___random_buffer(
-      rs, test_len, "fio_rand64", end - start);
-  memset(rs, 0, sizeof(*rs) * test_len);
-  start = clock();
-  fio_rand_bytes(rs, test_len * sizeof(*rs));
-  end = clock();
-  fio___dynamic_types_test___random_buffer(
-      rs, test_len, "fio_rand_bytes", end - start);
-
-  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
-  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
-  fprintf(stderr, "\n");
-#if DEBUG
-  fprintf(stderr,
-          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
-#endif
-}
-
-/* *****************************************************************************
 Atomic operations - test
 ***************************************************************************** */
 
@@ -17676,326 +18113,6 @@ URL parsing - Test
 
 #define FIO_URL
 #include __FILE__
-
-/* Test for URI variations:
- *
- * * `/complete_path?query#target`
- *
- *   i.e.: /index.html?page=1#list
- *
- * * `host:port/complete_path?query#target`
- *
- *   i.e.:
- *      example.com
- *      example.com:8080
- *      example.com/index.html
- *      example.com:8080/index.html
- *      example.com:8080/index.html?key=val#target
- *
- * * `user:password@host:port/path?query#target`
- *
- *   i.e.: user:1234@example.com:8080/index.html
- *
- * * `username[:password]@host[:port][...]`
- *
- *   i.e.: john:1234@example.com
- *
- * * `schema://user:password@host:port/path?query#target`
- *
- *   i.e.: http://example.com/index.html?page=1#list
- */
-TEST_FUNC void fio___dynamic_types_test___url(void) {
-  fprintf(stderr, "* Testing URL (URI) parser.\n");
-  struct {
-    char *url;
-    size_t len;
-    fio_url_s expected;
-  } tests[] = {
-      {
-          .url = (char *)"file://go/home/",
-          .len = 15,
-          .expected =
-              {
-                  .scheme = {.buf = (char *)"file", .len = 4},
-                  .path = {.buf = (char *)"go/home/", .len = 8},
-              },
-      },
-      {
-          .url = (char *)"unix:///go/home/",
-          .len = 16,
-          .expected =
-              {
-                  .scheme = {.buf = (char *)"unix", .len = 4},
-                  .path = {.buf = (char *)"/go/home/", .len = 9},
-              },
-      },
-      {
-          .url = (char *)"schema://user:password@host:port/path?query#target",
-          .len = 50,
-          .expected =
-              {
-                  .scheme = {.buf = (char *)"schema", .len = 6},
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .password = {.buf = (char *)"password", .len = 8},
-                  .host = {.buf = (char *)"host", .len = 4},
-                  .port = {.buf = (char *)"port", .len = 4},
-                  .path = {.buf = (char *)"/path", .len = 5},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
-              },
-      },
-      {
-          .url = (char *)"schema://user@host:port/path?query#target",
-          .len = 41,
-          .expected =
-              {
-                  .scheme = {.buf = (char *)"schema", .len = 6},
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .host = {.buf = (char *)"host", .len = 4},
-                  .port = {.buf = (char *)"port", .len = 4},
-                  .path = {.buf = (char *)"/path", .len = 5},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
-              },
-      },
-      {
-          .url = (char *)"http://localhost.com:3000/home?is=1",
-          .len = 35,
-          .expected =
-              {
-                  .scheme = {.buf = (char *)"http", .len = 4},
-                  .host = {.buf = (char *)"localhost.com", .len = 13},
-                  .port = {.buf = (char *)"3000", .len = 4},
-                  .path = {.buf = (char *)"/home", .len = 5},
-                  .query = {.buf = (char *)"is=1", .len = 4},
-              },
-      },
-      {
-          .url = (char *)"/complete_path?query#target",
-          .len = 27,
-          .expected =
-              {
-                  .path = {.buf = (char *)"/complete_path", .len = 14},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
-              },
-      },
-      {
-          .url = (char *)"/index.html?page=1#list",
-          .len = 23,
-          .expected =
-              {
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-                  .query = {.buf = (char *)"page=1", .len = 6},
-                  .target = {.buf = (char *)"list", .len = 4},
-              },
-      },
-      {
-          .url = (char *)"example.com",
-          .len = 11,
-          .expected =
-              {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-              },
-      },
-
-      {
-          .url = (char *)"example.com:8080",
-          .len = 16,
-          .expected =
-              {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-              },
-      },
-      {
-          .url = (char *)"example.com/index.html",
-          .len = 22,
-          .expected =
-              {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-              },
-      },
-      {
-          .url = (char *)"example.com:8080/index.html",
-          .len = 27,
-          .expected =
-              {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-              },
-      },
-      {
-          .url = (char *)"example.com:8080/index.html?key=val#target",
-          .len = 42,
-          .expected =
-              {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-                  .query = {.buf = (char *)"key=val", .len = 7},
-                  .target = {.buf = (char *)"target", .len = 6},
-              },
-      },
-      {
-          .url = (char *)"user:1234@example.com:8080/index.html",
-          .len = 37,
-          .expected =
-              {
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .password = {.buf = (char *)"1234", .len = 4},
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-              },
-      },
-      {
-          .url = (char *)"user@example.com:8080/index.html",
-          .len = 32,
-          .expected =
-              {
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-              },
-      },
-      {.url = NULL},
-  };
-  for (size_t i = 0; tests[i].url; ++i) {
-    fio_url_s result = fio_url_parse(tests[i].url, tests[i].len);
-    if (0) {
-      fprintf(stderr,
-              "Result for: %s"
-              "\n\tscheme (%zu):\t\t%.*s"
-              "\n\tuser (%zu):\t\t%.*s"
-              "\n\tpassword (%zu):\t\t%.*s"
-              "\n\thost (%zu):\t\t%.*s"
-              "\n\tport (%zu):\t\t%.*s"
-              "\n\tpath (%zu):\t\t%.*s"
-              "\n\tquery (%zu):\t\t%.*s"
-              "\n\ttarget (%zu):\t\t%.*s\n",
-              tests[i].url,
-              result.scheme.len,
-              (int)result.scheme.len,
-              result.scheme.buf,
-              result.user.len,
-              (int)result.user.len,
-              result.user.buf,
-              result.password.len,
-              (int)result.password.len,
-              result.password.buf,
-              result.host.len,
-              (int)result.host.len,
-              result.host.buf,
-              result.port.len,
-              (int)result.port.len,
-              result.port.buf,
-              result.path.len,
-              (int)result.path.len,
-              result.path.buf,
-              result.query.len,
-              (int)result.query.len,
-              result.query.buf,
-              result.target.len,
-              (int)result.target.len,
-              result.target.buf);
-    }
-    FIO_ASSERT(
-        result.scheme.len == tests[i].expected.scheme.len &&
-            (!result.scheme.len || !memcmp(result.scheme.buf,
-                                           tests[i].expected.scheme.buf,
-                                           tests[i].expected.scheme.len)),
-        "scheme result failed for:\n\ttest[%zu]: %s\n\texpected: "
-        "%s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.scheme.buf,
-        (int)result.scheme.len,
-        result.scheme.buf);
-    FIO_ASSERT(
-        result.user.len == tests[i].expected.user.len &&
-            (!result.user.len || !memcmp(result.user.buf,
-                                         tests[i].expected.user.buf,
-                                         tests[i].expected.user.len)),
-        "user result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.user.buf,
-        (int)result.user.len,
-        result.user.buf);
-    FIO_ASSERT(
-        result.password.len == tests[i].expected.password.len &&
-            (!result.password.len || !memcmp(result.password.buf,
-                                             tests[i].expected.password.buf,
-                                             tests[i].expected.password.len)),
-        "password result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: "
-        "%.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.password.buf,
-        (int)result.password.len,
-        result.password.buf);
-    FIO_ASSERT(
-        result.host.len == tests[i].expected.host.len &&
-            (!result.host.len || !memcmp(result.host.buf,
-                                         tests[i].expected.host.buf,
-                                         tests[i].expected.host.len)),
-        "host result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.host.buf,
-        (int)result.host.len,
-        result.host.buf);
-    FIO_ASSERT(
-        result.port.len == tests[i].expected.port.len &&
-            (!result.port.len || !memcmp(result.port.buf,
-                                         tests[i].expected.port.buf,
-                                         tests[i].expected.port.len)),
-        "port result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.port.buf,
-        (int)result.port.len,
-        result.port.buf);
-    FIO_ASSERT(
-        result.path.len == tests[i].expected.path.len &&
-            (!result.path.len || !memcmp(result.path.buf,
-                                         tests[i].expected.path.buf,
-                                         tests[i].expected.path.len)),
-        "path result failed for:\n\ttest[%zu]: %s\n\texpected: %s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.path.buf,
-        (int)result.path.len,
-        result.path.buf);
-    FIO_ASSERT(result.query.len == tests[i].expected.query.len &&
-                   (!result.query.len || !memcmp(result.query.buf,
-                                                 tests[i].expected.query.buf,
-                                                 tests[i].expected.query.len)),
-               "query result failed for:\n\ttest[%zu]: %s\n\texpected: "
-               "%s\n\tgot: %.*s",
-               i,
-               tests[i].url,
-               tests[i].expected.query.buf,
-               (int)result.query.len,
-               result.query.buf);
-    FIO_ASSERT(
-        result.target.len == tests[i].expected.target.len &&
-            (!result.target.len || !memcmp(result.target.buf,
-                                           tests[i].expected.target.buf,
-                                           tests[i].expected.target.len)),
-        "target result failed for:\n\ttest[%zu]: %s\n\texpected: "
-        "%s\n\tgot: %.*s",
-        i,
-        tests[i].url,
-        tests[i].expected.target.buf,
-        (int)result.target.len,
-        result.target.buf);
-  }
-}
 
 /* *****************************************************************************
 Linked List - Test
@@ -18676,138 +18793,6 @@ Socket helper testing
 #include __FILE__
 
 /* *****************************************************************************
-Hashing speed test
-***************************************************************************** */
-
-typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
-
-TEST_FUNC void fio_test_hash_function(fio__hashing_func_fn h,
-                                      char *name,
-                                      uint8_t mem_alignment_ofset) {
-#ifdef DEBUG
-  fprintf(stderr,
-          "* Testing %s speed "
-          "(DEBUG mode detected - speed may be affected).\n",
-          name);
-  uint64_t cycles_start_at = (8192 << 4);
-#else
-  fprintf(stderr, "* Testing %s speed.\n", name);
-  uint64_t cycles_start_at = (8192 << 8);
-#endif
-  /* test based on code from BearSSL with credit to Thomas Pornin */
-  size_t const buffer_len = 8192;
-  uint8_t buffer_[8200];
-  uint8_t *buffer = buffer_ + (mem_alignment_ofset & 7);
-  // uint64_t buffer[1024];
-  memset(buffer, 'T', buffer_len);
-  /* warmup */
-  uint64_t hash = 0;
-  for (size_t i = 0; i < 4; i++) {
-    hash += h((char *)buffer, buffer_len);
-    memcpy(buffer, &hash, sizeof(hash));
-  }
-  /* loop until test runs for more than 2 seconds */
-  for (uint64_t cycles = cycles_start_at;;) {
-    clock_t start, end;
-    start = clock();
-    for (size_t i = cycles; i > 0; i--) {
-      hash += h((char *)buffer, buffer_len);
-      __asm__ volatile("" ::: "memory");
-    }
-    end = clock();
-    memcpy(buffer, &hash, sizeof(hash));
-    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
-        cycles >= ((uint64_t)1 << 62)) {
-      fprintf(stderr,
-              "\t%-40s %8.2f MB/s\n",
-              name,
-              (double)(buffer_len * cycles) /
-                  (((end - start) * (1000000.0 / CLOCKS_PER_SEC))));
-      break;
-    }
-    cycles <<= 1;
-  }
-}
-
-TEST_FUNC uintptr_t fio___dynamic_types_test___risky_wrapper(char *buf,
-                                                             size_t len) {
-  return fio_risky_hash(buf, len, 1);
-}
-
-// TEST_FUNC uintptr_t
-// fio___dynamic_types_test___risky_stream_wrapper(char *buf, size_t len) {
-//   fio_risky_hash_s r = fio_risky_hash_init(0);
-//   __asm__ volatile("" ::: "memory");
-//   fio_risky_hash_stream(&r, buf, len);
-//   __asm__ volatile("" ::: "memory");
-//   return fio_risky_hash_value(&r);
-// }
-
-TEST_FUNC uintptr_t fio___dynamic_types_test___risky_mask_wrapper(char *buf,
-                                                                  size_t len) {
-  fio_risky_mask(buf, len, 0, 0);
-  return len;
-}
-
-TEST_FUNC void fio___dynamic_types_test___risky(void) {
-#if 0
-  {
-    uint64_t h1, h2;
-    const char *buf =
-        "This is a small string consisting of 127 bytes (uneven data), meant "
-        "for testing that risky streaming == risky non-streaming.123";
-    const size_t len = 127;
-    fio_risky_hash_s r = fio_risky_hash_init(0);
-    // fio_risky_hash_stream(&r, buf, len);
-    fio_risky_hash_stream(&r, buf, 37);
-    // fio_risky_hash_stream(&r, buf + 37, len - 37);
-    h1 = fio_risky_hash_value(&r);
-    h2 = fio_risky_hash(buf, len, 0);
-    FIO_ASSERT(h1 == h2, "Risky Hash Streaming != Non-Streaming %p != %p",
-                 (void *)h1, (void *)h2);
-  }
-#endif
-  for (int i = 0; i < 8; ++i) {
-    char buf[128];
-    uint64_t nonce = fio_rand64();
-    const char *str = "this is a short text, to test risky masking";
-    char *tmp = buf + i;
-    memcpy(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
-    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
-    size_t err = 0;
-    for (size_t b = 0; b < strlen(str); ++b) {
-      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
-                 "Risky Hash masking didn't mask buf[%zu] on offset "
-                 "%d (statistical deviation?)",
-                 b,
-                 i);
-      err += (tmp[b] == str[b]);
-    }
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
-  }
-  const uint8_t alignment_test_offset = 0;
-  if (alignment_test_offset)
-    fprintf(stderr,
-            "The following speed tests use a memory alignment offset of %d "
-            "bytes.\n",
-            (int)(alignment_test_offset & 7));
-  fio_test_hash_function(fio___dynamic_types_test___risky_wrapper,
-                         (char *)"fio_risky_hash",
-                         alignment_test_offset);
-  // fio_test_hash_function(fio___dynamic_types_test___risky_stream_wrapper,
-  //                        "fio_risky_hash (streaming)",
-  //                        alignment_test_offset);
-  fio_test_hash_function(fio___dynamic_types_test___risky_mask_wrapper,
-                         (char *)"fio_risky_mask (Risky XOR + counter)",
-                         alignment_test_offset);
-  fio_test_hash_function(fio___dynamic_types_test___risky_mask_wrapper,
-                         (char *)"fio_risky_mask (unaligned)",
-                         1);
-}
-
-/* *****************************************************************************
 FIOBJ and JSON testing
 ***************************************************************************** */
 #define FIO_FIOBJ
@@ -18887,15 +18872,15 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___print_sizes();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___random();
+  FIO_NAME_TEST(stl, random)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___atomic();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___bitwise();
+  FIO_NAME_TEST(stl, bitwise)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___atol();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___url();
+  FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
@@ -18917,7 +18902,7 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___risky();
+  FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___lock2_speed();
   fprintf(stderr, "===============\n");

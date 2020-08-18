@@ -547,6 +547,275 @@ small_random:
   }
 }
 
-#endif /* FIO_EXTERN_COMPLETE */
+/* *****************************************************************************
+Hashing speed test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+#include <math.h>
+
+typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
+
+SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
+                                  char *name,
+                                  uint8_t mem_alignment_ofset) {
+#ifdef DEBUG
+  fprintf(stderr,
+          "* Testing %s speed "
+          "(DEBUG mode detected - speed may be affected).\n",
+          name);
+  uint64_t cycles_start_at = (8192 << 4);
+#else
+  fprintf(stderr, "* Testing %s speed.\n", name);
+  uint64_t cycles_start_at = (8192 << 8);
 #endif
+  /* test based on code from BearSSL with credit to Thomas Pornin */
+  size_t const buffer_len = 8192;
+  uint8_t buffer_[8200];
+  uint8_t *buffer = buffer_ + (mem_alignment_ofset & 7);
+  // uint64_t buffer[1024];
+  memset(buffer, 'T', buffer_len);
+  /* warmup */
+  uint64_t hash = 0;
+  for (size_t i = 0; i < 4; i++) {
+    hash += h((char *)buffer, buffer_len);
+    memcpy(buffer, &hash, sizeof(hash));
+  }
+  /* loop until test runs for more than 2 seconds */
+  for (uint64_t cycles = cycles_start_at;;) {
+    clock_t start, end;
+    start = clock();
+    for (size_t i = cycles; i > 0; i--) {
+      hash += h((char *)buffer, buffer_len);
+      __asm__ volatile("" ::: "memory");
+    }
+    end = clock();
+    memcpy(buffer, &hash, sizeof(hash));
+    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
+        cycles >= ((uint64_t)1 << 62)) {
+      fprintf(stderr,
+              "\t%-40s %8.2f MB/s\n",
+              name,
+              (double)(buffer_len * cycles) /
+                  (((end - start) * (1000000.0 / CLOCKS_PER_SEC))));
+      break;
+    }
+    cycles <<= 1;
+  }
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
+  return fio_risky_hash(buf, len, 1);
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
+                                                           size_t len) {
+  fio_risky_mask(buf, len, 0, 0);
+  return len;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+  for (int i = 0; i < 8; ++i) {
+    char buf[128];
+    uint64_t nonce = fio_rand64();
+    const char *str = "this is a short text, to test risky masking";
+    char *tmp = buf + i;
+    memcpy(tmp, str, strlen(str));
+    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
+    size_t err = 0;
+    for (size_t b = 0; b < strlen(str); ++b) {
+      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
+                 "Risky Hash masking didn't mask buf[%zu] on offset "
+                 "%d (statistical deviation?)",
+                 b,
+                 i);
+      err += (tmp[b] == str[b]);
+    }
+    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
+  }
+  const uint8_t alignment_test_offset = 0;
+  if (alignment_test_offset)
+    fprintf(stderr,
+            "The following speed tests use a memory alignment offset of %d "
+            "bytes.\n",
+            (int)(alignment_test_offset & 7));
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         alignment_test_offset);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (Risky XOR + counter)",
+                         alignment_test_offset);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (unaligned)",
+                         1);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
+                                                 size_t len,
+                                                 const char *name,
+                                                 size_t clk) {
+  size_t totals[2] = {0};
+  size_t freq[256] = {0};
+  const size_t total_bits = (len * sizeof(*stream) * 8);
+  uint64_t hemming = 0;
+  /* collect data */
+  for (size_t i = 1; i < len; i += 2) {
+    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
+    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
+      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
+      ++freq[val];
+      for (int bit = 0; bit < 8; ++bit) {
+        ++totals[(val >> bit) & 1];
+      }
+    }
+  }
+  hemming /= len;
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
+          name,
+          clk);
+#else
+  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
+#endif
+  fprintf(stderr,
+          "\t  zeros / ones (bit frequency)\t%.05f\n",
+          ((float)1.0 * totals[0]) / totals[1]);
+  FIO_ASSERT(totals[0] < totals[1] + (total_bits / 20) &&
+                 totals[1] < totals[0] + (total_bits / 20),
+             "randomness isn't random?");
+  fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
+  /* expect avarage hemming distance of 25% == 16 bits */
+  FIO_ASSERT(hemming >= 14 && hemming <= 18,
+             "randomness isn't random (hemming distance failed)?");
+  /* test chi-square ... I think */
+  if (len * sizeof(*stream) > 2560) {
+    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
+    double chi_square = 0;
+    for (unsigned int i = 0; i < 256; ++i) {
+      double f = freq[i] - n_r;
+      chi_square += (f * f);
+    }
+    chi_square /= n_r;
+    double chi_square_r_abs =
+        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
+    fprintf(
+        stderr,
+        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
+        chi_square_r_abs,
+        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
+             ? "good"
+             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
+                                                      : "\x1B[1mBAD\x1B[0m")),
+        2 * (sqrt(n_r)));
+  }
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
+  fprintf(stderr,
+          "* Testing randomness "
+          "- bit frequency / hemming distance / chi-square.\n");
+  const size_t test_len = (TEST_REPEAT << 7);
+  uint64_t *rs = (uint64_t *)FIO_MEM_CALLOC(sizeof(*rs), test_len);
+  clock_t start, end;
+  FIO_ASSERT_ALLOC(rs);
+
+  rand(); /* warmup */
+  if (sizeof(int) < sizeof(uint64_t)) {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
+    }
+    end = clock();
+  } else {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = (uint64_t)rand();
+    }
+    end = clock();
+  }
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  {
+    if (RAND_MAX == ~(uint64_t)0ULL) {
+      /* RAND_MAX fills all bits */
+      start = clock();
+      for (size_t i = 0; i < test_len; ++i) {
+        rs[i] = (uint64_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
+      /* RAND_MAX fill at least 32 bits per call */
+      uint32_t *rs_adjusted = (uint32_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 1); ++i) {
+        rs_adjusted[i] = (uint32_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint16_t)0U)) {
+      /* RAND_MAX fill at least 16 bits per call */
+      uint16_t *rs_adjusted = (uint16_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint16_t)rand();
+      }
+      end = clock();
+    } else {
+      /* assume RAND_MAX fill at least 8 bits per call */
+      uint8_t *rs_adjusted = (uint8_t *)rs;
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint8_t)rand();
+      }
+      end = clock();
+    }
+    /* test RAND_MAX value */
+    uint8_t rand_bits = 63;
+    while (rand_bits) {
+      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
+        break;
+      --rand_bits;
+    }
+    rand_bits = 64 - rand_bits;
+    char buffer[128] = {0};
+    snprintf(buffer,
+             128 - 14,
+             "rand (system - fixed, testing %d random bits)",
+             (int)rand_bits);
+    FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
+  }
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  fio_rand64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio_rand64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
+  memset(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio_rand_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "fio_rand_bytes", end - start);
+
+  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
+  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
+#endif /* DEBUG */
+}
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Random - Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_RAND
+#endif
