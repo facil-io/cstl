@@ -861,5 +861,5 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
 /* *****************************************************************************
 Bit-Byte operations - cleanup
 ***************************************************************************** */
-#undef FIO_BITMAP
 #endif /* FIO_BITMAP */
+#undef FIO_BITMAP

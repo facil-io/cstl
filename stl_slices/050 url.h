@@ -675,6 +675,6 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
 FIO_URL - Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_URL || FIO_URI */
 #undef FIO_URL
 #undef FIO_URI
-#endif /* FIO_URL || FIO_URI */

@@ -817,5 +817,5 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
 Random - Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_RAND */
 #undef FIO_RAND
-#endif
