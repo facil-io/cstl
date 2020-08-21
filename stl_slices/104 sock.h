@@ -268,6 +268,12 @@ SFUNC int fio_sock_set_non_block(int fd);
 IO Poll - Implementation (always static / inlined)
 ***************************************************************************** */
 
+FIO_SFUNC void fio___sock_poll_mock_ev(int fd, size_t index, void *udata) {
+  (void)fd;
+  (void)index;
+  (void)udata;
+}
+
 int fio_sock_poll____(void); /* sublime text marker */
 FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
   size_t event_count = 0;
@@ -279,6 +285,15 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
       ++args.count;
   if (!args.count)
     goto empty_list;
+
+  /* move if statement out of loop using a move callback */
+  if (!args.on_ready)
+    args.on_ready = fio___sock_poll_mock_ev;
+  if (!args.on_data)
+    args.on_data = fio___sock_poll_mock_ev;
+  if (!args.on_error)
+    args.on_error = fio___sock_poll_mock_ev;
+
   event_count = poll(args.fds, args.count, args.timeout);
   if (args.before_events)
     args.before_events(args.udata);
@@ -288,11 +303,11 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
     if (!args.fds[i].revents)
       continue;
     ++limit;
-    if (args.on_ready && (args.fds[i].revents & POLLOUT))
+    if ((args.fds[i].revents & POLLOUT))
       args.on_ready(args.fds[i].fd, i, args.udata);
-    if (args.on_data && (args.fds[i].revents & POLLIN))
+    if ((args.fds[i].revents & POLLIN))
       args.on_data(args.fds[i].fd, i, args.udata);
-    if (args.on_error && (args.fds[i].revents & (POLLERR | POLLNVAL)))
+    if ((args.fds[i].revents & (POLLERR | POLLNVAL)))
       args.on_error(args.fds[i].fd, i, args.udata); /* TODO: POLLHUP ? */
   }
 finish:

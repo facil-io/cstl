@@ -5532,6 +5532,11 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #endif
 
+#ifndef FIO_MEMORY_USE_FIO_MEMSET
+/** Prefer a custom implementation of memset over the library implementation */
+#define FIO_MEMORY_USE_FIO_MEMSET 0
+#endif
+
 /* *****************************************************************************
 Memory Allocation - configuration value - results and constants
 ***************************************************************************** */
@@ -5699,6 +5704,70 @@ fio___memcpy_16byte(void *dest_, const void *src_, size_t units) {
 #endif                             /* SIZE_MAX */
 }
 
+/** a 16 byte aligned memset implementation. */
+FIO_SFUNC void
+fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
+  uint64_t *dest = (uint64_t *)dest_;
+  bytes >>= 3;
+  while (bytes >= 16) {
+    dest[0] = data;
+    dest[1] = data;
+    dest[2] = data;
+    dest[3] = data;
+    dest[4] = data;
+    dest[5] = data;
+    dest[6] = data;
+    dest[7] = data;
+    dest[8] = data;
+    dest[9] = data;
+    dest[10] = data;
+    dest[11] = data;
+    dest[12] = data;
+    dest[13] = data;
+    dest[14] = data;
+    dest[15] = data;
+    dest += 16;
+    bytes -= 16;
+  }
+  switch (bytes) {
+  case 15:
+    *(dest++) = data; /* fallthrough */
+  case 14:
+    *(dest++) = data; /* fallthrough */
+  case 13:
+    *(dest++) = data; /* fallthrough */
+  case 12:
+    *(dest++) = data; /* fallthrough */
+  case 11:
+    *(dest++) = data; /* fallthrough */
+  case 10:
+    *(dest++) = data; /* fallthrough */
+  case 9:
+    *(dest++) = data; /* fallthrough */
+  case 8:
+    *(dest++) = data; /* fallthrough */
+  case 7:
+    *(dest++) = data; /* fallthrough */
+  case 6:
+    *(dest++) = data; /* fallthrough */
+  case 5:
+    *(dest++) = data; /* fallthrough */
+  case 4:
+    *(dest++) = data; /* fallthrough */
+  case 3:
+    *(dest++) = data; /* fallthrough */
+  case 2:
+    *(dest++) = data; /* fallthrough */
+  case 1:
+    *(dest++) = data;
+  }
+}
+
+#if FIO_MEMORY_USE_FIO_MEMSET
+#define FIO___MEMSET fio___memset_aligned
+#else
+#define FIO___MEMSET memset
+#endif
 /* *****************************************************************************
 Override the system's malloc functions if required
 ***************************************************************************** */
@@ -6243,7 +6312,7 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
              (void *)(*(uintptr_t *)b));
   if (fio_atomic_sub_fetch(&b->ref, 1))
     return;
-  memset(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
+  FIO___MEMSET(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
 
 #if defined(FIO_MEMORY_CACHE_SLOTS) && FIO_MEMORY_CACHE_SLOTS
   for (size_t i = 0; i < FIO_MEMORY_CACHE_SLOTS; ++i) {
@@ -6267,8 +6336,20 @@ Slice allocation / deallocation (slicing the block)
 FIO_IFUNC void *fio___mem_slice(fio___mem_block_s *b, size_t units) {
   /* Note: each unit is 16 bytes long */
   void *ret = NULL;
-  if (!b || (b->pos + units >= (FIO_MEMORY_BLOCK_SIZE >> 4)))
+  if (!b)
     return ret;
+
+  /* if we hold the only reference, all slices were freed... */
+  if (b->ref == 1 && b->pos > 1) {
+    /* reset used memory to 0 and reset slice counter */
+    FIO___MEMSET(b + 1, 0, (size_t)(b->pos - 1) << 4);
+    b->pos = 1;
+  }
+
+  /* enough room? */
+  if (b->pos + units >= (FIO_MEMORY_BLOCK_SIZE >> 4))
+    return ret;
+
   ret = (void *)(b + b->pos);
   b->pos += units;
   fio_atomic_add(&b->ref, 1);
@@ -6296,9 +6377,21 @@ FIO_IFUNC fio___mem_big_block_s *fio___mem_big_block_new(void) {
 FIO_IFUNC void *fio___mem_big_slice(fio___mem_big_block_s *b, size_t units) {
   /* Note: each unit is 16 bytes long */
   void *ret = NULL;
-  if (!b || (b->pos + units >=
-             (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG)))
+  if (!b)
     return ret;
+
+  /* if we hold the only reference, all slices were freed... */
+  if (b->ref == 1 && b->pos > 1) {
+    /* reset used memory to 0 and reset slice counter */
+    FIO___MEMSET(b + 1, 0, (size_t)b->pos << FIO_MEM_PAGE_SIZE_LOG);
+    b->pos = 1;
+  }
+
+  /* enough room? */
+  if (b->pos + units >=
+      (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG))
+    return ret;
+
   ret = (void *)((uintptr_t)(b + 1) +
                  ((uintptr_t)b->pos << FIO_MEM_PAGE_SIZE_LOG));
   b->pos += units;
@@ -6312,7 +6405,7 @@ FIO_IFUNC void fio___mem_big_slice_free(void *p) {
     return;
   if (fio_atomic_sub_fetch(&b->ref, 1))
     return;
-  memset(b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
+  FIO___MEMSET(b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
   fio___mem_chunk_s *c = (fio___mem_chunk_s *)b;
   c->ref = 1;
   FIO_MEMORY_LOCK(fio___mem_state->lock);
@@ -6541,7 +6634,8 @@ big_free:
   return;
 mmap_free:
   /* zero out memory before returning it to the system */
-  memset(ptr, 0, ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - sizeof(*c));
+  FIO___MEMSET(
+      ptr, 0, ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - sizeof(*c));
   FIO_MEM_PAGE_FREE(c, c->marker);
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
@@ -6723,64 +6817,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
 #else /* FIO_MALLOC_FORCE_SYSTEM */
 
 #include "pthread.h"
-
-FIO_IFUNC void
-fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
-  uint64_t *dest = (uint64_t *)dest_;
-  size_t units = bytes >> 3;
-  while (units >= 16) {
-    dest[0] = data;
-    dest[1] = data;
-    dest[2] = data;
-    dest[3] = data;
-    dest[4] = data;
-    dest[5] = data;
-    dest[6] = data;
-    dest[7] = data;
-    dest[8] = data;
-    dest[9] = data;
-    dest[10] = data;
-    dest[11] = data;
-    dest[12] = data;
-    dest[13] = data;
-    dest[14] = data;
-    dest[15] = data;
-    dest += 16;
-    units -= 16;
-  }
-  switch (units) {
-  case 15:
-    *(dest++) = data; /* fallthrough */
-  case 14:
-    *(dest++) = data; /* fallthrough */
-  case 13:
-    *(dest++) = data; /* fallthrough */
-  case 12:
-    *(dest++) = data; /* fallthrough */
-  case 11:
-    *(dest++) = data; /* fallthrough */
-  case 10:
-    *(dest++) = data; /* fallthrough */
-  case 9:
-    *(dest++) = data; /* fallthrough */
-  case 8:
-    *(dest++) = data; /* fallthrough */
-  case 7:
-    *(dest++) = data; /* fallthrough */
-  case 6:
-    *(dest++) = data; /* fallthrough */
-  case 5:
-    *(dest++) = data; /* fallthrough */
-  case 4:
-    *(dest++) = data; /* fallthrough */
-  case 3:
-    *(dest++) = data; /* fallthrough */
-  case 2:
-    *(dest++) = data; /* fallthrough */
-  case 1:
-    *(dest++) = data;
-  }
-}
 
 FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                                          uint64_t data,
@@ -6997,6 +7033,8 @@ Memory Allocation - cleanup
 #undef FIO_MEMORY_TRYLOCK
 #undef FIO_MEMORY_LOCK
 #undef FIO_MEMORY_UNLOCK
+#undef FIO_MEMORY_USE_FIO_MEMSET
+#undef FIO___MEMSET
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_ALIGN
@@ -8485,7 +8523,8 @@ Internal Macro Implementation
 #define FIO_CLI_BOOL__TYPE_I 0x2
 #define FIO_CLI_INT__TYPE_I 0x3
 #define FIO_CLI_PRINT__TYPE_I 0x4
-#define FIO_CLI_PRINT_HEADER__TYPE_I 0x5
+#define FIO_CLI_PRINT_LINE__TYPE_I 0x5
+#define FIO_CLI_PRINT_HEADER__TYPE_I 0x6
 
 /** Indicates the CLI argument should be a String (default). */
 #define FIO_CLI_STRING(line) (line), ((char *)FIO_CLI_STRING__TYPE_I)
@@ -8493,8 +8532,10 @@ Internal Macro Implementation
 #define FIO_CLI_BOOL(line) (line), ((char *)FIO_CLI_BOOL__TYPE_I)
 /** Indicates the CLI argument should be an Integer (numerical). */
 #define FIO_CLI_INT(line) (line), ((char *)FIO_CLI_INT__TYPE_I)
-/** Indicates the CLI string should be printed as is. */
+/** Indicates the CLI string should be printed as is with proper offset. */
 #define FIO_CLI_PRINT(line) (line), ((char *)FIO_CLI_PRINT__TYPE_I)
+/** Indicates the CLI string should be printed as is with no offset. */
+#define FIO_CLI_PRINT_LINE(line) (line), ((char *)FIO_CLI_PRINT_LINE__TYPE_I)
 /** Indicates the CLI string should be printed as a header. */
 #define FIO_CLI_PRINT_HEADER(line)                                             \
   (line), ((char *)FIO_CLI_PRINT_HEADER__TYPE_I)
@@ -8800,6 +8841,7 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
     case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
     case FIO_CLI_INT__TYPE_I:          /* fallthrough */
     case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
       ++pos;
       continue;
@@ -8816,10 +8858,36 @@ found:
   case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
   case FIO_CLI_INT__TYPE_I:          /* fallthrough */
   case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+  case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
   case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
     return pos[1];
   }
   return NULL;
+}
+
+FIO_SFUNC void fio___cli_print_line(char const *desc, char const *name) {
+  char buf[1024];
+  size_t pos = 0;
+  while (name[0] == '.' || name[0] == '/')
+    ++name;
+  while (*desc) {
+    if (desc[0] == 'N' && desc[1] == 'A' && desc[2] == 'M' && desc[3] == 'E') {
+      buf[pos++] = 0;
+      desc += 4;
+      fprintf(stderr, "%s%s", buf, name);
+      pos = 0;
+    } else {
+      buf[pos++] = *desc;
+      ++desc;
+      if (pos >= 980) {
+        buf[pos++] = 0;
+        fwrite(buf, pos, sizeof(*buf), stderr);
+        pos = 0;
+      }
+    }
+  }
+  if (pos)
+    fwrite(buf, pos, sizeof(*buf), stderr);
 }
 
 FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
@@ -8914,33 +8982,9 @@ error: /* handle errors*/
           value ? (value[0] ? value : "(empty)") : "(null)");
 print_help:
   if (parser->description) {
-    const char *name_tmp = parser->argv[0];
-    const char *desc = parser->description;
-    char buf[1024];
-    size_t pos = 0;
-    while (name_tmp[0] == '.' || name_tmp[0] == '/')
-      ++name_tmp;
-    buf[pos++] = '\n';
-    while (*desc) {
-      if (desc[0] == 'N' && desc[1] == 'A' && desc[2] == 'M' &&
-          desc[3] == 'E') {
-        buf[pos++] = 0;
-        desc += 4;
-        fprintf(stderr, "%s%s", buf, name_tmp);
-        pos = 0;
-      } else {
-        buf[pos++] = *desc;
-        ++desc;
-        if (pos >= 1023) {
-          buf[pos++] = 0;
-          fwrite(buf, pos, sizeof(*buf), stderr);
-          pos = 0;
-        }
-      }
-    }
-    buf[pos++] = '\n';
-    buf[pos++] = 0;
-    fprintf(stderr, "%s", buf);
+    fprintf(stderr, "\n");
+    fio___cli_print_line(parser->description, parser->argv[0]);
+    fprintf(stderr, "\n");
   } else {
     const char *name_tmp = parser->argv[0];
     while (name_tmp[0] == '.' || name_tmp[0] == '/')
@@ -8953,10 +8997,11 @@ print_help:
   char const **pos = parser->names;
   while (*pos) {
     switch ((intptr_t)*pos) {
-    case FIO_CLI_STRING__TYPE_I: /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:   /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:    /* fallthrough */
-    case FIO_CLI_PRINT__TYPE_I:  /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I:     /* fallthrough */
+    case FIO_CLI_BOOL__TYPE_I:       /* fallthrough */
+    case FIO_CLI_INT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT__TYPE_I:      /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I: /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I:
       ++pos;
       continue;
@@ -8964,11 +9009,20 @@ print_help:
     type = (char *)FIO_CLI_STRING__TYPE_I;
     switch ((intptr_t)pos[1]) {
     case FIO_CLI_PRINT__TYPE_I:
-      fprintf(stderr, "          \t%s\n", pos[0]);
+      fprintf(stderr, "          \t");
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\n");
+      pos += 2;
+      continue;
+    case FIO_CLI_PRINT_LINE__TYPE_I:
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\n");
       pos += 2;
       continue;
     case FIO_CLI_PRINT_HEADER__TYPE_I:
-      fprintf(stderr, "\n\x1B[4m%s\x1B[0m\n", pos[0]);
+      fprintf(stderr, "\n\x1B[4m");
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\x1B[0m\n");
       pos += 2;
       continue;
 
@@ -9036,7 +9090,7 @@ print_help:
       switch ((size_t)type) {
       case FIO_CLI_STRING__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%*s\x1B[2msame as "
+                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%.*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
@@ -9047,7 +9101,7 @@ print_help:
         break;
       case FIO_CLI_BOOL__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\t   %*s\x1B[2msame as %.*s\x1B[0m\n",
+                " \x1B[1m%-10.*s\x1B[0m\t   %.*s\x1B[2msame as %.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
                 padding,
@@ -9057,7 +9111,7 @@ print_help:
         break;
       case FIO_CLI_INT__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%*s\x1B[2msame as "
+                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%.*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
@@ -9124,11 +9178,13 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
     case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
     case FIO_CLI_INT__TYPE_I:          /* fallthrough */
     case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
       ++line;
       continue;
     }
     if (line[1] != (char *)FIO_CLI_PRINT__TYPE_I &&
+        line[1] != (char *)FIO_CLI_PRINT_LINE__TYPE_I &&
         line[1] != (char *)FIO_CLI_PRINT_HEADER__TYPE_I)
       fio___cli_map_line2alias(*line);
     ++line;
@@ -9253,6 +9309,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_BOOL("-boolean -t boolean"),
         FIO_CLI_BOOL("-boolean_false -f boolean"),
         FIO_CLI_STRING("-str -s a string"),
+        FIO_CLI_PRINT_HEADER("Printing stuff"),
+        FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
+        FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
         NULL,
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
@@ -9560,6 +9619,12 @@ SFUNC int fio_sock_set_non_block(int fd);
 IO Poll - Implementation (always static / inlined)
 ***************************************************************************** */
 
+FIO_SFUNC void fio___sock_poll_mock_ev(int fd, size_t index, void *udata) {
+  (void)fd;
+  (void)index;
+  (void)udata;
+}
+
 int fio_sock_poll____(void); /* sublime text marker */
 FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
   size_t event_count = 0;
@@ -9571,6 +9636,15 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
       ++args.count;
   if (!args.count)
     goto empty_list;
+
+  /* move if statement out of loop using a move callback */
+  if (!args.on_ready)
+    args.on_ready = fio___sock_poll_mock_ev;
+  if (!args.on_data)
+    args.on_data = fio___sock_poll_mock_ev;
+  if (!args.on_error)
+    args.on_error = fio___sock_poll_mock_ev;
+
   event_count = poll(args.fds, args.count, args.timeout);
   if (args.before_events)
     args.before_events(args.udata);
@@ -9580,11 +9654,11 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
     if (!args.fds[i].revents)
       continue;
     ++limit;
-    if (args.on_ready && (args.fds[i].revents & POLLOUT))
+    if ((args.fds[i].revents & POLLOUT))
       args.on_ready(args.fds[i].fd, i, args.udata);
-    if (args.on_data && (args.fds[i].revents & POLLIN))
+    if ((args.fds[i].revents & POLLIN))
       args.on_data(args.fds[i].fd, i, args.udata);
-    if (args.on_error && (args.fds[i].revents & (POLLERR | POLLNVAL)))
+    if ((args.fds[i].revents & (POLLERR | POLLNVAL)))
       args.on_error(args.fds[i].fd, i, args.udata); /* TODO: POLLHUP ? */
   }
 finish:

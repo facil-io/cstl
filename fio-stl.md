@@ -2016,7 +2016,9 @@ Command line arguments can be either String, Integer or Boolean. Optionally, ext
 
 * `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
 
-* `FIO_CLI_PRINT("raw text line (printed as is)")`
+* `FIO_CLI_PRINT("raw text line (printed as is, with same spacing as arguments)")`
+
+* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
 
 **Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
 
@@ -2028,8 +2030,10 @@ int main(int argc, char const *argv[]) {
                 FIO_CLI_STRING("-str -s (my default str (string\\)) any data goes here"),
                 FIO_CLI_INT("-int -i (42) numeral data goes here"),
                 FIO_CLI_BOOL("-bool -b (1) flag (boolean) only - no data"),
-                FIO_CLI_PRINT("This test allows for unlimited arguments "
-                              "that will simply pass-through"));
+                FIO_CLI_PRINT("This example allows for unlimited arguments "
+                              "that will simply pass-through"),
+                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
+                );
   if (fio_cli_get("-s")) /* always true when default value is provided */
     fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
 

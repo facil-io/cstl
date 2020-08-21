@@ -47,7 +47,8 @@ Internal Macro Implementation
 #define FIO_CLI_BOOL__TYPE_I 0x2
 #define FIO_CLI_INT__TYPE_I 0x3
 #define FIO_CLI_PRINT__TYPE_I 0x4
-#define FIO_CLI_PRINT_HEADER__TYPE_I 0x5
+#define FIO_CLI_PRINT_LINE__TYPE_I 0x5
+#define FIO_CLI_PRINT_HEADER__TYPE_I 0x6
 
 /** Indicates the CLI argument should be a String (default). */
 #define FIO_CLI_STRING(line) (line), ((char *)FIO_CLI_STRING__TYPE_I)
@@ -55,8 +56,10 @@ Internal Macro Implementation
 #define FIO_CLI_BOOL(line) (line), ((char *)FIO_CLI_BOOL__TYPE_I)
 /** Indicates the CLI argument should be an Integer (numerical). */
 #define FIO_CLI_INT(line) (line), ((char *)FIO_CLI_INT__TYPE_I)
-/** Indicates the CLI string should be printed as is. */
+/** Indicates the CLI string should be printed as is with proper offset. */
 #define FIO_CLI_PRINT(line) (line), ((char *)FIO_CLI_PRINT__TYPE_I)
+/** Indicates the CLI string should be printed as is with no offset. */
+#define FIO_CLI_PRINT_LINE(line) (line), ((char *)FIO_CLI_PRINT_LINE__TYPE_I)
 /** Indicates the CLI string should be printed as a header. */
 #define FIO_CLI_PRINT_HEADER(line)                                             \
   (line), ((char *)FIO_CLI_PRINT_HEADER__TYPE_I)
@@ -362,6 +365,7 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
     case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
     case FIO_CLI_INT__TYPE_I:          /* fallthrough */
     case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
       ++pos;
       continue;
@@ -378,10 +382,36 @@ found:
   case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
   case FIO_CLI_INT__TYPE_I:          /* fallthrough */
   case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+  case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
   case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
     return pos[1];
   }
   return NULL;
+}
+
+FIO_SFUNC void fio___cli_print_line(char const *desc, char const *name) {
+  char buf[1024];
+  size_t pos = 0;
+  while (name[0] == '.' || name[0] == '/')
+    ++name;
+  while (*desc) {
+    if (desc[0] == 'N' && desc[1] == 'A' && desc[2] == 'M' && desc[3] == 'E') {
+      buf[pos++] = 0;
+      desc += 4;
+      fprintf(stderr, "%s%s", buf, name);
+      pos = 0;
+    } else {
+      buf[pos++] = *desc;
+      ++desc;
+      if (pos >= 980) {
+        buf[pos++] = 0;
+        fwrite(buf, pos, sizeof(*buf), stderr);
+        pos = 0;
+      }
+    }
+  }
+  if (pos)
+    fwrite(buf, pos, sizeof(*buf), stderr);
 }
 
 FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
@@ -476,33 +506,9 @@ error: /* handle errors*/
           value ? (value[0] ? value : "(empty)") : "(null)");
 print_help:
   if (parser->description) {
-    const char *name_tmp = parser->argv[0];
-    const char *desc = parser->description;
-    char buf[1024];
-    size_t pos = 0;
-    while (name_tmp[0] == '.' || name_tmp[0] == '/')
-      ++name_tmp;
-    buf[pos++] = '\n';
-    while (*desc) {
-      if (desc[0] == 'N' && desc[1] == 'A' && desc[2] == 'M' &&
-          desc[3] == 'E') {
-        buf[pos++] = 0;
-        desc += 4;
-        fprintf(stderr, "%s%s", buf, name_tmp);
-        pos = 0;
-      } else {
-        buf[pos++] = *desc;
-        ++desc;
-        if (pos >= 1023) {
-          buf[pos++] = 0;
-          fwrite(buf, pos, sizeof(*buf), stderr);
-          pos = 0;
-        }
-      }
-    }
-    buf[pos++] = '\n';
-    buf[pos++] = 0;
-    fprintf(stderr, "%s", buf);
+    fprintf(stderr, "\n");
+    fio___cli_print_line(parser->description, parser->argv[0]);
+    fprintf(stderr, "\n");
   } else {
     const char *name_tmp = parser->argv[0];
     while (name_tmp[0] == '.' || name_tmp[0] == '/')
@@ -515,10 +521,11 @@ print_help:
   char const **pos = parser->names;
   while (*pos) {
     switch ((intptr_t)*pos) {
-    case FIO_CLI_STRING__TYPE_I: /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:   /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:    /* fallthrough */
-    case FIO_CLI_PRINT__TYPE_I:  /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I:     /* fallthrough */
+    case FIO_CLI_BOOL__TYPE_I:       /* fallthrough */
+    case FIO_CLI_INT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT__TYPE_I:      /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I: /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I:
       ++pos;
       continue;
@@ -526,11 +533,20 @@ print_help:
     type = (char *)FIO_CLI_STRING__TYPE_I;
     switch ((intptr_t)pos[1]) {
     case FIO_CLI_PRINT__TYPE_I:
-      fprintf(stderr, "          \t%s\n", pos[0]);
+      fprintf(stderr, "          \t");
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\n");
+      pos += 2;
+      continue;
+    case FIO_CLI_PRINT_LINE__TYPE_I:
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\n");
       pos += 2;
       continue;
     case FIO_CLI_PRINT_HEADER__TYPE_I:
-      fprintf(stderr, "\n\x1B[4m%s\x1B[0m\n", pos[0]);
+      fprintf(stderr, "\n\x1B[4m");
+      fio___cli_print_line(pos[0], parser->argv[0]);
+      fprintf(stderr, "\x1B[0m\n");
       pos += 2;
       continue;
 
@@ -598,7 +614,7 @@ print_help:
       switch ((size_t)type) {
       case FIO_CLI_STRING__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%*s\x1B[2msame as "
+                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t\"\" \x1B[0m%.*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
@@ -609,7 +625,7 @@ print_help:
         break;
       case FIO_CLI_BOOL__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\t   %*s\x1B[2msame as %.*s\x1B[0m\n",
+                " \x1B[1m%-10.*s\x1B[0m\t   %.*s\x1B[2msame as %.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
                 padding,
@@ -619,7 +635,7 @@ print_help:
         break;
       case FIO_CLI_INT__TYPE_I:
         fprintf(stderr,
-                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%*s\x1B[2msame as "
+                " \x1B[1m%-10.*s\x1B[0m\x1B[2m\t## \x1B[0m%.*s\x1B[2msame as "
                 "%.*s\x1B[0m\n",
                 (int)(tmp - start),
                 p + start,
@@ -686,11 +702,13 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
     case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
     case FIO_CLI_INT__TYPE_I:          /* fallthrough */
     case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
     case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
       ++line;
       continue;
     }
     if (line[1] != (char *)FIO_CLI_PRINT__TYPE_I &&
+        line[1] != (char *)FIO_CLI_PRINT_LINE__TYPE_I &&
         line[1] != (char *)FIO_CLI_PRINT_HEADER__TYPE_I)
       fio___cli_map_line2alias(*line);
     ++line;
@@ -815,6 +833,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_BOOL("-boolean -t boolean"),
         FIO_CLI_BOOL("-boolean_false -f boolean"),
         FIO_CLI_STRING("-str -s a string"),
+        FIO_CLI_PRINT_HEADER("Printing stuff"),
+        FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
+        FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
         NULL,
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);

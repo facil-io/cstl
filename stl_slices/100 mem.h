@@ -267,6 +267,11 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #endif
 
+#ifndef FIO_MEMORY_USE_FIO_MEMSET
+/** Prefer a custom implementation of memset over the library implementation */
+#define FIO_MEMORY_USE_FIO_MEMSET 0
+#endif
+
 /* *****************************************************************************
 Memory Allocation - configuration value - results and constants
 ***************************************************************************** */
@@ -434,6 +439,70 @@ fio___memcpy_16byte(void *dest_, const void *src_, size_t units) {
 #endif                             /* SIZE_MAX */
 }
 
+/** a 16 byte aligned memset implementation. */
+FIO_SFUNC void
+fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
+  uint64_t *dest = (uint64_t *)dest_;
+  bytes >>= 3;
+  while (bytes >= 16) {
+    dest[0] = data;
+    dest[1] = data;
+    dest[2] = data;
+    dest[3] = data;
+    dest[4] = data;
+    dest[5] = data;
+    dest[6] = data;
+    dest[7] = data;
+    dest[8] = data;
+    dest[9] = data;
+    dest[10] = data;
+    dest[11] = data;
+    dest[12] = data;
+    dest[13] = data;
+    dest[14] = data;
+    dest[15] = data;
+    dest += 16;
+    bytes -= 16;
+  }
+  switch (bytes) {
+  case 15:
+    *(dest++) = data; /* fallthrough */
+  case 14:
+    *(dest++) = data; /* fallthrough */
+  case 13:
+    *(dest++) = data; /* fallthrough */
+  case 12:
+    *(dest++) = data; /* fallthrough */
+  case 11:
+    *(dest++) = data; /* fallthrough */
+  case 10:
+    *(dest++) = data; /* fallthrough */
+  case 9:
+    *(dest++) = data; /* fallthrough */
+  case 8:
+    *(dest++) = data; /* fallthrough */
+  case 7:
+    *(dest++) = data; /* fallthrough */
+  case 6:
+    *(dest++) = data; /* fallthrough */
+  case 5:
+    *(dest++) = data; /* fallthrough */
+  case 4:
+    *(dest++) = data; /* fallthrough */
+  case 3:
+    *(dest++) = data; /* fallthrough */
+  case 2:
+    *(dest++) = data; /* fallthrough */
+  case 1:
+    *(dest++) = data;
+  }
+}
+
+#if FIO_MEMORY_USE_FIO_MEMSET
+#define FIO___MEMSET fio___memset_aligned
+#else
+#define FIO___MEMSET memset
+#endif
 /* *****************************************************************************
 Override the system's malloc functions if required
 ***************************************************************************** */
@@ -978,7 +1047,7 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
              (void *)(*(uintptr_t *)b));
   if (fio_atomic_sub_fetch(&b->ref, 1))
     return;
-  memset(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
+  FIO___MEMSET(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
 
 #if defined(FIO_MEMORY_CACHE_SLOTS) && FIO_MEMORY_CACHE_SLOTS
   for (size_t i = 0; i < FIO_MEMORY_CACHE_SLOTS; ++i) {
@@ -1002,8 +1071,20 @@ Slice allocation / deallocation (slicing the block)
 FIO_IFUNC void *fio___mem_slice(fio___mem_block_s *b, size_t units) {
   /* Note: each unit is 16 bytes long */
   void *ret = NULL;
-  if (!b || (b->pos + units >= (FIO_MEMORY_BLOCK_SIZE >> 4)))
+  if (!b)
     return ret;
+
+  /* if we hold the only reference, all slices were freed... */
+  if (b->ref == 1 && b->pos > 1) {
+    /* reset used memory to 0 and reset slice counter */
+    FIO___MEMSET(b + 1, 0, (size_t)(b->pos - 1) << 4);
+    b->pos = 1;
+  }
+
+  /* enough room? */
+  if (b->pos + units >= (FIO_MEMORY_BLOCK_SIZE >> 4))
+    return ret;
+
   ret = (void *)(b + b->pos);
   b->pos += units;
   fio_atomic_add(&b->ref, 1);
@@ -1031,9 +1112,21 @@ FIO_IFUNC fio___mem_big_block_s *fio___mem_big_block_new(void) {
 FIO_IFUNC void *fio___mem_big_slice(fio___mem_big_block_s *b, size_t units) {
   /* Note: each unit is 16 bytes long */
   void *ret = NULL;
-  if (!b || (b->pos + units >=
-             (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG)))
+  if (!b)
     return ret;
+
+  /* if we hold the only reference, all slices were freed... */
+  if (b->ref == 1 && b->pos > 1) {
+    /* reset used memory to 0 and reset slice counter */
+    FIO___MEMSET(b + 1, 0, (size_t)b->pos << FIO_MEM_PAGE_SIZE_LOG);
+    b->pos = 1;
+  }
+
+  /* enough room? */
+  if (b->pos + units >=
+      (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG))
+    return ret;
+
   ret = (void *)((uintptr_t)(b + 1) +
                  ((uintptr_t)b->pos << FIO_MEM_PAGE_SIZE_LOG));
   b->pos += units;
@@ -1047,7 +1140,7 @@ FIO_IFUNC void fio___mem_big_slice_free(void *p) {
     return;
   if (fio_atomic_sub_fetch(&b->ref, 1))
     return;
-  memset(b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
+  FIO___MEMSET(b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
   fio___mem_chunk_s *c = (fio___mem_chunk_s *)b;
   c->ref = 1;
   FIO_MEMORY_LOCK(fio___mem_state->lock);
@@ -1276,7 +1369,8 @@ big_free:
   return;
 mmap_free:
   /* zero out memory before returning it to the system */
-  memset(ptr, 0, ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - sizeof(*c));
+  FIO___MEMSET(
+      ptr, 0, ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - sizeof(*c));
   FIO_MEM_PAGE_FREE(c, c->marker);
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
@@ -1458,64 +1552,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
 #else /* FIO_MALLOC_FORCE_SYSTEM */
 
 #include "pthread.h"
-
-FIO_IFUNC void
-fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
-  uint64_t *dest = (uint64_t *)dest_;
-  size_t units = bytes >> 3;
-  while (units >= 16) {
-    dest[0] = data;
-    dest[1] = data;
-    dest[2] = data;
-    dest[3] = data;
-    dest[4] = data;
-    dest[5] = data;
-    dest[6] = data;
-    dest[7] = data;
-    dest[8] = data;
-    dest[9] = data;
-    dest[10] = data;
-    dest[11] = data;
-    dest[12] = data;
-    dest[13] = data;
-    dest[14] = data;
-    dest[15] = data;
-    dest += 16;
-    units -= 16;
-  }
-  switch (units) {
-  case 15:
-    *(dest++) = data; /* fallthrough */
-  case 14:
-    *(dest++) = data; /* fallthrough */
-  case 13:
-    *(dest++) = data; /* fallthrough */
-  case 12:
-    *(dest++) = data; /* fallthrough */
-  case 11:
-    *(dest++) = data; /* fallthrough */
-  case 10:
-    *(dest++) = data; /* fallthrough */
-  case 9:
-    *(dest++) = data; /* fallthrough */
-  case 8:
-    *(dest++) = data; /* fallthrough */
-  case 7:
-    *(dest++) = data; /* fallthrough */
-  case 6:
-    *(dest++) = data; /* fallthrough */
-  case 5:
-    *(dest++) = data; /* fallthrough */
-  case 4:
-    *(dest++) = data; /* fallthrough */
-  case 3:
-    *(dest++) = data; /* fallthrough */
-  case 2:
-    *(dest++) = data; /* fallthrough */
-  case 1:
-    *(dest++) = data;
-  }
-}
 
 FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                                          uint64_t data,
@@ -1732,6 +1768,8 @@ Memory Allocation - cleanup
 #undef FIO_MEMORY_TRYLOCK
 #undef FIO_MEMORY_LOCK
 #undef FIO_MEMORY_UNLOCK
+#undef FIO_MEMORY_USE_FIO_MEMSET
+#undef FIO___MEMSET
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_ALIGN
