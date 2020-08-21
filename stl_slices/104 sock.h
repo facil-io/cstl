@@ -228,6 +228,24 @@ typedef enum {
   FIO_SOCK_UNIX = 16,
 } fio_sock_open_flags_e;
 
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_RW(fd, timeout_)                                         \
+  fio_sock_poll(.timeout = (timeout_),                                         \
+                .count = 1,                                                    \
+                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW((fd))))
+
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_R(fd, timeout_)                                          \
+  fio_sock_poll(.timeout = (timeout_),                                         \
+                .count = 1,                                                    \
+                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_R((fd))))
+
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_W(fd, timeout_)                                          \
+  fio_sock_poll(.timeout = (timeout_),                                         \
+                .count = 1,                                                    \
+                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_W((fd))))
+
 /**
  * Creates a new socket according to the provided flags.
  *
