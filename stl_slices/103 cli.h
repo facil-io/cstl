@@ -10,6 +10,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #include "202 hashmap.h"            /* Development inclusion - ignore line */
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -298,10 +299,10 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
   if (!d.len || !d.buf)
     return val;
   {
-    void *tmp = FIO_MEM_REALLOC((void *)fio___cli_default_values.buf,
-                                fio___cli_default_values.len,
-                                fio___cli_default_values.len + d.len + 1,
-                                fio___cli_default_values.len);
+    void *tmp = FIO_MEM_REALLOC_((void *)fio___cli_default_values.buf,
+                                 fio___cli_default_values.len,
+                                 fio___cli_default_values.len + d.len + 1,
+                                 fio___cli_default_values.len);
     if (!tmp)
       return val;
     fio___cli_default_values.buf = (const char *)tmp;
@@ -753,8 +754,8 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_hash_destroy(&fio___cli_aliases);
   fio___cli_unnamed_count = 0;
   if (fio___cli_default_values.buf) {
-    FIO_MEM_FREE((void *)fio___cli_default_values.buf,
-                 fio___cli_default_values.len);
+    FIO_MEM_FREE_((void *)fio___cli_default_values.buf,
+                  fio___cli_default_values.len);
     fio___cli_default_values.buf = NULL;
     fio___cli_default_values.len = 0;
   }
