@@ -1066,7 +1066,7 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, mem)();
+  FIO_NAME_TEST(FIO_NAME(stl, fio), mem)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");

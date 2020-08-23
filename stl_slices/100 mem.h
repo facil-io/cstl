@@ -1048,7 +1048,11 @@ FIO_SFUNC void fio___mem_block_free(fio___mem_block_s *b) {
              (void *)(*(uintptr_t *)b));
   if (fio_atomic_sub_fetch(&b->ref, 1))
     return;
-  FIO___MEMSET(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
+  if (b->pos >= (FIO_MEMORY_BLOCK_SIZE >> 4)) {
+    FIO___MEMSET(b + 1, 0, FIO_MEMORY_BLOCK_SIZE - 16);
+  } else if (b->pos > 1) {
+    FIO___MEMSET(b + 1, 0, ((b->pos - 1) << 4));
+  }
 
 #if defined(FIO_MEMORY_CACHE_SLOTS) && FIO_MEMORY_CACHE_SLOTS
   for (size_t i = 0; i < FIO_MEMORY_CACHE_SLOTS; ++i) {
@@ -1640,7 +1644,7 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   }
 }
 
-FIO_IFUNC void *FIO_NAME_TEST(stl, mem_tsk)(void *i_) {
+FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(stl, fio), mem_tsk)(void *i_) {
   uintptr_t cycles = (uintptr_t)i_;
   const size_t test_block_count = (2UL << FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   uint64_t marker;
@@ -1682,7 +1686,7 @@ FIO_IFUNC void *FIO_NAME_TEST(stl, mem_tsk)(void *i_) {
   return NULL;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, fio), mem)(void) {
   fprintf(stderr, "* Testing core memory allocator (fio_malloc).\n");
   FIO_ASSERT(fio___mem_state, "memory state machine uninitialized");
 
@@ -1736,12 +1740,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem)(void) {
             (size_t)(cycles),
             (thread_count + 1));
     for (size_t i = 1; i < thread_count; ++i) {
-      if (pthread_create(
-              threads + i, NULL, FIO_NAME_TEST(stl, mem_tsk), (void *)cycles)) {
+      if (pthread_create(threads + i,
+                         NULL,
+                         FIO_NAME_TEST(FIO_NAME(stl, fio), mem_tsk),
+                         (void *)cycles)) {
         abort();
       }
     }
-    FIO_NAME_TEST(stl, mem_tsk)((void *)cycles);
+    FIO_NAME_TEST(FIO_NAME(stl, fio), mem_tsk)((void *)cycles);
     for (size_t i = 1; i < thread_count; ++i) {
       pthread_join(threads[i], NULL);
     }
