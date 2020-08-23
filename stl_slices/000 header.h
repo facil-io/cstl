@@ -407,6 +407,23 @@ typedef struct fio___list_node_s {
                  type, node_name, next____p_ls->node_name.next)))
 #endif
 
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = NULL;                                              \
+  } while (0)
+
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
@@ -500,13 +517,7 @@ Miscellaneous helper macros
 
 #ifndef FIO_ASSERT_ALLOC
 /** Tests for an allocation failure. The behavior can be overridden. */
-#define FIO_ASSERT_ALLOC(ptr)                                                  \
-  if (!(ptr)) {                                                                \
-    FIO_LOG_FATAL("memory allocation error " FIO__FILE__                          \
-                  ":" FIO_MACRO2STR(__LINE__));                                \
-    kill(0, SIGINT);                                                           \
-    exit(-1);                                                                  \
-  }
+#define FIO_ASSERT_ALLOC(ptr)  FIO_ASSERT((ptr), "memory allocation failed.")
 #endif
 // clang-format on
 
