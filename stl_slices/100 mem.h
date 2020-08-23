@@ -27,7 +27,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+This is a fairly naive memory allocator that was nested in a less naive (but
+still very simple) structure.
 
 The allocator has multiple allocation "arenas" that elevate thread contention.
 
@@ -108,9 +109,11 @@ in addition to a set memory consumption (~1 page for core data + 16 bytes for
 `fio_malloc(0)` + 8 bytes per thread), only 16 bytes per block are
 used by the allocator (%0.006), the rest is available for the application.
 
+5. Low code footprint.
+
 ***************************************************************************** */
-#if defined(FIO_MALLOC) && !defined(H___FIO_MALLOC_H)
-#define H___FIO_MALLOC_H
+#if defined(FIO_MALLOC) && !defined(H___FIO_MALLOC___H)
+#define H___FIO_MALLOC___H
 
 /* *****************************************************************************
 Memory Allocation - API
@@ -212,9 +215,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  *
  * Limited to >=17 and <=24.
  *
- * By default 22, whch is a ~4Mb allocation per system call.
- *
- * A block is always 1/16 of this value. A default block size is ~256Kb.
+ * By default 23, which is ~8Mb allocation per system call.
  */
 #define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 23
 #endif
@@ -1389,10 +1390,7 @@ SFUNC void *FIO_ALIGN fio_realloc(void *ptr, size_t new_size) {
 FIO_SFUNC void *fio_realloc2_big(fio___mem_chunk_s *c, size_t new_size) {
   const size_t new_page_len = FIO_MEM_BYTES2PAGES(new_size + sizeof(*c));
   c = (fio___mem_chunk_s *)FIO_MEM_PAGE_REALLOC(
-      c,
-      c->marker >> FIO_MEM_PAGE_SIZE_LOG,
-      new_page_len,
-      FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+      c, c->marker, new_page_len, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
   c->marker = new_page_len;
@@ -1444,6 +1442,12 @@ SFUNC void *FIO_ALIGN fio_realloc2(void *ptr,
   if (!mem) {
     return mem;
   }
+  /* when allocated from the same block, the max length might be adjusted */
+  if ((uintptr_t)mem > (uintptr_t)ptr &&
+      (uintptr_t)ptr + copy_len >= (uintptr_t)mem) {
+    copy_len = (uintptr_t)mem - (uintptr_t)ptr;
+  }
+
   fio___memcpy_16byte(mem, ptr, ((copy_len + 15) >> 4));
   fio_free(ptr);
   // zero out leftover bytes, if any.
@@ -1805,15 +1809,24 @@ Memory Allocation - cleanup
 Memory management macros
 ***************************************************************************** */
 
+#if !defined(FIO_MEM_CALLOC_) || !defined(FIO_MEM_REALLOC_) ||                 \
+    !defined(FIO_MEM_FREE_)
+#undef FIO_MEM_CALLOC_
+#undef FIO_MEM_REALLOC_
+#undef FIO_MEM_FREE_
+
 #ifdef FIO_MALLOC_TMP_USE_SYSTEM /* force malloc */
 #define FIO_MEM_CALLOC_(size, units) calloc((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_INTERNAL_MALLOC_ 0
+
 #else /* FIO_MALLOC_TMP_USE_SYSTEM */
 #define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
 #define FIO_MEM_INTERNAL_MALLOC_ FIO_MEM_INTERNAL_MALLOC
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
+
+#endif /* !defined(FIO_MEM_CALLOC_)... */
