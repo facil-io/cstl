@@ -21,13 +21,16 @@
 #endif
 #endif /* FIO_LOCK2 */
 
-/* FIO_MALLOC dependencies */
-#ifdef FIO_MALLOC
+/* FIO_MEMORY_NAME dependencies */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
+#endif
+#ifndef FIO_RAND
+#define FIO_RAND
 #endif
 #endif /* FIO_MALLOC */
 

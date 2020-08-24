@@ -61,6 +61,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MARK_MEMORY 1
 #endif
 #ifndef FIO_FIOBJ
+// #define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
 #endif
 
@@ -459,7 +460,7 @@ Hash Map / Set - test
 TEST_FUNC size_t map_____test_key_copy_counter = 0;
 TEST_FUNC void map_____test_key_copy(char **dest, char *src) {
   *dest = (char *)FIO_MEM_CALLOC(strlen(src) + 1, sizeof(*dest));
-  FIO_ASSERT(*dest, "not memory to allocate key in map_test")
+  FIO_ASSERT(*dest, "no memory to allocate key in map_test")
   strcpy(*dest, src);
   ++map_____test_key_copy_counter;
 }
@@ -755,7 +756,11 @@ CLI - test
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-#define FIO_MALLOC
+#define FIO_MEMORY_NAME fio_mem_pool4test
+#define FIO_MEMORY_ARENA_COUNT 2
+#include __FILE__
+#define FIO_MEMORY_NAME fio_mem_pool4test2
+#define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
 /* *****************************************************************************
 Socket helper testing
@@ -1066,7 +1071,7 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(FIO_NAME(stl, fio), mem)();
+  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_pool4test), mem)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");

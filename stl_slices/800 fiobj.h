@@ -142,6 +142,35 @@ General Requirements / Macros
 #endif
 
 /* *****************************************************************************
+Dedicated memory allocator for FIOBJ types? (recommended for locality)
+***************************************************************************** */
+#ifdef FIOBJ_MALLOC
+#define FIO_MEMORY_NAME fiobj_mem
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22  /* 4Mb per system call */
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4 /* fight fragmentation */
+#define FIO_MEMORY_ALIGN_LOG 3         /* align on 8 bytes, it's enough */
+#define FIO_MEMORY_CACHE_SLOTS 16      /* cache up to 64Mb */
+#define FIO_MEMORY_ENABLE_BIG_ALLOC 1  /* for big arrays / maps */
+#define FIO_MEMORY_ARENA_COUNT -1      /* CPU core arena count */
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 1 /* yes, well...*/
+#include __FILE__
+
+#define FIOBJ_MEM_CALLOC(size, units)                                          \
+  FIO_NAME(fiobj_mem, calloc)((size), (units))
+#define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
+  FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
+#define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
+#define FIOBJ_MEM_INTERNAL_MALLOC 1
+
+#else
+
+#define FIOBJ_MEM_CALLOC FIO_MEM_CALLOC
+#define FIOBJ_MEM_REALLOC FIO_MEM_REALLOC
+#define FIOBJ_MEM_FREE FIO_MEM_FREE
+#define FIOBJ_MEM_INTERNAL_MALLOC FIO_MEM_INTERNAL_MALLOC
+
+#endif /* FIOBJ_MALLOC */
+/* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
 #if (TEST || DEBUG) && !defined(FIOBJ_MARK_MEMORY)
@@ -348,6 +377,10 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 /* *****************************************************************************
@@ -416,6 +449,10 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -538,6 +575,10 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 /* *****************************************************************************
@@ -567,6 +608,10 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 /** Calculates an object's hash value for a specific hash map object. */
@@ -931,6 +976,10 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -991,6 +1040,10 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 /** Creates a new Float object. */
@@ -1259,10 +1312,18 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o) fiobj_free(o)
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME fiobj____stack
 #define FIO_ARRAY_TYPE fiobj____stack_element_s
+#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
+#define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
+#define FIO_MEM_FREE_ FIOBJ_MEM_FREE
+#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
 #include __FILE__
 
 typedef struct {
@@ -2171,5 +2232,9 @@ FIOBJ cleanup
 #undef FIOBJ_EXTERN_COMPLETE
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
+#undef FIOBJ_MEM_CALLOC
+#undef FIOBJ_MEM_REALLOC
+#undef FIOBJ_MEM_FREE
+#undef FIOBJ_MEM_INTERNAL_MALLOC
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ

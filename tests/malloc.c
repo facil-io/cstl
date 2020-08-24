@@ -1,4 +1,13 @@
+/* use the fast-setup global allocator shortcut for FIO_MEMORY_NAME */
 #define FIO_MALLOC
+#ifdef DEBUG
+/*
+ * when debugging, use less arenas, it makes it faster to track contention
+ * related issues
+ */
+#define FIO_MEMORY_ARENA_COUNT 2
+#endif
+
 #define FIO_LOG
 #define FIO_TIME
 #define FIO_ATOMIC
@@ -309,17 +318,14 @@ int main(int argc, char const *argv[]) {
   fio_cli_set_default("-t", "1");
   const size_t thread_count = fio_cli_get_i("-t");
   fio_cli_end();
+  fio_free(fio_malloc(16)); /* initialize allocator if needed */
+  free(malloc(16));         /* initialize allocator if needed */
   pthread_t threads[thread_count];
 
   fprintf(stderr, "========================================\n");
   fprintf(stderr,
-          "NOTE: The facil.io allocator always returns memory that was "
-          "zeroed out.\n"
-          "\n      In contrast, the system allocator may return (and retain) "
-          "junk data.\n"
-          "\n      Test allocation ranges: %zu - %zu bytes.\n",
-          ((size_t)(TEST_CYCLES_START) << 4),
-          ((size_t)(TEST_CYCLES_END) << 5));
+          "Testing FIO_MEMPOOL with global allocator settings (FIO_MALLOC).\n");
+  fio_malloc_print_settings();
 
   /* test facil.io allocations */
   fprintf(stderr, "========================================\n");

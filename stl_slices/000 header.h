@@ -65,7 +65,8 @@ This file also contains common helper macros / primitives, such as:
 
 * Command Line Interface helpers - defined by `FIO_CLI`
 
-* Custom Memory Allocation - defined by `FIO_MALLOC`, updates `FIO_MEM_CALLOC`
+* Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
+  if `FIO_MALLOC` is used, it updates `FIO_MEM_CALLOC` etc'
 
 * Custom JSON Parser - defined by `FIO_JSON`
 
@@ -326,29 +327,6 @@ Pointer Math
   FIO_PTR_MATH_SUB(T_type, ptr, (&((T_type *)0)->field))
 
 /* *****************************************************************************
-Memory allocation macros
-***************************************************************************** */
-#ifndef FIO_MEM_CALLOC
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
-#endif
-
-#ifndef FIO_MEM_REALLOC
-/** Reallocates memory, copying (at least) `copy_len` if necessary. */
-#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
-  realloc((ptr), (new_size))
-#endif
-
-#ifndef FIO_MEM_FREE
-/** Frees allocated memory. */
-#define FIO_MEM_FREE(ptr, size) free((ptr))
-#endif
-
-#ifndef FIO_MEM_INTERNAL_MALLOC
-#define FIO_MEM_INTERNAL_MALLOC 0
-#endif
-
-/* *****************************************************************************
 Security Related macros
 ***************************************************************************** */
 #define FIO_MEM_STACK_WIPE(pages)                                              \
@@ -566,6 +544,42 @@ End persistent segment (end include-once guard)
 
 ***************************************************************************** */
 
+/* *****************************************************************************
+Memory allocation macros
+***************************************************************************** */
+#if !defined(FIO_MEM_CALLOC) || !defined(FIO_MEM_REALLOC) ||                   \
+    !defined(FIO_MEM_FREE)
+
+#undef FIO_MEM_CALLOC
+#undef FIO_MEM_REALLOC
+#undef FIO_MEM_FREE
+#undef FIO_MEM_INTERNAL_MALLOC
+
+/* if a global allocator was previously defined route macros to fio_malloc */
+#ifdef H___FIO_MALLOC___H
+/** Allocates size X units of bytes, where all bytes equal zero. */
+#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
+/** Reallocates memory, copying (at least) `copy_len` if necessary. */
+#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
+  fio_realloc2((ptr), (new_size), (copy_len))
+/** Frees allocated memory. */
+#define FIO_MEM_FREE(ptr, size) fio_free((ptr))
+/** Set to true of internall allocator is used (memory returned set to zero). */
+#define FIO_MEM_INTERNAL_MALLOC 1
+
+#else
+/** Allocates size X units of bytes, where all bytes equal zero. */
+#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
+/** Reallocates memory, copying (at least) `copy_len` if necessary. */
+#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
+  realloc((ptr), (new_size))
+/** Frees allocated memory. */
+#define FIO_MEM_FREE(ptr, size) free((ptr))
+/** Set to true of internall allocator is used (memory returned set to zero). */
+#define FIO_MEM_INTERNAL_MALLOC 0
+#endif /* H___FIO_MALLOC___H */
+
+#endif /* defined(FIO_MEM_CALLOC) */
 /* *****************************************************************************
 Common macros
 ***************************************************************************** */
