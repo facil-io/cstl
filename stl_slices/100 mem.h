@@ -193,7 +193,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  *
  * Limited to >=17 and <=24.
  *
- * By default 22, whch is a ~2Mb allocation per system call, resulting in a
+ * By default 22, which is a ~2Mb allocation per system call, resulting in a
  * maximum allocation size of 131Kb.
  */
 #define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 21
@@ -211,8 +211,8 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 /**
  * Memory arenas mitigate thread contention while using more memory.
  *
- * Note that at some point arenas are statistically irrelevant (except when
- * benchmarking contention in multicore machines.
+ * Note that at some point arenas are statistically irrelevant... except when
+ * benchmarking contention in multi-core machines.
  *
  * Negative values will result in dynamic selection based on CPU core count.
  */
@@ -254,7 +254,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
 /**
- * Uses a while system allocation to support bigger allocations.
+ * Uses a whole system allocation to support bigger allocations.
  *
  * Could increase fragmentation costs.
  */
@@ -263,7 +263,11 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
 
-/* If arena count isn't linked to the CPU count, threads might busy-spin */
+/*
+ * If arena count isn't linked to the CPU count, threads might busy-spin.
+ * It is better to slow wait than fast busy spin when the work in the lock is
+ * longer... and system allocations are performed inside arena locks.
+ */
 #if FIO_MEMORY_ARENA_COUNT > 0
 /** If true, uses a pthread mutex instead of a spinlock. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
@@ -399,11 +403,55 @@ Temporarily (at least) set memory allocation macros to use this allocator
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
 /* *****************************************************************************
+
+
+
+
+
 Memory Allocation - start implementation
+
+
+
+
+
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 /* internal workings start here */
+/* *****************************************************************************
+FIO_MALLOC_FORCE_SYSTEM - use the system allocator
+***************************************************************************** */
+#ifdef FIO_MALLOC_FORCE_SYSTEM
 
+SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
+  return calloc(size);
+}
+SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                   calloc)(size_t size_per_unit,
+                                           size_t unit_count) {
+  return calloc(size_per_unit, unit_count);
+}
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) { return free(ptr); }
+SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
+                                                         size_t new_size) {
+  return realloc(ptr, new_size);
+}
+SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
+                                                          size_t new_size,
+                                                          size_t copy_len) {
+  return realloc(ptr, new_size);
+  (void)copy_len;
+}
+SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
+  return calloc(size);
+}
+
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, after_fork)(void) {}
+/** Prints the allocator's data structure. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {}
+/** Prints the settings used to define the allocator. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
+
+#else
 /* *****************************************************************************
 
 
@@ -504,11 +552,11 @@ FIO_IFUNC void
 fio___memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
 #if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
   fio___memcpy_8b(dest_, src_, bytes >> 3);
-#elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
+#elif SIZE_MAX == 0xFFFFFFFF       /* 32 bit size_t */
   fio___memcpy_4b(dest_, src_, bytes >> 2);
-#else                        /* unknown... assume 16 bit? */
+#else                              /* unknown... assume 16 bit? */
   fio___memcpy_2b(dest_, src_, bytes >> 1);
-#endif                       /* SIZE_MAX */
+#endif                             /* SIZE_MAX */
 }
 
 /** a 16 byte aligned memset implementation. */
@@ -1250,10 +1298,18 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   /* cleanup big-alloc chunk */
-  FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)
-  (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block);
-  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block = NULL;
-  FIO_MEMORY_LOCK_TYPE_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block) {
+    if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block->ref > 1) {
+      FIO_LOG_WARNING("(" FIO_MACRO2STR(FIO_NAME(
+          FIO_MEMORY_NAME,
+          malloc)) ") active big-block reference count error at %p\n"
+                   "          Possible memory leaks for big-block allocation.");
+    }
+    FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)
+    (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block);
+    FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block = NULL;
+    FIO_MEMORY_LOCK_TYPE_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
+  }
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
 
 #if FIO_MEMORY_CACHE_SLOTS
@@ -2262,13 +2318,12 @@ Memory pool cleanup
 ***************************************************************************** */
 #undef FIO___MEMSET
 #undef FIO___MEMCPY
-
 #undef FIO_ALIGN
 #undef FIO_ALIGN_NEW
-
 #undef FIO_MEMORY_MALLOC_ZERO_POINTER
-#endif /* FIO_EXTERN_COMPLETE */
 
+#endif /* FIO_MALLOC_FORCE_SYSTEM */
+#endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_MEMORY_NAME */
 
 #undef FIO_MEMORY_ON_CHUNK_ALLOC

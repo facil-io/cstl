@@ -61,7 +61,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MARK_MEMORY 1
 #endif
 #ifndef FIO_FIOBJ
-// #define FIOBJ_MALLOC /* define to test with custom allocator */
+#define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
 #endif
 
