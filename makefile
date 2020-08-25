@@ -755,7 +755,7 @@ test_set_test_flag___:
 # test/cpp will try to compile a source file using C++ to test header integration
 .PHONY : test/cpp
 test/cpp: | create_tree test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/$*)
+	$(eval BIN:=$(DEST)/cpp)
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
@@ -765,7 +765,7 @@ test/cpp: | create_tree test_set_test_flag___
 # test/cpp will try to compile a source file using C++ to test header integration
 .PHONY : test/db/cpp
 test/db/cpp: | create_tree set_debug_flags___ test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/$*)
+	$(eval BIN:=$(DEST)/cpp)
 	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
 	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
 	@echo "* Linking"
