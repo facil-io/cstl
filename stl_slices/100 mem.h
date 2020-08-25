@@ -1961,8 +1961,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
                    "\t* system allocation overhead (actual):      %zu bytes\n"
                    "\t* memory block size:                        %zu bytes\n"
                    "\t* allocation units per block:               %zu units\n"
-                   "\t* arena allocation limit:                   %zu bytes\n"
-                   "\t* allocator limit (revert to mmap):         %zu bytes\n"
+                   "\t* arena per-allocation limit:               %zu bytes\n"
+                   "\t* local per-allocation limit (before mmap): %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
