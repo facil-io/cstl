@@ -809,6 +809,7 @@ TEST_FUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   FIO_PRINT_SIZE_OF(double);
   FIO_PRINT_SIZE_OF(size_t);
   FIO_PRINT_SIZE_OF(void *);
+  printf("\tPage\t%ld bytes.\n", sysconf(_SC_PAGESIZE));
 }
 #undef FIO_PRINT_SIZE_OF
 
