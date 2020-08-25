@@ -330,6 +330,16 @@ int main(int argc, char const *argv[]) {
   /* test facil.io allocations */
   fprintf(stderr, "========================================\n");
   fprintf(stderr,
+          "NOTE: The facil.io allocator always returns memory that was "
+          "zeroed out.\n"
+          "\n      In contrast, the system allocator may return (and retain) "
+          "junk data.\n"
+          "\n      This added feature incurs a performance penalty.\n"
+          "\n      Test allocation ranges: %zu - %zu bytes.\n",
+          ((size_t)(TEST_CYCLES_START) << 4),
+          ((size_t)(TEST_CYCLES_END) << 5));
+  fprintf(stderr, "========================================\n");
+  fprintf(stderr,
           "Performance Testing facil.io memory allocator with %zu threads "
           "(please wait):\n\n",
           thread_count);

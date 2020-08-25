@@ -757,9 +757,11 @@ CLI - test
 Memory Allocation - test
 ***************************************************************************** */
 #define FIO_MEMORY_NAME fio_mem_pool4test
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
 #define FIO_MEMORY_NAME fio_mem_pool4test2
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
 /* *****************************************************************************
