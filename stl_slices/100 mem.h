@@ -1827,6 +1827,15 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *p) {
 
   /* zero out memory */
   FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(b);
+/* zero out possible block memory (if required) */
+#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
+    FIO_LIST_NODE *n =
+        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(
+            (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i, 0);
+    n->prev = n->next = NULL;
+  }
+#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)
   ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b);
 }
