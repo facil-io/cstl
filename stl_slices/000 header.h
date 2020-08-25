@@ -547,6 +547,12 @@ End persistent segment (end include-once guard)
 /* *****************************************************************************
 Memory allocation macros
 ***************************************************************************** */
+
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
+/* secure by default */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
+#endif
+
 #if !defined(FIO_MEM_CALLOC) || !defined(FIO_MEM_REALLOC) ||                   \
     !defined(FIO_MEM_FREE)
 

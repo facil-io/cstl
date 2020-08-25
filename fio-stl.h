@@ -547,6 +547,12 @@ End persistent segment (end include-once guard)
 /* *****************************************************************************
 Memory allocation macros
 ***************************************************************************** */
+
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
+/* secure by default */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
+#endif
+
 #if !defined(FIO_MEM_CALLOC) || !defined(FIO_MEM_REALLOC) ||                   \
     !defined(FIO_MEM_FREE)
 
@@ -5356,11 +5362,6 @@ Memory Allocation - fast setup for a global allocator
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
 #endif
 
-#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
-/** Secure by default. */
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#endif
-
 #undef FIO_MEM_CALLOC
 /** Allocates size X units of bytes, where all bytes equal zero. */
 #define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
@@ -5512,7 +5513,8 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  *
  * This will make the realloc2 safe for use (all data not copied is zero).
  */
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS                                      \
+  FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 #elif FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1

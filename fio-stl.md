@@ -1634,12 +1634,25 @@ The following compile time MACROS can effect the tuning and configuration of the
 #### `FIO_MEMORY_INITIALIZE_ALLOCATIONS`
 
 ```c
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 ```
 
 If true, all allocations (including `realloc2` but excluding `realloc`) will return initialized memory memory and memory will be zeroed out earlier.
 
 **Note**: when using `realloc` (vs., `realloc2`), the allocator does not know the size of the original allocation or its copy limits, so the memory isn't guaranteed to be initialized unless using `realloc2` which promises that any memory over `copy_len`is initialized.
+
+The default value is controlled by the macro `FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT`.
+
+#### `FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT`
+
+```c
+/* secure by default */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
+```
+
+Controls the default behavior for facil.io memory allocators (see `FIO_MEMORY_INITIALIZE_ALLOCATIONS`).
+
+To increase performance, at the expense of the improved security and features provided by an allocator that zeros out memory early and often, set this value to 0.
 
 #### `FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG`
 
