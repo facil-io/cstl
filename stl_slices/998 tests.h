@@ -756,11 +756,13 @@ CLI - test
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-#define FIO_MEMORY_NAME fio_mem_pool4test
+#define FIO_MEMORY_NAME fio_mem_test_safe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
-#define FIO_MEMORY_NAME fio_mem_pool4test2
+#define FIO_MEMORY_NAME fio_mem_test_unsafe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
@@ -1073,7 +1075,11 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_pool4test), mem)();
+  /* test memory allocator that initializes memory to zero */
+  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
+  fprintf(stderr, "===============\n");
+  /* test memory allocator that allows junk data in allocations */
+  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_unsafe), mem)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");

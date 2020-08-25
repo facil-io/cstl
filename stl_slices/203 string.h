@@ -2354,7 +2354,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test!\n");
+    fprintf(stderr, "* skipped `compact` test (irrelevent for type).\n");
   }
 
   {

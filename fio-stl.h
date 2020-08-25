@@ -7260,8 +7260,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
                    "\t* system allocation overhead (actual):      %zu bytes\n"
                    "\t* memory block size:                        %zu bytes\n"
                    "\t* allocation units per block:               %zu units\n"
-                   "\t* arena allocation limit:                   %zu bytes\n"
-                   "\t* allocator limit (revert to mmap):         %zu bytes\n"
+                   "\t* arena per-allocation limit:               %zu bytes\n"
+                   "\t* local per-allocation limit (before mmap): %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
@@ -15812,7 +15812,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test!\n");
+    fprintf(stderr, "* skipped `compact` test (irrelevent for type).\n");
   }
 
   {
@@ -19448,11 +19448,13 @@ CLI - test
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-#define FIO_MEMORY_NAME fio_mem_pool4test
+#define FIO_MEMORY_NAME fio_mem_test_safe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
-#define FIO_MEMORY_NAME fio_mem_pool4test2
+#define FIO_MEMORY_NAME fio_mem_test_unsafe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT 2
 #include __FILE__
@@ -19765,7 +19767,11 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_pool4test), mem)();
+  /* test memory allocator that initializes memory to zero */
+  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
+  fprintf(stderr, "===============\n");
+  /* test memory allocator that allows junk data in allocations */
+  FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_unsafe), mem)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");
