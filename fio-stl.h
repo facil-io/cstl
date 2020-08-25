@@ -6332,7 +6332,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 #define FIO_MEMORY_PRINT_STATS()                                               \
   FIO_LOG_INFO(                                                                \
       "(fio) Total memory chunks allocated before cleanup %zu\n"               \
-      "       Maximum memory blocks allocated at a single time %zu\n",         \
+      "          Maximum memory blocks allocated at a single time %zu\n",      \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),          \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)))
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
@@ -6594,7 +6594,7 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
-#if DEBUG && defined(FIO_LOG_INFO)
+#if DEBUG
   FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
       FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
 #endif /* DEBUG */
@@ -16601,10 +16601,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* yes, well...*/
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #endif
-#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
-/* secure by default, optional */
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#endif
 #include __FILE__
 
 #define FIOBJ_MEM_CALLOC(size, units)                                          \
@@ -18291,7 +18287,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
     if (p.top) {
       FIO_LOG_DEBUG("WARNING - JSON failed secondary validation, no on_error");
     }
-#if DEBUG
+#ifdef DEBUG
     FIOBJ s = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, p.top, 0);
     FIO_LOG_DEBUG("JSON data being deleted:\n%s",
                   FIO_NAME2(fiobj, cstr)(s).buf);
@@ -18442,7 +18438,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     o = fiobj_json_parse2(json, strlen(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
     FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);
-#if DEBUG
+#ifdef DEBUG
     fprintf(stderr, "JSON: %s\n", FIO_NAME2(fiobj, cstr)(j).buf);
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
@@ -18684,10 +18680,6 @@ FIOBJ cleanup
 #undef FIOBJ_EXTERN_COMPLETE
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#undef FIOBJ_MEM_CALLOC
-#undef FIOBJ_MEM_REALLOC
-#undef FIOBJ_MEM_FREE
-#undef FIOBJ_MEM_REALLOC_IS_SAFE
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
 /* *****************************************************************************
@@ -18746,9 +18738,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define TEST_REPEAT 4096
 
 /* Make sure logging and FIOBJ memory marking are set. */
-#if !defined(FIO_LOG) || defined(FIO_LOG2STDERR2)
 #define FIO_LOG
-#endif
 #ifndef FIOBJ_MARK_MEMORY
 #define FIOBJ_MARK_MEMORY 1
 #endif

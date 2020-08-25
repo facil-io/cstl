@@ -1033,7 +1033,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 #define FIO_MEMORY_PRINT_STATS()                                               \
   FIO_LOG_INFO(                                                                \
       "(fio) Total memory chunks allocated before cleanup %zu\n"               \
-      "       Maximum memory blocks allocated at a single time %zu\n",         \
+      "          Maximum memory blocks allocated at a single time %zu\n",      \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),          \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)))
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
@@ -1295,7 +1295,7 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
-#if DEBUG && defined(FIO_LOG_INFO)
+#if DEBUG
   FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
       FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
 #endif /* DEBUG */

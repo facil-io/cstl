@@ -54,9 +54,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define TEST_REPEAT 4096
 
 /* Make sure logging and FIOBJ memory marking are set. */
-#if !defined(FIO_LOG) || defined(FIO_LOG2STDERR2)
 #define FIO_LOG
-#endif
 #ifndef FIOBJ_MARK_MEMORY
 #define FIOBJ_MARK_MEMORY 1
 #endif

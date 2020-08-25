@@ -174,10 +174,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* yes, well...*/
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #endif
-#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
-/* secure by default, optional */
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#endif
 #include __FILE__
 
 #define FIOBJ_MEM_CALLOC(size, units)                                          \
@@ -1864,7 +1860,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
     if (p.top) {
       FIO_LOG_DEBUG("WARNING - JSON failed secondary validation, no on_error");
     }
-#if DEBUG
+#ifdef DEBUG
     FIOBJ s = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, p.top, 0);
     FIO_LOG_DEBUG("JSON data being deleted:\n%s",
                   FIO_NAME2(fiobj, cstr)(s).buf);
@@ -2015,7 +2011,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     o = fiobj_json_parse2(json, strlen(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
     FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);
-#if DEBUG
+#ifdef DEBUG
     fprintf(stderr, "JSON: %s\n", FIO_NAME2(fiobj, cstr)(j).buf);
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
@@ -2257,9 +2253,5 @@ FIOBJ cleanup
 #undef FIOBJ_EXTERN_COMPLETE
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#undef FIOBJ_MEM_CALLOC
-#undef FIOBJ_MEM_REALLOC
-#undef FIOBJ_MEM_FREE
-#undef FIOBJ_MEM_REALLOC_IS_SAFE
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
