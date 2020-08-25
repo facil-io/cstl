@@ -1427,7 +1427,7 @@ The facil.io Simple Template Library includes a fast, concurrent, memory allocat
 
 Multiple allocators can be defined using the `FIO_MEMORY_NAME` macro, allowing different objects types to have different memory allocators, resulting in better cache locality and less contention in multi-threaded programs.
 
-The facil.io allocator also increases security by zero-ing out the memory earlier in it's lifetime and always returning zeroed out memory.
+The facil.io allocator also increases security by zero-ing out the memory earlier and always returning zeroed out memory (see default`FIO_MEMORY_INITIALIZE_ALLOCATIONS`).
 
 Reallocated memory might be filled with junk data after the valid data, but this allocator solves this issue by offering [`fio_realloc2`](#fio_realloc2).
 
@@ -1583,12 +1583,19 @@ It is similar to using:
 #define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 5
 /* support big allocations using undivided memory chunks */
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
+/* secure by default */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 
 #undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
-#undef FIO_MEM_INTERNAL_MALLOC
-#define FIO_MEM_INTERNAL_MALLOC 1
+#undef FIO_MEM_REALLOC_IS_SAFE
+
+/*
+* Set if FIO_MEM_REALLOC copies only what was asked,
+* and the rest of the memory is initialized (as if returned from calloc).
+*/
+#define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 
 /** Allocates size X units of bytes, where all bytes equal zero. */
 #define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
@@ -1598,7 +1605,7 @@ It is similar to using:
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 ```
 
-**Note**: this macro also (re)defines the `FIO_MEM_INTERNAL_MALLOC` macro, allowing you to know if `fio_malloc` (and it's feature of memory being zeroed out) is available.
+**Note**: this macro also (re)defines the `FIO_MEM_REALLOC_IS_SAFE` macro, allowing you to know if `fio_malloc` (and it's feature of memory being zeroed out) is available.
 
 #### `FIO_MEMORY_NAME`
 
@@ -1623,6 +1630,16 @@ This macro automatically defines the `FIO_MEMORY_ALIGN_SIZE` macro for internal 
 ### Memory Allocator Configuration MACROS
 
 The following compile time MACROS can effect the tuning and configuration of the resulting memory allocator.
+
+#### `FIO_MEMORY_INITIALIZE_ALLOCATIONS`
+
+```c
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+```
+
+If true, all allocations (including `realloc2` but excluding `realloc`) will return initialized memory memory and memory will be zeroed out earlier.
+
+**Note**: when using `realloc` (vs., `realloc2`), the allocator does not know the size of the original allocation or its copy limits, so the memory isn't guaranteed to be initialized unless using `realloc2` which promises that any memory over `copy_len`is initialized.
 
 #### `FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG`
 

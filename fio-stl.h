@@ -553,7 +553,7 @@ Memory allocation macros
 #undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
-#undef FIO_MEM_INTERNAL_MALLOC
+#undef FIO_MEM_REALLOC_IS_SAFE
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
@@ -565,7 +565,7 @@ Memory allocation macros
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
-#define FIO_MEM_INTERNAL_MALLOC 1
+#define FIO_MEM_REALLOC_IS_SAFE 1
 
 #else
 /** Allocates size X units of bytes, where all bytes equal zero. */
@@ -576,7 +576,7 @@ Memory allocation macros
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
-#define FIO_MEM_INTERNAL_MALLOC 0
+#define FIO_MEM_REALLOC_IS_SAFE 0
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_CALLOC) */
@@ -5356,6 +5356,11 @@ Memory Allocation - fast setup for a global allocator
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
 #endif
 
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+/** Secure by default. */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#endif
+
 #undef FIO_MEM_CALLOC
 /** Allocates size X units of bytes, where all bytes equal zero. */
 #define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
@@ -5369,8 +5374,8 @@ Memory Allocation - fast setup for a global allocator
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 
-#undef FIO_MEM_INTERNAL_MALLOC
-#define FIO_MEM_INTERNAL_MALLOC 1
+#undef FIO_MEM_REALLOC_IS_SAFE
+#define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 
 /* prevent double decleration of FIO_MALLOC */
 #define H___FIO_MALLOC___H
@@ -5500,6 +5505,43 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_CACHE_SLOTS 4
 #endif
 
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+/**
+ * Forces the allocator to zero out memory early and often, so allocations
+ * return initialized memory (bytes are all zeros.
+ *
+ * This will make the realloc2 safe for use (all data not copied is zero).
+ */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#elif FIO_MEMORY_INITIALIZE_ALLOCATIONS
+#undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#else
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
+#endif
+
+#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
+/**
+ * The number of blocks per system allocation.
+ *
+ * More blocks protect against fragmentation, but lower the maximum number that
+ * can be allocated without reverting to mmap.
+ *
+ * Range: 0-4
+ * Recommended: depends on object allocation sizes, usually 1 or 2.
+ */
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 2
+#endif
+
+#ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
+/**
+ * Uses a whole system allocation to support bigger allocations.
+ *
+ * Could increase fragmentation costs.
+ */
+#define FIO_MEMORY_ENABLE_BIG_ALLOC 1
+#endif
+
 #ifndef FIO_MEMORY_ARENA_COUNT
 /**
  * Memory arenas mitigate thread contention while using more memory.
@@ -5532,30 +5574,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_ARENA_COUNT_MAX 32
 #endif
 
-#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
-/**
- * The number of blocks per system allocation.
- *
- * More blocks protect against fragmentation, but lower the maximum number that
- * can be allocated without reverting to mmap.
- *
- * Range: 0-4
- * Recommended: depends on object allocation sizes, usually 1 or 2.
- */
-#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 2
-#endif
-
-#ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
-/**
- * Uses a whole system allocation to support bigger allocations.
- *
- * Could increase fragmentation costs.
- */
-#define FIO_MEMORY_ENABLE_BIG_ALLOC 1
-#endif
-
 #ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
-
 /*
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
@@ -5649,8 +5668,6 @@ FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_sys_alloc_size)(void) {
   return FIO_MEMORY_SYS_ALLOCATION_SIZE;
 }
 
-SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
-
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_cache_slots)(void) {
   return FIO_MEMORY_CACHE_SLOTS;
 }
@@ -5671,6 +5688,14 @@ FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arena_alloc_limit)(void) {
   return FIO_MEMORY_BLOCK_ALLOC_LIMIT;
 }
 
+/* will realloc2 return junk data? */
+FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)(void) {
+  return FIO_MEMORY_INITIALIZE_ALLOCATIONS;
+}
+
+/* Returns the calculated block size. */
+SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
+
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void);
 
@@ -5684,14 +5709,14 @@ Temporarily (at least) set memory allocation macros to use this allocator
 #undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
-#undef FIO_MEM_INTERNAL_MALLOC_
+#undef FIO_MEM_REALLOC_IS_SAFE_
 
 #define FIO_MEM_CALLOC_(size, units)                                           \
   FIO_NAME(FIO_MEMORY_NAME, calloc)((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
-#define FIO_MEM_INTERNAL_MALLOC_ 1
+#define FIO_MEM_REALLOC_IS_SAFE_ FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)()
 
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
@@ -5743,6 +5768,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, after_fork)(void) {}
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {}
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
+SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
 
 #else
 /* *****************************************************************************
@@ -6368,7 +6394,7 @@ typedef struct {
 } FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s);
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
-/* big-blocks consumes a chunk (overlayed) */
+/* big-blocks consumes a chunk, sizeof header MUST be <= chunk header */
 typedef struct {
   /* marker and ref MUST overlay chunk header */
   uint32_t marker;
@@ -6886,6 +6912,12 @@ block allocation / deallocation
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
     size_t b) {
+#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  /** only reset a block't free-list header */
+  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
+               0,
+               sizeof(FIO_LIST_NODE));
+#else
   if (c->blocks[b].pos >= (FIO_MEMORY_UNITS_PER_BLOCK - 4)) {
     FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
                  0,
@@ -6895,6 +6927,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
                  0,
                  (((size_t)c->blocks[b].pos) << FIO_MEMORY_ALIGN_LOG));
   }
+#endif /*FIO_MEMORY_INITIALIZE_ALLOCATIONS*/
   c->blocks[b].pos = 0;
 }
 
@@ -7053,6 +7086,12 @@ void fio___mem_big_block__reset_memory___(void);
 /** zeros out a big-block's memory, keeping it's reference count at 1. */
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) * b) {
+
+#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  /* reset chunk header, which is always bigger than big_block header*/
+  FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
+#else
+
   /* zero out memory */
   if (b->pos >= (FIO_MEMORY_UNITS_PER_BIG_BLOCK - 10)) {
     FIO___MEMSET((void *)b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
@@ -7062,6 +7101,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
                  (((size_t)b->pos << FIO_MEMORY_ALIGN_LOG) +
                   FIO_MEMORY_BIG_BLOCK_HEADER_SIZE));
   }
+#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
   b->ref = 1;
 }
 
@@ -7212,6 +7252,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
                    "\t* arena allocation limit:                   %zu bytes\n"
                    "\t* allocator limit (revert to mmap):         %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
+                   "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
       (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE,
       (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count,
@@ -7222,7 +7263,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
       (size_t)FIO_MEMORY_UNITS_PER_BLOCK,
       (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT,
       (size_t)FIO_MEMORY_ALLOC_LIMIT,
-      FIO_MEMORY_MALLOC_ZERO_POINTER);
+      FIO_MEMORY_MALLOC_ZERO_POINTER,
+      (FIO_MEMORY_INITIALIZE_ALLOCATIONS ? "true" : "false"));
 }
 
 /* *****************************************************************************
@@ -7278,7 +7320,19 @@ void fio_calloc__(void);
 SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                    calloc)(size_t size_per_unit,
                                            size_t unit_count) {
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   return FIO_NAME(FIO_MEMORY_NAME, malloc)(size_per_unit * unit_count);
+#else
+  void *p;
+  /* round up to alignment size. */
+  const size_t len =
+      ((size_per_unit * unit_count) + (FIO_MEMORY_ALIGN_SIZE - 1)) &
+      (~((size_t)FIO_MEMORY_ALIGN_SIZE - 1));
+  p = FIO_NAME(FIO_MEMORY_NAME, malloc)(len);
+  /* initialize memory only when required */
+  FIO___MEMSET(p, 0, len);
+  return p;
+#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
 }
 
 /* SublimeText marker */
@@ -7516,11 +7570,12 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
     FIO_ASSERT(ary[i], "allocation failed!");
     FIO_ASSERT(!((uintptr_t)ary[i] & alignment_mask),
                "allocation alignment error!");
-    FIO_ASSERT(!ary[i][(cycles - 1)],
+    FIO_ASSERT(!FIO_MEMORY_INITIALIZE_ALLOCATIONS || !ary[i][(cycles - 1)],
                "allocated memory not zero (end): %p",
                (void *)ary[i]);
-    FIO_ASSERT(
-        !ary[i][0], "allocated memory not zero (start): %p", (void *)ary[i]);
+    FIO_ASSERT(!FIO_MEMORY_INITIALIZE_ALLOCATIONS || !ary[i][0],
+               "allocated memory not zero (start): %p",
+               (void *)ary[i]);
     fio___memset_aligned(ary[i], marker, (cycles));
   }
   for (size_t i = 0; i < limit; ++i) {
@@ -7530,7 +7585,8 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
     ary[i] = tmp;
     FIO_ASSERT(!((uintptr_t)ary[i] & alignment_mask),
                "allocation alignment error!");
-    FIO_ASSERT(!ary[i][(cycles)], "realloc2 copy overflow!");
+    FIO_ASSERT(!FIO_MEMORY_INITIALIZE_ALLOCATIONS || !ary[i][(cycles)],
+               "realloc2 copy overflow!");
     fio___memset_test_aligned(ary[i], marker, (cycles), "realloc grow");
     tmp =
         (char *)FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i], (cycles), (cycles));
@@ -7635,6 +7691,7 @@ Memory pool cleanup
 #undef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
 #undef FIO_MEMORY_CACHE_SLOTS
 #undef FIO_MEMORY_ALIGN_LOG
+#undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #undef FIO_MEMORY_USE_PTHREAD_MUTEX
 #undef FIO_MEMORY_USE_FIO_MEMSET
 #undef FIO_MEMORY_USE_FIO_MEMCOPY
@@ -7652,7 +7709,7 @@ Memory pool cleanup
 #undef FIO_MEMORY_LOCK
 #undef FIO_MEMORY_UNLOCK
 
-#undef FIO_MEMORY_NAME
+/* don't undefine FIO_MEMORY_NAME due to possible use in allocation macros */
 
 /* *****************************************************************************
 Memory management macros
@@ -7663,20 +7720,20 @@ Memory management macros
 #undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
-#undef FIO_MEM_INTERNAL_MALLOC_
+#undef FIO_MEM_REALLOC_IS_SAFE_
 
 #ifdef FIO_MALLOC_TMP_USE_SYSTEM /* force malloc */
 #define FIO_MEM_CALLOC_(size, units) calloc((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
-#define FIO_MEM_INTERNAL_MALLOC_ 0
+#define FIO_MEM_REALLOC_IS_SAFE_ 0
 
 #else /* FIO_MALLOC_TMP_USE_SYSTEM */
 #define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIO_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIO_MEM_REALLOC_IS_SAFE
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
 #endif /* !defined(FIO_MEM_CALLOC_)... */
@@ -12926,12 +12983,9 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, __map_realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
   }
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   if (new_capa > old_capa) {
-    if (!FIO_MEM_INTERNAL_MALLOC_) {
+    if (!FIO_MEM_REALLOC_IS_SAFE_) {
       /* realloc might return recycled (junk filled) memory */
       memset(imap, 0, ((size_t)1 << m->bits) * sizeof(FIO_MAP_SIZE_TYPE));
-    } else if ((sizeof(*m->map) & 15) && ((uintptr_t)imap & 15)) {
-      /* fio_realloc2 might copy junk data in the last 15 bytes (big word) */
-      memset(imap, 0, ((uintptr_t)imap & 15));
     }
   } else {
     /* when shrinking (or staying), we might have junk data by design... */
@@ -16339,11 +16393,13 @@ Common cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
+
+#undef FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
-#undef FIO_MEM_INTERNAL_MALLOC_
-#undef FIO_MALLOC_TMP_USE_SYSTEM
+#undef FIO_MEM_REALLOC_IS_SAFE_
+#undef FIO_MEMORY_NAME /* postponed due to possible use in macros */
 
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
 #if FIO_EXTERN_COMPLETE == 2
@@ -16506,13 +16562,38 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 ***************************************************************************** */
 #ifdef FIOBJ_MALLOC
 #define FIO_MEMORY_NAME fiobj_mem
-#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22  /* 4Mb per system call */
-#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4 /* fight fragmentation */
-#define FIO_MEMORY_ALIGN_LOG 3         /* align on 8 bytes, it's enough */
-#define FIO_MEMORY_CACHE_SLOTS 16      /* cache up to 64Mb */
-#define FIO_MEMORY_ENABLE_BIG_ALLOC 1  /* for big arrays / maps */
-#define FIO_MEMORY_ARENA_COUNT -1      /* CPU core arena count */
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1 /* yes, well...*/
+#ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
+/* 4Mb per system call */
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22
+#endif
+#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
+/* fight fragmentation */
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4
+#endif
+#ifndef FIO_MEMORY_ALIGN_LOG
+/* align on 8 bytes, it's enough */
+#define FIO_MEMORY_ALIGN_LOG 3
+#endif
+#ifndef FIO_MEMORY_CACHE_SLOTS
+/* cache up to 64Mb */
+#define FIO_MEMORY_CACHE_SLOTS 16
+#endif
+#ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
+/* for big arrays / maps */
+#define FIO_MEMORY_ENABLE_BIG_ALLOC 1
+#endif
+#ifndef FIO_MEMORY_ARENA_COUNT
+/* CPU core arena count */
+#define FIO_MEMORY_ARENA_COUNT -1
+#endif
+#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
+/* yes, well...*/
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#endif
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+/* secure by default, optional */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#endif
 #include __FILE__
 
 #define FIOBJ_MEM_CALLOC(size, units)                                          \
@@ -16520,14 +16601,14 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 #define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
   FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
 #define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
-#define FIOBJ_MEM_INTERNAL_MALLOC 1
+#define FIOBJ_MEM_REALLOC_IS_SAFE 0
 
 #else
 
 #define FIOBJ_MEM_CALLOC FIO_MEM_CALLOC
 #define FIOBJ_MEM_REALLOC FIO_MEM_REALLOC
 #define FIOBJ_MEM_FREE FIO_MEM_FREE
-#define FIOBJ_MEM_INTERNAL_MALLOC FIO_MEM_INTERNAL_MALLOC
+#define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
 
 #endif /* FIOBJ_MALLOC */
 /* *****************************************************************************
@@ -16740,7 +16821,7 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* *****************************************************************************
@@ -16812,7 +16893,7 @@ FIOBJ Strings
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -16938,7 +17019,7 @@ FIOBJ Arrays
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* *****************************************************************************
@@ -16971,7 +17052,7 @@ FIOBJ Hash Maps
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /** Calculates an object's hash value for a specific hash map object. */
@@ -17339,7 +17420,7 @@ FIOBJ Integers
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -17403,7 +17484,7 @@ FIOBJ Floats
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /** Creates a new Float object. */
@@ -17675,7 +17756,7 @@ typedef struct {
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME fiobj____stack
@@ -17683,7 +17764,7 @@ typedef struct {
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 typedef struct {
@@ -18595,7 +18676,7 @@ FIOBJ cleanup
 #undef FIOBJ_MEM_CALLOC
 #undef FIOBJ_MEM_REALLOC
 #undef FIOBJ_MEM_FREE
-#undef FIOBJ_MEM_INTERNAL_MALLOC
+#undef FIOBJ_MEM_REALLOC_IS_SAFE
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
 /* *****************************************************************************

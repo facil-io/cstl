@@ -1,4 +1,5 @@
 /* use the fast-setup global allocator shortcut for FIO_MEMORY_NAME */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #define FIO_MALLOC
 #ifdef DEBUG
 /*
@@ -46,6 +47,11 @@ static size_t TEST_CYCLES_REPEAT;
 /* *****************************************************************************
 Testing implementation
 ***************************************************************************** */
+
+#ifndef FIO_MALLOC_TEST_NOTICE
+#define FIO_MALLOC_TEST_NOTICE                                                 \
+  "Testing FIO_MEMORY_NAME with global allocator settings (FIO_MALLOC)."
+#endif
 
 #if TEST_WITH_REALLOC2
 FIO_SFUNC void *sys_realloc2(void *ptr, size_t new_size, size_t copy_len) {
@@ -323,21 +329,34 @@ int main(int argc, char const *argv[]) {
   pthread_t threads[thread_count];
 
   fprintf(stderr, "========================================\n");
-  fprintf(stderr,
-          "Testing FIO_MEMPOOL with global allocator settings (FIO_MALLOC).\n");
+  fprintf(stderr, FIO_MALLOC_TEST_NOTICE "\n");
   fio_malloc_print_settings();
 
   /* test facil.io allocations */
   fprintf(stderr, "========================================\n");
+  if (fio_realloc_is_safe()) {
+    fprintf(stderr,
+            "NOTE: This tests uses a facil.io allocator thatinitializes all  "
+            "memory to zero, always.\n"
+            "\n      In contrast, the system allocator may return (and retain) "
+            "junk data.\n"
+            "\n      This added security feature incurs a performance "
+            "penalty.\n\n");
+  } else {
+    fprintf(stderr,
+            "NOTE: This test uses a facil.io allocator that does NOT "
+            "initialize memory.\n"
+            "\n     This is the standard behavior for memory allocators (is "
+            "but shouldn't be).\n"
+            "\n     When initializing memory, which is facil.io's recommended  "
+            "default,\n"
+            "      theres an added performance cost.\n\n");
+  }
   fprintf(stderr,
-          "NOTE: The facil.io allocator always returns memory that was "
-          "zeroed out.\n"
-          "\n      In contrast, the system allocator may return (and retain) "
-          "junk data.\n"
-          "\n      This added feature incurs a performance penalty.\n"
-          "\n      Test allocation ranges: %zu - %zu bytes.\n",
+          "Test allocation ranges: %zu - %zu bytes.\n",
           ((size_t)(TEST_CYCLES_START) << 4),
           ((size_t)(TEST_CYCLES_END) << 5));
+
   fprintf(stderr, "========================================\n");
   fprintf(stderr,
           "Performance Testing facil.io memory allocator with %zu threads "

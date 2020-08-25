@@ -39,11 +39,13 @@ Common cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
+
+#undef FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
-#undef FIO_MEM_INTERNAL_MALLOC_
-#undef FIO_MALLOC_TMP_USE_SYSTEM
+#undef FIO_MEM_REALLOC_IS_SAFE_
+#undef FIO_MEMORY_NAME /* postponed due to possible use in macros */
 
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
 #if FIO_EXTERN_COMPLETE == 2

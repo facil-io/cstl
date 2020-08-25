@@ -553,7 +553,7 @@ Memory allocation macros
 #undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
-#undef FIO_MEM_INTERNAL_MALLOC
+#undef FIO_MEM_REALLOC_IS_SAFE
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
@@ -565,7 +565,7 @@ Memory allocation macros
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
-#define FIO_MEM_INTERNAL_MALLOC 1
+#define FIO_MEM_REALLOC_IS_SAFE 1
 
 #else
 /** Allocates size X units of bytes, where all bytes equal zero. */
@@ -576,7 +576,7 @@ Memory allocation macros
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
-#define FIO_MEM_INTERNAL_MALLOC 0
+#define FIO_MEM_REALLOC_IS_SAFE 0
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_CALLOC) */

@@ -146,13 +146,38 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 ***************************************************************************** */
 #ifdef FIOBJ_MALLOC
 #define FIO_MEMORY_NAME fiobj_mem
-#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22  /* 4Mb per system call */
-#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4 /* fight fragmentation */
-#define FIO_MEMORY_ALIGN_LOG 3         /* align on 8 bytes, it's enough */
-#define FIO_MEMORY_CACHE_SLOTS 16      /* cache up to 64Mb */
-#define FIO_MEMORY_ENABLE_BIG_ALLOC 1  /* for big arrays / maps */
-#define FIO_MEMORY_ARENA_COUNT -1      /* CPU core arena count */
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1 /* yes, well...*/
+#ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
+/* 4Mb per system call */
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22
+#endif
+#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
+/* fight fragmentation */
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4
+#endif
+#ifndef FIO_MEMORY_ALIGN_LOG
+/* align on 8 bytes, it's enough */
+#define FIO_MEMORY_ALIGN_LOG 3
+#endif
+#ifndef FIO_MEMORY_CACHE_SLOTS
+/* cache up to 64Mb */
+#define FIO_MEMORY_CACHE_SLOTS 16
+#endif
+#ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
+/* for big arrays / maps */
+#define FIO_MEMORY_ENABLE_BIG_ALLOC 1
+#endif
+#ifndef FIO_MEMORY_ARENA_COUNT
+/* CPU core arena count */
+#define FIO_MEMORY_ARENA_COUNT -1
+#endif
+#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
+/* yes, well...*/
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#endif
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+/* secure by default, optional */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#endif
 #include __FILE__
 
 #define FIOBJ_MEM_CALLOC(size, units)                                          \
@@ -160,14 +185,14 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 #define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
   FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
 #define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
-#define FIOBJ_MEM_INTERNAL_MALLOC 1
+#define FIOBJ_MEM_REALLOC_IS_SAFE 0
 
 #else
 
 #define FIOBJ_MEM_CALLOC FIO_MEM_CALLOC
 #define FIOBJ_MEM_REALLOC FIO_MEM_REALLOC
 #define FIOBJ_MEM_FREE FIO_MEM_FREE
-#define FIOBJ_MEM_INTERNAL_MALLOC FIO_MEM_INTERNAL_MALLOC
+#define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
 
 #endif /* FIOBJ_MALLOC */
 /* *****************************************************************************
@@ -380,7 +405,7 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* *****************************************************************************
@@ -452,7 +477,7 @@ FIOBJ Strings
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -578,7 +603,7 @@ FIOBJ Arrays
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /* *****************************************************************************
@@ -611,7 +636,7 @@ FIOBJ Hash Maps
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /** Calculates an object's hash value for a specific hash map object. */
@@ -979,7 +1004,7 @@ FIOBJ Integers
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -1043,7 +1068,7 @@ FIOBJ Floats
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 /** Creates a new Float object. */
@@ -1315,7 +1340,7 @@ typedef struct {
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME fiobj____stack
@@ -1323,7 +1348,7 @@ typedef struct {
 #define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
-#define FIO_MEM_INTERNAL_MALLOC_ FIOBJ_MEM_INTERNAL_MALLOC
+#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
 typedef struct {
@@ -2235,6 +2260,6 @@ FIOBJ cleanup
 #undef FIOBJ_MEM_CALLOC
 #undef FIOBJ_MEM_REALLOC
 #undef FIOBJ_MEM_FREE
-#undef FIOBJ_MEM_INTERNAL_MALLOC
+#undef FIOBJ_MEM_REALLOC_IS_SAFE
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ

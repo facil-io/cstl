@@ -1024,12 +1024,9 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, __map_realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
   }
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   if (new_capa > old_capa) {
-    if (!FIO_MEM_INTERNAL_MALLOC_) {
+    if (!FIO_MEM_REALLOC_IS_SAFE_) {
       /* realloc might return recycled (junk filled) memory */
       memset(imap, 0, ((size_t)1 << m->bits) * sizeof(FIO_MAP_SIZE_TYPE));
-    } else if ((sizeof(*m->map) & 15) && ((uintptr_t)imap & 15)) {
-      /* fio_realloc2 might copy junk data in the last 15 bytes (big word) */
-      memset(imap, 0, ((uintptr_t)imap & 15));
     }
   } else {
     /* when shrinking (or staying), we might have junk data by design... */
