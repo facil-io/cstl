@@ -1243,6 +1243,27 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
   }
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
+  /* report any blocks in the allocation list */
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
+      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
+    struct t_s {
+      FIO_LIST_NODE node;
+    };
+    void *last_chunk = NULL;
+    FIO_LOG_WARNING(FIO_MACRO2STR(FIO_NAME(
+        FIO_MEMORY_NAME, malloc)) " blocks left after cleanup.\n\tPossible "
+                                  "memory leaks at related chunks:");
+    FIO_LIST_EACH(struct t_s,
+                  node,
+                  &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks,
+                  pos) {
+      if (last_chunk == (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos))
+        continue;
+      last_chunk = (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos);
+      FIO_LOG_WARNING("block %p (from chunk %p)", (void *)pos, last_chunk);
+    }
+  }
+
   /* dealloc the state machine */
   const size_t s = FIO_MEMORY_STATE_SIZE(
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
@@ -1999,11 +2020,12 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                ptr,
                ((copy_len + (FIO_MEMORY_ALIGN_SIZE - 1)) &
                 ((~(size_t)0) << FIO_MEMORY_ALIGN_LOG)));
-  FIO_NAME(FIO_MEMORY_NAME, free)(ptr);
   // zero out leftover bytes, if any.
   while (copy_len & (FIO_MEMORY_ALIGN_SIZE - 1)) {
     ((uint8_t *)mem)[copy_len++] = 0;
   }
+
+  FIO_NAME(FIO_MEMORY_NAME, free)(ptr);
 
   return mem;
 
