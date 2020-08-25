@@ -262,11 +262,14 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #endif
 
 #ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
-/** Uses a pthread mutex instead of a spinlock. */
-#if FIO_MEMORY_ARENA_COUNT < 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
-#else
+
+/* If arena count isn't linked to the CPU count, threads might busy-spin */
+#if FIO_MEMORY_ARENA_COUNT > 0
+/** If true, uses a pthread mutex instead of a spinlock. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#else
+/** If true, uses a pthread mutex instead of a spinlock. */
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #endif
 #endif
 
@@ -1086,11 +1089,8 @@ void fio___mem_arena_unlock___(void);
 FIO_SFUNC void
 FIO_NAME(FIO_MEMORY_NAME,
          __mem_arena_unlock)(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) * a) {
-  if (a) {
-    FIO_MEMORY_UNLOCK(a->lock);
-  } else {
-    FIO_LOG_DEBUG2("unlocking a NULL arena?!");
-  }
+  FIO_ASSERT_DEBUG(a, "unlocking a NULL arena?!");
+  FIO_MEMORY_UNLOCK(a->lock);
 }
 
 /* SublimeText marker */
@@ -1098,14 +1098,22 @@ void fio___mem_arena_lock___(void);
 /** Locks and returns the thread's arena. */
 FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)(void) {
-#if FIO_MEMORY_ARENA_COUNT != 1
+#if FIO_MEMORY_ARENA_COUNT == 1
+  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[0].lock);
+  return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena;
+
+#else /* FIO_MEMORY_ARENA_COUNT != 1 */
+
+#if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
+  static size_t warning_printed = 0;
+#endif
   for (;;) {
     /* rotate all arenas to find one that's available */
     for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
          ++i) {
       /* first attempt is the last used arena, then cycle with offset */
       size_t index = i + FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
-      if (index > FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
+      if (index >= FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
         index = 0;
 
       if (FIO_MEMORY_TRYLOCK(
@@ -1114,17 +1122,26 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var) = index;
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + index);
     }
+#if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
+    if (!warning_printed)
+      FIO_LOG_WARNING(FIO_MACRO2STR(
+          FIO_NAME(FIO_MEMORY_NAME,
+                   malloc)) " high arena contention.\n"
+                            "          Consider recompiling with more arenas.");
+    warning_printed = 1;
+#endif /* DEBUG */
+#if FIO_MEMORY_USE_PTHREAD_MUTEX
     /* slow wait for last arena used by the thread */
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
                         ->arena[FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var)]
                         .lock);
     return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena +
            FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
-  }
 #else
-  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[0].lock);
-  return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena;
-#endif
+    FIO_THREAD_RESCHEDULE();
+#endif /* FIO_MEMORY_USE_PTHREAD_MUTEX */
+  }
+#endif /* FIO_MEMORY_ARENA_COUNT != 1 */
 }
 
 /* *****************************************************************************
@@ -1216,6 +1233,14 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
   /* free arena blocks */
   for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
        ++i) {
+    if (FIO_MEMORY_TRYLOCK(
+            FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].lock)) {
+      FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].lock);
+      FIO_LOG_ERROR(FIO_MACRO2STR(
+          FIO_NAME(FIO_MEMORY_NAME,
+                   malloc)) "cleanup called while some arenas are in use!");
+    }
+    FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].lock);
     FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)
     (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block);
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block = NULL;
@@ -1243,16 +1268,17 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
   }
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
-  /* report any blocks in the allocation list */
+  /* report any blocks in the allocation list - even if not in DEBUG mode */
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
       &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     struct t_s {
       FIO_LIST_NODE node;
     };
     void *last_chunk = NULL;
-    FIO_LOG_WARNING(FIO_MACRO2STR(FIO_NAME(
-        FIO_MEMORY_NAME, malloc)) " blocks left after cleanup.\n\tPossible "
-                                  "memory leaks at related chunks:");
+    FIO_LOG_WARNING("(" FIO_MACRO2STR(
+        FIO_NAME(FIO_MEMORY_NAME,
+                 malloc)) ") blocks left after cleanup.\n"
+                          "          Possible memory leaks at related chunks:");
     FIO_LIST_EACH(struct t_s,
                   node,
                   &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks,
@@ -1260,7 +1286,11 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
       if (last_chunk == (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos))
         continue;
       last_chunk = (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos);
-      FIO_LOG_WARNING("block %p (from chunk %p)", (void *)pos, last_chunk);
+      FIO_LOG_WARNING(
+          "(" FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME,
+                                     malloc)) ") leaked block(s) for chunk %p",
+          (void *)pos,
+          last_chunk);
     }
   }
 
@@ -1604,15 +1634,17 @@ FIO_SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *a =
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)();
+
   if (!a->block)
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
   for (;;) {
     if (!a->block)
       goto no_mem;
+    void *const block = a->block;
 
-    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
-        FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(a->block);
-    size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, a->block);
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *const c =
+        FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(block);
+    const size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, block);
 
     /* if we are the only thread holding a reference to this block... reset. */
     if (c->blocks[b].ref == 1 && c->blocks[b].pos) {
@@ -1623,20 +1655,21 @@ FIO_SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     /* enough space? allocate */
     if (c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, c->blocks[b].pos);
-      fio_atomic_add(&c->blocks[b].ref, 1);
+      fio_atomic_add(&c->blocks[b].ref, 1); /* keep inside lock for reset */
       c->blocks[b].pos += bytes;
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return p;
     }
+
     /*
      * allocate a new block before freeing the existing block
      * this prevents the last chunk from deallocating and reallocating
      */
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
     /* release the reference held by the allocator */
-    FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)
-    (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0));
+    FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(block);
   }
+
 no_mem:
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
   return p;
@@ -1656,8 +1689,8 @@ big block allocation / deallocation
 
 #define FIO_MEMORY_BIG_BLOCK_MARKER ((~(uint32_t)0) << 2)
 #define FIO_MEMORY_BIG_BLOCK_HEADER_SIZE                                       \
-  ((sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s)) +                     \
-        ((FIO_MEMORY_ALIGN_SIZE - 1)) &                                        \
+  (((sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s)) +                    \
+     ((FIO_MEMORY_ALIGN_SIZE - 1))) &                                          \
     ((~(0UL)) << FIO_MEMORY_ALIGN_LOG)))
 
 #define FIO_MEMORY_BIG_BLOCK_SIZE                                              \
@@ -1759,7 +1792,7 @@ FIO_SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
 
     if (b->pos + bytes < FIO_MEMORY_UNITS_PER_BIG_BLOCK) {
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, b->pos);
-      fio_atomic_add(&b->ref, 1);
+      fio_atomic_add(&b->ref, 1); /* keep inside lock to enable reset */
       b->pos += bytes;
       FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
       return p;
@@ -2106,6 +2139,7 @@ SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
 #include "pthread.h"
 
+/* contention testing (multi-threaded) */
 FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
                               mem_tsk)(void *i_) {
   uintptr_t cycles = (uintptr_t)i_;
@@ -2121,11 +2155,10 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   FIO_ASSERT(ary, "allocation failed for test container");
   for (size_t i = 0; i < limit; ++i) {
-    if (1) { /* TODO: re-enable */
-      char *tmp;
-      FIO_NAME(FIO_MEMORY_NAME, free)
-      ((tmp = (char *)FIO_NAME(FIO_MEMORY_NAME,
-                               malloc)(16))); /* add some fragmentation */
+    if (1) {
+      /* add some fragmentation */
+      char *tmp = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(16);
+      FIO_NAME(FIO_MEMORY_NAME, free)(tmp);
       FIO_ASSERT(tmp, "small allocation failed!")
       FIO_ASSERT(!((uintptr_t)tmp & alignment_mask),
                  "allocation alignment error!");
@@ -2164,6 +2197,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   return NULL;
 }
 
+/* main test functin */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   fprintf(stderr,
           "* Testing core memory allocator " FIO_MACRO2STR(
@@ -2182,7 +2216,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   }
   const size_t thread_count =
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count +
-      (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count >> 1);
+      (1 + (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count >> 1));
   for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
     pthread_t threads[thread_count];
     fprintf(stderr,
