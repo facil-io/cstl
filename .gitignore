@@ -1,2 +1,3 @@
 # Specify filepatterns you want git to ignore.
-./tmp/*
+tmp/*
+.DS_Store
