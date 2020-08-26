@@ -5,7 +5,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_REF_NAME long_ref       /* Development inclusion - ignore line */
+#define FIO_REF_TYPE long           /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -42,7 +46,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifndef FIO_REF_INIT
-#define FIO_REF_INIT(obj)
+#define FIO_REF_INIT(obj)                                                      \
+  do {                                                                         \
+    obj = (FIO_REF_TYPE){0};                                                   \
+  } while (0)
 #endif
 
 #ifndef FIO_REF_DESTROY
@@ -117,8 +124,8 @@ Reference Counter (Wrapper) Implementation
 
 /** Allocates a reference counted object. */
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)FIO_MEM_CALLOC_(sizeof(*o), 1);
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o = (FIO_NAME(
+      FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
   o->ref = 1;

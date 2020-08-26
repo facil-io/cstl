@@ -5,8 +5,10 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_QUEUE                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -84,9 +86,12 @@ typedef struct {
 Queue API
 ***************************************************************************** */
 
-/** Used to initialize a fio_queue_s object. */
-#define FIO_QUEUE_INIT(name)                                                   \
-  { .r = &(name).mem, .w = &(name).mem, .lock = FIO_LOCK_INIT }
+/** May be used to initialize global, static memory, queues. */
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q);
 
 /** Destroys a queue and reinitializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q);
@@ -203,10 +208,10 @@ Queue Inline Helpers
 
 /** Creates a new queue object (allocated on the heap). */
 FIO_IFUNC fio_queue_s *fio_queue_new(void) {
-  fio_queue_s *q = (fio_queue_s *)FIO_MEM_CALLOC_(sizeof(*q), 1);
+  fio_queue_s *q = (fio_queue_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q), 0);
   if (!q)
     return NULL;
-  *q = (fio_queue_s)FIO_QUEUE_INIT(*q);
+  fio_queue_init(q);
   return q;
 }
 
@@ -258,6 +263,17 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
 
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
+  /* do this manually, we don't want to reset a whole page */
+  q->r = &q->mem;
+  q->w = &q->mem;
+  q->count = 0;
+  q->lock = FIO_LOCK_INIT;
+  q->mem.r = q->mem.w = q->mem.dir = 0;
+  q->mem.next = NULL;
+}
+
 /** Destroys a queue and reinitializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   fio_lock(&q->lock);
@@ -267,7 +283,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
     if (tmp != &q->mem)
       FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
-  *q = (fio_queue_s)FIO_QUEUE_INIT(*q);
+  fio_queue_init(q);
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -327,9 +343,15 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
       q->w->next = &q->mem;
       q->mem.w = q->mem.r = q->mem.dir = 0;
     } else {
-      q->w->next = (fio___task_ring_s *)FIO_MEM_CALLOC_(sizeof(*q->w->next), 1);
-      if (!q->w->next)
+      void *tmp = (fio___task_ring_s *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*q->w->next), 0);
+      if (!tmp)
         goto no_mem;
+      q->w->next = (fio___task_ring_s *)tmp;
+      if (!FIO_MEM_REALLOC_IS_SAFE_) {
+        q->w->next->r = q->w->next->w = q->w->next->dir = 0;
+        q->w->next->next = NULL;
+      }
     }
     q->w = q->w->next;
     fio___task_ring_push(q->w, task);
@@ -352,7 +374,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
   if (fio___task_ring_unpop(q->r, task)) {
     /* such a shame... but we must allocate a while task block for one task */
     fio___task_ring_s *tmp =
-        (fio___task_ring_s *)FIO_MEM_CALLOC_(sizeof(*q->w->next), 1);
+        (fio___task_ring_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
     if (!tmp)
       goto no_mem;
     tmp->next = q->r;
@@ -441,7 +463,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
 FIO_IFUNC fio___timer_event_s *
 fio___timer_event_new(fio_timer_schedule_args_s args) {
   fio___timer_event_s *t = NULL;
-  t = (fio___timer_event_s *)FIO_MEM_CALLOC_(sizeof(*t), 1);
+  t = (fio___timer_event_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*t), 0);
   if (!t)
     goto init_error;
   if (!args.repetitions)
@@ -574,7 +596,9 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
   for (size_t i = 0; i < t->count; i++) {
-    fio_queue_push(t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count);
+    FIO_ASSERT(!fio_queue_push(
+                   t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count),
+               "Couldn't push task!");
   }
 }
 
@@ -586,6 +610,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
 FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
   fio_queue_s *q = fio_queue_new();
+  fio_queue_s q2;
 
   fprintf(stderr, "\t- size of queue object (fio_queue_s): %zu\n", sizeof(*q));
   fprintf(stderr,
@@ -651,7 +676,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       } thread_tasks;
       thread_tasks.act = fio_queue_perform_all;
       pthread_t *threads =
-          (pthread_t *)FIO_MEM_CALLOC(sizeof(*threads), t_count);
+          (pthread_t *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
       for (size_t j = 0; j < t_count; ++j) {
         if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
           abort();
@@ -686,7 +711,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fio_queue_free(q);
   {
     fprintf(stderr, "* testing urgent insertion\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    fio_queue_init(&q2);
     for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
       FIO_ASSERT(!fio_queue_push_urgent(&q2,
                                         .fn = (void (*)(void *, void *))(i + 1),
@@ -713,7 +738,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr,
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    fio_queue_init(&q2);
     uintptr_t tester = 0;
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 

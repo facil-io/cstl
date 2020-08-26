@@ -5,7 +5,9 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_ARRAY_NAME fio          /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -134,10 +136,16 @@ Dynamic Arrays - type
 ***************************************************************************** */
 
 typedef struct {
-  FIO_ARRAY_TYPE *ary;
-  uint32_t capa;
+  /* start common header */
+  /** the offser to the first item. */
   uint32_t start;
+  /** The offset to the first empty location the array. */
   uint32_t end;
+  /* end common header */
+  /** The attay's capacity only 32bits are valid */
+  uintptr_t capa;
+  /** a pointer to the array's memory (if not embedded) */
+  FIO_ARRAY_TYPE *ary;
 } FIO_NAME(FIO_ARRAY_NAME, s);
 
 #ifdef FIO_PTR_TAG_TYPE
@@ -345,7 +353,38 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                                   (start__tmp__ = (array)->ary))
 #endif
 
+#ifndef FIO_ARRAY_EACH
+/**
+ * Iterates through the list using a `for` loop.
+ *
+ * Access the object with the pointer `pos`. The `pos` variable can be named
+ * however you please.
+ *
+ * Avoid editing the array during a FOR loop, although I hope it's possible, I
+ * wouldn't count on it.
+ *
+ * **Note**: this variant supports automatic pointer tagging / untagging.
+ */
+#define FIO_ARRAY_EACH2(array_type, array, pos) TODO
+#endif
+
 #ifdef FIO_EXTERN_COMPLETE
+
+/* *****************************************************************************
+Dynamic Arrays - embedded arrays (TODO)
+***************************************************************************** */
+#define FIO_ARRAY_IS_EMBEDED(a)                                                \
+  (sizeof(FIO_ARRAY_TYPE) <= sizeof(void *) && ((a)->start > (a)->end))
+
+typedef struct {
+  /* start common header */
+  /** the offser to the first item. */
+  uint32_t start;
+  /** The offset to the first empty location the array. */
+  uint32_t end;
+  /* end common header */
+  FIO_ARRAY_TYPE embded[];
+} FIO_NAME(FIO_ARRAY_NAME, ___embedded_s);
 
 /* *****************************************************************************
 Dynamic Arrays - internal helpers
@@ -364,7 +403,10 @@ Dynamic Arrays - implementation
 /* Allocates a new array object on the heap and initializes it's memory. */
 IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
   FIO_NAME(FIO_ARRAY_NAME, s) *a =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_CALLOC_(sizeof(*a), 1);
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
+    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
+  }
   return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
 }
 
@@ -543,10 +585,13 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
             ((uint32_t)ary->capa + FIO_ARRAY_ADD2CAPA + ((uint32_t)0 - index)));
         const uint32_t valid_data = ary->end - ary->start;
         index -= ary->end; /* return to previous state */
-        FIO_ARRAY_TYPE *tmp =
-            (FIO_ARRAY_TYPE *)FIO_MEM_CALLOC_(new_capa, sizeof(*tmp));
+        FIO_ARRAY_TYPE *tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
+            NULL, 0, new_capa * sizeof(*tmp), 0);
         if (!tmp)
           return NULL;
+        if (!FIO_MEM_REALLOC_IS_SAFE_ && new_capa > valid_data) {
+          memset(tmp, 0, sizeof(*tmp) * (new_capa - valid_data));
+        }
         if (valid_data)
           memcpy(tmp + new_capa - valid_data,
                  ary->ary + ary->start,
@@ -725,7 +770,8 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   FIO_ARRAY_TYPE *tmp = NULL;
   if (!(ary->end - ary->start))
     goto finish;
-  tmp = (FIO_ARRAY_TYPE *)FIO_MEM_CALLOC((ary->end - ary->start), sizeof(*tmp));
+  tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
+      NULL, 0, (ary->end - ary->start) * sizeof(*tmp), 0);
   if (!tmp)
     return;
   memcpy(

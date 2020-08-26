@@ -62,6 +62,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
 #endif
+#include __FILE__
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
@@ -101,10 +102,10 @@ typedef struct {
 
 TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
-  FIO_LIST_HEAD ls = FIO_LIST_INIT(ls);
+  FIO_LIST_HEAD FIO_LIST_INIT(ls);
   for (int i = 0; i < TEST_REPEAT; ++i) {
-    ls____test_s *node =
-        ls____test_push(&ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+    ls____test_s *node = ls____test_push(
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   int tester = 0;
@@ -126,7 +127,7 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   tester = TEST_REPEAT;
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_unshift(
-        &ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -146,8 +147,8 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   FIO_ASSERT(FIO_NAME_BL(ls____test, empty)(&ls),
              "Linked list empty should have been true");
   for (int i = 0; i < TEST_REPEAT; ++i) {
-    ls____test_s *node =
-        ls____test_push(&ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+    ls____test_s *node = ls____test_push(
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), ));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -457,7 +458,8 @@ Hash Map / Set - test
 
 TEST_FUNC size_t map_____test_key_copy_counter = 0;
 TEST_FUNC void map_____test_key_copy(char **dest, char *src) {
-  *dest = (char *)FIO_MEM_CALLOC(strlen(src) + 1, sizeof(*dest));
+  *dest =
+      (char *)FIO_MEM_REALLOC(NULL, 0, (strlen(src) + 1) * sizeof(*dest), 0);
   FIO_ASSERT(*dest, "no memory to allocate key in map_test")
   strcpy(*dest, src);
   ++map_____test_key_copy_counter;

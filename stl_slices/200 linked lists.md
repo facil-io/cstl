@@ -74,7 +74,7 @@ typedef struct {
 #include "fio-stl.h"
 
 void example(void) {
-  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  FIO_LIST_HEAD FIO_LIST_INIT(list);
   for (int i = 0; i < 10; ++i) {
     my_list_s *n = malloc(sizeof(*n));
     n->i = i;
@@ -127,7 +127,7 @@ typedef struct {
 
 ```c
 #define FIO_LIST_INIT(obj)                                                     \
-  { .next = &(obj), .prev = &(obj) }
+  (obj) = { .next = &(obj), .prev = &(obj) }
 ```
 
 This macro initializes an uninitialized node (assumes the data in the node is junk). 

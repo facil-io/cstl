@@ -176,8 +176,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 #endif
 #include __FILE__
 
-#define FIOBJ_MEM_CALLOC(size, units)                                          \
-  FIO_NAME(fiobj_mem, calloc)((size), (units))
 #define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
   FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
 #define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
@@ -185,7 +183,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 
 #else
 
-#define FIOBJ_MEM_CALLOC FIO_MEM_CALLOC
 #define FIOBJ_MEM_REALLOC FIO_MEM_REALLOC
 #define FIOBJ_MEM_FREE FIO_MEM_FREE
 #define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
@@ -398,7 +395,6 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -470,7 +466,6 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -596,7 +591,6 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -629,7 +623,6 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -997,7 +990,6 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -1061,7 +1053,6 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -1333,7 +1324,6 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o) fiobj_free(o)
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -1341,7 +1331,6 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME fiobj____stack
 #define FIO_ARRAY_TYPE fiobj____stack_element_s
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE

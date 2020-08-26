@@ -41,7 +41,6 @@ Common cleanup
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 
 #undef FIO_MALLOC_TMP_USE_SYSTEM
-#undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_

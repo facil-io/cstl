@@ -151,6 +151,7 @@ These are the features that have been requested so far. Even if any of them are 
 |-------------------|--------------------|-----------------------------------------------------|
 |   Documentation   |     🙏 Help 🙏     |                                                     |
 |   Security        |                    |  Some security features would be nice.              |
+|  Embedded Arrays  |         Bo         |  It should be possible to embed the first few (2) objects within an array's struct... |
 
 ## Notable Contributions
 

@@ -205,14 +205,6 @@ By setting these macros, the memory allocator used by facil.io could be changed 
 
 When facil.io's memory allocator is defined (using `FIO_MALLOC`), **these macros will be automatically overwritten to use the custom memory allocator**. To use a different allocator, you may redefine the macros.
 
-#### `FIO_MEM_CALLOC`
-
-```c
-#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
-```
-
-Allocates size X units of bytes, where all bytes equal zero.
-
 #### `FIO_MEM_REALLOC`
 
 ```c
@@ -220,6 +212,10 @@ Allocates size X units of bytes, where all bytes equal zero.
 ```
 
 Reallocates memory, copying (at least) `copy_len` if necessary.
+
+If `ptr` is `NULL`, behaves like `malloc`.
+
+If `new_size` is 0, behaves like `free`.
 
 #### `FIO_MEM_FREE`
 
@@ -231,7 +227,7 @@ Frees allocated memory.
 
 #### `FIO_MALLOC_TMP_USE_SYSTEM`
 
-When defined, temporarily bypasses the `FIO_MEM_CALLOC` macros and uses the system's `calloc`, `realloc` and `free` functions.
+When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions.
 
 ### Naming and Misc. Macros
 

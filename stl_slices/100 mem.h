@@ -63,10 +63,6 @@ Memory Allocation - fast setup for a global allocator
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
 #endif
 
-#undef FIO_MEM_CALLOC
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
-
 #undef FIO_MEM_REALLOC
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
@@ -409,13 +405,10 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 Temporarily (at least) set memory allocation macros to use this allocator
 ***************************************************************************** */
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
-#undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
-#define FIO_MEM_CALLOC_(size, units)                                           \
-  FIO_NAME(FIO_MEMORY_NAME, calloc)((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
@@ -1415,8 +1408,7 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
     FIO_ASSERT_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __mem_state));
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arean_count;
   }
-  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks = (FIO_LIST_HEAD)FIO_LIST_INIT(
-      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
+  FIO_LIST_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
   FIO_NAME(FIO_MEMORY_NAME, after_fork)();
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
@@ -2427,25 +2419,21 @@ Memory pool cleanup
 Memory management macros
 ***************************************************************************** */
 
-#if !defined(FIO_MEM_CALLOC_) || !defined(FIO_MEM_REALLOC_) ||                 \
-    !defined(FIO_MEM_FREE_)
-#undef FIO_MEM_CALLOC_
+#if !defined(FIO_MEM_REALLOC_) || !defined(FIO_MEM_FREE_)
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
 #ifdef FIO_MALLOC_TMP_USE_SYSTEM /* force malloc */
-#define FIO_MEM_CALLOC_(size, units) calloc((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ 0
 
 #else /* FIO_MALLOC_TMP_USE_SYSTEM */
-#define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIO_MEM_REALLOC_IS_SAFE
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
-#endif /* !defined(FIO_MEM_CALLOC_)... */
+#endif /* !defined(FIO_MEM_REALLOC_)... */

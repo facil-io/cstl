@@ -718,7 +718,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
           "* Testing randomness "
           "- bit frequency / hemming distance / chi-square.\n");
   const size_t test_len = (TEST_REPEAT << 7);
-  uint64_t *rs = (uint64_t *)FIO_MEM_CALLOC(sizeof(*rs), test_len);
+  uint64_t *rs =
+      (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
   clock_t start, end;
   FIO_ASSERT_ALLOC(rs);
 

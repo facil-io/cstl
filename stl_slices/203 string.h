@@ -5,7 +5,9 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_STR_NAME fio            /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -626,7 +628,10 @@ String Constructors (inline)
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_CALLOC_(sizeof(*s), 1);
+      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
+    *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
+  }
   return (FIO_STR_PTR)FIO_PTR_TAG(s);
 }
 
@@ -676,7 +681,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
   }
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
-      data = (char *)FIO_MEM_CALLOC_(sizeof(*data), (FIO_STR_SMALL_LEN(s) + 1));
+      data = (char *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1), 0);
       if (data)
         memcpy(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
     }
@@ -684,7 +690,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       data = FIO_STR_BIG_DATA(s);
     } else if (FIO_STR_BIG_LEN(s)) {
-      data = (char *)FIO_MEM_CALLOC_(sizeof(*data), (FIO_STR_BIG_LEN(s) + 1));
+      data = (char *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1), 0);
       if (data)
         memcpy(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
     }
@@ -788,9 +795,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   }
 
   {
-    char *buf = (char *)FIO_MEM_CALLOC_(FIO_STR_CAPA2WORDS(len) + 1, 1);
+    char *buf = (char *)FIO_MEM_REALLOC_(
+        NULL, 0, sizeof(*buf) * (FIO_STR_CAPA2WORDS(len) + 1), 0);
     if (!buf)
       return i;
+    buf[len] = 0;
     i = (fio_str_info_s){
         .buf = buf, .len = len, .capa = FIO_STR_CAPA2WORDS(len)};
   }
@@ -1082,12 +1091,13 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     char *tmp = NULL;
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       tmp = (char *)FIO_MEM_REALLOC_(
-          FIO_STR_BIG_DATA(s), old_capa, amount + 1, data_len);
+          FIO_STR_BIG_DATA(s), old_capa, (amount + 1) * sizeof(char), data_len);
       (void)old_capa; /* might not be used by macro */
     } else {
-      tmp = (char *)FIO_MEM_CALLOC_(amount + 1, sizeof(char));
+      tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, (amount + 1) * sizeof(char), 0);
       if (tmp) {
         s->special = 0;
+        tmp[data_len] = 0;
         if (data_len)
           memcpy(tmp, FIO_STR_BIG_DATA(s), data_len);
       }
@@ -2190,7 +2200,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
       if (home[home_len - 1] == '/' || home[home_len - 1] == '\\')
         --home_len;
       path_len = home_len + filename_len - 1;
-      path = (char *)FIO_MEM_CALLOC_(sizeof(*path), path_len + 1);
+      path =
+          (char *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*path) * (path_len + 1), 0);
       if (!path)
         return state;
       memcpy(path, home, home_len);

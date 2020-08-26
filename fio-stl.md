@@ -205,14 +205,6 @@ By setting these macros, the memory allocator used by facil.io could be changed 
 
 When facil.io's memory allocator is defined (using `FIO_MALLOC`), **these macros will be automatically overwritten to use the custom memory allocator**. To use a different allocator, you may redefine the macros.
 
-#### `FIO_MEM_CALLOC`
-
-```c
-#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
-```
-
-Allocates size X units of bytes, where all bytes equal zero.
-
 #### `FIO_MEM_REALLOC`
 
 ```c
@@ -220,6 +212,10 @@ Allocates size X units of bytes, where all bytes equal zero.
 ```
 
 Reallocates memory, copying (at least) `copy_len` if necessary.
+
+If `ptr` is `NULL`, behaves like `malloc`.
+
+If `new_size` is 0, behaves like `free`.
 
 #### `FIO_MEM_FREE`
 
@@ -231,7 +227,7 @@ Frees allocated memory.
 
 #### `FIO_MALLOC_TMP_USE_SYSTEM`
 
-When defined, temporarily bypasses the `FIO_MEM_CALLOC` macros and uses the system's `calloc`, `realloc` and `free` functions.
+When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions.
 
 ### Naming and Misc. Macros
 
@@ -1570,7 +1566,7 @@ This shortcut macros defines a general allocator with the prefix `fio` (i.e., `f
 
 The general allocator settings consume more memory to allow for higher relative performance when using the memory pool as a generic allocator rather than an object specific memory pool.
 
-Some setup macros are automatically defined and the `FIO_MEM_CALLOC` macro family are automatically updated.
+Some setup macros are automatically defined and the `FIO_MEM_REALLOC` macro family are automatically updated.
 
 
 It is similar to using:
@@ -1586,7 +1582,6 @@ It is similar to using:
 /* secure by default */
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 
-#undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
@@ -1597,8 +1592,6 @@ It is similar to using:
 */
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len) fio_realloc2((ptr), (new_size), (copy_len))
 /** Frees allocated memory. */
@@ -1611,7 +1604,7 @@ It is similar to using:
 
 **REQUIRED**: the prefix for the memory-pool allocator.
 
-This also automatically updates the temporary memory allocation macros (`FIO_MEM_CALLOC_`, etc') so all types defined in the same `include` statement as the allocator will use this allocator instead of the default allocator assigned using `FIO_MEM_CALLOC` (nothe the `_`).
+This also automatically updates the temporary memory allocation macros (`FIO_MEM_REALLOC_`, etc') so all types defined in the same `include` statement as the allocator will use this allocator instead of the default allocator assigned using `FIO_MEM_REALLOC` (nothe the `_`).
 
 #### `FIO_MEMORY_ALIGN_LOG`
 
@@ -2042,12 +2035,11 @@ Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destro
 
 ### Queue API
 
-#### `FIO_QUEUE_INIT(queue)`
+#### `fio_queue_init`
 
 ```c
 /** Used to initialize a fio_queue_s object. */
-#define FIO_QUEUE_INIT(name)                                                   \
-  { .r = &(name).mem, .w = &(name).mem, .lock = FIO_LOCK_INIT }
+void fio_queue_init(fio_queue_s *q);
 ```
 
 #### `fio_queue_destroy`
@@ -2057,6 +2049,17 @@ void fio_queue_destroy(fio_queue_s *q);
 ```
 
 Destroys a queue and reinitializes it, after freeing any used resources.
+
+#### `FIO_QUEUE_STATIC_INIT(queue)`
+
+```c
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+```
+
+May be used to initialize global, static memory, queues.
+
+**Note**: use `fio_queue_init` is possible. This macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
 
 #### `fio_queue_new`
 
@@ -2709,7 +2712,7 @@ typedef struct {
 #include "fio-stl.h"
 
 void example(void) {
-  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  FIO_LIST_HEAD FIO_LIST_INIT(list);
   for (int i = 0; i < 10; ++i) {
     my_list_s *n = malloc(sizeof(*n));
     n->i = i;
@@ -2762,7 +2765,7 @@ typedef struct {
 
 ```c
 #define FIO_LIST_INIT(obj)                                                     \
-  { .next = &(obj), .prev = &(obj) }
+  (obj) = { .next = &(obj), .prev = &(obj) }
 ```
 
 This macro initializes an uninitialized node (assumes the data in the node is junk). 
@@ -3862,7 +3865,7 @@ This macro allows the container to be initialized with existing data.
 ```
 The `capacity` value should exclude the space required for the NUL character (if exists).
 
-Memory should be dynamically allocated using the same allocator selected for the String type (see `FIO_MALLOC` / `FIO_MEM_CALLOC` / `FIO_MEM_FREE`).
+Memory should be dynamically allocated using the same allocator selected for the String type (see `FIO_MALLOC` / `FIO_MEM_REALLOC` / `FIO_MEM_FREE`).
 
 #### `FIO_STR_INIT_STATIC`
 
@@ -3958,7 +3961,7 @@ char * STR_detach(FIO_STR_PTR s);
 
 Returns a C string with the existing data, **re-initializing** the String.
 
-The returned C string is **always dynamic** and **must be freed** using the same memory allocator assigned to the type (i.e., `free` or `fio_free`, see [`FIO_MALLOC`](#memory-allocation), [`FIO_MEM_CALLOC`](#FIO_MEM_CALLOC) and [`FIO_MALLOC_TMP_USE_SYSTEM`](#FIO_MALLOC_TMP_USE_SYSTEM))
+The returned C string is **always dynamic** and **must be freed** using the same memory allocator assigned to the type (i.e., `free` or `fio_free`, see [`FIO_MALLOC`](#local-memory-allocation), [`FIO_MEM_REALLOC`](#FIO_MEM_REALLOC) and [`FIO_MALLOC_TMP_USE_SYSTEM`](#FIO_MALLOC_TMP_USE_SYSTEM))
 
 **Note**: the String data is removed from the container, but the container is **not** freed.
 

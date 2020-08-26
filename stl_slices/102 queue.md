@@ -48,12 +48,11 @@ Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destro
 
 ### Queue API
 
-#### `FIO_QUEUE_INIT(queue)`
+#### `fio_queue_init`
 
 ```c
 /** Used to initialize a fio_queue_s object. */
-#define FIO_QUEUE_INIT(name)                                                   \
-  { .r = &(name).mem, .w = &(name).mem, .lock = FIO_LOCK_INIT }
+void fio_queue_init(fio_queue_s *q);
 ```
 
 #### `fio_queue_destroy`
@@ -63,6 +62,17 @@ void fio_queue_destroy(fio_queue_s *q);
 ```
 
 Destroys a queue and reinitializes it, after freeing any used resources.
+
+#### `FIO_QUEUE_STATIC_INIT(queue)`
+
+```c
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+```
+
+May be used to initialize global, static memory, queues.
+
+**Note**: use `fio_queue_init` is possible. This macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
 
 #### `fio_queue_new`
 

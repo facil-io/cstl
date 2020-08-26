@@ -721,7 +721,10 @@ Hash Map / Set - API (initialization inlined)
  */
 FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
   FIO_MAP_PTR r;
-  FIO_MAP_S *const m = (FIO_MAP_S *)FIO_MEM_CALLOC_(sizeof(*m), 1);
+  FIO_MAP_S *const m = (FIO_MAP_S *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*m), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && m) {
+    *m = (FIO_MAP_S)FIO_MAP_INIT;
+  }
   // no need to initialize the map object, since all bytes are zero.
   r = (FIO_MAP_PTR)FIO_PTR_TAG(m);
   return r;

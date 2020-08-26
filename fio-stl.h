@@ -37,7 +37,7 @@ This file also contains common helper macros / primitives, such as:
 
 * Pointer Math - i.e., `FIO_PTR_MATH_ADD` / `FIO_PTR_FROM_FIELD`
 
-* Memory Allocation Macros - i.e., `FIO_MEM_CALLOC`
+* Memory Allocation Macros - i.e., `FIO_MEM_REALLOC`
 
 * Security Related macros - i.e., `FIO_MEM_STACK_WIPE`
 
@@ -66,7 +66,7 @@ This file also contains common helper macros / primitives, such as:
 * Command Line Interface helpers - defined by `FIO_CLI`
 
 * Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
-  if `FIO_MALLOC` is used, it updates `FIO_MEM_CALLOC` etc'
+  if `FIO_MALLOC` is used, it updates `FIO_MEM_REALLOC` etc'
 
 * Custom JSON Parser - defined by `FIO_JSON`
 
@@ -85,10 +85,10 @@ define all available macros.
 - To make this file usable for kernel authoring, the `include` statements should
 be reviewed.
 
-- To make these functions safe for kernel authoring, the `FIO_MEM_CALLOC` /
-`FIO_MEM_FREE` / `FIO_MEM_REALLOC` macros should be (re)-defined.
+- To make these functions safe for kernel authoring, the `FIO_MEM_REALLOC` and
+`FIO_MEM_FREE` macros should be (re)-defined.
 
-  These macros default to using the `calloc` and `free` functions calls. If
+  These macros default to using the `realloc` and `free` functions calls. If
   `FIO_MALLOC` was defined, these macros will default to the custom memory
   allocator.
 
@@ -371,7 +371,7 @@ typedef struct fio___list_node_s {
 
 /** Allows initialization of FIO_LIST_HEAD objects. */
 #define FIO_LIST_INIT(obj)                                                     \
-  { .next = &(obj), .prev = &(obj) }
+  (obj) = (fio___list_node_s) { .next = &(obj), .prev = &(obj) }
 
 #ifndef FIO_LIST_EACH
 /** Loops through every node in the linked list except the head. */
@@ -553,18 +553,14 @@ Memory allocation macros
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
 #endif
 
-#if !defined(FIO_MEM_CALLOC) || !defined(FIO_MEM_REALLOC) ||                   \
-    !defined(FIO_MEM_FREE)
+#if !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
 
-#undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   fio_realloc2((ptr), (new_size), (copy_len))
@@ -574,8 +570,6 @@ Memory allocation macros
 #define FIO_MEM_REALLOC_IS_SAFE 1
 
 #else
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   realloc((ptr), (new_size))
@@ -585,7 +579,7 @@ Memory allocation macros
 #define FIO_MEM_REALLOC_IS_SAFE 0
 #endif /* H___FIO_MALLOC___H */
 
-#endif /* defined(FIO_MEM_CALLOC) */
+#endif /* defined(FIO_MEM_REALLOC) */
 /* *****************************************************************************
 Common macros
 ***************************************************************************** */
@@ -679,6 +673,7 @@ Common macros
 #define SFUNC FIO_SFUNC
 #define IFUNC FIO_IFUNC
 #endif /* SFUNC_ vs FIO_STL_KEEP__*/
+
 /* *****************************************************************************
 
 
@@ -695,13 +690,6 @@ Common macros
 
 ***************************************************************************** */
 
-/* FIO_LOCK2 dependencies */
-#ifdef FIO_LOCK2
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
-#endif /* FIO_LOCK2 */
-
 /* FIO_MEMORY_NAME dependencies */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_LOG
@@ -715,19 +703,12 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
-/* FIO_BITMAP dependencies */
-#ifdef FIO_BITMAP
+/* FIO_BITMAP, FIO_REF_NAME, FIO_LOCK2 dependencies */
+#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
 #endif /* FIO_BITMAP */
-
-/* FIO_REF_NAME dependencies */
-#ifdef FIO_REF_NAME
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
-#endif /* FIO_REF_NAME */
 
 /* FIO_RAND dependencies */
 #ifdef FIO_RAND
@@ -3180,7 +3161,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
           "* Testing randomness "
           "- bit frequency / hemming distance / chi-square.\n");
   const size_t test_len = (TEST_REPEAT << 7);
-  uint64_t *rs = (uint64_t *)FIO_MEM_CALLOC(sizeof(*rs), test_len);
+  uint64_t *rs =
+      (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
   clock_t start, end;
   FIO_ASSERT_ALLOC(rs);
 
@@ -5362,10 +5344,6 @@ Memory Allocation - fast setup for a global allocator
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
 #endif
 
-#undef FIO_MEM_CALLOC
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
-
 #undef FIO_MEM_REALLOC
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
@@ -5708,13 +5686,10 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 Temporarily (at least) set memory allocation macros to use this allocator
 ***************************************************************************** */
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
-#undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
-#define FIO_MEM_CALLOC_(size, units)                                           \
-  FIO_NAME(FIO_MEMORY_NAME, calloc)((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
@@ -6714,8 +6689,7 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
     FIO_ASSERT_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __mem_state));
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arean_count;
   }
-  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks = (FIO_LIST_HEAD)FIO_LIST_INIT(
-      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
+  FIO_LIST_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
   FIO_NAME(FIO_MEMORY_NAME, after_fork)();
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
@@ -7726,28 +7700,24 @@ Memory pool cleanup
 Memory management macros
 ***************************************************************************** */
 
-#if !defined(FIO_MEM_CALLOC_) || !defined(FIO_MEM_REALLOC_) ||                 \
-    !defined(FIO_MEM_FREE_)
-#undef FIO_MEM_CALLOC_
+#if !defined(FIO_MEM_REALLOC_) || !defined(FIO_MEM_FREE_)
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
 #ifdef FIO_MALLOC_TMP_USE_SYSTEM /* force malloc */
-#define FIO_MEM_CALLOC_(size, units) calloc((size), (units))
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ 0
 
 #else /* FIO_MALLOC_TMP_USE_SYSTEM */
-#define FIO_MEM_CALLOC_ FIO_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIO_MEM_REALLOC
 #define FIO_MEM_FREE_ FIO_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIO_MEM_REALLOC_IS_SAFE
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
-#endif /* !defined(FIO_MEM_CALLOC_)... */
+#endif /* !defined(FIO_MEM_REALLOC_)... */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -8327,8 +8297,10 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_QUEUE                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -8406,9 +8378,12 @@ typedef struct {
 Queue API
 ***************************************************************************** */
 
-/** Used to initialize a fio_queue_s object. */
-#define FIO_QUEUE_INIT(name)                                                   \
-  { .r = &(name).mem, .w = &(name).mem, .lock = FIO_LOCK_INIT }
+/** May be used to initialize global, static memory, queues. */
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q);
 
 /** Destroys a queue and reinitializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q);
@@ -8525,10 +8500,10 @@ Queue Inline Helpers
 
 /** Creates a new queue object (allocated on the heap). */
 FIO_IFUNC fio_queue_s *fio_queue_new(void) {
-  fio_queue_s *q = (fio_queue_s *)FIO_MEM_CALLOC_(sizeof(*q), 1);
+  fio_queue_s *q = (fio_queue_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q), 0);
   if (!q)
     return NULL;
-  *q = (fio_queue_s)FIO_QUEUE_INIT(*q);
+  fio_queue_init(q);
   return q;
 }
 
@@ -8580,6 +8555,17 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
 
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
+  /* do this manually, we don't want to reset a whole page */
+  q->r = &q->mem;
+  q->w = &q->mem;
+  q->count = 0;
+  q->lock = FIO_LOCK_INIT;
+  q->mem.r = q->mem.w = q->mem.dir = 0;
+  q->mem.next = NULL;
+}
+
 /** Destroys a queue and reinitializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   fio_lock(&q->lock);
@@ -8589,7 +8575,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
     if (tmp != &q->mem)
       FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
-  *q = (fio_queue_s)FIO_QUEUE_INIT(*q);
+  fio_queue_init(q);
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -8649,9 +8635,15 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
       q->w->next = &q->mem;
       q->mem.w = q->mem.r = q->mem.dir = 0;
     } else {
-      q->w->next = (fio___task_ring_s *)FIO_MEM_CALLOC_(sizeof(*q->w->next), 1);
-      if (!q->w->next)
+      void *tmp = (fio___task_ring_s *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*q->w->next), 0);
+      if (!tmp)
         goto no_mem;
+      q->w->next = (fio___task_ring_s *)tmp;
+      if (!FIO_MEM_REALLOC_IS_SAFE_) {
+        q->w->next->r = q->w->next->w = q->w->next->dir = 0;
+        q->w->next->next = NULL;
+      }
     }
     q->w = q->w->next;
     fio___task_ring_push(q->w, task);
@@ -8674,7 +8666,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
   if (fio___task_ring_unpop(q->r, task)) {
     /* such a shame... but we must allocate a while task block for one task */
     fio___task_ring_s *tmp =
-        (fio___task_ring_s *)FIO_MEM_CALLOC_(sizeof(*q->w->next), 1);
+        (fio___task_ring_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
     if (!tmp)
       goto no_mem;
     tmp->next = q->r;
@@ -8763,7 +8755,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
 FIO_IFUNC fio___timer_event_s *
 fio___timer_event_new(fio_timer_schedule_args_s args) {
   fio___timer_event_s *t = NULL;
-  t = (fio___timer_event_s *)FIO_MEM_CALLOC_(sizeof(*t), 1);
+  t = (fio___timer_event_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*t), 0);
   if (!t)
     goto init_error;
   if (!args.repetitions)
@@ -8896,7 +8888,9 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
   for (size_t i = 0; i < t->count; i++) {
-    fio_queue_push(t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count);
+    FIO_ASSERT(!fio_queue_push(
+                   t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count),
+               "Couldn't push task!");
   }
 }
 
@@ -8908,6 +8902,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
 FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
   fio_queue_s *q = fio_queue_new();
+  fio_queue_s q2;
 
   fprintf(stderr, "\t- size of queue object (fio_queue_s): %zu\n", sizeof(*q));
   fprintf(stderr,
@@ -8973,7 +8968,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       } thread_tasks;
       thread_tasks.act = fio_queue_perform_all;
       pthread_t *threads =
-          (pthread_t *)FIO_MEM_CALLOC(sizeof(*threads), t_count);
+          (pthread_t *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
       for (size_t j = 0; j < t_count; ++j) {
         if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
           abort();
@@ -9008,7 +9003,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fio_queue_free(q);
   {
     fprintf(stderr, "* testing urgent insertion\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    fio_queue_init(&q2);
     for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
       FIO_ASSERT(!fio_queue_push_urgent(&q2,
                                         .fn = (void (*)(void *, void *))(i + 1),
@@ -9035,7 +9030,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr,
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
-    fio_queue_s q2 = FIO_QUEUE_INIT(q2);
+    fio_queue_init(&q2);
     uintptr_t tester = 0;
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
@@ -10876,7 +10871,7 @@ typedef struct {
 #include "fio-stl.h"
 
 void example(void) {
-  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  FIO_LIST_HEAD FIO_LIST_INIT(list);
   for (int i = 0; i < 10; ++i) {
     my_list_s *n = malloc(sizeof(*n));
     n->i = i;
@@ -11054,7 +11049,9 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_ARRAY_NAME fio          /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -11183,10 +11180,16 @@ Dynamic Arrays - type
 ***************************************************************************** */
 
 typedef struct {
-  FIO_ARRAY_TYPE *ary;
-  uint32_t capa;
+  /* start common header */
+  /** the offser to the first item. */
   uint32_t start;
+  /** The offset to the first empty location the array. */
   uint32_t end;
+  /* end common header */
+  /** The attay's capacity only 32bits are valid */
+  uintptr_t capa;
+  /** a pointer to the array's memory (if not embedded) */
+  FIO_ARRAY_TYPE *ary;
 } FIO_NAME(FIO_ARRAY_NAME, s);
 
 #ifdef FIO_PTR_TAG_TYPE
@@ -11394,7 +11397,38 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                                   (start__tmp__ = (array)->ary))
 #endif
 
+#ifndef FIO_ARRAY_EACH
+/**
+ * Iterates through the list using a `for` loop.
+ *
+ * Access the object with the pointer `pos`. The `pos` variable can be named
+ * however you please.
+ *
+ * Avoid editing the array during a FOR loop, although I hope it's possible, I
+ * wouldn't count on it.
+ *
+ * **Note**: this variant supports automatic pointer tagging / untagging.
+ */
+#define FIO_ARRAY_EACH2(array_type, array, pos) TODO
+#endif
+
 #ifdef FIO_EXTERN_COMPLETE
+
+/* *****************************************************************************
+Dynamic Arrays - embedded arrays (TODO)
+***************************************************************************** */
+#define FIO_ARRAY_IS_EMBEDED(a)                                                \
+  (sizeof(FIO_ARRAY_TYPE) <= sizeof(void *) && ((a)->start > (a)->end))
+
+typedef struct {
+  /* start common header */
+  /** the offser to the first item. */
+  uint32_t start;
+  /** The offset to the first empty location the array. */
+  uint32_t end;
+  /* end common header */
+  FIO_ARRAY_TYPE embded[];
+} FIO_NAME(FIO_ARRAY_NAME, ___embedded_s);
 
 /* *****************************************************************************
 Dynamic Arrays - internal helpers
@@ -11413,7 +11447,10 @@ Dynamic Arrays - implementation
 /* Allocates a new array object on the heap and initializes it's memory. */
 IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
   FIO_NAME(FIO_ARRAY_NAME, s) *a =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_CALLOC_(sizeof(*a), 1);
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
+    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
+  }
   return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
 }
 
@@ -11592,10 +11629,13 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
             ((uint32_t)ary->capa + FIO_ARRAY_ADD2CAPA + ((uint32_t)0 - index)));
         const uint32_t valid_data = ary->end - ary->start;
         index -= ary->end; /* return to previous state */
-        FIO_ARRAY_TYPE *tmp =
-            (FIO_ARRAY_TYPE *)FIO_MEM_CALLOC_(new_capa, sizeof(*tmp));
+        FIO_ARRAY_TYPE *tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
+            NULL, 0, new_capa * sizeof(*tmp), 0);
         if (!tmp)
           return NULL;
+        if (!FIO_MEM_REALLOC_IS_SAFE_ && new_capa > valid_data) {
+          memset(tmp, 0, sizeof(*tmp) * (new_capa - valid_data));
+        }
         if (valid_data)
           memcpy(tmp + new_capa - valid_data,
                  ary->ary + ary->start,
@@ -11774,7 +11814,8 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   FIO_ARRAY_TYPE *tmp = NULL;
   if (!(ary->end - ary->start))
     goto finish;
-  tmp = (FIO_ARRAY_TYPE *)FIO_MEM_CALLOC((ary->end - ary->start), sizeof(*tmp));
+  tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
+      NULL, 0, (ary->end - ary->start) * sizeof(*tmp), 0);
   if (!tmp)
     return;
   memcpy(
@@ -12691,7 +12732,10 @@ Hash Map / Set - API (initialization inlined)
  */
 FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
   FIO_MAP_PTR r;
-  FIO_MAP_S *const m = (FIO_MAP_S *)FIO_MEM_CALLOC_(sizeof(*m), 1);
+  FIO_MAP_S *const m = (FIO_MAP_S *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*m), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && m) {
+    *m = (FIO_MAP_S)FIO_MAP_INIT;
+  }
   // no need to initialize the map object, since all bytes are zero.
   r = (FIO_MAP_PTR)FIO_PTR_TAG(m);
   return r;
@@ -13463,7 +13507,9 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_STR_NAME fio            /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -14084,7 +14130,10 @@ String Constructors (inline)
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_CALLOC_(sizeof(*s), 1);
+      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
+    *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
+  }
   return (FIO_STR_PTR)FIO_PTR_TAG(s);
 }
 
@@ -14134,7 +14183,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
   }
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
-      data = (char *)FIO_MEM_CALLOC_(sizeof(*data), (FIO_STR_SMALL_LEN(s) + 1));
+      data = (char *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1), 0);
       if (data)
         memcpy(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
     }
@@ -14142,7 +14192,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       data = FIO_STR_BIG_DATA(s);
     } else if (FIO_STR_BIG_LEN(s)) {
-      data = (char *)FIO_MEM_CALLOC_(sizeof(*data), (FIO_STR_BIG_LEN(s) + 1));
+      data = (char *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1), 0);
       if (data)
         memcpy(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
     }
@@ -14246,9 +14297,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   }
 
   {
-    char *buf = (char *)FIO_MEM_CALLOC_(FIO_STR_CAPA2WORDS(len) + 1, 1);
+    char *buf = (char *)FIO_MEM_REALLOC_(
+        NULL, 0, sizeof(*buf) * (FIO_STR_CAPA2WORDS(len) + 1), 0);
     if (!buf)
       return i;
+    buf[len] = 0;
     i = (fio_str_info_s){
         .buf = buf, .len = len, .capa = FIO_STR_CAPA2WORDS(len)};
   }
@@ -14540,12 +14593,13 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     char *tmp = NULL;
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       tmp = (char *)FIO_MEM_REALLOC_(
-          FIO_STR_BIG_DATA(s), old_capa, amount + 1, data_len);
+          FIO_STR_BIG_DATA(s), old_capa, (amount + 1) * sizeof(char), data_len);
       (void)old_capa; /* might not be used by macro */
     } else {
-      tmp = (char *)FIO_MEM_CALLOC_(amount + 1, sizeof(char));
+      tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, (amount + 1) * sizeof(char), 0);
       if (tmp) {
         s->special = 0;
+        tmp[data_len] = 0;
         if (data_len)
           memcpy(tmp, FIO_STR_BIG_DATA(s), data_len);
       }
@@ -15648,7 +15702,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
       if (home[home_len - 1] == '/' || home[home_len - 1] == '\\')
         --home_len;
       path_len = home_len + filename_len - 1;
-      path = (char *)FIO_MEM_CALLOC_(sizeof(*path), path_len + 1);
+      path =
+          (char *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*path) * (path_len + 1), 0);
       if (!path)
         return state;
       memcpy(path, home, home_len);
@@ -16184,7 +16239,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_REF_NAME long_ref       /* Development inclusion - ignore line */
+#define FIO_REF_TYPE long           /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -16221,7 +16280,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifndef FIO_REF_INIT
-#define FIO_REF_INIT(obj)
+#define FIO_REF_INIT(obj)                                                      \
+  do {                                                                         \
+    obj = (FIO_REF_TYPE){0};                                                   \
+  } while (0)
 #endif
 
 #ifndef FIO_REF_DESTROY
@@ -16296,8 +16358,8 @@ Reference Counter (Wrapper) Implementation
 
 /** Allocates a reference counted object. */
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)FIO_MEM_CALLOC_(sizeof(*o), 1);
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o = (FIO_NAME(
+      FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
   o->ref = 1;
@@ -16406,7 +16468,6 @@ Common cleanup
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 
 #undef FIO_MALLOC_TMP_USE_SYSTEM
-#undef FIO_MEM_CALLOC_
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
@@ -16603,8 +16664,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 #endif
 #include __FILE__
 
-#define FIOBJ_MEM_CALLOC(size, units)                                          \
-  FIO_NAME(fiobj_mem, calloc)((size), (units))
 #define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
   FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
 #define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
@@ -16612,7 +16671,6 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 
 #else
 
-#define FIOBJ_MEM_CALLOC FIO_MEM_CALLOC
 #define FIOBJ_MEM_REALLOC FIO_MEM_REALLOC
 #define FIOBJ_MEM_FREE FIO_MEM_FREE
 #define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
@@ -16825,7 +16883,6 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -16897,7 +16954,6 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17023,7 +17079,6 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17056,7 +17111,6 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17424,7 +17478,6 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17488,7 +17541,6 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17760,7 +17812,6 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o) fiobj_free(o)
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -17768,7 +17819,6 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME fiobj____stack
 #define FIO_ARRAY_TYPE fiobj____stack_element_s
-#define FIO_MEM_CALLOC_ FIOBJ_MEM_CALLOC
 #define FIO_MEM_REALLOC_ FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_ FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
@@ -18746,6 +18796,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
 #endif
+#include __FILE__
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
@@ -18785,10 +18836,10 @@ typedef struct {
 
 TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
-  FIO_LIST_HEAD ls = FIO_LIST_INIT(ls);
+  FIO_LIST_HEAD FIO_LIST_INIT(ls);
   for (int i = 0; i < TEST_REPEAT; ++i) {
-    ls____test_s *node =
-        ls____test_push(&ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+    ls____test_s *node = ls____test_push(
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   int tester = 0;
@@ -18810,7 +18861,7 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   tester = TEST_REPEAT;
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_unshift(
-        &ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -18830,8 +18881,8 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   FIO_ASSERT(FIO_NAME_BL(ls____test, empty)(&ls),
              "Linked list empty should have been true");
   for (int i = 0; i < TEST_REPEAT; ++i) {
-    ls____test_s *node =
-        ls____test_push(&ls, (ls____test_s *)FIO_MEM_CALLOC(sizeof(*node), 1));
+    ls____test_s *node = ls____test_push(
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), ));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -19141,7 +19192,8 @@ Hash Map / Set - test
 
 TEST_FUNC size_t map_____test_key_copy_counter = 0;
 TEST_FUNC void map_____test_key_copy(char **dest, char *src) {
-  *dest = (char *)FIO_MEM_CALLOC(strlen(src) + 1, sizeof(*dest));
+  *dest =
+      (char *)FIO_MEM_REALLOC(NULL, 0, (strlen(src) + 1) * sizeof(*dest), 0);
   FIO_ASSERT(*dest, "no memory to allocate key in map_test")
   strcpy(*dest, src);
   ++map_____test_key_copy_counter;

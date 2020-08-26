@@ -268,7 +268,7 @@ This macro allows the container to be initialized with existing data.
 ```
 The `capacity` value should exclude the space required for the NUL character (if exists).
 
-Memory should be dynamically allocated using the same allocator selected for the String type (see `FIO_MALLOC` / `FIO_MEM_CALLOC` / `FIO_MEM_FREE`).
+Memory should be dynamically allocated using the same allocator selected for the String type (see `FIO_MALLOC` / `FIO_MEM_REALLOC` / `FIO_MEM_FREE`).
 
 #### `FIO_STR_INIT_STATIC`
 
@@ -364,7 +364,7 @@ char * STR_detach(FIO_STR_PTR s);
 
 Returns a C string with the existing data, **re-initializing** the String.
 
-The returned C string is **always dynamic** and **must be freed** using the same memory allocator assigned to the type (i.e., `free` or `fio_free`, see [`FIO_MALLOC`](#memory-allocation), [`FIO_MEM_CALLOC`](#FIO_MEM_CALLOC) and [`FIO_MALLOC_TMP_USE_SYSTEM`](#FIO_MALLOC_TMP_USE_SYSTEM))
+The returned C string is **always dynamic** and **must be freed** using the same memory allocator assigned to the type (i.e., `free` or `fio_free`, see [`FIO_MALLOC`](#local-memory-allocation), [`FIO_MEM_REALLOC`](#FIO_MEM_REALLOC) and [`FIO_MALLOC_TMP_USE_SYSTEM`](#FIO_MALLOC_TMP_USE_SYSTEM))
 
 **Note**: the String data is removed from the container, but the container is **not** freed.
 

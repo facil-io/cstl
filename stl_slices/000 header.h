@@ -37,7 +37,7 @@ This file also contains common helper macros / primitives, such as:
 
 * Pointer Math - i.e., `FIO_PTR_MATH_ADD` / `FIO_PTR_FROM_FIELD`
 
-* Memory Allocation Macros - i.e., `FIO_MEM_CALLOC`
+* Memory Allocation Macros - i.e., `FIO_MEM_REALLOC`
 
 * Security Related macros - i.e., `FIO_MEM_STACK_WIPE`
 
@@ -66,7 +66,7 @@ This file also contains common helper macros / primitives, such as:
 * Command Line Interface helpers - defined by `FIO_CLI`
 
 * Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
-  if `FIO_MALLOC` is used, it updates `FIO_MEM_CALLOC` etc'
+  if `FIO_MALLOC` is used, it updates `FIO_MEM_REALLOC` etc'
 
 * Custom JSON Parser - defined by `FIO_JSON`
 
@@ -85,10 +85,10 @@ define all available macros.
 - To make this file usable for kernel authoring, the `include` statements should
 be reviewed.
 
-- To make these functions safe for kernel authoring, the `FIO_MEM_CALLOC` /
-`FIO_MEM_FREE` / `FIO_MEM_REALLOC` macros should be (re)-defined.
+- To make these functions safe for kernel authoring, the `FIO_MEM_REALLOC` and
+`FIO_MEM_FREE` macros should be (re)-defined.
 
-  These macros default to using the `calloc` and `free` functions calls. If
+  These macros default to using the `realloc` and `free` functions calls. If
   `FIO_MALLOC` was defined, these macros will default to the custom memory
   allocator.
 
@@ -371,7 +371,7 @@ typedef struct fio___list_node_s {
 
 /** Allows initialization of FIO_LIST_HEAD objects. */
 #define FIO_LIST_INIT(obj)                                                     \
-  { .next = &(obj), .prev = &(obj) }
+  (obj) = (fio___list_node_s) { .next = &(obj), .prev = &(obj) }
 
 #ifndef FIO_LIST_EACH
 /** Loops through every node in the linked list except the head. */
@@ -553,18 +553,14 @@ Memory allocation macros
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
 #endif
 
-#if !defined(FIO_MEM_CALLOC) || !defined(FIO_MEM_REALLOC) ||                   \
-    !defined(FIO_MEM_FREE)
+#if !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
 
-#undef FIO_MEM_CALLOC
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) fio_calloc((size), (units))
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   fio_realloc2((ptr), (new_size), (copy_len))
@@ -574,8 +570,6 @@ Memory allocation macros
 #define FIO_MEM_REALLOC_IS_SAFE 1
 
 #else
-/** Allocates size X units of bytes, where all bytes equal zero. */
-#define FIO_MEM_CALLOC(size, units) calloc((size), (units))
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   realloc((ptr), (new_size))
@@ -585,7 +579,7 @@ Memory allocation macros
 #define FIO_MEM_REALLOC_IS_SAFE 0
 #endif /* H___FIO_MALLOC___H */
 
-#endif /* defined(FIO_MEM_CALLOC) */
+#endif /* defined(FIO_MEM_REALLOC) */
 /* *****************************************************************************
 Common macros
 ***************************************************************************** */
@@ -679,3 +673,118 @@ Common macros
 #define SFUNC FIO_SFUNC
 #define IFUNC FIO_IFUNC
 #endif /* SFUNC_ vs FIO_STL_KEEP__*/
+
+/* *****************************************************************************
+
+
+
+
+
+
+                          Internal Dependencies
+
+
+
+
+
+
+***************************************************************************** */
+
+/* FIO_MEMORY_NAME dependencies */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
+#ifndef FIO_LOG
+#define FIO_LOG
+#endif
+#ifndef FIO_ATOMIC
+#define FIO_ATOMIC
+#endif
+#ifndef FIO_RAND
+#define FIO_RAND
+#endif
+#endif /* FIO_MALLOC */
+
+/* FIO_BITMAP, FIO_REF_NAME, FIO_LOCK2 dependencies */
+#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2)
+#ifndef FIO_ATOMIC
+#define FIO_ATOMIC
+#endif
+#endif /* FIO_BITMAP */
+
+/* FIO_RAND dependencies */
+#ifdef FIO_RAND
+#ifndef FIO_BITWISE
+#define FIO_BITWISE
+#endif
+#ifndef FIO_RISKY_HASH
+#define FIO_RISKY_HASH
+#endif
+#ifndef FIO_TIME
+#define FIO_TIME
+#endif
+#endif /* FIO_RAND */
+
+/* FIO_STR_NAME / FIO_STR_SMALL dependencies */
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
+#ifndef FIO_ATOL
+#define FIO_ATOL
+#endif
+#ifndef FIO_BITWISE
+#define FIO_BITWISE
+#endif
+#ifndef FIO_RISKY_HASH
+#define FIO_RISKY_HASH
+#endif
+#endif /* FIO_STR_NAME */
+
+/* FIO_QUEUE dependencies */
+#ifdef FIO_QUEUE
+#ifndef FIO_TIME
+#define FIO_TIME
+#endif
+#ifndef FIO_ATOL
+#define FIO_ATOL
+#endif
+#ifndef FIO_ATOMIC
+#define FIO_ATOMIC
+#endif
+#endif /* FIO_QUEUE */
+
+/* FIO_TIME dependencies */
+#ifdef FIO_TIME
+#ifndef FIO_ATOL
+#define FIO_ATOL
+#endif
+#endif /* FIO_TIME */
+
+/* FIO_CLI dependencies */
+#ifdef FIO_CLI
+#ifndef FIO_ATOL
+#define FIO_ATOL
+#endif
+#ifndef FIO_RISKY_HASH
+#define FIO_RISKY_HASH
+#endif
+#ifndef FIO_BITWISE
+#define FIO_BITWISE
+#endif
+#endif /* FIO_CLI */
+
+/* FIO_JSON dependencies */
+#ifdef FIO_JSON
+#ifndef FIO_ATOL
+#define FIO_ATOL
+#endif
+#ifndef FIO_BITMAP
+#define FIO_BITMAP
+#endif
+#ifndef FIO_ATOMIC
+#define FIO_ATOMIC
+#endif
+#endif /* FIO_JSON */
+
+/* FIO_RISKY_HASH dependencies */
+#ifdef FIO_RISKY_HASH
+#ifndef FIO_BITWISE
+#define FIO_BITWISE
+#endif
+#endif /* FIO_RISKY_HASH */
