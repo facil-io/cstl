@@ -260,12 +260,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
 
 #else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
-#if __has_builtin(__builtin_memcpy)
-#define FIO___MEMCPY __builtin_memcpy
-#else
-#define FIO___MEMCPY memcpy
-#endif
-
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
@@ -297,7 +291,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
-#undef FIO___MEMCPY
 
 #endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 

@@ -207,6 +207,13 @@ Basic macros and included files
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
 
+/* memcopy selectors */
+#if __has_builtin(__builtin_memcpy)
+#define FIO___MEMCPY __builtin_memcpy
+#else
+#define FIO___MEMCPY memcpy
+#endif
+
 /* *****************************************************************************
 Macro Stringifier
 ***************************************************************************** */

@@ -928,9 +928,9 @@ memset / memcpy selectors
 #endif /* FIO_MEMORY_USE_FIO_MEMSET */
 
 #if FIO_MEMORY_USE_FIO_MEMCOPY
-#define FIO___MEMCPY fio___memcpy_aligned
+#define FIO___MEMCPY2 fio___memcpy_aligned
 #else
-#define FIO___MEMCPY memcpy
+#define FIO___MEMCPY2 FIO___MEMCPY
 #endif /* FIO_MEMORY_USE_FIO_MEMCOPY */
 
 /* *****************************************************************************
@@ -2156,10 +2156,10 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
     copy_len = (uintptr_t)mem - (uintptr_t)ptr;
   }
 
-  FIO___MEMCPY(mem,
-               ptr,
-               ((copy_len + (FIO_MEMORY_ALIGN_SIZE - 1)) &
-                ((~(size_t)0) << FIO_MEMORY_ALIGN_LOG)));
+  FIO___MEMCPY2(mem,
+                ptr,
+                ((copy_len + (FIO_MEMORY_ALIGN_SIZE - 1)) &
+                 ((~(size_t)0) << FIO_MEMORY_ALIGN_LOG)));
   // zero out leftover bytes, if any.
   while (copy_len & (FIO_MEMORY_ALIGN_SIZE - 1)) {
     ((uint8_t *)mem)[copy_len++] = 0;
@@ -2370,7 +2370,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 Memory pool cleanup
 ***************************************************************************** */
 #undef FIO___MEMSET
-#undef FIO___MEMCPY
+#undef FIO___MEMCPY2
 #undef FIO_ALIGN
 #undef FIO_ALIGN_NEW
 #undef FIO_MEMORY_MALLOC_ZERO_POINTER
