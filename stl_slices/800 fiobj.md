@@ -2,12 +2,15 @@
 
 ```c
 #define FIO_FIOBJ
+#define FIOBJ_MALLOC /* an optional local memory allocator for FIOBJ types */
 #include "fio-stl.h"
 ```
 
 The facil.io library includes a dynamic type system that makes it a easy to handle mixed-type tasks, such as JSON object construction.
 
 This soft type system included in the facil.io STL, it is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
+
+The soft type system also offers an (optional) * [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
 
 The `FIOBJ` API offers type generic functions in addition to the type specific API. An objects underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
 
@@ -179,9 +182,11 @@ This function is **recursive** and could cause a **stack explosion** error.
 
 In addition, recursive object structures may produce unexpected results (for example, objects are always freed).
 
-The `FIOBJ_MAX_NESTING` nesting limit doesn't apply to `fiobj_free` since implementing the limit will always result in a memory leak.
+The `FIOBJ_MAX_NESTING` nesting limit doesn't apply to `fiobj_free`, making it possible to "expload" the stack if misused.
 
 This places the responsibility on the user / developer, not to exceed the maximum nesting limit (or errors may occur).
+
+When accepting external data, consider using the JSON parser, as it protects against this issue, offering a measure of safety against external data attacks.
 
 ### `FIOBJ` Common Functions
 
