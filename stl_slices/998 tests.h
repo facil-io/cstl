@@ -203,14 +203,10 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
 
   fprintf(stderr, "* Testing on stack, push/pop.\n");
   /* test stack allocated array (initialization) */
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Freshly initialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Freshly initialized array should have zero elements");
   memset(&a, 1, sizeof(a));
   a = (ary____test_s)FIO_ARRAY_INIT;
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Reinitialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Reinitialized array should have zero elements");
   ary____test_push(&a, 1);
@@ -263,8 +259,6 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
              "remove should have compacted the array.");
   /* test stack allocated array (destroy) */
   ary____test_destroy(&a);
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Destroyed array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Destroyed array should have zero elements");
   FIO_ASSERT(a.ary == NULL, "Destroyed array shouldn't have memory allocated");
@@ -273,7 +267,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   ary____test_push(&a, 3);
   ary____test_reserve(&a, 100);
   FIO_ASSERT(ary____test_count(&a) == 3,
-             "reserve shouldn't effect itme count.");
+             "reserve shouldn't effect item count.");
   FIO_ASSERT(ary____test_capa(&a) >= 100, "reserve should reserve.");
   FIO_ASSERT(ary____test_get(&a, 0) == 1,
              "Element should be kept after reserve (index 0)");
@@ -282,7 +276,8 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   FIO_ASSERT(ary____test_get(&a, 2) == 3,
              "Element should be kept after reserve (index 2)");
   ary____test_compact(&a);
-  FIO_ASSERT(ary____test_capa(&a) == 3, "reserve shouldn't effect itme count.");
+  FIO_ASSERT(ary____test_count(&a) == 3,
+             "compact shouldn't effect item count.");
   ary____test_destroy(&a);
 
   /* Round 2 - heap, shift/unshift, negative ary_set index */
@@ -290,8 +285,6 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   fprintf(stderr, "* Testing on heap, shift/unshift.\n");
   /* test heap allocated array (initialization) */
   ary____test_s *pa = ary____test_new();
-  FIO_ASSERT(ary____test_capa(pa) == 0,
-             "Freshly initialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(pa) == 0,
              "Freshly initialized array should have zero elements");
   ary____test_unshift(pa, 2);
@@ -1063,6 +1056,9 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, FIO_NAME(ary____test, test))();
+  FIO_NAME_TEST(stl, FIO_NAME(ary2____test, test))();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___array_test();
   fprintf(stderr, "===============\n");

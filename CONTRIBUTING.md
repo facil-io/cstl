@@ -150,8 +150,14 @@ These are the features that have been requested so far. Even if any of them are 
 |      Feature      |      assigned      |      remarks                                        |
 |-------------------|--------------------|-----------------------------------------------------|
 |   Documentation   |     🙏 Help 🙏     |                                                     |
+|-------------------|--------------------|-----------------------------------------------------|
 |   Security        |                    |  Some security features would be nice.              |
-|  Embedded Arrays  |         Bo         |  It should be possible to embed the first few (2) objects within an array's struct... |
+|-------------------|--------------------|-----------------------------------------------------|
+|  Embedded Arrays  |         Bo         |  It should be possible to embed the first few       |
+|                   |                    |  objects within an array's struct.                  |
+|-------------------|--------------------|-----------------------------------------------------|
+| FIO_PTR_TAG_VALID |                    |  implement pointer tag validation to all types.     |
+|-------------------|--------------------|-----------------------------------------------------|
 
 ## Notable Contributions
 
