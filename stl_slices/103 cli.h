@@ -44,11 +44,11 @@ Internal Macro Implementation
 ***************************************************************************** */
 
 /** Used internally. */
-#define FIO_CLI_STRING__TYPE_I 0x1
-#define FIO_CLI_BOOL__TYPE_I 0x2
-#define FIO_CLI_INT__TYPE_I 0x3
-#define FIO_CLI_PRINT__TYPE_I 0x4
-#define FIO_CLI_PRINT_LINE__TYPE_I 0x5
+#define FIO_CLI_STRING__TYPE_I       0x1
+#define FIO_CLI_BOOL__TYPE_I         0x2
+#define FIO_CLI_INT__TYPE_I          0x3
+#define FIO_CLI_PRINT__TYPE_I        0x4
+#define FIO_CLI_PRINT_LINE__TYPE_I   0x5
 #define FIO_CLI_PRINT_HEADER__TYPE_I 0x6
 
 /** Indicates the CLI argument should be a String (default). */
@@ -217,7 +217,7 @@ typedef struct {
 
 #define FIO_RISKY_HASH
 #define FIO_MAP_TYPE const char *
-#define FIO_MAP_KEY fio___cli_cstr_s
+#define FIO_MAP_KEY  fio___cli_cstr_s
 #define FIO_MAP_KEY_CMP(o1, o2)                                                \
   (o1.len == o2.len &&                                                         \
    (!o1.len || o1.buf == o2.buf ||                                             \

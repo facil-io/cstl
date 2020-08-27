@@ -752,6 +752,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
     } else if (RAND_MAX >= (~(uint32_t)0UL)) {
       /* RAND_MAX fill at least 32 bits per call */
       uint32_t *rs_adjusted = (uint32_t *)rs;
+
       start = clock();
       for (size_t i = 0; i < (test_len << 1); ++i) {
         rs_adjusted[i] = (uint32_t)rand();
@@ -760,6 +761,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
     } else if (RAND_MAX >= (~(uint16_t)0U)) {
       /* RAND_MAX fill at least 16 bits per call */
       uint16_t *rs_adjusted = (uint16_t *)rs;
+
       start = clock();
       for (size_t i = 0; i < (test_len << 2); ++i) {
         rs_adjusted[i] = (uint16_t)rand();
@@ -768,6 +770,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
     } else {
       /* assume RAND_MAX fill at least 8 bits per call */
       uint8_t *rs_adjusted = (uint8_t *)rs;
+
       start = clock();
       for (size_t i = 0; i < (test_len << 2); ++i) {
         rs_adjusted[i] = (uint8_t)rand();
@@ -782,6 +785,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
       --rand_bits;
     }
     rand_bits = 64 - rand_bits;
+
     char buffer[128] = {0};
     snprintf(buffer,
              128 - 14,

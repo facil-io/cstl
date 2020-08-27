@@ -63,6 +63,9 @@ For complex types, define any (or all) of the following macros:
 #define FIO_ARRAY_PADDING 4 
 // should the array growth be exponential? (ignores FIO_ARRAY_PADDING)
 #define FIO_ARRAY_EXPONENTIAL 0 
+// optimizes small arrays (mostly tuplets and single item arrays).
+// note: values larger than 1 add a memory allocation cost to the array container
+#define FIO_ARRAY_ENABLE_EMBEDDED 1
 ```
 
 To create the type and helper functions, include the Simple Template Library header.

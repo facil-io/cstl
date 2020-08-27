@@ -523,21 +523,21 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void);
 String Macro Helpers
 ***************************************************************************** */
 
-#define FIO_STR_IS_SMALL(s) (((s)->special & 1) || !(s)->buf)
+#define FIO_STR_IS_SMALL(s)  (((s)->special & 1) || !(s)->buf)
 #define FIO_STR_SMALL_LEN(s) ((size_t)((s)->special >> 2))
 #define FIO_STR_SMALL_LEN_SET(s, l)                                            \
   ((s)->special = (((s)->special & 2) | ((uint8_t)(l) << 2) | 1))
 #define FIO_STR_SMALL_CAPA(s) (sizeof(*(s)) - 2)
 #define FIO_STR_SMALL_DATA(s) ((char *)((s)->reserved))
 
-#define FIO_STR_BIG_DATA(s) ((s)->buf)
+#define FIO_STR_BIG_DATA(s)       ((s)->buf)
 #define FIO_STR_BIG_IS_DYNAMIC(s) (!((s)->special & 4))
 #define FIO_STR_BIG_SET_STATIC(s) ((s)->special |= 4)
-#define FIO_STR_BIG_FREE_BUF(s) (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
+#define FIO_STR_BIG_FREE_BUF(s)   (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
 
 #define FIO_STR_IS_FROZEN(s) ((s)->special & 2)
-#define FIO_STR_FREEZE_(s) ((s)->special |= 2)
-#define FIO_STR_THAW_(s) ((s)->special ^= (uint8_t)2)
+#define FIO_STR_FREEZE_(s)   ((s)->special |= 2)
+#define FIO_STR_THAW_(s)     ((s)->special ^= (uint8_t)2)
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
 #define FIO_STR_BIG_LEN(s)                                                     \
@@ -587,9 +587,9 @@ String Macro Helpers
 #define FIO_STR_BIG_CAPA(s) FIO_STR_CAPA2WORDS(FIO_STR_BIG_LEN((s)))
 #define FIO_STR_BIG_CAPA_SET(s, capa)
 #else
-#define FIO_STR_BIG_LEN(s) ((s)->len)
-#define FIO_STR_BIG_LEN_SET(s, l) ((s)->len = (l))
-#define FIO_STR_BIG_CAPA(s) ((s)->capa)
+#define FIO_STR_BIG_LEN(s)            ((s)->len)
+#define FIO_STR_BIG_LEN_SET(s, l)     ((s)->len = (l))
+#define FIO_STR_BIG_CAPA(s)           ((s)->capa)
 #define FIO_STR_BIG_CAPA_SET(s, capa) (FIO_STR_BIG_CAPA(s) = (capa))
 #endif
 
@@ -754,6 +754,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
     if (len && str)
       memcpy(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
+
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
                          .len = len,
                          .capa = FIO_STR_SMALL_CAPA(s)};
@@ -788,6 +789,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
     if (len && str)
       memcpy(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
+
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
                          .len = len,
                          .capa = FIO_STR_SMALL_CAPA(s)};
@@ -819,7 +821,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
  */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy2)(FIO_STR_PTR dest,
                                                             FIO_STR_PTR src) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(src);
+  fio_str_info_s i;
+  i = FIO_NAME(FIO_STR_NAME, info)(src);
   i = FIO_NAME(FIO_STR_NAME, init_copy)(dest, i.buf, i.len);
   return i;
 }
@@ -1081,8 +1084,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     };
   } else {
     /* from big to big - grow / shrink */
-    size_t data_len = FIO_STR_BIG_LEN(s);
     const size_t __attribute__((unused)) old_capa = FIO_STR_BIG_CAPA(s);
+    size_t data_len = FIO_STR_BIG_LEN(s);
     if (data_len > amount) {
       /* truncate */
       data_len = amount;
@@ -1914,6 +1917,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     const unsigned char tmp1 = *(reader++);
     const unsigned char tmp2 = *(reader++);
     const unsigned char tmp3 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[(((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15))];
     *(writer++) = encoding[((tmp2 & 15) << 2) | ((tmp3 >> 6) & 3)];
@@ -1925,6 +1929,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   case 2: {
     const unsigned char tmp1 = *(reader++);
     const unsigned char tmp2 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15)];
     *(writer++) = encoding[((tmp2 & 15) << 2)];
@@ -1932,6 +1937,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   } break;
   case 1: {
     const unsigned char tmp1 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[(tmp1 & 3) << 4];
     *(writer++) = '=';

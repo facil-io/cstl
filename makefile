@@ -94,7 +94,7 @@ OPTIMIZATION=-O2 -march=native
 # optimization level in debug mode.
 OPTIMIZATION_DEBUG=-O0 -march=native -fsanitize=address -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
-WARNINGS=-Wshadow -Wall -Wextra -Wno-missing-field-initializers -Wpedantic
+WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 # any extra include folders, space seperated list. (i.e. `pg_config --includedir`)
 INCLUDE=./
 # any preprocessosr defined flags we want, space seperated list (i.e. DEBUG )
@@ -106,11 +106,11 @@ CXX?=g++
 # C specific compiler options
 C_EXTRA_OPT:=
 # C++ specific compiler options
-CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros
-# c standard (if any, prefix using `-std=`, i.e.: -std=c11)
-CSTD?=-std=gnu11
-# c++ standard (if any, prefix using `-std=`, i.e.: -std=c++11)
-CXXSTD?=-std=gnu++11
+CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-vla-extension -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros
+# c standard   (if any, without the `-std=` prefix, i.e.: c11)
+CSTD?=gnu11
+# c++ standard (if any, without the `-std=` prefix, i.e.: c++11)
+CXXSTD?=gnu++11
 # pkg-config
 PKG_CONFIG?=pkg-config
 # for internal use - don't change
@@ -600,8 +600,8 @@ endif # TEST4ENDIAN
 #############################################################################
 
 FLAGS_STR=$(foreach flag,$(FLAGS),$(addprefix -D, $(flag)))
-CFLAGS:=$(CFLAGS) -g $(CSTD) -fpic $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
-CXXFLAGS:=$(CXXFLAGS) $(CXXSTD) -fpic  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
+CFLAGS:=$(CFLAGS) -g -std=$(CSTD) -fpic $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
+CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD) -fpic  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
 LINKER_FLAGS=$(LDFLAGS) $(foreach lib,$(LINKER_LIBS),$(addprefix -l,$(lib))) $(foreach lib,$(LINKER_LIBS_EXT),$(addprefix -l,$(lib)))
 CFLAGS_DEPENDENCY=-MT $@ -MMD -MP
 

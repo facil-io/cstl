@@ -157,6 +157,7 @@ SFUNC int64_t fio_atol(char **pstr) {
   char *p = *pstr;
   unsigned char invert = 0;
   fio___number_s n = (fio___number_s){0};
+
   while ((int)(unsigned char)isspace(*p))
     ++p;
   if (*p == '-') {
@@ -802,6 +803,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
             "* fio_atol speed test completed in %zu cycles\n",
             stop - start);
     r = 0;
+
     start = clock();
     for (int i = 0; i < (TEST_REPEAT << 3); ++i) {
       char *pos = buffer;

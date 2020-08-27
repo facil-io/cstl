@@ -270,8 +270,8 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->w = &q->mem;
   q->count = 0;
   q->lock = FIO_LOCK_INIT;
-  q->mem.r = q->mem.w = q->mem.dir = 0;
   q->mem.next = NULL;
+  q->mem.r = q->mem.w = q->mem.dir = 0;
 }
 
 /** Destroys a queue and reinitializes it, after freeing any used resources. */
@@ -350,6 +350,7 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
       q->w->next = (fio___task_ring_s *)tmp;
       if (!FIO_MEM_REALLOC_IS_SAFE_) {
         q->w->next->r = q->w->next->w = q->w->next->dir = 0;
+
         q->w->next->next = NULL;
       }
     }
@@ -456,6 +457,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
   if (!*pos || (*pos)->due > due)
     return NULL;
   fio___timer_event_s *t = *pos;
+
   *pos = t->next;
   return t;
 }
@@ -565,6 +567,7 @@ SFUNC void fio_timer_clear(fio_timer_queue_s *tq) {
   fio_unlock(&tq->lock);
   while (next) {
     fio___timer_event_s *tmp = next;
+
     next = next->next;
     fio___timer_event_free(NULL, tmp);
   }
@@ -658,10 +661,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
 
   for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
-    i_count = 0;
     fio___queue_test_s info = {
         .q = q, .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
     const size_t tasks = 1 << i;
+    i_count = 0;
     start = clock();
     for (size_t j = 0; j < tasks; ++j) {
       fio_queue_push(

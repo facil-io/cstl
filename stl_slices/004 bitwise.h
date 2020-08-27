@@ -846,6 +846,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       char force_padding;
       int b;
     } stst = {.a = 1};
+
     struct test_s *stst_p = FIO_PTR_FROM_FIELD(struct test_s, b, &stst.b);
     FIO_ASSERT(stst_p == &stst, "FIO_PTR_FROM_FIELD failed to retrace pointer");
   }

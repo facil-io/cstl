@@ -178,11 +178,11 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     // for seconds up to weekdays, we reduce the reminder every step.
     a = (ssize_t)timer;
     b = a / 60; // b == time in minutes
-    tm.tm_sec = a - (b * 60);
+    tm.tm_sec = (int)(a - (b * 60));
     a = b / 60; // b == time in hours
-    tm.tm_min = b - (a * 60);
+    tm.tm_min = (int)(b - (a * 60));
     b = a / 24; // b == time in days since epoch
-    tm.tm_hour = a - (b * 24);
+    tm.tm_hour = (int)(a - (b * 24));
     // b == number of days since epoch
     // day of epoch was a thursday. Add + 4 so sunday == 0...
     tm.tm_wday = (b + 4) % 7;
@@ -192,7 +192,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     b = a / 60; // b == time in minutes
     if (b * 60 != a) {
       /* seconds passed */
-      tm.tm_sec = (a - (b * 60)) + 60;
+      tm.tm_sec = (int)((a - (b * 60)) + 60);
       --b;
     } else {
       /* no seconds */
@@ -201,7 +201,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     a = b / 60; // b == time in hours
     if (a * 60 != b) {
       /* minutes passed */
-      tm.tm_min = (b - (a * 60)) + 60;
+      tm.tm_min = (int)((b - (a * 60)) + 60);
       --a;
     } else {
       /* no minutes */
@@ -210,7 +210,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     b = a / 24; // b == time in days since epoch?
     if (b * 24 != a) {
       /* hours passed */
-      tm.tm_hour = (a - (b * 24)) + 24;
+      tm.tm_hour = (int)((a - (b * 24)) + 24);
       --b;
     } else {
       /* no hours */
@@ -230,17 +230,17 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     b += 719468L; // adjust to March 1st, 2000 (post leap of 400 year era)
     // 146,097 = days in era (400 years)
     const size_t era = (b >= 0 ? b : b - 146096) / 146097;
-    const uint32_t doe = (b - (era * 146097)); // day of era
-    const uint16_t yoe =
-        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era
+    const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
+    const uint16_t yoe = (uint16_t)(
+        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365); // year of era
     a = yoe;
     a += era * 400; // a == year number, assuming year starts on March 1st...
-    const uint16_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const uint16_t mp = (5U * doy + 2) / 153;
-    const uint16_t d = doy - (153U * mp + 2) / 5 + 1;
-    const uint8_t m = mp + (mp < 10 ? 2 : -10);
+    const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));
+    const uint16_t mp = (uint16_t)((5U * doy + 2) / 153);
+    const uint16_t d = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
+    const uint8_t m = (uint8_t)(mp + (mp < 10 ? 2 : -10));
     a += (m <= 1);
-    tm.tm_year = a - 1900; // tm_year == years since 1900
+    tm.tm_year = (int)(a - 1900); // tm_year == years since 1900
     tm.tm_mon = m;
     tm.tm_mday = d;
     const uint8_t is_leap = (a % 4 == 0 && (a % 100 != 0 || a % 400 == 0));
@@ -441,7 +441,7 @@ Time - test
 #ifdef FIO_TEST_CSTL
 
 #define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
-#define FIO___GMTIME_TEST_RANGE (4093L * 365) /* test ~4 millenium  */
+#define FIO___GMTIME_TEST_RANGE    (4093L * 365) /* test ~4 millenium  */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
