@@ -1868,6 +1868,10 @@ FIOBJ and JSON testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(FIOBJ o, void *e_) {
   static size_t index = 0;
+  if(o == FIOBJ_INVALID && !e_) {
+    index = 0;
+    return -1;
+  }
   int *expect = (int *)e_;
   if (expect[index] == -1) {
     FIO_ASSERT(FIOBJ_TYPE(o) == FIOBJ_T_ARRAY,
@@ -1985,6 +1989,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                         9 + 1,
                "each2 repetition count error");
     fiobj_free(o);
+    FIO_NAME_TEST(stl, fiobj_task)(FIOBJ_INVALID, NULL);
   }
   {
     fprintf(stderr, "* Testing FIOBJ JSON handling.\n");

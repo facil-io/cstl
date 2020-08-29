@@ -59,8 +59,10 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MARK_MEMORY 1
 #endif
 #ifndef FIO_FIOBJ
-#define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
+#endif
+#ifndef FIOBJ_MALLOC
+#define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
 #include __FILE__
 
@@ -338,12 +340,8 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
              "remove should have compacted the array.");
   /* test heap allocated array (destroy) */
   ary____test_destroy(pa);
-  FIO_ASSERT(ary____test_capa(pa) == 0,
-             "Destroyed array should have zero capacity");
   FIO_ASSERT(ary____test_count(pa) == 0,
              "Destroyed array should have zero elements");
-  FIO_ASSERT(FIO_NAME2(ary____test, ptr)(pa) == NULL,
-             "Destroyed array shouldn't have memory allocated");
   ary____test_unshift(pa, 1);
   ary____test_unshift(pa, 2);
   ary____test_unshift(pa, 3);
@@ -1059,6 +1057,7 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, FIO_NAME(ary____test, test))();
   FIO_NAME_TEST(stl, FIO_NAME(ary2____test, test))();
+  FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___array_test();
   fprintf(stderr, "===============\n");
