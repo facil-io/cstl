@@ -802,7 +802,15 @@ TEST_FUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   FIO_PRINT_SIZE_OF(double);
   FIO_PRINT_SIZE_OF(size_t);
   FIO_PRINT_SIZE_OF(void *);
-  fprintf(stderr, "\tPage\t%ld bytes.\n", sysconf(_SC_PAGESIZE));
+  long page = sysconf(_SC_PAGESIZE);
+  if (page > 0) {
+    fprintf(stderr, "\tPage\t%ld bytes.\n", page);
+    FIO_ASSERT((page >> FIO_MEM_PAGE_SIZE_LOG) <= 1,
+               "page size mismatch!\n          "
+               "facil.io should be recompiled with "
+               "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
+               log2(page));
+  }
 }
 #undef FIO_PRINT_SIZE_OF
 
