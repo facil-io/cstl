@@ -523,21 +523,21 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void);
 String Macro Helpers
 ***************************************************************************** */
 
-#define FIO_STR_IS_SMALL(s) (((s)->special & 1) || !(s)->buf)
+#define FIO_STR_IS_SMALL(s)  (((s)->special & 1) || !(s)->buf)
 #define FIO_STR_SMALL_LEN(s) ((size_t)((s)->special >> 2))
 #define FIO_STR_SMALL_LEN_SET(s, l)                                            \
   ((s)->special = (((s)->special & 2) | ((uint8_t)(l) << 2) | 1))
 #define FIO_STR_SMALL_CAPA(s) (sizeof(*(s)) - 2)
 #define FIO_STR_SMALL_DATA(s) ((char *)((s)->reserved))
 
-#define FIO_STR_BIG_DATA(s) ((s)->buf)
+#define FIO_STR_BIG_DATA(s)       ((s)->buf)
 #define FIO_STR_BIG_IS_DYNAMIC(s) (!((s)->special & 4))
 #define FIO_STR_BIG_SET_STATIC(s) ((s)->special |= 4)
-#define FIO_STR_BIG_FREE_BUF(s) (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
+#define FIO_STR_BIG_FREE_BUF(s)   (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
 
 #define FIO_STR_IS_FROZEN(s) ((s)->special & 2)
-#define FIO_STR_FREEZE_(s) ((s)->special |= 2)
-#define FIO_STR_THAW_(s) ((s)->special ^= (uint8_t)2)
+#define FIO_STR_FREEZE_(s)   ((s)->special |= 2)
+#define FIO_STR_THAW_(s)     ((s)->special ^= (uint8_t)2)
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
 #define FIO_STR_BIG_LEN(s)                                                     \
@@ -587,9 +587,9 @@ String Macro Helpers
 #define FIO_STR_BIG_CAPA(s) FIO_STR_CAPA2WORDS(FIO_STR_BIG_LEN((s)))
 #define FIO_STR_BIG_CAPA_SET(s, capa)
 #else
-#define FIO_STR_BIG_LEN(s) ((s)->len)
-#define FIO_STR_BIG_LEN_SET(s, l) ((s)->len = (l))
-#define FIO_STR_BIG_CAPA(s) ((s)->capa)
+#define FIO_STR_BIG_LEN(s)            ((s)->len)
+#define FIO_STR_BIG_LEN_SET(s, l)     ((s)->len = (l))
+#define FIO_STR_BIG_CAPA(s)           ((s)->capa)
 #define FIO_STR_BIG_CAPA_SET(s, capa) (FIO_STR_BIG_CAPA(s) = (capa))
 #endif
 
@@ -717,7 +717,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, compact)(FIO_STR_PTR s_) {
           FIO_NAME(FIO_STR_NAME, capa)(s_))
     return;
   FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i              = FIO_NAME(FIO_STR_NAME, info)(s_);
   FIO_NAME(FIO_STR_NAME, init_copy)
   ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), i.buf, i.len);
   FIO_NAME(FIO_STR_NAME, destroy)(s_);
@@ -754,8 +754,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
     if (len && str)
       memcpy(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
-    i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
-                         .len = len,
+
+    i = (fio_str_info_s){.buf  = FIO_STR_SMALL_DATA(s),
+                         .len  = len,
                          .capa = FIO_STR_SMALL_CAPA(s)};
     return i;
   }
@@ -788,8 +789,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
     if (len && str)
       memcpy(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
-    i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
-                         .len = len,
+
+    i = (fio_str_info_s){.buf  = FIO_STR_SMALL_DATA(s),
+                         .len  = len,
                          .capa = FIO_STR_SMALL_CAPA(s)};
     return i;
   }
@@ -800,7 +802,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
     if (!buf)
       return i;
     buf[len] = 0;
-    i = (fio_str_info_s){
+    i        = (fio_str_info_s){
         .buf = buf, .len = len, .capa = FIO_STR_CAPA2WORDS(len)};
   }
   FIO_STR_BIG_CAPA_SET(s, i.capa);
@@ -819,7 +821,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
  */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy2)(FIO_STR_PTR dest,
                                                             FIO_STR_PTR src) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(src);
+  fio_str_info_s i;
+  i = FIO_NAME(FIO_STR_NAME, info)(src);
   i = FIO_NAME(FIO_STR_NAME, init_copy)(dest, i.buf, i.len);
   return i;
 }
@@ -836,14 +839,14 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, info)(const FIO_STR_PTR s_) {
     return (fio_str_info_s){0};
   if (FIO_STR_IS_SMALL(s))
     return (fio_str_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = FIO_STR_SMALL_LEN(s),
+        .buf  = FIO_STR_SMALL_DATA(s),
+        .len  = FIO_STR_SMALL_LEN(s),
         .capa = (FIO_STR_IS_FROZEN(s) ? 0 : FIO_STR_SMALL_CAPA(s)),
     };
 
   return (fio_str_info_s){
-      .buf = FIO_STR_BIG_DATA(s),
-      .len = FIO_STR_BIG_LEN(s),
+      .buf  = FIO_STR_BIG_DATA(s),
+      .len  = FIO_STR_BIG_LEN(s),
       .capa = (FIO_STR_IS_FROZEN(s) ? 0 : FIO_STR_BIG_CAPA(s)),
   };
 }
@@ -901,16 +904,16 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
     FIO_STR_SMALL_DATA(s)[size] = 0;
     FIO_STR_SMALL_LEN_SET(s, size);
     i = (fio_str_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = size,
+        .buf  = FIO_STR_SMALL_DATA(s),
+        .len  = size,
         .capa = FIO_STR_SMALL_CAPA(s),
     };
   } else {
     FIO_STR_BIG_DATA(s)[size] = 0;
     FIO_STR_BIG_LEN_SET(s, size);
     i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = size,
+        .buf  = FIO_STR_BIG_DATA(s),
+        .len  = size,
         .capa = i.capa,
     };
   }
@@ -1050,8 +1053,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
       *s = tmp;
     }
     i = (fio_str_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = FIO_STR_SMALL_LEN(s),
+        .buf  = FIO_STR_SMALL_DATA(s),
+        .len  = FIO_STR_SMALL_LEN(s),
         .capa = FIO_STR_SMALL_CAPA(s),
     };
     return i;
@@ -1067,22 +1070,22 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
         FIO_STR_BIG_DATA(&tmp), FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_CAPA(s));
     FIO_STR_BIG_LEN_SET(&tmp, FIO_STR_SMALL_LEN(s));
     *s = tmp;
-    i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
+    i  = (fio_str_info_s){
+        .buf  = FIO_STR_BIG_DATA(s),
+        .len  = FIO_STR_BIG_LEN(s),
         .capa = amount,
     };
     return i;
   } else if (FIO_STR_BIG_IS_DYNAMIC(s) && FIO_STR_BIG_CAPA(s) == amount) {
     i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
+        .buf  = FIO_STR_BIG_DATA(s),
+        .len  = FIO_STR_BIG_LEN(s),
         .capa = amount,
     };
   } else {
     /* from big to big - grow / shrink */
-    size_t data_len = FIO_STR_BIG_LEN(s);
     const size_t __attribute__((unused)) old_capa = FIO_STR_BIG_CAPA(s);
+    size_t data_len                               = FIO_STR_BIG_LEN(s);
     if (data_len > amount) {
       /* truncate */
       data_len = amount;
@@ -1096,22 +1099,22 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     } else {
       tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, (amount + 1) * sizeof(char), 0);
       if (tmp) {
-        s->special = 0;
+        s->special    = 0;
         tmp[data_len] = 0;
         if (data_len)
           memcpy(tmp, FIO_STR_BIG_DATA(s), data_len);
       }
     }
     if (tmp) {
-      tmp[data_len] = 0;
+      tmp[data_len]       = 0;
       FIO_STR_BIG_DATA(s) = tmp;
       FIO_STR_BIG_CAPA_SET(s, amount);
     } else {
       amount = FIO_STR_BIG_CAPA(s);
     }
     i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = data_len,
+        .buf  = FIO_STR_BIG_DATA(s),
+        .len  = data_len,
         .capa = amount,
     };
   }
@@ -1211,7 +1214,7 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_valid)(FIO_STR_PTR s_) {
   if (!state.len)
     return 1;
   char *const end = state.buf + state.len;
-  int32_t c = 0;
+  int32_t c       = 0;
   do {
     FIO_STR_UTF8_CODE_POINT(state.buf, end, c);
   } while (c > 0 && state.buf < end);
@@ -1223,9 +1226,9 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s_) {
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!state.len)
     return 0;
-  char *end = state.buf + state.len;
+  char *end      = state.buf + state.len;
   size_t utf8len = 0;
-  int32_t c = 0;
+  int32_t c      = 0;
   do {
     ++utf8len;
     FIO_STR_UTF8_CODE_POINT(state.buf, end, c);
@@ -1254,9 +1257,9 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s_) {
 SFUNC int FIO_NAME(FIO_STR_NAME,
                    utf8_select)(FIO_STR_PTR s_, intptr_t *pos, size_t *len) {
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
-  int32_t c = 0;
-  char *p = state.buf;
-  char *const end = state.buf + state.len;
+  int32_t c            = 0;
+  char *p              = state.buf;
+  char *const end      = state.buf + state.len;
   size_t start;
 
   if (!state.buf)
@@ -1362,18 +1365,18 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s_,
     goto write_zero;
   {
     char buf[22];
-    uint64_t l = 0;
+    uint64_t l  = 0;
     uint8_t neg = 0;
-    int64_t t = num / 10;
+    int64_t t   = num / 10;
     if (num < 0) {
       num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-      t = (int64_t)0 - t;
+      t   = (int64_t)0 - t;
       neg = 1;
     }
     while (num) {
       buf[l++] = '0' + (num - (t * 10));
-      num = t;
-      t = num / 10;
+      num      = t;
+      t        = num / 10;
     }
     if (neg) {
       buf[l++] = '-';
@@ -1445,7 +1448,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
                                                      const void *src,
                                                      size_t src_len) {
   FIO_NAME(FIO_STR_NAME, s) *s = (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
-  fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s state         = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!s_ || !s || FIO_STR_IS_FROZEN(s) || (!old_len && !src_len) ||
       (!src && src_len))
     return state;
@@ -1547,9 +1550,9 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
                                    '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
   // clang-format on
   const uint8_t *src = (const uint8_t *)src_;
-  size_t extra_len = 0;
-  size_t at = 0;
-  uint8_t set_at = 1;
+  size_t extra_len   = 0;
+  size_t at          = 0;
+  uint8_t set_at     = 1;
 
   /* collect escaping requiremnents */
   for (size_t i = 0; i < len; ++i) {
@@ -1577,7 +1580,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
       continue;
     }
     /* store first instance of character that needs escaping */
-    at = FIO_STR_WRITE_ESCAPED_CT_OR(set_at, i, at);
+    at     = FIO_STR_WRITE_ESCAPED_CT_OR(set_at, i, at);
     set_at = 0;
 
     /* count extra bytes */
@@ -1605,7 +1608,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
     /* often, after `write_escape` come quotes */
     FIO_NAME(FIO_STR_NAME, reserve)(s, org_len + extra_len + len + 4);
 #endif
-    dest = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + extra_len + len);
+    dest     = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + extra_len + len);
     dest.len = org_len;
   }
   dest.buf += dest.len;
@@ -1728,10 +1731,10 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
   fio_str_info_s dest;
   {
     const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s);
-    dest = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + len);
-    dest.len = org_len;
+    dest                 = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + len);
+    dest.len             = org_len;
   }
-  size_t at = 0;
+  size_t at          = 0;
   const uint8_t *src = (const uint8_t *)src_;
   const uint8_t *end = src + len;
   dest.buf += dest.len;
@@ -1900,12 +1903,12 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   }
 
   /* base64 length and padding information */
-  int groups = len / 3;
-  const int mod = len - (groups * 3);
-  const int target_size = (groups + (mod != 0)) * 4;
+  int groups             = len / 3;
+  const int mod          = len - (groups * 3);
+  const int target_size  = (groups + (mod != 0)) * 4;
   const uint32_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + target_size);
-  char *writer = i.buf + org_len;
+  char *writer     = i.buf + org_len;
   const unsigned char *reader = (const unsigned char *)data;
 
   /* write encoded data */
@@ -1914,6 +1917,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     const unsigned char tmp1 = *(reader++);
     const unsigned char tmp2 = *(reader++);
     const unsigned char tmp3 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[(((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15))];
     *(writer++) = encoding[((tmp2 & 15) << 2) | ((tmp3 >> 6) & 3)];
@@ -1925,6 +1929,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   case 2: {
     const unsigned char tmp1 = *(reader++);
     const unsigned char tmp2 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15)];
     *(writer++) = encoding[((tmp2 & 15) << 2)];
@@ -1932,6 +1937,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   } break;
   case 1: {
     const unsigned char tmp1 = *(reader++);
+
     *(writer++) = encoding[(tmp1 >> 2) & 63];
     *(writer++) = encoding[(tmp1 & 3) << 4];
     *(writer++) = '=';
@@ -2139,8 +2145,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
   }
 
   const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
-  size_t write_pos = org_len;
-  state = FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + limit);
+  size_t write_pos     = org_len;
+  state                = FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + limit);
   if (state.capa < (org_len + limit) || !state.buf) {
     return state;
   }
@@ -2184,15 +2190,15 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
   /* POSIX implementations. */
   if (filename == NULL || !s_)
     return state;
-  int file = -1;
-  char *path = NULL;
+  int file        = -1;
+  char *path      = NULL;
   size_t path_len = 0;
 
   if (filename[0] == '~' && (filename[1] == '/' || filename[1] == '\\')) {
     char *home = getenv("HOME");
     if (home) {
       size_t filename_len = strlen(filename);
-      size_t home_len = strlen(home);
+      size_t home_len     = strlen(home);
       if ((home_len + filename_len) >= (1 << 16)) {
         /* too long */
         return state;
@@ -2207,7 +2213,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
       memcpy(path, home, home_len);
       memcpy(path + home_len, filename + 1, filename_len);
       path[path_len] = 0;
-      filename = path;
+      filename       = path;
     }
   }
 
@@ -2453,7 +2459,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     if (1) {
       /* String content == whole file (this file) */
       intptr_t pos = -11;
-      size_t len = 20;
+      size_t len   = 20;
       fprintf(stderr, "* Testing UTF-8 positioning.\n");
 
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(s, &pos, &len) == 0,
@@ -2492,7 +2498,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_NAME(FIO_STR_NAME, write)(&str, utf8_sample, strlen(utf8_sample));
     intptr_t pos = -2;
-    size_t len = 2;
+    size_t len   = 2;
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
                "`utf8_select` returned error for negative pos on "
                "UTF-8 data! (%zd, %zu)",
@@ -2598,11 +2604,11 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_NAME(FIO_STR_NAME, destroy)(&str); /* does nothing, but why not... */
 
     FIO_NAME(FIO_STR_NAME, s) b64message = FIO_STR_INIT;
-    fio_str_info_s b64i = FIO_NAME(FIO_STR_NAME, write)(
+    fio_str_info_s b64i                  = FIO_NAME(FIO_STR_NAME, write)(
         &b64message, "Hello World, this is the voice of peace:)", 41);
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      b64i = FIO_NAME(FIO_STR_NAME, write)(&b64message, &c, 1);
+      b64i      = FIO_NAME(FIO_STR_NAME, write)(&b64message, &c, 1);
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&b64message) == (size_t)(42 + i),
                  "Base64 message length error (%zu != %zu)",
                  FIO_NAME(FIO_STR_NAME, len)(&b64message),
@@ -2652,7 +2658,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
     FIO_NAME(FIO_STR_NAME, write)(&unescaped, utf8_sample, strlen(utf8_sample));
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      ue = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
+      ue        = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
     }
     fio_str_info_s encoded =
         FIO_NAME(FIO_STR_NAME, write_escape)(&str, ue.buf, ue.len);

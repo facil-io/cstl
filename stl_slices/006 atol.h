@@ -97,7 +97,7 @@ typedef struct {
 
 /** Reads number information in base 2. Returned expo in base 2. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
+  fio___number_s r    = (fio___number_s){0};
   const uint64_t mask = ((1ULL) << ((sizeof(mask) << 3) - 1));
   while (**pstr >= '0' && **pstr <= '1' && !(r.val & mask)) {
     r.val = (r.val << 1) | (**pstr - '0');
@@ -112,7 +112,7 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
 
 /** Reads number information, up to base 10 numbers. Returned expo in `base`. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_b10(char **pstr, uint8_t base) {
-  fio___number_s r = (fio___number_s){0};
+  fio___number_s r     = (fio___number_s){0};
   const uint64_t limit = ((~0ULL) / base) - (base - 1);
   while (**pstr >= '0' && **pstr < ('0' + base) && r.val <= (limit)) {
     r.val = (r.val * base) + (**pstr - '0');
@@ -127,7 +127,7 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b10(char **pstr, uint8_t base) {
 
 /** Reads number information for base 16 (hex). Returned expo in base 4. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
+  fio___number_s r    = (fio___number_s){0};
   const uint64_t mask = (~0ULL) << ((sizeof(mask) << 3) - 4);
   for (; !(r.val & mask);) {
     uint8_t tmp;
@@ -154,9 +154,10 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
 SFUNC int64_t fio_atol(char **pstr) {
   if (!pstr || !(*pstr))
     return 0;
-  char *p = *pstr;
+  char *p              = *pstr;
   unsigned char invert = 0;
-  fio___number_s n = (fio___number_s){0};
+  fio___number_s n     = (fio___number_s){0};
+
   while ((int)(unsigned char)isspace(*p))
     ++p;
   if (*p == '-') {
@@ -187,7 +188,7 @@ SFUNC int64_t fio_atol(char **pstr) {
 
   /* is_base10: */
   *pstr = p;
-  n = fio___aton_read_b2_b10(pstr, 10);
+  n     = fio___aton_read_b2_b10(pstr, 10);
 
   /* sign can't be embeded */
 #define CALC_N_VAL()                                                           \
@@ -213,7 +214,7 @@ is_hex:
     ++p;
   }
   *pstr = p;
-  n = fio___aton_read_b2_b16(pstr);
+  n     = fio___aton_read_b2_b16(pstr);
 
   /* sign can be embeded */
 #define CALC_N_VAL_EMBEDABLE()                                                 \
@@ -239,7 +240,7 @@ is_binary:
     ++p;
   }
   *pstr = p;
-  n = fio___aton_read_b2_b2(pstr);
+  n     = fio___aton_read_b2_b2(pstr);
   CALC_N_VAL_EMBEDABLE()
   return n.val;
 
@@ -248,7 +249,7 @@ is_base8:
     ++p;
   }
   *pstr = p;
-  n = fio___aton_read_b2_b10(pstr, 8);
+  n     = fio___aton_read_b2_b10(pstr, 8);
   CALC_N_VAL();
   return n.val;
 }
@@ -290,7 +291,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     /* Base 2 */
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
+      uint8_t i  = 0;   /* counting bits */
       dest[len++] = '0';
       dest[len++] = 'b';
 #if __has_builtin(__builtin_clzll)
@@ -322,7 +323,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       /* write to dest. */
       while (i < 64) {
         dest[len++] = ((n & 0x8000000000000000) ? '1' : '0');
-        n = n << 1;
+        n           = n << 1;
         i++;
       }
       dest[len] = 0;
@@ -334,13 +335,13 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       uint64_t l = 0;
       if (num < 0) {
         dest[len++] = '-';
-        num = 0 - num;
+        num         = 0 - num;
       }
       dest[len++] = '0';
 
       while (num) {
         buf[l++] = '0' + (num & 7);
-        num = num >> 3;
+        num      = num >> 3;
       }
       while (l) {
         --l;
@@ -354,7 +355,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     /* Base 16 */
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
+      uint8_t i  = 0;   /* counting bits */
       dest[len++] = '0';
       dest[len++] = 'x';
       while ((n & 0xFF00000000000000) == 0) { // since n != 0, then i < 8
@@ -368,10 +369,10 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       }
       /* write the damn thing, high to low */
       while (i < 8) {
-        uint8_t tmp = (n & 0xF000000000000000) >> 60;
+        uint8_t tmp  = (n & 0xF000000000000000) >> 60;
         uint8_t tmp2 = (n & 0x0F00000000000000) >> 56;
-        dest[len++] = notation[tmp];
-        dest[len++] = notation[tmp2];
+        dest[len++]  = notation[tmp];
+        dest[len++]  = notation[tmp2];
         i++;
         n = n << 8;
       }
@@ -386,17 +387,17 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
   case 9: /* fallthrough */
     /* rare bases */
     {
-      int64_t t = num / base;
+      int64_t t  = num / base;
       uint64_t l = 0;
       if (num < 0) {
         num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-        t = (int64_t)0 - t;
+        t   = (int64_t)0 - t;
         dest[len++] = '-';
       }
       while (num) {
         buf[l++] = '0' + (num - (t * base));
-        num = t;
-        t = num / base;
+        num      = t;
+        t        = num / base;
       }
       while (l) {
         --l;
@@ -411,17 +412,17 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
   }
   /* Base 10, the default base */
   {
-    int64_t t = num / 10;
+    int64_t t  = num / 10;
     uint64_t l = 0;
     if (num < 0) {
       num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-      t = (int64_t)0 - t;
+      t   = (int64_t)0 - t;
       dest[len++] = '-';
     }
     while (num) {
       buf[l++] = '0' + (num - (t * 10));
-      num = t;
-      t = num / 10;
+      num      = t;
+      t        = num / 10;
     }
     while (l) {
       --l;
@@ -448,7 +449,7 @@ zero:
     break;
   }
   dest[len++] = '0';
-  dest[len] = 0;
+  dest[len]   = 0;
   return len;
 }
 
@@ -463,9 +464,9 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
     p.d = num;
     return fio_ltoa(dest, p.i, base);
   }
-  size_t written = 0;
+  size_t written    = 0;
   uint8_t need_zero = 1;
-  char *start = dest;
+  char *start       = dest;
 
   if (isinf(num))
     goto is_inifinity;
@@ -515,8 +516,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     size_t tmp = fio_ltoa(buffer, i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
     buffer[tmp++] = 0;
-    char *tmp2 = buffer;
-    int i2 = fio_atol(&tmp2);
+    char *tmp2    = buffer;
+    int i2        = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
     FIO_ASSERT(
         i == i2, "fio_ltoa-fio_atol roundtrip error %lld != %lld", i, i2);
@@ -526,8 +527,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     size_t tmp = fio_ltoa(buffer, (int64_t)i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa return length error");
     buffer[tmp] = 0;
-    char *tmp2 = buffer;
-    int64_t i2 = fio_atol(&tmp2);
+    char *tmp2  = buffer;
+    int64_t i2  = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
     FIO_ASSERT((int64_t)i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
@@ -537,7 +538,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol samples.\n");
 #define TEST_ATOL(s, n)                                                        \
   do {                                                                         \
-    char *p = (char *)(s);                                                     \
+    char *p   = (char *)(s);                                                   \
     int64_t r = fio_atol(&p);                                                  \
     FIO_ASSERT(r == (n),                                                       \
                "fio_atol test error! %s => %zd (not %zd)",                     \
@@ -550,7 +551,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (size_t)(p - (s)));                                             \
     char buf[72];                                                              \
     buf[fio_ltoa(buf, n, 2)] = 0;                                              \
-    p = buf;                                                                   \
+    p                        = buf;                                            \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 2 test error! "                                  \
                "%s != %s (%zd)",                                               \
@@ -558,7 +559,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
     buf[fio_ltoa(buf, n, 8)] = 0;                                              \
-    p = buf;                                                                   \
+    p                        = buf;                                            \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 8 test error! "                                  \
                "%s != %s (%zd)",                                               \
@@ -566,7 +567,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
     buf[fio_ltoa(buf, n, 10)] = 0;                                             \
-    p = buf;                                                                   \
+    p                         = buf;                                           \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 10 test error! "                                 \
                "%s != %s (%zd)",                                               \
@@ -574,7 +575,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
     buf[fio_ltoa(buf, n, 16)] = 0;                                             \
-    p = buf;                                                                   \
+    p                         = buf;                                           \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 16 test error! "                                 \
                "%s != %s (%zd)",                                               \
@@ -609,10 +610,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
       double d_;                                                               \
       uint64_t as_i;                                                           \
     } pn, pn2;                                                                 \
-    pn2.d_ = d;                                                                \
-    char *p = (char *)(s);                                                     \
-    char *p2 = (char *)(s);                                                    \
-    double r = fio_atof(&p);                                                   \
+    pn2.d_     = d;                                                            \
+    char *p    = (char *)(s);                                                  \
+    char *p2   = (char *)(s);                                                  \
+    double r   = fio_atof(&p);                                                 \
     double std = strtod(p2, &p2);                                              \
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
@@ -629,8 +630,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
       fprintf(stderr, "* WARNING: float range limit marked before: %s\n", s);  \
     } else {                                                                   \
       char f_buf[164];                                                         \
-      pn.d_ = std;                                                             \
-      pn2.d_ = r;                                                              \
+      pn.d_          = std;                                                    \
+      pn2.d_         = r;                                                      \
       size_t tmp_pos = fio_ltoa(f_buf, pn.as_i, 2);                            \
       f_buf[tmp_pos] = '\n';                                                   \
       fio_ltoa(f_buf + tmp_pos + 1, pn2.as_i, 2);                              \
@@ -789,8 +790,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     clock_t start, stop;
     memcpy(buffer, "1234567890.123", 14);
     buffer[14] = 0;
-    size_t r = 0;
-    start = clock();
+    size_t r   = 0;
+    start      = clock();
     for (int i = 0; i < (TEST_REPEAT << 3); ++i) {
       char *pos = buffer;
       r += fio_atol(&pos);
@@ -802,6 +803,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
             "* fio_atol speed test completed in %zu cycles\n",
             stop - start);
     r = 0;
+
     start = clock();
     for (int i = 0; i < (TEST_REPEAT << 3); ++i) {
       char *pos = buffer;

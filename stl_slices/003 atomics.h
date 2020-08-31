@@ -117,7 +117,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #error Required builtin "__sync_add_and_fetch" not found.
 #endif
 
-#define FIO_LOCK_INIT 0
+#define FIO_LOCK_INIT         0
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
 typedef volatile unsigned char fio_lock_i;
 
@@ -563,7 +563,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
     return;
 
   /* initialize self-waiting node memory (using stack memory) */
-  self_thread.t = FIO_THREAD_ID();
+  self_thread.t    = FIO_THREAD_ID();
   self_thread.next = NULL; // lock->waiting;
 
   /* enter waitlist lock */

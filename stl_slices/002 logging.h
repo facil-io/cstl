@@ -43,10 +43,10 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
-#define FIO_LOG____LENGTH_BORDER (FIO_LOG_LENGTH_LIMIT - 32)
+#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 32)
 #else
 #define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 32)
-#define FIO_LOG____LENGTH_BORDER FIO_LOG_LENGTH_LIMIT
+#define FIO_LOG____LENGTH_BORDER   FIO_LOG_LENGTH_LIMIT
 #endif
 
 #undef FIO_LOG2STDERR
@@ -74,7 +74,7 @@ FIO_LOG2STDERR(const char *format, ...) {
     }
   }
   tmp___log[len___log++] = '\n';
-  tmp___log[len___log] = '0';
+  tmp___log[len___log]   = '0';
   fwrite(tmp___log, len___log, 1, stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK

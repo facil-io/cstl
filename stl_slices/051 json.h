@@ -195,12 +195,13 @@ FIO_IFUNC const char *fio___json_consume_number(fio_json_parser_s *p,
                                                 const char *stop) {
 
   const char *const was = buffer;
-  errno = 0; /* testo for E2BIG on number parsing */
-  long long i = fio_atol((char **)&buffer);
+  errno                 = 0; /* testo for E2BIG on number parsing */
+  long long i           = fio_atol((char **)&buffer);
+
   if (buffer < stop &&
       ((*buffer) == '.' || (*buffer | 32) == 'e' || (*buffer | 32) == 'x' ||
        (*buffer | 32) == 'p' || (*buffer | 32) == 'i' || errno)) {
-    buffer = was;
+    buffer   = was;
     double f = fio_atof((char **)&buffer);
     fio_json_on_float(p, f);
   } else {
@@ -468,7 +469,7 @@ SFUNC size_t fio_json_parse(fio_json_parser_s *p,
                             const char *buffer,
                             const size_t len) {
   const char *start = buffer;
-  const char *stop = buffer + len;
+  const char *stop  = buffer + len;
   const char *last;
   /* skip BOM, if exists */
   if (len >= 3 && buffer[0] == (char)0xEF && buffer[1] == (char)0xBB &&
@@ -479,14 +480,14 @@ SFUNC size_t fio_json_parse(fio_json_parser_s *p,
   }
   /* loop until the first JSON data was read */
   do {
-    last = buffer;
+    last   = buffer;
     buffer = fio___json_identify(p, buffer, stop);
     if (!buffer)
       goto failed;
   } while (!p->expect && buffer < stop);
   /* loop until the JSON object (nesting) is closed */
   while (p->depth && buffer < stop) {
-    last = buffer;
+    last   = buffer;
     buffer = fio___json_identify(p, buffer, stop);
     if (!buffer)
       goto failed;

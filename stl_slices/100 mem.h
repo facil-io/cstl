@@ -2094,7 +2094,7 @@ FIO_NAME(FIO_MEMORY_NAME,
       c, c->marker, new_page_len, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
-  c->marker = new_page_len;
+  c->marker = (uint32_t)new_page_len;
   return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
 }
 
@@ -2202,7 +2202,7 @@ SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (!c)
     return NULL;
   FIO_MEMORY_ON_CHUNK_ALLOC(c);
-  c->marker = pages;
+  c->marker = (uint32_t)pages;
   return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
 }
 

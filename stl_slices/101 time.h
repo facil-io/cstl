@@ -240,7 +240,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     const uint16_t d   = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
     const uint8_t m    = (uint8_t)(mp + (mp < 10 ? 2 : -10));
     a += (m <= 1);
-    tm.tm_year            = a - 1900; // tm_year == years since 1900
+    tm.tm_year            = (int)(a - 1900); // tm_year == years since 1900
     tm.tm_mon             = m;
     tm.tm_mday            = d;
     const uint8_t is_leap = (a % 4 == 0 && (a % 100 != 0 || a % 400 == 0));

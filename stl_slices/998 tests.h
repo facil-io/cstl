@@ -50,7 +50,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #if !defined(FIO_EXTERN_TEST) || defined(FIO_EXTERN_COMPLETE)
 
 /* Common testing values / Macros */
-#define TEST_FUNC static __attribute__((unused))
+#define TEST_FUNC   static __attribute__((unused))
 #define TEST_REPEAT 4096
 
 /* Make sure logging and FIOBJ memory marking are set. */
@@ -96,8 +96,8 @@ typedef struct {
   FIO_LIST_NODE node;
 } ls____test_s;
 
-#define FIO_LIST_NAME ls____test
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_LIST_NAME    ls____test
+#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 
 #include __FILE__
@@ -167,9 +167,9 @@ Dynamic Array - Test
 ***************************************************************************** */
 
 static int ary____test_was_destroyed = 0;
-#define FIO_ARRAY_NAME ary____test
-#define FIO_ARRAY_TYPE int
-#define FIO_REF_NAME ary____test
+#define FIO_ARRAY_NAME    ary____test
+#define FIO_ARRAY_TYPE    int
+#define FIO_REF_NAME      ary____test
 #define FIO_REF_INIT(obj) obj = (ary____test_s)FIO_ARRAY_INIT
 #define FIO_REF_DESTROY(obj)                                                   \
   do {                                                                         \
@@ -177,18 +177,18 @@ static int ary____test_was_destroyed = 0;
     ary____test_was_destroyed = 1;                                             \
   } while (0)
 #define FIO_ATOMIC
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
-#define FIO_ARRAY_NAME ary2____test
-#define FIO_ARRAY_TYPE uint8_t
-#define FIO_ARRAY_TYPE_INVALID 0xFF
+#define FIO_ARRAY_NAME                 ary2____test
+#define FIO_ARRAY_TYPE                 uint8_t
+#define FIO_ARRAY_TYPE_INVALID         0xFF
 #define FIO_ARRAY_TYPE_COPY(dest, src) (dest) = (src)
-#define FIO_ARRAY_TYPE_DESTROY(obj) (obj = FIO_ARRAY_TYPE_INVALID)
-#define FIO_ARRAY_TYPE_CMP(a, b) (a) == (b)
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_ARRAY_TYPE_DESTROY(obj)    (obj = FIO_ARRAY_TYPE_INVALID)
+#define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
+#define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 static int fio_____dynamic_test_array_task(int o, void *c_) {
@@ -199,7 +199,7 @@ static int fio_____dynamic_test_array_task(int o, void *c_) {
 }
 
 TEST_FUNC void fio___dynamic_types_test___array_test(void) {
-  int tmp = 0;
+  int tmp         = 0;
   ary____test_s a = FIO_ARRAY_INIT;
   fprintf(stderr, "* Testing dynamic arrays.\n");
 
@@ -432,19 +432,19 @@ Hash Map / Set - test
 ***************************************************************************** */
 
 /* a simple set of numbers */
-#define FIO_MAP_NAME set_____test
-#define FIO_MAP_TYPE size_t
+#define FIO_MAP_NAME           set_____test
+#define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 /* a simple set of numbers */
-#define FIO_MAP_NAME set2_____test
-#define FIO_MAP_TYPE size_t
+#define FIO_MAP_NAME           set2_____test
+#define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) 1
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 TEST_FUNC size_t map_____test_key_copy_counter = 0;
@@ -462,12 +462,12 @@ TEST_FUNC void map_____test_key_destroy(char **dest) {
 }
 
 /* keys are strings, values are numbers */
-#define FIO_MAP_KEY char *
-#define FIO_MAP_KEY_CMP(a, b) (strcmp((a), (b)) == 0)
+#define FIO_MAP_KEY            char *
+#define FIO_MAP_KEY_CMP(a, b)  (strcmp((a), (b)) == 0)
 #define FIO_MAP_KEY_COPY(a, b) map_____test_key_copy(&(a), (b))
 #define FIO_MAP_KEY_DESTROY(a) map_____test_key_destroy(&(a))
-#define FIO_MAP_TYPE size_t
-#define FIO_MAP_NAME map_____test
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_NAME           map_____test
 #include __FILE__
 
 #define HASHOFi(i) i /* fio_risky_hash(&(i), sizeof((i)), 0) */
@@ -658,7 +658,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                "freshly initialized map should have no capacity");
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buffer[64];
-      int l = snprintf(buffer, 63, "%zu", i);
+      int l     = snprintf(buffer, 63, "%zu", i);
       buffer[l] = 0;
       map_____test_set(m, HASHOFs(buffer), buffer, i + 1, NULL);
     }
@@ -670,7 +670,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                (size_t)map_____test_count(m));
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buffer[64];
-      int l = snprintf(buffer + 1, 61, "%zu", i);
+      int l         = snprintf(buffer + 1, 61, "%zu", i);
       buffer[l + 1] = 0;
       FIO_ASSERT(map_____test_get(m, HASHOFs(buffer + 1), buffer + 1) == i + 1,
                  "item retrival error in map.");
@@ -747,15 +747,15 @@ CLI - test
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-#define FIO_MEMORY_NAME fio_mem_test_safe
+#define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT 2
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
-#define FIO_MEMORY_NAME fio_mem_test_unsafe
+#define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT 2
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
 /* *****************************************************************************
 Socket helper testing
@@ -817,9 +817,9 @@ TEST_FUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 /* *****************************************************************************
 Locking - Speed Test
 ***************************************************************************** */
-#define FIO___LOCK2_TEST_TASK (1LU << 25)
+#define FIO___LOCK2_TEST_TASK    (1LU << 25)
 #define FIO___LOCK2_TEST_THREADS 32U
-#define FIO___LOCK2_TEST_REPEAT 1
+#define FIO___LOCK2_TEST_REPEAT  1
 
 #ifndef H___FIO_LOCK2___H
 #include <pthread.h>
@@ -876,22 +876,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       {
           .type_size = sizeof(fio_lock_i),
           .type_name = "fio_lock_i",
-          .name = "fio_lock      (spinlock)",
-          .task = fio___lock_mytask_lock,
+          .name      = "fio_lock      (spinlock)",
+          .task      = fio___lock_mytask_lock,
       },
 #ifdef H___FIO_LOCK2___H
       {
           .type_size = sizeof(fio_lock2_s),
           .type_name = "fio_lock2_s",
-          .name = "fio_lock2 (pause/resume)",
-          .task = fio___lock_mytask_lock2,
+          .name      = "fio_lock2 (pause/resume)",
+          .task      = fio___lock_mytask_lock2,
       },
 #endif
       {
           .type_size = sizeof(pthread_mutex_t),
           .type_name = "pthread_mutex_t",
-          .name = "pthreads (pthread_mutex)",
-          .task = fio___lock_mytask_mutex,
+          .name      = "pthreads (pthread_mutex)",
+          .task      = fio___lock_mytask_mutex,
       },
       {
           .name = NULL,
@@ -962,7 +962,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */
       result = 0;
-      start = fio_time_micro();
+      start  = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
         __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
         test_funcs[fn].task(&result);
@@ -993,7 +993,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */
       result = 0;
-      start = fio_time_micro();
+      start  = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
         pthread_create(threads + i, NULL, test_funcs[fn].task, &result);
       }

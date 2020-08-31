@@ -183,10 +183,10 @@ Hash Map / Set - type and hash macros
  * maximum number of items to... hmm... a lot (1 << 63).
  */
 #ifdef FIO_MAP_BIG
-#define FIO_MAP_SIZE_TYPE uint64_t
+#define FIO_MAP_SIZE_TYPE      uint64_t
 #define FIO_MAP_INDEX_USED_BIT ((uint64_t)1 << 63)
 #else
-#define FIO_MAP_SIZE_TYPE uint32_t
+#define FIO_MAP_SIZE_TYPE      uint32_t
 #define FIO_MAP_INDEX_USED_BIT ((uint32_t)1 << 31)
 #endif /* FIO_MAP_BIG */
 
@@ -278,7 +278,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
 #define FIO_MAP_OBJ_KEY FIO_MAP_KEY
 
 #define FIO_MAP_OBJ_INVALID                                                    \
-  ((FIO_NAME(FIO_MAP_NAME, couplet_s)){.key = FIO_MAP_KEY_INVALID,             \
+  ((FIO_NAME(FIO_MAP_NAME, couplet_s)){.key   = FIO_MAP_KEY_INVALID,           \
                                        .value = FIO_MAP_TYPE_INVALID})
 
 #define FIO_MAP_OBJ_COPY(dest, src)                                            \
@@ -287,10 +287,10 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
 #define FIO_MAP_OBJ_DESTROY(obj)                                               \
   FIO_NAME(FIO_MAP_NAME, _couplet_destroy)(&(obj))
 
-#define FIO_MAP_OBJ_CMP(a, b) FIO_MAP_KEY_CMP((a).key, (b).key)
+#define FIO_MAP_OBJ_CMP(a, b)        FIO_MAP_KEY_CMP((a).key, (b).key)
 #define FIO_MAP_OBJ_KEY_CMP(a, key_) FIO_MAP_KEY_CMP((a).key, (key_))
-#define FIO_MAP_OBJ2KEY(o) (o).key
-#define FIO_MAP_OBJ2TYPE(o) (o).value
+#define FIO_MAP_OBJ2KEY(o)           (o).key
+#define FIO_MAP_OBJ2TYPE(o)          (o).value
 
 #define FIO_MAP_OBJ_DISCARD(o)                                                 \
   do {                                                                         \
@@ -309,15 +309,15 @@ Map - Set
 ***************************************************************************** */
 #else /* FIO_MAP_KEY */
 /** FIO_MAP_OBJ is either a couplet (for hash maps) or the objet (for sets) */
-#define FIO_MAP_OBJ FIO_MAP_TYPE
+#define FIO_MAP_OBJ         FIO_MAP_TYPE
 /** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
-#define FIO_MAP_OBJ_KEY FIO_MAP_TYPE
+#define FIO_MAP_OBJ_KEY     FIO_MAP_TYPE
 #define FIO_MAP_OBJ_INVALID FIO_MAP_TYPE_INVALID
-#define FIO_MAP_OBJ_COPY FIO_MAP_TYPE_COPY
+#define FIO_MAP_OBJ_COPY    FIO_MAP_TYPE_COPY
 #define FIO_MAP_OBJ_DESTROY FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_OBJ_CMP FIO_MAP_TYPE_CMP
+#define FIO_MAP_OBJ_CMP     FIO_MAP_TYPE_CMP
 #define FIO_MAP_OBJ_KEY_CMP FIO_MAP_TYPE_CMP
-#define FIO_MAP_OBJ2KEY(o) (o)
+#define FIO_MAP_OBJ2KEY(o)  (o)
 #define FIO_MAP_OBJ2TYPE(o) (o)
 #define FIO_MAP_OBJ_DISCARD FIO_MAP_TYPE_DISCARD
 #define FIO_MAP_KEY_DISCARD(_ignore)
@@ -512,7 +512,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
  *
  */
 #define FIO_MAP_EACH(map_p, pos)                                               \
-  for (__typeof__((map_p)->map) pos = (map_p)->map,                            \
+  for (__typeof__((map_p)->map) pos   = (map_p)->map,                          \
                                 end__ = (map_p)->map + (map_p)->w;             \
        pos < end__;                                                            \
        ++pos)
@@ -672,8 +672,9 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, __byte_size)(uint8_t bits) {
 FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                      __hash2index)(FIO_MAP_HASH hash,
                                                    uint8_t bits) {
-  return (((hash) ^ (((hash)*FIO_MAP_CUCKOO_STEPS) >> (63 & (bits)))) |
-          FIO_MAP_INDEX_USED_BIT);
+  return (FIO_MAP_SIZE_TYPE)(
+      ((hash) ^ (((hash)*FIO_MAP_CUCKOO_STEPS) >> (63 & (bits)))) |
+      FIO_MAP_INDEX_USED_BIT);
 }
 
 FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, __destroy_each_entry)(FIO_MAP_S *m) {
@@ -707,6 +708,7 @@ FIO_IFUNC const FIO_NAME(FIO_MAP_NAME, s) *
 FIO_IFUNC FIO_MAP_SIZE_TYPE *FIO_NAME(FIO_MAP_NAME, __imap)(FIO_MAP_S *m) {
   FIO_MAP_SIZE_TYPE *r;
   const FIO_MAP_SIZE_TYPE capa = FIO_MAP_CAPA(m->bits);
+
   r = (FIO_MAP_SIZE_TYPE *)(m->map + capa);
   return r;
 }
@@ -915,7 +917,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR m_) {
 
 /** Attempts to lower the map's memory consumption. */
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR m_) {
-  int r = 0;
+  int r              = 0;
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m->map || !m->bits)
     return r;
@@ -1022,7 +1024,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, __map_realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
             m->w * sizeof(*m->map));
     if (!tmp)
       return -1;
-    m->map = tmp;
+    m->map  = tmp;
     m->bits = bits;
   }
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
@@ -1059,31 +1061,34 @@ SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
                                       FIO_MAP_HASH hash,
                                       FIO_MAP_SIZE_TYPE ihash,
                                       FIO_MAP_OBJ_KEY key) {
-  const size_t imask = ((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1;
-  const size_t test_mask = ~imask;
+  const size_t imask      = ((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1;
+  const size_t test_mask  = ~imask;
   FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
-  r = {.i = FIO_MAP_INDEX_INVALID, .imap = FIO_MAP_INDEX_INVALID};
+  r        = {.i = FIO_MAP_INDEX_INVALID, .imap = FIO_MAP_INDEX_INVALID};
   size_t i = ihash;
   if (!m->map)
     return r;
   ihash &= test_mask;
   uint8_t full_collisions = 0;
-  unsigned int attempts = (imask < FIO_MAP_MAX_SEEK) ? imask : FIO_MAP_MAX_SEEK;
+  unsigned int attempts =
+      (unsigned int)((imask < FIO_MAP_MAX_SEEK) ? imask : FIO_MAP_MAX_SEEK);
   if (FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT >= m->bits)
     goto seek_as_array;
   do {
     i &= imask;
     if (!imap[i]) {
       /* unused empty slot */
+      /* update returned index only if no previous index exits */
       if (r.imap == FIO_MAP_INDEX_INVALID)
-        r.imap = i; /* update returned index only if no previous index exits */
+        r.imap = (FIO_MAP_SIZE_TYPE)i;
       return r;
     }
     if (imap[i] == FIO_MAP_INDEX_INVALID) {
       /* known hole, could be filled by `__set` */
+      /* update returned index only if no previous index exits */
       if (r.imap == FIO_MAP_INDEX_INVALID)
-        r.imap = i; /* update returned index only if no previous index exits */
+        r.imap = (FIO_MAP_SIZE_TYPE)i;
     } else if ((imap[i] & test_mask) == ihash &&
                m->map[(imap[i] & imask)].hash == hash) {
       /* potential hit */
@@ -1091,7 +1096,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
           FIO_MAP_OBJ_KEY_CMP(m->map[(imap[i] & imask)].obj, key)) {
         /* object found */
         r = (FIO_NAME(FIO_MAP_NAME, __pos_s)){
-            .i = (FIO_MAP_SIZE_TYPE)(imap[i] & imask),
+            .i    = (FIO_MAP_SIZE_TYPE)(imap[i] & imask),
             .imap = (FIO_MAP_SIZE_TYPE)i,
         };
         return r;
@@ -1111,7 +1116,7 @@ seek_as_array:
     if (m->map[i].hash == hash &&
         FIO_MAP_OBJ_KEY_CMP(m->map[(i & imask)].obj, key)) {
       r = (FIO_NAME(FIO_MAP_NAME, __pos_s)){
-          .i = (FIO_MAP_SIZE_TYPE)i,
+          .i    = (FIO_MAP_SIZE_TYPE)i,
           .imap = (FIO_MAP_SIZE_TYPE)i,
       };
       return r;
@@ -1130,8 +1135,8 @@ Hash Map / Set - Internal API (Helpers) - Rehashing
 
 /** Internal: rehashes the map. */
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __rehash_no_holes)(FIO_MAP_S *m) {
-  size_t pos = 0;
-  FIO_MAP_SIZE_TYPE *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
+  size_t pos                          = 0;
+  FIO_MAP_SIZE_TYPE *imap             = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   FIO_NAME(FIO_MAP_NAME, each_s) *map = m->map;
   while (pos < m->w) {
     const FIO_MAP_SIZE_TYPE ihash =
@@ -1143,11 +1148,12 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __rehash_no_holes)(FIO_MAP_S *m) {
       pos = 0;
       if (FIO_NAME(FIO_MAP_NAME, __map_realloc)(m, m->bits + 1))
         return -1;
-      map = m->map;
+      map  = m->map;
       imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
       continue;
     }
-    imap[i.imap] = (pos) | (ihash & (~(((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1)));
+    imap[i.imap] = (FIO_MAP_SIZE_TYPE)(
+        (pos) | (ihash & (~(((FIO_MAP_SIZE_TYPE)1 << m->bits) - 1))));
     ++pos;
   }
   return 0;
@@ -1224,7 +1230,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
         FIO_NAME(FIO_MAP_NAME, __imap)(m)[i_tmp.imap] = FIO_MAP_INDEX_INVALID;
       }
       FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
-      m->map[pos].obj = FIO_MAP_OBJ_INVALID;
+      m->map[pos].obj  = FIO_MAP_OBJ_INVALID;
       m->map[pos].hash = 0;
       --m->count;
     }
@@ -1238,7 +1244,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
     FIO_MAP_TYPE_COPY((m->map[m->w].obj), obj);
 #endif
     m->map[m->w].hash = hash;
-    i.i = m->w;
+    i.i               = m->w;
     ++m->w;
     ++m->count;
 
@@ -1314,7 +1320,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR m_,
     } else {
       FIO_MAP_OBJ_DESTROY(m->map[i.i].obj);
     }
-    m->map[i.i].obj = FIO_MAP_OBJ_INVALID;
+    m->map[i.i].obj  = FIO_MAP_OBJ_INVALID;
     m->map[i.i].hash = 0;
     if (i.imap != FIO_MAP_INDEX_INVALID) {
       FIO_NAME(FIO_MAP_NAME, __imap)(m)[i.imap] = FIO_MAP_INDEX_INVALID;
@@ -1370,13 +1376,13 @@ IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   }
   if ((FIO_MAP_SIZE_TYPE)start_at >= m->count)
     return m->count;
-  FIO_MAP_SIZE_TYPE old_pos = FIO_NAME(FIO_MAP_NAME, __each_pos);
-  FIO_MAP_SIZE_TYPE count = 0;
+  FIO_MAP_SIZE_TYPE old_pos          = FIO_NAME(FIO_MAP_NAME, __each_pos);
+  FIO_MAP_SIZE_TYPE count            = (FIO_MAP_SIZE_TYPE)start_at;
   FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
   FIO_NAME(FIO_MAP_NAME, __each_map) = m;
-  count = start_at;
+
   if (m->w == m->count) {
-    FIO_NAME(FIO_MAP_NAME, __each_pos) = start_at;
+    FIO_NAME(FIO_MAP_NAME, __each_pos) = (FIO_MAP_SIZE_TYPE)start_at;
   } else {
     while (start_at) {
       FIO_MAP_SIZE_TYPE tmp = FIO_NAME(FIO_MAP_NAME, __each_pos);
