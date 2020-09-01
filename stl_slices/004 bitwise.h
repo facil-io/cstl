@@ -521,7 +521,7 @@ FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[],
     char *p8;
     uint64_t *p64;
   } pn, mpn;
-  pn.p64  = buf;
+  pn.p64 = buf;
   mpn.p64 = &mask;
 
   switch ((byte_len & 7)) {
@@ -562,7 +562,7 @@ FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_,
                                                uint64_t mask,
                                                const uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
-  register uint64_t m   = mask;
+  register uint64_t m = mask;
   for (size_t i = len >> 3; i; --i) {
     uint64_t tmp;
     tmp = FIO_NAME2(fio_buf, u64_local)(buf);
@@ -712,7 +712,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_lrotX and fio_rrotX macros.\n");
   {
     uint64_t tmp = 1;
-    tmp          = FIO_RROT(tmp, 1);
+    tmp = FIO_RROT(tmp, 1);
     __asm__ volatile("" ::: "memory");
     FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
                "fio_rrot failed");

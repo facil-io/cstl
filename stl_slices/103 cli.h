@@ -232,8 +232,8 @@ typedef struct {
 #endif
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
-static fio___cli_hash_s fio___cli_values  = FIO_MAP_INIT;
-static size_t fio___cli_unnamed_count     = 0;
+static fio___cli_hash_s fio___cli_values = FIO_MAP_INIT;
+static size_t fio___cli_unnamed_count = 0;
 
 typedef struct {
   int unnamed_min;
@@ -557,10 +557,10 @@ print_help:
       type = pos[1];
     }
     /* print line @ pos, starting with main argument name */
-    int alias_count      = 0;
-    int first_len        = 0;
-    size_t tmp           = 0;
-    char const *const p  = *pos;
+    int alias_count = 0;
+    int first_len = 0;
+    size_t tmp = 0;
+    char const *const p = *pos;
     fio___cli_cstr_s def = fio___cli_map_line2default(p);
     while (p[tmp] == '-') {
       while (p[tmp] && p[tmp] != ' ' && p[tmp] != ',') {
@@ -683,11 +683,11 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
   fio_cli_parser_data_s parser = {
       .unnamed_min = unnamed_min,
       .unnamed_max = unnamed_max,
-      .pos         = 0,
-      .argc        = argc,
-      .argv        = argv,
+      .pos = 0,
+      .argc = argc,
+      .argv = argv,
       .description = description,
-      .names       = names,
+      .names = names,
   };
 
   if (fio___cli_hash_count(&fio___cli_values)) {
@@ -718,7 +718,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
   /* parse existing arguments */
 
   while ((++parser.pos) < argc) {
-    char const *value  = NULL;
+    char const *value = NULL;
     fio___cli_cstr_s n = {.buf = argv[parser.pos],
                           .len = strlen(argv[parser.pos])};
     if (parser.pos + 1 < argc) {

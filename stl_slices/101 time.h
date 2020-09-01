@@ -103,7 +103,7 @@ FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
   int rv = gettimeofday(&now, NULL);
   if (rv)
     return rv;
-  t->tv_sec  = now.tv_sec;
+  t->tv_sec = now.tv_sec;
   t->tv_nsec = now.tv_usec * 1000;
   return 0;
   (void)clk_id;
@@ -165,7 +165,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
 #if HAVE_TM_TM_ZONE || defined(BSD)
   tm = (struct tm){
       .tm_isdst = 0,
-      .tm_zone  = (char *)"UTC",
+      .tm_zone = (char *)"UTC",
   };
 #else
   tm = (struct tm){
@@ -176,12 +176,12 @@ SFUNC struct tm fio_time2gm(time_t timer) {
   // convert seconds from epoch to days from epoch + extract data
   if (timer >= 0) {
     // for seconds up to weekdays, we reduce the reminder every step.
-    a          = (ssize_t)timer;
-    b          = a / 60; // b == time in minutes
-    tm.tm_sec  = (int)(a - (b * 60));
-    a          = b / 60; // b == time in hours
-    tm.tm_min  = (int)(b - (a * 60));
-    b          = a / 24; // b == time in days since epoch
+    a = (ssize_t)timer;
+    b = a / 60; // b == time in minutes
+    tm.tm_sec = (int)(a - (b * 60));
+    a = b / 60; // b == time in hours
+    tm.tm_min = (int)(b - (a * 60));
+    b = a / 24; // b == time in days since epoch
     tm.tm_hour = (int)(a - (b * 24));
     // b == number of days since epoch
     // day of epoch was a thursday. Add + 4 so sunday == 0...
@@ -229,22 +229,22 @@ SFUNC struct tm fio_time2gm(time_t timer) {
   {
     b += 719468L; // adjust to March 1st, 2000 (post leap of 400 year era)
     // 146,097 = days in era (400 years)
-    const size_t era   = (b >= 0 ? b : b - 146096) / 146097;
+    const size_t era = (b >= 0 ? b : b - 146096) / 146097;
     const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
     const uint16_t yoe = (uint16_t)(
         (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365); // year of era
     a = yoe;
     a += era * 400; // a == year number, assuming year starts on March 1st...
     const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));
-    const uint16_t mp  = (uint16_t)((5U * doy + 2) / 153);
-    const uint16_t d   = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
-    const uint8_t m    = (uint8_t)(mp + (mp < 10 ? 2 : -10));
+    const uint16_t mp = (uint16_t)((5U * doy + 2) / 153);
+    const uint16_t d = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
+    const uint8_t m = (uint8_t)(mp + (mp < 10 ? 2 : -10));
     a += (m <= 1);
-    tm.tm_year            = (int)(a - 1900); // tm_year == years since 1900
-    tm.tm_mon             = m;
-    tm.tm_mday            = d;
+    tm.tm_year = (int)(a - 1900); // tm_year == years since 1900
+    tm.tm_mon = m;
+    tm.tm_mday = d;
     const uint8_t is_leap = (a % 4 == 0 && (a % 100 != 0 || a % 400 == 0));
-    tm.tm_yday            = (doy + (is_leap) + 28 + 31) % (365 + is_leap);
+    tm.tm_yday = (doy + (is_leap) + 28 + 31) % (365 + is_leap);
   }
 
   return tm;
@@ -257,8 +257,8 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
   // Credit to Howard Hinnant.
   {
-    const int32_t y    = (tm.tm_year + 1900) - (tm.tm_mon < 2);
-    const int32_t era  = (y >= 0 ? y : y - 399) / 400;
+    const int32_t y = (tm.tm_year + 1900) - (tm.tm_mon < 2);
+    const int32_t era = (y >= 0 ? y : y - 399) / 400;
     const uint16_t yoe = (y - era * 400L); // 0-399
     const uint32_t doy =
         (153L * (tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10)) + 2) / 5 + tm.tm_mday -
@@ -304,30 +304,30 @@ SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
   pos[3] = ',';
   pos[4] = ' ';
   pos += 5;
-  tmp    = tm.tm_mday / 10;
+  tmp = tm.tm_mday / 10;
   pos[0] = '0' + tmp;
   pos[1] = '0' + (tm.tm_mday - (tmp * 10));
   pos += 2;
   *(pos++) = ' ';
-  pos[0]   = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1]   = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2]   = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3]   = ' ';
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos[3] = ' ';
   pos += 4;
   // write year.
   pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
   *(pos++) = ' ';
-  tmp      = tm.tm_hour / 10;
-  pos[0]   = '0' + tmp;
-  pos[1]   = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2]   = ':';
-  tmp      = tm.tm_min / 10;
-  pos[3]   = '0' + tmp;
-  pos[4]   = '0' + (tm.tm_min - (tmp * 10));
-  pos[5]   = ':';
-  tmp      = tm.tm_sec / 10;
-  pos[6]   = '0' + tmp;
-  pos[7]   = '0' + (tm.tm_sec - (tmp * 10));
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
   pos += 8;
   pos[0] = ' ';
   pos[1] = FIO___GMT_STR[0];
@@ -349,30 +349,30 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
   pos[3] = ',';
   pos[4] = ' ';
   pos += 5;
-  tmp    = tm.tm_mday / 10;
+  tmp = tm.tm_mday / 10;
   pos[0] = '0' + tmp;
   pos[1] = '0' + (tm.tm_mday - (tmp * 10));
   pos += 2;
   *(pos++) = ' ';
-  pos[0]   = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1]   = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2]   = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3]   = ' ';
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos[3] = ' ';
   pos += 4;
   // write year.
   pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
   *(pos++) = ' ';
-  tmp      = tm.tm_hour / 10;
-  pos[0]   = '0' + tmp;
-  pos[1]   = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2]   = ':';
-  tmp      = tm.tm_min / 10;
-  pos[3]   = '0' + tmp;
-  pos[4]   = '0' + (tm.tm_min - (tmp * 10));
-  pos[5]   = ':';
-  tmp      = tm.tm_sec / 10;
-  pos[6]   = '0' + tmp;
-  pos[7]   = '0' + (tm.tm_sec - (tmp * 10));
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
   pos += 8;
   *pos++ = ' ';
   *pos++ = '-';
@@ -380,7 +380,7 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
   *pos++ = '0';
   *pos++ = '0';
   *pos++ = '0';
-  *pos   = 0;
+  *pos = 0;
   return pos - target;
 }
 
@@ -400,31 +400,31 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
     *pos = '0' + tm.tm_mday;
     ++pos;
   } else {
-    tmp    = tm.tm_mday / 10;
+    tmp = tm.tm_mday / 10;
     pos[0] = '0' + tmp;
     pos[1] = '0' + (tm.tm_mday - (tmp * 10));
     pos += 2;
   }
   *(pos++) = '-';
-  pos[0]   = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1]   = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2]   = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
   pos += 3;
   *(pos++) = '-';
   // write year.
   pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
   *(pos++) = ' ';
-  tmp      = tm.tm_hour / 10;
-  pos[0]   = '0' + tmp;
-  pos[1]   = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2]   = ':';
-  tmp      = tm.tm_min / 10;
-  pos[3]   = '0' + tmp;
-  pos[4]   = '0' + (tm.tm_min - (tmp * 10));
-  pos[5]   = ':';
-  tmp      = tm.tm_sec / 10;
-  pos[6]   = '0' + tmp;
-  pos[7]   = '0' + (tm.tm_sec - (tmp * 10));
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
   pos += 8;
   pos[0] = ' ';
   pos[1] = FIO___GMT_STR[0];
@@ -535,9 +535,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
             (size_t)(stop - start));
     fprintf(stderr, "\n");
     struct tm tm_now = fio_time2gm(now);
-    start            = fio_time_micro();
+    start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now       = fio_time2gm(now + i);
+      tm_now = fio_time2gm(now + i);
       time_t t_tmp = fio_gm2time(tm_now);
       __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
       (void)t_tmp;
@@ -548,7 +548,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
             (size_t)(stop - start));
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now                = fio_time2gm(now + i);
+      tm_now = fio_time2gm(now + i);
       volatile time_t t_tmp = mktime((struct tm *)&tm_now);
       __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
       (void)t_tmp;

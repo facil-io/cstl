@@ -74,7 +74,7 @@ FIO_LOG2STDERR(const char *format, ...) {
     }
   }
   tmp___log[len___log++] = '\n';
-  tmp___log[len___log]   = '0';
+  tmp___log[len___log] = '0';
   fwrite(tmp___log, len___log, 1, stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK

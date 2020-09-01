@@ -395,10 +395,10 @@ typedef struct fio___list_node_s {
 /** UNSAFE macro for pushing a node to a list. */
 #define FIO_LIST_PUSH(head, n)                                                 \
   do {                                                                         \
-    (n)->prev          = (head)->prev;                                         \
-    (n)->next          = (head);                                               \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
     (head)->prev->next = (n);                                                  \
-    (head)->prev       = (n);                                                  \
+    (head)->prev = (n);                                                        \
   } while (0)
 
 /** UNSAFE macro for removing a node from a list. */
@@ -455,7 +455,7 @@ Sleep / Thread Scheduling Macros
  */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
-    const struct timespec tm = {.tv_sec  = (time_t)((nano_sec) / 1000000000),  \
+    const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
                                 .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
     nanosleep(&tm, (struct timespec *)NULL);                                   \
   } while (0)

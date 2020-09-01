@@ -199,7 +199,7 @@ static int fio_____dynamic_test_array_task(int o, void *c_) {
 }
 
 TEST_FUNC void fio___dynamic_types_test___array_test(void) {
-  int tmp         = 0;
+  int tmp = 0;
   ary____test_s a = FIO_ARRAY_INIT;
   fprintf(stderr, "* Testing dynamic arrays.\n");
 
@@ -658,7 +658,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                "freshly initialized map should have no capacity");
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buffer[64];
-      int l     = snprintf(buffer, 63, "%zu", i);
+      int l = snprintf(buffer, 63, "%zu", i);
       buffer[l] = 0;
       map_____test_set(m, HASHOFs(buffer), buffer, i + 1, NULL);
     }
@@ -670,7 +670,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                (size_t)map_____test_count(m));
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buffer[64];
-      int l         = snprintf(buffer + 1, 61, "%zu", i);
+      int l = snprintf(buffer + 1, 61, "%zu", i);
       buffer[l + 1] = 0;
       FIO_ASSERT(map_____test_get(m, HASHOFs(buffer + 1), buffer + 1) == i + 1,
                  "item retrival error in map.");
@@ -876,22 +876,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       {
           .type_size = sizeof(fio_lock_i),
           .type_name = "fio_lock_i",
-          .name      = "fio_lock      (spinlock)",
-          .task      = fio___lock_mytask_lock,
+          .name = "fio_lock      (spinlock)",
+          .task = fio___lock_mytask_lock,
       },
 #ifdef H___FIO_LOCK2___H
       {
           .type_size = sizeof(fio_lock2_s),
           .type_name = "fio_lock2_s",
-          .name      = "fio_lock2 (pause/resume)",
-          .task      = fio___lock_mytask_lock2,
+          .name = "fio_lock2 (pause/resume)",
+          .task = fio___lock_mytask_lock2,
       },
 #endif
       {
           .type_size = sizeof(pthread_mutex_t),
           .type_name = "pthread_mutex_t",
-          .name      = "pthreads (pthread_mutex)",
-          .task      = fio___lock_mytask_mutex,
+          .name = "pthreads (pthread_mutex)",
+          .task = fio___lock_mytask_mutex,
       },
       {
           .name = NULL,
@@ -962,7 +962,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */
       result = 0;
-      start  = fio_time_micro();
+      start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
         __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
         test_funcs[fn].task(&result);
@@ -993,7 +993,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */
       result = 0;
-      start  = fio_time_micro();
+      start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
         pthread_create(threads + i, NULL, test_funcs[fn].task, &result);
       }

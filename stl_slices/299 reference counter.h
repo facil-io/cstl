@@ -74,10 +74,10 @@ Feel free to copy, use and enjoy according to the license provided.
  */
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
 #define FIO_REF_CONSTRUCTOR new
-#define FIO_REF_DESTRUCTOR free
+#define FIO_REF_DESTRUCTOR  free
 #else
 #define FIO_REF_CONSTRUCTOR new2
-#define FIO_REF_DESTRUCTOR free2
+#define FIO_REF_DESTRUCTOR  free2
 #endif
 
 typedef struct {

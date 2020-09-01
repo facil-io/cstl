@@ -525,11 +525,11 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
   size_t count;
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
-    a     = ary->ary + ary->start;
+    a = ary->ary + ary->start;
     count = ary->end - ary->start;
     break;
   case 1:
-    a     = FIO_ARRAY2EMBEDDED(ary)->embedded;
+    a = FIO_ARRAY2EMBEDDED(ary)->embedded;
     count = ary->start;
     break;
   default:
@@ -577,7 +577,7 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   FIO_NAME(FIO_ARRAY_NAME, s) tmp = *ary;
-  *ary                            = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
+  *ary = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
 
   switch (
       FIO_NAME_BL(FIO_ARRAY_NAME, embedded)((FIO_ARRAY_PTR)FIO_PTR_TAG(&tmp))) {
@@ -620,7 +620,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (!tmp)
         return ary->capa;
       ary->capa = capa;
-      ary->ary  = tmp;
+      ary->ary = tmp;
       return capa;
     } else {
       /* moving objects, starting with a fresh piece of memory */
@@ -636,9 +636,9 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
         FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
         *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
             .start = 0,
-            .end   = count,
-            .capa  = capa,
-            .ary   = tmp,
+            .end = count,
+            .capa = capa,
+            .ary = tmp,
         };
         return capa;
       }
@@ -650,9 +650,9 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
           .start = (capa - count),
-          .end   = capa,
-          .capa  = capa,
-          .ary   = tmp,
+          .end = capa,
+          .capa = capa,
+          .ary = tmp,
       };
     }
     return capa;
@@ -670,9 +670,9 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       }
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
           .start = 0,
-          .end   = ary->start,
-          .capa  = capa,
-          .ary   = tmp,
+          .end = ary->start,
+          .capa = capa,
+          .ary = tmp,
       };
       return capa;
     }
@@ -684,9 +684,9 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     }
     *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
         .start = (capa - ary->start),
-        .end   = capa,
-        .capa  = capa,
-        .ary   = tmp,
+        .end = capa,
+        .capa = capa,
+        .ary = tmp,
     };
     return capa;
   default:
@@ -713,7 +713,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
     return dest_;
 
   const uint32_t offset = FIO_NAME(FIO_ARRAY_NAME, count)(dest_);
-  const uint32_t total  = offset + FIO_NAME(FIO_ARRAY_NAME, count)(src_);
+  const uint32_t total = offset + FIO_NAME(FIO_ARRAY_NAME, count)(src_);
   if (total < offset || total < total - offset)
     return NULL; /* item count overflow */
 
@@ -732,9 +732,9 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
          FIO_NAME(FIO_ARRAY_NAME, count)(src_));
 #else
   {
-    FIO_ARRAY_TYPE *const a  = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
+    FIO_ARRAY_TYPE *const a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
     FIO_ARRAY_TYPE *const a2 = FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_);
-    const uint32_t to_copy   = total - offset;
+    const uint32_t to_copy = total - offset;
     for (uint32_t i = 0; i < to_copy; ++i) {
       FIO_ARRAY_TYPE_CONCAT_COPY(a[i + offset], a2[i]);
     }
@@ -773,7 +773,7 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
 
   FIO_PTR_TAG_VALID_OR_GOTO(ary_, invalid);
 
-  ary   = (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
+  ary = (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
 
   if (index < 0) {
@@ -816,15 +816,15 @@ done:
 expansion:
 
   pre_existing = 0;
-  a            = ary->ary;
+  a = ary->ary;
   {
     uint8_t was_moved = 0;
     /* test if we need to move objects to make room at the end */
     if (ary->start + index >= ary->capa) {
       memmove(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
       ary->start = 0;
-      ary->end   = index + 1;
-      was_moved  = 1;
+      ary->end = index + 1;
+      was_moved = 1;
     }
     /* initialize memory in between objects */
     if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_) {
@@ -842,8 +842,8 @@ expansion:
 
 expand_embedded:
   pre_existing = 0;
-  ary->start   = index + 1;
-  a            = FIO_ARRAY2EMBEDDED(ary)->embedded;
+  ary->start = index + 1;
+  a = FIO_ARRAY2EMBEDDED(ary)->embedded;
   goto done;
 
 negative_expansion:
@@ -856,7 +856,7 @@ negative_expansion:
   a = ary->ary;
   if (index > (int32_t)ary->start) {
     memmove(a + index, a + ary->start, count * sizeof(*a));
-    ary->end   = index + count;
+    ary->end = index + count;
     ary->start = index;
   }
   index = ary->start - index;
@@ -1157,7 +1157,7 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
-  size_t count        = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
+  size_t count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
   FIO_ARRAY_TYPE *tmp = NULL;
 
   if (count <= FIO_ARRAY_EMBEDDED_CAPA)
@@ -1170,19 +1170,19 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   memcpy(tmp, ary->ary + ary->start, count * sizeof(*ary->ary));
   FIO_MEM_FREE_(ary->ary, ary->capa * sizeof(*ary->ary));
   *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
-      .ary   = tmp,
-      .capa  = (ary->end - ary->start),
+      .ary = tmp,
+      .capa = (ary->end - ary->start),
       .start = 0,
-      .end   = (ary->end - ary->start),
+      .end = (ary->end - ary->start),
   };
   return;
 
 re_embed:
   if (!FIO_ARRAY_IS_EMBEDDED(ary)) {
-    tmp             = ary->ary;
+    tmp = ary->ary;
     uint32_t offset = ary->start;
     size_t old_capa = ary->capa;
-    *ary            = (FIO_NAME(FIO_ARRAY_NAME, s)){
+    *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
         .start = (uint32_t)count,
     };
     if (count) {
@@ -1480,7 +1480,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test))(void) {
       FIO_ASSERT(
           FIO_ARRAY_TEST_OBJ_IS(i + 1), "unshift-get cycle failed (%d)", i);
       int32_t negative_index = 0 - (((int)(FIO_ARRAY_EMBEDDED_CAPA) + 3) - i);
-      o                      = FIO_NAME(FIO_ARRAY_NAME, get)(a, negative_index);
+      o = FIO_NAME(FIO_ARRAY_NAME, get)(a, negative_index);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1),
                  "get with %d returned wrong result.",
                  negative_index);

@@ -266,10 +266,10 @@ Queue Implementation
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   /* do this manually, we don't want to reset a whole page */
-  q->r        = &q->mem;
-  q->w        = &q->mem;
-  q->count    = 0;
-  q->lock     = FIO_LOCK_INIT;
+  q->r = &q->mem;
+  q->w = &q->mem;
+  q->count = 0;
+  q->lock = FIO_LOCK_INIT;
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
@@ -279,7 +279,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
   fio_lock(&q->lock);
   while (q->r) {
     fio___task_ring_s *tmp = q->r;
-    q->r                   = q->r->next;
+    q->r = q->r->next;
     if (tmp != &q->mem)
       FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
@@ -299,7 +299,7 @@ FIO_IFUNC int fio___task_ring_push(fio___task_ring_s *r,
   r->buf[r->w] = task;
   ++r->w;
   if (r->w == FIO_QUEUE_TASKS_PER_ALLOC) {
-    r->w   = 0;
+    r->w = 0;
     r->dir = ~r->dir;
   }
   return 0;
@@ -310,7 +310,7 @@ FIO_IFUNC int fio___task_ring_unpop(fio___task_ring_s *r,
   if (r->dir && r->r == r->w)
     return -1;
   if (!r->r) {
-    r->r   = FIO_QUEUE_TASKS_PER_ALLOC;
+    r->r = FIO_QUEUE_TASKS_PER_ALLOC;
     r->dir = ~r->dir;
   }
   --r->r;
@@ -326,7 +326,7 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
   t = r->buf[r->r];
   ++r->r;
   if (r->r == FIO_QUEUE_TASKS_PER_ALLOC) {
-    r->r   = 0;
+    r->r = 0;
     r->dir = ~r->dir;
   }
   return t;
@@ -379,10 +379,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     if (!tmp)
       goto no_mem;
     tmp->next = q->r;
-    q->r      = tmp;
-    tmp->w    = 1;
+    q->r = tmp;
+    tmp->w = 1;
     tmp->dir = tmp->r = 0;
-    tmp->buf[0]       = task;
+    tmp->buf[0] = task;
   }
   ++q->count;
   fio_unlock(&q->lock);
@@ -394,7 +394,7 @@ no_mem:
 
 /** Pops a task from the queue (FIFO). Returns a NULL task on error. */
 SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
-  fio_queue_task_s t         = {.fn = NULL};
+  fio_queue_task_s t = {.fn = NULL};
   fio___task_ring_s *to_free = NULL;
   if (!q->count)
     return t;
@@ -402,10 +402,10 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   if (!q->count)
     goto finish;
   if (!(t = fio___task_ring_pop(q->r)).fn) {
-    to_free       = q->r;
-    q->r          = to_free->next;
+    to_free = q->r;
+    q->r = to_free->next;
     to_free->next = NULL;
-    t             = fio___task_ring_pop(q->r);
+    t = fio___task_ring_pop(q->r);
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
     if (to_free && to_free != &q->mem) { // edge case? never happens?
@@ -449,7 +449,7 @@ FIO_IFUNC void fio___timer_insert(fio___timer_event_s **pos,
   while (*pos && e->due >= (*pos)->due)
     pos = &((*pos)->next);
   e->next = *pos;
-  *pos    = e;
+  *pos = e;
 }
 
 FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
@@ -471,12 +471,12 @@ fio___timer_event_new(fio_timer_schedule_args_s args) {
   if (!args.repetitions)
     args.repetitions = 1;
   *t = (fio___timer_event_s){
-      .fn          = args.fn,
-      .udata1      = args.udata1,
-      .udata2      = args.udata2,
-      .on_finish   = args.on_finish,
-      .due         = args.start_at + args.every,
-      .every       = args.every,
+      .fn = args.fn,
+      .udata1 = args.udata1,
+      .udata2 = args.udata2,
+      .on_finish = args.on_finish,
+      .due = args.start_at + args.every,
+      .every = args.every,
       .repetitions = args.repetitions,
   };
   return t;
@@ -500,7 +500,7 @@ FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
 }
 
 SFUNC void fio___timer_perform(void *timer_, void *t_) {
-  fio_timer_queue_s *tq  = (fio_timer_queue_s *)timer_;
+  fio_timer_queue_s *tq = (fio_timer_queue_s *)timer_;
   fio___timer_event_s *t = (fio___timer_event_s *)t_;
   if (t->fn(t->udata1, t->udata2))
     tq = NULL;
@@ -562,7 +562,7 @@ no_timer_queue:
 SFUNC void fio_timer_clear(fio_timer_queue_s *tq) {
   fio___timer_event_s *next;
   fio_lock(&tq->lock);
-  next     = tq->next;
+  next = tq->next;
   tq->next = NULL;
   fio_unlock(&tq->lock);
   while (next) {
@@ -627,7 +627,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   uintptr_t i_count;
   clock_t start, end;
   i_count = 0;
-  start   = clock();
+  start = clock();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio___queue_test_sample_task(&i_count, NULL);
   }
@@ -640,8 +640,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
         (unsigned long)i_count);
   }
   size_t i_count_should_be = i_count;
-  i_count                  = 0;
-  start                    = clock();
+  i_count = 0;
+  start = clock();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio_queue_push(
         q, .fn = fio___queue_test_sample_task, .udata1 = (void *)&i_count);
@@ -664,8 +664,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fio___queue_test_s info = {
         .q = q, .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
     const size_t tasks = 1 << i;
-    i_count            = 0;
-    start              = clock();
+    i_count = 0;
+    start = clock();
     for (size_t j = 0; j < tasks; ++j) {
       fio_queue_push(
           q, fio___queue_test_sched_sample_task, (void *)&info, &i_count);
@@ -742,32 +742,32 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
-    uintptr_t tester     = 0;
+    uintptr_t tester = 0;
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
     /* test failuers */
     fio_timer_schedule(&tq,
-                       .udata1      = &tester,
-                       .on_finish   = fio___queue_test_sample_task,
-                       .every       = 100,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
     tester = 0;
     fio_timer_schedule(NULL,
-                       .fn          = fio___queue_test_timer_task,
-                       .udata1      = &tester,
-                       .on_finish   = fio___queue_test_sample_task,
-                       .every       = 100,
+                       .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
     tester = 0;
     fio_timer_schedule(&tq,
-                       .fn          = fio___queue_test_timer_task,
-                       .udata1      = &tester,
-                       .on_finish   = fio___queue_test_sample_task,
-                       .every       = 0,
+                       .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 0,
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
@@ -775,12 +775,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     /* test endless task */
     tester = 0;
     fio_timer_schedule(&tq,
-                       .fn          = fio___queue_test_timer_task,
-                       .udata1      = &tester,
-                       .on_finish   = fio___queue_test_sample_task,
-                       .every       = 1,
+                       .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 1,
                        .repetitions = -1,
-                       .start_at    = fio_time_milli() - 10);
+                       .start_at = fio_time_milli() - 10);
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
     for (size_t i = 0; i < 10; ++i) {
@@ -797,22 +797,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
 
     /* test single-use task */
-    tester             = 0;
+    tester = 0;
     uint64_t milli_now = fio_time_milli();
     fio_timer_schedule(&tq,
-                       .fn          = fio___queue_test_timer_task,
-                       .udata1      = &tester,
-                       .on_finish   = fio___queue_test_sample_task,
-                       .every       = 100,
+                       .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
+                       .on_finish = fio___queue_test_sample_task,
+                       .every = 100,
                        .repetitions = 1,
-                       .start_at    = milli_now - 10);
+                       .start_at = milli_now - 10);
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
     fio_timer_schedule(&tq,
-                       .fn        = fio___queue_test_timer_task,
-                       .udata1    = &tester,
+                       .fn = fio___queue_test_timer_task,
+                       .udata1 = &tester,
                        .on_finish = fio___queue_test_sample_task,
-                       .every     = 1,
+                       .every = 1,
                        // .repetitions = 1, // auto-value is 1
                        .start_at = milli_now - 10);
     FIO_ASSERT(tester == 0,

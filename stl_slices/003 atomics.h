@@ -563,7 +563,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
     return;
 
   /* initialize self-waiting node memory (using stack memory) */
-  self_thread.t    = FIO_THREAD_ID();
+  self_thread.t = FIO_THREAD_ID();
   self_thread.next = NULL; // lock->waiting;
 
   /* enter waitlist lock */

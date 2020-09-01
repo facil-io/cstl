@@ -152,7 +152,7 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
     return NULL;
   node->FIO_LIST_NODE_NAME.prev->next = node->FIO_LIST_NODE_NAME.next;
   node->FIO_LIST_NODE_NAME.next->prev = node->FIO_LIST_NODE_NAME.prev;
-  node->FIO_LIST_NODE_NAME.next       = node->FIO_LIST_NODE_NAME.prev =
+  node->FIO_LIST_NODE_NAME.next = node->FIO_LIST_NODE_NAME.prev =
       &node->FIO_LIST_NODE_NAME;
   return node_;
 }
@@ -163,12 +163,12 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
                                        FIO_LIST_TYPE_PTR restrict node_) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
   FIO_PTR_TAG_VALID_OR_RETURN(node_, (FIO_LIST_TYPE_PTR)NULL);
-  head                          = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
-  FIO_LIST_TYPE *restrict node  = (FIO_LIST_TYPE *)(FIO_PTR_UNTAG(node_));
+  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  FIO_LIST_TYPE *restrict node = (FIO_LIST_TYPE *)(FIO_PTR_UNTAG(node_));
   node->FIO_LIST_NODE_NAME.prev = head->prev;
   node->FIO_LIST_NODE_NAME.next = head;
-  head->prev->next              = &node->FIO_LIST_NODE_NAME;
-  head->prev                    = &node->FIO_LIST_NODE_NAME;
+  head->prev->next = &node->FIO_LIST_NODE_NAME;
+  head->prev = &node->FIO_LIST_NODE_NAME;
   return node_;
 }
 

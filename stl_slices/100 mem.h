@@ -502,18 +502,18 @@ Aligned memory copying
   FIO_IFUNC void fio___memcpy_##size##b(                                       \
       void *restrict dest_, const void *restrict src_, size_t units) {         \
     type *dest = (type *)dest_;                                                \
-    type *src  = (type *)src_;                                                 \
+    type *src = (type *)src_;                                                  \
     while (units >= 16) {                                                      \
-      dest[0]  = src[0];                                                       \
-      dest[1]  = src[1];                                                       \
-      dest[2]  = src[2];                                                       \
-      dest[3]  = src[3];                                                       \
-      dest[4]  = src[4];                                                       \
-      dest[5]  = src[5];                                                       \
-      dest[6]  = src[6];                                                       \
-      dest[7]  = src[7];                                                       \
-      dest[8]  = src[8];                                                       \
-      dest[9]  = src[9];                                                       \
+      dest[0] = src[0];                                                        \
+      dest[1] = src[1];                                                        \
+      dest[2] = src[2];                                                        \
+      dest[3] = src[3];                                                        \
+      dest[4] = src[4];                                                        \
+      dest[5] = src[5];                                                        \
+      dest[6] = src[6];                                                        \
+      dest[7] = src[7];                                                        \
+      dest[8] = src[8];                                                        \
+      dest[9] = src[9];                                                        \
       dest[10] = src[10];                                                      \
       dest[11] = src[11];                                                      \
       dest[12] = src[12];                                                      \
@@ -580,16 +580,16 @@ fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
   uint64_t *dest = (uint64_t *)dest_;
   bytes >>= 3;
   while (bytes >= 16) {
-    dest[0]  = data;
-    dest[1]  = data;
-    dest[2]  = data;
-    dest[3]  = data;
-    dest[4]  = data;
-    dest[5]  = data;
-    dest[6]  = data;
-    dest[7]  = data;
-    dest[8]  = data;
-    dest[9]  = data;
+    dest[0] = data;
+    dest[1] = data;
+    dest[2] = data;
+    dest[3] = data;
+    dest[4] = data;
+    dest[5] = data;
+    dest[6] = data;
+    dest[7] = data;
+    dest[8] = data;
+    dest[9] = data;
     dest[10] = data;
     dest[11] = data;
     dest[12] = data;
@@ -665,7 +665,7 @@ POSIX Allocaion
 FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
                                             uint8_t alignment_log) {
   void *result;
-  static void *next_alloc     = (void *)0x01;
+  static void *next_alloc = (void *)0x01;
   const size_t alignment_mask = (1ULL << alignment_log) - 1;
   const size_t alignment_size = (1ULL << alignment_log);
   pages <<= FIO_MEM_PAGE_SIZE_LOG;
@@ -720,7 +720,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
                                               size_t new_pages,
                                               uint8_t alignment_log) {
   const size_t prev_len = prev_pages << FIO_MEM_PAGE_SIZE_LOG;
-  const size_t new_len  = new_pages << FIO_MEM_PAGE_SIZE_LOG;
+  const size_t new_len = new_pages << FIO_MEM_PAGE_SIZE_LOG;
   if (new_len > prev_len) {
     void *result;
 #if defined(__linux__)
@@ -810,7 +810,7 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                                          size_t bytes,
                                          const char *msg) {
   uint64_t *dest = (uint64_t *)dest_;
-  size_t units   = bytes >> 3;
+  size_t units = bytes >> 3;
   FIO_ASSERT(
       *(dest) = data, "%s memory data was overwritten (first 8 bytes)", msg);
   while (units >= 16) {
@@ -1390,7 +1390,7 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
 #else
     size_t arean_count = FIO_MEMORY_ARENA_COUNT_DEFAULT;
 #ifdef _SC_NPROCESSORS_ONLN
-    arean_count        = sysconf(_SC_NPROCESSORS_ONLN);
+    arean_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (arean_count == (size_t)-1UL)
       arean_count = FIO_MEMORY_ARENA_COUNT_DEFAULT;
 #else
@@ -1547,7 +1547,7 @@ FIO_NAME(FIO_MEMORY_NAME,
     FIO_MEMORY_ON_CHUNK_CACHE(c);
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)
         ->cache.a[FIO_NAME(FIO_MEMORY_NAME, __mem_state)->cache.pos++] = c;
-    c                                                                  = NULL;
+    c = NULL;
   }
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
@@ -1655,7 +1655,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
 void fio___mem_block_new___(void);
 /** returns a new block with a reference count of 1 */
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
-  void *p                                     = NULL;
+  void *p = NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c = NULL;
   size_t b;
 
@@ -1839,8 +1839,8 @@ FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *
   if (!b)
     return b;
   b->marker = FIO_MEMORY_BIG_BLOCK_MARKER;
-  b->ref    = 1;
-  b->pos    = 0;
+  b->ref = 1;
+  b->pos = 0;
   FIO_MEMORY_ON_BIG_BLOCK_SET(b);
   return b;
 }

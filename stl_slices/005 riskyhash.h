@@ -390,9 +390,9 @@ static __thread uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
 
 IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
   len &= 1023;
-  uint8_t *buf   = (uint8_t *)buf_;
+  uint8_t *buf = (uint8_t *)buf_;
   uint8_t offset = (fio___rand_counter & 3);
-  uint64_t tmp   = 0;
+  uint64_t tmp = 0;
   for (size_t i = 0; i < (len >> 3); ++i) {
     tmp = FIO_NAME2(fio_buf, u64_local)(buf);
     fio___rand_buffer[(offset++ & 3)] ^= tmp;
@@ -448,7 +448,7 @@ IFUNC void fio_rand_reseed(void) {
     uint64_t clk = fio_time_nano();
     fio___rand_state[0] =
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
-    clk                 = fio_time_nano();
+    clk = fio_time_nano();
     fio___rand_state[1] = fio_risky_hash(
         &clk, sizeof(clk), fio___rand_state[1] + fio___rand_counter);
   }
@@ -456,7 +456,7 @@ IFUNC void fio_rand_reseed(void) {
       fio_risky_hash(fio___rand_buffer,
                      sizeof(fio___rand_buffer),
                      fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3]  = fio_risky_hash(fio___rand_state,
+  fio___rand_state[3] = fio_risky_hash(fio___rand_state,
                                        sizeof(fio___rand_state),
                                        fio___rand_state[1] + jitter_samples);
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
@@ -616,9 +616,9 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   for (int i = 0; i < 8; ++i) {
     char buf[128];
-    uint64_t nonce  = fio_rand64();
+    uint64_t nonce = fio_rand64();
     const char *str = "this is a short text, to test risky masking";
-    char *tmp       = buf + i;
+    char *tmp = buf + i;
     memcpy(tmp, str, strlen(str));
     fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
     FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
@@ -655,10 +655,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
                                                  size_t len,
                                                  const char *name,
                                                  size_t clk) {
-  size_t totals[2]        = {0};
-  size_t freq[256]        = {0};
+  size_t totals[2] = {0};
+  size_t freq[256] = {0};
   const size_t total_bits = (len * sizeof(*stream) * 8);
-  uint64_t hemming        = 0;
+  uint64_t hemming = 0;
   /* collect data */
   for (size_t i = 1; i < len; i += 2) {
     hemming += fio_hemming_dist(stream[i], stream[i - 1]);
@@ -692,7 +692,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
              "randomness isn't random (hemming distance failed)?");
   /* test chi-square ... I think */
   if (len * sizeof(*stream) > 2560) {
-    double n_r        = (double)1.0 * ((len * sizeof(*stream)) / 256);
+    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
     double chi_square = 0;
     for (unsigned int i = 0; i < 256; ++i) {
       double f = freq[i] - n_r;

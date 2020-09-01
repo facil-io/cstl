@@ -126,7 +126,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   */
   const char *end = url + len;
   const char *pos = url;
-  fio_url_s r     = {.scheme = {.buf = (char *)url}};
+  fio_url_s r = {.scheme = {.buf = (char *)url}};
   if (len == 0) {
     goto finish;
   }
@@ -393,7 +393,7 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .expected =
               {
                   .scheme = {.buf = (char *)"file", .len = 4},
-                  .path   = {.buf = (char *)"go/home/", .len = 8},
+                  .path = {.buf = (char *)"go/home/", .len = 8},
               },
       },
       {
@@ -402,7 +402,7 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .expected =
               {
                   .scheme = {.buf = (char *)"unix", .len = 4},
-                  .path   = {.buf = (char *)"/go/home/", .len = 9},
+                  .path = {.buf = (char *)"/go/home/", .len = 9},
               },
       },
       {
@@ -410,14 +410,14 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 50,
           .expected =
               {
-                  .scheme   = {.buf = (char *)"schema", .len = 6},
-                  .user     = {.buf = (char *)"user", .len = 4},
+                  .scheme = {.buf = (char *)"schema", .len = 6},
+                  .user = {.buf = (char *)"user", .len = 4},
                   .password = {.buf = (char *)"password", .len = 8},
-                  .host     = {.buf = (char *)"host", .len = 4},
-                  .port     = {.buf = (char *)"port", .len = 4},
-                  .path     = {.buf = (char *)"/path", .len = 5},
-                  .query    = {.buf = (char *)"query", .len = 5},
-                  .target   = {.buf = (char *)"target", .len = 6},
+                  .host = {.buf = (char *)"host", .len = 4},
+                  .port = {.buf = (char *)"port", .len = 4},
+                  .path = {.buf = (char *)"/path", .len = 5},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
               },
       },
       {
@@ -426,11 +426,11 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .expected =
               {
                   .scheme = {.buf = (char *)"schema", .len = 6},
-                  .user   = {.buf = (char *)"user", .len = 4},
-                  .host   = {.buf = (char *)"host", .len = 4},
-                  .port   = {.buf = (char *)"port", .len = 4},
-                  .path   = {.buf = (char *)"/path", .len = 5},
-                  .query  = {.buf = (char *)"query", .len = 5},
+                  .user = {.buf = (char *)"user", .len = 4},
+                  .host = {.buf = (char *)"host", .len = 4},
+                  .port = {.buf = (char *)"port", .len = 4},
+                  .path = {.buf = (char *)"/path", .len = 5},
+                  .query = {.buf = (char *)"query", .len = 5},
                   .target = {.buf = (char *)"target", .len = 6},
               },
       },
@@ -440,10 +440,10 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .expected =
               {
                   .scheme = {.buf = (char *)"http", .len = 4},
-                  .host   = {.buf = (char *)"localhost.com", .len = 13},
-                  .port   = {.buf = (char *)"3000", .len = 4},
-                  .path   = {.buf = (char *)"/home", .len = 5},
-                  .query  = {.buf = (char *)"is=1", .len = 4},
+                  .host = {.buf = (char *)"localhost.com", .len = 13},
+                  .port = {.buf = (char *)"3000", .len = 4},
+                  .path = {.buf = (char *)"/home", .len = 5},
+                  .query = {.buf = (char *)"is=1", .len = 4},
               },
       },
       {
@@ -451,8 +451,8 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 27,
           .expected =
               {
-                  .path   = {.buf = (char *)"/complete_path", .len = 14},
-                  .query  = {.buf = (char *)"query", .len = 5},
+                  .path = {.buf = (char *)"/complete_path", .len = 14},
+                  .query = {.buf = (char *)"query", .len = 5},
                   .target = {.buf = (char *)"target", .len = 6},
               },
       },
@@ -461,8 +461,8 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 23,
           .expected =
               {
-                  .path   = {.buf = (char *)"/index.html", .len = 11},
-                  .query  = {.buf = (char *)"page=1", .len = 6},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .query = {.buf = (char *)"page=1", .len = 6},
                   .target = {.buf = (char *)"list", .len = 4},
               },
       },
@@ -508,10 +508,10 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 42,
           .expected =
               {
-                  .host   = {.buf = (char *)"example.com", .len = 11},
-                  .port   = {.buf = (char *)"8080", .len = 4},
-                  .path   = {.buf = (char *)"/index.html", .len = 11},
-                  .query  = {.buf = (char *)"key=val", .len = 7},
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .query = {.buf = (char *)"key=val", .len = 7},
                   .target = {.buf = (char *)"target", .len = 6},
               },
       },
@@ -520,11 +520,11 @@ TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 37,
           .expected =
               {
-                  .user     = {.buf = (char *)"user", .len = 4},
+                  .user = {.buf = (char *)"user", .len = 4},
                   .password = {.buf = (char *)"1234", .len = 4},
-                  .host     = {.buf = (char *)"example.com", .len = 11},
-                  .port     = {.buf = (char *)"8080", .len = 4},
-                  .path     = {.buf = (char *)"/index.html", .len = 11},
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .path = {.buf = (char *)"/index.html", .len = 11},
               },
       },
       {
