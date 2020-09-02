@@ -74,10 +74,10 @@ Feel free to copy, use and enjoy according to the license provided.
  */
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
 #define FIO_REF_CONSTRUCTOR new
-#define FIO_REF_DESTRUCTOR free
+#define FIO_REF_DESTRUCTOR  free
 #else
 #define FIO_REF_CONSTRUCTOR new2
-#define FIO_REF_DESTRUCTOR free2
+#define FIO_REF_DESTRUCTOR  free2
 #endif
 
 typedef struct {
@@ -149,7 +149,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
 IFUNC int FIO_NAME(FIO_REF_NAME,
                    FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
-  if (!wrapped)
+  if (!wrapped || !wrapped_)
     return -1;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);

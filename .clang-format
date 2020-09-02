@@ -4,6 +4,7 @@ BasedOnStyle:  LLVM
 AllowAllParametersOfDeclarationOnNextLine: false
 BinPackArguments: false
 BinPackParameters: false
+AlignConsecutiveMacros: true
 ---
 Language:        JavaScript
 BasedOnStyle:  LLVM

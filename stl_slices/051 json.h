@@ -197,6 +197,7 @@ FIO_IFUNC const char *fio___json_consume_number(fio_json_parser_s *p,
   const char *const was = buffer;
   errno = 0; /* testo for E2BIG on number parsing */
   long long i = fio_atol((char **)&buffer);
+
   if (buffer < stop &&
       ((*buffer) == '.' || (*buffer | 32) == 'e' || (*buffer | 32) == 'x' ||
        (*buffer | 32) == 'p' || (*buffer | 32) == 'i' || errno)) {

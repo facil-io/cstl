@@ -50,7 +50,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #if !defined(FIO_EXTERN_TEST) || defined(FIO_EXTERN_COMPLETE)
 
 /* Common testing values / Macros */
-#define TEST_FUNC static __attribute__((unused))
+#define TEST_FUNC   static __attribute__((unused))
 #define TEST_REPEAT 4096
 
 /* Make sure logging and FIOBJ memory marking are set. */
@@ -59,8 +59,10 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MARK_MEMORY 1
 #endif
 #ifndef FIO_FIOBJ
-#define FIOBJ_MALLOC /* define to test with custom allocator */
 #define FIO_FIOBJ
+#endif
+#ifndef FIOBJ_MALLOC
+#define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
 #include __FILE__
 
@@ -94,8 +96,8 @@ typedef struct {
   FIO_LIST_NODE node;
 } ls____test_s;
 
-#define FIO_LIST_NAME ls____test
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_LIST_NAME    ls____test
+#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 
 #include __FILE__
@@ -165,9 +167,9 @@ Dynamic Array - Test
 ***************************************************************************** */
 
 static int ary____test_was_destroyed = 0;
-#define FIO_ARRAY_NAME ary____test
-#define FIO_ARRAY_TYPE int
-#define FIO_REF_NAME ary____test
+#define FIO_ARRAY_NAME    ary____test
+#define FIO_ARRAY_TYPE    int
+#define FIO_REF_NAME      ary____test
 #define FIO_REF_INIT(obj) obj = (ary____test_s)FIO_ARRAY_INIT
 #define FIO_REF_DESTROY(obj)                                                   \
   do {                                                                         \
@@ -175,18 +177,18 @@ static int ary____test_was_destroyed = 0;
     ary____test_was_destroyed = 1;                                             \
   } while (0)
 #define FIO_ATOMIC
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
-#define FIO_ARRAY_NAME ary2____test
-#define FIO_ARRAY_TYPE uint8_t
-#define FIO_ARRAY_TYPE_INVALID 0xFF
+#define FIO_ARRAY_NAME                 ary2____test
+#define FIO_ARRAY_TYPE                 uint8_t
+#define FIO_ARRAY_TYPE_INVALID         0xFF
 #define FIO_ARRAY_TYPE_COPY(dest, src) (dest) = (src)
-#define FIO_ARRAY_TYPE_DESTROY(obj) (obj = FIO_ARRAY_TYPE_INVALID)
-#define FIO_ARRAY_TYPE_CMP(a, b) (a) == (b)
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_ARRAY_TYPE_DESTROY(obj)    (obj = FIO_ARRAY_TYPE_INVALID)
+#define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
+#define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 static int fio_____dynamic_test_array_task(int o, void *c_) {
@@ -203,14 +205,10 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
 
   fprintf(stderr, "* Testing on stack, push/pop.\n");
   /* test stack allocated array (initialization) */
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Freshly initialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Freshly initialized array should have zero elements");
   memset(&a, 1, sizeof(a));
   a = (ary____test_s)FIO_ARRAY_INIT;
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Reinitialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Reinitialized array should have zero elements");
   ary____test_push(&a, 1);
@@ -263,8 +261,6 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
              "remove should have compacted the array.");
   /* test stack allocated array (destroy) */
   ary____test_destroy(&a);
-  FIO_ASSERT(ary____test_capa(&a) == 0,
-             "Destroyed array should have zero capacity");
   FIO_ASSERT(ary____test_count(&a) == 0,
              "Destroyed array should have zero elements");
   FIO_ASSERT(a.ary == NULL, "Destroyed array shouldn't have memory allocated");
@@ -273,7 +269,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   ary____test_push(&a, 3);
   ary____test_reserve(&a, 100);
   FIO_ASSERT(ary____test_count(&a) == 3,
-             "reserve shouldn't effect itme count.");
+             "reserve shouldn't effect item count.");
   FIO_ASSERT(ary____test_capa(&a) >= 100, "reserve should reserve.");
   FIO_ASSERT(ary____test_get(&a, 0) == 1,
              "Element should be kept after reserve (index 0)");
@@ -282,7 +278,8 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   FIO_ASSERT(ary____test_get(&a, 2) == 3,
              "Element should be kept after reserve (index 2)");
   ary____test_compact(&a);
-  FIO_ASSERT(ary____test_capa(&a) == 3, "reserve shouldn't effect itme count.");
+  FIO_ASSERT(ary____test_count(&a) == 3,
+             "compact shouldn't effect item count.");
   ary____test_destroy(&a);
 
   /* Round 2 - heap, shift/unshift, negative ary_set index */
@@ -290,8 +287,6 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   fprintf(stderr, "* Testing on heap, shift/unshift.\n");
   /* test heap allocated array (initialization) */
   ary____test_s *pa = ary____test_new();
-  FIO_ASSERT(ary____test_capa(pa) == 0,
-             "Freshly initialized array should have zero capacity");
   FIO_ASSERT(ary____test_count(pa) == 0,
              "Freshly initialized array should have zero elements");
   ary____test_unshift(pa, 2);
@@ -345,12 +340,8 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
              "remove should have compacted the array.");
   /* test heap allocated array (destroy) */
   ary____test_destroy(pa);
-  FIO_ASSERT(ary____test_capa(pa) == 0,
-             "Destroyed array should have zero capacity");
   FIO_ASSERT(ary____test_count(pa) == 0,
              "Destroyed array should have zero elements");
-  FIO_ASSERT(FIO_NAME2(ary____test, ptr)(pa) == NULL,
-             "Destroyed array shouldn't have memory allocated");
   ary____test_unshift(pa, 1);
   ary____test_unshift(pa, 2);
   ary____test_unshift(pa, 3);
@@ -441,19 +432,19 @@ Hash Map / Set - test
 ***************************************************************************** */
 
 /* a simple set of numbers */
-#define FIO_MAP_NAME set_____test
-#define FIO_MAP_TYPE size_t
+#define FIO_MAP_NAME           set_____test
+#define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 /* a simple set of numbers */
-#define FIO_MAP_NAME set2_____test
-#define FIO_MAP_TYPE size_t
+#define FIO_MAP_NAME           set2_____test
+#define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) 1
-#define FIO_PTR_TAG(p) fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
 TEST_FUNC size_t map_____test_key_copy_counter = 0;
@@ -471,12 +462,12 @@ TEST_FUNC void map_____test_key_destroy(char **dest) {
 }
 
 /* keys are strings, values are numbers */
-#define FIO_MAP_KEY char *
-#define FIO_MAP_KEY_CMP(a, b) (strcmp((a), (b)) == 0)
+#define FIO_MAP_KEY            char *
+#define FIO_MAP_KEY_CMP(a, b)  (strcmp((a), (b)) == 0)
 #define FIO_MAP_KEY_COPY(a, b) map_____test_key_copy(&(a), (b))
 #define FIO_MAP_KEY_DESTROY(a) map_____test_key_destroy(&(a))
-#define FIO_MAP_TYPE size_t
-#define FIO_MAP_NAME map_____test
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_NAME           map_____test
 #include __FILE__
 
 #define HASHOFi(i) i /* fio_risky_hash(&(i), sizeof((i)), 0) */
@@ -756,15 +747,15 @@ CLI - test
 /* *****************************************************************************
 Memory Allocation - test
 ***************************************************************************** */
-#define FIO_MEMORY_NAME fio_mem_test_safe
+#define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT 2
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
-#define FIO_MEMORY_NAME fio_mem_test_unsafe
+#define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT 2
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
 /* *****************************************************************************
 Socket helper testing
@@ -811,16 +802,24 @@ TEST_FUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   FIO_PRINT_SIZE_OF(double);
   FIO_PRINT_SIZE_OF(size_t);
   FIO_PRINT_SIZE_OF(void *);
-  fprintf(stderr, "\tPage\t%ld bytes.\n", sysconf(_SC_PAGESIZE));
+  long page = sysconf(_SC_PAGESIZE);
+  if (page > 0) {
+    fprintf(stderr, "\tPage\t%ld bytes.\n", page);
+    FIO_ASSERT((page >> FIO_MEM_PAGE_SIZE_LOG) <= 1,
+               "page size mismatch!\n          "
+               "facil.io should be recompiled with "
+               "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
+               log2(page));
+  }
 }
 #undef FIO_PRINT_SIZE_OF
 
 /* *****************************************************************************
 Locking - Speed Test
 ***************************************************************************** */
-#define FIO___LOCK2_TEST_TASK (1LU << 25)
+#define FIO___LOCK2_TEST_TASK    (1LU << 25)
 #define FIO___LOCK2_TEST_THREADS 32U
-#define FIO___LOCK2_TEST_REPEAT 1
+#define FIO___LOCK2_TEST_REPEAT  1
 
 #ifndef H___FIO_LOCK2___H
 #include <pthread.h>
@@ -1063,6 +1062,10 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, FIO_NAME(ary____test, test))();
+  FIO_NAME_TEST(stl, FIO_NAME(ary2____test, test))();
+  FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___array_test();
   fprintf(stderr, "===============\n");

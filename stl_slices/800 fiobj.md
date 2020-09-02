@@ -2,12 +2,15 @@
 
 ```c
 #define FIO_FIOBJ
+#define FIOBJ_MALLOC /* an optional local memory allocator for FIOBJ types */
 #include "fio-stl.h"
 ```
 
 The facil.io library includes a dynamic type system that makes it a easy to handle mixed-type tasks, such as JSON object construction.
 
 This soft type system included in the facil.io STL, it is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
+
+The soft type system also offers an (optional) * [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
 
 The `FIOBJ` API offers type generic functions in addition to the type specific API. An objects underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
 
@@ -179,9 +182,11 @@ This function is **recursive** and could cause a **stack explosion** error.
 
 In addition, recursive object structures may produce unexpected results (for example, objects are always freed).
 
-The `FIOBJ_MAX_NESTING` nesting limit doesn't apply to `fiobj_free` since implementing the limit will always result in a memory leak.
+The `FIOBJ_MAX_NESTING` nesting limit doesn't apply to `fiobj_free`, making it possible to "expload" the stack if misused.
 
 This places the responsibility on the user / developer, not to exceed the maximum nesting limit (or errors may occur).
+
+When accepting external data, consider using the JSON parser, as it protects against this issue, offering a measure of safety against external data attacks.
 
 ### `FIOBJ` Common Functions
 
@@ -705,11 +710,13 @@ In addition, all the functions documented above as `MAP_x`, are defined as `fiob
 
 Parsing, editing and outputting JSON in C can be easily accomplished using `FIOBJ` types.
 
-There are [faster alternatives as well as slower alternatives out there](json_performance.html) (i.e., the [Qajson4c library](https://github.com/DeHecht/qajson4c) is a wonderful alternative for embedded systems).
-
-However, `facil.io` offers the added benefit of complete parsing from JSON to object. This allows the result to be manipulated, updated, sliced or merged with ease. This is in contrast to some parsers that offer a mid-way structure or lazy (delayed) parsing for types such as `true`, `false` and Numbers.
+`facil.io` offers the added benefit of complete parsing from JSON to object. This allows the result to be manipulated, updated, sliced or merged with ease. This is in contrast to some parsers that offer a mid-way structures or lazy (delayed) parsing for types such as `true`, `false` and Numbers.
 
 `facil.io` also offers the added benefit of complete formatting from a framework wide object type (`FIOBJ`) to JSON, allowing the same soft type system to be used throughout the project (rather than having a JSON dedicated type system).
+
+This is in addition to `facil.io` support to some JSON extensions such as comments, both C style (both `//` and `/* ... */` and bash style (`#`).
+
+However, there are [faster alternatives as well as slower alternatives out there](json_performance.html) (i.e., the [Qajson4c library](https://github.com/DeHecht/qajson4c) is a wonderful alternative for embedded systems).
 
 #### `fiobj2json`
 

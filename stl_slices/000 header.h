@@ -162,11 +162,11 @@ Basic macros and included files
 #define __attribute__(...)
 #define __has_include(...) 0
 #define __has_builtin(...) 0
-#define GNUC_BYPASS 1
+#define GNUC_BYPASS        1
 #elif !defined(__clang__) && !defined(__has_builtin)
 /* E.g: GCC < 6.0 doesn't support __has_builtin */
 #define __has_builtin(...) 0
-#define GNUC_BYPASS 1
+#define GNUC_BYPASS        1
 #endif
 
 #ifndef __has_include
