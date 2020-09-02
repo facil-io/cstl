@@ -576,23 +576,26 @@ Dynamic Arrays - implementation
 IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
-  FIO_NAME(FIO_ARRAY_NAME, s) tmp = *ary;
+  union {
+    FIO_NAME(FIO_ARRAY_NAME, s) a;
+    FIO_NAME(FIO_ARRAY_NAME, ___embedded_s) e;
+  } tmp = {.a = *ary};
   *ary = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
 
   switch (
       FIO_NAME_BL(FIO_ARRAY_NAME, embedded)((FIO_ARRAY_PTR)FIO_PTR_TAG(&tmp))) {
   case 0:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
-    for (size_t i = tmp.start; i < tmp.end; ++i) {
-      FIO_ARRAY_TYPE_DESTROY(tmp.ary[i]);
+    for (size_t i = tmp.a.start; i < tmp.a.end; ++i) {
+      FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
     }
 #endif
-    FIO_MEM_FREE_(tmp.ary, tmp.capa * sizeof(*tmp.ary));
+    FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
     return;
   case 1:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
-    while (tmp.start--) {
-      FIO_ARRAY_TYPE_DESTROY((FIO_ARRAY2EMBEDDED(&tmp)->embedded[tmp.start]));
+    while (tmp.e.start--) {
+      FIO_ARRAY_TYPE_DESTROY((tmp.e.embedded[tmp.e.start]));
     }
 #endif
     return;
