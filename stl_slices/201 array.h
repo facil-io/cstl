@@ -614,7 +614,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     if (abs_capa <= ary->capa)
       return ary->capa;
     /* objects don't move, use the system's realloc */
-    if ((capa_ >= 0 && ary->start == 0) || (capa_ < 0 && ary->start > 0)) {
+    if ((capa_ >= 0) || (capa_ < 0 && ary->start > 0)) {
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(
           ary->ary, 0, sizeof(*tmp) * capa, sizeof(*tmp) * ary->end);
       if (!tmp)
@@ -1206,21 +1206,42 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
-    if (ary->end == ary->capa)
-      return FIO_NAME(FIO_ARRAY_NAME,
-                      set)(ary_, ary->end - ary->start, data, NULL);
+    if (ary->end == ary->capa) {
+      if (!ary->start) {
+        if (FIO_NAME(FIO_ARRAY_NAME,
+                     reserve)(ary_, FIO_ARRAY_ADD2CAPA(ary->capa)) == ary->end)
+          goto invalid;
+      } else {
+        const uint32_t new_start = (ary->start >> 2);
+        const uint32_t count = ary->end - ary->start;
+        if (count)
+          memmove(ary->ary + new_start,
+                  ary->ary + ary->start,
+                  count * sizeof(*ary->ary));
+        ary->end = count + new_start;
+        ary->start = new_start;
+      }
+    }
     FIO_ARRAY_TYPE_COPY(ary->ary[ary->end], data);
     return ary->ary + (ary->end++);
 
   case 1:
     if (ary->start == FIO_ARRAY_EMBEDDED_CAPA)
-      return FIO_NAME(FIO_ARRAY_NAME, set)(ary_, ary->start, data, NULL);
+      goto needs_memory_embedded;
     FIO_ARRAY_TYPE_COPY(FIO_ARRAY2EMBEDDED(ary)->embedded[ary->start], data);
     return FIO_ARRAY2EMBEDDED(ary)->embedded + (ary->start++);
   }
-
+invalid:
   FIO_ARRAY_TYPE_DESTROY(data);
   return NULL;
+
+needs_memory_embedded:
+  if (FIO_NAME(FIO_ARRAY_NAME,
+               reserve)(ary_, FIO_ARRAY_ADD2CAPA(FIO_ARRAY_EMBEDDED_CAPA)) ==
+      FIO_ARRAY_EMBEDDED_CAPA)
+    goto invalid;
+  FIO_ARRAY_TYPE_COPY(ary->ary[ary->end], data);
+  return ary->ary + (ary->end++);
 }
 
 /**
@@ -1281,25 +1302,49 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
-    if (!ary->start)
-      return FIO_NAME(FIO_ARRAY_NAME,
-                      set)(ary_, (int32_t)(-1 - ary->end), data, NULL);
+    if (!ary->start) {
+      if (ary->end == ary->capa) {
+        FIO_NAME(FIO_ARRAY_NAME, reserve)
+        (ary_, (-1 - (int32_t)FIO_ARRAY_ADD2CAPA(ary->capa)));
+        if (!ary->start)
+          goto invalid;
+      } else {
+        const uint32_t new_end = ary->capa - ((ary->capa - ary->end) >> 2);
+        const uint32_t count = ary->end - ary->start;
+        const uint32_t new_start = new_end - count;
+        if (count)
+          memmove(ary->ary + new_start,
+                  ary->ary + ary->start,
+                  count * sizeof(*ary->ary));
+        ary->end = new_end;
+        ary->start = new_start;
+      }
+    }
     FIO_ARRAY_TYPE_COPY(ary->ary[--ary->start], data);
     return ary->ary + ary->start;
 
   case 1:
     if (ary->start == FIO_ARRAY_EMBEDDED_CAPA)
-      return FIO_NAME(FIO_ARRAY_NAME,
-                      set)(ary_, (0 - ((int32_t)ary->start + 1)), data, NULL);
-    memmove(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
-            FIO_ARRAY2EMBEDDED(ary)->embedded,
-            sizeof(*ary->ary) * ary->start);
+      goto needs_memory_embed;
+    if (ary->start)
+      memmove(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
+              FIO_ARRAY2EMBEDDED(ary)->embedded,
+              sizeof(*ary->ary) * ary->start);
     ++ary->start;
     FIO_ARRAY_TYPE_COPY(FIO_ARRAY2EMBEDDED(ary)->embedded[0], data);
     return FIO_ARRAY2EMBEDDED(ary)->embedded;
   }
+invalid:
   FIO_ARRAY_TYPE_DESTROY(data);
   return NULL;
+
+needs_memory_embed:
+  if (FIO_NAME(FIO_ARRAY_NAME, reserve)(
+          ary_, (-1 - (int32_t)FIO_ARRAY_ADD2CAPA(FIO_ARRAY_EMBEDDED_CAPA))) ==
+      FIO_ARRAY_EMBEDDED_CAPA)
+    goto invalid;
+  FIO_ARRAY_TYPE_COPY(ary->ary[--ary->start], data);
+  return ary->ary + ary->start;
 }
 
 /** TODO
