@@ -3177,23 +3177,50 @@ If the callback returns -1, the loop is broken. Any other value is ignored.
 
 Returns the relative "stop" position (number of items processed + starting point).
 
+
+
+#### `ARY_each_next`
+
+```c
+FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
+                             FIO_ARRAY_TYPE **first,
+                             FIO_ARRAY_TYPE *pos);
+
+```
+
+Used internally by the `FIO_ARRAY_EACH` macro.
+
+Returns a pointer to the first object if `pos == NULL` and there are objects
+in the array.
+
+Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
+
+Returns `NULL` on error or if the array is empty.
+
+**Note**: 
+The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
+
+If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+
 #### `FIO_ARRAY_EACH`
 
 ```c
-#define FIO_ARRAY_EACH(array, pos)                                               \
-  if ((array)->ary)                                                            \
-    for (__typeof__((array)->ary) start__tmp__ = (array)->ary,                 \
-                                  pos = ((array)->ary + (array)->start);       \
-         pos < (array)->ary + (array)->end;                                    \
-         (pos = (array)->ary + (pos - start__tmp__) + 1),                      \
-                                  (start__tmp__ = (array)->ary))
+#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
+  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
+           first___ = NULL,                                                    \
+           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 ```
 
-Iterates through the list using a `for` loop.
+
+Iterates through the array using a `for` loop.
 
 Access the object with the pointer `pos`. The `pos` variable can be named however you please.
 
-It's possible to edit elements within the loop, but avoid editing the array itself (adding / removing elements). Although I hope it's possible, I wouldn't count on it and it could result in items being skipped or unending loops.
+It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
+
+**Note**: this macro supports automatic pointer tagging / untagging.
 
 -------------------------------------------------------------------------------
 ## Maps - Hash Maps / Sets
@@ -3484,10 +3511,8 @@ Rehashes the Hash Map / Set. Usually this is performed automatically, no need to
 #### `MAP_each_next`
 
 ```c
-MAP_each_s * MAP_each_next(FIO_MAP_PTR m, MAP_each_s * pos);
+MAP_each_s * MAP_each_next(FIO_MAP_PTR m, MAP_each_s ** first, MAP_each_s * pos);
 ```
-
-
 
 Returns a pointer to the (next) object's information in the map.
 
@@ -3511,9 +3536,11 @@ Returns NULL if `pos` was the last object or no object exist.
 
 **Note**:
 
-Behavior is undefined if `pos` is invalid.
+If `pos` is invalid or `NULL`, a pointer to the first object will be returned.
 
-The value of `pos` may become invalid if an object is added to the Map after the value of `pos` was retrieved. However, object removal and replacement (same key and hash value) are safe (will not invalidate `pos`).
+The value of `first` is required and used to revalidate `pos` in cases where object insertion or memory changes occurred while iterating.
+
+The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects or reiterating some objects.
 
 #### `MAP_each`
 
@@ -3544,18 +3571,17 @@ Only available within an `each` loop.
 
 _Note: For sets, returns the hash value, for hash maps, returns the key value._
 
-#### `FIO_MAP_EACH2`
+#### `FIO_MAP_EACH`
 
 ```c
-#define FIO_MAP_EACH2(map_type, map_p, pos)                                    \
+#define FIO_MAP_EACH(map_type, map_p, pos)                                    \
   for (FIO_NAME(map_type, each_s) *pos =                                       \
            FIO_NAME(map_type, each_next)(map_p, NULL);                         \
        pos;                                                                    \
        pos = FIO_NAME(map_type, each_next)(map_p, pos))
 ```
 
-A macro for a `for` loop that iterates over all the Map's objects (in
-order).
+A macro for a `for` loop that iterates over all the Map's objects (in order).
 
 Use this macro for small Hash Maps / Sets.
 
@@ -3573,29 +3599,6 @@ To access the object information, use:
 - `pos->obj` to access the object's data.
 
    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
-
-#### `FIO_MAP_EACH`
-
-```c
-#define FIO_MAP_EACH(map_, pos_)                                               \
-  for (__typeof__((map_)->map) prev__ = NULL,                                  \
-                               pos_ = (map_)->map + (map_)->head;              \
-       (map_)->head != (uint32_t)-1 &&                                         \
-       (prev__ == NULL || pos_ != (map_)->map + (map_)->head);                 \
-       (prev__ = pos_), pos_ = (map_)->map + pos_->next)
-```
-
-A macro for a `for` loop that iterates over all the Map's objects (in order).
-
-Use this macro for small Hash Maps / Sets.
-
-`map` is a pointer to the Hash Map / Set variable and `pos` is a temporary variable name to be created for iteration.
-
-`pos->hash` is the hashing value and `pos->obj` is the object's data.
-
-For hash maps, use `pos->obj.key` and `pos->obj.value` to access the stored data.
-
-_Note: this macro doesn't work with pointer tagging_.
 
 -------------------------------------------------------------------------------
 ## Dynamic Strings

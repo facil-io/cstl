@@ -319,22 +319,49 @@ If the callback returns -1, the loop is broken. Any other value is ignored.
 
 Returns the relative "stop" position (number of items processed + starting point).
 
+
+
+#### `ARY_each_next`
+
+```c
+FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
+                             FIO_ARRAY_TYPE **first,
+                             FIO_ARRAY_TYPE *pos);
+
+```
+
+Used internally by the `FIO_ARRAY_EACH` macro.
+
+Returns a pointer to the first object if `pos == NULL` and there are objects
+in the array.
+
+Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
+
+Returns `NULL` on error or if the array is empty.
+
+**Note**: 
+The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
+
+If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+
 #### `FIO_ARRAY_EACH`
 
 ```c
-#define FIO_ARRAY_EACH(array, pos)                                               \
-  if ((array)->ary)                                                            \
-    for (__typeof__((array)->ary) start__tmp__ = (array)->ary,                 \
-                                  pos = ((array)->ary + (array)->start);       \
-         pos < (array)->ary + (array)->end;                                    \
-         (pos = (array)->ary + (pos - start__tmp__) + 1),                      \
-                                  (start__tmp__ = (array)->ary))
+#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
+  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
+           first___ = NULL,                                                    \
+           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 ```
 
-Iterates through the list using a `for` loop.
+
+Iterates through the array using a `for` loop.
 
 Access the object with the pointer `pos`. The `pos` variable can be named however you please.
 
-It's possible to edit elements within the loop, but avoid editing the array itself (adding / removing elements). Although I hope it's possible, I wouldn't count on it and it could result in items being skipped or unending loops.
+It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
+
+**Note**: this macro supports automatic pointer tagging / untagging.
 
 -------------------------------------------------------------------------------

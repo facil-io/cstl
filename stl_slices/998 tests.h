@@ -358,7 +358,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   fprintf(stderr, "* Testing non-zero value for uninitialized elements.\n");
   ary2____test_s a2 = FIO_ARRAY_INIT;
   ary2____test_set(&a2, 99, 1, NULL);
-  FIO_ARRAY_EACH(&a2, pos) {
+  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
     FIO_ASSERT(
         (*pos == 0xFF || (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 99),
         "uninitialized elements should be initialized as "
@@ -366,7 +366,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   }
   ary2____test_set(&a2, -200, 1, NULL);
   FIO_ASSERT(ary2____test_count(&a2) == 200, "array should have 100 items.");
-  FIO_ARRAY_EACH(&a2, pos) {
+  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
     FIO_ASSERT((*pos == 0xFF ||
                 (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 0 ||
                 (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 199),
@@ -524,7 +524,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
     }
     {
       size_t i = 0;
-      FIO_MAP_EACH2(set_____test, &m, pos) {
+      FIO_MAP_EACH(set_____test, &m, pos) {
         FIO_ASSERT(pos->obj == pos->hash + 1 || !(~pos->hash),
                    "FIO_MAP_EACH loop out of order?")
         ++i;

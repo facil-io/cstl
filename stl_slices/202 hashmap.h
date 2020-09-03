@@ -475,50 +475,20 @@ Hash Map / Set - API (iterration)
  *    For Hash Maps, use `i->obj.key` and `i->obj.value`.
  *
  * Returns the first object if `pos == NULL` and there are objects in the map.
+ * The first object's address should be used for any future call as the `first`
+ * address.
  *
- * Returns the next object if `pos` is valid.
+ * Returns the next object if both `first` and `pos` are valid
  *
  * Returns NULL if `pos` was the last object or no object exist.
  *
  */
 FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR m,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos);
 
 #ifndef FIO_MAP_EACH
-/**
- * A macro for a `for` loop that iterates over all the Map's objects (in
- * order).
- *
- * Use this macro for small Hash Maps / Sets.
- *
- * - `map_p` is a pointer to the Hash Map / Set variable.
- *
- * - `pos` is a temporary variable name to be created for iteration. This
- *    variable may SHADOW external variables, be aware.
- *
- * To access the object information, use:
- *
- * - `pos->hash` to access the hash value.
- *
- * - `pos->obj` to access the object's data.
- *
- *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
- *
- *
- * Each loop **SHOULD** test for a valid object using (unlike FIO_MAP_EACH2):
- *
- *      if (!pos->hash) continue;
- *
- */
-#define FIO_MAP_EACH(map_p, pos)                                               \
-  for (__typeof__((map_p)->map) pos = (map_p)->map,                            \
-                                end__ = (map_p)->map + (map_p)->w;             \
-       pos < end__;                                                            \
-       ++pos)
-#endif
-
-#ifndef FIO_MAP_EACH2
 /**
  * A macro for a `for` loop that iterates over all the Map's objects (in
  * order).
@@ -540,11 +510,12 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
  *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */
-#define FIO_MAP_EACH2(map_type, map_p, pos)                                    \
-  for (FIO_NAME(map_type, each_s) *pos =                                       \
-           FIO_NAME(map_type, each_next)(map_p, NULL);                         \
+#define FIO_MAP_EACH(map_type, map_p, pos)                                     \
+  for (FIO_NAME(map_type, each_s) *first___ = NULL,                            \
+                                  *pos = FIO_NAME(map_type, each_next)(        \
+                                      map_p, &first___, NULL);                 \
        pos;                                                                    \
-       pos = FIO_NAME(map_type, each_next)(map_p, pos))
+       pos = FIO_NAME(map_type, each_next)(map_p, &first___, pos))
 #endif
 
 /**
@@ -932,12 +903,17 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR m_) {
 /** Returns a pointer to the (next) object's information in the map. */
 FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR m_,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
-  if (!m || !m_)
+  if (!m || !m_ || !m->map || !first)
     return NULL;
-  if (!pos)
+  if (!pos || !(*first) || (*first) > pos) {
     pos = m->map - 1;
+  } else {
+    pos = m->map + (intptr_t)(pos - (*first));
+  }
+  *first = m->map;
   for (;;) {
     ++pos;
     if (pos >= m->map + m->w)

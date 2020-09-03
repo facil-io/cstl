@@ -286,10 +286,8 @@ Rehashes the Hash Map / Set. Usually this is performed automatically, no need to
 #### `MAP_each_next`
 
 ```c
-MAP_each_s * MAP_each_next(FIO_MAP_PTR m, MAP_each_s * pos);
+MAP_each_s * MAP_each_next(FIO_MAP_PTR m, MAP_each_s ** first, MAP_each_s * pos);
 ```
-
-
 
 Returns a pointer to the (next) object's information in the map.
 
@@ -313,9 +311,11 @@ Returns NULL if `pos` was the last object or no object exist.
 
 **Note**:
 
-Behavior is undefined if `pos` is invalid.
+If `pos` is invalid or `NULL`, a pointer to the first object will be returned.
 
-The value of `pos` may become invalid if an object is added to the Map after the value of `pos` was retrieved. However, object removal and replacement (same key and hash value) are safe (will not invalidate `pos`).
+The value of `first` is required and used to revalidate `pos` in cases where object insertion or memory changes occurred while iterating.
+
+The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects or reiterating some objects.
 
 #### `MAP_each`
 
@@ -346,18 +346,17 @@ Only available within an `each` loop.
 
 _Note: For sets, returns the hash value, for hash maps, returns the key value._
 
-#### `FIO_MAP_EACH2`
+#### `FIO_MAP_EACH`
 
 ```c
-#define FIO_MAP_EACH2(map_type, map_p, pos)                                    \
+#define FIO_MAP_EACH(map_type, map_p, pos)                                    \
   for (FIO_NAME(map_type, each_s) *pos =                                       \
            FIO_NAME(map_type, each_next)(map_p, NULL);                         \
        pos;                                                                    \
        pos = FIO_NAME(map_type, each_next)(map_p, pos))
 ```
 
-A macro for a `for` loop that iterates over all the Map's objects (in
-order).
+A macro for a `for` loop that iterates over all the Map's objects (in order).
 
 Use this macro for small Hash Maps / Sets.
 
@@ -375,28 +374,5 @@ To access the object information, use:
 - `pos->obj` to access the object's data.
 
    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
-
-#### `FIO_MAP_EACH`
-
-```c
-#define FIO_MAP_EACH(map_, pos_)                                               \
-  for (__typeof__((map_)->map) prev__ = NULL,                                  \
-                               pos_ = (map_)->map + (map_)->head;              \
-       (map_)->head != (uint32_t)-1 &&                                         \
-       (prev__ == NULL || pos_ != (map_)->map + (map_)->head);                 \
-       (prev__ = pos_), pos_ = (map_)->map + pos_->next)
-```
-
-A macro for a `for` loop that iterates over all the Map's objects (in order).
-
-Use this macro for small Hash Maps / Sets.
-
-`map` is a pointer to the Hash Map / Set variable and `pos` is a temporary variable name to be created for iteration.
-
-`pos->hash` is the hashing value and `pos->obj` is the object's data.
-
-For hash maps, use `pos->obj.key` and `pos->obj.value` to access the stored data.
-
-_Note: this macro doesn't work with pointer tagging_.
 
 -------------------------------------------------------------------------------

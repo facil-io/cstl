@@ -361,30 +361,34 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
                               void *arg);
 
-#ifndef FIO_ARRAY_EACH
 /**
- * Iterates through the list using a `for` loop.
+ * Returns a pointer to the (next) object in the array.
  *
- * Access the object with the pointer `pos`. The `pos` variable can be named
- * however you please.
+ * Returns a pointer to the first object if `pos == NULL` and there are objects
+ * in the array.
  *
- * Avoid editing the array during a FOR loop, although I hope it's possible, I
- * wouldn't count on it.
+ * The first pointer is automatically set and it allows object insertions and
+ * memory effecting functions to be called from within the loop.
  *
- * **Note**: doesn't support automatic pointer tagging / untagging.
+ * If the object in `pos` (or an object before it) were removed, consider
+ * passing `pos-1` to the function, to avoid skipping any elements while
+ * looping.
+ *
+ * Returns the next object if both `first` and `pos` are valid.
+ *
+ * Returns NULL if `pos` was the last object or no object exist.
+ *
+ * Returns the first object if either `first` or `pos` are invalid.
+ *
  */
-#define FIO_ARRAY_EACH(array, pos)                                             \
-  if ((array)->ary)                                                            \
-    for (__typeof__((array)->ary) start__tmp__ = (array)->ary,                 \
-                                  pos = ((array)->ary + (array)->start);       \
-         pos < (array)->ary + (array)->end;                                    \
-         (pos = (array)->ary + (pos - start__tmp__) + 1),                      \
-                                  (start__tmp__ = (array)->ary))
-#endif
+FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
+                                   each_next)(FIO_ARRAY_PTR ary,
+                                              FIO_ARRAY_TYPE **first,
+                                              FIO_ARRAY_TYPE *pos);
 
 #ifndef FIO_ARRAY_EACH
 /**
- * Iterates through the list using a `for` loop.
+ * Iterates through the array using a `for` loop.
  *
  * Access the object with the pointer `pos`. The `pos` variable can be named
  * however you please.
@@ -394,7 +398,12 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
  *
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
-#define FIO_ARRAY_EACH2(array_type, array, pos) TODO
+#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
+  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                         \
+           first___ = NULL,                                                    \
+           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 #endif
 
 /* *****************************************************************************
@@ -544,6 +553,42 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
   if ((uint32_t)index >= count)
     return FIO_ARRAY_TYPE_INVALID;
   return a[index];
+}
+
+/* Returns a pointer to the (next) object in the array. */
+FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
+                                   each_next)(FIO_ARRAY_PTR ary_,
+                                              FIO_ARRAY_TYPE **first,
+                                              FIO_ARRAY_TYPE *pos) {
+  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
+  int32_t count;
+  FIO_ARRAY_TYPE *a;
+  switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
+  case 0:
+    count = ary->end - ary->start;
+    a = ary->ary + ary->start;
+    break;
+  case 1:
+    count = ary->start;
+    a = FIO_ARRAY2EMBEDDED(ary)->embedded;
+    break;
+  default:
+    return NULL;
+  }
+  intptr_t i;
+  if (!count || !first)
+    return NULL;
+  if (!pos || !(*first) || (*first) > pos) {
+    i = -1;
+  } else {
+    i = (intptr_t)(pos - (*first));
+  }
+  *first = a;
+  ++i;
+  if (i >= count)
+    return NULL;
+  return i + a;
 }
 
 /* *****************************************************************************

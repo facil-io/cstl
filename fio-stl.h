@@ -11489,30 +11489,34 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
                               void *arg);
 
-#ifndef FIO_ARRAY_EACH
 /**
- * Iterates through the list using a `for` loop.
+ * Returns a pointer to the (next) object in the array.
  *
- * Access the object with the pointer `pos`. The `pos` variable can be named
- * however you please.
+ * Returns a pointer to the first object if `pos == NULL` and there are objects
+ * in the array.
  *
- * Avoid editing the array during a FOR loop, although I hope it's possible, I
- * wouldn't count on it.
+ * The first pointer is automatically set and it allows object insertions and
+ * memory effecting functions to be called from within the loop.
  *
- * **Note**: doesn't support automatic pointer tagging / untagging.
+ * If the object in `pos` (or an object before it) were removed, consider
+ * passing `pos-1` to the function, to avoid skipping any elements while
+ * looping.
+ *
+ * Returns the next object if both `first` and `pos` are valid.
+ *
+ * Returns NULL if `pos` was the last object or no object exist.
+ *
+ * Returns the first object if either `first` or `pos` are invalid.
+ *
  */
-#define FIO_ARRAY_EACH(array, pos)                                             \
-  if ((array)->ary)                                                            \
-    for (__typeof__((array)->ary) start__tmp__ = (array)->ary,                 \
-                                  pos = ((array)->ary + (array)->start);       \
-         pos < (array)->ary + (array)->end;                                    \
-         (pos = (array)->ary + (pos - start__tmp__) + 1),                      \
-                                  (start__tmp__ = (array)->ary))
-#endif
+FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
+                                   each_next)(FIO_ARRAY_PTR ary,
+                                              FIO_ARRAY_TYPE **first,
+                                              FIO_ARRAY_TYPE *pos);
 
 #ifndef FIO_ARRAY_EACH
 /**
- * Iterates through the list using a `for` loop.
+ * Iterates through the array using a `for` loop.
  *
  * Access the object with the pointer `pos`. The `pos` variable can be named
  * however you please.
@@ -11522,7 +11526,12 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
  *
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
-#define FIO_ARRAY_EACH2(array_type, array, pos) TODO
+#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
+  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                         \
+           first___ = NULL,                                                    \
+           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 #endif
 
 /* *****************************************************************************
@@ -11672,6 +11681,42 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
   if ((uint32_t)index >= count)
     return FIO_ARRAY_TYPE_INVALID;
   return a[index];
+}
+
+/* Returns a pointer to the (next) object in the array. */
+FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
+                                   each_next)(FIO_ARRAY_PTR ary_,
+                                              FIO_ARRAY_TYPE **first,
+                                              FIO_ARRAY_TYPE *pos) {
+  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
+  int32_t count;
+  FIO_ARRAY_TYPE *a;
+  switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
+  case 0:
+    count = ary->end - ary->start;
+    a = ary->ary + ary->start;
+    break;
+  case 1:
+    count = ary->start;
+    a = FIO_ARRAY2EMBEDDED(ary)->embedded;
+    break;
+  default:
+    return NULL;
+  }
+  intptr_t i;
+  if (!count || !first)
+    return NULL;
+  if (!pos || !(*first) || (*first) > pos) {
+    i = -1;
+  } else {
+    i = (intptr_t)(pos - (*first));
+  }
+  *first = a;
+  ++i;
+  if (i >= count)
+    return NULL;
+  return i + a;
 }
 
 /* *****************************************************************************
@@ -13406,50 +13451,20 @@ Hash Map / Set - API (iterration)
  *    For Hash Maps, use `i->obj.key` and `i->obj.value`.
  *
  * Returns the first object if `pos == NULL` and there are objects in the map.
+ * The first object's address should be used for any future call as the `first`
+ * address.
  *
- * Returns the next object if `pos` is valid.
+ * Returns the next object if both `first` and `pos` are valid
  *
  * Returns NULL if `pos` was the last object or no object exist.
  *
  */
 FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR m,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos);
 
 #ifndef FIO_MAP_EACH
-/**
- * A macro for a `for` loop that iterates over all the Map's objects (in
- * order).
- *
- * Use this macro for small Hash Maps / Sets.
- *
- * - `map_p` is a pointer to the Hash Map / Set variable.
- *
- * - `pos` is a temporary variable name to be created for iteration. This
- *    variable may SHADOW external variables, be aware.
- *
- * To access the object information, use:
- *
- * - `pos->hash` to access the hash value.
- *
- * - `pos->obj` to access the object's data.
- *
- *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
- *
- *
- * Each loop **SHOULD** test for a valid object using (unlike FIO_MAP_EACH2):
- *
- *      if (!pos->hash) continue;
- *
- */
-#define FIO_MAP_EACH(map_p, pos)                                               \
-  for (__typeof__((map_p)->map) pos = (map_p)->map,                            \
-                                end__ = (map_p)->map + (map_p)->w;             \
-       pos < end__;                                                            \
-       ++pos)
-#endif
-
-#ifndef FIO_MAP_EACH2
 /**
  * A macro for a `for` loop that iterates over all the Map's objects (in
  * order).
@@ -13471,11 +13486,12 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
  *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */
-#define FIO_MAP_EACH2(map_type, map_p, pos)                                    \
-  for (FIO_NAME(map_type, each_s) *pos =                                       \
-           FIO_NAME(map_type, each_next)(map_p, NULL);                         \
+#define FIO_MAP_EACH(map_type, map_p, pos)                                     \
+  for (FIO_NAME(map_type, each_s) *first___ = NULL,                            \
+                                  *pos = FIO_NAME(map_type, each_next)(        \
+                                      map_p, &first___, NULL);                 \
        pos;                                                                    \
-       pos = FIO_NAME(map_type, each_next)(map_p, pos))
+       pos = FIO_NAME(map_type, each_next)(map_p, &first___, pos))
 #endif
 
 /**
@@ -13863,12 +13879,17 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR m_) {
 /** Returns a pointer to the (next) object's information in the map. */
 FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR m_,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
-  if (!m || !m_)
+  if (!m || !m_ || !m->map || !first)
     return NULL;
-  if (!pos)
+  if (!pos || !(*first) || (*first) > pos) {
     pos = m->map - 1;
+  } else {
+    pos = m->map + (intptr_t)(pos - (*first));
+  }
+  *first = m->map;
   for (;;) {
     ++pos;
     if (pos >= m->map + m->w)
@@ -18582,12 +18603,16 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
                     hash)(o, (uint64_t)target_hash);
   case FIOBJ_T_ARRAY: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-    size_t c = 0;
     h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_ARRAY);
-    FIO_ARRAY_EACH(((FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
-                              s) *)((uintptr_t)o & (~(uintptr_t)7))),
-                   pos) {
-      h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_ARRAY + (c++), *pos);
+    {
+      FIOBJ *a = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), ptr)(o);
+      const size_t count =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
+      if (a) {
+        for (size_t i = 0; i < count; ++i) {
+          h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_ARRAY + i, a[i]);
+        }
+      }
     }
     return h;
   }
@@ -18595,7 +18620,7 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
     size_t c = 0;
     h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_HASH);
-    FIO_MAP_EACH2(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
+    FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
       h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
                                   pos->obj.key);
       h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
@@ -18891,7 +18916,7 @@ FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
     }
     goto equal;
   case FIOBJ_T_HASH:
-    FIO_MAP_EACH2(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
+    FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
       FIOBJ val = fiobj_hash_get2(b, pos->obj.key);
       if (!FIO_NAME_BL(fiobj, eq)(val, pos->obj.value))
         goto equal;
@@ -19081,7 +19106,7 @@ fiobj___json_format_internal__(fiobj___json_format_internal__s *args, FIOBJ o) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "{", 1);
       size_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
       if (i) {
-        FIO_MAP_EACH2(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
+        FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
           if (args->beautify) {
             fiobj___json_format_internal_beauty_pad(args->json, args->level);
           }
@@ -20031,7 +20056,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   fprintf(stderr, "* Testing non-zero value for uninitialized elements.\n");
   ary2____test_s a2 = FIO_ARRAY_INIT;
   ary2____test_set(&a2, 99, 1, NULL);
-  FIO_ARRAY_EACH(&a2, pos) {
+  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
     FIO_ASSERT(
         (*pos == 0xFF || (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 99),
         "uninitialized elements should be initialized as "
@@ -20039,7 +20064,7 @@ TEST_FUNC void fio___dynamic_types_test___array_test(void) {
   }
   ary2____test_set(&a2, -200, 1, NULL);
   FIO_ASSERT(ary2____test_count(&a2) == 200, "array should have 100 items.");
-  FIO_ARRAY_EACH(&a2, pos) {
+  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
     FIO_ASSERT((*pos == 0xFF ||
                 (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 0 ||
                 (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 199),
@@ -20197,7 +20222,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
     }
     {
       size_t i = 0;
-      FIO_MAP_EACH2(set_____test, &m, pos) {
+      FIO_MAP_EACH(set_____test, &m, pos) {
         FIO_ASSERT(pos->obj == pos->hash + 1 || !(~pos->hash),
                    "FIO_MAP_EACH loop out of order?")
         ++i;
