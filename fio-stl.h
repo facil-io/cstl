@@ -11271,7 +11271,8 @@ fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
     struct stat st;
     if (fstat(fd, &st))
       goto error;
-    if (st.st_size <= 0 || offset >= (size_t)st.st_size)
+    if (st.st_size <= 0 || offset >= (size_t)st.st_size ||
+        (uint64_t)st.st_size >= ((uint64_t)1UL << 32))
       goto error;
     len = (size_t)st.st_size - offset;
   }
@@ -11285,11 +11286,11 @@ fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
   *f = (fio_stream_packet_fd_s){
       .type =
           (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
-      .length = len,
+      .length = (uint32_t)len,
       .offset = offset,
       .fd = fd,
   };
-
+  return p;
 error:
   if (!keep_open)
     close(fd);
@@ -11417,15 +11418,17 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     }
     {
       uint8_t possible_eol_surprise = 0;
-      written = u.ext->length - offset;
+      written = u.f->length - offset;
       if (written > len[0])
         written = len[0];
       if (written) {
         ssize_t act;
       retry_on_signal:
-        act = pread(u.f->fd, buf[0], written, u.f->offset + offset);
+        act =
+            pread(u.f->fd, buf[0] + buf_offset, written, u.f->offset + offset);
         if (act <= 0) {
           /* no more data in the file? */
+          FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));
           if (errno == EINTR)
             goto retry_on_signal;
           u.f->length = offset;
@@ -11510,7 +11513,7 @@ Module Testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
   char *const str =
-      "My Hello World string should be long enough so iit can be used for "
+      "My Hello World string should be long enough so it can be used for "
       "testing the stream functionality in the facil.io stream module. The "
       "stream moduule takes strings and failes and places them (by reference / "
       "copy) into a linked list of objects. When data is requested from the "
@@ -11572,6 +11575,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
              "fio_stream_read data error? (%.*s)",
              (int)len,
              buf);
+
+  buf = mem;
+  len = 8;
+  fio_stream_read(&s, &buf, &len);
+
+  FIO_ASSERT(
+      len < 80, "fio_stream_read didn't perform a partial read? (%zu)", len);
+  FIO_ASSERT(!memcmp(str, buf, len),
+             "fio_stream_read partial read data error? (%.*s)",
+             (int)len,
+             buf);
+
   fio_stream_advance(&s, 20);
   FIO_ASSERT(fio_stream_packets(&s) == 2, "packet counut error (2).");
   buf = mem;
@@ -11582,6 +11597,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
              len);
   FIO_ASSERT(!memcmp(str + 20, buf, len),
              "fio_stream_read data error? (%.*s)",
+             (int)len,
+             buf);
+
+  fio_stream_add(&s, fio_stream_pack_fd(open(__FILE__, O_RDONLY), 20, 0, 0));
+  FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error (3).");
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 80,
+             "fio_stream_read didn't read all data from stream(4)? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp("/* *****************", buf + 60, 20),
+             "fio_stream_read file read data error?\n%.*s",
+             (int)len,
+             buf);
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 80,
+             "fio_stream_read didn't (re)read all data from stream(5)? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp("/* *****************", buf + 60, 20),
+             "fio_stream_read file (re)read data error? (%.*s)",
              (int)len,
              buf);
 
@@ -20631,7 +20669,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_RAND
 #define FIO_ATOMIC
 #define FIO_RISKY_HASH
-#define FIO_MALLOC /* define to tests types with custom allocator */
+// #define FIO_MALLOC /* define to tests types with custom allocator */
 #include __FILE__
 
 TEST_FUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }

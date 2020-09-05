@@ -73,7 +73,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_RAND
 #define FIO_ATOMIC
 #define FIO_RISKY_HASH
-#define FIO_MALLOC /* define to tests types with custom allocator */
+// #define FIO_MALLOC /* define to tests types with custom allocator */
 #include __FILE__
 
 TEST_FUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
