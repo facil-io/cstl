@@ -11038,7 +11038,7 @@ SFUNC void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
 SFUNC void fio_stream_advance(fio_stream_s *stream, size_t len);
 
 /**
- * Returns true if there's any data iin the stream.
+ * Returns true if there's any data in the stream.
  *
  * Note: this isn't truely thread safe.
  */
