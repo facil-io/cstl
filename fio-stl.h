@@ -10916,6 +10916,698 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_STREAM                  /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+
+
+
+
+
+
+      A packet based data stream for storing / buffering endless data.
+
+
+
+
+
+
+
+
+
+
+***************************************************************************** */
+#ifdef FIO_STREAM
+
+#if !FIO_HAVE_UNIX_TOOLS
+#warning "POSIX is required for the fio_stream API."
+#endif
+#include <sys/stat.h>
+#include <unistd.h>
+/* *****************************************************************************
+Stream API - types, constructor / destructor
+***************************************************************************** */
+
+typedef struct fio_stream_packet_s fio_stream_packet_s;
+
+typedef struct {
+  /* do not directly acecss! */
+  fio_stream_packet_s *next;
+  fio_stream_packet_s **pos;
+  uint32_t consumed;
+  uint32_t packets;
+} fio_stream_s;
+
+/* at this point publish (declare only) the public API */
+
+#ifndef FIO_STREAM_INIT
+/* Initialization macro. */
+#define FIO_STREAM_INIT(s)                                                     \
+  { .next = NULL, .pos = &(s).next }
+#endif
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC fio_stream_s *fio_stream_new(void);
+
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int fio_stream_free(fio_stream_s *stream);
+
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/** Destroys the object, reinitializing its container. */
+SFUNC void fio_stream_destroy(fio_stream_s *stream);
+
+/* *****************************************************************************
+Stream API - packing data into packets and adding it to the stream
+***************************************************************************** */
+
+/** Packs data into a fio_stream_packet_s container. */
+SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
+                                                size_t len,
+                                                size_t offset,
+                                                uint8_t copy_buffer,
+                                                void (*dealloc_func)(void *));
+
+/** Packs a file descriptor into a fio_stream_packet_s container. */
+SFUNC fio_stream_packet_s *
+fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open);
+
+/** Adds a packet to the stream. This isn't thread safe.*/
+SFUNC void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
+
+/** Destroys the fio_stream_packet_s - call this ONLY if unused. */
+SFUNC void fio_stream_pack_free(fio_stream_packet_s *packet);
+
+/* *****************************************************************************
+Stream API - Consuming the stream
+***************************************************************************** */
+
+/**
+ * Reads data from the stream (if any), leaving it in the stream.
+ *
+ * `buf` MUST point to a buffer with - at least - `len` bytes. This is required
+ * in case the packed data is fragmented or references a file and needs to be
+ * copied to an available buffer.
+ *
+ * On error, or if the stream is empty, `buf` will be set to NULL and `len` will
+ * be set to zero.
+ *
+ * Otherwise, `buf` may retain the same value or it may point directly to a
+ * memory address wiithin the stream's buffer (the original value may be lost)
+ * and `len` will be updated to the largest possible value for valid data that
+ * can be read from `buf`.
+ *
+ * Note: this isn't thread safe.
+ */
+SFUNC void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
+
+/**
+ * Advances the Stream, so the first `len` bytes are marked as consumed.
+ *
+ * Note: this isn't thread safe.
+ */
+SFUNC void fio_stream_advance(fio_stream_s *stream, size_t len);
+
+/**
+ * Returns true if there's any data iin the stream.
+ *
+ * Note: this isn't truely thread safe.
+ */
+FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
+
+/**
+ * Returns the number of packets waiting in the stream.
+ *
+ * Note: this isn't truely thread safe.
+ */
+FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *stream);
+
+/* *****************************************************************************
+
+
+
+
+
+
+
+
+                          Stream Implementation
+
+
+
+
+
+
+
+
+***************************************************************************** */
+
+/* *****************************************************************************
+Stream Implementation - inlined static functions
+***************************************************************************** */
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC fio_stream_s *fio_stream_new(void) {
+  fio_stream_s *s = (fio_stream_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
+  if (s) {
+    *s = (fio_stream_s)FIO_STREAM_INIT(s[0]);
+  }
+  return s;
+}
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
+  fio_stream_destroy(s);
+  FIO_MEM_FREE_(s, sizeof(*s));
+  return 0;
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/**
+ * Returns true if there's any data iin the stream.
+ *
+ * Note: this isn't thread safe.
+ */
+FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
+
+/**
+ * Returns the number of packets waiting in the stream.
+ *
+ * Note: this isn't truely thread safe.
+ */
+FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *s) { return s->packets; }
+
+/* *****************************************************************************
+Stream Implementation - possibly externed functions.
+***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
+
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+
+*/
+FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
+/* Frees any internal data AND the object's container! */
+SFUNC void fio_stream_destroy(fio_stream_s *s) {
+  if (!s)
+    return;
+  fio_stream_packet_free_all(s->next);
+  *s = (fio_stream_s)FIO_STREAM_INIT(s[0]);
+  return;
+}
+
+/* *****************************************************************************
+Stream API - packing data into packets and adding it to the stream
+***************************************************************************** */
+
+struct fio_stream_packet_s {
+  fio_stream_packet_s *next;
+};
+
+typedef enum {
+  FIO_PACKET_TYPE_EMBEDDED = 0,
+  FIO_PACKET_TYPE_EXTERNAL = 1,
+  FIO_PACKET_TYPE_FILE = 2,
+  FIO_PACKET_TYPE_FILE_NO_CLOSE = 3,
+} fio_stream_packet_type_e;
+
+typedef struct fio_stream_packet_embd_s {
+  uint32_t type;
+  char buf[];
+} fio_stream_packet_embd_s;
+#define FIO_STREAM___EMBD_BIT_OFFSET 4
+
+typedef struct fio_stream_packet_extrn_s {
+  uint32_t type;
+  uint32_t length;
+  char *buf;
+  uintptr_t offset;
+  void (*dealloc)(void *buf);
+} fio_stream_packet_extrn_s;
+
+/** User-space socket buffer data */
+typedef struct {
+  uint32_t type;
+  uint32_t length;
+  int32_t offset;
+  int fd;
+} fio_stream_packet_fd_s;
+
+FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
+  if (!p)
+    return;
+  union {
+    fio_stream_packet_embd_s *em;
+    fio_stream_packet_extrn_s *ext;
+    fio_stream_packet_fd_s *f;
+  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
+  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  case FIO_PACKET_TYPE_EMBEDDED:
+    FIO_MEM_FREE_(
+        p,
+        sizeof(*p) + sizeof(*u.em) +
+            (sizeof(char) * (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET)));
+    break;
+  case FIO_PACKET_TYPE_EXTERNAL:
+    if (u.ext->dealloc)
+      u.ext->dealloc(u.ext->buf);
+    FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.ext));
+    break;
+  case FIO_PACKET_TYPE_FILE:
+    close(u.f->fd);
+    /* fallthrough */
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
+    FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.f));
+    break;
+  }
+}
+
+FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p) {
+  while (p) {
+    register fio_stream_packet_s *t = p;
+    p = p->next;
+    fio_stream_packet_free(t);
+  }
+}
+
+/** Packs data into a fio_stream_packet_s container. */
+SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
+                                                size_t len,
+                                                size_t offset,
+                                                uint8_t copy_buffer,
+                                                void (*dealloc_func)(void *)) {
+  fio_stream_packet_s *p = NULL;
+  if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___EMBD_BIT_OFFSET))))
+    goto error;
+  if (copy_buffer || len <= 14) {
+    while (len) {
+      /* break apart large memory blocks into smaller, 96Kb pieces */
+      const size_t slice = (len > 98304) ? 98304 : len;
+      fio_stream_packet_embd_s *em;
+      fio_stream_packet_s *tmp = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
+          NULL, 0, sizeof(*p) + sizeof(*em) + (sizeof(char) * slice), 0);
+      if (!tmp)
+        goto error;
+      tmp->next = p;
+      em = (fio_stream_packet_embd_s *)(tmp + 1);
+      em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
+                 (uint32_t)(slice << FIO_STREAM___EMBD_BIT_OFFSET);
+      FIO___MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
+      p = tmp;
+      len -= slice;
+    }
+    if (dealloc_func)
+      dealloc_func(buf);
+  } else {
+    fio_stream_packet_extrn_s *ext;
+    p = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
+        NULL, 0, sizeof(*p) + sizeof(*ext), 0);
+    if (!p)
+      goto error;
+    p->next = NULL;
+    ext = (fio_stream_packet_extrn_s *)(p + 1);
+    *ext = (fio_stream_packet_extrn_s){
+        .type = FIO_PACKET_TYPE_EXTERNAL,
+        .length = len,
+        .buf = (char *)buf,
+        .offset = offset,
+        .dealloc = dealloc_func,
+    };
+  }
+  return p;
+
+error:
+  if (dealloc_func)
+    dealloc_func(buf);
+  fio_stream_packet_free_all(p);
+  return p;
+}
+
+/** Packs a file descriptor into a fio_stream_packet_s container. */
+SFUNC fio_stream_packet_s *
+fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
+  fio_stream_packet_s *p = NULL;
+  fio_stream_packet_fd_s *f;
+  if (fd < 0)
+    goto no_file;
+
+  if (!len) {
+    /* review file total length and auto-calculate */
+    struct stat st;
+    if (fstat(fd, &st))
+      goto error;
+    if (st.st_size <= 0 || offset >= (size_t)st.st_size)
+      goto error;
+    len = (size_t)st.st_size - offset;
+  }
+
+  p = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
+      NULL, 0, sizeof(*p) + sizeof(*f), 0);
+  if (!p)
+    goto error;
+  p->next = NULL;
+  f = (fio_stream_packet_fd_s *)(p + 1);
+  *f = (fio_stream_packet_fd_s){
+      .type =
+          (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
+      .length = len,
+      .offset = offset,
+      .fd = fd,
+  };
+
+error:
+  if (!keep_open)
+    close(fd);
+no_file:
+  return p;
+}
+
+/** Adds a packet to the stream. This isn't thread safe.*/
+SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
+  if (!s || !p)
+    return;
+  fio_stream_packet_s *last = p;
+  uint32_t packets = 1;
+  while (last->next) {
+    last = last->next;
+    ++packets;
+  }
+  if (!s->pos)
+    s->pos = &s->next;
+  *s->pos = p;
+  s->pos = &last->next;
+  s->packets += packets;
+}
+
+/** Destroys the fio_stream_packet_s - call this ONLY if unused. */
+SFUNC void fio_stream_pack_free(fio_stream_packet_s *p) {
+  fio_stream_packet_free_all(p);
+}
+
+/* *****************************************************************************
+Stream API - Consuming the stream
+***************************************************************************** */
+
+FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
+  size_t len = 0;
+  if (!p)
+    return len;
+  union {
+    fio_stream_packet_embd_s *em;
+    fio_stream_packet_extrn_s *ext;
+    fio_stream_packet_fd_s *f;
+  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
+
+  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  case FIO_PACKET_TYPE_EMBEDDED:
+    len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
+    return len;
+  case FIO_PACKET_TYPE_EXTERNAL:
+    len = u.ext->length;
+    return len;
+  case FIO_PACKET_TYPE_FILE: /* fallthrough */
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
+    len = u.f->length;
+    return len;
+  }
+  return len;
+}
+
+FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
+                                          char **buf,
+                                          size_t *len,
+                                          size_t buf_offset,
+                                          size_t offset,
+                                          size_t must_copy) {
+  if (!p || !len[0]) {
+    len[0] = 0;
+    return;
+  }
+  union {
+    fio_stream_packet_embd_s *em;
+    fio_stream_packet_extrn_s *ext;
+    fio_stream_packet_fd_s *f;
+  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
+  size_t written = 0;
+
+  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  case FIO_PACKET_TYPE_EMBEDDED:
+    if (!buf[0] || !len[0] ||
+        (!must_copy &&
+         (!p->next ||
+          (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) >= len[0] + offset))) {
+      buf[0] = u.em->buf + offset;
+      len[0] = (size_t)(u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) - offset;
+      return;
+    }
+    written = (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) - offset;
+    if (written > len[0])
+      written = len[0];
+    if (written) {
+      FIO___MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
+      len[0] -= written;
+    }
+    if (len[0]) {
+      fio___stream_read_internal(p->next, buf, len, written + buf_offset, 0, 1);
+    }
+    len[0] += written;
+    return;
+  case FIO_PACKET_TYPE_EXTERNAL:
+    if (!buf[0] || !len[0] ||
+        (!must_copy && (!p->next || u.ext->length >= len[0] + offset))) {
+      buf[0] = u.ext->buf + offset;
+      len[0] = (size_t)(u.ext->length) - offset;
+      return;
+    }
+    written = u.ext->length - offset;
+    if (written > len[0])
+      written = len[0];
+    if (written) {
+      FIO___MEMCPY(
+          buf[0] + buf_offset, u.ext->buf + u.ext->offset + offset, written);
+      len[0] -= written;
+    }
+    if (len[0]) {
+      fio___stream_read_internal(p->next, buf, len, written + buf_offset, 0, 1);
+    }
+    len[0] += written;
+    return;
+    break;
+  case FIO_PACKET_TYPE_FILE: /* fallthrough */
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
+    if (!buf[0] || !len[0]) {
+      buf[0] = NULL;
+      len[0] = 0;
+      return;
+    }
+    {
+      uint8_t possible_eol_surprise = 0;
+      written = u.ext->length - offset;
+      if (written > len[0])
+        written = len[0];
+      if (written) {
+        ssize_t act;
+      retry_on_signal:
+        act = pread(u.f->fd, buf[0], written, u.f->offset + offset);
+        if (act <= 0) {
+          /* no more data in the file? */
+          if (errno == EINTR)
+            goto retry_on_signal;
+          u.f->length = offset;
+        } else if ((size_t)act != written) {
+          /* a surprising EOF? */
+          written = act;
+          possible_eol_surprise = 1;
+        }
+        len[0] -= written;
+      }
+      if (!possible_eol_surprise && len[0]) {
+        fio___stream_read_internal(
+            p->next, buf, len, written + buf_offset, 0, 1);
+      }
+      len[0] += written;
+    }
+    return;
+  }
+}
+
+/**
+ * Reads data from the stream (if any), leaving it in the stream.
+ *
+ * `buf` MUST point to a buffer with - at least - `len` bytes. This is required
+ * in case the packed data is fragmented or references a file and needs to be
+ * copied to an available buffer.
+ *
+ * On error, or if the stream is empty, `buf` will be set to NULL and `len` will
+ * be set to zero.
+ *
+ * Otherwise, `buf` may retain the same value or it may point directly to a
+ * memory address wiithin the stream's buffer (the original value may be lost)
+ * and `len` will be updated to the largest possible value for valid data that
+ * can be read from `buf`.
+ *
+ * Note: this isn't thread safe.
+ */
+SFUNC void fio_stream_read(fio_stream_s *s, char **buf, size_t *len) {
+  if (!s || !s->next)
+    goto none;
+  fio___stream_read_internal(s->next, buf, len, 0, s->consumed, 0);
+  return;
+none:
+  *buf = NULL;
+  *len = 0;
+}
+
+/**
+ * Advances the Stream, so the first `len` bytes are marked as consumed.
+ *
+ * Note: this isn't thread safe.
+ */
+SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
+  if (!s || !s->next)
+    return;
+  len += s->consumed;
+  while (len) {
+    size_t p_len = fio___stream_p2len(s->next);
+    if (len >= p_len) {
+      fio_stream_packet_s *p = s->next;
+      s->next = p->next;
+      --s->packets;
+      fio_stream_packet_free(p);
+      len -= p_len;
+      if (!s->next) {
+        s->pos = &s->next;
+        s->consumed = 0;
+        s->packets = 0;
+        return;
+      }
+    } else {
+      s->consumed = len;
+      return;
+    }
+  }
+  s->consumed = len;
+}
+
+/* *****************************************************************************
+Module Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
+  char *const str =
+      "My Hello World string should be long enough so iit can be used for "
+      "testing the stream functionality in the facil.io stream module. The "
+      "stream moduule takes strings and failes and places them (by reference / "
+      "copy) into a linked list of objects. When data is requested from the "
+      "stream, the stream will either copy the data to a pre-allocated buffer "
+      "or it may update the link to it points to its own internal buffer "
+      "(avoiding a copy when possible).";
+  fio_stream_s s = FIO_STREAM_INIT(s);
+  char mem[4000];
+  char *buf = mem;
+  size_t len = 4000;
+  fprintf(stderr, "* Testing fio_stream for streaming buffer storage.\n");
+  fio_stream_add(&s, fio_stream_pack_data(str, 11, 3, 1, NULL));
+  FIO_ASSERT(fio_stream_any(&s),
+             "stream is empty after `fio_stream_add` (data, copy)");
+  for (int i = 0; i < 3; ++i) {
+    /* test that read operrations are immutable */
+    buf = mem;
+    len = 4000;
+    fio_stream_read(&s, &buf, &len);
+    FIO_ASSERT(len == 11,
+               "fio_stream_read didn't read all data from stream? (%zu)",
+               len);
+    FIO_ASSERT(!memcmp(str + 3, buf, len),
+               "fio_stream_read data error? (%.*s)",
+               (int)len,
+               buf);
+    FIO_ASSERT_DEBUG(
+        buf != mem,
+        "fio_stream_read should have been performed with zero-copy");
+  }
+  fio_stream_advance(&s, len);
+  FIO_ASSERT(
+      !fio_stream_any(&s),
+      "after advance, at this point, the stream should have been consumed.");
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(
+      !buf && !len,
+      "reading from an empty stream should set buf and len to NULL and zero.");
+  fio_stream_destroy(&s);
+  FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
+
+  fio_stream_add(&s, fio_stream_pack_data(str, 11, 0, 1, NULL));
+  fio_stream_add(&s, fio_stream_pack_data(str, 49, 11, 0, NULL));
+  fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
+
+  FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
+  FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error.");
+
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+
+  FIO_ASSERT(len == 80,
+             "fio_stream_read didn't read all data from stream(2)? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp(str, buf, len),
+             "fio_stream_read data error? (%.*s)",
+             (int)len,
+             buf);
+  fio_stream_advance(&s, 20);
+  FIO_ASSERT(fio_stream_packets(&s) == 2, "packet counut error (2).");
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 60,
+             "fio_stream_read didn't read all data from stream(3)? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp(str + 20, buf, len),
+             "fio_stream_read data error? (%.*s)",
+             (int)len,
+             buf);
+
+  fio_stream_destroy(&s);
+  FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
+  /*
+   * test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_STREAM___EMBD_BIT_OFFSET
+#endif /* FIO_STREAM */
+#undef FIO_STREAM
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2020
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -11198,6 +11890,11 @@ void example(void) {
 /* internal flag - do not set */
 #define FIO_ARRAY_TYPE_INVALID_SIMPLE 1
 #endif
+#endif
+
+#ifndef FIO_ARRAY_TYPE_INVALID_SIMPLE
+/** Is the FIO_ARRAY_TYPE_INVALID object memory is all zero? (yes = 1) */
+#define FIO_ARRAY_TYPE_INVALID_SIMPLE 0
 #endif
 
 #ifndef FIO_ARRAY_TYPE_COPY
@@ -12003,7 +12700,8 @@ expansion:
       was_moved = 1;
     }
     /* initialize memory in between objects */
-    if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_) {
+    if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_ ||
+        !FIO_ARRAY_TYPE_INVALID_SIMPLE) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
       memset(a + count, 0, (index - count) * sizeof(*ary->ary));
 #else
@@ -12639,7 +13337,7 @@ FIO_SFUNC int FIO_NAME_TEST(stl,
   return -1;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test))(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
   FIO_ARRAY_TYPE o;
   FIO_ARRAY_TYPE v;
   FIO_NAME(FIO_ARRAY_NAME, s) a_on_stack = FIO_ARRAY_INIT;
@@ -14956,7 +15654,7 @@ String API - Testing
 /**
  * Tests the fio_str functionality.
  */
-SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void);
+SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void);
 #endif
 /* *****************************************************************************
 
@@ -16694,7 +17392,7 @@ finish:
 /**
  * Tests the fio_str functionality.
  */
-SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
+SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
   fprintf(
@@ -17378,6 +18076,168 @@ Reference Counter (Wrapper) Cleanup
 #undef FIO_REF_CONSTRUCTOR
 #undef FIO_REF_DESTRUCTOR
 #endif
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2020
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_MODULE_NAME module      /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+
+
+
+
+
+
+                  A Template for New Types / Modules
+
+
+
+
+
+
+
+
+
+
+***************************************************************************** */
+#ifdef FIO_MODULE_NAME
+
+/* *****************************************************************************
+Module Settings
+
+At this point, define any MACROs and customaizable settings avsailable to the
+developer.
+***************************************************************************** */
+
+/* *****************************************************************************
+Pointer Tagging Support
+***************************************************************************** */
+
+#ifdef FIO_PTR_TAG_TYPE
+#define FIO_MODULE_PTR FIO_PTR_TAG_TYPE
+#else
+#define FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, s) *
+#endif
+
+/* *****************************************************************************
+Module API
+***************************************************************************** */
+
+typedef struct {
+  /* module's type(s) if any */
+  void *data;
+} FIO_NAME(FIO_MODULE_NAME, s);
+
+/* at this point publish (declare only) the public API */
+
+#ifndef FIO_MODULE_INIT
+/* Initialization macro. */
+#define FIO_MODULE_INIT                                                        \
+  { 0 }
+#endif
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void);
+
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj);
+
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/** Destroys the object, reinitializing its container. */
+SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj);
+
+/* *****************************************************************************
+Module Implementation - inlined static functions
+***************************************************************************** */
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+
+*/
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
+  FIO_NAME(FIO_MODULE_NAME, s) *o =
+      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  if (!o)
+    return (FIO_MODULE_PTR)NULL;
+  *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
+  return (FIO_MODULE_PTR)FIO_PTR_TAG(o);
+}
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
+  FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
+  FIO_NAME(FIO_MODULE_NAME, s) *o =
+      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
+  FIO_MEM_FREE_(o, sizeof(*o));
+  return 0;
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/* *****************************************************************************
+Module Implementation - possibly externed functions.
+***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
+
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+
+*/
+
+/* Frees any internal data AND the object's container! */
+SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
+  FIO_NAME(FIO_MODULE_NAME, s) *o =
+      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
+  /* add destruction logic */
+
+  *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
+  return;
+}
+
+/* *****************************************************************************
+Module Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
+  /*
+   * test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_MODULE_PTR
+#endif /* FIO_MODULE_NAME */
+#undef FIO_MODULE_NAME
 /* *****************************************************************************
 
 
@@ -19771,6 +20631,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_RAND
 #define FIO_ATOMIC
 #define FIO_RISKY_HASH
+#define FIO_MALLOC /* define to tests types with custom allocator */
 #include __FILE__
 
 TEST_FUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
@@ -19848,7 +20709,7 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
              "Linked list empty should have been true");
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
-        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), ));
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -19888,242 +20749,6 @@ static int ary____test_was_destroyed = 0;
 #define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
-
-static int fio_____dynamic_test_array_task(int o, void *c_) {
-  ((size_t *)(c_))[0] += o;
-  if (((size_t *)(c_))[0] >= 256)
-    return -1;
-  return 0;
-}
-
-TEST_FUNC void fio___dynamic_types_test___array_test(void) {
-  int tmp = 0;
-  ary____test_s a = FIO_ARRAY_INIT;
-  fprintf(stderr, "* Testing dynamic arrays.\n");
-
-  fprintf(stderr, "* Testing on stack, push/pop.\n");
-  /* test stack allocated array (initialization) */
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Freshly initialized array should have zero elements");
-  memset(&a, 1, sizeof(a));
-  a = (ary____test_s)FIO_ARRAY_INIT;
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Reinitialized array should have zero elements");
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  /* test get/set array functions */
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_pop(&a, &tmp);
-  FIO_ASSERT(tmp == 2, "pop failed to set correct element.");
-  ary____test_pop(&a, &tmp);
-  /* array is now empty */
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  ary____test_push(&a, 3);
-  ary____test_set(&a, 99, 1, NULL);
-  FIO_ASSERT(ary____test_count(&a) == 100,
-             "set with 100 elements should force create elements.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "Intialized element should be kept (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "Intialized element should be kept (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "Intialized element should be kept (index 2)");
-  for (int i = 3; i < 99; ++i) {
-    FIO_ASSERT(ary____test_get(&a, i) == 0, "Unintialized element should be 0");
-  }
-  ary____test_remove2(&a, 0);
-  FIO_ASSERT(ary____test_count(&a) == 4,
-             "remove2 should have removed all zero elements.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "remove2 should have compacted the array (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "remove2 should have compacted the array (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "remove2 should have compacted the array (index 2)");
-  FIO_ASSERT(ary____test_get(&a, 3) == 1,
-             "remove2 should have compacted the array (index 4)");
-  tmp = 9;
-  ary____test_remove(&a, 0, &tmp);
-  FIO_ASSERT(tmp == 1, "remove should have copied the value to the pointer.");
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "remove should have removed an element.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 2,
-             "remove should have compacted the array.");
-  /* test stack allocated array (destroy) */
-  ary____test_destroy(&a);
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Destroyed array should have zero elements");
-  FIO_ASSERT(a.ary == NULL, "Destroyed array shouldn't have memory allocated");
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  ary____test_push(&a, 3);
-  ary____test_reserve(&a, 100);
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "reserve shouldn't effect item count.");
-  FIO_ASSERT(ary____test_capa(&a) >= 100, "reserve should reserve.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "Element should be kept after reserve (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "Element should be kept after reserve (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "Element should be kept after reserve (index 2)");
-  ary____test_compact(&a);
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "compact shouldn't effect item count.");
-  ary____test_destroy(&a);
-
-  /* Round 2 - heap, shift/unshift, negative ary_set index */
-
-  fprintf(stderr, "* Testing on heap, shift/unshift.\n");
-  /* test heap allocated array (initialization) */
-  ary____test_s *pa = ary____test_new();
-  FIO_ASSERT(ary____test_count(pa) == 0,
-             "Freshly initialized array should have zero elements");
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 1);
-  /* test get/set/shift/unshift array functions */
-  FIO_ASSERT(ary____test_get(pa, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_shift(pa, &tmp);
-  FIO_ASSERT(tmp == 1, "shift failed to set correct element.");
-  ary____test_shift(pa, &tmp);
-  FIO_ASSERT(tmp == 2, "shift failed to set correct element.");
-  /* array now empty */
-  ary____test_unshift(pa, 1);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 3);
-  ary____test_set(pa, -100, 1, NULL);
-  FIO_ASSERT(ary____test_count(pa) == 100,
-             "set with 100 elements should force create elements.");
-  // FIO_ARRAY_EACH(pa, pos) {
-  //   fprintf(stderr, "[%zu]  %d\n", (size_t)(pos -
-  //   FIO_NAME2(ary____test,ptr)(pa)), *pos);
-  // }
-  FIO_ASSERT(ary____test_get(pa, 99) == 1,
-             "Intialized element should be kept (index 99)");
-  FIO_ASSERT(ary____test_get(pa, 98) == 2,
-             "Intialized element should be kept (index 98)");
-  FIO_ASSERT(ary____test_get(pa, 97) == 3,
-             "Intialized element should be kept (index 97)");
-  for (int i = 1; i < 97; ++i) {
-    FIO_ASSERT(ary____test_get(pa, i) == 0, "Unintialized element should be 0");
-  }
-  ary____test_remove2(pa, 0);
-  FIO_ASSERT(ary____test_count(pa) == 4,
-             "remove2 should have removed all zero elements.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1, "remove2 should have kept index 0");
-  FIO_ASSERT(ary____test_get(pa, 1) == 3, "remove2 should have kept index 1");
-  FIO_ASSERT(ary____test_get(pa, 2) == 2, "remove2 should have kept index 2");
-  FIO_ASSERT(ary____test_get(pa, 3) == 1, "remove2 should have kept index 3");
-  tmp = 9;
-  ary____test_remove(pa, 0, &tmp);
-  FIO_ASSERT(tmp == 1, "remove should have copied the value to the pointer.");
-  FIO_ASSERT(ary____test_count(pa) == 3,
-             "remove should have removed an element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 3,
-             "remove should have compacted the array.");
-  /* test heap allocated array (destroy) */
-  ary____test_destroy(pa);
-  FIO_ASSERT(ary____test_count(pa) == 0,
-             "Destroyed array should have zero elements");
-  ary____test_unshift(pa, 1);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 3);
-  ary____test_reserve(pa, -100);
-  FIO_ASSERT(ary____test_count(pa) == 3,
-             "reserve shouldn't change item count.");
-  FIO_ASSERT(ary____test_capa(pa) >= 100, "reserve should reserve.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 3, "reserve should have kept index 0");
-  FIO_ASSERT(ary____test_get(pa, 1) == 2, "reserve should have kept index 1");
-  FIO_ASSERT(ary____test_get(pa, 2) == 1, "reserve should have kept index 2");
-  ary____test_destroy(pa);
-  ary____test_free(pa);
-
-  fprintf(stderr, "* Testing non-zero value for uninitialized elements.\n");
-  ary2____test_s a2 = FIO_ARRAY_INIT;
-  ary2____test_set(&a2, 99, 1, NULL);
-  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
-    FIO_ASSERT(
-        (*pos == 0xFF || (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 99),
-        "uninitialized elements should be initialized as "
-        "FIO_ARRAY_TYPE_INVALID");
-  }
-  ary2____test_set(&a2, -200, 1, NULL);
-  FIO_ASSERT(ary2____test_count(&a2) == 200, "array should have 100 items.");
-  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
-    FIO_ASSERT((*pos == 0xFF ||
-                (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 0 ||
-                (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 199),
-               "uninitialized elements should be initialized as "
-               "FIO_ARRAY_TYPE_INVALID (index %zd)",
-               (pos - FIO_NAME2(ary2____test, ptr)(&a2)));
-  }
-  ary2____test_destroy(&a2);
-
-  /* Round 3 - heap, with reference counting */
-  fprintf(stderr, "* Testing reference counting.\n");
-  /* test heap allocated array (initialization) */
-  pa = ary____test_new2();
-  ary____test_up_ref(pa);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 1);
-  ary____test_free2(pa);
-  FIO_ASSERT(!ary____test_was_destroyed,
-             "reference counted array destroyed too early.");
-  FIO_ASSERT(ary____test_get(pa, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_free2(pa);
-  FIO_ASSERT(ary____test_was_destroyed,
-             "reference counted array not destroyed.");
-
-  fprintf(stderr, "* Testing dynamic arrays helpers.\n");
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    ary____test_push(&a, i);
-  }
-  FIO_ASSERT(ary____test_count(&a) == TEST_REPEAT, "push object count error");
-  {
-    size_t c = 0;
-    size_t i = ary____test_each(&a, 3, fio_____dynamic_test_array_task, &c);
-    FIO_ASSERT(i < 64, "too many objects counted in each loop.");
-    FIO_ASSERT(c >= 256 && c < 512, "each loop too long.");
-  }
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    FIO_ASSERT((size_t)ary____test_get(&a, i) == i,
-               "push order / insert issue");
-  }
-  ary____test_destroy(&a);
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    ary____test_unshift(&a, i);
-  }
-  FIO_ASSERT(ary____test_count(&a) == TEST_REPEAT,
-             "unshift object count error");
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    int old = 0;
-    ary____test_pop(&a, &old);
-    FIO_ASSERT((size_t)old == i, "shift order / insert issue");
-  }
-  ary____test_destroy(&a);
-}
 
 /* *****************************************************************************
 Hash Map / Set - test
@@ -20423,8 +21048,8 @@ Dynamic Strings - test
  * Tests the fio_str functionality.
  */
 TEST_FUNC void fio___dynamic_types_test___str(void) {
-  fio_big_str___dynamic_test();
-  fio_small_str___dynamic_test();
+  FIO_NAME_TEST(stl, fio_big_str)();
+  FIO_NAME_TEST(stl, fio_small_str)();
 }
 
 /* *****************************************************************************
@@ -20456,9 +21081,10 @@ Memory Allocation - test
 #define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
 /* *****************************************************************************
-Socket helper testing
+Socket helper and Stream testing
 ***************************************************************************** */
 #define FIO_SOCK
+#define FIO_STREAM
 #include __FILE__
 
 /* *****************************************************************************
@@ -20761,11 +21387,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, FIO_NAME(ary____test, test))();
-  FIO_NAME_TEST(stl, FIO_NAME(ary2____test, test))();
-  FIO_NAME_TEST(stl, fiobj)();
-  fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___array_test();
+  FIO_NAME_TEST(stl, ary____test)();
+  FIO_NAME_TEST(stl, ary2____test)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
@@ -20776,6 +21399,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, queue)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, fio_stream)();
   fprintf(stderr, "===============\n");
   /* test memory allocator that initializes memory to zero */
   FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
