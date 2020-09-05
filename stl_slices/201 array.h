@@ -72,6 +72,11 @@ void example(void) {
 #endif
 #endif
 
+#ifndef FIO_ARRAY_TYPE_INVALID_SIMPLE
+/** Is the FIO_ARRAY_TYPE_INVALID object memory is all zero? (yes = 1) */
+#define FIO_ARRAY_TYPE_INVALID_SIMPLE 0
+#endif
+
 #ifndef FIO_ARRAY_TYPE_COPY
 /** Handles a copy operation for an array's element. */
 #define FIO_ARRAY_TYPE_COPY(dest, src) (dest) = (src)
@@ -875,7 +880,8 @@ expansion:
       was_moved = 1;
     }
     /* initialize memory in between objects */
-    if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_) {
+    if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_ ||
+        !FIO_ARRAY_TYPE_INVALID_SIMPLE) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
       memset(a + count, 0, (index - count) * sizeof(*ary->ary));
 #else
@@ -1511,7 +1517,7 @@ FIO_SFUNC int FIO_NAME_TEST(stl,
   return -1;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test))(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
   FIO_ARRAY_TYPE o;
   FIO_ARRAY_TYPE v;
   FIO_NAME(FIO_ARRAY_NAME, s) a_on_stack = FIO_ARRAY_INIT;
