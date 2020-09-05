@@ -507,7 +507,7 @@ String API - Testing
 /**
  * Tests the fio_str functionality.
  */
-SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void);
+SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void);
 #endif
 /* *****************************************************************************
 
@@ -2245,7 +2245,7 @@ finish:
 /**
  * Tests the fio_str functionality.
  */
-SFUNC void FIO_NAME(FIO_STR_NAME, __dynamic_test)(void) {
+SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
   fprintf(

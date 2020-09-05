@@ -73,6 +73,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_RAND
 #define FIO_ATOMIC
 #define FIO_RISKY_HASH
+#define FIO_MALLOC /* define to tests types with custom allocator */
 #include __FILE__
 
 TEST_FUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
@@ -150,7 +151,7 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
              "Linked list empty should have been true");
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
-        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), ));
+        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -190,242 +191,6 @@ static int ary____test_was_destroyed = 0;
 #define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
-
-static int fio_____dynamic_test_array_task(int o, void *c_) {
-  ((size_t *)(c_))[0] += o;
-  if (((size_t *)(c_))[0] >= 256)
-    return -1;
-  return 0;
-}
-
-TEST_FUNC void fio___dynamic_types_test___array_test(void) {
-  int tmp = 0;
-  ary____test_s a = FIO_ARRAY_INIT;
-  fprintf(stderr, "* Testing dynamic arrays.\n");
-
-  fprintf(stderr, "* Testing on stack, push/pop.\n");
-  /* test stack allocated array (initialization) */
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Freshly initialized array should have zero elements");
-  memset(&a, 1, sizeof(a));
-  a = (ary____test_s)FIO_ARRAY_INIT;
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Reinitialized array should have zero elements");
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  /* test get/set array functions */
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(&a, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_pop(&a, &tmp);
-  FIO_ASSERT(tmp == 2, "pop failed to set correct element.");
-  ary____test_pop(&a, &tmp);
-  /* array is now empty */
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  ary____test_push(&a, 3);
-  ary____test_set(&a, 99, 1, NULL);
-  FIO_ASSERT(ary____test_count(&a) == 100,
-             "set with 100 elements should force create elements.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "Intialized element should be kept (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "Intialized element should be kept (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "Intialized element should be kept (index 2)");
-  for (int i = 3; i < 99; ++i) {
-    FIO_ASSERT(ary____test_get(&a, i) == 0, "Unintialized element should be 0");
-  }
-  ary____test_remove2(&a, 0);
-  FIO_ASSERT(ary____test_count(&a) == 4,
-             "remove2 should have removed all zero elements.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "remove2 should have compacted the array (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "remove2 should have compacted the array (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "remove2 should have compacted the array (index 2)");
-  FIO_ASSERT(ary____test_get(&a, 3) == 1,
-             "remove2 should have compacted the array (index 4)");
-  tmp = 9;
-  ary____test_remove(&a, 0, &tmp);
-  FIO_ASSERT(tmp == 1, "remove should have copied the value to the pointer.");
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "remove should have removed an element.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 2,
-             "remove should have compacted the array.");
-  /* test stack allocated array (destroy) */
-  ary____test_destroy(&a);
-  FIO_ASSERT(ary____test_count(&a) == 0,
-             "Destroyed array should have zero elements");
-  FIO_ASSERT(a.ary == NULL, "Destroyed array shouldn't have memory allocated");
-  ary____test_push(&a, 1);
-  ary____test_push(&a, 2);
-  ary____test_push(&a, 3);
-  ary____test_reserve(&a, 100);
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "reserve shouldn't effect item count.");
-  FIO_ASSERT(ary____test_capa(&a) >= 100, "reserve should reserve.");
-  FIO_ASSERT(ary____test_get(&a, 0) == 1,
-             "Element should be kept after reserve (index 0)");
-  FIO_ASSERT(ary____test_get(&a, 1) == 2,
-             "Element should be kept after reserve (index 1)");
-  FIO_ASSERT(ary____test_get(&a, 2) == 3,
-             "Element should be kept after reserve (index 2)");
-  ary____test_compact(&a);
-  FIO_ASSERT(ary____test_count(&a) == 3,
-             "compact shouldn't effect item count.");
-  ary____test_destroy(&a);
-
-  /* Round 2 - heap, shift/unshift, negative ary_set index */
-
-  fprintf(stderr, "* Testing on heap, shift/unshift.\n");
-  /* test heap allocated array (initialization) */
-  ary____test_s *pa = ary____test_new();
-  FIO_ASSERT(ary____test_count(pa) == 0,
-             "Freshly initialized array should have zero elements");
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 1);
-  /* test get/set/shift/unshift array functions */
-  FIO_ASSERT(ary____test_get(pa, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_shift(pa, &tmp);
-  FIO_ASSERT(tmp == 1, "shift failed to set correct element.");
-  ary____test_shift(pa, &tmp);
-  FIO_ASSERT(tmp == 2, "shift failed to set correct element.");
-  /* array now empty */
-  ary____test_unshift(pa, 1);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 3);
-  ary____test_set(pa, -100, 1, NULL);
-  FIO_ASSERT(ary____test_count(pa) == 100,
-             "set with 100 elements should force create elements.");
-  // FIO_ARRAY_EACH(pa, pos) {
-  //   fprintf(stderr, "[%zu]  %d\n", (size_t)(pos -
-  //   FIO_NAME2(ary____test,ptr)(pa)), *pos);
-  // }
-  FIO_ASSERT(ary____test_get(pa, 99) == 1,
-             "Intialized element should be kept (index 99)");
-  FIO_ASSERT(ary____test_get(pa, 98) == 2,
-             "Intialized element should be kept (index 98)");
-  FIO_ASSERT(ary____test_get(pa, 97) == 3,
-             "Intialized element should be kept (index 97)");
-  for (int i = 1; i < 97; ++i) {
-    FIO_ASSERT(ary____test_get(pa, i) == 0, "Unintialized element should be 0");
-  }
-  ary____test_remove2(pa, 0);
-  FIO_ASSERT(ary____test_count(pa) == 4,
-             "remove2 should have removed all zero elements.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1, "remove2 should have kept index 0");
-  FIO_ASSERT(ary____test_get(pa, 1) == 3, "remove2 should have kept index 1");
-  FIO_ASSERT(ary____test_get(pa, 2) == 2, "remove2 should have kept index 2");
-  FIO_ASSERT(ary____test_get(pa, 3) == 1, "remove2 should have kept index 3");
-  tmp = 9;
-  ary____test_remove(pa, 0, &tmp);
-  FIO_ASSERT(tmp == 1, "remove should have copied the value to the pointer.");
-  FIO_ASSERT(ary____test_count(pa) == 3,
-             "remove should have removed an element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 3,
-             "remove should have compacted the array.");
-  /* test heap allocated array (destroy) */
-  ary____test_destroy(pa);
-  FIO_ASSERT(ary____test_count(pa) == 0,
-             "Destroyed array should have zero elements");
-  ary____test_unshift(pa, 1);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 3);
-  ary____test_reserve(pa, -100);
-  FIO_ASSERT(ary____test_count(pa) == 3,
-             "reserve shouldn't change item count.");
-  FIO_ASSERT(ary____test_capa(pa) >= 100, "reserve should reserve.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 3, "reserve should have kept index 0");
-  FIO_ASSERT(ary____test_get(pa, 1) == 2, "reserve should have kept index 1");
-  FIO_ASSERT(ary____test_get(pa, 2) == 1, "reserve should have kept index 2");
-  ary____test_destroy(pa);
-  ary____test_free(pa);
-
-  fprintf(stderr, "* Testing non-zero value for uninitialized elements.\n");
-  ary2____test_s a2 = FIO_ARRAY_INIT;
-  ary2____test_set(&a2, 99, 1, NULL);
-  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
-    FIO_ASSERT(
-        (*pos == 0xFF || (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 99),
-        "uninitialized elements should be initialized as "
-        "FIO_ARRAY_TYPE_INVALID");
-  }
-  ary2____test_set(&a2, -200, 1, NULL);
-  FIO_ASSERT(ary2____test_count(&a2) == 200, "array should have 100 items.");
-  FIO_ARRAY_EACH(ary2____test, &a2, pos) {
-    FIO_ASSERT((*pos == 0xFF ||
-                (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 0 ||
-                (pos - FIO_NAME2(ary2____test, ptr)(&a2)) == 199),
-               "uninitialized elements should be initialized as "
-               "FIO_ARRAY_TYPE_INVALID (index %zd)",
-               (pos - FIO_NAME2(ary2____test, ptr)(&a2)));
-  }
-  ary2____test_destroy(&a2);
-
-  /* Round 3 - heap, with reference counting */
-  fprintf(stderr, "* Testing reference counting.\n");
-  /* test heap allocated array (initialization) */
-  pa = ary____test_new2();
-  ary____test_up_ref(pa);
-  ary____test_unshift(pa, 2);
-  ary____test_unshift(pa, 1);
-  ary____test_free2(pa);
-  FIO_ASSERT(!ary____test_was_destroyed,
-             "reference counted array destroyed too early.");
-  FIO_ASSERT(ary____test_get(pa, 1) == 2,
-             "`get` by index failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -1) == 2,
-             "last element `get` failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, 0) == 1,
-             "`get` by index 0 failed to return correct element.");
-  FIO_ASSERT(ary____test_get(pa, -2) == 1,
-             "last element `get(-2)` failed to return correct element.");
-  ary____test_free2(pa);
-  FIO_ASSERT(ary____test_was_destroyed,
-             "reference counted array not destroyed.");
-
-  fprintf(stderr, "* Testing dynamic arrays helpers.\n");
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    ary____test_push(&a, i);
-  }
-  FIO_ASSERT(ary____test_count(&a) == TEST_REPEAT, "push object count error");
-  {
-    size_t c = 0;
-    size_t i = ary____test_each(&a, 3, fio_____dynamic_test_array_task, &c);
-    FIO_ASSERT(i < 64, "too many objects counted in each loop.");
-    FIO_ASSERT(c >= 256 && c < 512, "each loop too long.");
-  }
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    FIO_ASSERT((size_t)ary____test_get(&a, i) == i,
-               "push order / insert issue");
-  }
-  ary____test_destroy(&a);
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    ary____test_unshift(&a, i);
-  }
-  FIO_ASSERT(ary____test_count(&a) == TEST_REPEAT,
-             "unshift object count error");
-  for (size_t i = 0; i < TEST_REPEAT; ++i) {
-    int old = 0;
-    ary____test_pop(&a, &old);
-    FIO_ASSERT((size_t)old == i, "shift order / insert issue");
-  }
-  ary____test_destroy(&a);
-}
 
 /* *****************************************************************************
 Hash Map / Set - test
@@ -725,8 +490,8 @@ Dynamic Strings - test
  * Tests the fio_str functionality.
  */
 TEST_FUNC void fio___dynamic_types_test___str(void) {
-  fio_big_str___dynamic_test();
-  fio_small_str___dynamic_test();
+  FIO_NAME_TEST(stl, fio_big_str)();
+  FIO_NAME_TEST(stl, fio_small_str)();
 }
 
 /* *****************************************************************************
@@ -758,9 +523,10 @@ Memory Allocation - test
 #define FIO_MEMORY_ARENA_COUNT            2
 #include __FILE__
 /* *****************************************************************************
-Socket helper testing
+Socket helper and Stream testing
 ***************************************************************************** */
 #define FIO_SOCK
+#define FIO_STREAM
 #include __FILE__
 
 /* *****************************************************************************
@@ -1063,11 +829,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, FIO_NAME(ary____test, test))();
-  FIO_NAME_TEST(stl, FIO_NAME(ary2____test, test))();
-  FIO_NAME_TEST(stl, fiobj)();
-  fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___array_test();
+  FIO_NAME_TEST(stl, ary____test)();
+  FIO_NAME_TEST(stl, ary2____test)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
@@ -1078,6 +841,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, queue)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, fio_stream)();
   fprintf(stderr, "===============\n");
   /* test memory allocator that initializes memory to zero */
   FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
