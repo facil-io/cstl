@@ -153,5 +153,15 @@ Advances the Stream, so the first `len` bytes are marked as consumed.
 
 **Note**: this isn't thread safe.
 
+### Stream configuration
+
+Besides the (recommended) use of a local allocator using the `FIO_MEMORY` or `FIO_MEM_REALLOC` macro families, the following configuration macros are supported:
+
+#### `FIO_STREAM_COPY_PER_PACKET`
+
+When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
+
+This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (which is neither here nor there).
+
 -------------------------------------------------------------------------------
 

@@ -39,6 +39,12 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifndef FIO_STREAM_COPY_PER_PACKET
+/** Break apart large memory blocks into smaller pieces. by default 96Kb */
+#define FIO_STREAM_COPY_PER_PACKET 98304
+#endif
+
 /* *****************************************************************************
 Stream API - types, constructor / destructor
 ***************************************************************************** */
@@ -305,8 +311,9 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
     goto error;
   if (copy_buffer || len <= 14) {
     while (len) {
-      /* break apart large memory blocks into smaller, 96Kb pieces */
-      const size_t slice = (len > 98304) ? 98304 : len;
+      /* break apart large memory blocks into smaller pieces */
+      const size_t slice =
+          (len > FIO_STREAM_COPY_PER_PACKET) ? FIO_STREAM_COPY_PER_PACKET : len;
       fio_stream_packet_embd_s *em;
       fio_stream_packet_s *tmp = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
           NULL, 0, sizeof(*p) + sizeof(*em) + (sizeof(char) * slice), 0);
