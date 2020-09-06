@@ -1,4 +1,4 @@
-## Data Stream
+## Data Stream Container
 
 Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
 

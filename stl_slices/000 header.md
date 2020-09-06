@@ -60,6 +60,10 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
 
+* [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
+
+* [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
+
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
 ## Testing the Library (`FIO_TEST_CSTL`)

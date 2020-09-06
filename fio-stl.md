@@ -60,6 +60,10 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
 
+* [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
+
+* [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
+
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
 ## Testing the Library (`FIO_TEST_CSTL`)
@@ -2636,7 +2640,7 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 Creates a new Unix socket and binds it to a local address.
 
 -------------------------------------------------------------------------------
-## Data Stream
+## Data Stream Container
 
 Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
 
@@ -2793,6 +2797,43 @@ Advances the Stream, so the first `len` bytes are marked as consumed.
 
 -------------------------------------------------------------------------------
 
+## Signal Monitoring
+
+OS signal callbacks are very limited in the actions they are allowed to take. In fact, one of the only actions they are allowed to take is to set a volatile atomic flag.
+
+The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.
+
+When defining `FIO_SIGNAL`, the following function are defined.
+
+#### `fio_signal_monitor`
+
+```c
+int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata);
+```
+
+Starts to monitor for the specified signal, setting an optional callback.
+
+If the signal is already being monitored, the callback and `udata` pointers are updated.
+
+**Note**: `udata` stands for "user data", it is an opaque pointer that is simply passed along to the callback.
+
+#### `fio_signal_review`
+
+```c
+int fio_signal_review(void);
+```
+
+Reviews all signals, calling any relevant callbacks.
+
+#### `fio_signal_forget`
+
+```c
+int fio_signal_forget(int sig);
+```
+
+Stops monitoring the specified signal.
+
+-------------------------------------------------------------------------------
 ## Linked Lists
 
 ```c

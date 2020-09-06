@@ -65,6 +65,12 @@ This file also contains common helper macros / primitives, such as:
 
 * Command Line Interface helpers - defined by `FIO_CLI`
 
+* Socket Helpers - defined by `FIO_SOCK`
+
+* Data Stream Containers - defined by `FIO_STREAM`
+
+* Signal (passthrough) Monitors - defined by `FIO_SIGNAL`
+
 * Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
   if `FIO_MALLOC` is used, it updates `FIO_MEM_REALLOC` etc'
 

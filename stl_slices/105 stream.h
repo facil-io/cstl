@@ -597,10 +597,10 @@ SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
 }
 
 /* *****************************************************************************
-Module Testing
+Stream Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char *const str =
       "My Hello World string should be long enough so it can be used for "
       "testing the stream functionality in the facil.io stream module. The "
@@ -714,9 +714,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fio_stream)(void) {
 
   fio_stream_destroy(&s);
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
-  /*
-   * test module here
-   */
 }
 
 #endif /* FIO_TEST_CSTL */

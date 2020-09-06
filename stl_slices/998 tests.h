@@ -527,6 +527,7 @@ Socket helper and Stream testing
 ***************************************************************************** */
 #define FIO_SOCK
 #define FIO_STREAM
+#define FIO_SIGNAL
 #include __FILE__
 
 /* *****************************************************************************
@@ -842,7 +843,9 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, fio_stream)();
+  FIO_NAME_TEST(stl, stream)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, signal)();
   fprintf(stderr, "===============\n");
   /* test memory allocator that initializes memory to zero */
   FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
