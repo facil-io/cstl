@@ -1053,7 +1053,7 @@ This function attempts to accept many different formats, including any of the fo
 
 Invalid formats might produce unexpected results. No error testing performed.
 
-The `file` and `unix` schemas are special in the sense that they produce no `host` (only `path`).
+The `file` and `unix` schema is special in the sense that it produce no `host` (only `path`).
 
 -------------------------------------------------------------------------------
 ## Custom JSON Parser
