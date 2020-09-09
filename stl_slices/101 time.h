@@ -53,6 +53,9 @@ FIO_IFUNC uint64_t fio_time_micro();
 /** Returns monotonic time in milliseconds. */
 FIO_IFUNC uint64_t fio_time_milli();
 
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC uint64_t fio_time2milli(struct timespec);
+
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
  *
@@ -144,6 +147,11 @@ FIO_IFUNC uint64_t fio_time_micro() {
 /** Returns monotonic time in milliseconds. */
 FIO_IFUNC uint64_t fio_time_milli() {
   struct timespec t = fio_time_mono();
+  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+}
+
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC uint64_t fio_time2milli(struct timespec t) {
   return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
 }
 

@@ -34,7 +34,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_SIGNAL
+#if defined(FIO_SIGNAL) && !defined(H___FIO_SIGNAL___H)
+#define H___FIO_SIGNAL___H
 
 #ifndef FIO_SIGNAL_MONITOR_MAX
 /* The maximum number of signals the implementation will be able to monitor */

@@ -457,7 +457,6 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
   if (!*pos || (*pos)->due > due)
     return NULL;
   fio___timer_event_s *t = *pos;
-
   *pos = t->next;
   return t;
 }
@@ -504,6 +503,7 @@ SFUNC void fio___timer_perform(void *timer_, void *t_) {
   fio___timer_event_s *t = (fio___timer_event_s *)t_;
   if (t->fn(t->udata1, t->udata2))
     tq = NULL;
+  t->due += t->every;
   fio___timer_event_free(tq, t);
 }
 
@@ -792,6 +792,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                  "task should have been performed (%zu).",
                  (size_t)tester);
     }
+    fio_timer_push2queue(&q2, &tq, fio_time_milli());
+    FIO_ASSERT(fio_queue_count(&q2) == 0,
+               "task should NOT have been scheduled");
+
     tester = 0;
     fio_timer_clear(&tq);
     FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
@@ -820,7 +824,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(fio_timer_next_at(&tq) == milli_now - 9,
                "fio_timer_next_at value error.");
     fio_timer_push2queue(&q2, &tq, milli_now);
-    FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+    FIO_ASSERT(fio_queue_count(&q2) == 1,
+               "task should have been scheduled (2)");
     FIO_ASSERT(fio_timer_next_at(&tq) == milli_now + 90,
                "fio_timer_next_at value error for unscheduled task.");
     fio_queue_perform(&q2);

@@ -32,7 +32,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_STREAM
+#if defined(FIO_STREAM) && !defined(H___FIO_STREAM___H)
+#define H___FIO_STREAM___H
 
 #if !FIO_HAVE_UNIX_TOOLS
 #warning "POSIX is required for the fio_stream API."
@@ -339,7 +340,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
     ext = (fio_stream_packet_extrn_s *)(p + 1);
     *ext = (fio_stream_packet_extrn_s){
         .type = FIO_PACKET_TYPE_EXTERNAL,
-        .length = len,
+        .length = (uint32_t)len,
         .buf = (char *)buf,
         .offset = offset,
         .dealloc = dealloc_func,
@@ -383,7 +384,7 @@ fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
       .type =
           (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
       .length = (uint32_t)len,
-      .offset = offset,
+      .offset = (int32_t)offset,
       .fd = fd,
   };
   return p;
@@ -396,10 +397,10 @@ no_file:
 
 /** Adds a packet to the stream. This isn't thread safe.*/
 SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
-  if (!s || !p)
-    return;
   fio_stream_packet_s *last = p;
   uint32_t packets = 1;
+  if (!s || !p)
+    goto error;
   while (last->next) {
     last = last->next;
     ++packets;
@@ -409,6 +410,9 @@ SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
   *s->pos = p;
   s->pos = &last->next;
   s->packets += packets;
+  return;
+error:
+  fio_stream_pack_free(p);
 }
 
 /** Destroys the fio_stream_packet_s - call this ONLY if unused. */

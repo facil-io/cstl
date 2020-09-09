@@ -1053,7 +1053,7 @@ This function attempts to accept many different formats, including any of the fo
 
 Invalid formats might produce unexpected results. No error testing performed.
 
-The `file` and `unix` schema is special in the sense that it produce no `host` (only `path`).
+The `file` and `unix` schemas are special in the sense that they produce no `host` (only `path`).
 
 -------------------------------------------------------------------------------
 ## Custom JSON Parser
@@ -1929,6 +1929,15 @@ uint64_t fio_time_milli();
 ```
 
 Returns monotonic time in milliseconds.
+
+
+#### `fio_time2milli`
+
+```c
+uint64_t fio_time2milli(struct timespec t);
+```
+
+Converts a `struct timespec` to milliseconds.
 
 #### `fio_time2gm`
 

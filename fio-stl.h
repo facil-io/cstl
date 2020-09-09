@@ -1100,6 +1100,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
+  /* release the locks we aquired, which are: ((~state) & group) */
   fio_atomic_and(lock, (state | (~group)));
   return 1;
 }
@@ -7860,6 +7861,9 @@ FIO_IFUNC uint64_t fio_time_micro();
 /** Returns monotonic time in milliseconds. */
 FIO_IFUNC uint64_t fio_time_milli();
 
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC uint64_t fio_time2milli(struct timespec);
+
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
  *
@@ -7951,6 +7955,11 @@ FIO_IFUNC uint64_t fio_time_micro() {
 /** Returns monotonic time in milliseconds. */
 FIO_IFUNC uint64_t fio_time_milli() {
   struct timespec t = fio_time_mono();
+  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+}
+
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC uint64_t fio_time2milli(struct timespec t) {
   return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
 }
 
@@ -8836,8 +8845,8 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
   if (!*pos || (*pos)->due > due)
     return NULL;
   fio___timer_event_s *t = *pos;
-
   *pos = t->next;
+  // t->due = due + t->every; /* update next scheduling time */
   return t;
 }
 
@@ -8883,6 +8892,7 @@ SFUNC void fio___timer_perform(void *timer_, void *t_) {
   fio___timer_event_s *t = (fio___timer_event_s *)t_;
   if (t->fn(t->udata1, t->udata2))
     tq = NULL;
+  t->due += t->every;
   fio___timer_event_free(tq, t);
 }
 
@@ -9171,6 +9181,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                  "task should have been performed (%zu).",
                  (size_t)tester);
     }
+    fio_timer_push2queue(&q2, &tq, fio_time_milli());
+    FIO_ASSERT(fio_queue_count(&q2) == 0,
+               "task should NOT have been scheduled");
+
     tester = 0;
     fio_timer_clear(&tq);
     FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
@@ -9199,7 +9213,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(fio_timer_next_at(&tq) == milli_now - 9,
                "fio_timer_next_at value error.");
     fio_timer_push2queue(&q2, &tq, milli_now);
-    FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+    FIO_ASSERT(fio_queue_count(&q2) == 1,
+               "task should have been scheduled (2)");
     FIO_ASSERT(fio_timer_next_at(&tq) == milli_now + 90,
                "fio_timer_next_at value error for unscheduled task.");
     fio_queue_perform(&q2);
@@ -10949,7 +10964,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_STREAM
+#if defined(FIO_STREAM) && !defined(H___FIO_STREAM___H)
+#define H___FIO_STREAM___H
 
 #if !FIO_HAVE_UNIX_TOOLS
 #warning "POSIX is required for the fio_stream API."
@@ -11256,7 +11272,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
     ext = (fio_stream_packet_extrn_s *)(p + 1);
     *ext = (fio_stream_packet_extrn_s){
         .type = FIO_PACKET_TYPE_EXTERNAL,
-        .length = len,
+        .length = (uint32_t)len,
         .buf = (char *)buf,
         .offset = offset,
         .dealloc = dealloc_func,
@@ -11300,7 +11316,7 @@ fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
       .type =
           (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
       .length = (uint32_t)len,
-      .offset = offset,
+      .offset = (int32_t)offset,
       .fd = fd,
   };
   return p;
@@ -11313,10 +11329,10 @@ no_file:
 
 /** Adds a packet to the stream. This isn't thread safe.*/
 SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
-  if (!s || !p)
-    return;
   fio_stream_packet_s *last = p;
   uint32_t packets = 1;
+  if (!s || !p)
+    goto error;
   while (last->next) {
     last = last->next;
     ++packets;
@@ -11326,6 +11342,9 @@ SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
   *s->pos = p;
   s->pos = &last->next;
   s->packets += packets;
+  return;
+error:
+  fio_stream_pack_free(p);
 }
 
 /** Destroys the fio_stream_packet_s - call this ONLY if unused. */
@@ -11685,7 +11704,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_SIGNAL
+#if defined(FIO_SIGNAL) && !defined(H___FIO_SIGNAL___H)
+#define H___FIO_SIGNAL___H
 
 #ifndef FIO_SIGNAL_MONITOR_MAX
 /* The maximum number of signals the implementation will be able to monitor */

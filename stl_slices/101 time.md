@@ -42,6 +42,15 @@ uint64_t fio_time_milli();
 
 Returns monotonic time in milliseconds.
 
+
+#### `fio_time2milli`
+
+```c
+uint64_t fio_time2milli(struct timespec t);
+```
+
+Converts a `struct timespec` to milliseconds.
+
 #### `fio_time2gm`
 
 ```c

@@ -162,6 +162,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
+  /* release the locks we aquired, which are: ((~state) & group) */
   fio_atomic_and(lock, (state | (~group)));
   return 1;
 }
