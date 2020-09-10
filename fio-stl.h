@@ -8575,7 +8575,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
  */
-FIO_IFUNC uint64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
+FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
 
 /**
  * Clears any waiting timer bound tasks.
@@ -8629,8 +8629,8 @@ struct fio___timer_event_s {
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
  */
-FIO_IFUNC uint64_t fio_timer_next_at(fio_timer_queue_s *tq) {
-  uint64_t v = (uint64_t)-1;
+FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *tq) {
+  int64_t v = -1;
   if (!tq)
     goto missing_tq;
   if (!tq || !tq->next)
@@ -9033,8 +9033,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio_queue_push(
         q, .fn = fio___queue_test_sample_task, .udata1 = (void *)&i_count);
-    fio_queue_perform(q);
   }
+  fio_queue_perform_all(q);
   end = clock();
   if (FIO___QUEUE_TEST_PRINT) {
     fprintf(stderr,
@@ -9190,7 +9190,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
     /* test single-use task */
     tester = 0;
-    uint64_t milli_now = fio_time_milli();
+    int64_t milli_now = fio_time_milli();
     fio_timer_schedule(&tq,
                        .fn = fio___queue_test_timer_task,
                        .udata1 = &tester,

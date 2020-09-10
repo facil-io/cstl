@@ -45,16 +45,16 @@ FIO_IFUNC struct timespec fio_time_real();
 FIO_IFUNC struct timespec fio_time_mono();
 
 /** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
-FIO_IFUNC uint64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano();
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC uint64_t fio_time_micro();
+FIO_IFUNC int64_t fio_time_micro();
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC uint64_t fio_time_milli();
+FIO_IFUNC int64_t fio_time_milli();
 
 /** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC uint64_t fio_time2milli(struct timespec);
+FIO_IFUNC int64_t fio_time2milli(struct timespec);
 
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
@@ -133,26 +133,26 @@ FIO_IFUNC struct timespec fio_time_mono() {
 }
 
 /** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
-FIO_IFUNC uint64_t fio_time_nano() {
+FIO_IFUNC int64_t fio_time_nano() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000000000) + (uint64_t)t.tv_nsec;
+  return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
 }
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC uint64_t fio_time_micro() {
+FIO_IFUNC int64_t fio_time_micro() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000000) + (uint64_t)t.tv_nsec / 1000;
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC uint64_t fio_time_milli() {
+FIO_IFUNC int64_t fio_time_milli() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
 }
 
 /** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC uint64_t fio_time2milli(struct timespec t) {
-  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
 }
 
 /* *****************************************************************************
