@@ -2883,7 +2883,7 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
 }
 
 /* used here, defined later */
-FIO_IFUNC uint64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano();
 
 IFUNC void fio_rand_reseed(void) {
   const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
@@ -2896,7 +2896,7 @@ IFUNC void fio_rand_reseed(void) {
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
-    uint64_t clk = fio_time_nano();
+    uint64_t clk = (uint64_t)fio_time_nano();
     fio___rand_state[0] =
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
     clk = fio_time_nano();
@@ -7853,16 +7853,16 @@ FIO_IFUNC struct timespec fio_time_real();
 FIO_IFUNC struct timespec fio_time_mono();
 
 /** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
-FIO_IFUNC uint64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano();
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC uint64_t fio_time_micro();
+FIO_IFUNC int64_t fio_time_micro();
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC uint64_t fio_time_milli();
+FIO_IFUNC int64_t fio_time_milli();
 
 /** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC uint64_t fio_time2milli(struct timespec);
+FIO_IFUNC int64_t fio_time2milli(struct timespec);
 
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
@@ -7941,26 +7941,26 @@ FIO_IFUNC struct timespec fio_time_mono() {
 }
 
 /** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
-FIO_IFUNC uint64_t fio_time_nano() {
+FIO_IFUNC int64_t fio_time_nano() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000000000) + (uint64_t)t.tv_nsec;
+  return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
 }
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC uint64_t fio_time_micro() {
+FIO_IFUNC int64_t fio_time_micro() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000000) + (uint64_t)t.tv_nsec / 1000;
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC uint64_t fio_time_milli() {
+FIO_IFUNC int64_t fio_time_milli() {
   struct timespec t = fio_time_mono();
-  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
 }
 
 /** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC uint64_t fio_time2milli(struct timespec t) {
-  return ((uint64_t)t.tv_sec * 1000) + (uint64_t)t.tv_nsec / 1000000;
+FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
 }
 
 /* *****************************************************************************
@@ -8550,7 +8550,7 @@ typedef struct {
   /** The number of times the timer should be performed. -1 == infinity. */
   int32_t repetitions;
   /** Millisecond at which to start. If missing, filled automatically. */
-  uint64_t start_at;
+  int64_t start_at;
 } fio_timer_schedule_args_s;
 
 /** Adds a time-bound event to the timer queue. */
@@ -8565,7 +8565,7 @@ SFUNC void fio_timer_schedule(fio_timer_queue_s *timer_queue,
 /** Pushes due events from the timer queue to an event queue. */
 SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                                   fio_timer_queue_s *timer_queue,
-                                  uint64_t now_in_milliseconds);
+                                  int64_t now_in_milliseconds);
 
 /*
  * Returns the millisecond at which the next event should occur.
@@ -8615,7 +8615,7 @@ struct fio___timer_event_s {
   void *udata1;
   void *udata2;
   void (*on_finish)(void *udata1, void *udata2);
-  uint64_t due;
+  int64_t due;
   uint32_t every;
   int32_t repetitions;
   struct fio___timer_event_s *next;
@@ -8841,12 +8841,11 @@ FIO_IFUNC void fio___timer_insert(fio___timer_event_s **pos,
 }
 
 FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
-                                               uint64_t due) {
+                                               int64_t due) {
   if (!*pos || (*pos)->due > due)
     return NULL;
   fio___timer_event_s *t = *pos;
   *pos = t->next;
-  // t->due = due + t->every; /* update next scheduling time */
   return t;
 }
 
@@ -8899,7 +8898,7 @@ SFUNC void fio___timer_perform(void *timer_, void *t_) {
 /** Pushes due events from the timer queue to an event queue. */
 SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                                   fio_timer_queue_s *timer,
-                                  uint64_t start_at) {
+                                  int64_t start_at) {
   size_t r = 0;
   if (!start_at)
     start_at = fio_time_milli();

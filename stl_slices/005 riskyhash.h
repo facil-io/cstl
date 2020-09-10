@@ -432,7 +432,7 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
 }
 
 /* used here, defined later */
-FIO_IFUNC uint64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano();
 
 IFUNC void fio_rand_reseed(void) {
   const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
@@ -445,7 +445,7 @@ IFUNC void fio_rand_reseed(void) {
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
-    uint64_t clk = fio_time_nano();
+    uint64_t clk = (uint64_t)fio_time_nano();
     fio___rand_state[0] =
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
     clk = fio_time_nano();

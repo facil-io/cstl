@@ -162,7 +162,7 @@ typedef struct {
   /** The number of times the timer should be performed. -1 == infinity. */
   int32_t repetitions;
   /** Millisecond at which to start. If missing, filled automatically. */
-  uint64_t start_at;
+  int64_t start_at;
 } fio_timer_schedule_args_s;
 
 /** Adds a time-bound event to the timer queue. */
@@ -177,7 +177,7 @@ SFUNC void fio_timer_schedule(fio_timer_queue_s *timer_queue,
 /** Pushes due events from the timer queue to an event queue. */
 SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                                   fio_timer_queue_s *timer_queue,
-                                  uint64_t now_in_milliseconds);
+                                  int64_t now_in_milliseconds);
 
 /*
  * Returns the millisecond at which the next event should occur.
@@ -227,7 +227,7 @@ struct fio___timer_event_s {
   void *udata1;
   void *udata2;
   void (*on_finish)(void *udata1, void *udata2);
-  uint64_t due;
+  int64_t due;
   uint32_t every;
   int32_t repetitions;
   struct fio___timer_event_s *next;
@@ -453,7 +453,7 @@ FIO_IFUNC void fio___timer_insert(fio___timer_event_s **pos,
 }
 
 FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
-                                               uint64_t due) {
+                                               int64_t due) {
   if (!*pos || (*pos)->due > due)
     return NULL;
   fio___timer_event_s *t = *pos;
@@ -510,7 +510,7 @@ SFUNC void fio___timer_perform(void *timer_, void *t_) {
 /** Pushes due events from the timer queue to an event queue. */
 SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                                   fio_timer_queue_s *timer,
-                                  uint64_t start_at) {
+                                  int64_t start_at) {
   size_t r = 0;
   if (!start_at)
     start_at = fio_time_milli();
