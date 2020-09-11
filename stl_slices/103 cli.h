@@ -534,7 +534,7 @@ print_help:
     type = (char *)FIO_CLI_STRING__TYPE_I;
     switch ((intptr_t)pos[1]) {
     case FIO_CLI_PRINT__TYPE_I:
-      fprintf(stderr, "          \t");
+      fprintf(stderr, "          \t   ");
       fio___cli_print_line(pos[0], parser->argv[0]);
       fprintf(stderr, "\n");
       pos += 2;
