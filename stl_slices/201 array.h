@@ -1808,6 +1808,37 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
       FIO_ASSERT(!(*(char *)&d.va[d.i + 1]),
                  "array each error (didn't stop in time?).");
     }
+#if FIO_ARRAY_TYPE_DESTROY_SIMPLE
+    {
+      FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
+      size_t max_items = 63;
+      FIO_ARRAY_TYPE tmp[64];
+      for (size_t i = 0; i < max_items; ++i) {
+        memset(tmp + i, i + 1, sizeof(*tmp));
+      }
+      for (size_t items = 0; items <= max_items; items = ((items << 1) | 1)) {
+        FIO_LOG_DEBUG2("* testing the FIO_ARRAY_EACH macro with %zu items.",
+                       items);
+        size_t i = 0;
+        for (i = 0; i < items; ++i)
+          FIO_NAME(FIO_ARRAY_NAME, push)(a, tmp[i]);
+        i = 0;
+        FIO_ARRAY_EACH(FIO_ARRAY_NAME, a, pos) {
+          FIO_ASSERT(!memcmp(tmp + i, pos, sizeof(*pos)),
+                     "FIO_ARRAY_EACH pos is at wrong index %zu != %zu",
+                     (size_t)(pos - FIO_NAME2(FIO_ARRAY_NAME, ptr)(a)),
+                     i);
+          ++i;
+        }
+        FIO_ASSERT(i == items,
+                   "FIO_ARRAY_EACH macro count error - didn't review all "
+                   "items? %zu != %zu ",
+                   i,
+                   items);
+        FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
+      }
+    }
+#endif
     /* test destroy */
     FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
     FIO_ASSERT(!FIO_NAME(FIO_ARRAY_NAME, count)(a),

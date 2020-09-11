@@ -192,6 +192,10 @@ static int ary____test_was_destroyed = 0;
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
+/* test all defaults */
+#define FIO_ARRAY_NAME ary3____test
+#include __FILE__
+
 /* *****************************************************************************
 Hash Map / Set - test
 ***************************************************************************** */
@@ -528,6 +532,7 @@ Socket helper and Stream testing
 #define FIO_SOCK
 #define FIO_STREAM
 #define FIO_SIGNAL
+#define FIO_POLL
 #include __FILE__
 
 /* *****************************************************************************
@@ -832,6 +837,7 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, ary____test)();
   FIO_NAME_TEST(stl, ary2____test)();
+  FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
@@ -846,6 +852,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, stream)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, signal)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, poll)();
   fprintf(stderr, "===============\n");
   /* test memory allocator that initializes memory to zero */
   FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
