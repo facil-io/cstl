@@ -482,6 +482,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
 Dynamic Strings - test
 ***************************************************************************** */
 
+#define FIO_GLOB_MATCH
 #define FIO_STR_NAME fio_big_str
 #define FIO_STR_WRITE_TEST_FUNC
 #include __FILE__
@@ -832,6 +833,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, atol)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, url)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, glob_matching)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
