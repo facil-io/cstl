@@ -589,7 +589,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
     state = fio_atomic_or(&lock->lock, group);
     if (!(state & group))
       break;
-    // `next` may have been added while we didn't look
+    /* `next` may have been added while we didn't look */
     if (self_thread.next) {
       /* resume next thread if this isn't for us (possibly different group) */
       fio_atomic_and(&lock->lock, (state | (~group)));
