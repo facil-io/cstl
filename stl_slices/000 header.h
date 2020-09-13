@@ -708,96 +708,53 @@ Common macros
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
 #endif /* FIO_MALLOC */
 
-/* FIO_BITMAP, FIO_REF_NAME, FIO_LOCK2 dependencies */
-#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2)
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
-#endif /* FIO_BITMAP */
-
-/* FIO_RAND dependencies */
-#ifdef FIO_RAND
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
-#endif
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
-#endif
-#ifndef FIO_TIME
-#define FIO_TIME
-#endif
-#endif /* FIO_RAND */
-
-/* FIO_STR_NAME / FIO_STR_SMALL dependencies */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
-#endif
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
-#endif
-#endif /* FIO_STR_NAME */
-
-/* FIO_QUEUE dependencies */
+/* FIO_QUEUE requires FIO_TIME */
 #ifdef FIO_QUEUE
 #ifndef FIO_TIME
 #define FIO_TIME
 #endif
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
 #endif /* FIO_QUEUE */
 
-/* FIO_TIME dependencies */
-#ifdef FIO_TIME
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#endif /* FIO_TIME */
-
-/* FIO_CLI dependencies */
-#ifdef FIO_CLI
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
+/* Modules that require FIO_RISKY_HASH */
+#if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
+    defined(FIO_CLI)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
+#endif /* FIO_RISKY_HASH */
+
+/* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
+#if defined(FIO_RISKY_HASH) || defined(FIO_JSON)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
-#endif /* FIO_CLI */
+#endif /* FIO_BITWISE */
 
-/* FIO_JSON dependencies */
-#ifdef FIO_JSON
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_BITMAP
-#define FIO_BITMAP
-#endif
+/* Modules that require FIO_ATOMIC */
+#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
+    defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
+    defined(FIO_QUEUE) || defined(FIO_JSON)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
-#endif /* FIO_JSON */
+#endif /* FIO_ATOMIC */
 
-/* FIO_RISKY_HASH dependencies */
-#ifdef FIO_RISKY_HASH
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
+/* Modules that require FIO_ATOL */
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
+    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON)
+#ifndef FIO_ATOL
+#define FIO_ATOL
 #endif
-#endif /* FIO_RISKY_HASH */
+#endif /* FIO_ATOL */
+
+/* Modules that require FIO_BITMAP */
+#if defined(FIO_JSON)
+#ifndef FIO_BITMAP
+#define FIO_BITMAP
+#endif
+#endif /* FIO_BITMAP */

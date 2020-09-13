@@ -708,99 +708,56 @@ Common macros
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
 #endif /* FIO_MALLOC */
 
-/* FIO_BITMAP, FIO_REF_NAME, FIO_LOCK2 dependencies */
-#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2)
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
-#endif /* FIO_BITMAP */
-
-/* FIO_RAND dependencies */
-#ifdef FIO_RAND
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
-#endif
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
-#endif
-#ifndef FIO_TIME
-#define FIO_TIME
-#endif
-#endif /* FIO_RAND */
-
-/* FIO_STR_NAME / FIO_STR_SMALL dependencies */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
-#endif
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
-#endif
-#endif /* FIO_STR_NAME */
-
-/* FIO_QUEUE dependencies */
+/* FIO_QUEUE requires FIO_TIME */
 #ifdef FIO_QUEUE
 #ifndef FIO_TIME
 #define FIO_TIME
 #endif
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_ATOMIC
-#define FIO_ATOMIC
-#endif
 #endif /* FIO_QUEUE */
 
-/* FIO_TIME dependencies */
-#ifdef FIO_TIME
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#endif /* FIO_TIME */
-
-/* FIO_CLI dependencies */
-#ifdef FIO_CLI
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
+/* Modules that require FIO_RISKY_HASH */
+#if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
+    defined(FIO_CLI)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
+#endif /* FIO_RISKY_HASH */
+
+/* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
+#if defined(FIO_RISKY_HASH) || defined(FIO_JSON)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
-#endif /* FIO_CLI */
+#endif /* FIO_BITWISE */
 
-/* FIO_JSON dependencies */
-#ifdef FIO_JSON
-#ifndef FIO_ATOL
-#define FIO_ATOL
-#endif
-#ifndef FIO_BITMAP
-#define FIO_BITMAP
-#endif
+/* Modules that require FIO_ATOMIC */
+#if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
+    defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
+    defined(FIO_QUEUE) || defined(FIO_JSON)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
-#endif /* FIO_JSON */
+#endif /* FIO_ATOMIC */
 
-/* FIO_RISKY_HASH dependencies */
-#ifdef FIO_RISKY_HASH
-#ifndef FIO_BITWISE
-#define FIO_BITWISE
+/* Modules that require FIO_ATOL */
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
+    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON)
+#ifndef FIO_ATOL
+#define FIO_ATOL
 #endif
-#endif /* FIO_RISKY_HASH */
+#endif /* FIO_ATOL */
+
+/* Modules that require FIO_BITMAP */
+#if defined(FIO_JSON)
+#ifndef FIO_BITMAP
+#define FIO_BITMAP
+#endif
+#endif /* FIO_BITMAP */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -1527,7 +1484,7 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
     state = fio_atomic_or(&lock->lock, group);
     if (!(state & group))
       break;
-    // `next` may have been added while we didn't look
+    /* `next` may have been added while we didn't look */
     if (self_thread.next) {
       /* resume next thread if this isn't for us (possibly different group) */
       fio_atomic_and(&lock->lock, (state | (~group)));
@@ -9277,8 +9234,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI_H)
-#define H___FIO_CLI_H 1
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H)
+#define H___FIO_CLI___H 1
 
 /* *****************************************************************************
 Internal Macro Implementation
@@ -9688,7 +9645,28 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
   switch ((size_t)type) {
   case FIO_CLI_BOOL__TYPE_I:
     if (value && value != parser->argv[parser->pos + 1]) {
-      goto error;
+      while (*value) {
+        /* support grouped boolean flags with one `-`*/
+        char bf[3] = {'-', *value, 0};
+        ++value;
+
+        fio___cli_cstr_s a = {.buf = bf, .len = 2};
+
+        const char *l =
+            fio___cli_hash_get(&fio___cli_aliases, FIO_CLI_HASH_VAL(a), a);
+        if (!l) {
+          if (bf[1] == ',')
+            continue;
+          value = arg.buf + arg.len;
+          goto error;
+        }
+        const char *t = fio___cli_get_line_type(parser, l);
+        if (t != (char *)FIO_CLI_BOOL__TYPE_I) {
+          value = arg.buf + arg.len;
+          goto error;
+        }
+        fio___cli_set_arg(a, parser->argv[parser->pos + 1], l, parser);
+      }
     }
     value = "1";
     break;
@@ -10058,7 +10036,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
       "-i2=2",
       "-i3",
       "3",
-      "-t",
+      "-t,u",
       "-s",
       "test",
       "unnamed",
@@ -10073,6 +10051,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_INT("-integer4 -i4 (4) fourth integer"),
         FIO_CLI_INT("-integer5 -i5 (\"5\") fifth integer"),
         FIO_CLI_BOOL("-boolean -t boolean"),
+        FIO_CLI_BOOL("-boolean2 -u boolean"),
         FIO_CLI_BOOL("-boolean_false -f boolean"),
         FIO_CLI_STRING("-str -s a string"),
         FIO_CLI_PRINT_HEADER("Printing stuff"),
@@ -10098,6 +10077,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   FIO_ASSERT(fio_cli_get_i("-i1") == fio_cli_get_i("-integer1"),
              "CLI first integer error.");
   FIO_ASSERT(fio_cli_get_i("-t") == 1, "CLI boolean true error.");
+  FIO_ASSERT(fio_cli_get_i("-u") == 1, "CLI boolean 2 true error.");
   FIO_ASSERT(fio_cli_get_i("-f") == 0, "CLI boolean false error.");
   FIO_ASSERT(!strcmp(fio_cli_get("-s"), "test"), "CLI string error.");
   FIO_ASSERT(fio_cli_unnamed_count() == 1, "CLI unnamed count error.");
