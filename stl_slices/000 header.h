@@ -738,7 +738,7 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
-    defined(FIO_QUEUE) || defined(FIO_JSON)
+    defined(FIO_QUEUE) || defined(FIO_JSON) || defined(FIO_SIGNAL)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
