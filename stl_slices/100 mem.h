@@ -1622,6 +1622,7 @@ FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *
   FIO_MEMORY_ON_CHUNK_ALLOC(c);
   c->ref = 1;
   return c;
+  (void)needs_lock; /* in case it isn't used */
 }
 
 /* *****************************************************************************
