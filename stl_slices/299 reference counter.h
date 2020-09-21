@@ -124,8 +124,9 @@ Reference Counter (Wrapper) Implementation
 
 /** Allocates a reference counted object. */
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o = (FIO_NAME(
-      FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
+      (FIO_NAME(FIO_REF_NAME,
+                _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
   o->ref = 1;

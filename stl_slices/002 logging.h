@@ -52,8 +52,9 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 #undef FIO_LOG2STDERR
 
 #pragma weak FIO_LOG2STDERR
-__attribute__((format(printf, 1, 0), weak)) void
-FIO_LOG2STDERR(const char *format, ...) {
+__attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
+    const char *format,
+    ...) {
   char tmp___log[FIO_LOG____LENGTH_ON_STACK];
   va_list argv;
   va_start(argv, format);

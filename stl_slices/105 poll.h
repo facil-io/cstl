@@ -104,8 +104,10 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p);
  *
  * Returns -1 on error.
  */
-SFUNC int
-fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
+SFUNC int fio_poll_monitor(fio_poll_s *p,
+                           int fd,
+                           void *udata,
+                           unsigned short flags);
 
 /**
  * Reviews if any of the monitored file descriptors has any events.
@@ -195,8 +197,10 @@ FIO_IFUNC void **fio___poll_udata_push(void **pu, void *udata) {
     *pu = udata;
   return pu;
 }
-FIO_IFUNC void **
-fio___poll_udata_set(void **pu, int32_t pos, void *udata, void **ignr) {
+FIO_IFUNC void **fio___poll_udata_set(void **pu,
+                                      int32_t pos,
+                                      void *udata,
+                                      void **ignr) {
   if (udata)
     *pu = udata;
   return pu;
@@ -258,8 +262,10 @@ FIO_SFUNC void fio___poll_ev_mock(int fd, void *udata) {
   (void)udata;
 }
 
-FIO_IFUNC int
-fio___poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags) {
+FIO_IFUNC int fio___poll_monitor(fio_poll_s *p,
+                                 int fd,
+                                 void *udata,
+                                 unsigned short flags) {
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
   struct pollfd *i = fio___poll_fds2ptr(&p->fds);
   if (i && i[pos].fd == fd)
@@ -302,8 +308,10 @@ renew_monitoring:
  *
  * Returns -1 on error.
  */
-SFUNC int
-fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags) {
+SFUNC int fio_poll_monitor(fio_poll_s *p,
+                           int fd,
+                           void *udata,
+                           unsigned short flags) {
   int r = -1;
   if (!p || fd == -1)
     return r;
@@ -399,8 +407,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
   } else {
     for (size_t i = 0; i < to_copy; ++i) {
-      fio___poll_monitor(
-          p, fds_ary[i].fd, FIO___POLL_UDATA_GET(i), fds_ary[i].events);
+      fio___poll_monitor(p,
+                         fds_ary[i].fd,
+                         FIO___POLL_UDATA_GET(i),
+                         fds_ary[i].events);
     }
   }
   fio_unlock(&p->lock);

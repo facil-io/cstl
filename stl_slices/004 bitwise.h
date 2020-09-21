@@ -757,12 +757,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing constant-time helpers.\n");
   FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
   for (uintptr_t i = 1; i; i <<= 1) {
-    FIO_ASSERT(
-        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+    FIO_ASSERT(fio_ct_true(i) == 1,
+               "fio_ct_true(%p) should be true!",
+               (void *)i);
   }
   for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
-    FIO_ASSERT(
-        fio_ct_true(i) == 1, "fio_ct_true(%p) should be true!", (void *)i);
+    FIO_ASSERT(fio_ct_true(i) == 1,
+               "fio_ct_true(%p) should be true!",
+               (void *)i);
   }
   FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
              "fio_ct_true(%p) should be true!",
@@ -770,12 +772,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
 
   FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
   for (uintptr_t i = 1; i; i <<= 1) {
-    FIO_ASSERT(
-        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+    FIO_ASSERT(fio_ct_false(i) == 0,
+               "fio_ct_false(%p) should be zero!",
+               (void *)i);
   }
   for (uintptr_t i = 1; i + 1 != 0; i = (i << 1) | 1) {
-    FIO_ASSERT(
-        fio_ct_false(i) == 0, "fio_ct_false(%p) should be zero!", (void *)i);
+    FIO_ASSERT(fio_ct_false(i) == 0,
+               "fio_ct_false(%p) should be zero!",
+               (void *)i);
   }
   FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
              "fio_ct_false(%p) should be zero!",

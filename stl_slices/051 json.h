@@ -112,8 +112,9 @@ FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i);
 /** a Float was detected (double). */
 FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f);
 /** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void
-fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len);
+FIO_JSON_CB void fio_json_on_string(fio_json_parser_s *p,
+                                    const void *start,
+                                    size_t len);
 /** a dictionary object was detected, should return 0 unless error occurred. */
 FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p);
 /** a dictionary object closure detected */

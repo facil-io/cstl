@@ -387,18 +387,19 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     fio_sock_address_free(addr);
     return fd;
   case FIO_SOCK_UNIX:
-    return fio_sock_open_unix(
-        address, (flags & FIO_SOCK_CLIENT), (flags & FIO_SOCK_NONBLOCK));
+    return fio_sock_open_unix(address,
+                              (flags & FIO_SOCK_CLIENT),
+                              (flags & FIO_SOCK_NONBLOCK));
   }
   FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
                 "FIO_SOCK_UNIX flags are exclisive");
   return -1;
 }
 
-FIO_IFUNC struct addrinfo *
-fio_sock_address_new(const char *restrict address,
-                     const char *restrict port,
-                     int sock_type /*i.e., SOCK_DGRAM */) {
+FIO_IFUNC struct addrinfo *fio_sock_address_new(
+    const char *restrict address,
+    const char *restrict port,
+    int sock_type /*i.e., SOCK_DGRAM */) {
   struct addrinfo addr_hints = (struct addrinfo){0}, *a;
   int e;
   addr_hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
@@ -791,11 +792,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);
-    FIO_ASSERT(
-        srv != -1, "Couldn't open UDP server socket: %s", strerror(errno));
+    FIO_ASSERT(srv != -1,
+               "Couldn't open UDP server socket: %s",
+               strerror(errno));
     int cl = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
-    FIO_ASSERT(
-        cl != -1, "Couldn't open UDP client socket: %s", strerror(errno));
+    FIO_ASSERT(cl != -1,
+               "Couldn't open UDP client socket: %s",
+               strerror(errno));
     FIO_ASSERT(send(cl, "hello", 5, 0) != -1,
                "couldn't send datagram from client");
     char buf[64];

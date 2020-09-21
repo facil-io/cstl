@@ -343,8 +343,8 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
       q->w->next = &q->mem;
       q->mem.w = q->mem.r = q->mem.dir = 0;
     } else {
-      void *tmp = (fio___task_ring_s *)FIO_MEM_REALLOC_(
-          NULL, 0, sizeof(*q->w->next), 0);
+      void *tmp = (fio___task_ring_s *)
+          FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
       if (!tmp)
         goto no_mem;
       q->w->next = (fio___task_ring_s *)tmp;
@@ -461,8 +461,8 @@ FIO_IFUNC fio___timer_event_s *fio___timer_pop(fio___timer_event_s **pos,
   return t;
 }
 
-FIO_IFUNC fio___timer_event_s *
-fio___timer_event_new(fio_timer_schedule_args_s args) {
+FIO_IFUNC fio___timer_event_s *fio___timer_event_new(
+    fio_timer_schedule_args_s args) {
   fio___timer_event_s *t = NULL;
   t = (fio___timer_event_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*t), 0);
   if (!t)
@@ -518,8 +518,10 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
     return 0;
   fio___timer_event_s *t;
   while ((t = fio___timer_pop(&timer->next, start_at))) {
-    fio_queue_push(
-        queue, .fn = fio___timer_perform, .udata1 = timer, .udata2 = t);
+    fio_queue_push(queue,
+                   .fn = fio___timer_perform,
+                   .udata1 = timer,
+                   .udata2 = t);
     ++r;
   }
   fio_unlock(&timer->lock);
@@ -599,8 +601,9 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
   for (size_t i = 0; i < t->count; i++) {
-    FIO_ASSERT(!fio_queue_push(
-                   t->q, .fn = fio___queue_test_sample_task, .udata1 = i_count),
+    FIO_ASSERT(!fio_queue_push(t->q,
+                               .fn = fio___queue_test_sample_task,
+                               .udata1 = i_count),
                "Couldn't push task!");
   }
 }
@@ -643,8 +646,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   i_count = 0;
   start = clock();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
-    fio_queue_push(
-        q, .fn = fio___queue_test_sample_task, .udata1 = (void *)&i_count);
+    fio_queue_push(q,
+                   .fn = fio___queue_test_sample_task,
+                   .udata1 = (void *)&i_count);
   }
   fio_queue_perform_all(q);
   end = clock();
@@ -661,14 +665,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
 
   for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
-    fio___queue_test_s info = {
-        .q = q, .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
+    fio___queue_test_s info = {.q = q,
+                               .count =
+                                   (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
     const size_t tasks = 1 << i;
     i_count = 0;
     start = clock();
     for (size_t j = 0; j < tasks; ++j) {
-      fio_queue_push(
-          q, fio___queue_test_sched_sample_task, (void *)&info, &i_count);
+      fio_queue_push(q,
+                     fio___queue_test_sched_sample_task,
+                     (void *)&info,
+                     &i_count);
     }
     FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
     {

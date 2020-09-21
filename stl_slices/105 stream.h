@@ -94,8 +94,10 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 void (*dealloc_func)(void *));
 
 /** Packs a file descriptor into a fio_stream_packet_s container. */
-SFUNC fio_stream_packet_s *
-fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open);
+SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
+                                              size_t len,
+                                              size_t offset,
+                                              uint8_t keep_open);
 
 /** Adds a packet to the stream. This isn't thread safe.*/
 SFUNC void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
@@ -317,7 +319,10 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
           (len > FIO_STREAM_COPY_PER_PACKET) ? FIO_STREAM_COPY_PER_PACKET : len;
       fio_stream_packet_embd_s *em;
       fio_stream_packet_s *tmp = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
-          NULL, 0, sizeof(*p) + sizeof(*em) + (sizeof(char) * slice), 0);
+          NULL,
+          0,
+          sizeof(*p) + sizeof(*em) + (sizeof(char) * slice),
+          0);
       if (!tmp)
         goto error;
       tmp->next = p;
@@ -332,8 +337,8 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
       dealloc_func(buf);
   } else {
     fio_stream_packet_extrn_s *ext;
-    p = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
-        NULL, 0, sizeof(*p) + sizeof(*ext), 0);
+    p = (fio_stream_packet_s *)
+        FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*ext), 0);
     if (!p)
       goto error;
     p->next = NULL;
@@ -356,8 +361,10 @@ error:
 }
 
 /** Packs a file descriptor into a fio_stream_packet_s container. */
-SFUNC fio_stream_packet_s *
-fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
+SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
+                                              size_t len,
+                                              size_t offset,
+                                              uint8_t keep_open) {
   fio_stream_packet_s *p = NULL;
   fio_stream_packet_fd_s *f;
   if (fd < 0)
@@ -374,8 +381,8 @@ fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open) {
     len = (size_t)st.st_size - offset;
   }
 
-  p = (fio_stream_packet_s *)FIO_MEM_REALLOC_(
-      NULL, 0, sizeof(*p) + sizeof(*f), 0);
+  p = (fio_stream_packet_s *)
+      FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*f), 0);
   if (!p)
     goto error;
   p->next = NULL;
@@ -499,8 +506,9 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     if (written > len[0])
       written = len[0];
     if (written) {
-      FIO___MEMCPY(
-          buf[0] + buf_offset, u.ext->buf + u.ext->offset + offset, written);
+      FIO___MEMCPY(buf[0] + buf_offset,
+                   u.ext->buf + u.ext->offset + offset,
+                   written);
       len[0] -= written;
     }
     if (len[0]) {
@@ -540,8 +548,12 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
         len[0] -= written;
       }
       if (!possible_eol_surprise && len[0]) {
-        fio___stream_read_internal(
-            p->next, buf, len, written + buf_offset, 0, 1);
+        fio___stream_read_internal(p->next,
+                                   buf,
+                                   len,
+                                   written + buf_offset,
+                                   0,
+                                   1);
       }
       len[0] += written;
     }
@@ -680,8 +692,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   len = 8;
   fio_stream_read(&s, &buf, &len);
 
-  FIO_ASSERT(
-      len < 80, "fio_stream_read didn't perform a partial read? (%zu)", len);
+  FIO_ASSERT(len < 80,
+             "fio_stream_read didn't perform a partial read? (%zu)",
+             len);
   FIO_ASSERT(!memcmp(str, buf, len),
              "fio_stream_read partial read data error? (%.*s)",
              (int)len,

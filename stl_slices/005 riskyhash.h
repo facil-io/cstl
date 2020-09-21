@@ -203,8 +203,10 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 #else
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t v[4] = {
-      FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
+  uint64_t v[4] = {FIO_RISKY3_IV0,
+                   FIO_RISKY3_IV1,
+                   FIO_RISKY3_IV2,
+                   FIO_RISKY3_IV3};
   uint64_t w[4];
   const uint8_t *data = (const uint8_t *)data_;
 
@@ -449,8 +451,10 @@ IFUNC void fio_rand_reseed(void) {
     fio___rand_state[0] =
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
     clk = fio_time_nano();
-    fio___rand_state[1] = fio_risky_hash(
-        &clk, sizeof(clk), fio___rand_state[1] + fio___rand_counter);
+    fio___rand_state[1] =
+        fio_risky_hash(&clk,
+                       sizeof(clk),
+                       fio___rand_state[1] + fio___rand_counter);
   }
   fio___rand_state[2] =
       fio_risky_hash(fio___rand_buffer,

@@ -503,8 +503,9 @@ Helpers and System Memory Allocation
 Aligned memory copying
 ***************************************************************************** */
 #define FIO_MEMCOPY_FIO_IFUNC_ALIGNED(type, size)                              \
-  FIO_IFUNC void fio___memcpy_##size##b(                                       \
-      void *restrict dest_, const void *restrict src_, size_t units) {         \
+  FIO_IFUNC void fio___memcpy_##size##b(void *restrict dest_,                  \
+                                        const void *restrict src_,             \
+                                        size_t units) {                        \
     type *dest = (type *)dest_;                                                \
     type *src = (type *)src_;                                                  \
     while (units >= 16) {                                                      \
@@ -567,8 +568,9 @@ FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint64_t, 8)
 #undef FIO_MEMCOPY_FIO_IFUNC_ALIGNED
 
 /** Copies 16 byte `units` of size_t aligned memory blocks */
-FIO_IFUNC void
-fio___memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
+FIO_IFUNC void fio___memcpy_aligned(void *dest_,
+                                    const void *src_,
+                                    size_t bytes) {
 #if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
   fio___memcpy_8b(dest_, src_, bytes >> 3);
 #elif SIZE_MAX == 0xFFFFFFFF       /* 32 bit size_t */
@@ -579,8 +581,9 @@ fio___memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
 }
 
 /** a 16 byte aligned memset implementation. */
-FIO_SFUNC void
-fio___memset_aligned(void *restrict dest_, uint64_t data, size_t bytes) {
+FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
+                                    uint64_t data,
+                                    size_t bytes) {
   uint64_t *dest = (uint64_t *)dest_;
   bytes >>= 3;
   while (bytes >= 16) {
@@ -743,8 +746,9 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
     } else {
       /* copy and free */
       munmap(result, new_len - prev_len); /* free the failed attempt */
-      result = FIO_MEM_PAGE_ALLOC_def_func(
-          new_pages, alignment_log); /* allocate new memory */
+      result =
+          FIO_MEM_PAGE_ALLOC_def_func(new_pages,
+                                      alignment_log); /* allocate new memory */
       if (!result) {
         return (void *)NULL;
       }
@@ -799,8 +803,10 @@ Overridable system allocation macros
 #define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
   FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
 #define FIO_MEM_PAGE_REALLOC(ptr, old_pages, new_pages, alignment_log)         \
-  FIO_MEM_PAGE_REALLOC_def_func(                                               \
-      (ptr), (old_pages), (new_pages), (alignment_log))
+  FIO_MEM_PAGE_REALLOC_def_func((ptr),                                         \
+                                (old_pages),                                   \
+                                (new_pages),                                   \
+                                (alignment_log))
 #define FIO_MEM_PAGE_FREE(ptr, pages) FIO_MEM_PAGE_FREE_def_func((ptr), (pages))
 #endif /* FIO_MEM_PAGE_ALLOC */
 
@@ -815,8 +821,9 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                                          const char *msg) {
   uint64_t *dest = (uint64_t *)dest_;
   size_t units = bytes >> 3;
-  FIO_ASSERT(
-      *(dest) = data, "%s memory data was overwritten (first 8 bytes)", msg);
+  FIO_ASSERT(*(dest) = data,
+             "%s memory data was overwritten (first 8 bytes)",
+             msg);
   while (units >= 16) {
     FIO_ASSERT(dest[0] == data && dest[1] == data && dest[2] == data &&
                    dest[3] == data && dest[4] == data && dest[5] == data &&
@@ -887,8 +894,9 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                "%s memory data was overwritten",
                msg); /* fallthrough */
   case 1:
-    FIO_ASSERT(
-        *(dest++) = data, "%s memory data was overwritten (last 8 bytes)", msg);
+    FIO_ASSERT(*(dest++) = data,
+               "%s memory data was overwritten (last 8 bytes)",
+               msg);
   }
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
@@ -950,8 +958,9 @@ Lock type choice
   do {                                                                         \
     int tmp__ = pthread_mutex_unlock(&(lock));                                 \
     if (tmp__) {                                                               \
-      FIO_LOG_ERROR(                                                           \
-          "Couldn't free mutex! error (%d): %s", tmp__, strerror(tmp__));      \
+      FIO_LOG_ERROR("Couldn't free mutex! error (%d): %s",                     \
+                    tmp__,                                                     \
+                    strerror(tmp__));                                          \
     }                                                                          \
   } while (0)
 
@@ -980,7 +989,8 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
   do {                                                                         \
     FIO_LOG_DEBUG2("MEMORY SYS-ALLOC - retrieved %p from system", ptr);        \
     fio_atomic_add(                                                            \
-        &FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)), 1);   \
+        &FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),       \
+        1);                                                                    \
     if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)) >       \
         FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)))    \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)) =     \
@@ -990,7 +1000,8 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
   do {                                                                         \
     FIO_LOG_DEBUG2("MEMORY SYS-DEALLOC- returned %p to system", ptr);          \
     fio_atomic_sub_fetch(                                                      \
-        &FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)), 1);   \
+        &FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),       \
+        1);                                                                    \
   } while (0)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
   do {                                                                         \
@@ -1011,8 +1022,9 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 #define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk)                            \
   if (0)                                                                       \
     do {                                                                       \
-      FIO_LOG_DEBUG2(                                                          \
-          "MEMORY chunk %p block %zu reset in lock", ptr, (size_t)blk);        \
+      FIO_LOG_DEBUG2("MEMORY chunk %p block %zu reset in lock",                \
+                     ptr,                                                      \
+                     (size_t)blk);                                             \
     } while (0);
 
 #define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)                                       \
@@ -1155,9 +1167,8 @@ static __thread size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
 /* SublimeText marker */
 void fio___mem_arena_unlock___(void);
 /** Unlocks the thread's arena. */
-FIO_SFUNC void
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_arena_unlock)(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) * a) {
+FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) * a) {
   FIO_ASSERT_DEBUG(a, "unlocking a NULL arena?!");
   FIO_MEMORY_UNLOCK(a->lock);
 }
@@ -1233,11 +1244,10 @@ Converting between chunk & block data to pointers (and back)
 /* SublimeText marker */
 void fio___mem_chunk2ptr___(void);
 /** returns a pointer within a chunk, given it's block and offset value. */
-FIO_IFUNC void *
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_chunk2ptr)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
-                          size_t block,
-                          size_t offset) {
+FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
+    size_t block,
+    size_t offset) {
   return (void *)(((uintptr_t)(c) + FIO_MEMORY_HEADER_SIZE) +
                   (block * FIO_MEMORY_BLOCK_SIZE) +
                   (offset << FIO_MEMORY_ALIGN_LOG));
@@ -1278,15 +1288,13 @@ Allocator State Initialization & Cleanup
        (sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s)) * (arean_count))))
 
 /* function declerations for functions called during cleanup */
-FIO_IFUNC void
-    FIO_NAME(FIO_MEMORY_NAME,
-             __mem_chunk_dealloc)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *ptr);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *ptr);
-FIO_IFUNC void
-    FIO_NAME(FIO_MEMORY_NAME,
-             __mem_chunk_free)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
@@ -1480,7 +1488,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {
           FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(
               FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block);
       size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(
-          c, FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block);
+          c,
+          FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block);
       fprintf(stderr, "\t\tchunk-ref: %zu (%p)\n", (size_t)c->ref, (void *)c);
       fprintf(stderr,
               "\t\t- block[%zu]-ref: %zu\n"
@@ -1527,9 +1536,8 @@ chunk allocation / deallocation
 /* SublimeText marker */
 void fio___mem_chunk_dealloc___(void);
 /* returns memory to system */
-FIO_IFUNC void
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_chunk_dealloc)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
   if (!c)
     return;
   FIO_MEM_PAGE_FREE(((void *)c),
@@ -1537,9 +1545,8 @@ FIO_NAME(FIO_MEMORY_NAME,
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 
-FIO_IFUNC void
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_chunk_free)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
   /* should we free the chunk? */
   if (!c || fio_atomic_sub_fetch(&c->ref, 1))
     return;
@@ -1837,8 +1844,8 @@ void fio___mem_big_block_free___(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *p) {
   // FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)      ;
   FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *b =
-      (FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *)FIO_NAME(
-          FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
+      (FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *)
+          FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
   /* should we free the block? */
   if (!b || fio_atomic_sub_fetch(&b->ref, 1))
     return;
@@ -1849,9 +1856,9 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *p) {
 /* zero out possible block memory (if required) */
 #if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
   for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
-    FIO_LIST_NODE *n =
-        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(
-            (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i, 0);
+    FIO_LIST_NODE *n = (FIO_LIST_NODE *)FIO_NAME(
+        FIO_MEMORY_NAME,
+        __mem_chunk2ptr)((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i, 0);
     n->prev = n->next = NULL;
   }
 #endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
@@ -1865,8 +1872,8 @@ void fio___mem_big_block_new___(void);
 FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *
     FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_new)(void) {
   FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *b =
-      (FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *)FIO_NAME(
-          FIO_MEMORY_NAME, __mem_chunk_new)(1);
+      (FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *)
+          FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_new)(1);
   if (!b)
     return b;
   b->marker = FIO_MEMORY_BIG_BLOCK_MARKER;
@@ -1883,10 +1890,9 @@ Big allocation internal API
 /* SublimeText marker */
 void fio___mem_big2ptr___(void);
 /** returns a pointer within a chunk, given it's block and offset value. */
-FIO_IFUNC void *
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_big2ptr)(FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) * b,
-                        size_t offset) {
+FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) * b,
+    size_t offset) {
   return (void *)(((uintptr_t)(b) + FIO_MEMORY_BIG_BLOCK_HEADER_SIZE) +
                   (offset << FIO_MEMORY_ALIGN_LOG));
 }
@@ -2043,9 +2049,10 @@ FIO_IFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                              (FIO_MEMORY_BIG_BLOCK_HEADER_SIZE << 1))) ||
       (!is_realloc && size > FIO_MEMORY_ALLOC_LIMIT)) {
 #ifdef DEBUG
-    FIO_LOG_WARNING("unintended " FIO_MACRO2STR(FIO_NAME(
-                        FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu pages",
-                    FIO_MEM_BYTES2PAGES(size));
+    FIO_LOG_WARNING(
+        "unintended " FIO_MACRO2STR(
+            FIO_NAME(FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu pages",
+        FIO_MEM_BYTES2PAGES(size));
 #endif
     return FIO_NAME(FIO_MEMORY_NAME, mmap)(size);
   }
@@ -2156,14 +2163,16 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
 /**
  * Uses system page maps for reallocation.
  */
-FIO_SFUNC void *
-FIO_NAME(FIO_MEMORY_NAME,
-         __mem_realloc2_big)(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
-                             size_t new_size) {
+FIO_SFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
+    size_t new_size) {
   const size_t new_page_len =
       FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_ALIGN_SIZE);
   c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_PAGE_REALLOC(
-      c, c->marker, new_page_len, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+      c,
+      c->marker,
+      new_page_len,
+      FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
   c->marker = (uint32_t)new_page_len;
@@ -2269,8 +2278,8 @@ SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (((uint64_t)pages >> 32))
     return NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
-      (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_PAGE_ALLOC(
-          pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+      (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)
+          FIO_MEM_PAGE_ALLOC(pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
   FIO_MEMORY_ON_CHUNK_ALLOC(c);

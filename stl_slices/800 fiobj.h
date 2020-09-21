@@ -515,8 +515,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
     uint64_t i1;                                                               \
     uint64_t i2;                                                               \
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), s) s;                       \
-  } FIO_NAME(str_name, __auto_mem_tmp) = {                                     \
-      0x7f7f7f7f7f7f7f7fULL, 0x7f7f7f7f7f7f7f7fULL, FIO_STR_INIT};             \
+  } FIO_NAME(str_name, __auto_mem_tmp) = {0x7f7f7f7f7f7f7f7fULL,               \
+                                          0x7f7f7f7f7f7f7f7fULL,               \
+                                          FIO_STR_INIT};                       \
   FIOBJ str_name =                                                             \
       (FIOBJ)(((uintptr_t) & (FIO_NAME(str_name, __auto_mem_tmp).s)) |         \
               FIOBJ_T_STRING);
@@ -662,9 +663,11 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * Removes a String value in a hash map, using a temporary String and
  * automatically calculating the hash value.
  */
-FIO_IFUNC int
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-             remove3)(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
+FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                       remove3)(FIOBJ hash,
+                                const char *buf,
+                                size_t len,
+                                FIOBJ *old);
 
 /* *****************************************************************************
 FIOBJ JSON support
@@ -1199,8 +1202,9 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
 /** Inserts a value to a hash map, with a default hash value calculation. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                          set2)(FIOBJ hash, FIOBJ key, FIOBJ value) {
-  return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(
-      hash, FIO_NAME2(fiobj, hash)(hash, key), key, value, NULL);
+  return FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      set)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, value, NULL);
 }
 
 /** Finds a value in a hash map, automatically calculating the hash value. */
@@ -1230,8 +1234,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
-  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(
-      hash, fio_risky_hash(key, len, (uint64_t)hash), tmp, value, NULL);
+  FIOBJ v = FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      set)(hash, fio_risky_hash(key, len, (uint64_t)hash), tmp, value, NULL);
   fiobj_free(tmp);
   return v;
 }
@@ -1254,12 +1259,15 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * Removes a String value in a hash map, using a temporary String and
  * automatically calculating the hash value.
  */
-FIO_IFUNC int
-FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-         remove3)(FIOBJ hash, const char *buf, size_t len, FIOBJ *old) {
+FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                       remove3)(FIOBJ hash,
+                                const char *buf,
+                                size_t len,
+                                FIOBJ *old) {
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(
-      hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp, old);
+  int r = FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      remove)(hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp, old);
   FIOBJ_STR_TEMP_DESTROY(tmp);
   return r;
 }
@@ -1275,8 +1283,9 @@ typedef struct {
 } fiobj___json_format_internal__s;
 
 /* internal helper funnction for recursive JSON formatting. */
-FIOBJ_FUNC void
-fiobj___json_format_internal__(fiobj___json_format_internal__s *, FIOBJ);
+FIOBJ_FUNC void fiobj___json_format_internal__(
+    fiobj___json_format_internal__s *,
+    FIOBJ);
 
 /** Helper function, calls `fiobj_hash_update_json` with string information */
 FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
@@ -1603,8 +1612,9 @@ FIO_IFUNC void fiobj___json_format_internal_beauty_pad(FIOBJ json,
   }
 }
 
-FIOBJ_FUNC void
-fiobj___json_format_internal__(fiobj___json_format_internal__s *args, FIOBJ o) {
+FIOBJ_FUNC void fiobj___json_format_internal__(
+    fiobj___json_format_internal__s *args,
+    FIOBJ o) {
   switch (FIOBJ_TYPE(o)) {
   case FIOBJ_T_TRUE:   /* fallthrough */
   case FIOBJ_T_FALSE:  /* fallthrough */
@@ -1753,8 +1763,9 @@ static inline void fio_json_on_float(fio_json_parser_s *p, double f) {
                         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(f));
 }
 /** a String was detected (int / float). update `pos` to point at ending */
-static inline void
-fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
+static inline void fio_json_on_string(fio_json_parser_s *p,
+                                      const void *start,
+                                      size_t len) {
   FIOBJ str = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_unescape)
   (str, start, len);
@@ -1987,8 +1998,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(o, a);
       }
     }
-    int expectation[] = {
-        -1 /* array */, -1, 1, 2, 3, -1, 4, 5, 6, -1, 7, 8, 9, -1};
+    int expectation[] =
+        {-1 /* array */, -1, 1, 2, 3, -1, 4, 5, 6, -1, 7, 8, 9, -1};
     size_t c =
         fiobj_each2(o, FIO_NAME_TEST(stl, fiobj_task), (void *)expectation);
     FIO_ASSERT(c == FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o) +
@@ -2128,15 +2139,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     for (int i = 0; i < TEST_REPEAT; ++i) {
       FIOBJ_STR_TEMP_VAR(tmp);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
-      FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(FIO_NAME(
-                     FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a2, i)) ==
-                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(tmp),
-                 "string length zeroed out - string freed?");
       FIO_ASSERT(
-          !memcmp(FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(tmp),
-                  FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(FIO_NAME(
-                      FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a2, i)),
-                  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(tmp)),
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a2, i)) ==
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(tmp),
+          "string length zeroed out - string freed?");
+      FIO_ASSERT(
+          !memcmp(
+              FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(tmp),
+              FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(
+                  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a2, i)),
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(tmp)),
           "string data error - string freed?");
       FIOBJ_STR_TEMP_DESTROY(tmp);
     }

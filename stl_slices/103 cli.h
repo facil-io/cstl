@@ -331,11 +331,17 @@ FIO_SFUNC void fio___cli_map_line2alias(char const *line) {
       ++n.len;
     }
     const char *old = NULL;
-    fio___cli_hash_set(
-        &fio___cli_aliases, FIO_CLI_HASH_VAL(n), n, (char const *)line, &old);
+    fio___cli_hash_set(&fio___cli_aliases,
+                       FIO_CLI_HASH_VAL(n),
+                       n,
+                       (char const *)line,
+                       &old);
     if (def.buf) {
-      fio___cli_hash_set(
-          &fio___cli_values, FIO_CLI_HASH_VAL(n), n, def.buf, NULL);
+      fio___cli_hash_set(&fio___cli_values,
+                         FIO_CLI_HASH_VAL(n),
+                         n,
+                         def.buf,
+                         NULL);
     }
 #ifdef FIO_LOG_ERROR
     if (old) {
@@ -496,11 +502,15 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
       while (n.buf[n.len] && n.buf[n.len] != ' ' && n.buf[n.len] != ',') {
         ++n.len;
       }
-      fio___cli_hash_set(
-          &fio___cli_values, FIO_CLI_HASH_VAL(n), n, value, NULL);
+      fio___cli_hash_set(&fio___cli_values,
+                         FIO_CLI_HASH_VAL(n),
+                         n,
+                         value,
+                         NULL);
       FIO_LOG_DEBUG2("(CLI) set argument %.*s = %s", (int)n.len, n.buf, value);
-      FIO_ASSERT_DEBUG(fio___cli_hash_get(
-                           &fio___cli_values, FIO_CLI_HASH_VAL(n), n) == value,
+      FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values,
+                                          FIO_CLI_HASH_VAL(n),
+                                          n) == value,
                        "(CLI) set argument failed!");
       while (n.buf[n.len] && (n.buf[n.len] == ' ' || n.buf[n.len] == ',')) {
         ++n.len;
@@ -746,8 +756,9 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       value = argv[parser.pos + 1];
     }
     const char *l = NULL;
-    while (n.len && !(l = fio___cli_hash_get(
-                          &fio___cli_aliases, FIO_CLI_HASH_VAL(n), n))) {
+    while (
+        n.len &&
+        !(l = fio___cli_hash_get(&fio___cli_aliases, FIO_CLI_HASH_VAL(n), n))) {
       --n.len;
       value = n.buf + n.len;
     }

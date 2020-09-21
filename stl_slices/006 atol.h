@@ -519,8 +519,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     char *tmp2 = buffer;
     int i2 = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
-    FIO_ASSERT(
-        i == i2, "fio_ltoa-fio_atol roundtrip error %lld != %lld", i, i2);
+    FIO_ASSERT(i == i2,
+               "fio_ltoa-fio_atol roundtrip error %lld != %lld",
+               i,
+               i2);
   }
   for (size_t bit = 0; bit < sizeof(int64_t) * 8; ++bit) {
     uint64_t i = (uint64_t)1 << bit;
@@ -624,8 +626,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     if ((double)d == r || r == std) {                                          \
       /** fprintf(stderr, "Okay for %s\n", s); */                              \
     } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {     \
-      fprintf(                                                                 \
-          stderr, "* WARNING: Single bit rounding error detected: %s\n", s);   \
+      fprintf(stderr,                                                          \
+              "* WARNING: Single bit rounding error detected: %s\n",           \
+              s);                                                              \
     } else if (r == 0.0 && d != 0.0) {                                         \
       fprintf(stderr, "* WARNING: float range limit marked before: %s\n", s);  \
     } else {                                                                   \
@@ -740,14 +743,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
               2.2250738585072014e-308,
               0);
 
-  TEST_DOUBLE(
-      "0.999999999999999944488848768742172978818416595458984375", 1.0, 0);
-  TEST_DOUBLE(
-      "0.999999999999999944488848768742172978818416595458984376", 1.0, 0);
-  TEST_DOUBLE(
-      "1.00000000000000011102230246251565404236316680908203125", 1.0, 0);
-  TEST_DOUBLE(
-      "1.00000000000000011102230246251565404236316680908203124", 1.0, 0);
+  TEST_DOUBLE("0.999999999999999944488848768742172978818416595458984375",
+              1.0,
+              0);
+  TEST_DOUBLE("0.999999999999999944488848768742172978818416595458984376",
+              1.0,
+              0);
+  TEST_DOUBLE("1.00000000000000011102230246251565404236316680908203125",
+              1.0,
+              0);
+  TEST_DOUBLE("1.00000000000000011102230246251565404236316680908203124",
+              1.0,
+              0);
 
   TEST_DOUBLE("72057594037927928.0", 72057594037927928.0, 0);
   TEST_DOUBLE("72057594037927936.0", 72057594037927936.0, 0);

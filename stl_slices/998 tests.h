@@ -108,7 +108,8 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   FIO_LIST_HEAD FIO_LIST_INIT(ls);
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
-        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
+        &ls,
+        (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   int tester = 0;
@@ -130,7 +131,8 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
   tester = TEST_REPEAT;
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_unshift(
-        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
+        &ls,
+        (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -151,7 +153,8 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
              "Linked list empty should have been true");
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
-        &ls, (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
+        &ls,
+        (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
     node->data = i;
   }
   FIO_LIST_EACH(ls____test_s, node, &ls, pos) {
@@ -444,8 +447,9 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
       FIO_ASSERT(map_____test_get(m, HASHOFs(buffer + 1), buffer + 1) == i + 1,
                  "item retrival error in map.");
       FIO_ASSERT(map_____test_get_ptr(m, HASHOFs(buffer + 1), buffer + 1) &&
-                     map_____test_get_ptr(
-                         m, HASHOFs(buffer + 1), buffer + 1)[0] == i + 1,
+                     map_____test_get_ptr(m,
+                                          HASHOFs(buffer + 1),
+                                          buffer + 1)[0] == i + 1,
                  "pointer retrival error in map.");
     }
     map_____test_free(m);
@@ -697,8 +701,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
-      fprintf(
-          stderr, "%s (%d)\n", (test_repeat ? "Round" : "Warmup"), test_repeat);
+      fprintf(stderr,
+              "%s (%d)\n",
+              (test_repeat ? "Round" : "Warmup"),
+              test_repeat);
     for (size_t fn = 0; test_funcs[fn].name; ++fn) {
       test_funcs[fn].task(NULL); /* warmup */
       start = fio_time_micro();
@@ -729,8 +735,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
-      fprintf(
-          stderr, "%s (%d)\n", (test_repeat ? "Round" : "Warmup"), test_repeat);
+      fprintf(stderr,
+              "%s (%d)\n",
+              (test_repeat ? "Round" : "Warmup"),
+              test_repeat);
     for (size_t fn = 0; test_funcs[fn].name; ++fn) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */
@@ -760,8 +768,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
-      fprintf(
-          stderr, "%s (%d)\n", (test_repeat ? "Round" : "Warmup"), test_repeat);
+      fprintf(stderr,
+              "%s (%d)\n",
+              (test_repeat ? "Round" : "Warmup"),
+              test_repeat);
     for (size_t fn = 0; test_funcs[fn].name; ++fn) {
       size_t result = 0;
       test_funcs[fn].task((void *)&result); /* warmup */

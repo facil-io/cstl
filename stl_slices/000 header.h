@@ -394,8 +394,9 @@ typedef struct fio___list_node_s {
                 FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
        pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
        (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(                                \
-                 type, node_name, next____p_ls->node_name.next)))
+            (next____p_ls = FIO_PTR_FROM_FIELD(type,                           \
+                                               node_name,                      \
+                                               next____p_ls->node_name.next)))
 #endif
 
 /** UNSAFE macro for pushing a node to a list. */

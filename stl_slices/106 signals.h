@@ -53,8 +53,9 @@ Signal Monitoring API
 /**
  * Starts to monitor for the specified signal, setting an optional callback.
  */
-SFUNC int
-fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata);
+SFUNC int fio_signal_monitor(int sig,
+                             void (*callback)(int sig, void *),
+                             void *udata);
 
 /** Reviews all signals, calling any relevant callbacks. */
 SFUNC int fio_signal_review(void);
@@ -118,8 +119,9 @@ FIO_SFUNC void fio___signal_catcher(int sig) {
 /**
  * Starts to monitor for the specified signal, setting an optional callback.
  */
-SFUNC int
-fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata) {
+SFUNC int fio_signal_monitor(int sig,
+                             void (*callback)(int sig, void *),
+                             void *udata) {
   if (!sig)
     return -1;
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
@@ -227,15 +229,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal)(void) {
   fprintf(stderr, "* testing signal monitoring (setup / cleanup only).\n");
   for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
     if (fio_signal_monitor(t[i].sig, NULL, NULL)) {
-      FIO_LOG_ERROR(
-          "couldn't set signal monitoring for %s (%d)", t[i].name, t[i].sig);
+      FIO_LOG_ERROR("couldn't set signal monitoring for %s (%d)",
+                    t[i].name,
+                    t[i].sig);
       e = 1;
     }
   }
   for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
     if (fio_signal_forget(t[i].sig)) {
-      FIO_LOG_ERROR(
-          "couldn't stop signal monitoring for %s (%d)", t[i].name, t[i].sig);
+      FIO_LOG_ERROR("couldn't stop signal monitoring for %s (%d)",
+                    t[i].name,
+                    t[i].sig);
       e = 1;
     }
   }

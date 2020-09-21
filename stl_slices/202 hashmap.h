@@ -256,9 +256,10 @@ typedef struct {
   FIO_MAP_TYPE value;
 } FIO_NAME(FIO_MAP_NAME, couplet_s);
 
-FIO_IFUNC void
-FIO_NAME(FIO_MAP_NAME, _couplet_copy)(FIO_NAME(FIO_MAP_NAME, couplet_s) * dest,
-                                      FIO_NAME(FIO_MAP_NAME, couplet_s) * src) {
+FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
+                        _couplet_copy)(FIO_NAME(FIO_MAP_NAME, couplet_s) * dest,
+                                       FIO_NAME(FIO_MAP_NAME, couplet_s) *
+                                           src) {
   FIO_MAP_KEY_COPY((dest->key), (src->key));
   FIO_MAP_TYPE_COPY((dest->value), (src->value));
 }
@@ -511,9 +512,10 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */
 #define FIO_MAP_EACH(map_type, map_p, pos)                                     \
-  for (FIO_NAME(map_type, each_s) *first___ = NULL,                            \
-                                  *pos = FIO_NAME(map_type, each_next)(        \
-                                      map_p, &first___, NULL);                 \
+  for (FIO_NAME(map_type,                                                      \
+                each_s) *first___ = NULL,                                      \
+                        *pos = FIO_NAME(map_type,                              \
+                                        each_next)(map_p, &first___, NULL);    \
        pos;                                                                    \
        pos = FIO_NAME(map_type, each_next)(map_p, &first___, pos))
 #endif
@@ -1118,8 +1120,9 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __rehash_no_holes)(FIO_MAP_S *m) {
     const FIO_MAP_SIZE_TYPE ihash =
         FIO_NAME(FIO_MAP_NAME, __hash2index)(map[pos].hash, m->bits);
     FIO_NAME(FIO_MAP_NAME, __pos_s)
-    i = FIO_NAME(FIO_MAP_NAME, __get_pos)(
-        m, map[pos].hash, ihash, FIO_MAP_OBJ2KEY(map[pos].obj));
+    i = FIO_NAME(
+        FIO_MAP_NAME,
+        __get_pos)(m, map[pos].hash, ihash, FIO_MAP_OBJ2KEY(map[pos].obj));
     if (i.imap == FIO_MAP_INDEX_INVALID) {
       pos = 0;
       if (FIO_NAME(FIO_MAP_NAME, __map_realloc)(m, m->bits + 1))
@@ -1198,8 +1201,11 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
         const FIO_MAP_SIZE_TYPE tmp_ihash =
             FIO_NAME(FIO_MAP_NAME, __hash2index)(m->map[pos].hash, m->bits);
         FIO_NAME(FIO_MAP_NAME, __pos_s)
-        i_tmp = FIO_NAME(FIO_MAP_NAME, __get_pos)(
-            m, m->map[pos].hash, tmp_ihash, FIO_MAP_OBJ2KEY(m->map[pos].obj));
+        i_tmp =
+            FIO_NAME(FIO_MAP_NAME, __get_pos)(m,
+                                              m->map[pos].hash,
+                                              tmp_ihash,
+                                              FIO_MAP_OBJ2KEY(m->map[pos].obj));
         FIO_ASSERT_DEBUG(i_tmp.i != FIO_MAP_INDEX_INVALID &&
                              i_tmp.imap != FIO_MAP_INDEX_INVALID,
                          "always true.");
