@@ -152,28 +152,27 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 Poll Monitoring Implementation - The polling type(s)
 ***************************************************************************** */
 
-#define FIO_RISKY_HASH
-#define FIO_MAP_TYPE uint32_t
-#define FIO_MAP_NAME fio___poll_index
 #ifndef FIO_STL_KEEP__
 #define FIO_STL_KEEP__ 1
 #endif
+
+#define FIO_RISKY_HASH
+#define FIO_MAP_TYPE uint32_t
+#define FIO_MAP_NAME fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
 #define FIO_ARRAY_NAME           fio___poll_fds
 #define FIO_ARRAY_TYPE_CMP(a, b) (a.fd == b.fd)
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
 #include __FILE__
 #if FIO_POLL_HAS_UDATA_COLLECTION
 #define FIO_ARRAY_TYPE void *
 #define FIO_ARRAY_NAME fio___poll_udata
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
 #include __FILE__
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
+
+#if FIO_STL_KEEP__ == 1
+#undef FIO_STL_KEEP__
+#endif
 
 struct fio_poll_s {
   fio_poll_settings_s settings;

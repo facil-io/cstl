@@ -253,14 +253,14 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_ARENA_COUNT -1
 #endif
 
-#ifndef FIO_MEMORY_ARENA_COUNT_DEFAULT
+#ifndef FIO_MEMORY_ARENA_COUNT_FALLBACK
 /*
  * Used when dynamic arena count calculations fail.
  *
  * NOTE: if FIO_MEMORY_ARENA_COUNT is negative, dynamic arena calculation is
  * performed using CPU core calculation.
  */
-#define FIO_MEMORY_ARENA_COUNT_DEFAULT 8
+#define FIO_MEMORY_ARENA_COUNT_FALLBACK 8
 #endif
 
 #ifndef FIO_MEMORY_ARENA_COUNT_MAX
@@ -1161,9 +1161,6 @@ struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
 Arena assignment
 ***************************************************************************** */
 
-/** thread arena value */
-static __thread size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
-
 /* SublimeText marker */
 void fio___mem_arena_unlock___(void);
 /** Unlocks the thread's arena. */
@@ -1187,6 +1184,8 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
   static size_t warning_printed = 0;
 #endif
+  /** thread arena value */
+  static __thread size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
   for (;;) {
     /* rotate all arenas to find one that's available */
     for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
@@ -1363,8 +1362,7 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
     void *last_chunk = NULL;
     FIO_LOG_WARNING("(" FIO_MACRO2STR(
         FIO_NAME(FIO_MEMORY_NAME,
-                 malloc)) ") blocks left after cleanup.\n"
-                          "          Possible memory leaks at related chunks:");
+                 malloc)) ") blocks left after cleanup - memory leaks?");
     FIO_LIST_EACH(struct t_s,
                   node,
                   &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks,
@@ -1404,13 +1402,13 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
 #if FIO_MEMORY_ARENA_COUNT > 0
     size_t const arean_count = FIO_MEMORY_ARENA_COUNT;
 #else
-    size_t arean_count = FIO_MEMORY_ARENA_COUNT_DEFAULT;
+    size_t arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
 #ifdef _SC_NPROCESSORS_ONLN
     arean_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (arean_count == (size_t)-1UL)
-      arean_count = FIO_MEMORY_ARENA_COUNT_DEFAULT;
+      arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
 #else
-#warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_DEFAULT cores.
+#warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.
 #endif /* _SC_NPROCESSORS_ONLN */
 
     if (arean_count >= FIO_MEMORY_ARENA_COUNT_MAX)
@@ -1431,7 +1429,7 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
   for (size_t i = 0; i < (size_t)FIO_MEMORY_WARMUP &&
                      i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
        ++i) {
-    FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[1].block =
+    FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block =
         FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
   }
 #endif
@@ -2485,7 +2483,7 @@ Memory pool cleanup
 #undef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
 #undef FIO_MEMORY_BLOCKS_PER_ALLOCATION
 #undef FIO_MEMORY_ENABLE_BIG_ALLOC
-#undef FIO_MEMORY_ARENA_COUNT_DEFAULT
+#undef FIO_MEMORY_ARENA_COUNT_FALLBACK
 #undef FIO_MEMORY_ARENA_COUNT_MAX
 #undef FIO_MEMORY_WARMUP
 
