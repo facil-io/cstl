@@ -19117,7 +19117,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef FIO_REF_INIT
 #define FIO_REF_INIT(obj)                                                      \
   do {                                                                         \
-    obj = (FIO_REF_TYPE){0};                                                   \
+    (obj) = (FIO_REF_TYPE){0};                                                 \
   } while (0)
 #endif
 
@@ -19126,7 +19126,14 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifndef FIO_REF_METADATA_INIT
+#ifdef FIO_REF_METADATA
+#define FIO_REF_METADATA_INIT(meta)                                            \
+  do {                                                                         \
+    (meta) = (FIO_REF_METADATA){0};                                            \
+  } while (0)
+#else
 #define FIO_REF_METADATA_INIT(meta)
+#endif
 #endif
 
 #ifndef FIO_REF_METADATA_DESTROY
@@ -19144,9 +19151,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
 #define FIO_REF_CONSTRUCTOR new
 #define FIO_REF_DESTRUCTOR  free
+#define FIO_REF_DUPNAME     dup
 #else
 #define FIO_REF_CONSTRUCTOR new2
 #define FIO_REF_DESTRUCTOR  free2
+#define FIO_REF_DUPNAME     dup2
 #endif
 
 typedef struct {
@@ -19168,10 +19177,15 @@ Reference Counter (Wrapper) API
 ***************************************************************************** */
 
 /** Allocates a reference counted object. */
+#ifdef FIO_REF_FLEX_TYPE
+IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
+                                FIO_REF_CONSTRUCTOR)(size_t members);
+#else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void);
-
+#endif /* FIO_REF_FLEX_TYPE */
 /** Increases the reference count. */
-IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, up_ref)(FIO_REF_TYPE_PTR wrapped);
+IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
+                                FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
 
 /**
  * Frees a reference counted object (or decreases the reference count).
@@ -19192,10 +19206,21 @@ Reference Counter (Wrapper) Implementation
 #ifdef FIO_EXTERN_COMPLETE
 
 /** Allocates a reference counted object. */
+#ifdef FIO_REF_FLEX_TYPE
+IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
+                                FIO_REF_CONSTRUCTOR)(size_t members) {
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
+      (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(
+          NULL,
+          0,
+          sizeof(*o) + (sizeof(FIO_REF_FLEX_TYPE) * members),
+          0);
+#else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       (FIO_NAME(FIO_REF_NAME,
                 _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+#endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
   o->ref = 1;
@@ -19207,7 +19232,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 
 /** Increases the reference count. */
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
-                                up_ref)(FIO_REF_TYPE_PTR wrapped_) {
+                                FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
@@ -19250,6 +19275,7 @@ Reference Counter (Wrapper) Cleanup
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_REF_NAME
+#undef FIO_REF_FLEX_TYPE
 #undef FIO_REF_TYPE
 #undef FIO_REF_INIT
 #undef FIO_REF_DESTROY
@@ -19259,6 +19285,7 @@ Reference Counter (Wrapper) Cleanup
 #undef FIO_REF_TYPE_PTR
 #undef FIO_REF_CONSTRUCTOR_ONLY
 #undef FIO_REF_CONSTRUCTOR
+#undef FIO_REF_DUPNAME
 #undef FIO_REF_DESTRUCTOR
 #endif
 /* *****************************************************************************
@@ -20267,16 +20294,16 @@ FIO_IFUNC FIOBJ fiobj_dup(FIOBJ o) {
   case FIOBJ_T_FLOAT:     /* fallthrough */
     return o;
   case FIOBJ_T_STRING: /* fallthrough */
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), up_ref)(o);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), dup)(o);
     break;
   case FIOBJ_T_ARRAY: /* fallthrough */
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), up_ref)(o);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), dup)(o);
     break;
   case FIOBJ_T_HASH: /* fallthrough */
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), up_ref)(o);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), dup)(o);
     break;
   case FIOBJ_T_OTHER: /* fallthrough */
-    fiobj_object_up_ref(o);
+    fiobj_object_dup(o);
   }
   return o;
 }

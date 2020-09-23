@@ -83,7 +83,7 @@ void example(void) {
   }
   for (size_t i = 0; i < 10; ++i) {
     /* allow each task to hold a reference to the object */
-    fio_queue_push(&queue, .fn = example_task, .udata1 = fio_str_up_ref(str));
+    fio_queue_push(&queue, .fn = example_task, .udata1 = fio_str_dup(str));
   }
   fio_str_free(str);             /* decreases reference count */
   fio_queue_perform_all(&queue); /* performs all tasks */

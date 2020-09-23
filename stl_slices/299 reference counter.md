@@ -10,16 +10,77 @@
 If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be
 defined for any named type.
 
-By default, `FIO_REF_TYPE` will equal `FIO_REF_NAME_s`, using the naming
-convention in this library.
+**Note**: requires the atomic operations to be defined (`FIO_ATOMIC`).
 
-In addition, the `FIO_REF_METADATA` macro can be defined with any type, allowing
-metadata to be attached and accessed using the helper function
-`FIO_REF_metadata(object)`.
+### Reference Counting Type Macros
 
-If the `FIO_REF_CONSTRUCTOR_ONLY` macro is defined, the reference counter constructor (`TYPE_new`) will be the only constructor function.  When set, the reference counting functions will use `X_new` and `X_free`. Otherwise (assuming `X_new` and `X_free` are already defined), the reference counter will define `X_new2` and `X_free2` instead.
+The following setup Macros are supported when setting up the reference counting type helpers:
 
-Note: requires the atomic operations to be defined (`FIO_ATOMIC`).
+#### `FIO_REF_TYPE`
+
+```c
+#define FIO_REF_TYPE FIO_NAME(FIO_REF_NAME, s)
+```
+
+The type to be wrapped and reference counted by the `FIO_REF_NAME` wrapper API.
+
+By default, `FIO_REF_TYPE` will equal `FIO_REF_NAME_s`, using the naming convention in this library.
+
+#### `FIO_REF_INIT`
+
+```c
+#define FIO_REF_INIT(obj) (obj) = (FIO_REF_TYPE){0}
+```
+
+Sets up the default object initializer.
+
+By default initializes the object's memory to zero.
+
+If `FIO_REF_FLEX_TYPE` is defined, the variable `members` may be used during initialization. It's value is the same as the value passed on to the `REF_new` function.
+
+#### `FIO_REF_DESTROY`
+
+```c
+#define FIO_REF_DESTROY(obj)
+```
+
+Sets up the default object cleanup. By default does nothing.
+
+#### `FIO_REF_CONSTRUCTOR_ONLY`
+
+By default, the reference counter generator will generate the `new2`, `free2` and `dup2` functions.
+
+However, f the `FIO_REF_CONSTRUCTOR_ONLY` macro is defined, the reference counter will name these functions as `new`, `free` and `dup` instead, making them the type's only and primary constructor / destructor.
+
+#### `FIO_REF_FLEX_TYPE`
+
+If the `FIO_REF_FLEX_TYPE` macro is defined, the constructor will allocate a enough memory for both the type and a `FIO_REF_FLEX_TYPE` array consisting of the specified amount of members (as passed to the constructor's `member` argument).
+
+This allows reference objects structures to include a flexible array of type `FIO_REF_FLEX_TYPE` at the end of the `struct`.
+
+The `members` variable passed to the constructor will also be available to the `FIO_REF_INIT` macro.
+
+#### `FIO_REF_METADATA`
+
+If defined, should be type that will be available as "meta data".
+
+A pointer to this type sill be available using the `REF_metadata` function and will allow "hidden" data to be accessible even though it isn't part of the observable object.
+
+#### `FIO_REF_METADATA_INIT`
+
+```c
+#define FIO_REF_METADATA_INIT(meta) (meta) = (FIO_REF_TYPE){0}
+```
+
+Sets up object's meta-data initialization (if any). Be default initializes the meta-data object's memory to zero.
+
+#### `FIO_REF_METADATA_DESTROY`
+
+```c
+#define FIO_REF_METADATA_DESTROY(meta)
+```
+
+### Reference Counting Generated Functions
 
 Reference counting adds the following functions:
 
@@ -27,8 +88,14 @@ Reference counting adds the following functions:
 
 ```c
 FIO_REF_TYPE * REF_new2(void)
+// or, if FIO_REF_FLEX_TYPE is defined:
+FIO_REF_TYPE * REF_new2(size_t members)
+
+
 // or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-FIO_REF_TYPE * REF_new(void)
+FIO_REF_TYPE * REF_new(void) 
+FIO_REF_TYPE * REF_new(size_t members) // for FIO_REF_FLEX_TYPE
+
 ```
 
 Allocates a new reference counted object, initializing it using the
@@ -37,10 +104,10 @@ Allocates a new reference counted object, initializing it using the
 If `FIO_REF_METADATA` is defined, than the metadata is initialized using the
 `FIO_REF_METADATA_INIT(metadata)` macro.
 
-#### `REF_up_ref`
+#### `REF_dup`
 
 ```c
-FIO_REF_TYPE * REF_up_ref(FIO_REF_TYPE * object)
+FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * object)
 ```
 
 Increases an object's reference count (an atomic operation, thread-safe).
@@ -48,9 +115,9 @@ Increases an object's reference count (an atomic operation, thread-safe).
 #### `REF_free` / `REF_free2`
 
 ```c
-void REF_free2(FIO_REF_TYPE * object)
+int REF_free2(FIO_REF_TYPE * object)
 // or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-void REF_free(FIO_REF_TYPE * object)
+int REF_free(FIO_REF_TYPE * object)
 ```
 
 Frees an object or decreases it's reference count (an atomic operation,
