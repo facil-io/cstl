@@ -8571,7 +8571,7 @@ FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
  * This is due to the fact that the tasks may try to reschedule themselves (if
  * they repeat).
  */
-SFUNC void fio_timer_clear(fio_timer_queue_s *timer_queue);
+SFUNC void fio_timer_destroy(fio_timer_queue_s *timer_queue);
 
 /* *****************************************************************************
 Queue Inline Helpers
@@ -8932,7 +8932,7 @@ no_timer_queue:
  * This is due to the fact that the tasks may try to reschedule themselves (if
  * they repeat).
  */
-SFUNC void fio_timer_clear(fio_timer_queue_s *tq) {
+SFUNC void fio_timer_destroy(fio_timer_queue_s *tq) {
   fio___timer_event_s *next;
   fio_lock(&tq->lock);
   next = tq->next;
@@ -9175,8 +9175,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                "task should NOT have been scheduled");
 
     tester = 0;
-    fio_timer_clear(&tq);
-    FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
+    fio_timer_destroy(&tq);
+    FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */
     tester = 0;
@@ -9211,10 +9211,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(tester == 2,
                "task should have been performed and on_finish called (%zu).",
                (size_t)tester);
-    fio_timer_clear(&tq);
+    fio_timer_destroy(&tq);
     FIO_ASSERT(
         tester == 3,
-        "fio_timer_clear should have called on_finish of future task (%zu).",
+        "fio_timer_destroy should have called on_finish of future task (%zu).",
         (size_t)tester);
     FIO_ASSERT(!tq.next, "timer queue should be empty.");
     fio_queue_destroy(&q2);
@@ -19163,7 +19163,6 @@ typedef struct {
 #ifdef FIO_REF_METADATA
   FIO_REF_METADATA metadata;
 #endif
-  FIO_REF_TYPE wrapped;
 } FIO_NAME(FIO_REF_NAME, _wrapper_s);
 
 #ifdef FIO_PTR_TAG_TYPE
@@ -19205,6 +19204,28 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
+#ifdef DEBUG
+static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
+#define FIO_REF_ON_ALLOC()                                                     \
+  fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
+#define FIO_REF_ON_FREE()                                                      \
+  fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
+static void __attribute__((destructor))
+FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
+  if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
+    FIO_LOG_WARNING(
+        "(" FIO_MACRO2STR(FIO_REF_NAME) ") memory leak warning for "
+                                        "type: " FIO_MACRO2STR(
+                                            FIO_REF_TYPE) " - unbalanced "
+                                                          "(%zd) ",
+        FIO_NAME(FIO_REF_NAME, ___leak_tester));
+  }
+}
+#else
+#define FIO_REF_ON_ALLOC()
+#define FIO_REF_ON_FREE()
+#endif
+
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
@@ -19213,20 +19234,21 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
       (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(
           NULL,
           0,
-          sizeof(*o) + (sizeof(FIO_REF_FLEX_TYPE) * members),
+          sizeof(*o) + sizeof(FIO_REF_TYPE) +
+              (sizeof(FIO_REF_FLEX_TYPE) * members),
           0);
 #else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME,
-                _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o = (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)
+      FIO_MEM_REALLOC_(NULL, 0, sizeof(*o) + sizeof(FIO_REF_TYPE), 0);
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
+  FIO_REF_ON_ALLOC();
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
-  FIO_REF_INIT(o->wrapped);
-  FIO_REF_TYPE *ret = &o->wrapped;
+  FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
+  FIO_REF_INIT((ret[0]));
   return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG(ret));
 }
 
@@ -19235,7 +19257,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                 FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   fio_atomic_add(&o->ref, 1);
   return wrapped_;
 }
@@ -19247,14 +19269,15 @@ IFUNC int FIO_NAME(FIO_REF_NAME,
   if (!wrapped || !wrapped_)
     return -1;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   if (!o)
     return -1;
   if (fio_atomic_sub_fetch(&o->ref, 1))
     return 0;
-  FIO_REF_DESTROY(o->wrapped);
+  FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o));
+  FIO_REF_ON_FREE();
   return 1;
 }
 
@@ -19264,7 +19287,7 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
                                  metadata)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   return &o->metadata;
 }
 #endif

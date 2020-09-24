@@ -200,7 +200,7 @@ FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
  * This is due to the fact that the tasks may try to reschedule themselves (if
  * they repeat).
  */
-SFUNC void fio_timer_clear(fio_timer_queue_s *timer_queue);
+SFUNC void fio_timer_destroy(fio_timer_queue_s *timer_queue);
 
 /* *****************************************************************************
 Queue Inline Helpers
@@ -561,7 +561,7 @@ no_timer_queue:
  * This is due to the fact that the tasks may try to reschedule themselves (if
  * they repeat).
  */
-SFUNC void fio_timer_clear(fio_timer_queue_s *tq) {
+SFUNC void fio_timer_destroy(fio_timer_queue_s *tq) {
   fio___timer_event_s *next;
   fio_lock(&tq->lock);
   next = tq->next;
@@ -804,8 +804,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                "task should NOT have been scheduled");
 
     tester = 0;
-    fio_timer_clear(&tq);
-    FIO_ASSERT(tester == 1, "fio_timer_clear should have called `on_finish`");
+    fio_timer_destroy(&tq);
+    FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */
     tester = 0;
@@ -840,10 +840,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(tester == 2,
                "task should have been performed and on_finish called (%zu).",
                (size_t)tester);
-    fio_timer_clear(&tq);
+    fio_timer_destroy(&tq);
     FIO_ASSERT(
         tester == 3,
-        "fio_timer_clear should have called on_finish of future task (%zu).",
+        "fio_timer_destroy should have called on_finish of future task (%zu).",
         (size_t)tester);
     FIO_ASSERT(!tq.next, "timer queue should be empty.");
     fio_queue_destroy(&q2);

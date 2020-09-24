@@ -270,10 +270,10 @@ If no timer is due (list is empty), returns `(uint64_t)-1`.
 **Note**: Unless manually specified, millisecond timers are relative to  `fio_time_milli()`.
 
 
-#### `fio_timer_clear`
+#### `fio_timer_destroy`
 
 ```c
-void fio_timer_clear(fio_timer_queue_s *timer_queue);
+void fio_timer_destroy(fio_timer_queue_s *timer_queue);
 ```
 
 Clears any waiting timer bound tasks.

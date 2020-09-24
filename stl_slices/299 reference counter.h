@@ -94,7 +94,6 @@ typedef struct {
 #ifdef FIO_REF_METADATA
   FIO_REF_METADATA metadata;
 #endif
-  FIO_REF_TYPE wrapped;
 } FIO_NAME(FIO_REF_NAME, _wrapper_s);
 
 #ifdef FIO_PTR_TAG_TYPE
@@ -136,6 +135,28 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
+#ifdef DEBUG
+static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
+#define FIO_REF_ON_ALLOC()                                                     \
+  fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
+#define FIO_REF_ON_FREE()                                                      \
+  fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
+static void __attribute__((destructor))
+FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
+  if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
+    FIO_LOG_WARNING(
+        "(" FIO_MACRO2STR(FIO_REF_NAME) ") memory leak warning for "
+                                        "type: " FIO_MACRO2STR(
+                                            FIO_REF_TYPE) " - unbalanced "
+                                                          "(%zd) ",
+        FIO_NAME(FIO_REF_NAME, ___leak_tester));
+  }
+}
+#else
+#define FIO_REF_ON_ALLOC()
+#define FIO_REF_ON_FREE()
+#endif
+
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
@@ -144,20 +165,21 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
       (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)FIO_MEM_REALLOC_(
           NULL,
           0,
-          sizeof(*o) + (sizeof(FIO_REF_FLEX_TYPE) * members),
+          sizeof(*o) + sizeof(FIO_REF_TYPE) +
+              (sizeof(FIO_REF_FLEX_TYPE) * members),
           0);
 #else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME,
-                _wrapper_s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o = (FIO_NAME(FIO_REF_NAME, _wrapper_s) *)
+      FIO_MEM_REALLOC_(NULL, 0, sizeof(*o) + sizeof(FIO_REF_TYPE), 0);
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
+  FIO_REF_ON_ALLOC();
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
-  FIO_REF_INIT(o->wrapped);
-  FIO_REF_TYPE *ret = &o->wrapped;
+  FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
+  FIO_REF_INIT((ret[0]));
   return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG(ret));
 }
 
@@ -166,7 +188,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                 FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   fio_atomic_add(&o->ref, 1);
   return wrapped_;
 }
@@ -178,14 +200,15 @@ IFUNC int FIO_NAME(FIO_REF_NAME,
   if (!wrapped || !wrapped_)
     return -1;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   if (!o)
     return -1;
   if (fio_atomic_sub_fetch(&o->ref, 1))
     return 0;
-  FIO_REF_DESTROY(o->wrapped);
+  FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o));
+  FIO_REF_ON_FREE();
   return 1;
 }
 
@@ -195,7 +218,7 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
                                  metadata)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      FIO_PTR_FROM_FIELD(FIO_NAME(FIO_REF_NAME, _wrapper_s), wrapped, wrapped);
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   return &o->metadata;
 }
 #endif
