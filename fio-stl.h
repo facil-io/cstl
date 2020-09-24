@@ -19552,6 +19552,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "203 string.h"             /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
+#define FIO_FIOBJ                   /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -19998,7 +19999,10 @@ FIOBJ Strings
     s_ = (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), s))FIO_STR_INIT;      \
     FIOBJ_MARK_MEMORY_ALLOC();                                                 \
   } while (0)
-#define FIO_REF_METADATA         uint32_t /* for 32bit system padding */
+
+#if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
+#define FIO_REF_METADATA uint32_t
+#endif
 #define FIO_PTR_TAG(p)           ((uintptr_t)p | FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE         FIOBJ
@@ -20117,7 +20121,9 @@ FIOBJ Arrays
     a = (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), s))FIO_ARRAY_INIT;      \
     FIOBJ_MARK_MEMORY_ALLOC();                                                 \
   } while (0)
-#define FIO_REF_METADATA          uint32_t /* for 32bit system padding */
+#if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
+#define FIO_REF_METADATA uint32_t
+#endif
 #define FIO_ARRAY_TYPE            FIOBJ
 #define FIO_ARRAY_TYPE_CMP(a, b)  FIO_NAME_BL(fiobj, eq)((a), (b))
 #define FIO_ARRAY_TYPE_DESTROY(o) fiobj_free(o)
@@ -20150,7 +20156,9 @@ FIOBJ Hash Maps
     a = (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), s))FIO_MAP_INIT;         \
     FIOBJ_MARK_MEMORY_ALLOC();                                                 \
   } while (0)
-#define FIO_REF_METADATA          uint32_t /* for 32bit system padding */
+#if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
+#define FIO_REF_METADATA uint32_t
+#endif
 #define FIO_MAP_TYPE              FIOBJ
 #define FIO_MAP_TYPE_DESTROY(o)   fiobj_free(o)
 #define FIO_MAP_KEY               FIOBJ
