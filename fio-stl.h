@@ -19159,7 +19159,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 typedef struct {
-  volatile uint32_t ref;
+  volatile size_t ref;
 #ifdef FIO_REF_METADATA
   FIO_REF_METADATA metadata;
 #endif
