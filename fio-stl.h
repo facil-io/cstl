@@ -714,8 +714,8 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
-/* FIO_QUEUE requires FIO_TIME */
-#ifdef FIO_QUEUE
+/* Modules that require FIO_TIME */
+#if defined(FIO_QUEUE) || defined(FIO_RAND)
 #ifndef FIO_TIME
 #define FIO_TIME
 #endif
