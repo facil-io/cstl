@@ -18,25 +18,26 @@ int main(int argc, char const *argv[]) {
       "Decode / Encode Base64 from stdin to stdout",
       FIO_CLI_STRING(
           "--file -f a filename to encode / decode (instead of stdin)."),
-      FIO_CLI_BOOL("--encode -e run the program in encoding mode instead of "
-                   "decoding mode."),
+      FIO_CLI_BOOL("--decode -d run the program in decoding mode instead of "
+                   "encoding mode."),
       FIO_CLI_BOOL("--url -u when (if) encoding, use URL mode."),
       FIO_CLI_PRINT_HEADER("Notes:"),
       FIO_CLI_PRINT_LINE(
           "When running NAME in the terminal with manual input, use "
           "^D (ctrl+D) to end session."),
       FIO_CLI_PRINT_HEADER("Examples:"),
-      FIO_CLI_PRINT("NAME -e -f my_file.txt > file.base64"),
+      FIO_CLI_PRINT("NAME Hello World"),
+      FIO_CLI_PRINT("NAME -f my_file.txt > my_file.base64"),
+      FIO_CLI_PRINT("NAME -d -f my_file.base64 > my_file.txt"),
       FIO_CLI_PRINT("NAME -f my_file.base64 > file.txt"),
-      FIO_CLI_PRINT("echo \"SGVsbG8gV29ybGQ=\" | NAME"),
-      FIO_CLI_PRINT("NAME -e Hello World"),
-      FIO_CLI_PRINT("NAME SGVsbG8gV29ybGQ="));
+      FIO_CLI_PRINT("echo \"SGVsbG8gV29ybGQ=\" | NAME -d"),
+      FIO_CLI_PRINT("NAME -d SGVsbG8gV29ybGQ="));
   fio_str_s out = FIO_STR_INIT;
   ;
   fio_str_info_s (*fn)(fio_str_s *, const void *, size_t) =
-      fio_str_write_base64dec;
-  if (fio_cli_get_bool("-e"))
-    fn = fio_str_write_base64enc2;
+      fio_str_write_base64enc2;
+  if (fio_cli_get_bool("-d"))
+    fn = fio_str_write_base64dec;
   int fd = fileno(stdin);
   /* process Base64 as arguments */
   if (fio_cli_unnamed_count()) {
@@ -46,7 +47,7 @@ int main(int argc, char const *argv[]) {
       fn(&out, str, len);
       fio_str_write(&out, "\n", 1);
     }
-    fprintf(stdout, "%s\n", fio_str2ptr(&out));
+    fprintf(stdout, "%s", fio_str2ptr(&out));
     fio_str_resize(&out, 0);
     /* don't process stdio */
     if (!fio_cli_get("-f"))
