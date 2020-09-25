@@ -1,13 +1,3 @@
-#define FIO_RAND
-#include "fio-stl.h"
-
-// #define HWD_BITS 32
-// static uint32_t next(void) {
-//   return ((uint32_t)rand() << 16) ^ (uint32_t)rand();
-// }
-#define HWD_BITS 64
-FIO_IFUNC uint64_t next(void) { return fio_rand64(); }
-
 /*
  * Copyright (C) 2004-2016 David Blackman.
  * Copyright (C) 2017-2018 David Blackman and Sebastiano Vigna.
@@ -26,6 +16,25 @@ FIO_IFUNC uint64_t next(void) { return fio_rand64(); }
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  */
+
+// I edited the original code only slightly, the original copyright still holds.
+
+#define FIO_RAND
+#define FIO_CLI
+#include "fio-stl.h"
+
+// #define HWD_BITS 32
+// static uint32_t next(void) {
+//   return ((uint32_t)rand() << 16) ^ (uint32_t)rand();
+// }
+#define HWD_BITS 64
+static uint64_t (*next)(void) = fio_rand64;
+
+static uint64_t sys_next(void) {
+  uint64_t r = ((uint64_t)rand() >> 8) | ((uint64_t)rand() << 40);
+  r ^= (uint64_t)rand() << 20;
+  return r;
+}
 
 #include <assert.h>
 #include <fcntl.h>
@@ -173,7 +182,6 @@ const int64_t batch_size[] = {-1,
 
 #if HWD_PRNG_BITS == 64
 #define TEST_ITERATIONS(b) (b)
-static uint64_t next(void);
 #else
 #error "Test 64-bit test supports PRNGs of size 64"
 #endif
@@ -708,10 +716,46 @@ static void run_test(const int64_t n, const bool trans, const bool progress) {
   analyze(pos, trans, true);
 }
 
-int main(int argc, char **argv) {
-  double dn;
+int main(int argc, const char **argv) {
   int64_t n = -1;
   bool trans = false, progress = false;
+
+  fio_cli_start(
+      argc,
+      argv,
+      0,
+      1,
+      "implements the Hamming-weight dependency test based on z9 from gjrand "
+      "4.2.1.0 and described by David Blackman and Sebastiano Vigna.\n"
+      "Runs the test, by default, on the facil.io random function.",
+      FIO_CLI_BOOL("--system -s tests a patched  `rand` instead of facil.io's "
+                   "`fio_rand64`."),
+      FIO_CLI_BOOL("--progress -p uses progressive test sizes (true unless N "
+                   "is provided)."),
+      FIO_CLI_BOOL("--trans -t tests transitions (vs. bits)."),
+      FIO_CLI_STRING("--low-pv a float indicating the test's low P value."),
+      FIO_CLI_INT("--N -n the tests iteration size limit."));
+
+  if (fio_cli_get_bool("-p"))
+    progress = true;
+  if (fio_cli_get_bool("-t"))
+    trans = true;
+  if (fio_cli_get_i("-n"))
+    n = fio_cli_get_i("-n");
+  if (fio_cli_get("--low-pv")) {
+    if (fio_cli_get("--low-pv") &&
+        sscanf(fio_cli_get("--low-pv"), "%lf", &low_pvalue) != 1)
+      fprintf(stderr, "Optional --low-pv must be a float.\n");
+    exit(1);
+  }
+  if (fio_cli_get_bool("-s")) {
+    fprintf(
+        stderr,
+        "Testing a fixed variation of system's `rand` instead of facil.io.\n");
+    sys_next();
+    next = sys_next;
+  }
+  fio_cli_end();
 
 #ifdef HWD_MMAP
   fprintf(stderr, "Allocating memory via mmap()... ");
@@ -734,21 +778,22 @@ int main(int argc, char **argv) {
 
   tstart = time(0);
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--progress") == 0)
-      progress = true;
-    else if (strcmp(argv[i], "-t") == 0)
-      trans = true;
-    else if (sscanf(argv[i], "%lf", &dn) == 1)
-      n = (int64_t)dn;
-    else if (sscanf(argv[i], "--low-pv=%lf", &low_pvalue) == 1) {
-    } else {
-      fprintf(stderr,
-              "Optional arg must be --progress or -t or "
-              "--low-pv=number or numeric\n");
-      exit(1);
-    }
-  }
+  // for (int i = 1; i < argc; i++) {
+  //   double dn;
+  //   if (strcmp(argv[i], "--progress") == 0)
+  //     progress = true;
+  //   else if (strcmp(argv[i], "-t") == 0)
+  //     trans = true;
+  //   else if (sscanf(argv[i], "%lf", &dn) == 1)
+  //     n = (int64_t)dn;
+  //   else if (sscanf(argv[i], "--low-pv=%lf", &low_pvalue) == 1) {
+  //   } else {
+  //     fprintf(stderr,
+  //             "Optional arg must be --progress or -t or "
+  //             "--low-pv=number or numeric\n");
+  //     exit(1);
+  //   }
+  // }
 
   if (n <= 0)
     progress = true;
