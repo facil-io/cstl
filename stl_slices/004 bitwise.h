@@ -7,6 +7,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#define FIO_BITWISE                 /* Development inclusion - ignore line */
+#define FIO_BITMAP                  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -25,7 +27,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+s
 
 
 
@@ -496,7 +498,7 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 }
 
 /* *****************************************************************************
-Byte masking (XOR)
+Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
 
 /**
@@ -505,10 +507,10 @@ Byte masking (XOR)
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[],
-                                         size_t byte_len,
-                                         uint64_t mask,
-                                         uint64_t nonce) {
+FIO_IFUNC uint64_t fio___xmask2_aligned64(uint64_t buf[],
+                                          size_t byte_len,
+                                          uint64_t mask,
+                                          uint64_t nonce) {
 
   register uint64_t m = mask;
   for (size_t i = byte_len >> 3; i; --i) {
@@ -557,10 +559,10 @@ FIO_IFUNC uint64_t fio___xmask_aligned64(uint64_t buf[],
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_,
-                                               size_t len,
-                                               uint64_t mask,
-                                               const uint64_t nonce) {
+FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
+                                                size_t len,
+                                                uint64_t mask,
+                                                const uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
   register uint64_t m = mask;
   for (size_t i = len >> 3; i; --i) {
@@ -606,19 +608,113 @@ FIO_IFUNC uint64_t fio___xmask_unaligned_words(void *buf_,
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio_xmask(char *buf,
-                             size_t len,
-                             uint64_t mask,
-                             uint64_t nonce) {
+FIO_IFUNC uint64_t fio_xmask2(char *buf,
+                              size_t len,
+                              uint64_t mask,
+                              uint64_t nonce) {
   if (!((uintptr_t)buf & 7)) {
     union {
       char *p8;
       uint64_t *p64;
     } pn;
     pn.p8 = buf;
-    return fio___xmask_aligned64(pn.p64, len, mask, nonce);
+    return fio___xmask2_aligned64(pn.p64, len, mask, nonce);
   }
-  return fio___xmask_unaligned_words(buf, len, mask, nonce);
+  return fio___xmask2_unaligned_words(buf, len, mask, nonce);
+}
+
+/* *****************************************************************************
+Byte masking (XOR) - no nonce
+***************************************************************************** */
+
+/**
+ * Masks data using a persistent 64 bit mask.
+ *
+ * When the buffer's memory is aligned, the function may perform significantly
+ * better.
+ */
+FIO_IFUNC void fio_xmask(char *buf, size_t len, uint64_t mask) {
+  register union { /* type punning */
+    char *restrict p8;
+    uint64_t *restrict p64;
+  } pn, mpn;
+
+  if (((uintptr_t)buf & 7) && len >= 8) {
+    uint64_t tmp;
+    mpn.p64 = &mask;
+    uint8_t pos = 0;
+    /* mask each byte until we reach alignment */
+    switch (((uintptr_t)buf & 7)) {
+    case 1:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 2:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 3:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 4:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 5:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 6:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos; /* fallthrough */
+    case 7:
+      buf[pos] ^= mpn.p8[pos];
+      ++pos;
+    }
+    /* advance */
+    len -= pos;
+    buf += pos;
+    /* rotate mask so it is aligned */
+    tmp = mask;
+    pn.p64 = &tmp;
+    mpn.p8[0] = pn.p8[((0 + pos) & 7)];
+    mpn.p8[1] = pn.p8[((1 + pos) & 7)];
+    mpn.p8[2] = pn.p8[((2 + pos) & 7)];
+    mpn.p8[3] = pn.p8[((3 + pos) & 7)];
+    mpn.p8[4] = pn.p8[((4 + pos) & 7)];
+    mpn.p8[5] = pn.p8[((5 + pos) & 7)];
+    mpn.p8[6] = pn.p8[((6 + pos) & 7)];
+    mpn.p8[7] = pn.p8[((7 + pos) & 7)];
+  }
+  pn.p8 = buf;
+  mpn.p64 = &mask;
+  register const uint64_t m = mask;
+  for (size_t i = len >> 3; i; --i) {
+    *pn.p64 ^= m;
+    ++pn.p64;
+  }
+
+  switch ((len & 7)) {
+  case 7:
+    pn.p8[6] ^= mpn.p8[6];
+  /* fallthrough */
+  case 6:
+    pn.p8[5] ^= mpn.p8[5];
+  /* fallthrough */
+  case 5:
+    pn.p8[4] ^= mpn.p8[4];
+  /* fallthrough */
+  case 4:
+    pn.p8[3] ^= mpn.p8[3];
+  /* fallthrough */
+  case 3:
+    pn.p8[2] ^= mpn.p8[2];
+  /* fallthrough */
+  case 2:
+    pn.p8[1] ^= mpn.p8[1];
+  /* fallthrough */
+  case 1:
+    pn.p8[0] ^= mpn.p8[0];
+    /* fallthrough */
+  case 0:
+    break;
+  }
 }
 
 /* *****************************************************************************
@@ -626,15 +722,18 @@ Hemming Distance and bit counting
 ***************************************************************************** */
 
 #if __has_builtin(__builtin_popcountll)
+/** performs a `popcount` operation to count the set bits. */
 #define fio_popcount(n) __builtin_popcountll(n)
 #else
 FIO_IFUNC int fio_popcount(uint64_t n) {
-  int c = 0;
-  while (n) {
-    ++c;
-    n &= n - 1;
-  }
-  return c;
+  /* for logic, see Wikipedia: https://en.wikipedia.org/wiki/Hamming_weight */
+  n = n - ((n >> 1) & 0x5555555555555555);
+  n = (n & 0x3333333333333333) + ((n >> 2) & 0x3333333333333333);
+  n = (n + (n >> 4)) & 0x0f0f0f0f0f0f0f0f;
+  n = n + (n >> 8);
+  n = n + (n >> 16);
+  n = n + (n >> 32);
+  return n & 0x7f;
 }
 #endif
 
@@ -700,6 +799,10 @@ FIO_IFUNC void fio_bitmap_flip(void *map, size_t bit) {
 Bit-Byte operations - testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+/* used in the test, defined later */
+SFUNC uint64_t fio_rand64(void);
+SFUNC void fio_rand_bytes(void *target, size_t len);
 
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
@@ -853,6 +956,39 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
 
     struct test_s *stst_p = FIO_PTR_FROM_FIELD(struct test_s, b, &stst.b);
     FIO_ASSERT(stst_p == &stst, "FIO_PTR_FROM_FIELD failed to retrace pointer");
+  }
+  {
+    fprintf(stderr, "* Testing fio_xmask and fio_xmask2.\n");
+    char data[128], buf[256];
+    uint64_t mask;
+    uint64_t counter;
+    do {
+      mask = fio_rand64();
+      counter = fio_rand64();
+    } while (!mask || !counter);
+    fio_rand_bytes(data, 128);
+    for (uint8_t i = 0; i < 16; ++i) {
+      memcpy(buf + i, data, 128);
+      fio_xmask(buf + i, 128, mask);
+      fio_xmask(buf + i, 128, mask);
+      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
+      fio_xmask(buf + i, 128, mask);
+      memmove(buf + i + 1, buf + i, 128);
+      fio_xmask(buf + i + 1, 128, mask);
+      FIO_ASSERT(!memcmp(buf + i + 1, data, 128),
+                 "fio_xmask rountrip (with move) error");
+    }
+    for (uint8_t i = 0; i < 16; ++i) {
+      memcpy(buf + i, data, 128);
+      fio_xmask2(buf + i, 128, mask, counter);
+      fio_xmask2(buf + i, 128, mask, counter);
+      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 CM rountrip error");
+      fio_xmask2(buf + i, 128, mask, counter);
+      memmove(buf + i + 1, buf + i, 128);
+      fio_xmask2(buf + i + 1, 128, mask, counter);
+      FIO_ASSERT(!memcmp(buf + i + 1, data, 128),
+                 "fio_xmask2 CM rountrip (with move) error");
+    }
   }
 }
 #endif /* FIO_TEST_CSTL */

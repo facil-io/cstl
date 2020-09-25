@@ -729,6 +729,13 @@ Common macros
 #endif
 #endif /* FIO_RISKY_HASH */
 
+/* Modules that require FIO_BITMAP */
+#if defined(FIO_JSON)
+#ifndef FIO_BITMAP
+#define FIO_BITMAP
+#endif
+#endif /* FIO_BITMAP */
+
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON)
 #ifndef FIO_BITWISE
@@ -739,7 +746,8 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
-    defined(FIO_QUEUE) || defined(FIO_JSON) || defined(FIO_SIGNAL)
+    defined(FIO_QUEUE) || defined(FIO_JSON) || defined(FIO_SIGNAL) ||          \
+    defined(FIO_BITMAP)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -752,10 +760,3 @@ Common macros
 #define FIO_ATOL
 #endif
 #endif /* FIO_ATOL */
-
-/* Modules that require FIO_BITMAP */
-#if defined(FIO_JSON)
-#ifndef FIO_BITMAP
-#define FIO_BITMAP
-#endif
-#endif /* FIO_BITMAP */

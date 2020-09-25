@@ -1,4 +1,6 @@
 /*
+ * Original Source code copied from: http://xoshiro.di.unimi.it/hwd.php
+ *
  * Copyright (C) 2004-2016 David Blackman.
  * Copyright (C) 2017-2018 David Blackman and Sebastiano Vigna.
  *
@@ -23,10 +25,6 @@
 #define FIO_CLI
 #include "fio-stl.h"
 
-// #define HWD_BITS 32
-// static uint32_t next(void) {
-//   return ((uint32_t)rand() << 16) ^ (uint32_t)rand();
-// }
 #define HWD_BITS 64
 static uint64_t (*next)(void) = fio_rand64;
 
@@ -64,9 +62,8 @@ static uint64_t sys_next(void) {
 
    To compile, you must define:
 
-   - HWD_BITS, which is the width of the word tested (parameter w in the paper);
-     must be 32, 64, or 128.
-   - HWD_PRNG_BITS, which is the number of bits output by the PRNG, and it is by
+   - HWD_BITS is set to 64 in this implementation.
+   - HWD_BITS, which is the number of bits output by the PRNG, and it is by
      default HWD_BITS. Presently legal combinations are 32/32, 32/64,
      64/64 and 128/64.
    - Optionally HWD_DIM, which defines the length of the signatures examined
@@ -81,7 +78,7 @@ static uint64_t sys_next(void) {
    mmap().
 
    You must insert the code for your PRNG, providing a suitable next()
-   method (returning a uint32_t or a uint64_t, depending on HWD_PRNG_BITS)
+   method (returning a uint32_t or a uint64_t, depending on HWD_BITS)
    at the HERE comment below. You may additionally initialize his state in
    the main() if necessary.
 */
@@ -116,47 +113,7 @@ static uint64_t sys_next(void) {
 // Fast division by 3; works up to DIM = 19.
 #define DIV3(x) ((x)*UINT64_C(1431655766) >> 32)
 
-#ifndef HWD_PRNG_BITS
-#define HWD_PRNG_BITS HWD_BITS
-#endif
-
 // batch_size values MUST be even. P is the probability of a 1 trit.
-
-#if HWD_BITS == 32
-
-#define P (0.40338510414585471153)
-const int64_t batch_size[] = {-1,
-                              UINT64_C(16904),
-                              UINT64_C(37848),
-                              UINT64_C(88680),
-                              UINT64_C(213360),
-                              UINT64_C(520784),
-                              UINT64_C(1280664),
-                              UINT64_C(3160976),
-                              UINT64_C(7815952),
-                              UINT64_C(19342248),
-                              UINT64_C(47885112),
-                              UINT64_C(118569000),
-                              UINT64_C(293614056),
-                              UINT64_C(727107408),
-                              UINT64_C(1800643824),
-                              UINT64_C(4459239480),
-                              UINT64_C(11043223056),
-                              UINT64_C(27348419104),
-                              UINT64_C(67728213816),
-                              UINT64_C(167728896072)};
-
-#if HWD_PRNG_BITS == 64
-static uint64_t next(void);
-#define TEST_ITERATIONS(b) ((b) / 2)
-#elif HWD_PRNG_BITS == 32
-#define TEST_ITERATIONS(b) (b)
-static uint32_t next(void);
-#else
-#error "Test 32-bit test supports PRNG of size 32 or 64"
-#endif
-
-#elif HWD_BITS == 64
 
 #define P (0.46769122397215788544)
 const int64_t batch_size[] = {-1,
@@ -180,50 +137,6 @@ const int64_t batch_size[] = {-1,
                               UINT64_C(4545075936),
                               UINT64_C(9707156552)};
 
-#if HWD_PRNG_BITS == 64
-#define TEST_ITERATIONS(b) (b)
-#else
-#error "Test 64-bit test supports PRNGs of size 64"
-#endif
-
-#elif HWD_BITS == 128
-
-#define P (0.46373128592889397439)
-const int64_t batch_size[] = {-1,
-                              UINT64_C(14856),
-                              UINT64_C(28792),
-                              UINT64_C(58088),
-                              UINT64_C(120392),
-                              UINT64_C(253680),
-                              UINT64_C(539816),
-                              UINT64_C(1155104),
-                              UINT64_C(2479360),
-                              UINT64_C(5330680),
-                              UINT64_C(11471256),
-                              UINT64_C(24696808),
-                              UINT64_C(53183328),
-                              UINT64_C(114541856),
-                              UINT64_C(246706584),
-                              UINT64_C(531387952),
-                              UINT64_C(1144590984),
-                              UINT64_C(2465432776),
-                              UINT64_C(5310537968),
-                              UINT64_C(11438933136)};
-
-#if HWD_PRNG_BITS == 64
-#define TEST_ITERATIONS(b) (b)
-static uint64_t next(void);
-#else
-#error "Test 128-bit test supports PRNG of size 64"
-#endif
-
-#else
-#error "Please define HWD_BITS as 32, 64, or 128"
-#endif
-
-#if HWD_BITS == 64 || HWD_BITS == 128
-
-#define WTYPE uint64_t
 #ifdef HWD_NO_POPCOUNT
 static inline int popcount64(uint64_t x) {
   x = x - ((x >> 1) & 0x5555555555555555);
@@ -236,24 +149,6 @@ static inline int popcount64(uint64_t x) {
 }
 #else
 #define popcount64(x) __builtin_popcountll(x)
-#endif
-
-#else /* HWD_BITS == 32 */
-
-#define WTYPE uint32_t
-#ifdef HWD_NO_POPCOUNT
-static inline int popcount32(uint32_t x) {
-  x = x - ((x >> 1) & 0x55555555);
-  x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
-  x = (x + (x >> 4)) & 0x0f0f0f0f;
-  x = x + (x >> 8);
-  x = x + (x >> 16);
-  return x & 0x7f;
-}
-#else
-#define popcount32(x) __builtin_popcount((uint32_t)x)
-#endif
-
 #endif
 
 /* Probability that the smallest of n numbers in [0..1) is <= x . */
@@ -309,45 +204,6 @@ static struct {
 } count_sum[SIZE];
 #endif
 
-#if HWD_BITS == 128
-
-/* Keeps track of the sum of values, as is in this case it is not
-   guaranteed not to overflow (but probability is infinitesimal if the
-   source is random). */
-static int64_t tot_sums;
-
-/* Copy accumulated numbers out of cs[] into count_sum, then zero the ones
-   in cs[]. We have to check explicitly that values do not overflow. */
-
-static void desat(const int64_t next_batch_size) {
-  int64_t c = 0, s = 0;
-
-  for (int i = 0; i < SIZE; i++) {
-    const int32_t st = cs[i];
-
-    const int count = get_count(st);
-    const int sum = get_sum(st);
-
-    c += count;
-    s += sum;
-
-    count_sum[i].c += count;
-    /* In cs[] the total Hamming weight is stored as actual weight. In
-       count_sum, it is stored as difference from expected average
-       Hamming weight, hence (BITS/2) * count */
-    count_sum[i].s += sum - (HWD_BITS / 2) * count;
-    cs[i] = 0;
-  }
-
-  if (c != next_batch_size || s != tot_sums) {
-    fprintf(stderr, "Counters or values overflowed. Seriously non-random.\n");
-    printf("p = %.3g\n", 1e-100);
-    exit(0);
-  }
-}
-
-#else
-
 /* Copy accumulated numbers out of cs[] into count_sum, then zero the ones
    in cs[]. Note it is impossible for totals to overflow unless counts do. */
 
@@ -375,64 +231,10 @@ static void desat(const int64_t next_batch_size) {
   }
 }
 
-#endif
-
 /* sig is the last signature from the previous call. At each step it
    contains an index into cs[], derived from the Hamming weights of the
    previous DIM numbers. Considered as a base 3 number, the most
    significant digit is the most recent trit. n is the batch size. */
-
-#if HWD_BITS == 32
-
-static inline uint32_t scan_batch(uint32_t sig, int64_t n, uint32_t *ts) {
-  uint32_t t = ts ? *ts : 0;
-  int bc;
-
-  for (int64_t i = 0; i < n; i++) {
-#if HWD_PRNG_BITS == 64
-    const uint64_t w64 = next();
-    uint32_t w32 = w64 >> 32;
-    if (ts) {
-      bc = popcount32(w32 ^ w32 << 1 ^ t);
-      t = w32 >> 31;
-    } else
-      bc = popcount32(w32);
-
-    update_cs(bc, cs + sig);
-    sig = DIV3(sig) + ((bc >= 15) + (bc >= 18)) * (SIZE / 3);
-
-    w32 = w64;
-
-    if (ts) {
-      bc = popcount32(w32 ^ w32 << 1 ^ t);
-      t = w32 >> 31;
-    } else
-      bc = popcount32(w32);
-
-    update_cs(bc, cs + sig);
-    sig = DIV3(sig) + ((bc >= 15) + (bc >= 18)) * (SIZE / 3);
-#else
-    const uint32_t w = next();
-    if (ts) {
-      bc = popcount32(w ^ w << 1 ^ t);
-      t = w >> 31;
-    } else
-      bc = popcount32(w);
-
-    update_cs(bc, cs + sig);
-    sig = DIV3(sig) + ((bc >= 15) + (bc >= 18)) * (SIZE / 3);
-#endif
-  }
-
-  if (ts)
-    *ts = t;
-  /* return the current signature so it can be passed back in on the next batch
-   */
-  return sig;
-}
-
-#elif HWD_BITS == 64
-
 static inline uint32_t scan_batch(uint32_t sig, int64_t n, uint64_t *ts) {
   uint64_t t = ts ? *ts : 0;
   int bc;
@@ -456,38 +258,6 @@ static inline uint32_t scan_batch(uint32_t sig, int64_t n, uint64_t *ts) {
    */
   return sig;
 }
-
-#else
-
-static inline uint32_t scan_batch(uint32_t sig, int64_t n, uint64_t *ts) {
-  uint64_t t = ts ? *ts : 0;
-  int bc;
-  tot_sums = 0; // In this case we have to keep track of the values, too
-
-  for (int64_t i = 0; i < n; i++) {
-    const uint64_t w0 = next();
-    const uint64_t w1 = next();
-
-    if (ts) {
-      bc = popcount64(w0 ^ w0 << 1 ^ t);
-      bc += popcount64(w1 ^ (w1 << 1) ^ (w0 >> 63));
-      t = w1 >> 63;
-    } else
-      bc = popcount64(w0) + popcount64(w1);
-
-    tot_sums += bc;
-    update_cs(bc, cs + sig);
-    sig = DIV3(sig) + ((bc >= 61) + (bc >= 68)) * (SIZE / 3);
-  }
-
-  if (ts)
-    *ts = t;
-  /* return the current signature so it can be passed back in on the next batch
-   */
-  return sig;
-}
-
-#endif
 
 /* Now we're out of the the accumulate phase, which is the inside loop.
    Next is analysis. */
@@ -681,13 +451,13 @@ static int64_t progsize[] = {100000000,
 /* We use the all-one signature (the most probable) as initial signature. */
 static int64_t pos;
 static uint32_t last_sig = (SIZE - 1) / 2;
-static WTYPE ts;
+static uint64_t ts;
 static int64_t next_progr = 100000000; // progsize[0]
 static int progr_index;
 
 static void run_test(const int64_t n, const bool trans, const bool progress) {
 
-  WTYPE *const p = trans ? &ts : NULL;
+  uint64_t *const p = trans ? &ts : NULL;
 
   while (n < 0 || pos < n) {
     int64_t next_batch_size = batch_size[DIM];
@@ -696,9 +466,7 @@ static void run_test(const int64_t n, const bool trans, const bool progress) {
 
     if (next_batch_size == 0)
       break;
-    /* TEST_ITERATIONS() corrects batch_size depending on HWD_BITS and
-     * HWD_PRNG_BITS */
-    last_sig = scan_batch(last_sig, TEST_ITERATIONS(next_batch_size), p);
+    last_sig = scan_batch(last_sig, next_batch_size, p);
     desat(next_batch_size);
     pos += next_batch_size * (HWD_BITS / 8);
 

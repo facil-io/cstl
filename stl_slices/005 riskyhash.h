@@ -316,7 +316,7 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
     nonce |= 1;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
-  fio_xmask(buf, len, hash, nonce);
+  fio_xmask2(buf, len, hash, nonce);
 }
 /* *****************************************************************************
 Risky Hash - Cleanup
@@ -617,6 +617,11 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
   return len;
 }
 
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
+  fio_xmask(buf, len, fio_rand64());
+  return len;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   for (int i = 0; i < 8; ++i) {
     char buf[128];
@@ -653,6 +658,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
                          1);
+  if (0) {
+    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                           (char *)"fio_xmask (XOR, NO counter)",
+                           alignment_test_offset);
+    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                           (char *)"fio_xmask (unaligned)",
+                           1);
+  }
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,

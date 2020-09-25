@@ -808,6 +808,50 @@ Performs the operation indicated in constant time.
 
     Tests if `condition` is non-zero (returns `a` / `b`).
 
+#### `fio_popcount` and Hemming 
+
+```c
+int fio_popcount(uint64_t n);
+```
+
+Returns the number of set bits in the number `n`.
+
+#### `fio_hemming_dist`
+
+```c
+#define fio_hemming_dist(n1, n2) fio_popcount(((uint64_t)(n1) ^ (uint64_t)(n2)))
+```
+
+Returns the Hemming Distance between the number `n1` and the number `n2`.
+
+Hemming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
+
+#### `fio_xmask`
+
+```c
+void fio_xmask(char *buf,
+               size_t len,
+               uint64_t mask);
+```
+
+Masks data using a 64 bit mask.
+
+The function may perform significantly better when the buffer's memory is aligned.
+
+#### `fio_xmask2`
+
+```c
+uint64_t fio_xmask2(char *buf,
+                    size_t len,
+                    uint64_t mask,
+                    uint64_t nonce);
+```
+
+Masks data using a 64 bit mask and a counter mode nonce.
+
+Returns the end state of the mask.
+
+The function may perform significantly better when the buffer's memory is aligned.
 
 -------------------------------------------------------------------------------
 
@@ -846,7 +890,7 @@ This function will produce a 64 bit hash for X bytes of data.
 void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
 ```
 
-Masks data using a Risky Hash and a counter mode nonce.
+Masks data using a Risky Hash and a counter mode nonce, using `fio_xmask2`.
 
 Used for mitigating memory access attacks when storing "secret" information in memory.
 

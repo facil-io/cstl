@@ -19,7 +19,7 @@ This function will produce a 64 bit hash for X bytes of data.
 void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
 ```
 
-Masks data using a Risky Hash and a counter mode nonce.
+Masks data using a Risky Hash and a counter mode nonce, using `fio_xmask2`.
 
 Used for mitigating memory access attacks when storing "secret" information in memory.
 
