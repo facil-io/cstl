@@ -11495,18 +11495,15 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int i = 0;
     int c = 0;
     do {
-      uint8_t add = 0;
       if ((fds_ary[i].revents & POLLIN) || (fds_ary[i].revents & POLLPRI)) {
         cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
                            fds_ary[i].fd);
-        add |= 1;
       }
       if ((fds_ary[i].revents & POLLOUT)) {
         cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
                            fds_ary[i].fd);
-        add |= 1;
       }
       if ((fds_ary[i].revents & POLLHUP) || (fds_ary[i].revents & POLLERR) ||
           (fds_ary[i].revents & POLLNVAL)) {
@@ -11514,7 +11511,6 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         fds_ary[i].events = 0; /* never retain events after closure / error */
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
                            fds_ary[i].fd);
-        add |= 1;
       }
       fds_ary[i].events &= ~fds_ary[i].revents;
       if (fds_ary[i].events) {
@@ -11531,8 +11527,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
                            fds_ary[i].fd);
       }
       /* any more events? */
+      c += !!fds_ary[i].revents;
       ++i;
-      c += add;
       if (i < len || c < r)
         continue;
       if (to_copy != i) {
