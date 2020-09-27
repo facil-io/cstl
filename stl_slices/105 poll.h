@@ -157,8 +157,9 @@ Poll Monitoring Implementation - The polling type(s)
 #endif
 
 #define FIO_RISKY_HASH
-#define FIO_MAP_TYPE uint32_t
-#define FIO_MAP_NAME fio___poll_index
+#define FIO_MAP_TYPE         uint32_t
+#define FIO_MAP_TYPE_INVALID -1 /* allow monitoring of fd == 0*/
+#define FIO_MAP_NAME         fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
 #define FIO_ARRAY_NAME           fio___poll_fds
@@ -255,6 +256,12 @@ Poll Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
+#ifdef FIO_POLL_DEBUG
+#define FIO_POLL_DEBUG_LOG FIO_LOG_DEBUG
+#else
+#define FIO_POLL_DEBUG_LOG(...)
+#endif
+
 /* mock event */
 FIO_SFUNC void fio___poll_ev_mock(int fd, void *udata) {
   (void)fd;
@@ -265,18 +272,24 @@ FIO_IFUNC int fio___poll_monitor(fio_poll_s *p,
                                  int fd,
                                  void *udata,
                                  unsigned short flags) {
-  uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
+  if (fd == -1)
+    return -1;
+  int32_t pos = fio___poll_index_get(&p->index, fd, 0);
   struct pollfd *i = fio___poll_fds2ptr(&p->fds);
-  if (i && i[pos].fd == fd)
+  if (i && pos != -1 && i[pos].fd == fd)
     goto edit_existing;
-  if (i && i[pos].fd == -1)
+  if (i && pos != -1 && i[pos].fd == -1)
     goto renew_monitoring;
   /* insert new entry */
-  i = fio___poll_fds_push(&p->fds, (struct pollfd){.fd = fd, .events = flags});
-  if (!i)
+  i = fio___poll_fds_push(&p->fds,
+                          (struct pollfd){.fd = fd, .events = (short)flags});
+  if (!i) {
+    FIO_LOG_ERROR("fio___poll_monitor failed to push fd %d", fd);
     return -1;
+  }
   pos = (uint32_t)(i - fio___poll_fds2ptr(&p->fds));
   if (!fio___poll_udata_push(&p->udata, udata)) {
+    FIO_LOG_ERROR("fio___poll_monitor failed to push udata for fd %d", fd);
     fio___poll_fds_pop(&p->fds, NULL);
     return -1;
   }
@@ -333,8 +346,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  */
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   int r = -1;
-  int c = 0;
-  size_t to_copy = 0;
+  int to_copy = 0;
   fio_poll_s cpy;
   if (!p)
     return r;
@@ -360,8 +372,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 
   /* poll the array */
   struct pollfd *const fds_ary = fio___poll_fds2ptr(&cpy.fds);
-  size_t const len = fio___poll_fds_count(&cpy.fds);
+  int const len = (int)fio___poll_fds_count(&cpy.fds);
   void **const ud_ary = fio___poll_udata2ptr(&cpy.udata);
+  FIO_POLL_DEBUG_LOG("fio_poll_review reviewing %zu file descriptors.", len);
 #if FIO_POLL_HAS_UDATA_COLLECTION
 #define FIO___POLL_UDATA_GET(index) ud_ary[(index)]
 #else
@@ -371,41 +384,87 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 
   /* process events */
   if (r > 0) {
-    for (size_t i = 0; i < len; ++i) {
+    int i = 0;
+    int c = 0;
+    do {
+      uint8_t add = 0;
       if ((fds_ary[i].revents & POLLIN) || (fds_ary[i].revents & POLLPRI)) {
         cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
+                           fds_ary[i].fd);
+        add |= 1;
       }
       if ((fds_ary[i].revents & POLLOUT)) {
         cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
+                           fds_ary[i].fd);
+        add |= 1;
       }
       if ((fds_ary[i].revents & POLLHUP) || (fds_ary[i].revents & POLLERR) ||
           (fds_ary[i].revents & POLLNVAL)) {
         cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
         fds_ary[i].events = 0; /* never retain events after closure / error */
+        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
+                           fds_ary[i].fd);
+        add |= 1;
       }
       fds_ary[i].events &= ~fds_ary[i].revents;
       if (fds_ary[i].events) {
         /* unfired events await */
         fds_ary[to_copy].fd = fds_ary[i].fd;
         fds_ary[to_copy].events = fds_ary[i].events;
+        fds_ary[to_copy].revents = 0;
         FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
         ++to_copy;
+        FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
+                           fds_ary[i].fd);
+      } else {
+        FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
+                           fds_ary[i].fd);
       }
       /* any more events? */
-      if (c++ >= r)
-        break;
-    }
+      ++i;
+      c += add;
+      if (i < len || c < r)
+        continue;
+      if (to_copy != i) {
+        while (i < len) {
+          FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
+                             fds_ary[i].fd);
+          fds_ary[to_copy].fd = fds_ary[i].fd;
+          fds_ary[to_copy].events = fds_ary[i].events;
+          FIO_ASSERT(!fds_ary[i].revents,
+                     "Event unhandlerd for %d",
+                     fds_ary[i].fd);
+          fds_ary[to_copy].revents = 0;
+          FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
+          ++to_copy;
+          ++i;
+        }
+      } else {
+        if (to_copy != len) {
+          FIO_POLL_DEBUG_LOG("fio_poll_review no events left, quick mark");
+        }
+        to_copy = len;
+      }
+      break;
+    } while (1);
   } else
-    to_copy = fio___poll_fds_count(&cpy.fds);
+    to_copy = len;
 
   /* insert all unfired events back to the (thread safe) queue */
   fio_lock(&p->lock);
-  if (!c && !fio___poll_index_count(&p->index)) {
-    /* no editing was performed, it's possible to move the data set as is */
+  if (to_copy == len && !fio___poll_index_count(&p->index)) {
+    /* it's possible to move the data set as is */
+    FIO_POLL_DEBUG_LOG(
+        "fio_poll_review overwriting %zu items for pending events",
+        to_copy);
     *p = cpy;
     cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
   } else {
-    for (size_t i = 0; i < to_copy; ++i) {
+    FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
+                       to_copy);
+    for (int i = 0; i < to_copy; ++i) {
       fio___poll_monitor(p,
                          fds_ary[i].fd,
                          FIO___POLL_UDATA_GET(i),
@@ -427,6 +486,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
  */
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   void *old = NULL;
+  FIO_POLL_DEBUG_LOG("fio_poll_forget called for %d", fd);
   if (!p || fd == -1)
     return old;
   fio_lock(&p->lock);
@@ -445,19 +505,24 @@ Poll Monitoring Testing?
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
-  fprintf(stderr,
-          "* testing file descriptor monitoring (setup / cleanup only).\n");
+  fprintf(
+      stderr,
+      "* testing file descriptor monitoring (poll setup / cleanup only).\n");
   fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
-  for (int i = 128; i; --i) {
-    fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]);
+  for (int i = 128; i--;) {
+    FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
+               "fio_poll_monitor failed for fd %d",
+               i);
   }
-  for (int i = 128; i; --i) {
+  for (int i = 128; i--;) {
     if ((i & 3) == 3) {
-      fio_poll_forget(&p, i);
+      FIO_ASSERT(fio_poll_forget(&p, i) == (void *)(uintptr_t)i,
+                 "fio_poll_forget didn't return correct udata at %d",
+                 i);
     }
   }
-  for (int i = 128; i; --i) {
+  for (int i = 128; i--;) {
     size_t pos = fio___poll_index_get(&p.index, i, 0);
     if ((i & 3) == 3) {
       FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).fd != i, "fd wasn't removed?");
