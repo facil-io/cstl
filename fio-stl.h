@@ -11531,7 +11531,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
       /* any more events? */
       c += !!fds_ary[i].revents;
       ++i;
-      if (i < len || c < r)
+      if (i < len && c < r)
         continue;
       if (to_copy != i) {
         while (i < len) {
