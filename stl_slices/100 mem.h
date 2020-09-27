@@ -302,6 +302,10 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_USE_FIO_MEMCOPY 0
 #endif
 
+#ifndef FIO_MEM_PAGE_SIZE_LOG
+#define FIO_MEM_PAGE_SIZE_LOG 12 /* 4096 bytes per page */
+#endif
+
 #if !defined(FIO_MEM_PAGE_ALLOC) || !defined(FIO_MEM_PAGE_REALLOC) ||          \
     !defined(FIO_MEM_PAGE_FREE)
 /**
@@ -441,14 +445,18 @@ FIO_MALLOC_FORCE_SYSTEM - use the system allocator
 #ifdef FIO_MALLOC_FORCE_SYSTEM
 
 SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
-  return calloc(size);
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  return calloc(size, 1);
+#else
+  return malloc(size);
+#endif
 }
 SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                    calloc)(size_t size_per_unit,
                                            size_t unit_count) {
   return calloc(size_per_unit, unit_count);
 }
-SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) { return free(ptr); }
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) { free(ptr); }
 SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
                                                          size_t new_size) {
   return realloc(ptr, new_size);
@@ -460,7 +468,7 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
   (void)copy_len;
 }
 SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
-  return calloc(size);
+  return calloc(size, 1);
 }
 
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void) {}
@@ -470,7 +478,13 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {}
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
 SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
 
-#else
+#ifdef FIO_TEST_CSTL
+SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
+  fprintf(stderr, "* Custom memory allocator bypassed.\n");
+}
+#endif /* FIO_TEST_CSTL */
+
+#else /* FIO_MALLOC_FORCE_SYSTEM */
 /* *****************************************************************************
 
 
@@ -491,10 +505,6 @@ Helpers and System Memory Allocation
 #if FIO_HAVE_UNIX_TOOLS
 #include <unistd.h>
 #endif /* H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
-
-#ifndef FIO_MEM_PAGE_SIZE_LOG
-#define FIO_MEM_PAGE_SIZE_LOG 12 /* 4096 bytes per page */
-#endif                           /* FIO_MEM_PAGE_SIZE_LOG */
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
   (((size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) >> (FIO_MEM_PAGE_SIZE_LOG))
@@ -2317,13 +2327,6 @@ Memory Allocation - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#ifdef FIO_MALLOC_FORCE_SYSTEM
-SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
-  fprintf(stderr, "* Custom memory allocator bypassed.\n");
-}
-
-#else /* FIO_MALLOC_FORCE_SYSTEM */
-
 #include "pthread.h"
 
 /* contention testing (multi-threaded) */
@@ -2443,7 +2446,6 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
              "memory leaks?");
 #endif /* DEBUG && FIO_EXTERN_COMPLETE */
 }
-#endif /* FIO_MALLOC_FORCE_SYSTEM */
 #endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
