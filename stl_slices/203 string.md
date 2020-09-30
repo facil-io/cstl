@@ -174,7 +174,7 @@ The core type, created by the macro, is the `STR_s` type - where `STR` is replac
 void hello(void){
   my_str_s msg = FIO_STR_INIT;
   my_str_write(&msg, "Hello World", 11);
-  printf("%s\n", my_str_data(&msg));
+  printf("%s\n", my_str2ptr(&msg));
   my_str_destroy(&msg);
 }
 ```

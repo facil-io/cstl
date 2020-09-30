@@ -3430,8 +3430,8 @@ typedef struct {
 void example(void) {
   ary_s a = FIO_ARRAY_INIT;
   foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(&a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary_to_a(&a)), pos->i);
+  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
+    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), (void *)pos, pos->i);
   }
   ary_destroy(&a);
 }
@@ -3712,26 +3712,28 @@ It is possible to edit the array while iterating, however when deleting `pos`, o
 ## Maps - Hash Maps / Sets
 
 ```c
-#define FIO_STR_SMALL str /* a binary string type */
+/* Create a binary safe String type for Strings that aren't mutated often */
+#define FIO_STR_SMALL str
 #include "fio-stl.h"
-/* a binary safe string based key-value hash map */
-#define FIO_MAP_NAME map
-#define FIO_MAP_TYPE str_s
+
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP_NAME                 dict
+#define FIO_MAP_TYPE                 str_s
 #define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
-#define FIO_MAP_TYPE_DESTROY(k) str_destroy(&k)
-#define FIO_MAP_TYPE_CMP(a, b) str_is_eq(&(a), &(b))
-#define FIO_MAP_KEY FIO_MAP_TYPE
-#define FIO_MAP_KEY_COPY FIO_MAP_TYPE_COPY
-#define FIO_MAP_KEY_DESTROY FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_KEY_CMP FIO_MAP_TYPE_CMP
+#define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
+#define FIO_MAP_TYPE_CMP(a, b)       str_is_eq(&(a), &(b))
+#define FIO_MAP_KEY                  FIO_MAP_TYPE
+#define FIO_MAP_KEY_COPY             FIO_MAP_TYPE_COPY
+#define FIO_MAP_KEY_DESTROY          FIO_MAP_TYPE_DESTROY
+#define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
 #include "fio-stl.h"
 /** set helper for consistent hash values */
-FIO_IFUNC str_s map_set2(map_s *m, str_s key, str_s obj) {
-  return map_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
+FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
+  return dict_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
 }
 /** get helper for consistent hash values */
-FIO_IFUNC str_s * map_get2(map_s *m, str_s key, str_s obj) {
-  return map_get_ptr(m, str_hash(&key, (uint64_t)m), str_s key);
+FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
+  return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
 }
 ```
 
@@ -4263,7 +4265,7 @@ The core type, created by the macro, is the `STR_s` type - where `STR` is replac
 void hello(void){
   my_str_s msg = FIO_STR_INIT;
   my_str_write(&msg, "Hello World", 11);
-  printf("%s\n", my_str_data(&msg));
+  printf("%s\n", my_str2ptr(&msg));
   my_str_destroy(&msg);
 }
 ```

@@ -912,7 +912,6 @@ Testing cleanup
 #undef FIO_TEST_CSTL
 #undef TEST_REPEAT
 #undef TEST_FUNC
-#undef FIO_ASSERT
 
 #endif /* FIO_EXTERN_COMPLETE */
 #endif

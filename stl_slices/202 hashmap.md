@@ -1,26 +1,28 @@
 ## Maps - Hash Maps / Sets
 
 ```c
-#define FIO_STR_SMALL str /* a binary string type */
+/* Create a binary safe String type for Strings that aren't mutated often */
+#define FIO_STR_SMALL str
 #include "fio-stl.h"
-/* a binary safe string based key-value hash map */
-#define FIO_MAP_NAME map
-#define FIO_MAP_TYPE str_s
+
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP_NAME                 dict
+#define FIO_MAP_TYPE                 str_s
 #define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
-#define FIO_MAP_TYPE_DESTROY(k) str_destroy(&k)
-#define FIO_MAP_TYPE_CMP(a, b) str_is_eq(&(a), &(b))
-#define FIO_MAP_KEY FIO_MAP_TYPE
-#define FIO_MAP_KEY_COPY FIO_MAP_TYPE_COPY
-#define FIO_MAP_KEY_DESTROY FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_KEY_CMP FIO_MAP_TYPE_CMP
+#define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
+#define FIO_MAP_TYPE_CMP(a, b)       str_is_eq(&(a), &(b))
+#define FIO_MAP_KEY                  FIO_MAP_TYPE
+#define FIO_MAP_KEY_COPY             FIO_MAP_TYPE_COPY
+#define FIO_MAP_KEY_DESTROY          FIO_MAP_TYPE_DESTROY
+#define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
 #include "fio-stl.h"
 /** set helper for consistent hash values */
-FIO_IFUNC str_s map_set2(map_s *m, str_s key, str_s obj) {
-  return map_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
+FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
+  return dict_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
 }
 /** get helper for consistent hash values */
-FIO_IFUNC str_s * map_get2(map_s *m, str_s key, str_s obj) {
-  return map_get_ptr(m, str_hash(&key, (uint64_t)m), str_s key);
+FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
+  return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
 }
 ```
 
