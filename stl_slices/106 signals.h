@@ -94,7 +94,7 @@ Signal Monitoring Implementation - possibly externed functions.
 
 struct {
   int32_t sig;
-  volatile uint32_t flag;
+  volatile int32_t flag;
   void (*callback)(int sig, void *);
   void *udata;
   struct sigaction old;

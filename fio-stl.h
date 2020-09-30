@@ -3399,7 +3399,9 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#define FIO_TEST_CSTL               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -3505,7 +3507,7 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
 }
 
 /** Reads number information, up to base 10 numbers. Returned expo in `base`. */
-FIO_IFUNC fio___number_s fio___aton_read_b2_b10(char **pstr, uint8_t base) {
+FIO_IFUNC fio___number_s fio___aton_read_b2_bX(char **pstr, uint8_t base) {
   fio___number_s r = (fio___number_s){0};
   const uint64_t limit = ((~0ULL) / base) - (base - 1);
   while (**pstr >= '0' && **pstr < ('0' + base) && r.val <= (limit)) {
@@ -3582,7 +3584,7 @@ SFUNC int64_t fio_atol(char **pstr) {
 
   /* is_base10: */
   *pstr = p;
-  n = fio___aton_read_b2_b10(pstr, 10);
+  n = fio___aton_read_b2_bX(pstr, 10);
 
   /* sign can't be embeded */
 #define CALC_N_VAL()                                                           \
@@ -3643,7 +3645,7 @@ is_base8:
     ++p;
   }
   *pstr = p;
-  n = fio___aton_read_b2_b10(pstr, 8);
+  n = fio___aton_read_b2_bX(pstr, 8);
   CALC_N_VAL();
   return n.val;
 }
@@ -3903,10 +3905,119 @@ Numbers <=> Strings - Testing
 
 #ifdef FIO_TEST_CSTL
 
+#define FIO_ATOL_TEST_MAX 1048576
+
+FIO_IFUNC int64_t FIO_NAME_TEST(stl, atol_time)(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
+                                              int64_t (*a2l)(char **),
+                                              size_t (*l2a)(char *,
+                                                            int64_t,
+                                                            uint8_t)) {
+  int64_t start;
+  int64_t tw = 0;
+  int64_t trt = 0;
+  char buf[1024];
+  struct {
+    const char *str;
+    const char *prefix;
+    uint8_t prefix_len;
+    uint8_t base;
+  } * pb, b[] = {
+              {.str = "Base 10", .base = 10},
+              {.str = "Hex    ", .prefix = "0x", .prefix_len = 2, .base = 16},
+              // {.str = "Binary ", .prefix = "0b", .prefix_len = 2, .base = 2},
+              // {.str = "Oct    ", .prefix = "0", .prefix_len = 1, .base = 8},
+              /* end marker */
+              {.str = NULL},
+          };
+  fprintf(stderr, "    * %s test performance:\n", name);
+  for (pb = b; pb->str; ++pb) {
+    start = FIO_NAME_TEST(stl, atol_time)();
+    for (int64_t i = -FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
+      char *bf = buf + pb->prefix_len;
+      size_t len = l2a(bf, i, pb->base);
+      bf[len] = 0;
+      if (bf[0] == '-') {
+        for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
+          if (bf[pre_test + 1] == pb->prefix[pre_test])
+            continue;
+          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          bf = buf;
+          break;
+        }
+      } else {
+        for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
+          if (bf[pre_test] == pb->prefix[pre_test])
+            continue;
+          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          bf = buf;
+          break;
+        }
+      }
+      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+      int64_t n = a2l(&bf);
+      FIO_ASSERT(n == i, "roundtrip error for %s: %s != %lld", name, bf, i);
+    }
+    trt = FIO_NAME_TEST(stl, atol_time)() - start;
+    start = FIO_NAME_TEST(stl, atol_time)();
+    for (int64_t i = -FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
+      char *bf = buf + pb->prefix_len;
+      size_t len = l2a(bf, i, pb->base);
+      bf[len] = 0;
+      if (bf[0] == '-') {
+        for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
+          if (bf[pre_test + 1] == pb->prefix[pre_test])
+            continue;
+          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          bf = buf;
+          break;
+        }
+      } else {
+        for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
+          if (bf[pre_test] == pb->prefix[pre_test])
+            continue;
+          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          bf = buf;
+          break;
+        }
+      }
+      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+    }
+    tw = FIO_NAME_TEST(stl, atol_time)() - start;
+    fprintf(stderr, "        - %s roundtrip   %lld us\n", pb->str, trt);
+    fprintf(stderr, "        - %s write       %lld us\n", pb->str, tw);
+    fprintf(stderr, "        - %s read (calc) %lld us\n", pb->str, trt - tw);
+  }
+}
+
+SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
+  switch (base) {
+  case 2: /* overflow - unsupported */
+  case 8: /* overflow - unsupported */
+  case 10:
+    return sprintf(dest, "%lld", num);
+  case 16:
+    if (num >= 0)
+      return sprintf(dest, "0x%.8X", (int)num);
+    return sprintf(dest, "-0x%.8X", (int)(0 - num));
+  }
+  return sprintf(dest, "%lld", num);
+}
+
+SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
+
 FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol and fio_ltoa.\n");
+  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
+  FIO_NAME_TEST(stl, atol_speed)
+  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
   char buffer[1024];
-  for (int i = 0 - TEST_REPEAT; i < TEST_REPEAT; ++i) {
+  for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
     buffer[tmp++] = 0;
@@ -3997,6 +4108,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
             9223372036854775807LL); /* INT64_MAX overflow protection */
   TEST_ATOL("9223372036854775999",
             9223372036854775807LL); /* INT64_MAX overflow protection */
+  TEST_ATOL("9223372036854775806",
+            9223372036854775806LL); /* almost INT64_MAX */
 #undef TEST_ATOL
 
 #ifdef FIO_ATOF_ALT
@@ -4193,7 +4306,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     buffer[14] = 0;
     size_t r = 0;
     start = clock();
-    for (int i = 0; i < (TEST_REPEAT << 3); ++i) {
+    for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += fio_atol(&pos);
       __asm__ volatile("" ::: "memory");
@@ -4206,7 +4319,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     r = 0;
 
     start = clock();
-    for (int i = 0; i < (TEST_REPEAT << 3); ++i) {
+    for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += strtol(pos, NULL, 10);
       __asm__ volatile("" ::: "memory");
@@ -4220,6 +4333,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #endif /* !DEBUG */
 #endif /* FIO_ATOF_ALT */
 }
+#undef FIO_ATOL_TEST_MAX
 #endif /* FIO_TEST_CSTL */
 
 /* *****************************************************************************
@@ -12507,7 +12621,7 @@ Signal Monitoring Implementation - possibly externed functions.
 
 struct {
   int32_t sig;
-  volatile uint32_t flag;
+  volatile int32_t flag;
   void (*callback)(int sig, void *);
   void *udata;
   struct sigaction old;
@@ -22091,6 +22205,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #ifndef FIOBJ_MALLOC
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
+#define FIO_TIME
 #include __FILE__
 
 /* Add non-type options to minimize `#include` instructions */

@@ -64,6 +64,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #ifndef FIOBJ_MALLOC
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
+#define FIO_TIME
 #include __FILE__
 
 /* Add non-type options to minimize `#include` instructions */
