@@ -3428,6 +3428,7 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #if defined(FIO_ATOL) && !defined(H___FIO_ATOL_H)
 #define H___FIO_ATOL_H
+#include <inttypes.h>
 #include <math.h>
 /* *****************************************************************************
 Strings to Numbers - API
@@ -4000,13 +4001,13 @@ SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   case 2: /* overflow - unsupported */
   case 8: /* overflow - unsupported */
   case 10:
-    return sprintf(dest, "%lld", num);
+    return sprintf(dest, "%" PRId64, num);
   case 16:
     if (num >= 0)
-      return sprintf(dest, "0x%.8X", (int)num);
-    return sprintf(dest, "-0x%.8X", (int)(0 - num));
+      return sprintf(dest, "0x%.16" PRIx64, num);
+    return sprintf(dest, "-0x%.8" PRIx64, (0 - num));
   }
-  return sprintf(dest, "%lld", num);
+  return sprintf(dest, "%" PRId64, num);
 }
 
 SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
