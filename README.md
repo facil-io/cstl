@@ -1,5 +1,7 @@
 # facil.io - C STL - a Simple Template Library for C
 
+![C/C++ CI](https://github.com/facil-io/cstl/workflows/C/C++%20CI/badge.svg)
+
 At the core of the [facil.io library](https://facil.io) is its powerful Simple Template Library for C (and C++).
 
 The Simple Template Library is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
@@ -31,7 +33,7 @@ It is possible to use the same `makefile` to compile source code and static libr
 
 ## Quick Examples
 
-### Dynamic Binary-Safe Strings
+### Binary-Safe Dynamic Strings
 
 Easily construct binary safe String types that are always `NUL` terminated just in case you want to use them as a C String.
 

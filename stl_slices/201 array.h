@@ -46,7 +46,7 @@ typedef struct {
 void example(void) {
   ary_s a = FIO_ARRAY_INIT;
   foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(&a, pos) { // pos will be a pointer to the element
+  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
     fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), pos->i);
   }
   ary_destroy(&a);
