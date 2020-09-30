@@ -3525,26 +3525,21 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_bX(char **pstr, uint8_t base) {
 /** Reads number information for base 16 (hex). Returned expo in base 4. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
   fio___number_s r = (fio___number_s){0};
-  const uint64_t mask = (~0ULL) << ((sizeof(mask) << 3) - 4);
+  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
   for (; !(r.val & mask);) {
     uint8_t tmp;
     if (**pstr >= '0' && **pstr <= '9')
       tmp = **pstr - '0';
-    else if ((**pstr >= 'A' && **pstr <= 'F') ||
-             (**pstr >= 'a' && **pstr <= 'f'))
+    else if (((**pstr | 32) >= 'a' && (**pstr | 32) <= 'f'))
       tmp = (**pstr | 32) - ('a' - 10);
     else
       return r;
     r.val = (r.val << 4) | tmp;
     ++(*pstr);
   }
-  for (;;) {
-    if ((**pstr >= '0' && **pstr <= '9') || (**pstr >= 'A' && **pstr <= 'F') ||
-        (**pstr >= 'a' && **pstr <= 'f'))
-      ++r.expo;
-    else
-      return r;
-  }
+  while ((**pstr >= '0' && **pstr <= '9') ||
+         ((**pstr | 32) >= 'a' && (**pstr | 32) <= 'f'))
+    ++r.expo;
   return r;
 }
 
