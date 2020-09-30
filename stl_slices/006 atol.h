@@ -309,7 +309,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       }
 #else
       while ((i < 64) && (n & 0x8000000000000000) == 0) {
-        n = n << 1;
+        n <<= 1;
         i++;
       }
       /* make sure the Binary representation doesn't appear signed */
@@ -596,9 +596,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
       __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
     }
     tw = FIO_NAME_TEST(stl, atol_time)() - start;
-    fprintf(stderr, "        - %s roundtrip   %lld us\n", pb->str, trt);
-    fprintf(stderr, "        - %s write       %lld us\n", pb->str, tw);
-    fprintf(stderr, "        - %s read (calc) %lld us\n", pb->str, trt - tw);
+    // clang-format off
+    fprintf(stderr, "        - %s roundtrip   %zd us\n", pb->str, (size_t)trt);
+    fprintf(stderr, "        - %s write       %zd us\n", pb->str, (size_t)tw);
+    fprintf(stderr, "        - %s read (calc) %zd us\n", pb->str, (size_t)(trt - tw));
+    // clang-format on
   }
 }
 
