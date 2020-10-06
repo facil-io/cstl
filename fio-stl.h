@@ -491,6 +491,7 @@ Miscellaneous helper macros
 #define FIO_LOG_FATAL(...)
 #define FIO_LOG2STDERR(...)
 #define FIO_LOG2STDERR2(...)
+#define FIO_LOG_PRINT__(...)
 
 #ifndef FIO_LOG_LENGTH_LIMIT
 /** Defines a point at which logging truncates (limited by stack memory) */
@@ -871,6 +872,7 @@ __attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
 #endif
 int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
+#undef FIO_LOG_PRINT__
 #define FIO_LOG_PRINT__(level, ...)                                            \
   do {                                                                         \
     if (level <= FIO_LOG_LEVEL)                                                \

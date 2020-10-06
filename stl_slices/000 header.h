@@ -491,6 +491,7 @@ Miscellaneous helper macros
 #define FIO_LOG_FATAL(...)
 #define FIO_LOG2STDERR(...)
 #define FIO_LOG2STDERR2(...)
+#define FIO_LOG_PRINT__(...)
 
 #ifndef FIO_LOG_LENGTH_LIMIT
 /** Defines a point at which logging truncates (limited by stack memory) */

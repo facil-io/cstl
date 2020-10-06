@@ -109,6 +109,7 @@ __attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
 #endif
 int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
+#undef FIO_LOG_PRINT__
 #define FIO_LOG_PRINT__(level, ...)                                            \
   do {                                                                         \
     if (level <= FIO_LOG_LEVEL)                                                \
