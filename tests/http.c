@@ -13,14 +13,13 @@ Benchmark with keep-alive:
     ab -c 200 -t 4 -n 1000000 -k http://127.0.0.1:3000/
     wrk -c200 -d4 -t1 http://localhost:3000/
 
-Note - This is a TOY example, no security whatsever!
+Note: This is a **TOY** example, no security whatsoever!!!
 ***************************************************************************** */
 
 /* include some of the moduls we use... */
 #define FIO_LOG
 #define FIO_URL
 #define FIO_SOCK
-#define FIO_STREAM
 #define FIO_SIGNAL
 // #define FIO_POLL_DEBUG
 #include "fio-stl.h"
@@ -32,7 +31,9 @@ Note - This is a TOY example, no security whatsever!
 #define FIO_POLL
 #include "fio-stl.h"
 /* Short string object used for response objects. */
-#define FIO_STR_NAME str
+#define FIO_STREAM
+#define FIO_MEMORY_NAME str_allocator /* response & stream string allocator */
+#define FIO_STR_NAME    str
 #include "fio-stl.h"
 
 /* we use local global variables to make the code easier. */
@@ -40,8 +41,10 @@ Note - This is a TOY example, no security whatsever!
 /** A flag telling us when to stop reviewing IO events. */
 static volatile uint8_t server_stop_flag = 0;
 
-#define HTTP_CLIENT_BUFFER 32768
-#define HTTP_MAX_HEADERS   16
+#define HTTP_CLIENT_BUFFER    32768
+#define HTTP_MAX_HEADERS      16
+#define HTTP_RESPONSE_ECHO    0
+#define HTTP_RESPONSE_DYNAMIC 1
 
 /* *****************************************************************************
 Callbacks and object used by main()
@@ -309,7 +312,7 @@ HTTP/1.1 callback(s)
 /** called when a request was received. */
 static int http1_on_request(http1_parser_s *parser) {
   client_s *c = (client_s *)parser;
-#ifdef DEBUG
+#ifdef HTTP_RESPONSE_ECHO
   http_send_response(c,
                      200,
                      (fio_str_info_s){"OK", 2},
@@ -317,7 +320,7 @@ static int http1_on_request(http1_parser_s *parser) {
                      NULL,
                      (fio_str_info_s){c->method, strlen(c->method)});
 
-#elif 1
+#elif HTTP_RESPONSE_DYNAMIC
   http_send_response(c,
                      200,
                      (fio_str_info_s){"OK", 2},
@@ -326,8 +329,10 @@ static int http1_on_request(http1_parser_s *parser) {
                      (fio_str_info_s){"Hello World!", 12});
 #else
   char *response =
-      "200 OK HTTP/1.1\r\nContent-Length: 12\r\n\r\nHello World!\r\n";
-  fio_stream_pack_data(response, strlen(response), 0, 0, NULL);
+      "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!\n";
+  fio_stream_add(&c->out,
+                 fio_stream_pack_data(response, strlen(response), 0, 0, NULL));
+  (void)http_send_response; /* unused in this branch */
 #endif
 
   /* reset client request data */
