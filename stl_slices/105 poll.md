@@ -135,4 +135,8 @@ When set to true (the default value), the `udata` value is unique per file descr
 
 When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
 
+#### `FIO_POLL_DEBUG`
+
+If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.
+
 -------------------------------------------------------------------------------

@@ -498,7 +498,7 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   case FIO_PACKET_TYPE_EXTERNAL:
     if (!buf[0] || !len[0] ||
         (!must_copy && (!p->next || u.ext->length >= len[0] + offset))) {
-      buf[0] = u.ext->buf + offset;
+      buf[0] = u.ext->buf + u.ext->offset + offset;
       len[0] = (size_t)(u.ext->length) - offset;
       return;
     }

@@ -802,7 +802,8 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(FIO_LOG_PRINT__) && defined(FIO_LOG)
+#if !defined(H___FIO_LOH___H) && defined(FIO_LOG)
+#define H___FIO_LOH___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
@@ -11611,7 +11612,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int i = 0;
     int c = 0;
     do {
-      if ((fds_ary[i].revents & POLLIN) || (fds_ary[i].revents & POLLPRI)) {
+      if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
         cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
                            fds_ary[i].fd);
@@ -11621,12 +11622,13 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
                            fds_ary[i].fd);
       }
-      if ((fds_ary[i].revents & POLLHUP) || (fds_ary[i].revents & POLLERR) ||
-          (fds_ary[i].revents & POLLNVAL)) {
+      if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
         cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
         fds_ary[i].events = 0; /* never retain events after closure / error */
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
                            fds_ary[i].fd);
+        /* if it was re-inserted to the queue, remove it */
+        fio_poll_forget(p, fds_ary[i].fd);
       }
       fds_ary[i].events &= ~fds_ary[i].revents;
       if (fds_ary[i].events) {
@@ -11707,7 +11709,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   void *old = NULL;
   FIO_POLL_DEBUG_LOG("fio_poll_forget called for %d", fd);
-  if (!p || fd == -1)
+  if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
     return old;
   fio_lock(&p->lock);
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
@@ -12274,7 +12276,7 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   case FIO_PACKET_TYPE_EXTERNAL:
     if (!buf[0] || !len[0] ||
         (!must_copy && (!p->next || u.ext->length >= len[0] + offset))) {
-      buf[0] = u.ext->buf + offset;
+      buf[0] = u.ext->buf + u.ext->offset + offset;
       len[0] = (size_t)(u.ext->length) - offset;
       return;
     }

@@ -1941,6 +1941,8 @@ The following are reserved macro names:
 
 * `FIO_MEMORY_SYS_ALLOCATION_SIZE`
 
+* `FIO_MALLOC_TMP_USE_SYSTEM`
+
 
 -------------------------------------------------------------------------------
 ## Time Helpers
@@ -2853,6 +2855,10 @@ Stops monitoring the specified file descriptor even if some of it's event's hadn
 When set to true (the default value), the `udata` value is unique per file descriptor, using an array of `udata` values.
 
 When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
+
+#### `FIO_POLL_DEBUG`
+
+If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.
 
 -------------------------------------------------------------------------------
 ## Data Stream Container
