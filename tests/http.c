@@ -21,14 +21,9 @@ Note: This is a **TOY** example, no security whatsoever!!!
 #define FIO_URL
 #define FIO_SOCK
 #define FIO_SIGNAL
-// #define FIO_POLL_DEBUG
-#include "fio-stl.h"
-
-/* CLI and POLL both create sub-types and can't share include statements */
 #define FIO_CLI
-#include "fio-stl.h"
-/* CLI and POLL both create sub-types and can't share include statements */
 #define FIO_POLL
+// #define FIO_POLL_DEBUG
 #include "fio-stl.h"
 /* Short string object used for response objects. */
 #define FIO_STREAM
@@ -41,9 +36,12 @@ Note: This is a **TOY** example, no security whatsoever!!!
 /** A flag telling us when to stop reviewing IO events. */
 static volatile uint8_t server_stop_flag = 0;
 
-#define HTTP_CLIENT_BUFFER    32768
-#define HTTP_MAX_HEADERS      16
-#define HTTP_RESPONSE_ECHO    0
+#define HTTP_CLIENT_BUFFER 32768
+#define HTTP_MAX_HEADERS   16
+
+/* an echo response is always dynamic (allocated on the heap). */
+#define HTTP_RESPONSE_ECHO 1
+/* if not echoing, the response is "Hello World" - but is it allocated? */
 #define HTTP_RESPONSE_DYNAMIC 1
 
 /* *****************************************************************************

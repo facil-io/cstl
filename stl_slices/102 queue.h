@@ -791,17 +791,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
     for (size_t i = 0; i < 10; ++i) {
-      fio_timer_push2queue(&q2, &tq, fio_time_milli());
-      FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+      uint64_t now = fio_time_milli();
+      fio_timer_push2queue(&q2, &tq, now);
+      fio_timer_push2queue(&q2, &tq, now);
+      FIO_ASSERT(fio_queue_count(&q2), "task should have been scheduled");
+      FIO_ASSERT(fio_queue_count(&q2) == 1,
+                 "task should have been scheduled only once");
       fio_queue_perform(&q2);
       FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
       FIO_ASSERT(tester == i + 1,
                  "task should have been performed (%zu).",
                  (size_t)tester);
     }
-    fio_timer_push2queue(&q2, &tq, fio_time_milli());
-    FIO_ASSERT(fio_queue_count(&q2) == 0,
-               "task should NOT have been scheduled");
 
     tester = 0;
     fio_timer_destroy(&tq);

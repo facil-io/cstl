@@ -26,8 +26,6 @@ possible race conditions.
 #define FIO_SOCK
 #define FIO_STREAM
 #define FIO_SIGNAL
-#include "fio-stl.h"
-/* CLI and POLL both create sub-types and can't share include statements */
 #define FIO_POLL
 #include "fio-stl.h"
 
@@ -89,8 +87,10 @@ int main(int argc, char const *argv[]) {
   fio_url_s a = fio_url_parse(fio_cli_unnamed(0), url_len);
   if (!a.host.buf && !a.port.buf) {
     /* Unix Socket */
-    client_fd = fio_sock_open(
-        a.path.buf, NULL, FIO_SOCK_UNIX | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
+    client_fd =
+        fio_sock_open(a.path.buf,
+                      NULL,
+                      FIO_SOCK_UNIX | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
     FIO_LOG_DEBUG("Opened a Unix Socket (%d).", client_fd);
   } else if (!a.scheme.buf || a.scheme.len != 3 ||
              (a.scheme.buf[0] | 32) != 'u' || (a.scheme.buf[1] | 32) != 'd' ||
@@ -230,8 +230,9 @@ FIO_SFUNC void on_data(int fd, void *arg) {
         goto done;
     /* fallthrough */
     case 1: /* read returned 0, which means we reached EOF */
-      FIO_LOG_DEBUG(
-          "socket (%d) error / EOF, shutting down: %s", fd, strerror(errno));
+      FIO_LOG_DEBUG("socket (%d) error / EOF, shutting down: %s",
+                    fd,
+                    strerror(errno));
       stop = 1;
       return;
     }

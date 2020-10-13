@@ -2068,7 +2068,7 @@ FIO_IFUNC uint64_t fio___xmask2_aligned64(uint64_t buf[],
                                           uint64_t nonce) {
 
   register uint64_t m = mask;
-  for (size_t i = byte_len >> 3; i; --i) {
+  for (size_t i = 7; i < byte_len; i += 8) {
     *buf ^= m;
     m += nonce;
     ++buf;
@@ -2120,7 +2120,7 @@ FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
                                                 const uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
   register uint64_t m = mask;
-  for (size_t i = len >> 3; i; --i) {
+  for (size_t i = 7; i < len; i += 8) {
     uint64_t tmp;
     tmp = FIO_NAME2(fio_buf, u64_local)(buf);
     tmp ^= m;
@@ -2240,7 +2240,8 @@ FIO_IFUNC void fio_xmask(char *buf, size_t len, uint64_t mask) {
   pn.p8 = buf;
   mpn.p64 = &mask;
   register const uint64_t m = mask;
-  for (size_t i = len >> 3; i; --i) {
+  /** loop while greater than 8 bytes remain */
+  for (size_t i = 7; i < len; i += 8) {
     *pn.p64 ^= m;
     ++pn.p64;
   }
@@ -9429,17 +9430,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(tester == 0,
                "fio_timer_schedule should have scheduled the task.");
     for (size_t i = 0; i < 10; ++i) {
-      fio_timer_push2queue(&q2, &tq, fio_time_milli());
-      FIO_ASSERT(fio_queue_count(&q2) == 1, "task should have been scheduled");
+      uint64_t now = fio_time_milli();
+      fio_timer_push2queue(&q2, &tq, now);
+      fio_timer_push2queue(&q2, &tq, now);
+      FIO_ASSERT(fio_queue_count(&q2), "task should have been scheduled");
+      FIO_ASSERT(fio_queue_count(&q2) == 1,
+                 "task should have been scheduled only once");
       fio_queue_perform(&q2);
       FIO_ASSERT(!fio_queue_count(&q2), "queue should be empty");
       FIO_ASSERT(tester == i + 1,
                  "task should have been performed (%zu).",
                  (size_t)tester);
     }
-    fio_timer_push2queue(&q2, &tq, fio_time_milli());
-    FIO_ASSERT(fio_queue_count(&q2) == 0,
-               "task should NOT have been scheduled");
 
     tester = 0;
     fio_timer_destroy(&tq);
@@ -9534,7 +9536,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI___H)
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_CLI___H 1
 
 /* *****************************************************************************
@@ -9721,13 +9723,9 @@ typedef struct {
    (!o1.len || o1.buf == o2.buf ||                                             \
     (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
 #define FIO_MAP_NAME fio___cli_hash
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
+#define FIO_STL_KEEP__
 #include __FILE__
-#if FIO_STL_KEEP__ == 1
 #undef FIO_STL_KEEP__
-#endif
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
 static fio___cli_hash_s fio___cli_values = FIO_MAP_INIT;
@@ -11265,7 +11263,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
 
 #if !FIO_HAVE_UNIX_TOOLS
@@ -11376,10 +11374,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 /* *****************************************************************************
 Poll Monitoring Implementation - The polling type(s)
 ***************************************************************************** */
-
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
+#define FIO_STL_KEEP__
 
 #define FIO_RISKY_HASH
 #define FIO_MAP_TYPE         uint32_t
@@ -11396,7 +11391,7 @@ Poll Monitoring Implementation - The polling type(s)
 #include __FILE__
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
-#if FIO_STL_KEEP__ == 1
+#ifdef FIO_STL_KEEP__
 #undef FIO_STL_KEEP__
 #endif
 
@@ -11771,11 +11766,9 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#ifndef FIO_STL_KEEP__
 #undef FIO_POLL_HAS_UDATA_COLLECTION
-#endif
-#endif /* FIO_POLL */
 #undef FIO_POLL
+#endif /* FIO_POLL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2020
 License: ISC / MIT (choose your license)
@@ -16406,25 +16399,21 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
   /* existing. overwrite? */
   if (overwrite) {
 #ifdef FIO_MAP_KEY
+    FIO_MAP_TYPE tmp_old = m->map[i.i].obj.value;
+    FIO_MAP_TYPE_COPY((m->map[i.i].obj.value), obj);
+#else
+    FIO_MAP_TYPE tmp_old = m->map[i.i].obj;
+    FIO_MAP_TYPE_COPY((m->map[i.i].obj), obj);
+#endif
     if (old) {
-      FIO_MAP_TYPE_COPY((*old), (m->map[i.i].obj.value));
+      FIO_MAP_TYPE_COPY((*old), tmp_old);
 #if FIO_MAP_DESTROY_AFTER_COPY
-      FIO_MAP_TYPE_DESTROY(m->map[i.i].obj.value);
+      FIO_MAP_TYPE_DESTROY(tmp_old);
 #endif
     } else {
-      FIO_MAP_TYPE_DESTROY(m->map[i.i].obj.value);
+      FIO_MAP_TYPE_DESTROY(tmp_old);
     }
-    FIO_MAP_TYPE_COPY((m->map[i.i].obj.value), obj);
     FIO_MAP_KEY_DISCARD(key);
-#else  /* !FIO_MAP_KEY */
-    if (old) {
-      FIO_MAP_TYPE_COPY((*old), (m->map[i.i].obj));
-      FIO_MAP_OBJ_DESTROY_AFTER((m->map[i.i].obj));
-    } else {
-      FIO_MAP_OBJ_DESTROY((m->map[i.i].obj));
-    }
-    FIO_MAP_OBJ_COPY((m->map[i.i].obj), obj);
-#endif /* FIO_MAP_KEY */
   } else {
     FIO_MAP_KEY_DISCARD(key);
     FIO_MAP_TYPE_DISCARD(obj);
@@ -19969,6 +19958,10 @@ Type Naming Macros for FIOBJ types. By default, results in:
 #ifndef JSON_MAX_DEPTH
 #define JSON_MAX_DEPTH FIOBJ_MAX_NESTING
 #endif
+
+#ifndef FIOBJ_JSON_APPEND
+#define FIOBJ_JSON_APPEND 1
+#endif
 /* *****************************************************************************
 General Requirements / Macros
 ***************************************************************************** */
@@ -21145,6 +21138,51 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   return r;
 }
 
+/** TODO: Updates a hash using information from another Hash. */
+FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
+                                                                    FIOBJ src) {
+  if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||
+      FIOBJ_TYPE_CLASS(src) != FIOBJ_T_HASH)
+    return;
+  FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
+    if (i->obj.key == FIOBJ_INVALID ||
+        FIOBJ_TYPE_CLASS(i->obj.key) == FIOBJ_T_NULL) {
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)
+      (dest, i->obj.key, NULL);
+      continue;
+    }
+    register FIOBJ tmp;
+    switch (FIOBJ_TYPE_CLASS(i->obj.value)) {
+    case FIOBJ_T_ARRAY:
+      /* TODO? decide if we should merge elements or overwrite...? */
+      tmp =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
+        (tmp, i->obj.value);
+        continue;
+      }
+      break;
+    case FIOBJ_T_HASH:
+      tmp =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
+      (dest, i->obj.value);
+      else break;
+      continue;
+    case FIOBJ_T_NUMBER:    /* fallthrough */
+    case FIOBJ_T_PRIMITIVE: /* fallthrough */
+    case FIOBJ_T_STRING:    /* fallthrough */
+    case FIOBJ_T_FLOAT:     /* fallthrough */
+    case FIOBJ_T_OTHER:
+      break;
+    }
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
+    (dest, i->obj.key, fiobj_dup(i->obj.value));
+  }
+}
+
 /* *****************************************************************************
 FIOBJ JSON support (inline functions)
 ***************************************************************************** */
@@ -21653,8 +21691,24 @@ static inline int fio_json_on_start_object(fio_json_parser_s *p) {
     pr->top = pr->target;
     pr->target = FIOBJ_INVALID;
   } else {
-    FIOBJ hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
+    FIOBJ hash;
+#if FIOBJ_JSON_APPEND
+    hash = FIOBJ_INVALID;
+    if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
+      hash =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+    }
+    if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH) {
+      hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
+      fiobj_json_add2parser(pr, hash);
+    } else {
+      fiobj_free(pr->key);
+      pr->key = FIOBJ_INVALID;
+    }
+#else
+    hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
     fiobj_json_add2parser(pr, hash);
+#endif
     pr->stack[pr->so++] = pr->top;
     pr->top = hash;
   }
@@ -21676,10 +21730,29 @@ static inline void fio_json_on_end_object(fio_json_parser_s *p) {
 /** an array object was detected */
 static int fio_json_on_start_array(fio_json_parser_s *p) {
   fiobj_json_parser_s *pr = (fiobj_json_parser_s *)p;
-  if (pr->target)
-    return -1;
+  FIOBJ ary = FIOBJ_INVALID;
+  if (pr->target != FIOBJ_INVALID) {
+    if (FIOBJ_TYPE_CLASS(pr->target) != FIOBJ_T_ARRAY)
+      return -1;
+    ary = pr->target;
+    pr->target = FIOBJ_INVALID;
+  }
+#if FIOBJ_JSON_APPEND
+  if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
+    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+  }
+  if (FIOBJ_TYPE_CLASS(ary) != FIOBJ_T_ARRAY) {
+    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
+    fiobj_json_add2parser(pr, ary);
+  } else {
+    fiobj_free(pr->key);
+    pr->key = FIOBJ_INVALID;
+  }
+#else
   FIOBJ ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
   fiobj_json_add2parser(pr, ary);
+#endif
+
   pr->stack[pr->so++] = pr->top;
   pr->top = ary;
   return 0;

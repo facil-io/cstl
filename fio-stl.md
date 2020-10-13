@@ -1,3 +1,7 @@
+---
+title: facil.io - C STL - a Simple Template Library for C
+sidebar: 0.8.x/_sidebar.md
+---
 # facil.io - C STL - a Simple Template Library for C
 
 At the core of the [facil.io library](https://facil.io) is its powerful Simple Template Library for C (and C++).
@@ -9,6 +13,8 @@ The Simple Template Library also offers common functional primitives and helpers
 In other words, all the common building blocks one could need in a C project are placed in this single header file.
 
 The header could be included multiple times with different results, creating different types or exposing different functionality.
+
+**Note**: facil.io Web Application Developers get many of the features of the C STL through including the `fio.h` header. See the [facil.io IO Core documentation](fio) for more information.
 
 ## Simple Template Library (STL) Overview
 

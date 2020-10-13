@@ -513,7 +513,7 @@ FIO_IFUNC uint64_t fio___xmask2_aligned64(uint64_t buf[],
                                           uint64_t nonce) {
 
   register uint64_t m = mask;
-  for (size_t i = byte_len >> 3; i; --i) {
+  for (size_t i = 7; i < byte_len; i += 8) {
     *buf ^= m;
     m += nonce;
     ++buf;
@@ -565,7 +565,7 @@ FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
                                                 const uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
   register uint64_t m = mask;
-  for (size_t i = len >> 3; i; --i) {
+  for (size_t i = 7; i < len; i += 8) {
     uint64_t tmp;
     tmp = FIO_NAME2(fio_buf, u64_local)(buf);
     tmp ^= m;
@@ -685,7 +685,8 @@ FIO_IFUNC void fio_xmask(char *buf, size_t len, uint64_t mask) {
   pn.p8 = buf;
   mpn.p64 = &mask;
   register const uint64_t m = mask;
-  for (size_t i = len >> 3; i; --i) {
+  /** loop while greater than 8 bytes remain */
+  for (size_t i = 7; i < len; i += 8) {
     *pn.p64 ^= m;
     ++pn.p64;
   }

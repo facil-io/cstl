@@ -214,34 +214,6 @@ LIB_OBJS=$(foreach source, $(LIBSRC), $(addprefix $(TMP_ROOT)/, $(addsuffix .o, 
 
 OBJS_DEPENDENCY:=$(LIB_OBJS:.o=.d) $(MAIN_OBJS:.o=.d) 
 
-# TODO: fix code so this isn't required.
-#
-# GCC (at least) >= 7 triggers some bug when -fipa-icf is enabled
-# (as in our default: -O2)
-#
-# Is there a hidden code issue in facil.io?
-#
-# https://kristerw.blogspot.com/2017/05/interprocedural-optimization-in-gcc.html
-ifeq ($(shell $(CC) -v 2>&1 | grep -o "^gcc version"),gcc version)
-  OPTIMIZATION+=-fno-ipa-icf
-endif
-
-#############################################################################
-# TRY_RUN, TRY_COMPILE and TRY_COMPILE_AND_RUN functions
-#
-# Call using $(call TRY_COMPILE, code, compiler_flags)
-#
-# Returns shell code as string: "0" (success) or non-0 (failure)
-#
-# TRY_COMPILE_AND_RUN returns the program's shell code as string.
-#############################################################################
-
-TRY_RUN=$(shell $(1) >> /dev/null 2> /dev/null; echo $$?;)
-TRY_COMPILE=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(LDFLAGS) $(2) -xc -o /dev/null - >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
-TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(2) -xc -o ./___fio_tmp_test_ - 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___fio_tmp_test_ 2> /dev/null)
-EMPTY:=
-
-
 #############################################################################
 # Combining single-file library
 #############################################################################
@@ -270,6 +242,34 @@ endif
 endif
 endif
 
+#############################################################################
+# TRY_RUN, TRY_COMPILE and TRY_COMPILE_AND_RUN functions
+#
+# Call using $(call TRY_COMPILE, code, compiler_flags)
+#
+# Returns shell code as string: "0" (success) or non-0 (failure)
+#
+# TRY_COMPILE_AND_RUN returns the program's shell code as string.
+#############################################################################
+
+TRY_RUN=$(shell $(1) >> /dev/null 2> /dev/null; echo $$?;)
+TRY_COMPILE=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(LDFLAGS) $(2) -xc -o /dev/null - >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
+TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(2) -xc -o ./___fio_tmp_test_ - 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___fio_tmp_test_ 2> /dev/null)
+EMPTY:=
+
+#############################################################################
+# GCC bug handling.
+#
+# GCC might trigger a bug when -fipa-icf is enabled and (de)constructor
+# functions are used (as in our case with -O2 or above).
+#
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=70306
+#############################################################################
+
+ifeq ($(shell $(CC) -v 2>&1 | grep -o "^gcc version [0-7]\." | grep -o "^gcc version"),gcc version)
+  OPTIMIZATION+=-fno-ipa-icf
+  $(info * Disabled `-fipa-icf` optimization, might be buggy with this gcc version.)
+endif
 
 #############################################################################
 # kqueue / epoll / poll Selection / Detection

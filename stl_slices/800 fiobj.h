@@ -104,6 +104,10 @@ Type Naming Macros for FIOBJ types. By default, results in:
 #ifndef JSON_MAX_DEPTH
 #define JSON_MAX_DEPTH FIOBJ_MAX_NESTING
 #endif
+
+#ifndef FIOBJ_JSON_APPEND
+#define FIOBJ_JSON_APPEND 1
+#endif
 /* *****************************************************************************
 General Requirements / Macros
 ***************************************************************************** */
@@ -1280,6 +1284,51 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   return r;
 }
 
+/** TODO: Updates a hash using information from another Hash. */
+FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
+                                                                    FIOBJ src) {
+  if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||
+      FIOBJ_TYPE_CLASS(src) != FIOBJ_T_HASH)
+    return;
+  FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
+    if (i->obj.key == FIOBJ_INVALID ||
+        FIOBJ_TYPE_CLASS(i->obj.key) == FIOBJ_T_NULL) {
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)
+      (dest, i->obj.key, NULL);
+      continue;
+    }
+    register FIOBJ tmp;
+    switch (FIOBJ_TYPE_CLASS(i->obj.value)) {
+    case FIOBJ_T_ARRAY:
+      /* TODO? decide if we should merge elements or overwrite...? */
+      tmp =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
+        (tmp, i->obj.value);
+        continue;
+      }
+      break;
+    case FIOBJ_T_HASH:
+      tmp =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
+      (dest, i->obj.value);
+      else break;
+      continue;
+    case FIOBJ_T_NUMBER:    /* fallthrough */
+    case FIOBJ_T_PRIMITIVE: /* fallthrough */
+    case FIOBJ_T_STRING:    /* fallthrough */
+    case FIOBJ_T_FLOAT:     /* fallthrough */
+    case FIOBJ_T_OTHER:
+      break;
+    }
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
+    (dest, i->obj.key, fiobj_dup(i->obj.value));
+  }
+}
+
 /* *****************************************************************************
 FIOBJ JSON support (inline functions)
 ***************************************************************************** */
@@ -1788,8 +1837,24 @@ static inline int fio_json_on_start_object(fio_json_parser_s *p) {
     pr->top = pr->target;
     pr->target = FIOBJ_INVALID;
   } else {
-    FIOBJ hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
+    FIOBJ hash;
+#if FIOBJ_JSON_APPEND
+    hash = FIOBJ_INVALID;
+    if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
+      hash =
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+    }
+    if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH) {
+      hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
+      fiobj_json_add2parser(pr, hash);
+    } else {
+      fiobj_free(pr->key);
+      pr->key = FIOBJ_INVALID;
+    }
+#else
+    hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
     fiobj_json_add2parser(pr, hash);
+#endif
     pr->stack[pr->so++] = pr->top;
     pr->top = hash;
   }
@@ -1811,10 +1876,29 @@ static inline void fio_json_on_end_object(fio_json_parser_s *p) {
 /** an array object was detected */
 static int fio_json_on_start_array(fio_json_parser_s *p) {
   fiobj_json_parser_s *pr = (fiobj_json_parser_s *)p;
-  if (pr->target)
-    return -1;
+  FIOBJ ary = FIOBJ_INVALID;
+  if (pr->target != FIOBJ_INVALID) {
+    if (FIOBJ_TYPE_CLASS(pr->target) != FIOBJ_T_ARRAY)
+      return -1;
+    ary = pr->target;
+    pr->target = FIOBJ_INVALID;
+  }
+#if FIOBJ_JSON_APPEND
+  if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
+    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+  }
+  if (FIOBJ_TYPE_CLASS(ary) != FIOBJ_T_ARRAY) {
+    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
+    fiobj_json_add2parser(pr, ary);
+  } else {
+    fiobj_free(pr->key);
+    pr->key = FIOBJ_INVALID;
+  }
+#else
   FIOBJ ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
   fiobj_json_add2parser(pr, ary);
+#endif
+
   pr->stack[pr->so++] = pr->top;
   pr->top = ary;
   return 0;

@@ -40,7 +40,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
 
 #if !FIO_HAVE_UNIX_TOOLS
@@ -151,10 +151,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 /* *****************************************************************************
 Poll Monitoring Implementation - The polling type(s)
 ***************************************************************************** */
-
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
+#define FIO_STL_KEEP__
 
 #define FIO_RISKY_HASH
 #define FIO_MAP_TYPE         uint32_t
@@ -171,7 +168,7 @@ Poll Monitoring Implementation - The polling type(s)
 #include __FILE__
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
-#if FIO_STL_KEEP__ == 1
+#ifdef FIO_STL_KEEP__
 #undef FIO_STL_KEEP__
 #endif
 
@@ -546,8 +543,6 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#ifndef FIO_STL_KEEP__
 #undef FIO_POLL_HAS_UDATA_COLLECTION
-#endif
-#endif /* FIO_POLL */
 #undef FIO_POLL
+#endif /* FIO_POLL */

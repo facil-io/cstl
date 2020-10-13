@@ -36,7 +36,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI___H)
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_CLI___H 1
 
 /* *****************************************************************************
@@ -223,13 +223,9 @@ typedef struct {
    (!o1.len || o1.buf == o2.buf ||                                             \
     (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
 #define FIO_MAP_NAME fio___cli_hash
-#ifndef FIO_STL_KEEP__
-#define FIO_STL_KEEP__ 1
-#endif
+#define FIO_STL_KEEP__
 #include __FILE__
-#if FIO_STL_KEEP__ == 1
 #undef FIO_STL_KEEP__
-#endif
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
 static fio___cli_hash_s fio___cli_values = FIO_MAP_INIT;

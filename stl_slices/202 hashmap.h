@@ -1244,25 +1244,21 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
   /* existing. overwrite? */
   if (overwrite) {
 #ifdef FIO_MAP_KEY
+    FIO_MAP_TYPE tmp_old = m->map[i.i].obj.value;
+    FIO_MAP_TYPE_COPY((m->map[i.i].obj.value), obj);
+#else
+    FIO_MAP_TYPE tmp_old = m->map[i.i].obj;
+    FIO_MAP_TYPE_COPY((m->map[i.i].obj), obj);
+#endif
     if (old) {
-      FIO_MAP_TYPE_COPY((*old), (m->map[i.i].obj.value));
+      FIO_MAP_TYPE_COPY((*old), tmp_old);
 #if FIO_MAP_DESTROY_AFTER_COPY
-      FIO_MAP_TYPE_DESTROY(m->map[i.i].obj.value);
+      FIO_MAP_TYPE_DESTROY(tmp_old);
 #endif
     } else {
-      FIO_MAP_TYPE_DESTROY(m->map[i.i].obj.value);
+      FIO_MAP_TYPE_DESTROY(tmp_old);
     }
-    FIO_MAP_TYPE_COPY((m->map[i.i].obj.value), obj);
     FIO_MAP_KEY_DISCARD(key);
-#else  /* !FIO_MAP_KEY */
-    if (old) {
-      FIO_MAP_TYPE_COPY((*old), (m->map[i.i].obj));
-      FIO_MAP_OBJ_DESTROY_AFTER((m->map[i.i].obj));
-    } else {
-      FIO_MAP_OBJ_DESTROY((m->map[i.i].obj));
-    }
-    FIO_MAP_OBJ_COPY((m->map[i.i].obj), obj);
-#endif /* FIO_MAP_KEY */
   } else {
     FIO_MAP_KEY_DISCARD(key);
     FIO_MAP_TYPE_DISCARD(obj);
