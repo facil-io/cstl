@@ -205,6 +205,7 @@ Basic macros and included files
     defined(__CYGWIN__)
 #define FIO_HAVE_UNIX_TOOLS 1
 #include <sys/param.h>
+#include <unistd.h>
 #endif
 
 #if FIO_UNALIGNED_ACCESS && (__amd64 || __amd64__ || __x86_64 || __x86_64__)
@@ -415,6 +416,54 @@ typedef struct fio___list_node_s {
     (n)->next->prev = (n)->prev;                                               \
     (n)->next = (n)->prev = NULL;                                              \
   } while (0)
+
+/* *****************************************************************************
+32 bit Indexed Linked Lists Persistent Macros and Types
+
+32 bit indexes can be used on 64 bit machines to create a linked list that uses
+less memory and is always relative to some root pointer (usually the root of an
+array).
+
+This assumes that the distance between any 2 nodes is never greater than a 32
+bit value and saves 8 bytes per node in memory allocation requirements.
+
+The "head" index is usualy validated by reserving the value of `-1` to indicate
+an empty list.
+***************************************************************************** */
+#ifndef FIO_ILIST32_EACH
+/** A common linked list node type. */
+typedef struct fio___index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio___index32_node_s;
+
+/** A linked list node type */
+#define FIO_ILIST32_NODE fio___index32_node_s
+#define FIO_ILIST32_HEAD uint32_t
+
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_ILIST32_PUSH(root, node_name, head, n)                             \
+  do {                                                                         \
+    (n)->node_name.prev = (root)[(head)].node_name.prev;                       \
+    (n)->node_name.next = (head);                                              \
+    (root)[(root)[(head)].node_name.prev].node_name.next =                     \
+        (uint32_t)((n) - (root));                                              \
+    (root)[(head)].node_name.prev = (uint32_t)((n) - (root));                  \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_ILIST32_REMOVE(root, node_name, n)                                 \
+  do {                                                                         \
+    (root)[(n)->node_name.prev].node_name.next = (n)->node_name.next;          \
+    (root)[(n)->node_name.next].node_name.prev = (n)->node_name.prev;          \
+    (n)->node_name.next = (n)->node_name.prev = (uint32_t)((n) - (root));      \
+  } while (0)
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_ILIST32_EACH(root, node_name, head, pos)                           \
+  for (uint32_t pos = (head), stopper___i32___ = 0; !stopper___i32___;         \
+       stopper___i32___ = ((pos = (root)[pos].node_name.next) == (head)))
+#endif
 
 /* *****************************************************************************
 Naming Macros

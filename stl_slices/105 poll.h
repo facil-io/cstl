@@ -128,6 +128,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
  */
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 
+/** Closes all sockets, calling the `on_close` and reinitializing the object. */
+SFUNC void fio_poll_close_and_destroy(fio_poll_s *p);
+
 /* *****************************************************************************
 
 
@@ -494,6 +497,31 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   fio_unlock(&p->lock);
   return old;
 }
+
+/** Closes all sockets, calling the `on_close` and reinitializing the object. */
+SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
+  fio_poll_s tmp;
+  fio_lock(&p->lock);
+  tmp = *p;
+  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
+                                 p->settings.on_ready,
+                                 p->settings.on_close);
+  fio_unlock(&tmp.lock);
+  for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
+    if (fio___poll_fds_get(&tmp.fds, i).fd == -1)
+      continue;
+    close(fio___poll_fds_get(&tmp.fds, i).fd);
+#if FIO_POLL_HAS_UDATA_COLLECTION
+    tmp.settings.on_close(fio___poll_fds_get(&tmp.fds, i).fd,
+                          fio___poll_udata2ptr(&tmp.udata)[i]);
+#else
+    tmp.settings.on_close(fio___poll_fds_get(&tmp.fds, i).fd,
+                          fio___poll_udata2ptr(&tmp.udata)[0]);
+#endif
+  }
+  fio_poll_destroy(&tmp);
+}
+
 /* *****************************************************************************
 Poll Monitoring Testing?
 ***************************************************************************** */

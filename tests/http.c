@@ -25,6 +25,7 @@ Note: This is a **TOY** example, no security whatsoever!!!
 #define FIO_POLL
 // #define FIO_POLL_DEBUG
 #include "fio-stl.h"
+
 /* Short string object used for response objects. */
 #define FIO_STREAM
 #define FIO_MEMORY_NAME str_allocator /* response & stream string allocator */
@@ -151,8 +152,7 @@ int main(int argc, char const *argv[]) {
   }
 
   /* cleanup */
-  close(srv_fd);
-  fio_poll_destroy(&monitor);
+  fio_poll_close_and_destroy(&monitor);
   return 0;
 }
 
