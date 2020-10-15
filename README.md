@@ -124,6 +124,16 @@ FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
 FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
   return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
 }
+
+void example(void) {
+  dict_s dictionary = FIO_MAP_INIT;
+  str_s key, val;
+  str_init_const(&key, "hello", 5);
+  str_init_const(&val, "Hello World!", 12);
+  dict_set2(&dictionary, key, val);
+  fprintf(stdout, "%s\n", str2ptr(dict_get2(&dictionary, key)));
+  dict_destroy(&dictionary);
+}
 ```
 
 
