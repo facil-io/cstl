@@ -1,6 +1,6 @@
 # facil.io - C STL - a Simple Template Library for C
 
-![C/C++ CI](https://github.com/facil-io/cstl/workflows/C/C++%20CI/badge.svg)
+[![C/C++ CI](https://github.com/facil-io/cstl/workflows/C/C++%20CI/badge.svg)](https://github.com/facil-io/cstl/actions)
 
 At the core of the [facil.io library](https://facil.io) is its powerful Simple Template Library for C (and C++).
 

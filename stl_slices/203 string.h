@@ -99,7 +99,14 @@ String API - Initialization and Destruction
  * be used.
  */
 typedef struct {
-  uint8_t special; /* Flags and small string data */
+  /* String flags:
+   *
+   * bit 1: small string.
+   * bit 2: frozen string.
+   * bit 3: static (non allocated) string (big strings only).
+   * bit 3-8: small string length (up to 64 bytes).
+   */
+  uint8_t special;
   uint8_t reserved[(sizeof(void *) * (1 + FIO_STR_OPTIMIZE_EMBEDDED)) -
                    (sizeof(uint8_t))]; /* padding length */
 #if !FIO_STR_OPTIMIZE4IMMUTABILITY
@@ -527,7 +534,7 @@ String Macro Helpers
 #define FIO_STR_SMALL_LEN(s) ((size_t)((s)->special >> 2))
 #define FIO_STR_SMALL_LEN_SET(s, l)                                            \
   ((s)->special = (((s)->special & 2) | ((uint8_t)(l) << 2) | 1))
-#define FIO_STR_SMALL_CAPA(s) (sizeof(*(s)) - 2)
+#define FIO_STR_SMALL_CAPA(s) ((sizeof(*(s)) - 2) & 63)
 #define FIO_STR_SMALL_DATA(s) ((char *)((s)->reserved))
 
 #define FIO_STR_BIG_DATA(s)       ((s)->buf)
