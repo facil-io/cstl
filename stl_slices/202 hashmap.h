@@ -148,28 +148,33 @@ Hash Map / Set - type and hash macros
 #endif
 #endif /* FIO_MAP_DESTROY_AFTER_COPY */
 
-/** The maximum number of elements allowed before removing old data (FIFO) */
 #ifndef FIO_MAP_MAX_ELEMENTS
+/** The maximum number of elements allowed before removing old data (FIFO) */
 #define FIO_MAP_MAX_ELEMENTS 0
 #endif
 
-/* The maximum number of bins to rotate when (partial/full) collisions occure */
+#ifndef FIO_MAP_EVICT_LRU
+/** Sets the eviction policy to Least Recently Used.*/
+#define FIO_MAP_EVICT_LRU 0
+#endif
+
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
+/* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (96U)
 #endif
 
-/* The maximum number of full hash collisions that can be consumed */
 #ifndef FIO_MAP_MAX_FULL_COLLISIONS /* LIMITED to 255 */
+/* The maximum number of full hash collisions that can be consumed */
 #define FIO_MAP_MAX_FULL_COLLISIONS (22U)
 #endif
 
-/* Prime numbers are better */
 #ifndef FIO_MAP_CUCKOO_STEPS
+/* Prime numbers are better */
 #define FIO_MAP_CUCKOO_STEPS (0x43F82D0B) /* should be a high prime */
 #endif
 
-/* Hash to Array optimization limit in log2. MUST be less then 8. */
 #ifndef FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT
+/* Hash to Array optimization limit in log2. MUST be less then 8. */
 #define FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT 3
 #endif
 
@@ -337,12 +342,21 @@ Hash Map / Set - types
 typedef struct {
   FIO_MAP_HASH hash;
   FIO_MAP_OBJ obj;
+#if FIO_MAP_EVICT_LRU
+  struct {
+    FIO_MAP_SIZE_TYPE next;
+    FIO_MAP_SIZE_TYPE prev;
+  } node;
+#endif /* FIO_MAP_EVICT_LRU */
 } FIO_NAME(FIO_MAP_NAME, each_s);
 
 typedef struct {
   FIO_NAME(FIO_MAP_NAME, each_s) * map;
   FIO_MAP_SIZE_TYPE count;
   FIO_MAP_SIZE_TYPE w; /* writing position */
+#if FIO_MAP_EVICT_LRU
+  FIO_MAP_SIZE_TYPE recent;
+#endif
   uint8_t bits;
   uint8_t under_attack;
 } FIO_NAME(FIO_MAP_NAME, s);
@@ -415,6 +429,17 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR m,
                                                    FIO_MAP_TYPE *old);
 
 /**
+ * Inserts an object to the hash map, returning the existing or new object.
+ */
+FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
+                                set_if_missing)(FIO_MAP_PTR m,
+                                                FIO_MAP_HASH hash,
+#ifdef FIO_MAP_KEY
+                                                FIO_MAP_OBJ_KEY key,
+#endif /* FIO_MAP_KEY */
+                                                FIO_MAP_TYPE obj);
+
+/**
  * Removes an object from the hash map.
  *
  * If `old` is given, existing data will be copied to that location.
@@ -427,15 +452,14 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR m,
                                          FIO_MAP_TYPE *old);
 
 /**
- * Inserts an object to the hash map, returning the existing or new object.
+ * Evicts the number of `elements` specified.
+ *
+ * Eviction is FIFO (first in first out) unless FIO_MAP_EVICT_LRU is defined, in
+ * which case the least recently used element will be evicted.
+ *
+ * Returns 0 on success or -1 if less than `elements` were evicted.
  */
-FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
-                                set_if_missing)(FIO_MAP_PTR m,
-                                                FIO_MAP_HASH hash,
-#ifdef FIO_MAP_KEY
-                                                FIO_MAP_OBJ_KEY key,
-#endif /* FIO_MAP_KEY */
-                                                FIO_MAP_TYPE obj);
+SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR m, size_t elements);
 
 /* *****************************************************************************
 Hash Map / Set - API (misc)
@@ -712,6 +736,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR m_) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return;
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(m_);
   FIO_NAME(FIO_MAP_NAME, destroy)(m);
   FIO_MEM_FREE_(m, sizeof(*m));
 }
@@ -725,6 +750,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR m_) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return;
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(m_);
   if (m->map) {
     FIO_NAME(FIO_MAP_NAME, __destroy_each_entry)(m);
     memset(m->map, 0, FIO_NAME(FIO_MAP_NAME, __byte_size)(m->bits));
@@ -757,13 +783,15 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, get)(FIO_MAP_PTR m_,
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return FIO_MAP_TYPE_INVALID;
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, FIO_MAP_TYPE_INVALID);
   hash = FIO_MAP_HASH_FIX(hash);
   const FIO_MAP_SIZE_TYPE ihash =
       FIO_NAME(FIO_MAP_NAME, __hash2index)(hash, m->bits);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   i = FIO_NAME(FIO_MAP_NAME, __get_pos)(m, hash, ihash, key);
-  if (i.i != FIO_MAP_INDEX_INVALID)
+  if (i.i != FIO_MAP_INDEX_INVALID) {
     return FIO_MAP_OBJ2TYPE(m->map[i.i].obj);
+  }
   return FIO_MAP_TYPE_INVALID;
 }
 
@@ -774,13 +802,15 @@ FIO_IFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR m_,
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   const FIO_MAP_SIZE_TYPE ihash =
       FIO_NAME(FIO_MAP_NAME, __hash2index)(hash, m->bits);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   i = FIO_NAME(FIO_MAP_NAME, __get_pos)(m, hash, ihash, key);
-  if (i.i != FIO_MAP_INDEX_INVALID)
+  if (i.i != FIO_MAP_INDEX_INVALID) {
     return &FIO_MAP_OBJ2TYPE(m->map[i.i].obj);
+  }
   return NULL;
 }
 
@@ -799,7 +829,9 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR m_,
   FIO_MAP_TYPE *p;
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
-    return FIO_MAP_TYPE_INVALID;
+    goto error;
+  FIO_PTR_TAG_VALID_OR_GOTO(m_, error);
+
   p = FIO_NAME(FIO_MAP_NAME, __set)(m,
                                     hash,
 #ifdef FIO_MAP_KEY
@@ -811,6 +843,13 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR m_,
 
   if (p)
     return *p;
+  return FIO_MAP_TYPE_INVALID;
+
+error:
+#ifdef FIO_MAP_KEY
+  FIO_MAP_KEY_DISCARD(key);
+#endif /* FIO_MAP_KEY */
+  FIO_MAP_TYPE_DISCARD(obj);
   return FIO_MAP_TYPE_INVALID;
 }
 
@@ -827,7 +866,8 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
   FIO_MAP_TYPE *p;
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
-    return FIO_MAP_TYPE_INVALID;
+    goto error;
+  FIO_PTR_TAG_VALID_OR_GOTO(m_, error);
 
   p = FIO_NAME(FIO_MAP_NAME, __set)(m,
                                     hash,
@@ -840,6 +880,13 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
   if (p)
     return *p;
   return FIO_MAP_TYPE_INVALID;
+
+error:
+#ifdef FIO_MAP_KEY
+  FIO_MAP_KEY_DISCARD(key);
+#endif /* FIO_MAP_KEY */
+  FIO_MAP_TYPE_DISCARD(obj);
+  return FIO_MAP_TYPE_INVALID;
 }
 
 /* *****************************************************************************
@@ -851,6 +898,7 @@ FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, count)(FIO_MAP_PTR m_) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return 0;
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, 0);
   return m->count;
 }
 
@@ -859,6 +907,7 @@ FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR m_) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m->map || !m->bits)
     return 0;
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, 0);
   return FIO_MAP_CAPA(m->bits);
 }
 
@@ -869,6 +918,7 @@ FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_)
     return 0;
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, 0);
   uint8_t bits = 2;
   if (capa == (FIO_MAP_SIZE_TYPE)-1)
     return FIO_MAP_INDEX_INVALID;
@@ -892,6 +942,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR m_) {
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR m_) {
   int r = 0;
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, r);
   if (!m || !m->map || !m->bits)
     return r;
   uint8_t bits = 1;
@@ -907,6 +958,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR m_,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, NULL);
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
   if (!m || !m_ || !m->map || !first)
     return NULL;
@@ -1077,6 +1129,13 @@ SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
             .i = (FIO_MAP_SIZE_TYPE)(imap[i] & imask),
             .imap = (FIO_MAP_SIZE_TYPE)i,
         };
+#if FIO_MAP_EVICT_LRU
+        if (m->recent != r.i) {
+          FIO_INDEXED_LIST_REMOVE(m->map, node, r.i);
+          FIO_INDEXED_LIST_PUSH(m->map, node, m->recent, r.i);
+          m->recent = r.i;
+        }
+#endif /* FIO_MAP_EVICT_LRU */
         return r;
       }
       if (++full_collisions >= FIO_MAP_MAX_FULL_COLLISIONS) {
@@ -1154,6 +1213,42 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, __rehash_router)(FIO_MAP_S *m) {
 Hash Map / Set - Internal API (Helpers) - Object Insertion / Removal
 ***************************************************************************** */
 
+/** INTERNAL: eviction. */
+FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, __evict)(FIO_MAP_S *m,
+                                               FIO_MAP_SIZE_TYPE elements,
+                                               uint8_t remove_from_map) {
+  FIO_MAP_SIZE_TYPE pos = 0;
+  do {
+#if FIO_MAP_EVICT_LRU
+    pos = m->map[m->recent].node.prev;
+    if (!m->map[pos].hash)
+      break;
+#else
+    while (!m->map[pos].hash)
+      ++pos;
+#endif /* FIO_MAP_EVICT_LRU */
+    FIO_ASSERT_DEBUG(pos < m->w, "always true.");
+    if (remove_from_map) {
+      const FIO_MAP_SIZE_TYPE tmp_ihash =
+          FIO_NAME(FIO_MAP_NAME, __hash2index)(m->map[pos].hash, m->bits);
+      FIO_NAME(FIO_MAP_NAME, __pos_s)
+      i_tmp =
+          FIO_NAME(FIO_MAP_NAME, __get_pos)(m,
+                                            m->map[pos].hash,
+                                            tmp_ihash,
+                                            FIO_MAP_OBJ2KEY(m->map[pos].obj));
+      FIO_ASSERT_DEBUG(i_tmp.i != FIO_MAP_INDEX_INVALID &&
+                           i_tmp.imap != FIO_MAP_INDEX_INVALID,
+                       "always true.");
+      FIO_NAME(FIO_MAP_NAME, __imap)(m)[i_tmp.imap] = FIO_MAP_INDEX_INVALID;
+    }
+    FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
+    m->map[pos].obj = FIO_MAP_OBJ_INVALID;
+    m->map[pos].hash = 0;
+    --m->count;
+  } while (--elements);
+}
+
 /** INTERNAL: sets an object in the map. */
 SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
                                                   FIO_MAP_HASH hash,
@@ -1193,28 +1288,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
 #if FIO_MAP_MAX_ELEMENTS
     /* are we using more elements then we should? */
     if (m->count >= FIO_MAP_MAX_ELEMENTS) {
-      FIO_MAP_SIZE_TYPE pos = 0;
-      while (!m->map[pos].hash)
-        ++pos;
-      FIO_ASSERT_DEBUG(pos < m->w, "always true.");
-      if (i.imap != FIO_MAP_INDEX_INVALID) {
-        const FIO_MAP_SIZE_TYPE tmp_ihash =
-            FIO_NAME(FIO_MAP_NAME, __hash2index)(m->map[pos].hash, m->bits);
-        FIO_NAME(FIO_MAP_NAME, __pos_s)
-        i_tmp =
-            FIO_NAME(FIO_MAP_NAME, __get_pos)(m,
-                                              m->map[pos].hash,
-                                              tmp_ihash,
-                                              FIO_MAP_OBJ2KEY(m->map[pos].obj));
-        FIO_ASSERT_DEBUG(i_tmp.i != FIO_MAP_INDEX_INVALID &&
-                             i_tmp.imap != FIO_MAP_INDEX_INVALID,
-                         "always true.");
-        FIO_NAME(FIO_MAP_NAME, __imap)(m)[i_tmp.imap] = FIO_MAP_INDEX_INVALID;
-      }
-      FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
-      m->map[pos].obj = FIO_MAP_OBJ_INVALID;
-      m->map[pos].hash = 0;
-      --m->count;
+      FIO_NAME(FIO_MAP_NAME, __evict)(m, 1, i.imap != FIO_MAP_INDEX_INVALID);
     }
 #endif
 
@@ -1226,6 +1300,9 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
     FIO_MAP_TYPE_COPY((m->map[m->w].obj), obj);
 #endif
     m->map[m->w].hash = hash;
+#if FIO_MAP_EVICT_LRU
+    m->map[i.i].node.next = m->map[i.i].node.prev = 0;
+#endif /* FIO_MAP_EVICT_LRU */
     i.i = m->w;
     ++m->w;
     ++m->count;
@@ -1263,6 +1340,13 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, __set)(FIO_MAP_S *m,
     FIO_MAP_KEY_DISCARD(key);
     FIO_MAP_TYPE_DISCARD(obj);
   }
+#if FIO_MAP_EVICT_LRU
+  if (m->recent != i.i) {
+    FIO_INDEXED_LIST_REMOVE(m->map, node, i.i);
+    FIO_INDEXED_LIST_PUSH(m->map, node, m->recent, i.i);
+    m->recent = i.i;
+  }
+#endif /* FIO_MAP_EVICT_LRU */
   return &FIO_MAP_OBJ2TYPE(m->map[i.i].obj);
 
 error:
@@ -1282,6 +1366,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR m_,
                                          FIO_MAP_OBJ_KEY key,
                                          FIO_MAP_TYPE *old) {
   FIO_MAP_S *const m = (FIO_MAP_S *)FIO_PTR_UNTAG(m_);
+  FIO_PTR_TAG_VALID_OR_GOTO(m_, not_found);
   if (!m || !m_ || !m->count)
     goto not_found;
   {
@@ -1314,6 +1399,29 @@ not_found:
   return -1;
 }
 
+/**
+ * Evicts the number of `elements` specified.
+ *
+ * Eviction is FIFO (first in first out) unless FIO_MAP_EVICT_LRU is defined, in
+ * which case the least recently used elemnt will be evicted.
+ *
+ * Returns 0 on success or -1 if less than `elements` were evicted.
+ */
+SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR m_, size_t elements) {
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, -1);
+  FIO_NAME(FIO_MAP_NAME, s) *const m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(m_);
+  if (!m || !m_ || !m->map) {
+    return -1;
+  }
+  if (elements >= m->count) {
+    FIO_NAME(FIO_MAP_NAME, clear)(m_);
+    return -1;
+  }
+  FIO_NAME(FIO_MAP_NAME, __evict)(m, elements, 1);
+  return 0;
+}
+
 /* *****************************************************************************
 
 Hash Map / Set - Iteration
@@ -1340,6 +1448,7 @@ IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                        ssize_t start_at,
                                        int (*task)(FIO_MAP_TYPE obj, void *arg),
                                        void *arg) {
+  FIO_PTR_TAG_VALID_OR_RETURN(m_, 0);
   FIO_NAME(FIO_MAP_NAME, s) *const m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(m_);
   if (!m || !m_ || !m->map) {
@@ -1447,6 +1556,7 @@ Hash Map / Set - cleanup
 #undef FIO_MAP_MAX_ELEMENTS
 #undef FIO_MAP_MAX_FULL_COLLISIONS
 #undef FIO_MAP_MAX_SEEK
+#undef FIO_MAP_EVICT_LRU
 
 #undef FIO_MAP_OBJ
 #undef FIO_MAP_OBJ2KEY

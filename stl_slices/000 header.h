@@ -418,19 +418,19 @@ typedef struct fio___list_node_s {
   } while (0)
 
 /* *****************************************************************************
-32 bit Indexed Linked Lists Persistent Macros and Types
+Indexed Linked Lists Persistent Macros and Types
 
-32 bit indexes can be used on 64 bit machines to create a linked list that uses
-less memory and is always relative to some root pointer (usually the root of an
-array).
+Indexed Linked Lists can be used to create a linked list that uses is always
+relative to some root pointer (usually the root of an array). This:
 
-This assumes that the distance between any 2 nodes is never greater than a 32
-bit value and saves 8 bytes per node in memory allocation requirements.
+1. Allows easy reallocation of the list without requiring pointer updates.
+
+2. Could be used for memory optimization if the array limits are known.
 
 The "head" index is usualy validated by reserving the value of `-1` to indicate
 an empty list.
 ***************************************************************************** */
-#ifndef FIO_ILIST32_EACH
+#ifndef FIO_INDEXED_LIST_EACH
 /** A common linked list node type. */
 typedef struct fio___index32_node_s {
   uint32_t next;
@@ -438,31 +438,32 @@ typedef struct fio___index32_node_s {
 } fio___index32_node_s;
 
 /** A linked list node type */
-#define FIO_ILIST32_NODE fio___index32_node_s
-#define FIO_ILIST32_HEAD uint32_t
+#define FIO_INDEXED_LIST32_NODE fio___index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
 
 /** UNSAFE macro for pushing a node to a list. */
-#define FIO_ILIST32_PUSH(root, node_name, head, n)                             \
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, n)                        \
   do {                                                                         \
-    (n)->node_name.prev = (root)[(head)].node_name.prev;                       \
-    (n)->node_name.next = (head);                                              \
-    (root)[(root)[(head)].node_name.prev].node_name.next =                     \
-        (uint32_t)((n) - (root));                                              \
-    (root)[(head)].node_name.prev = (uint32_t)((n) - (root));                  \
+    (root)[(n)].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[(n)].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = (n);                \
+    (root)[(head)].node_name.prev = (n);                                       \
   } while (0)
 
 /** UNSAFE macro for removing a node from a list. */
-#define FIO_ILIST32_REMOVE(root, node_name, n)                                 \
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, n)                            \
   do {                                                                         \
-    (root)[(n)->node_name.prev].node_name.next = (n)->node_name.next;          \
-    (root)[(n)->node_name.next].node_name.prev = (n)->node_name.prev;          \
-    (n)->node_name.next = (n)->node_name.prev = (uint32_t)((n) - (root));      \
+    (root)[(root)[(n)].node_name.prev].node_name.next =                        \
+        (root)[(n)].node_name.next;                                            \
+    (root)[(root)[(n)].node_name.next].node_name.prev =                        \
+        (root)[(n)].node_name.prev;                                            \
+    (root)[(n)].node_name.next = (root)[(n)].node_name.prev = (n);             \
   } while (0)
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */
-#define FIO_ILIST32_EACH(root, node_name, head, pos)                           \
-  for (uint32_t pos = (head), stopper___i32___ = 0; !stopper___i32___;         \
-       stopper___i32___ = ((pos = (root)[pos].node_name.next) == (head)))
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
+  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
+       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
 #endif
 
 /* *****************************************************************************

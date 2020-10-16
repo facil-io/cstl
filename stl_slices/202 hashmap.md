@@ -243,6 +243,34 @@ If `old` is given, existing data will be copied to that location.
 
 Returns 0 on success or -1 if the object couldn't be found.
 
+#### `MAP_clear`
+
+```c
+void MAP_clear(MAP_PTR m);
+```
+
+Removes all elements from the Map without freeing the memory used.
+
+Similar to calling:
+
+```c
+size_t capa_was = MAP_capa(m);
+MAP_destroy(m);
+MAP_reserve(m, capa_was);
+```
+
+#### `MAP_evict` (set)
+
+```c
+int MAP_evict(FIO_MAP_PTR m, size_t number_of_elements);
+```
+
+Evicts (removed) `number_of_elements` from the Map.
+
+Eviction is FIFO based (First In First Out) unless FIO_MAP_EVICT_LRU is defined, in which case the Least Recently Used element will be evicted.
+
+Returns 0 on success or -1 on error (i.e., element number bigger than existing element count).
+
 ### Hash Map / Set - API (common)
 
 #### `MAP_count`
