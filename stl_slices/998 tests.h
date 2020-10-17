@@ -167,6 +167,61 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
              "Linked list empty should have been true");
 }
 
+TEST_FUNC void fio___dynamic_types_test___index_list_test(void) {
+  fprintf(stderr, "* Testing indexed lists.\n");
+  struct {
+    size_t i;
+    struct {
+      uint16_t next;
+      uint16_t prev;
+    } node;
+  } data[16];
+  size_t count;
+  const size_t len = 16;
+  for (size_t i = 0; i < len; ++i) {
+    data[i].i = i;
+    if (!i)
+      data[i].node.prev = data[i].node.next = i;
+    else
+      FIO_INDEXED_LIST_PUSH(data, node, 0, i);
+  }
+  count = 0;
+  FIO_INDEXED_LIST_EACH(data, node, 0, i) {
+    FIO_ASSERT(data[i].i == count,
+               "indexed list order issue? %zu != %zu",
+               data[i].i != i);
+    ++count;
+  }
+  FIO_ASSERT(count == 16, "indexed list each failed? (%zu != %zu)", count, len);
+  count = 0;
+  while (data[0].node.next != 0 && count < 32) {
+    ++count;
+    uint16_t n = data[0].node.prev;
+    FIO_INDEXED_LIST_REMOVE(data, node, n);
+  }
+  FIO_ASSERT(count == 15,
+             "indexed list remove failed? (%zu != %zu)",
+             count,
+             len);
+  for (size_t i = 0; i < len; ++i) {
+    data[i].i = i;
+    if (!i)
+      data[i].node.prev = data[i].node.next = i;
+    else {
+      FIO_INDEXED_LIST_PUSH(data, node, 0, i);
+      FIO_INDEXED_LIST_REMOVE(data, node, i);
+      FIO_INDEXED_LIST_PUSH(data, node, 0, i);
+    }
+  }
+  count = 0;
+  FIO_INDEXED_LIST_EACH(data, node, 0, i) {
+    FIO_ASSERT(data[i].i == count,
+               "indexed list order issue (push-pop-push? %zu != %zu",
+               data[i].i != count);
+    ++count;
+  }
+}
+
 /* *****************************************************************************
 Dynamic Array - Test
 ***************************************************************************** */
@@ -198,6 +253,22 @@ static int ary____test_was_destroyed = 0;
 
 /* test all defaults */
 #define FIO_ARRAY_NAME ary3____test
+#include __FILE__
+
+/* *****************************************************************************
+Unordered Map - Test
+***************************************************************************** */
+
+#define FIO_UMAP_NAME      __umap_test__size_t
+#define FIO_UMAP_TYPE      size_t
+#define FIO_UMAP_EVICT_LRU 0
+#define FIO_UMAP_TEST
+#include __FILE__
+#define FIO_UMAP_NAME      __umap_test__size_t_lru
+#define FIO_UMAP_TYPE      size_t
+#define FIO_UMAP_KEY       size_t
+#define FIO_UMAP_EVICT_LRU 1
+#define FIO_UMAP_TEST
 #include __FILE__
 
 /* *****************************************************************************
@@ -849,11 +920,16 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
+  fio___dynamic_types_test___index_list_test();
+  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, ary____test)();
   FIO_NAME_TEST(stl, ary2____test)();
   FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, __umap_test__size_t)();
+  FIO_NAME_TEST(stl, __umap_test__size_t_lru)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___str();
   fprintf(stderr, "===============\n");

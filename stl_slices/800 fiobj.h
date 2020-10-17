@@ -12,8 +12,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "051 json.h"               /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
-#include "202 hashmap.h"            /* Development inclusion - ignore line */
-#include "203 string.h"             /* Development inclusion - ignore line */
+#include "210 hashmap.h"            /* Development inclusion - ignore line */
+#include "220 string.h"             /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
 #define FIO_FIOBJ                   /* Development inclusion - ignore line */

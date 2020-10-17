@@ -442,22 +442,24 @@ typedef struct fio___index32_node_s {
 #define FIO_INDEXED_LIST32_HEAD uint32_t
 
 /** UNSAFE macro for pushing a node to a list. */
-#define FIO_INDEXED_LIST_PUSH(root, node_name, head, n)                        \
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
   do {                                                                         \
-    (root)[(n)].node_name.prev = (root)[(head)].node_name.prev;                \
-    (root)[(n)].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = (n);                \
-    (root)[(head)].node_name.prev = (n);                                       \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[n__].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
+    (root)[(head)].node_name.prev = n__;                                       \
   } while (0)
 
 /** UNSAFE macro for removing a node from a list. */
-#define FIO_INDEXED_LIST_REMOVE(root, node_name, n)                            \
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
   do {                                                                         \
-    (root)[(root)[(n)].node_name.prev].node_name.next =                        \
-        (root)[(n)].node_name.next;                                            \
-    (root)[(root)[(n)].node_name.next].node_name.prev =                        \
-        (root)[(n)].node_name.prev;                                            \
-    (root)[(n)].node_name.next = (root)[(n)].node_name.prev = (n);             \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
   } while (0)
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */

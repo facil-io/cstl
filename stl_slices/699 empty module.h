@@ -108,6 +108,7 @@ FIO_IFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
 }
 /* Frees any internal data AND the object's container! */
 FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
+  FIO_PTR_TAG_VALID_OR_RETURN(obj, 0);
   FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
@@ -135,6 +136,9 @@ All memory allocations should use:
 SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
+  if (!o)
+    return;
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   /* add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
