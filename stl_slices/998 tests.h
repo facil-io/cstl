@@ -270,6 +270,11 @@ Unordered Map - Test
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
+#define FIO_MAP_NAME      __omap_test__size_t
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
+#include __FILE__
 
 /* *****************************************************************************
 Hash Map / Set - test
@@ -356,7 +361,9 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                (size_t)set_____test_count(&m));
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == i + 1,
-                 "item retrival error in set.");
+                 "item retrival error in set (%zu != %zu).",
+                 set_____test_get(&m, HASHOFi(i), i + 1),
+                 i + 1);
     }
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 2) == 0,
@@ -369,7 +376,7 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
     {
       size_t i = 0;
       FIO_MAP_EACH(set_____test, &m, pos) {
-        FIO_ASSERT(pos->obj == pos->hash + 1 || !(~pos->hash),
+        FIO_ASSERT(pos->obj == pos->hash + 1 || !i,
                    "FIO_MAP_EACH loop out of order?")
         ++i;
       }
@@ -434,7 +441,9 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
                (size_t)set2_____test_count(&m));
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == i + 1,
-                 "item retrival error in set.");
+                 "item retrival error in set (%zu != %zu).",
+                 set2_____test_get(&m, HASHOFi(i), 0),
+                 i + 1);
     }
 
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
@@ -926,10 +935,11 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, ary2____test)();
   FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___map_test();
-  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, __umap_test__size_t)();
   FIO_NAME_TEST(stl, __umap_test__size_t_lru)();
+  FIO_NAME_TEST(stl, __omap_test__size_t)();
+  fprintf(stderr, "===============\n");
+  fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___str();
   fprintf(stderr, "===============\n");
