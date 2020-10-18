@@ -5,9 +5,10 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_MAP_NAME fio_map        /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#define FIO_MAP_NAME fio_map        /* Development inclusion - ignore line */
+#include "210 map settings.h"       /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -93,247 +94,7 @@ void main(void) {
 ```
 
 ***************************************************************************** */
-#ifdef FIO_MAP_NAME
-
-/* *****************************************************************************
-Hash Map / Set - type and hash macros
-***************************************************************************** */
-
-#ifndef FIO_MAP_TYPE
-/** The type for the elements in the map */
-#define FIO_MAP_TYPE void *
-/** An invalid value for that type (if any). */
-#define FIO_MAP_TYPE_INVALID NULL
-#else
-#ifndef FIO_MAP_TYPE_INVALID
-/** An invalid value for that type (if any). */
-#define FIO_MAP_TYPE_INVALID ((FIO_MAP_TYPE){0})
-#endif /* FIO_MAP_TYPE_INVALID */
-#endif /* FIO_MAP_TYPE */
-
-#ifndef FIO_MAP_TYPE_COPY
-/** Handles a copy operation for an value. */
-#define FIO_MAP_TYPE_COPY(dest, src) (dest) = (src)
-/* internal flag - do not set */
-#define FIO_MAP_TYPE_COPY_SIMPLE 1
-#endif
-
-#ifndef FIO_MAP_TYPE_DESTROY
-/** Handles a destroy / free operation for a map's value. */
-#define FIO_MAP_TYPE_DESTROY(obj)
-/* internal flag - do not set */
-#define FIO_MAP_TYPE_DESTROY_SIMPLE 1
-#endif
-
-#ifndef FIO_MAP_TYPE_DISCARD
-/** Handles discarded value data (i.e., insert without overwrite). */
-#define FIO_MAP_TYPE_DISCARD(obj)
-#endif
-
-#ifndef FIO_MAP_TYPE_CMP
-/** Handles a comparison operation for a map's value. */
-#define FIO_MAP_TYPE_CMP(a, b) 1
-#endif
-
-/**
- * The FIO_MAP_DESTROY_AFTER_COPY macro should be set if FIO_MAP_TYPE_DESTROY
- * should be called after FIO_MAP_TYPE_COPY when an object is removed from the
- * array after being copied to an external container (an `old` pointer)
- */
-#ifndef FIO_MAP_DESTROY_AFTER_COPY
-#if !FIO_MAP_TYPE_DESTROY_SIMPLE && !FIO_MAP_TYPE_COPY_SIMPLE
-#define FIO_MAP_DESTROY_AFTER_COPY 1
-#else
-#define FIO_MAP_DESTROY_AFTER_COPY 0
-#endif
-#endif /* FIO_MAP_DESTROY_AFTER_COPY */
-
-#ifndef FIO_MAP_MAX_ELEMENTS
-/** The maximum number of elements allowed before removing old data (FIFO) */
-#define FIO_MAP_MAX_ELEMENTS 0
-#endif
-
-#ifndef FIO_MAP_EVICT_LRU
-/** Sets the eviction policy to Least Recently Used.*/
-#define FIO_MAP_EVICT_LRU 0
-#endif
-
-#ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
-/* The maximum number of bins to rotate when (partial/full) collisions occure */
-#define FIO_MAP_MAX_SEEK (96U)
-#endif
-
-#ifndef FIO_MAP_MAX_FULL_COLLISIONS /* LIMITED to 255 */
-/* The maximum number of full hash collisions that can be consumed */
-#define FIO_MAP_MAX_FULL_COLLISIONS (22U)
-#endif
-
-#ifndef FIO_MAP_CUCKOO_STEPS
-/* Prime numbers are better */
-#define FIO_MAP_CUCKOO_STEPS (0x43F82D0B) /* should be a high prime */
-#endif
-
-#ifndef FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT
-/* Hash to Array optimization limit in log2. MUST be less then 8. */
-#define FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT 3
-#endif
-
-/**
- * Normally, FIO_MAP uses 32bit internal indexing and types.
- *
- * This limits the map to approximately 2 billion items (2,147,483,648).
- * Depending on possible 32 bit hash collisions, more items may be inserted.
- *
- * If FIO_MAP_BIG is be defined, 64 bit addressing is used, increasing the
- * maximum number of items to... hmm... a lot (1 << 63).
- */
-#ifdef FIO_MAP_BIG
-#define FIO_MAP_SIZE_TYPE      uint64_t
-#define FIO_MAP_INDEX_USED_BIT ((uint64_t)1 << 63)
-#else
-#define FIO_MAP_SIZE_TYPE      uint32_t
-#define FIO_MAP_INDEX_USED_BIT ((uint32_t)1 << 31)
-#endif /* FIO_MAP_BIG */
-
-/* the last (-1) index is always reserved, it will make "holes" */
-#define FIO_MAP_INDEX_INVALID ((FIO_MAP_SIZE_TYPE)-1)
-
-/* all bytes == 0 means the index was never used */
-#define FIO_MAP_INDEX_UNUSED ((FIO_MAP_SIZE_TYPE)0)
-
-#define FIO_MAP_INDEX_CALC(index, hash, index_mask)                            \
-  (((hash) & (~(index_mask))) | ((index) & (index_mask)) |                     \
-   FIO_MAP_INDEX_USED_BIT)
-
-#ifndef FIO_MAP_HASH
-/** The type for map hash value (an X bit integer) */
-#define FIO_MAP_HASH uint64_t
-#endif
-
-/** An invalid hash value (all bits are zero). */
-#define FIO_MAP_HASH_INVALID ((FIO_MAP_HASH)0)
-
-/** tests if the hash value is valid (not reserved). */
-#define FIO_MAP_HASH_IS_INVALID(h) ((h) == FIO_MAP_HASH_INVALID)
-
-/** the value to be used when the hash is a reserved value. */
-#define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-1LL)
-
-/** the value to be used when the hash is a reserved value. */
-#define FIO_MAP_HASH_FIX(h)                                                    \
-  (FIO_MAP_HASH_IS_INVALID(h) ? FIO_MAP_HASH_FIXED : (h))
-
-/* *****************************************************************************
-Map - Hash Map - a Hash Map is basically a couplet Set
-***************************************************************************** */
-/* Defining a key makes a Hash Map instead of a Set */
-#ifdef FIO_MAP_KEY
-
-#ifndef FIO_MAP_KEY_INVALID
-/** An invalid value for the hash map key type (if any). */
-#define FIO_MAP_KEY_INVALID ((FIO_MAP_KEY){0})
-#endif
-
-#ifndef FIO_MAP_KEY_COPY
-/** Handles a copy operation for a hash maps key. */
-#define FIO_MAP_KEY_COPY(dest, src) (dest) = (src)
-#endif
-
-#ifndef FIO_MAP_KEY_DESTROY
-/** Handles a destroy / free operation for a hash maps key. */
-#define FIO_MAP_KEY_DESTROY(obj)
-/* internal flag - do not set */
-#define FIO_MAP_KEY_DESTROY_SIMPLE 1
-#endif
-
-#ifndef FIO_MAP_KEY_DISCARD
-/** Handles discarded element data (i.e., when overwriting only the value). */
-#define FIO_MAP_KEY_DISCARD(obj)
-#endif
-
-#ifndef FIO_MAP_KEY_CMP
-/** Handles a comparison operation for a hash maps key. */
-#define FIO_MAP_KEY_CMP(a, b) 1
-#endif
-
-typedef struct {
-  FIO_MAP_KEY key;
-  FIO_MAP_TYPE value;
-} FIO_NAME(FIO_MAP_NAME, couplet_s);
-
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
-                        _couplet_copy)(FIO_NAME(FIO_MAP_NAME, couplet_s) * dest,
-                                       FIO_NAME(FIO_MAP_NAME, couplet_s) *
-                                           src) {
-  FIO_MAP_KEY_COPY((dest->key), (src->key));
-  FIO_MAP_TYPE_COPY((dest->value), (src->value));
-}
-
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
-                        _couplet_destroy)(FIO_NAME(FIO_MAP_NAME, couplet_s) *
-                                          c) {
-  FIO_MAP_KEY_DESTROY(c->key);
-  FIO_MAP_TYPE_DESTROY(c->value);
-  (void)c; /* in case where macros do nothing */
-}
-
-/** FIO_MAP_OBJ is either a couplet (for hash maps) or the objet (for sets) */
-#define FIO_MAP_OBJ FIO_NAME(FIO_MAP_NAME, couplet_s)
-
-/** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
-#define FIO_MAP_OBJ_KEY FIO_MAP_KEY
-
-#define FIO_MAP_OBJ_INVALID                                                    \
-  ((FIO_NAME(FIO_MAP_NAME, couplet_s)){.key = FIO_MAP_KEY_INVALID,             \
-                                       .value = FIO_MAP_TYPE_INVALID})
-
-#define FIO_MAP_OBJ_COPY(dest, src)                                            \
-  FIO_NAME(FIO_MAP_NAME, _couplet_copy)(&(dest), &(src))
-
-#define FIO_MAP_OBJ_DESTROY(obj)                                               \
-  FIO_NAME(FIO_MAP_NAME, _couplet_destroy)(&(obj))
-
-#define FIO_MAP_OBJ_CMP(a, b)        FIO_MAP_KEY_CMP((a).key, (b).key)
-#define FIO_MAP_OBJ_KEY_CMP(a, key_) FIO_MAP_KEY_CMP((a).key, (key_))
-#define FIO_MAP_OBJ2KEY(o)           (o).key
-#define FIO_MAP_OBJ2TYPE(o)          (o).value
-
-#define FIO_MAP_OBJ_DISCARD(o)                                                 \
-  do {                                                                         \
-    FIO_MAP_TYPE_DISCARD(((o).value));                                         \
-    FIO_MAP_KEY_DISCARD(((o).key));                                            \
-  } while (0);
-
-#if FIO_MAP_DESTROY_AFTER_COPY
-#define FIO_MAP_OBJ_DESTROY_AFTER FIO_MAP_OBJ_DESTROY
-#else
-#define FIO_MAP_OBJ_DESTROY_AFTER(obj) FIO_MAP_KEY_DESTROY((obj).key);
-#endif /* FIO_MAP_DESTROY_AFTER_COPY */
-
-/* *****************************************************************************
-Map - Set
-***************************************************************************** */
-#else /* FIO_MAP_KEY */
-/** FIO_MAP_OBJ is either a couplet (for hash maps) or the objet (for sets) */
-#define FIO_MAP_OBJ         FIO_MAP_TYPE
-/** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
-#define FIO_MAP_OBJ_KEY     FIO_MAP_TYPE
-#define FIO_MAP_OBJ_INVALID FIO_MAP_TYPE_INVALID
-#define FIO_MAP_OBJ_COPY    FIO_MAP_TYPE_COPY
-#define FIO_MAP_OBJ_DESTROY FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_OBJ_CMP     FIO_MAP_TYPE_CMP
-#define FIO_MAP_OBJ_KEY_CMP FIO_MAP_TYPE_CMP
-#define FIO_MAP_OBJ2KEY(o)  (o)
-#define FIO_MAP_OBJ2TYPE(o) (o)
-#define FIO_MAP_OBJ_DISCARD FIO_MAP_TYPE_DISCARD
-#define FIO_MAP_KEY_DISCARD(_ignore)
-#if FIO_MAP_DESTROY_AFTER_COPY
-#define FIO_MAP_OBJ_DESTROY_AFTER FIO_MAP_TYPE_DESTROY
-#else
-#define FIO_MAP_OBJ_DESTROY_AFTER(obj)
-#endif /* FIO_MAP_DESTROY_AFTER_COPY */
-
-#endif /* FIO_MAP_KEY */
+#if defined(FIO_MAP_NAME) && !defined(FIO_MAP_UNORDERED)
 
 /* *****************************************************************************
 Hash Map / Set - types
@@ -594,6 +355,33 @@ Hash Map / Set - Implementation - INLINE
 
 
 ***************************************************************************** */
+
+/* *****************************************************************************
+Helper macros
+***************************************************************************** */
+
+/** An invalid hash value (all bits are zero). */
+#define FIO_MAP_HASH_INVALID ((FIO_MAP_HASH)0)
+
+/** tests if the hash value is valid (not reserved). */
+#define FIO_MAP_HASH_IS_INVALID(h) ((h) == FIO_MAP_HASH_INVALID)
+
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-1LL)
+
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIX(h)                                                    \
+  (FIO_MAP_HASH_IS_INVALID(h) ? FIO_MAP_HASH_FIXED : (h))
+
+/* the last (-1) index is always reserved, it will make "holes" */
+#define FIO_MAP_INDEX_INVALID ((FIO_MAP_SIZE_TYPE)-1)
+
+/* all bytes == 0 means the index was never used */
+#define FIO_MAP_INDEX_UNUSED ((FIO_MAP_SIZE_TYPE)0)
+
+#define FIO_MAP_INDEX_CALC(index, hash, index_mask)                            \
+  (((hash) & (~(index_mask))) | ((index) & (index_mask)) |                     \
+   FIO_MAP_INDEX_USED_BIT)
 
 /* *****************************************************************************
 Hash Map / Set - Internal API (Helpers)
@@ -1527,59 +1315,5 @@ SFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
 Hash Map / Set - cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
-
-#undef FIO_MAP_NAME
-#undef FIO_MAP_BIG
-#undef FIO_MAP_CAPA
-#undef FIO_MAP_CUCKOO_STEPS
-#undef FIO_MAP_DESTROY_AFTER_COPY
-
-#undef FIO_MAP_HASH
-#undef FIO_MAP_HASH_FIX
-#undef FIO_MAP_HASH_FIXED
-#undef FIO_MAP_HASH_INVALID
-#undef FIO_MAP_HASH_IS_INVALID
-
-#undef FIO_MAP_INDEX_CALC
-#undef FIO_MAP_INDEX_INVALID
-#undef FIO_MAP_INDEX_UNUSED
-#undef FIO_MAP_INDEX_USED_BIT
-
-#undef FIO_MAP_KEY
-#undef FIO_MAP_KEY_CMP
-#undef FIO_MAP_KEY_COPY
-#undef FIO_MAP_KEY_DESTROY
-#undef FIO_MAP_KEY_DESTROY_SIMPLE
-#undef FIO_MAP_KEY_DISCARD
-#undef FIO_MAP_KEY_INVALID
-
-#undef FIO_MAP_MAX_ELEMENTS
-#undef FIO_MAP_MAX_FULL_COLLISIONS
-#undef FIO_MAP_MAX_SEEK
-#undef FIO_MAP_EVICT_LRU
-
-#undef FIO_MAP_OBJ
-#undef FIO_MAP_OBJ2KEY
-#undef FIO_MAP_OBJ2TYPE
-#undef FIO_MAP_OBJ_CMP
-#undef FIO_MAP_OBJ_COPY
-#undef FIO_MAP_OBJ_DESTROY
-#undef FIO_MAP_OBJ_DESTROY_AFTER
-#undef FIO_MAP_OBJ_DISCARD
-#undef FIO_MAP_OBJ_INVALID
-#undef FIO_MAP_OBJ_KEY
-#undef FIO_MAP_OBJ_KEY_CMP
-#undef FIO_MAP_PTR
-#undef FIO_MAP_S
-#undef FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT
-#undef FIO_MAP_SIZE_TYPE
-#undef FIO_MAP_TYPE
-#undef FIO_MAP_TYPE_CMP
-#undef FIO_MAP_TYPE_COPY
-#undef FIO_MAP_TYPE_COPY_SIMPLE
-#undef FIO_MAP_TYPE_DESTROY
-#undef FIO_MAP_TYPE_DESTROY_SIMPLE
-#undef FIO_MAP_TYPE_DISCARD
-#undef FIO_MAP_TYPE_INVALID
 
 #endif /* FIO_MAP_NAME */

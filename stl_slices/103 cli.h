@@ -11,7 +11,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 hashmap.h"            /* Development inclusion - ignore line */
+#include "210 map settings.h"       /* Development inclusion - ignore line */
+#include "211 unordered map.h"      /* Development inclusion - ignore line */
+#include "212 ordered map.h"        /* Development inclusion - ignore line */
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -222,7 +224,7 @@ typedef struct {
   (o1.len == o2.len &&                                                         \
    (!o1.len || o1.buf == o2.buf ||                                             \
     (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
-#define FIO_MAP_NAME fio___cli_hash
+#define FIO_UMAP_NAME fio___cli_hash
 #define FIO_STL_KEEP__
 #include __FILE__
 #undef FIO_STL_KEEP__

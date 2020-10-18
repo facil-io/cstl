@@ -498,6 +498,42 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 }
 
 /* *****************************************************************************
+SIMD helpers
+***************************************************************************** */
+
+/** Detects a byte where all the bits are set (255) within a 4 byte vector. */
+FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
+  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
+         (row & UINT32_C(0x80808080));
+}
+
+/** Detects a byte where no bits are set (0) within a 4 byte vector. */
+FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
+  return fio_has_full_byte32(~row);
+}
+
+/** Detects if `byte` exists within a 4 byte vector. */
+FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
+  return fio_has_full_byte32(~(row ^ (UINT32_C(0x01010101) * byte)));
+}
+
+/** Detects a byte where all the bits are set (255) within an 8 byte vector. */
+FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
+  return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
+         (row & UINT64_C(0x8080808080808080));
+}
+
+/** Detects a byte where no bits are set (0) within an 8 byte vector. */
+FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
+  return fio_has_full_byte64(~row);
+}
+
+/** Detects if `byte` exists within an 8 byte vector. */
+FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
+  return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
+}
+
+/* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
 

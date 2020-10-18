@@ -259,16 +259,16 @@ static int ary____test_was_destroyed = 0;
 Unordered Map - Test
 ***************************************************************************** */
 
-#define FIO_UMAP_NAME      __umap_test__size_t
-#define FIO_UMAP_TYPE      size_t
-#define FIO_UMAP_EVICT_LRU 0
-#define FIO_UMAP_TEST
+#define FIO_UMAP_NAME     __umap_test__size_t
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
 #include __FILE__
-#define FIO_UMAP_NAME      __umap_test__size_t_lru
-#define FIO_UMAP_TYPE      size_t
-#define FIO_UMAP_KEY       size_t
-#define FIO_UMAP_EVICT_LRU 1
-#define FIO_UMAP_TEST
+#define FIO_UMAP_NAME     __umap_test__size_t_lru
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_KEY       size_t
+#define FIO_MAP_EVICT_LRU 1
+#define FIO_MAP_TEST
 #include __FILE__
 
 /* *****************************************************************************

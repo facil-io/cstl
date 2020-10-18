@@ -790,7 +790,8 @@ Common macros
 #endif /* FIO_BITMAP */
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
-#if defined(FIO_RISKY_HASH) || defined(FIO_JSON)
+#if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
+    defined(FIO_UMAP_NAME)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
