@@ -433,9 +433,11 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     /* new */
     if (pos.a == (FIO_MAP_SIZE_TYPE)-1LL)
       pos.a = m->w++;
-    if (FIO_MAP_MAX_ELEMENTS && m->count >= FIO_MAP_MAX_ELEMENTS) {
+#if FIO_MAP_MAX_ELEMENTS
+    if (m->count >= FIO_MAP_MAX_ELEMENTS) {
       FIO_NAME(FIO_MAP_NAME, evict)(map, 1);
     }
+#endif
     FIO_NAME(FIO_MAP_NAME, __imap)
     (m)[pos.i] |= pos.a;
     m->map[pos.a].hash = hash;
