@@ -3764,7 +3764,7 @@ It is possible to edit the array while iterating, however when deleting `pos`, o
 #include "fio-stl.h"
 
 /* Set the properties for the key-value Hash Map type called `dict_s` */
-#define FIO_MAP_NAME                 dict
+#define FIO_UMAP_NAME                dict
 #define FIO_MAP_TYPE                 str_s
 #define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
 #define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
@@ -3775,8 +3775,8 @@ It is possible to edit the array while iterating, however when deleting `pos`, o
 #define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
 #include "fio-stl.h"
 /** set helper for consistent hash values */
-FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
-  return dict_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
+FIO_IFUNC str_s *dict_set2(dict_s *m, str_s key, str_s obj) {
+  return dict_set_ptr(m, str_hash(&key, (uint64_t)m), key, obj, NULL, 1);
 }
 /** get helper for consistent hash values */
 FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
@@ -3790,30 +3790,33 @@ Hash maps use both a `hash` and a `key` to identify a `value`. The `hash` value 
 
 A hash map without a `key` is known as a Set or a Bag. It uses only a `hash` (often calculated using `value`) to identify the `value` in the Set, sometimes requiring a `value` equality test as well. This approach often promises a collection of unique values (no duplicate values).
 
-Some map implementations support a FIFO limited storage, which could be used for naive limited-space caching (though caching solutions may require a more complex data-storage).
+Some map implementations support a FIFO limited storage, which could be used for naive limited-space caching (though caching solutions may require a more complex data-storage that's slower).
 
-### Map Performance
+### Ordered Maps, Unordered Maps, Indexing and Performance
 
-Memory overhead depends on the settings used to create the Map. By default, the overhead will be 24 bytes for the Map container (on 64bit machines) + 12 bytes per object (hash + index).
+The facil.io library offers both ordered and unordered maps. Unordered maps are often faster and use less memory. If iteration is performed, ordered maps might be better.
 
-For example, assuming a hash map (not a set) with 8 byte keys and 8 byte values, that would add up to 28 bytes per object (`28 * map_capa(map) + 24`).
+Indexing the map allows LRU (least recently used) eviction, but comes at a performance cost in both memory (due to the extra data per object) and speed (due to out of order memory access and increased cache misses).
 
-Seeking time is usually a fast O(1), although partial or full `hash` collisions may increase the cost of the operation.
+Ordered maps are constructed using an ordered Array + an index map that uses 4 or 8 bytes per array index.
 
-Adding, editing and removing items is also a very fast O(1), especially if enough memory was previously reserved. However, memory allocation and copying will slow performance, especially when the map need to grow or requires de-fragmentation.
+Unordered maps are constructed using an unordered Array + an index map that uses 1 byte per array index.
 
-Iteration enjoys memory locality at the expense of an expected cache miss per seeking operation. Maps are implemented using an array and an index map. When the index map is large, a cache miss will occur when reading data from the array.
+Indexing is performed using a linked list that uses 4 or 8 byte index values instead of pointers.
 
-This map implementation has protection features against too many full collisions or non-random hashes. When the map detects a possible "attack", it will start overwriting existing data instead of trying to resolve collisions. This can be adjusted using the `FIO_MAP_MAX_FULL_COLLISIONS` macro.
+In addition, each value stores a copy of the hash data, so hash data doesn't need to be recomputed.
+
+The map implementations have protection features against too many full collisions or non-random hashes. When the map detects a possible "attack", it will start overwriting existing data instead of trying to resolve collisions. This can be adjusted using the `FIO_MAP_MAX_FULL_COLLISIONS` macro.
 
 ### Map Overview 
 
-To create a map, define `FIO_MAP_NAME`.
+To create a map, define `FIO_MAP_NAME` or `FIO_UMAP_NAME` (unordered).
 
 To create a hash map (rather then a set), also define `FIO_MAP_KEY` (containing the key's type).
 
-Other helpful macros to define might include:
+To create an unordered map either use `FIO_UMAP_NAME` or define `FIO_MAP_ORDERED`.
 
+Other helpful macros to define might include:
 
 - `FIO_MAP_TYPE`, which defaults to `void *`
 - `FIO_MAP_TYPE_INVALID`, which defaults to `((FIO_MAP_TYPE){0})`
@@ -3828,15 +3831,18 @@ Other helpful macros to define might include:
 - `FIO_MAP_MAX_FULL_COLLISIONS`, which defaults to `22`
 
 
-- `FIO_MAP_DESTROY_AFTER_COPY` - uses "smart" defaults to decide if to destroy an object after it was copied (when using `set` / `remove` / `pop` with a pointer to contain `old` object)
-- `FIO_MAP_TYPE_DISCARD(obj)` - Handles discarded element data (i.e., insert without overwrite in a Set).
-- `FIO_MAP_KEY_DISCARD(obj)` - Handles discarded element data (i.e., when overwriting an existing value in a hash map).
-- `FIO_MAP_MAX_ELEMENTS` - The maximum number of elements allowed before removing old data (FIFO).
-- `FIO_MAP_MAX_SEEK` -  The maximum number of bins to rotate when (partial/full) collisions occur. Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS`. By default `96`.
+- `FIO_MAP_DESTROY_AFTER_COPY`, uses "smart" defaults to decide if to destroy an object after it was copied (when using `set` / `remove` / `pop` with a pointer to contain `old` object).
+- `FIO_MAP_TYPE_DISCARD(obj)`, handles discarded element data (i.e., insert without overwrite in a Set).
+- `FIO_MAP_KEY_DISCARD(obj)`, handles discarded element data (i.e., when overwriting an existing value in a hash map).
+- `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO).
+- `FIO_MAP_EVICT_LRU`, if set to true (1), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
+- `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when (partial/full) collisions occur. Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default `17`.
 
+- `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
+- `FIO_MAP_BIG`, if defined, the maximum theoretical capacity increases to `(1 << 64) -1`.
 To limit the number of elements in a map (FIFO, ignoring last access time), allowing it to behave similarly to a simple caching primitive, define: `FIO_MAP_MAX_ELEMENTS`.
 
-if `FIO_MAP_MAX_ELEMENTS` is `0`, then the theoretical maximum number of elements should be: `(1 << 32) - 1`. In practice, the safe limit should be calculated as `1 << 31`.
+If `FIO_MAP_MAX_ELEMENTS` is `0`, then the theoretical maximum number of elements should be: `(1 << 32) - 1`. In practice, the safe limit should be calculated as `1 << 31` or `1 << 30`. The same is true for `FIO_MAP_BIG`, only relative to 64 bits.
 
 Example:
 
@@ -3925,6 +3931,22 @@ Inserts an object to the hash map, returning the new object.
 
 If `old` is given, existing data will be copied to that location.
 
+#### `MAP_set_ptr` (hash map)
+
+```c
+FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+                      FIO_MAP_HASH hash,
+                      FIO_MAP_KEY key,
+                      FIO_MAP_TYPE obj,
+                      FIO_MAP_TYPE *old,
+                      uint8_t overwrite);
+```
+
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
+
 #### `MAP_remove` (hash map)
 
 ```c
@@ -3977,16 +3999,28 @@ If `old` is given, existing data will be copied to that location.
 #### `MAP_set` (set)
 
 ```c
-void MAP_set(FIO_MAP_PTR m,
-             FIO_MAP_HASH hash,
-             FIO_MAP_TYPE obj,
-             FIO_MAP_TYPE *old);
+FIO_MAP_TYPE MAP_set(FIO_MAP_PTR m,
+                     FIO_MAP_HASH hash,
+                     FIO_MAP_TYPE obj,
+                     FIO_MAP_TYPE *old);
 ```
 
 Inserts an object to the hash map, returning the new object.
 
 If `old` is given, existing data will be copied to that location.
 
+#### `MAP_set_ptr` (set)
+
+```c
+FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+                      FIO_MAP_HASH hash,
+                      FIO_MAP_TYPE obj,
+                      FIO_MAP_TYPE *old);
+```
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
 
 #### `MAP_remove` (set)
 
@@ -4103,7 +4137,7 @@ If `pos` is invalid or `NULL`, a pointer to the first object will be returned.
 
 The value of `first` is required and used to revalidate `pos` in cases where object insertion or memory changes occurred while iterating.
 
-The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects or reiterating some objects.
+The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects, reiterating some objects or exploding the screen.
 
 #### `MAP_each`
 

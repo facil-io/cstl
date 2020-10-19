@@ -15311,8 +15311,15 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef FIO_MAP_NAME
 #define FIO_MAP_NAME FIO_UMAP_NAME
 #endif
-#ifndef FIO_MAP_UNORDERED
-#define FIO_MAP_UNORDERED
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 0
+#endif
+#elif defined(FIO_OMAP_NAME)
+#ifndef FIO_MAP_NAME
+#define FIO_MAP_NAME FIO_OMAP_NAME
+#endif
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
 #endif
 #endif
 
@@ -15495,8 +15502,12 @@ Set Map
 Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
 
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
+#endif
+
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
-#ifdef FIO_MAP_UNORDERED
+#ifdef FIO_MAP_ORDERED
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
@@ -15873,7 +15884,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_MAP_NAME) && !defined(FIO_MAP_UNORDERED)
+#if defined(FIO_MAP_NAME) && FIO_MAP_ORDERED
 
 /* *****************************************************************************
 
@@ -16037,8 +16048,9 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
                                ? (int)FIO_MAP_MAX_SEEK
                                : (FIO_MAP_CAPA(m->bits));
   /* we perform X attempts using large cuckoo steps */
-  for (int attempts = 0; attempts < max_attempts; ++attempts) {
-    FIO_MAP_SIZE_TYPE pos = (hash + (FIO_MAP_CUCKOO_STEPS * attempts));
+  FIO_MAP_SIZE_TYPE pos = hash;
+  for (int attempts = 0; attempts < max_attempts;
+       (++attempts), (pos += FIO_MAP_CUCKOO_STEPS)) {
     const FIO_MAP_SIZE_TYPE desired_hash =
         FIO_NAME(FIO_MAP_NAME, __hash2imap)(pos, m->bits);
     /* each attempt tests a group of 5 slots with high cache locality */
@@ -16271,9 +16283,11 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     /* new */
     if (pos.a == (FIO_MAP_SIZE_TYPE)-1LL)
       pos.a = m->w++;
-    if (FIO_MAP_MAX_ELEMENTS && m->count >= FIO_MAP_MAX_ELEMENTS) {
+#if FIO_MAP_MAX_ELEMENTS
+    if (m->count >= FIO_MAP_MAX_ELEMENTS) {
       FIO_NAME(FIO_MAP_NAME, evict)(map, 1);
     }
+#endif
     FIO_NAME(FIO_MAP_NAME, __imap)
     (m)[pos.i] |= pos.a;
     m->map[pos.a].hash = hash;
@@ -16639,7 +16653,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_MAP_NAME) && defined(FIO_MAP_UNORDERED)
+#if defined(FIO_MAP_NAME) && !FIO_MAP_ORDERED
 
 /* *****************************************************************************
 
@@ -16787,13 +16801,14 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   const uint64_t simd_base =
       FIO_NAME(FIO_MAP_NAME, __hash2imap)(hash, m->bits) *
       UINT64_C(0x0101010101010101);
-  const uint64_t pos_mask = FIO_MAP_CAPA(m->bits) - 1;
+  const FIO_MAP_SIZE_TYPE pos_mask = FIO_MAP_CAPA(m->bits) - 1;
   const int max_attempts = (FIO_MAP_CAPA(m->bits) >> 3) >= FIO_MAP_MAX_SEEK
                                ? (int)FIO_MAP_MAX_SEEK
                                : (FIO_MAP_CAPA(m->bits) >> 3);
   /* we perrform X attempts using large cuckoo steps */
-  for (int attempts = 0; attempts < max_attempts; ++attempts) {
-    pos = (hash + (FIO_MAP_CUCKOO_STEPS * attempts)) & pos_mask;
+  pos = hash;
+  for (int attempts = 0; attempts < max_attempts;
+       (++attempts), (pos += FIO_MAP_CUCKOO_STEPS)) {
     /* each attempt test a group of 8 slots spaced by 7 bytes (comb) */
     const uint64_t comb = (uint64_t)imap[pos & pos_mask] |
                           ((uint64_t)imap[(pos + 7) & pos_mask] << (1 * 8)) |
@@ -21896,11 +21911,11 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
   if (sizeof(double) <= sizeof(FIOBJ) && FIOBJ_TYPE_CLASS(i) == FIOBJ_T_FLOAT) {
     union {
       double d;
-      uintptr_t i;
+      uint64_t i;
     } punned;
     punned.d = 0; /* dead code, but leave it, just in case */
-    punned.i = (uintptr_t)i;
-    punned.i = ((uintptr_t)i & (~(uintptr_t)7ULL));
+    punned.i = (uint64_t)i;
+    punned.i = ((uint64_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
   return FIO_PTR_MATH_RMASK(double, i, 3)[0];
@@ -22408,8 +22423,13 @@ FIOBJ Floats (bigger / smaller doubles)
 
 FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
                                                         FIOBJ restrict b) {
-  return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(a) ==
-         FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(b);
+  union {
+    uint64_t u;
+    double f;
+  } da, db;
+  da.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(a);
+  db.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(b);
+  return !((da.u ^ db.u) >> 1); /* test everything except the last bit */
 }
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),

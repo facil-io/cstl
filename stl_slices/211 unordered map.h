@@ -34,7 +34,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_MAP_NAME) && defined(FIO_MAP_UNORDERED)
+#if defined(FIO_MAP_NAME) && !FIO_MAP_ORDERED
 
 /* *****************************************************************************
 
@@ -182,13 +182,14 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   const uint64_t simd_base =
       FIO_NAME(FIO_MAP_NAME, __hash2imap)(hash, m->bits) *
       UINT64_C(0x0101010101010101);
-  const uint64_t pos_mask = FIO_MAP_CAPA(m->bits) - 1;
+  const FIO_MAP_SIZE_TYPE pos_mask = FIO_MAP_CAPA(m->bits) - 1;
   const int max_attempts = (FIO_MAP_CAPA(m->bits) >> 3) >= FIO_MAP_MAX_SEEK
                                ? (int)FIO_MAP_MAX_SEEK
                                : (FIO_MAP_CAPA(m->bits) >> 3);
   /* we perrform X attempts using large cuckoo steps */
-  for (int attempts = 0; attempts < max_attempts; ++attempts) {
-    pos = (hash + (FIO_MAP_CUCKOO_STEPS * attempts)) & pos_mask;
+  pos = hash;
+  for (int attempts = 0; attempts < max_attempts;
+       (++attempts), (pos += FIO_MAP_CUCKOO_STEPS)) {
     /* each attempt test a group of 8 slots spaced by 7 bytes (comb) */
     const uint64_t comb = (uint64_t)imap[pos & pos_mask] |
                           ((uint64_t)imap[(pos + 7) & pos_mask] << (1 * 8)) |

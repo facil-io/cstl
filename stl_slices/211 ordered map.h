@@ -35,7 +35,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_MAP_NAME) && !defined(FIO_MAP_UNORDERED)
+#if defined(FIO_MAP_NAME) && FIO_MAP_ORDERED
 
 /* *****************************************************************************
 
@@ -199,8 +199,9 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
                                ? (int)FIO_MAP_MAX_SEEK
                                : (FIO_MAP_CAPA(m->bits));
   /* we perform X attempts using large cuckoo steps */
-  for (int attempts = 0; attempts < max_attempts; ++attempts) {
-    FIO_MAP_SIZE_TYPE pos = (hash + (FIO_MAP_CUCKOO_STEPS * attempts));
+  FIO_MAP_SIZE_TYPE pos = hash;
+  for (int attempts = 0; attempts < max_attempts;
+       (++attempts), (pos += FIO_MAP_CUCKOO_STEPS)) {
     const FIO_MAP_SIZE_TYPE desired_hash =
         FIO_NAME(FIO_MAP_NAME, __hash2imap)(pos, m->bits);
     /* each attempt tests a group of 5 slots with high cache locality */

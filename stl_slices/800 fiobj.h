@@ -1106,11 +1106,11 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
   if (sizeof(double) <= sizeof(FIOBJ) && FIOBJ_TYPE_CLASS(i) == FIOBJ_T_FLOAT) {
     union {
       double d;
-      uintptr_t i;
+      uint64_t i;
     } punned;
     punned.d = 0; /* dead code, but leave it, just in case */
-    punned.i = (uintptr_t)i;
-    punned.i = ((uintptr_t)i & (~(uintptr_t)7ULL));
+    punned.i = (uint64_t)i;
+    punned.i = ((uint64_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
   return FIO_PTR_MATH_RMASK(double, i, 3)[0];
@@ -1618,8 +1618,13 @@ FIOBJ Floats (bigger / smaller doubles)
 
 FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
                                                         FIOBJ restrict b) {
-  return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(a) ==
-         FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(b);
+  union {
+    uint64_t u;
+    double f;
+  } da, db;
+  da.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(a);
+  db.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(b);
+  return !((da.u ^ db.u) >> 1); /* test everything except the last bit */
 }
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),

@@ -37,8 +37,15 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef FIO_MAP_NAME
 #define FIO_MAP_NAME FIO_UMAP_NAME
 #endif
-#ifndef FIO_MAP_UNORDERED
-#define FIO_MAP_UNORDERED
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 0
+#endif
+#elif defined(FIO_OMAP_NAME)
+#ifndef FIO_MAP_NAME
+#define FIO_MAP_NAME FIO_OMAP_NAME
+#endif
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
 #endif
 #endif
 
@@ -221,8 +228,12 @@ Set Map
 Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
 
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
+#endif
+
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
-#ifdef FIO_MAP_UNORDERED
+#ifdef FIO_MAP_ORDERED
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
