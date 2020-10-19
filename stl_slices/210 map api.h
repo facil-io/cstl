@@ -226,7 +226,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
-#define FIO_MAP_MAX_SEEK (96U)
+#define FIO_MAP_MAX_SEEK (17U)
 #endif
 #endif
 

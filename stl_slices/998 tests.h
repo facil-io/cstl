@@ -264,7 +264,7 @@ Unordered Map - Test
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_UMAP_NAME     __umap_test__size_t_lru
+#define FIO_UMAP_NAME     __umap_test__size_lru
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
@@ -273,6 +273,11 @@ Unordered Map - Test
 #define FIO_MAP_NAME      __omap_test__size_t
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
+#include __FILE__
+#define FIO_MAP_NAME      __omap_test__size_lru
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
 
@@ -936,8 +941,9 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, __umap_test__size_t)();
-  FIO_NAME_TEST(stl, __umap_test__size_t_lru)();
+  FIO_NAME_TEST(stl, __umap_test__size_lru)();
   FIO_NAME_TEST(stl, __omap_test__size_t)();
+  FIO_NAME_TEST(stl, __omap_test__size_lru)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");

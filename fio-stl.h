@@ -15500,7 +15500,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
-#define FIO_MAP_MAX_SEEK (96U)
+#define FIO_MAP_MAX_SEEK (17U)
 #endif
 #endif
 
@@ -15846,7 +15846,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_MAP_NAME map            /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 map settings.h"       /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
 #define FIO_MAP_TEST                /* Development inclusion - ignore line */
 #define FIO_MAP_V2                  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -16041,8 +16041,8 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
     FIO_MAP_SIZE_TYPE pos = (hash + (FIO_MAP_CUCKOO_STEPS * attempts));
     const FIO_MAP_SIZE_TYPE desired_hash =
         FIO_NAME(FIO_MAP_NAME, __hash2imap)(pos, m->bits);
-    /* each attempt tests a ~60 byte group of 5 slots spaced by 3 bytes */
-    for (int byte = 0, offset = 0; byte < 5; (++byte), (offset += 3)) {
+    /* each attempt tests a group of 5 slots with high cache locality */
+    for (int byte = 0, offset = 0; byte < 5; (++byte), (offset += byte)) {
       const FIO_MAP_SIZE_TYPE index = (pos + offset) & pos_mask;
       /* the last slot is reserved for marking deleted items, not allocated. */
       if (index == pos_mask) {
@@ -16140,7 +16140,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
           FIO_MAP_SIZE_TYPE head = m->map[r].node.next;
           m->map[w++] = m->map[r];
           if (m->last_used == r)
-            m->last_used == w;
+            m->last_used = w;
           FIO_INDEXED_LIST_REMOVE(m->map, node, r);
           FIO_INDEXED_LIST_PUSH(m->map, node, head, w);
         }
@@ -16219,10 +16219,10 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
   if (pos.a == (FIO_MAP_SIZE_TYPE)(-1) || !m->map[pos.a].hash)
     return NULL;
 #if FIO_MAP_EVICT_LRU
-  if (m->last_used != pos) {
-    FIO_INDEXED_LIST_REMOVE(m->map, node, pos);
-    FIO_INDEXED_LIST_PUSH(m->map, node, m->last_used, pos);
-    m->last_used = pos;
+  if (m->last_used != pos.a) {
+    FIO_INDEXED_LIST_REMOVE(m->map, node, pos.a);
+    FIO_INDEXED_LIST_PUSH(m->map, node, m->last_used, pos.a);
+    m->last_used = pos.a;
   }
 #endif /* FIO_MAP_EVICT_LRU */
   return &FIO_MAP_OBJ2TYPE(m->map[pos.a].obj);
@@ -16245,8 +16245,9 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
   FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   /* make sure there's room in the value array */
-  if (m->w == FIO_MAP_CAPA(m->bits))
+  if (m->w + 1 == FIO_MAP_CAPA(m->bits))
     FIO_NAME(FIO_MAP_NAME, __realloc)(m, m->bits + (m->w == m->count));
+
 #ifdef FIO_MAP_KEY
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key, 1);
@@ -16270,6 +16271,9 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     /* new */
     if (pos.a == (FIO_MAP_SIZE_TYPE)-1LL)
       pos.a = m->w++;
+    if (FIO_MAP_MAX_ELEMENTS && m->count >= FIO_MAP_MAX_ELEMENTS) {
+      FIO_NAME(FIO_MAP_NAME, evict)(map, 1);
+    }
     FIO_NAME(FIO_MAP_NAME, __imap)
     (m)[pos.i] |= pos.a;
     m->map[pos.a].hash = hash;
@@ -16279,7 +16283,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     if (m->count) {
       FIO_INDEXED_LIST_PUSH(m->map, node, m->last_used, pos.a);
     } else {
-      m->map[pos].node.prev = m->map[pos].node.next = pos.a;
+      m->map[pos.a].node.prev = m->map[pos.a].node.next = pos.a;
     }
     m->last_used = pos.a;
 #endif /* FIO_MAP_EVICT_LRU */
@@ -16297,7 +16301,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     }
     FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj), obj);
 #if FIO_MAP_EVICT_LRU
-    if (m->last_used != pos) {
+    if (m->last_used != pos.a) {
       FIO_INDEXED_LIST_REMOVE(m->map, node, pos.a);
       FIO_INDEXED_LIST_PUSH(m->map, node, m->last_used, pos.a);
       m->last_used = pos.a;
@@ -16609,7 +16613,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_UMAP_NAME map           /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 map settings.h"       /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
 #define FIO_MAP_TEST                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -23414,7 +23418,7 @@ Unordered Map - Test
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_UMAP_NAME     __umap_test__size_t_lru
+#define FIO_UMAP_NAME     __umap_test__size_lru
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
@@ -23423,6 +23427,11 @@ Unordered Map - Test
 #define FIO_MAP_NAME      __omap_test__size_t
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
+#include __FILE__
+#define FIO_MAP_NAME      __omap_test__size_lru
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
 
@@ -24086,8 +24095,9 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, __umap_test__size_t)();
-  FIO_NAME_TEST(stl, __umap_test__size_t_lru)();
+  FIO_NAME_TEST(stl, __umap_test__size_lru)();
   FIO_NAME_TEST(stl, __omap_test__size_t)();
+  FIO_NAME_TEST(stl, __omap_test__size_lru)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
