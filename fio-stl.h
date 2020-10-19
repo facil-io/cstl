@@ -22423,13 +22423,23 @@ FIOBJ Floats (bigger / smaller doubles)
 
 FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
                                                         FIOBJ restrict b) {
+  unsigned char r = 0;
   union {
     uint64_t u;
     double f;
   } da, db;
   da.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(a);
   db.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(b);
-  return !((da.u ^ db.u) >> 1); /* test everything except the last bit */
+  /* regular equality? */
+  r |= da.f == db.f;
+  /* test for small rounding errors (4 bit difference) on normalize floats */
+  r |= !((da.u ^ db.u) & UINT64_C(0xFFFFFFFFFFFFFFF0)) &&
+       (da.u & UINT64_C(0x7FF0000000000000));
+  /* test for small ULP: */
+  r |= (((da.u > db.u) ? da.u - db.u : db.u - da.u) < 2);
+  /* test for +-0 */
+  r |= !((da.u | db.u) & UINT64_C(0x7FFFFFFFFFFFFFFF));
+  return r;
 }
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
