@@ -12,6 +12,11 @@ Map Testing
 #endif                              /* Development inclusion - ignore line */
 #if defined(FIO_MAP_TEST) && defined(FIO_MAP_NAME)
 
+FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(FIO_MAP_TYPE o,
+                                                               void *p) {
+  *(size_t *)p -= (size_t)o;
+  return 0;
+}
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   /*
    * test unrodered maps here
@@ -140,19 +145,34 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   }
   {
     size_t count = 0;
+    size_t tmp = total;
     FIO_MAP_EACH(FIO_MAP_NAME, &m, i) {
       ++count;
-      total -= (size_t)(FIO_MAP_OBJ2TYPE(i->obj));
+      tmp -= (size_t)(FIO_MAP_OBJ2TYPE(i->obj));
     }
     FIO_ASSERT(count + 1 == MEMBERS,
                "FIO_MAP_EACH macro error, repetitions %zu != %zu",
                count,
                MEMBERS - 1);
     FIO_ASSERT(
-        !total,
+        !tmp,
         "FIO_MAP_EACH macro error total value %zu != 0 (%zu repetitions)",
-        total,
+        tmp,
         count);
+    tmp = total;
+    count = FIO_NAME(FIO_MAP_NAME,
+                     each)(&m,
+                           0,
+                           FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task)),
+                           (void *)&tmp);
+    FIO_ASSERT(count + 1 == MEMBERS,
+               "each task error, repetitions %zu != %zu",
+               count,
+               MEMBERS - 1);
+    FIO_ASSERT(!tmp,
+               "each task error, total value %zu != 0 (%zu repetitions)",
+               tmp,
+               count);
   }
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }

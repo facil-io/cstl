@@ -690,22 +690,117 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR map) {
 /* *****************************************************************************
 Iteration
 ***************************************************************************** */
+FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
+FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
+    FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
 
 SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                  each)(FIO_MAP_PTR map,
                                        ssize_t start_at,
                                        int (*task)(FIO_MAP_TYPE obj, void *arg),
                                        void *arg) {
-  /* TODO */
-  return start_at;
-  (void)map;
-  (void)task;
-  (void)arg;
-}
+  FIO_MAP_SIZE_TYPE count = (FIO_MAP_SIZE_TYPE)start_at;
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m)
+    return 0;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  if (!m->count)
+    return 0;
 
-FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
-FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
-    FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
+  if (start_at < 0) {
+    start_at = m->count + start_at;
+    if (start_at < 0)
+      start_at = 0;
+  }
+  if ((FIO_MAP_SIZE_TYPE)start_at >= m->count)
+    return m->count;
+
+  FIO_NAME(FIO_MAP_NAME, s) *old_map = FIO_NAME(FIO_MAP_NAME, __each_map);
+  FIO_MAP_SIZE_TYPE old_pos = FIO_NAME(FIO_MAP_NAME, __each_pos);
+  FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
+  FIO_NAME(FIO_MAP_NAME, __each_map) = m;
+
+#if FIO_MAP_EVICT_LRU
+  if (start_at) {
+    FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
+      ++count;
+      if (start_at) {
+        --start_at;
+        continue;
+      }
+      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
+      if (task(FIO_MAP_OBJ2TYPE(m->map[pos].obj), arg) == -1)
+        goto finish;
+    }
+  } else {
+    FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
+      ++count;
+      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
+      if (task(FIO_MAP_OBJ2TYPE(m->map[pos].obj), arg) == -1)
+        goto finish;
+    }
+  }
+
+#else  /* FIO_MAP_EVICT_LRU */
+  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
+  FIO_MAP_SIZE_TYPE pos = 0;
+  if (start_at) {
+    uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
+    /* scan map to arrive at starting point. */
+    for (FIO_MAP_SIZE_TYPE i = 0; start_at && i < FIO_MAP_CAPA(m->bits);
+         i += 8) {
+      /* skip empty groups (test for all bytes == 0 || 255 */
+      {
+        register const uint64_t row = imap64[i >> 3];
+        if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) ==
+            UINT64_C(0x8080808080808080)) {
+          continue;
+        }
+      }
+      for (int j = 0; start_at && j < 8; ++j) {
+        if (m->map[i + j].hash) {
+          pos = i + j;
+          --start_at;
+        }
+      }
+    }
+  }
+  while (pos + 8 < FIO_MAP_CAPA(m->bits)) {
+    /* test only groups with valid values (test for all bytes == 0 || 255 */
+    register const uint64_t row = fio_buf2u64_local(imap + pos);
+    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) !=
+        UINT64_C(0x8080808080808080)) {
+      for (int j = 0; j < 8; ++j) {
+        if (m->map[pos + j].hash) {
+          FIO_NAME(FIO_MAP_NAME, __each_pos) = pos + j;
+          ++count;
+          if (task(FIO_MAP_OBJ2TYPE(
+                       m->map[FIO_NAME(FIO_MAP_NAME, __each_pos)].obj),
+                   arg) == -1)
+            goto finish;
+        }
+      }
+    }
+    pos += 8;
+  }
+  while (pos < FIO_MAP_CAPA(m->bits)) {
+    if (m->map[pos].hash) {
+      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
+      ++count;
+      if (task(FIO_MAP_OBJ2TYPE(m->map[FIO_NAME(FIO_MAP_NAME, __each_pos)].obj),
+               arg) == -1)
+        goto finish;
+    }
+    ++pos;
+  }
+#endif /* FIO_MAP_EVICT_LRU */
+
+finish:
+  FIO_NAME(FIO_MAP_NAME, __each_pos) = old_pos;
+  FIO_NAME(FIO_MAP_NAME, __each_map) = old_map;
+  return count;
+}
 
 #ifdef FIO_MAP_KEY
 SFUNC FIO_MAP_KEY FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
