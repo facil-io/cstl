@@ -26,11 +26,11 @@ The header includes a Simple Template Library for the following common types:
 
 * [Dynamic Arrays](#dynamic-arrays) - defined by `FIO_ARRAY_NAME`
 
-* [Hash Maps / Sets](#maps-hash-maps-sets) - defined by `FIO_MAP_NAME`
+* [Hash Maps / Sets](#hash-tables-and-maps) - defined by `FIO_MAP_NAME`
 
 * [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
 
-* [Reference counting / Type wrapper](#reference-counting-type-wrapping) - defined by `FIO_REF_NAME`
+* [Reference counting / Type wrapper](#reference-counting-and-type-wrapping) - defined by `FIO_REF_NAME`
 
 * [Soft / Dynamic Types (FIOBJ)](#fiobj-soft-dynamic-types) - defined by `FIO_FIOBJ`
 

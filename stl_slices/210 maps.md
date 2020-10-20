@@ -1,4 +1,4 @@
-## Maps - Hash Maps / Sets
+## Hash Tables and Maps
 
 ```c
 /* Create a binary safe String type for Strings that aren't mutated often */

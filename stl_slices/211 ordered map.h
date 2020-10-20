@@ -243,6 +243,8 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
                                : (FIO_MAP_CAPA(m->bits));
   /* we perform X attempts using large cuckoo steps */
   FIO_MAP_SIZE_TYPE pos = hash;
+  if (m->bits <= FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT)
+    goto seek_as_array;
   for (int attempts = 0; attempts < max_attempts;
        (++attempts), (pos += FIO_MAP_CUCKOO_STEPS)) {
     const FIO_MAP_SIZE_TYPE desired_hash =
@@ -292,6 +294,31 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
     imap[i.i] = set_hash;
 
   return i;
+
+seek_as_array:
+  pos = 0;
+  if (m->w < FIO_MAP_CAPA(m->bits))
+    i.i = m->w;
+  while (pos < m->w) {
+    if (m->map[pos].hash == hash) {
+      /* test full collisions (attack) / match */
+      if (m->under_attack || FIO_MAP_OBJ_KEY_CMP(m->map[pos].obj, key)) {
+        i.i = pos;
+        i.a = pos;
+        return i;
+      } else if (++total_collisions >= FIO_MAP_MAX_FULL_COLLISIONS) {
+        m->under_attack = 1;
+        FIO_LOG_SECURITY("Ordered map under attack?");
+      }
+    } else if (!m->map[pos].hash && i.i > pos) {
+      i.i = pos;
+    }
+    ++pos;
+  }
+  if (set_hash && i.i != (FIO_MAP_SIZE_TYPE)-1LL)
+    imap[i.i] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(hash, m->bits);
+  return i;
+
   (void)key; /* if unused */
 }
 
@@ -299,8 +326,8 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
                                                 size_t bits) {
   if (!m || bits > (sizeof(FIO_MAP_SIZE_TYPE) * 8))
     return -1;
-  if (bits < 3)
-    bits = 3;
+  // if (bits < 3)
+  //   bits = 3;
   if (bits != m->bits) {
     FIO_NAME(FIO_MAP_NAME, each_s) *tmp =
         (FIO_NAME(FIO_MAP_NAME, each_s) *)FIO_MEM_REALLOC_(

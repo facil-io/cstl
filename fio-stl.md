@@ -26,11 +26,11 @@ The header includes a Simple Template Library for the following common types:
 
 * [Dynamic Arrays](#dynamic-arrays) - defined by `FIO_ARRAY_NAME`
 
-* [Hash Maps / Sets](#maps-hash-maps-sets) - defined by `FIO_MAP_NAME`
+* [Hash Maps / Sets](#hash-tables-and-maps) - defined by `FIO_MAP_NAME`
 
 * [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
 
-* [Reference counting / Type wrapper](#reference-counting-type-wrapping) - defined by `FIO_REF_NAME`
+* [Reference counting / Type wrapper](#reference-counting-and-type-wrapping) - defined by `FIO_REF_NAME`
 
 * [Soft / Dynamic Types (FIOBJ)](#fiobj-soft-dynamic-types) - defined by `FIO_FIOBJ`
 
@@ -3756,7 +3756,7 @@ It is possible to edit the array while iterating, however when deleting `pos`, o
 **Note**: this macro supports automatic pointer tagging / untagging.
 
 -------------------------------------------------------------------------------
-## Maps - Hash Maps / Sets
+## Hash Tables and Maps
 
 ```c
 /* Create a binary safe String type for Strings that aren't mutated often */
@@ -4874,7 +4874,7 @@ fio_str_info_s STR_write_unescape(FIO_STR_PTR s,
 Writes an escaped data into the string after unescaping the data.
 
 -------------------------------------------------------------------------------
-## Reference Counting / Type Wrapping
+## Reference Counting and Type Wrapping
 
 ```c
 #define FIO_STR_SMALL fio_str

@@ -1,4 +1,4 @@
-## Reference Counting / Type Wrapping
+## Reference Counting and Type Wrapping
 
 ```c
 #define FIO_STR_SMALL fio_str
