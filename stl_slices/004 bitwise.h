@@ -498,7 +498,7 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 }
 
 /* *****************************************************************************
-SIMD helpers
+SIMD emulation helpers
 ***************************************************************************** */
 
 /** Detects a byte where all the bits are set (255) within a 4 byte vector. */

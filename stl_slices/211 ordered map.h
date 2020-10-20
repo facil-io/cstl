@@ -124,6 +124,49 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   return FIO_MAP_CAPA(m->bits);
 }
 
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m || !first)
+    return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
+  if (!m->count || !m->map)
+    return NULL;
+  intptr_t i;
+#if FIO_MAP_EVICT_LRU
+  intptr_t next;
+  if (!pos) {
+    i = m->last_used;
+    *first = m->map;
+    return m->map + i;
+  }
+  i = pos - *first;
+  *first = m->map; /* was it updated? */
+  next = m->map[i].node.next;
+  if (next == m->last_used)
+    return NULL;
+  return m->map + next;
+
+#else  /* FIO_MAP_EVICT_LRU */
+  if (!pos) {
+    i = -1;
+  } else {
+    i = (intptr_t)(pos - *first);
+  }
+  ++i;
+  *first = m->map;
+  while (i < m->w) {
+    if (m->map[i].hash)
+      return m->map + i;
+    ++i;
+  }
+  return NULL;
+#endif /* FIO_MAP_EVICT_LRU */
+}
+
 /* *****************************************************************************
 Ordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -510,6 +553,18 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos.a].obj);
   }
+#if FIO_MAP_EVICT_LRU
+  if (pos.a == m->last_used)
+    m->last_used = m->map[pos.a].node.next;
+  FIO_INDEXED_LIST_REMOVE(m->map, node, pos.a);
+#endif
+  if (!m->count)
+    m->w = 0;
+  else if (pos.a + 1 == m->w) {
+    --m->w;
+    while (m->w && !m->map[m->w - 1].hash)
+      --m->w;
+  }
   return 0;
 }
 
@@ -629,47 +684,6 @@ Iteration
 FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
 FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
     FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
-
-SFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
-    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  if (!m || !first)
-    return NULL;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  if (!m->count)
-    return NULL;
-  intptr_t i;
-#if FIO_MAP_EVICT_LRU
-  if (!pos || !(*first)) {
-    i = m->last_used;
-    *first = m->map;
-    return m->map + i;
-  }
-  i = pos - *first;
-  *first = m->map;
-  if (m->map + m->map[i].node.next == m->map + m->last_used)
-    return NULL;
-  return m->map + m->map[i].node.next;
-
-#else  /* FIO_MAP_EVICT_LRU */
-  if (!pos || !(*first)) {
-    i = -1;
-  } else {
-    i = (intptr_t)(pos - *first);
-  }
-  ++i;
-  *first = m->map;
-  while (i < m->w) {
-    if (m->map[i].hash)
-      return m->map + i;
-    ++i;
-  }
-  return NULL;
-#endif /* FIO_MAP_EVICT_LRU */
-}
 
 /**
  * Iteration using a callback for each element in the map.

@@ -1,12 +1,22 @@
 /* *****************************************************************************
 Map Testing
 ***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_MAP_NAME map            /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
+#include "211 ordered map.h"        /* Development inclusion - ignore line */
+#include "211 unordered map.h"      /* Development inclusion - ignore line */
+#define FIO_MAP_TEST                /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
 #if defined(FIO_MAP_TEST) && defined(FIO_MAP_NAME)
 
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
-/*
- * test unrodered maps here
- */
+  /*
+   * test unrodered maps here
+   */
+  uint64_t total = 0;
 #ifdef FIO_MAP_KEY
   fprintf(
       stderr,
@@ -20,6 +30,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   FIO_NAME(FIO_MAP_NAME, s) m = FIO_MAP_INIT;
   const size_t MEMBERS = (1 << 18);
   for (size_t i = 1; i < MEMBERS; ++i) {
+    total += i;
     FIO_MAP_TYPE old = (FIO_MAP_TYPE)i;
 #ifdef FIO_MAP_KEY
     FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
@@ -127,6 +138,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_LOG_WARNING("capacity shouldn't change when re-inserting the same "
                     "number of items.");
   }
+  {
+    size_t count = 0;
+    FIO_MAP_EACH(FIO_MAP_NAME, &m, i) {
+      ++count;
+      total -= (size_t)(FIO_MAP_OBJ2TYPE(i->obj));
+    }
+    FIO_ASSERT(count + 1 == MEMBERS,
+               "FIO_MAP_EACH macro error, repetitions %zu != %zu",
+               count,
+               MEMBERS - 1);
+    FIO_ASSERT(
+        !total,
+        "FIO_MAP_EACH macro error total value %zu != 0 (%zu repetitions)",
+        total,
+        count);
+  }
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }
 #undef FIO_MAP_TEST_KEY
@@ -139,7 +166,7 @@ Map - cleanup
 
 #undef FIO_MAP_NAME
 #undef FIO_UMAP_NAME
-#undef FIO_MAP___NAME
+#undef FIO_OMAP_NAME
 
 #undef FIO_MAP_DESTROY_AFTER_COPY
 
@@ -154,7 +181,7 @@ Map - cleanup
 #undef FIO_MAP_INDEX_UNUSED
 #undef FIO_MAP_INDEX_USED_BIT
 
-#undef FIO_MAP_UNORDERED
+#undef FIO_MAP_ORDERED
 
 #undef FIO_MAP_KEY
 #undef FIO_MAP_KEY_CMP

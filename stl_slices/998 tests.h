@@ -270,13 +270,14 @@ Unordered Map - Test
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_MAP_NAME      __omap_test__size_t
+#define FIO_OMAP_NAME     __omap_test__size_t
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_MAP_NAME      __omap_test__size_lru
+#define FIO_OMAP_NAME     __omap_test__size_lru
 #define FIO_MAP_TYPE      size_t
+#define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__

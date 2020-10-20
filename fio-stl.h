@@ -2106,7 +2106,7 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 }
 
 /* *****************************************************************************
-SIMD helpers
+SIMD emulation helpers
 ***************************************************************************** */
 
 /** Detects a byte where all the bits are set (255) within a 4 byte vector. */
@@ -11471,9 +11471,10 @@ Poll Monitoring Implementation - The polling type(s)
 #define FIO_STL_KEEP__
 
 #define FIO_RISKY_HASH
-#define FIO_MAP_TYPE         uint32_t
+#define FIO_MAP_TYPE         int32_t
+#define FIO_MAP_HASH         uint32_t
 #define FIO_MAP_TYPE_INVALID -1 /* allow monitoring of fd == 0*/
-#define FIO_MAP_NAME         fio___poll_index
+#define FIO_UMAP_NAME        fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
 #define FIO_ARRAY_NAME           fio___poll_fds
@@ -15321,6 +15322,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef FIO_MAP_ORDERED
 #define FIO_MAP_ORDERED 1
 #endif
+#else
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
+#endif
 #endif
 
 #ifdef FIO_MAP_NAME
@@ -15501,10 +15506,6 @@ Set Map
 /* *****************************************************************************
 Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
-
-#ifndef FIO_MAP_ORDERED
-#define FIO_MAP_ORDERED 1
-#endif
 
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
 #ifdef FIO_MAP_ORDERED
@@ -15716,7 +15717,7 @@ Iteration
 ***************************************************************************** */
 
 /** Takes a previous (or NULL) item's position and returns the next. */
-SFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos);
@@ -15819,7 +15820,7 @@ Iteration Macro
  *
  * Use this macro for small Hash Maps / Sets.
  *
- * - `map_type` is the Map's type name/function prefix, same as FIO_MAP_NAME.
+ * - `map_name` is the Map's type name / function prefix, same as FIO_MAP_NAME.
  *
  * - `map_p` is a pointer to the Hash Map / Set variable.
  *
@@ -15834,13 +15835,13 @@ Iteration Macro
  *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */
-#define FIO_MAP_EACH(map_type, map_p, pos)                                     \
-  for (FIO_NAME(map_type,                                                      \
+#define FIO_MAP_EACH(map_name, map_p, pos)                                     \
+  for (FIO_NAME(map_name,                                                      \
                 each_s) *first___ = NULL,                                      \
-                        *pos = FIO_NAME(map_type,                              \
+                        *pos = FIO_NAME(map_name,                              \
                                         each_next)(map_p, &first___, NULL);    \
        pos;                                                                    \
-       pos = FIO_NAME(map_type, each_next)(map_p, &first___, pos))
+       pos = FIO_NAME(map_name, each_next)(map_p, &first___, pos))
 #endif
 
 /* *****************************************************************************
@@ -15971,6 +15972,49 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
     return 0;
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
   return FIO_MAP_CAPA(m->bits);
+}
+
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m || !first)
+    return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
+  if (!m->count || !m->map)
+    return NULL;
+  intptr_t i;
+#if FIO_MAP_EVICT_LRU
+  intptr_t next;
+  if (!pos) {
+    i = m->last_used;
+    *first = m->map;
+    return m->map + i;
+  }
+  i = pos - *first;
+  *first = m->map; /* was it updated? */
+  next = m->map[i].node.next;
+  if (next == m->last_used)
+    return NULL;
+  return m->map + next;
+
+#else  /* FIO_MAP_EVICT_LRU */
+  if (!pos) {
+    i = -1;
+  } else {
+    i = (intptr_t)(pos - *first);
+  }
+  ++i;
+  *first = m->map;
+  while (i < m->w) {
+    if (m->map[i].hash)
+      return m->map + i;
+    ++i;
+  }
+  return NULL;
+#endif /* FIO_MAP_EVICT_LRU */
 }
 
 /* *****************************************************************************
@@ -16359,6 +16403,18 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos.a].obj);
   }
+#if FIO_MAP_EVICT_LRU
+  if (pos.a == m->last_used)
+    m->last_used = m->map[pos.a].node.next;
+  FIO_INDEXED_LIST_REMOVE(m->map, node, pos.a);
+#endif
+  if (!m->count)
+    m->w = 0;
+  else if (pos.a + 1 == m->w) {
+    --m->w;
+    while (m->w && !m->map[m->w - 1].hash)
+      --m->w;
+  }
   return 0;
 }
 
@@ -16478,47 +16534,6 @@ Iteration
 FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
 FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
     FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
-
-SFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
-    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  if (!m || !first)
-    return NULL;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  if (!m->count)
-    return NULL;
-  intptr_t i;
-#if FIO_MAP_EVICT_LRU
-  if (!pos || !(*first)) {
-    i = m->last_used;
-    *first = m->map;
-    return m->map + i;
-  }
-  i = pos - *first;
-  *first = m->map;
-  if (m->map + m->map[i].node.next == m->map + m->last_used)
-    return NULL;
-  return m->map + m->map[i].node.next;
-
-#else  /* FIO_MAP_EVICT_LRU */
-  if (!pos || !(*first)) {
-    i = -1;
-  } else {
-    i = (intptr_t)(pos - *first);
-  }
-  ++i;
-  *first = m->map;
-  while (i < m->w) {
-    if (m->map[i].hash)
-      return m->map + i;
-    ++i;
-  }
-  return NULL;
-#endif /* FIO_MAP_EVICT_LRU */
-}
 
 /**
  * Iteration using a callback for each element in the map.
@@ -16718,6 +16733,12 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
+/** IInternal helper - do not access */
+FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
+                            __imap)(FIO_NAME(FIO_MAP_NAME, s) * m) {
+  return (uint8_t *)(m->map + FIO_MAP_CAPA(m->bits));
+}
+
 FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, count)(FIO_MAP_PTR map) {
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
@@ -16736,6 +16757,61 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   return FIO_MAP_CAPA(m->bits);
 }
 
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m || !first)
+    return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
+  if (!m->count || !m->map)
+    return NULL;
+  size_t i;
+#if FIO_MAP_EVICT_LRU
+  intptr_t next;
+  if (!pos) {
+    i = m->last_used;
+    *first = m->map;
+    return m->map + i;
+  }
+  i = pos - *first;
+  *first = m->map; /* was it updated? */
+  next = m->map[i].node.next;
+  if (next == m->last_used)
+    return NULL;
+  return m->map + next;
+
+#else  /*FIO_MAP_EVICT_LRU*/
+  if (!pos || !(*first)) {
+    i = -1;
+  } else {
+    i = pos - *first;
+  }
+  ++i;
+  *first = m->map;
+  while (i + 8 < FIO_MAP_CAPA(m->bits)) {
+    uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
+    /* test only groups with valid values (test for all bytes == 0 || 255 */
+    register const uint64_t row = fio_buf2u64_local(imap + i);
+    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) !=
+        UINT64_C(0x8080808080808080)) {
+      for (int j = 0; j < 8; ++j) {
+        if (m->map[i + j].hash)
+          return m->map + i + j;
+      }
+    }
+    i += 8;
+  }
+  while (i < FIO_MAP_CAPA(m->bits)) {
+    if (m->map[i].hash)
+      return m->map + i;
+    ++i;
+  }
+  return NULL;
+#endif /* FIO_MAP_EVICT_LRU */
+}
 /* *****************************************************************************
 Unordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -16772,11 +16848,6 @@ Unordered Map Implementation - helper functions.
 
 /** the value to be used when the hash is a reserved value. */
 #define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
-
-FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
-                            __imap)(FIO_NAME(FIO_MAP_NAME, s) * m) {
-  return (uint8_t *)(m->map + FIO_MAP_CAPA(m->bits));
-}
 
 FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                      __hash2imap)(FIO_MAP_HASH hash,
@@ -16907,7 +16978,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
       last = pos;
       ++m2.count;
     }
-#else  /* FIO_MAP_EVICT_LRU */
+#else /* FIO_MAP_EVICT_LRU */
     /* scan map for used slots to re-insert data */
     uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
     for (FIO_MAP_SIZE_TYPE i = 0;
@@ -16931,6 +17002,15 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
           (&m2)[pos] =
               FIO_NAME(FIO_MAP_NAME, __hash2imap)(m->map[n].hash, m2.bits);
           m2.map[pos] = m->map[n];
+#if FIO_MAP_EVICT_LRU
+          if (!m2.count) {
+            m2.last_used = pos;
+            m2.map[pos].node.prev = m2.map[pos].node.next = pos;
+          }
+          FIO_INDEXED_LIST_PUSH(m2.map, node, m2.last_used, pos);
+          if (m->last_used == n)
+            m2.last_used = pos;
+#endif /* FIO_MAP_EVICT_LRU */
           ++m2.count;
         }
       }
@@ -17097,6 +17177,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
   }
+#if FIO_MAP_EVICT_LRU
+  if (pos == m->last_used)
+    m->last_used = m->map[pos].node.next;
+  FIO_INDEXED_LIST_REMOVE(m->map, node, pos);
+#endif
   return 0;
 }
 
@@ -17240,58 +17325,6 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR map) {
 Iteration
 ***************************************************************************** */
 
-SFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
-    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  if (!m || !first || !m->count)
-    return NULL;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  size_t i;
-#if FIO_MAP_EVICT_LRU
-  if (!pos || !(*first)) {
-    i = m->last_used;
-    *first = m->map;
-    return m->map + i;
-  }
-  i = pos - *first;
-  *first = m->map;
-  if (m->map + m->map[i].node.next == m->map + m->last_used)
-    return NULL;
-  return m->map + m->map[i].node.next;
-
-#else  /*FIO_MAP_EVICT_LRU*/
-  if (!pos || !(*first)) {
-    i = -1;
-  } else {
-    i = pos - *first;
-  }
-  ++i;
-  *first = m->map;
-  while (i + 8 < FIO_MAP_CAPA(m->bits)) {
-    uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
-    /* test only groups with valid values (test for all bytes == 0 || 255 */
-    register const uint64_t row = fio_buf2u64_local(imap + i);
-    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) !=
-        UINT64_C(0x8080808080808080)) {
-      for (int j = 0; j < 8; ++j) {
-        if (m->map[i + j].hash)
-          return m->map + i + j;
-      }
-    }
-    i += 8;
-  }
-  while (i < FIO_MAP_CAPA(m->bits)) {
-    if (m->map[i].hash)
-      return m->map + i;
-    ++i;
-  }
-  return NULL;
-#endif /* FIO_MAP_EVICT_LRU */
-}
-
 SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                  each)(FIO_MAP_PTR map,
                                        ssize_t start_at,
@@ -17336,12 +17369,22 @@ Unordered Map Cleanup
 /* *****************************************************************************
 Map Testing
 ***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_MAP_NAME map            /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
+#include "211 ordered map.h"        /* Development inclusion - ignore line */
+#include "211 unordered map.h"      /* Development inclusion - ignore line */
+#define FIO_MAP_TEST                /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
 #if defined(FIO_MAP_TEST) && defined(FIO_MAP_NAME)
 
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
-/*
- * test unrodered maps here
- */
+  /*
+   * test unrodered maps here
+   */
+  uint64_t total = 0;
 #ifdef FIO_MAP_KEY
   fprintf(
       stderr,
@@ -17355,6 +17398,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   FIO_NAME(FIO_MAP_NAME, s) m = FIO_MAP_INIT;
   const size_t MEMBERS = (1 << 18);
   for (size_t i = 1; i < MEMBERS; ++i) {
+    total += i;
     FIO_MAP_TYPE old = (FIO_MAP_TYPE)i;
 #ifdef FIO_MAP_KEY
     FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
@@ -17462,6 +17506,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_LOG_WARNING("capacity shouldn't change when re-inserting the same "
                     "number of items.");
   }
+  {
+    size_t count = 0;
+    FIO_MAP_EACH(FIO_MAP_NAME, &m, i) {
+      ++count;
+      total -= (size_t)(FIO_MAP_OBJ2TYPE(i->obj));
+    }
+    FIO_ASSERT(count + 1 == MEMBERS,
+               "FIO_MAP_EACH macro error, repetitions %zu != %zu",
+               count,
+               MEMBERS - 1);
+    FIO_ASSERT(
+        !total,
+        "FIO_MAP_EACH macro error total value %zu != 0 (%zu repetitions)",
+        total,
+        count);
+  }
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }
 #undef FIO_MAP_TEST_KEY
@@ -17474,7 +17534,7 @@ Map - cleanup
 
 #undef FIO_MAP_NAME
 #undef FIO_UMAP_NAME
-#undef FIO_MAP___NAME
+#undef FIO_OMAP_NAME
 
 #undef FIO_MAP_DESTROY_AFTER_COPY
 
@@ -17489,7 +17549,7 @@ Map - cleanup
 #undef FIO_MAP_INDEX_UNUSED
 #undef FIO_MAP_INDEX_USED_BIT
 
-#undef FIO_MAP_UNORDERED
+#undef FIO_MAP_ORDERED
 
 #undef FIO_MAP_KEY
 #undef FIO_MAP_KEY_CMP
@@ -23454,13 +23514,14 @@ Unordered Map - Test
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_MAP_NAME      __omap_test__size_t
+#define FIO_OMAP_NAME     __omap_test__size_t
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_MAP_NAME      __omap_test__size_lru
+#define FIO_OMAP_NAME     __omap_test__size_lru
 #define FIO_MAP_TYPE      size_t
+#define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__

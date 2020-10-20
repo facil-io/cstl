@@ -47,6 +47,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef FIO_MAP_ORDERED
 #define FIO_MAP_ORDERED 1
 #endif
+#else
+#ifndef FIO_MAP_ORDERED
+#define FIO_MAP_ORDERED 1
+#endif
 #endif
 
 #ifdef FIO_MAP_NAME
@@ -227,10 +231,6 @@ Set Map
 /* *****************************************************************************
 Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
-
-#ifndef FIO_MAP_ORDERED
-#define FIO_MAP_ORDERED 1
-#endif
 
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
 #ifdef FIO_MAP_ORDERED
@@ -442,7 +442,7 @@ Iteration
 ***************************************************************************** */
 
 /** Takes a previous (or NULL) item's position and returns the next. */
-SFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, each_s) * pos);
@@ -545,7 +545,7 @@ Iteration Macro
  *
  * Use this macro for small Hash Maps / Sets.
  *
- * - `map_type` is the Map's type name/function prefix, same as FIO_MAP_NAME.
+ * - `map_name` is the Map's type name / function prefix, same as FIO_MAP_NAME.
  *
  * - `map_p` is a pointer to the Hash Map / Set variable.
  *
@@ -560,13 +560,13 @@ Iteration Macro
  *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */
-#define FIO_MAP_EACH(map_type, map_p, pos)                                     \
-  for (FIO_NAME(map_type,                                                      \
+#define FIO_MAP_EACH(map_name, map_p, pos)                                     \
+  for (FIO_NAME(map_name,                                                      \
                 each_s) *first___ = NULL,                                      \
-                        *pos = FIO_NAME(map_type,                              \
+                        *pos = FIO_NAME(map_name,                              \
                                         each_next)(map_p, &first___, NULL);    \
        pos;                                                                    \
-       pos = FIO_NAME(map_type, each_next)(map_p, &first___, pos))
+       pos = FIO_NAME(map_name, each_next)(map_p, &first___, pos))
 #endif
 
 /* *****************************************************************************

@@ -157,9 +157,10 @@ Poll Monitoring Implementation - The polling type(s)
 #define FIO_STL_KEEP__
 
 #define FIO_RISKY_HASH
-#define FIO_MAP_TYPE         uint32_t
+#define FIO_MAP_TYPE         int32_t
+#define FIO_MAP_HASH         uint32_t
 #define FIO_MAP_TYPE_INVALID -1 /* allow monitoring of fd == 0*/
-#define FIO_MAP_NAME         fio___poll_index
+#define FIO_UMAP_NAME        fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
 #define FIO_ARRAY_NAME           fio___poll_fds
