@@ -613,7 +613,7 @@ FIOBJ Arrays
 FIOBJ Hash Maps
 ***************************************************************************** */
 
-#define FIO_MAP_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
+#define FIO_OMAP_NAME            FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(a)                                                     \

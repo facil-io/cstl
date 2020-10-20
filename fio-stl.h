@@ -1639,7 +1639,7 @@ s
 
 
 
-
+More joyful ideas at:       https://graphics.stanford.edu/~seander/bithacks.html
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)
@@ -2109,38 +2109,100 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 SIMD emulation helpers
 ***************************************************************************** */
 
-/** Detects a byte where all the bits are set (255) within a 4 byte vector. */
+/**
+ * Detects a byte where all the bits are set (255) within a 4 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
   return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
          (row & UINT32_C(0x80808080));
 }
 
-/** Detects a byte where no bits are set (0) within a 4 byte vector. */
+/**
+ * Detects a byte where no bits are set (0) within a 4 byte vector.
+ *
+ * The zero byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
   return fio_has_full_byte32(~row);
 }
 
-/** Detects if `byte` exists within a 4 byte vector. */
+/**
+ * Detects if `byte` exists within a 4 byte vector.
+ *
+ * The requested byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
   return fio_has_full_byte32(~(row ^ (UINT32_C(0x01010101) * byte)));
 }
 
-/** Detects a byte where all the bits are set (255) within an 8 byte vector. */
+/**
+ * Detects a byte where all the bits are set (255) within an 8 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
   return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
          (row & UINT64_C(0x8080808080808080));
 }
 
-/** Detects a byte where no bits are set (0) within an 8 byte vector. */
+/**
+ * Detects a byte where no bits are set (0) within an 8 byte vector.
+ *
+ * The zero byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
   return fio_has_full_byte64(~row);
 }
 
-/** Detects if `byte` exists within an 8 byte vector. */
+/**
+ * Detects if `byte` exists within an 8 byte vector.
+ *
+ * The requested byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
+/** Isolated the least significant (lowest) bit. */
+FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+/** Returns the index of the most significant (highest) bit. */
+#define fio_bits_msb_index(i) __builtin_clz(i)
+#else
+/** Returns the index of the most significant (highest) bit. */
+FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
+  uint64_t r = 0;
+  if (!i)
+    goto zero;
+#define fio___bits_msb_index_step(x)                                           \
+  if (i >= ((uint64_t)1) << x)                                                 \
+    r += x, i >>= x;
+  fio___bits_msb_index_step(32);
+  fio___bits_msb_index_step(16);
+  fio___bits_msb_index_step(8);
+  fio___bits_msb_index_step(4);
+  fio___bits_msb_index_step(2);
+  fio___bits_msb_index_step(1);
+#undef fio___bits_msb_index_step
+  return r;
+zero:
+  r = (size_t)-1;
+  return r;
+}
+#endif
+
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+/** Returns the index of the least significant (lowest) bit. */
+#define fio_bits_lsb_index(i) __builtin_ctz(i)
+#else
+/** Returns the index of the least significant (lowest) bit. */
+FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
+  return fio_bits_msb_index(fio_bits_lsb(i));
+}
+#endif
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
@@ -12516,13 +12578,14 @@ Stream Testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char *const str =
-      "My Hello World string should be long enough so it can be used for "
-      "testing the stream functionality in the facil.io stream module. The "
-      "stream moduule takes strings and failes and places them (by reference / "
-      "copy) into a linked list of objects. When data is requested from the "
-      "stream, the stream will either copy the data to a pre-allocated buffer "
-      "or it may update the link to it points to its own internal buffer "
-      "(avoiding a copy when possible).";
+      (char *)"My Hello World string should be long enough so it can be used "
+              "for testing the stream functionality in the facil.io stream "
+              "module. The stream moduule takes strings and failes and places "
+              "them (by reference / copy) into a linked list of objects. When "
+              "data is requested from the stream, the stream will either copy "
+              "the data to a pre-allocated buffer or it may update the link to "
+              "it points to its own internal buffer (avoiding a copy when "
+              "possible).";
   fio_stream_s s = FIO_STREAM_INIT(s);
   char mem[4000];
   char *buf = mem;
@@ -15510,7 +15573,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
 
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
-#ifdef FIO_MAP_ORDERED
+#if FIO_MAP_ORDERED
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
@@ -15541,6 +15604,34 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #ifndef FIO_MAP_HASH
 /** The type for map hash value (an X bit integer) */
 #define FIO_MAP_HASH uint64_t
+#endif
+
+#undef FIO_MAP_HASH_FIXED
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-2LL)
+
+#undef FIO_MAP_HASH_FIX
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
+
+/**
+ * Unordered maps don't have to cache an object's hash.
+ *
+ * If the hash is cheap to calculate, it could be recalculated on the fly.
+ */
+#if defined(FIO_MAP_HASH_FN) && !FIO_MAP_ORDERED
+FIO_IFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, __get_hash)(FIO_MAP_OBJ_KEY k) {
+  FIO_MAP_HASH h = FIO_MAP_HASH_FN(k);
+  h = FIO_MAP_HASH_FIX(h);
+  return h;
+}
+#define FIO_MAP_HASH_CACHED 0
+#define FIO_MAP_HASH_GET_HASH(map_ptr, index)                                  \
+  FIO_NAME(FIO_MAP_NAME, __get_hash)                                           \
+  (FIO_MAP_OBJ2KEY((map_ptr)->map[(index)].obj))
+#else
+#define FIO_MAP_HASH_GET_HASH(map_ptr, index) (map_ptr)->map[(index)].hash
+#define FIO_MAP_HASH_CACHED                   1
 #endif
 
 #ifndef FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT
@@ -15606,8 +15697,10 @@ typedef struct FIO_NAME(FIO_MAP_NAME, s) FIO_NAME(FIO_MAP_NAME, s);
 struct FIO_NAME(FIO_MAP_NAME, each_s) {
   /** the data being stored in the Map / key-value pair: obj.key obj.value. */
   FIO_MAP_OBJ obj;
+#if FIO_MAP_HASH_CACHED
   /** a copy of the hash value. */
   FIO_MAP_HASH hash;
+#endif
 #if FIO_MAP_EVICT_LRU
   /** LRU evicion monitoring - do not access directly */
   struct {
@@ -16793,21 +16886,24 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
   }
   ++i;
   *first = m->map;
+  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   while (i + 8 < FIO_MAP_CAPA(m->bits)) {
-    uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
     /* test only groups with valid values (test for all bytes == 0 || 255 */
-    register const uint64_t row = fio_buf2u64_local(imap + i);
-    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) !=
-        UINT64_C(0x8080808080808080)) {
+    register uint64_t row = fio_buf2u64_local(imap + i);
+    row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+    if (row != UINT64_C(0x8080808080808080)) {
+      row ^= UINT64_C(0x8080808080808080);
       for (int j = 0; j < 8; ++j) {
-        if (m->map[i + j].hash)
+        if ((row & UINT64_C(0x80))) {
           return m->map + i + j;
+        }
+        row >>= 8;
       }
+      i += 8;
     }
-    i += 8;
   }
   while (i < FIO_MAP_CAPA(m->bits)) {
-    if (m->map[i].hash)
+    if (imap[i] && imap[i] != 255)
       return m->map + i;
     ++i;
   }
@@ -16845,12 +16941,6 @@ Unordered Map Implementation - helper functions.
 #define FIO_MAP___IMAP_FREE 0
 #endif
 
-/** the value to be used when the hash is a reserved value. */
-#define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-2LL)
-
-/** the value to be used when the hash is a reserved value. */
-#define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
-
 FIO_IFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                      __hash2imap)(FIO_MAP_HASH hash,
                                                   uint8_t bits) {
@@ -16878,6 +16968,8 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   const int max_attempts = (FIO_MAP_CAPA(m->bits) >> 3) >= FIO_MAP_MAX_SEEK
                                ? (int)FIO_MAP_MAX_SEEK
                                : (FIO_MAP_CAPA(m->bits) >> 3);
+  if (m->bits <= FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT)
+    goto seek_as_array;
   /* we perrform X attempts using large cuckoo steps */
   pos = hash;
   for (int attempts = 0; attempts < max_attempts;
@@ -16897,11 +16989,13 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
     /* test for exact match in each of the bytes in the 8 byte group */
     /* note: the MSB is 1 for both (x-1) and (~x) only if x == 0. */
     if (simd_result) {
-      for (int byte = 0, offset = 0; byte < 8; (++byte), (offset += 7)) {
+      for (int offset = 0; simd_result; offset += 7) {
         /* test cache friendly 8bit match */
-        if ((simd_result & (UINT64_C(0xFF) << (byte << 3)))) {
+        if ((simd_result & UINT64_C(0x80))) {
           /* test full hash */
-          if (m->map[(pos + offset) & pos_mask].hash == hash) {
+          register FIO_MAP_HASH obj_hash =
+              FIO_MAP_HASH_GET_HASH(m, ((pos + offset) & pos_mask));
+          if (obj_hash == hash) {
             /* test full collisions (attack) / match */
             if (m->under_attack ||
                 FIO_MAP_OBJ_KEY_CMP(m->map[(pos + offset) & pos_mask].obj,
@@ -16914,17 +17008,19 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
             }
           }
         }
+        simd_result >>= 8;
       }
     }
     /* test if there's an available slot in the group */
     if (free_slot == (FIO_MAP_SIZE_TYPE)-1LL &&
-        (fio_has_zero_byte64(comb) || fio_has_full_byte64(comb))) {
-      for (int byte = 0, offset = 0; byte < 8; (++byte), (offset += 7)) {
-        if (imap[(pos + offset) & pos_mask] == 255 ||
-            !imap[(pos + offset) & pos_mask]) {
+        (simd_result =
+             (fio_has_zero_byte64(comb) | fio_has_full_byte64(comb)))) {
+      for (int offset = 0; simd_result; offset += 7) {
+        if (simd_result & UINT64_C(0x80)) {
           free_slot = (pos + offset) & pos_mask;
           break;
         }
+        simd_result >>= 8;
       }
     }
     /* test if there's a free slot in the group (never used => stop seeking) */
@@ -16935,6 +17031,39 @@ FIO_SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
 
   pos = free_slot;
   return pos;
+
+seek_as_array:
+
+  if (m->count < FIO_MAP_CAPA(m->bits))
+    free_slot = m->count;
+  pos = 0;
+  while (pos < m->count) {
+    switch (imap[pos]) {
+    case 0:
+      return pos;
+    case 255:
+      if (free_slot > pos)
+        free_slot = pos;
+      break;
+    default:
+      if (imap[pos] == (uint8_t)(simd_base & 0xFF)) {
+        FIO_MAP_HASH obj_hash = FIO_MAP_HASH_GET_HASH(m, pos);
+        if (obj_hash == hash) {
+          /* test full collisions (attack) / match */
+          if (m->under_attack || FIO_MAP_OBJ_KEY_CMP(m->map[pos].obj, key)) {
+            return pos;
+          } else if (++total_collisions >= FIO_MAP_MAX_FULL_COLLISIONS) {
+            m->under_attack = 1;
+            FIO_LOG_SECURITY("Unordered map under attack?");
+          }
+        }
+      }
+    }
+    ++pos;
+  }
+  pos = free_slot;
+  return pos;
+
   (void)key; /* if unused */
 }
 
@@ -16942,8 +17071,6 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
                                                 size_t bits) {
   if (!m || bits >= (sizeof(FIO_MAP_SIZE_TYPE) * 8))
     return -1;
-  if (bits < 3)
-    bits = 3;
   FIO_NAME(FIO_MAP_NAME, each_s) *tmp = (FIO_NAME(FIO_MAP_NAME, each_s) *)
       FIO_MEM_REALLOC_(NULL, 0, FIO_MAP_MEMORY_SIZE(bits), 0);
   if (!tmp)
@@ -16962,14 +17089,17 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
     FIO_MAP_SIZE_TYPE last = 0;
     FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, i) {
       /* place old values in new hash */
-      FIO_MAP_SIZE_TYPE pos = FIO_NAME(
-          FIO_MAP_NAME,
-          __index)(&m2, m->map[i].hash, FIO_MAP_OBJ2KEY(m->map[i].obj));
+      FIO_MAP_HASH obj_hash = FIO_MAP_HASH_GET_HASH(m, i);
+      FIO_MAP_SIZE_TYPE pos =
+          FIO_NAME(FIO_MAP_NAME,
+                   __index)(&m2, obj_hash, FIO_MAP_OBJ2KEY(m->map[i].obj));
       if (pos == (FIO_MAP_SIZE_TYPE)-1)
         goto error;
       FIO_NAME(FIO_MAP_NAME, __imap)
-      (&m2)[pos] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(m->map[i].hash, m2.bits);
-      m2.map[pos].hash = m->map[i].hash;
+      (&m2)[pos] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(obj_hash, m2.bits);
+#if FIO_MAP_HASH_CACHED
+      m2.map[pos].hash = obj_hash;
+#endif /* FIO_MAP_HASH_CACHED */
       m2.map[pos].obj = m->map[i].obj;
       if (m2.count) {
         FIO_INDEXED_LIST_PUSH(m2.map, node, last, pos);
@@ -16982,37 +17112,59 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
     }
 #else /* FIO_MAP_EVICT_LRU */
     /* scan map for used slots to re-insert data */
-    uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
-    for (FIO_MAP_SIZE_TYPE i = 0;
-         m2.count < m->count && i < FIO_MAP_CAPA(m->bits);
-         i += 8) {
-      /* skip empty groups (test for all bytes == 0) (can we test == 255?) */
-      if ((fio_has_zero_byte64(imap64[(i >> 3)]) |
-           fio_has_full_byte64(imap64[(i >> 3)])) ==
-          UINT64_C(0x8080808080808080))
-        continue;
-      for (int j = 0; j < 8; ++j) {
-        const FIO_MAP_SIZE_TYPE n = i + j;
-        if (m->map[n].hash) {
-          /* place in new hash */
-          FIO_MAP_SIZE_TYPE pos = FIO_NAME(
-              FIO_MAP_NAME,
-              __index)(&m2, m->map[n].hash, FIO_MAP_OBJ2KEY(m->map[n].obj));
+    if (FIO_MAP_CAPA(m->bits) > 8) {
+      uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
+      for (FIO_MAP_SIZE_TYPE i = 0;
+           m2.count < m->count && i < FIO_MAP_CAPA(m->bits);
+           i += 8) {
+        /* skip empty groups (test for all bytes == 0) (can we test == 255?) */
+        uint64_t result = (fio_has_zero_byte64(imap64[(i >> 3)]) |
+                           fio_has_full_byte64(imap64[(i >> 3)]));
+        if (result == UINT64_C(0x8080808080808080))
+          continue;
+        result ^= UINT64_C(0x8080808080808080);
+        /* TODO: use __builtin_ctz for starting the loop */
+        for (int j = 0; j < 8 && result; ++j) {
+          const FIO_MAP_SIZE_TYPE n = i + j;
+          if ((result & UINT64_C(0x80))) {
+            /* place in new hash */
+            FIO_MAP_HASH obj_hash = FIO_MAP_HASH_GET_HASH(m, n);
+            FIO_MAP_SIZE_TYPE pos = FIO_NAME(
+                FIO_MAP_NAME,
+                __index)(&m2, obj_hash, FIO_MAP_OBJ2KEY(m->map[n].obj));
+            if (pos == (FIO_MAP_SIZE_TYPE)-1)
+              goto error;
+            FIO_NAME(FIO_MAP_NAME, __imap)
+            (&m2)[pos] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(obj_hash, m2.bits);
+            m2.map[pos] = m->map[n];
+#if FIO_MAP_EVICT_LRU
+            if (!m2.count) {
+              m2.last_used = pos;
+              m2.map[pos].node.prev = m2.map[pos].node.next = pos;
+            }
+            FIO_INDEXED_LIST_PUSH(m2.map, node, m2.last_used, pos);
+            if (m->last_used == n)
+              m2.last_used = pos;
+#endif /* FIO_MAP_EVICT_LRU */
+            ++m2.count;
+          }
+          result >>= 8;
+        }
+      }
+    } else {
+      for (FIO_MAP_SIZE_TYPE i = 0; m->count && i < FIO_MAP_CAPA(m->bits);
+           ++i) {
+        if (FIO_NAME(FIO_MAP_NAME, __imap)(m)[i] &&
+            FIO_NAME(FIO_MAP_NAME, __imap)(m)[i] != 255) {
+          FIO_MAP_HASH obj_hash = FIO_MAP_HASH_GET_HASH(m, i);
+          FIO_MAP_SIZE_TYPE pos =
+              FIO_NAME(FIO_MAP_NAME,
+                       __index)(&m2, obj_hash, FIO_MAP_OBJ2KEY(m->map[i].obj));
           if (pos == (FIO_MAP_SIZE_TYPE)-1)
             goto error;
           FIO_NAME(FIO_MAP_NAME, __imap)
-          (&m2)[pos] =
-              FIO_NAME(FIO_MAP_NAME, __hash2imap)(m->map[n].hash, m2.bits);
-          m2.map[pos] = m->map[n];
-#if FIO_MAP_EVICT_LRU
-          if (!m2.count) {
-            m2.last_used = pos;
-            m2.map[pos].node.prev = m2.map[pos].node.next = pos;
-          }
-          FIO_INDEXED_LIST_PUSH(m2.map, node, m2.last_used, pos);
-          if (m->last_used == n)
-            m2.last_used = pos;
-#endif /* FIO_MAP_EVICT_LRU */
+          (&m2)[pos] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(obj_hash, m2.bits);
+          m2.map[pos] = m->map[i];
           ++m2.count;
         }
       }
@@ -17030,7 +17182,8 @@ error:
 
 /* *****************************************************************************
 Unordered Map Implementation - API implementation
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /* Frees any internal data AND the object's container! */
 SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
@@ -17047,7 +17200,8 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
 
 /* *****************************************************************************
 Get / Set / Remove
-***************************************************************************** */
+*****************************************************************************
+*/
 
 SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
                                                     FIO_MAP_HASH hash,
@@ -17061,7 +17215,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
   FIO_MAP_SIZE_TYPE pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key);
   if (pos == (FIO_MAP_SIZE_TYPE)(-1) ||
       FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] == 255 ||
-      !FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] || !m->map[pos].hash)
+      !FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos])
     return NULL;
 #if FIO_MAP_EVICT_LRU
   if (m->last_used != pos) {
@@ -17106,11 +17260,14 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
   }
   if (pos == (FIO_MAP_SIZE_TYPE)-1)
     goto error;
-  if (!m->map[pos].hash) {
+  if (!FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] ||
+      FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] == 255) {
     /* new */
     FIO_NAME(FIO_MAP_NAME, __imap)
     (m)[pos] = FIO_NAME(FIO_MAP_NAME, __hash2imap)(hash, m->bits);
+#if FIO_MAP_HASH_CACHED
     m->map[pos].hash = hash;
+#endif
     FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2TYPE(m->map[pos].obj), obj);
     FIO_MAP_KEY_COPY(FIO_MAP_OBJ2KEY(m->map[pos].obj), key);
 #if FIO_MAP_EVICT_LRU
@@ -17168,10 +17325,12 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   FIO_MAP_SIZE_TYPE pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key);
   if (pos == (FIO_MAP_SIZE_TYPE)(-1) ||
       FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] == 255 ||
-      !FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] || !m->map[pos].hash)
+      !FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos])
     return -1;
   FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] = 255;
+#if FIO_MAP_HASH_CACHED
   m->map[pos].hash = 0;
+#endif
   --m->count;
   if (old) {
     FIO_MAP_TYPE_COPY(*old, FIO_MAP_OBJ2TYPE(m->map[pos].obj));
@@ -17195,21 +17354,36 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
 
   /* scan map to clear data. */
-  uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
-  for (FIO_MAP_SIZE_TYPE i = 0; m->count && i < FIO_MAP_CAPA(m->bits); i += 8) {
-    /* skip empty groups (test for all bytes == 0 || 255 */
-    register const uint64_t row = imap64[i >> 3];
-    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) ==
-        UINT64_C(0x8080808080808080)) {
+  if (m->bits > 3) {
+    uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
+    for (FIO_MAP_SIZE_TYPE i = 0; m->count && i < FIO_MAP_CAPA(m->bits);
+         i += 8) {
+      /* skip empty groups (test for all bytes == 0 || 255 */
+      register uint64_t row = imap64[i >> 3];
+      row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+      if (row == UINT64_C(0x8080808080808080)) {
+        imap64[i >> 3] = 0;
+        continue;
+      }
       imap64[i >> 3] = 0;
-      continue;
+      row ^= UINT64_C(0x8080808080808080);
+      for (int j = 0; j < 8; ++j) {
+        if ((row & UINT64_C(0x80))) {
+          FIO_MAP_OBJ_DESTROY(m->map[i + j].obj);
+#if FIO_MAP_HASH_CACHED
+          m->map[i + j].hash = 0;
+#endif
+          --m->count; /* stop seeking if no more elements */
+        }
+        row >>= 8;
+      }
     }
-    imap64[i >> 3] = 0;
-    for (int j = 0; j < 8; ++j) {
-      if (m->map[i + j].hash) {
-        FIO_MAP_OBJ_DESTROY(m->map[i + j].obj);
-        m->map[i + j].hash = 0;
-        --m->count; /* stop seeking if no more elements */
+  } else {
+    for (FIO_MAP_SIZE_TYPE i = 0; m->count && i < FIO_MAP_CAPA(m->bits); ++i) {
+      if (FIO_NAME(FIO_MAP_NAME, __imap)(m)[i] &&
+          FIO_NAME(FIO_MAP_NAME, __imap)(m)[i] != 255) {
+        FIO_MAP_OBJ_DESTROY(m->map[i].obj);
+        --m->count;
       }
     }
   }
@@ -17238,24 +17412,26 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
 #else /* FIO_MAP_EVICT_LRU */
   /* scan map and evict semi randomly. */
   uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
-  for (FIO_MAP_SIZE_TYPE i = 0; number_of_elements && i < FIO_MAP_CAPA(m->bits);
+  for (FIO_MAP_SIZE_TYPE i = 0;
+       number_of_elements && (i + 7) < FIO_MAP_CAPA(m->bits);
        i += 8) {
     /* skip empty groups (test for all bytes == 0 || 255 */
-    {
-      register const uint64_t row = imap64[i >> 3];
-      if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) ==
-          UINT64_C(0x8080808080808080)) {
-        continue;
-      }
-    }
+    register uint64_t row = imap64[i >> 3];
+    row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+    if (row == UINT64_C(0x8080808080808080))
+      continue;
+    row ^= UINT64_C(0x8080808080808080);
     for (int j = 0; number_of_elements && j < 8; ++j) {
-      if (m->map[i + j].hash) {
+      if ((row & UINT64_C(0x80))) {
         FIO_MAP_OBJ_DESTROY(m->map[i + j].obj);
+#if FIO_MAP_HASH_CACHED
         m->map[i + j].hash = 0;
+#endif
         FIO_NAME(FIO_MAP_NAME, __imap)(m)[i + j] = 255;
         --m->count;
         --number_of_elements; /* stop evicting? */
       }
+      row >>= 8;
     }
   }
 
@@ -17265,7 +17441,8 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
 
 /* *****************************************************************************
 Object state information
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Reservse enough space for a theoretical capacity of `capa` objects. */
 SFUNC size_t FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map,
@@ -17325,7 +17502,8 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR map) {
 
 /* *****************************************************************************
 Iteration
-***************************************************************************** */
+*****************************************************************************
+*/
 FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
 FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
     FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
@@ -17387,28 +17565,28 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
     for (FIO_MAP_SIZE_TYPE i = 0; start_at && i < FIO_MAP_CAPA(m->bits);
          i += 8) {
       /* skip empty groups (test for all bytes == 0 || 255 */
-      {
-        register const uint64_t row = imap64[i >> 3];
-        if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) ==
-            UINT64_C(0x8080808080808080)) {
-          continue;
-        }
-      }
+      register uint64_t row = imap64[i >> 3];
+      row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+      if (row == UINT64_C(0x8080808080808080))
+        continue;
+      row ^= UINT64_C(0x8080808080808080);
       for (int j = 0; start_at && j < 8; ++j) {
-        if (m->map[i + j].hash) {
+        if ((row & UINT64_C(0x80))) {
           pos = i + j;
           --start_at;
         }
+        row >>= 8;
       }
     }
   }
   while (pos + 8 < FIO_MAP_CAPA(m->bits)) {
     /* test only groups with valid values (test for all bytes == 0 || 255 */
-    register const uint64_t row = fio_buf2u64_local(imap + pos);
-    if ((fio_has_full_byte64(row) | fio_has_zero_byte64(row)) !=
-        UINT64_C(0x8080808080808080)) {
+    register uint64_t row = fio_buf2u64_local(imap + pos);
+    row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+    if (row != UINT64_C(0x8080808080808080)) {
+      row ^= UINT64_C(0x8080808080808080);
       for (int j = 0; j < 8; ++j) {
-        if (m->map[pos + j].hash) {
+        if ((row & UINT64_C(0xFF))) {
           FIO_NAME(FIO_MAP_NAME, __each_pos) = pos + j;
           ++count;
           if (task(FIO_MAP_OBJ2TYPE(
@@ -17416,12 +17594,14 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                    arg) == -1)
             goto finish;
         }
+        row >>= 8;
       }
     }
     pos += 8;
   }
   while (pos < FIO_MAP_CAPA(m->bits)) {
-    if (m->map[pos].hash) {
+    if (FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] &&
+        FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] != 255) {
       FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
       ++count;
       if (task(FIO_MAP_OBJ2TYPE(m->map[FIO_NAME(FIO_MAP_NAME, __each_pos)].obj),
@@ -17450,12 +17630,16 @@ SFUNC FIO_MAP_KEY FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
 #else
 
 SFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
+#if FIO_MAP_HASH_CACHED
   if (!FIO_NAME(FIO_MAP_NAME, __each_map) ||
       !FIO_NAME(FIO_MAP_NAME, __each_map)->count)
     return 0;
   return FIO_NAME(FIO_MAP_NAME, __each_map)
       ->map[FIO_NAME(FIO_MAP_NAME, __each_pos)]
       .hash;
+#else
+  return 0;
+#endif
 }
 #endif
 /* *****************************************************************************
@@ -17518,7 +17702,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                i);
 #endif
     FIO_ASSERT(old == FIO_MAP_TYPE_INVALID,
-               "old value should be set to the invalid value");
+               "old value should be set to the invalid value (%zu != %zu @%zu)",
+               old,
+               (size_t)FIO_MAP_TYPE_INVALID,
+               i);
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
@@ -17542,13 +17729,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                                                               (FIO_MAP_KEY)i,
                                                               (FIO_MAP_TYPE)i,
                                                               &old),
-               "re-insertion failed at %zu",
+               "overwrite failed at %zu",
                i);
 #else
     FIO_ASSERT((FIO_MAP_TYPE)i ==
                    FIO_NAME(FIO_MAP_NAME,
                             set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, &old),
-               "re-insertion failed at %zu",
+               "overwrite failed at %zu",
                i);
 #endif
     FIO_ASSERT(
@@ -17564,7 +17751,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
-        "get error for %zu",
+        "get (overwrite) error for %zu",
         i);
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
@@ -17601,7 +17788,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
-        "get error for %zu",
+        "get (remove/re-insert) error for %zu",
         i);
   }
   if (FIO_NAME(FIO_MAP_NAME, capa)(&m) != old_capa) {
@@ -17660,6 +17847,9 @@ Map - cleanup
 #undef FIO_MAP_HASH_FIXED
 #undef FIO_MAP_HASH_INVALID
 #undef FIO_MAP_HASH_IS_INVALID
+#undef FIO_MAP_HASH_FN
+#undef FIO_MAP_HASH_GET_HASH
+#undef FIO_MAP_HASH_CACHED
 
 #undef FIO_MAP_INDEX_CALC
 #undef FIO_MAP_INDEX_INVALID
@@ -21595,7 +21785,7 @@ FIOBJ Arrays
 FIOBJ Hash Maps
 ***************************************************************************** */
 
-#define FIO_MAP_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
+#define FIO_OMAP_NAME            FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(a)                                                     \

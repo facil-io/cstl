@@ -233,7 +233,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 ***************************************************************************** */
 
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
-#ifdef FIO_MAP_ORDERED
+#if FIO_MAP_ORDERED
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
 #define FIO_MAP_MAX_SEEK (17U)
 #else
@@ -264,6 +264,34 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #ifndef FIO_MAP_HASH
 /** The type for map hash value (an X bit integer) */
 #define FIO_MAP_HASH uint64_t
+#endif
+
+#undef FIO_MAP_HASH_FIXED
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-2LL)
+
+#undef FIO_MAP_HASH_FIX
+/** the value to be used when the hash is a reserved value. */
+#define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
+
+/**
+ * Unordered maps don't have to cache an object's hash.
+ *
+ * If the hash is cheap to calculate, it could be recalculated on the fly.
+ */
+#if defined(FIO_MAP_HASH_FN) && !FIO_MAP_ORDERED
+FIO_IFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, __get_hash)(FIO_MAP_OBJ_KEY k) {
+  FIO_MAP_HASH h = FIO_MAP_HASH_FN(k);
+  h = FIO_MAP_HASH_FIX(h);
+  return h;
+}
+#define FIO_MAP_HASH_CACHED 0
+#define FIO_MAP_HASH_GET_HASH(map_ptr, index)                                  \
+  FIO_NAME(FIO_MAP_NAME, __get_hash)                                           \
+  (FIO_MAP_OBJ2KEY((map_ptr)->map[(index)].obj))
+#else
+#define FIO_MAP_HASH_GET_HASH(map_ptr, index) (map_ptr)->map[(index)].hash
+#define FIO_MAP_HASH_CACHED                   1
 #endif
 
 #ifndef FIO_MAP_SEEK_AS_ARRAY_LOG_LIMIT
@@ -329,8 +357,10 @@ typedef struct FIO_NAME(FIO_MAP_NAME, s) FIO_NAME(FIO_MAP_NAME, s);
 struct FIO_NAME(FIO_MAP_NAME, each_s) {
   /** the data being stored in the Map / key-value pair: obj.key obj.value. */
   FIO_MAP_OBJ obj;
+#if FIO_MAP_HASH_CACHED
   /** a copy of the hash value. */
   FIO_MAP_HASH hash;
+#endif
 #if FIO_MAP_EVICT_LRU
   /** LRU evicion monitoring - do not access directly */
   struct {

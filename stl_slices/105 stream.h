@@ -625,13 +625,14 @@ Stream Testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char *const str =
-      "My Hello World string should be long enough so it can be used for "
-      "testing the stream functionality in the facil.io stream module. The "
-      "stream moduule takes strings and failes and places them (by reference / "
-      "copy) into a linked list of objects. When data is requested from the "
-      "stream, the stream will either copy the data to a pre-allocated buffer "
-      "or it may update the link to it points to its own internal buffer "
-      "(avoiding a copy when possible).";
+      (char *)"My Hello World string should be long enough so it can be used "
+              "for testing the stream functionality in the facil.io stream "
+              "module. The stream moduule takes strings and failes and places "
+              "them (by reference / copy) into a linked list of objects. When "
+              "data is requested from the stream, the stream will either copy "
+              "the data to a pre-allocated buffer or it may update the link to "
+              "it points to its own internal buffer (avoiding a copy when "
+              "possible).";
   fio_stream_s s = FIO_STREAM_INIT(s);
   char mem[4000];
   char *buf = mem;

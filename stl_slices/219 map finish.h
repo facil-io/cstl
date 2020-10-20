@@ -53,7 +53,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                i);
 #endif
     FIO_ASSERT(old == FIO_MAP_TYPE_INVALID,
-               "old value should be set to the invalid value");
+               "old value should be set to the invalid value (%zu != %zu @%zu)",
+               old,
+               (size_t)FIO_MAP_TYPE_INVALID,
+               i);
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
@@ -77,13 +80,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                                                               (FIO_MAP_KEY)i,
                                                               (FIO_MAP_TYPE)i,
                                                               &old),
-               "re-insertion failed at %zu",
+               "overwrite failed at %zu",
                i);
 #else
     FIO_ASSERT((FIO_MAP_TYPE)i ==
                    FIO_NAME(FIO_MAP_NAME,
                             set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, &old),
-               "re-insertion failed at %zu",
+               "overwrite failed at %zu",
                i);
 #endif
     FIO_ASSERT(
@@ -99,7 +102,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
-        "get error for %zu",
+        "get (overwrite) error for %zu",
         i);
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
@@ -136,7 +139,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_ASSERT(
         FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
             (FIO_MAP_TYPE)i,
-        "get error for %zu",
+        "get (remove/re-insert) error for %zu",
         i);
   }
   if (FIO_NAME(FIO_MAP_NAME, capa)(&m) != old_capa) {
@@ -195,6 +198,9 @@ Map - cleanup
 #undef FIO_MAP_HASH_FIXED
 #undef FIO_MAP_HASH_INVALID
 #undef FIO_MAP_HASH_IS_INVALID
+#undef FIO_MAP_HASH_FN
+#undef FIO_MAP_HASH_GET_HASH
+#undef FIO_MAP_HASH_CACHED
 
 #undef FIO_MAP_INDEX_CALC
 #undef FIO_MAP_INDEX_INVALID

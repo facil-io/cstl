@@ -31,7 +31,7 @@ s
 
 
 
-
+More joyful ideas at:       https://graphics.stanford.edu/~seander/bithacks.html
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)
@@ -501,38 +501,100 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
 SIMD emulation helpers
 ***************************************************************************** */
 
-/** Detects a byte where all the bits are set (255) within a 4 byte vector. */
+/**
+ * Detects a byte where all the bits are set (255) within a 4 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
   return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
          (row & UINT32_C(0x80808080));
 }
 
-/** Detects a byte where no bits are set (0) within a 4 byte vector. */
+/**
+ * Detects a byte where no bits are set (0) within a 4 byte vector.
+ *
+ * The zero byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
   return fio_has_full_byte32(~row);
 }
 
-/** Detects if `byte` exists within a 4 byte vector. */
+/**
+ * Detects if `byte` exists within a 4 byte vector.
+ *
+ * The requested byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
   return fio_has_full_byte32(~(row ^ (UINT32_C(0x01010101) * byte)));
 }
 
-/** Detects a byte where all the bits are set (255) within an 8 byte vector. */
+/**
+ * Detects a byte where all the bits are set (255) within an 8 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
   return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
          (row & UINT64_C(0x8080808080808080));
 }
 
-/** Detects a byte where no bits are set (0) within an 8 byte vector. */
+/**
+ * Detects a byte where no bits are set (0) within an 8 byte vector.
+ *
+ * The zero byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
   return fio_has_full_byte64(~row);
 }
 
-/** Detects if `byte` exists within an 8 byte vector. */
+/**
+ * Detects if `byte` exists within an 8 byte vector.
+ *
+ * The requested byte will be be set to 0x80, all other bytes will be 0x0.
+ */
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
+/** Isolated the least significant (lowest) bit. */
+FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+/** Returns the index of the most significant (highest) bit. */
+#define fio_bits_msb_index(i) __builtin_clz(i)
+#else
+/** Returns the index of the most significant (highest) bit. */
+FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
+  uint64_t r = 0;
+  if (!i)
+    goto zero;
+#define fio___bits_msb_index_step(x)                                           \
+  if (i >= ((uint64_t)1) << x)                                                 \
+    r += x, i >>= x;
+  fio___bits_msb_index_step(32);
+  fio___bits_msb_index_step(16);
+  fio___bits_msb_index_step(8);
+  fio___bits_msb_index_step(4);
+  fio___bits_msb_index_step(2);
+  fio___bits_msb_index_step(1);
+#undef fio___bits_msb_index_step
+  return r;
+zero:
+  r = (size_t)-1;
+  return r;
+}
+#endif
+
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+/** Returns the index of the least significant (lowest) bit. */
+#define fio_bits_lsb_index(i) __builtin_ctz(i)
+#else
+/** Returns the index of the least significant (lowest) bit. */
+FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
+  return fio_bits_msb_index(fio_bits_lsb(i));
+}
+#endif
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
