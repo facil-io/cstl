@@ -311,7 +311,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
     if (!tmp)
       return -1;
     m->map = tmp;
-    m->bits = bits;
+    m->bits = (uint8_t)bits;
   }
   if (!FIO_MEM_REALLOC_IS_SAFE_ || bits == m->bits)
     memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),

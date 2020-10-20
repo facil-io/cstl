@@ -318,7 +318,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
   FIO_NAME(FIO_MAP_NAME, s) m2;
   m2 = (FIO_NAME(FIO_MAP_NAME, s)){
       .map = tmp,
-      .bits = bits,
+      .bits = (uint8_t)bits,
   };
   if (m->count) {
 #if FIO_MAP_EVICT_LRU

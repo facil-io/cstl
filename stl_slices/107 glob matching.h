@@ -184,56 +184,58 @@ FIO_SFUNC void FIO_NAME_TEST(stl, glob_matching)(void) {
     char *str;
     uint8_t expect;
   } t[] = {
+      // clang-format off
       /* test empty string */
-      {.pat = "", .str = "", .expect = 1},
+      {.pat = (char *)"", .str = (char *)"", .expect = 1},
       /* test exact match */
-      {.pat = "a", .str = "a", .expect = 1},
+      {.pat = (char *)"a", .str = (char *)"a", .expect = 1},
       /* test empty pattern */
-      {.pat = "", .str = "a", .expect = 0},
+      {.pat = (char *)"", .str = (char *)"a", .expect = 0},
       /* test longer pattern */
-      {.pat = "a", .str = "", .expect = 0},
+      {.pat = (char *)"a", .str = (char *)"", .expect = 0},
       /* test empty string with glob pattern */
-      {.pat = "*", .str = "", .expect = 1},
+      {.pat = (char *)"*", .str = (char *)"", .expect = 1},
       /* test glob pattern */
-      {.pat = "*", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"*", .str = (char *)"Whatever", .expect = 1},
       /* test glob pattern at end */
-      {.pat = "W*", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"W*", .str = (char *)"Whatever", .expect = 1},
       /* test glob pattern as bookends */
-      {.pat = "*Whatever*", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"*Whatever*", .str = (char *)"Whatever", .expect = 1},
       /* test glob pattern in the middle */
-      {.pat = "W*er", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"W*er", .str = (char *)"Whatever", .expect = 1},
       /* test glob pattern in the middle - empty match*/
-      {.pat = "W*hatever", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"W*hatever", .str = (char *)"Whatever", .expect = 1},
       /* test glob pattern in the middle  - no match */
-      {.pat = "W*htever", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"W*htever", .str = (char *)"Whatever", .expect = 0},
       /* test partial match with glob at end */
-      {.pat = "h*", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"h*", .str = (char *)"Whatever", .expect = 0},
       /* test partial match with glob in the middle */
-      {.pat = "h*er", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"h*er", .str = (char *)"Whatever", .expect = 0},
       /* test glob match with "?"  */
-      {.pat = "?h*er", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"?h*er", .str = (char *)"Whatever", .expect = 1},
       /* test "?" for length restrictions */
-      {.pat = "?", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"?", .str = (char *)"Whatever", .expect = 0},
       /* test ? in the middle */
-      {.pat = "What?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"What?ver", .str = (char *)"Whatever", .expect = 1},
       /* test letter list */
-      {.pat = "[ASW]hat?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[ASW]hat?ver", .str = (char *)"Whatever", .expect = 1},
       /* test letter range */
-      {.pat = "[A-Z]hat?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[A-Z]hat?ver", .str = (char *)"Whatever", .expect = 1},
       /* test letter range (fail) */
-      {.pat = "[a-z]hat?ver", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"[a-z]hat?ver", .str = (char *)"Whatever", .expect = 0},
       /* test inverted letter range */
-      {.pat = "[!a-z]hat?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[!a-z]hat?ver", .str = (char *)"Whatever", .expect = 1},
       /* test inverted list */
-      {.pat = "[!F]hat?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[!F]hat?ver", .str = (char *)"Whatever", .expect = 1},
       /* test escaped range */
-      {.pat = "[!a-z\\]]hat?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[!a-z\\]]hat?ver", .str = (char *)"Whatever", .expect = 1},
       /* test "?" after range (no skip) */
-      {.pat = "[A-Z]?at?ver", .str = "Whatever", .expect = 1},
+      {.pat = (char *)"[A-Z]?at?ver", .str = (char *)"Whatever", .expect = 1},
       /* test error after range (no skip) */
-      {.pat = "[A-Z]Fat?ver", .str = "Whatever", .expect = 0},
+      {.pat = (char *)"[A-Z]Fat?ver", .str = (char *)"Whatever", .expect = 0},
       /* end of test marker */
-      {.pat = NULL, .str = NULL, .expect = 0},
+      {.pat = (char *)NULL, .str = (char *)NULL, .expect = 0},
+      // clang-format on
   };
   fprintf(stderr, "* testing glob matching.\n");
   for (size_t i = 0; t[i].pat; ++i) {
