@@ -6,7 +6,7 @@ The parser allows for streaming data and decouples the parsing process from the 
 
 To use the JSON parser, define `FIO_JSON` before including the `fio-slt.h` file and later define the static callbacks required by the parser (see list of callbacks).
 
-**Note**: the JSON parser and the FIOBJ soft types can't be implemented in the same translation unit, since the FIOBJ soft types already define JSON callbacks and use the JSON parser to provide JSON support.
+**Note**: the FIOBJ soft types already use the JSON parser. For this reason, another JSON parser can't be implemented in the same translation unit as the FIOBJ implementation. To use another JSON parser, implement it in a different C file then  the one where the FIOBJ types are implemented.
 
 #### `JSON_MAX_DEPTH`
 

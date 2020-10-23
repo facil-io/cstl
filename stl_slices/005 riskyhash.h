@@ -41,6 +41,9 @@ Risky Hash - API
 /**  Computes a facil.io Risky Hash (Risky v.3). */
 SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 
+/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
+
 /**
  * Masks data using a Risky Hash and a counter mode nonce.
  *
@@ -78,14 +81,22 @@ Here's a few resources about hashes that might explain more:
 
 ***************************************************************************** */
 
-#ifdef FIO_EXTERN_COMPLETE
-
 /* Risky Hash primes */
 #define FIO_RISKY3_PRIME0 0xCAEF89D1E9A5EB21ULL
 #define FIO_RISKY3_PRIME1 0xAB137439982B86C9ULL
 #define FIO_RISKY3_PRIME2 0xD9FDC73ABE9EDECDULL
 #define FIO_RISKY3_PRIME3 0x3532D520F9511B13ULL
 #define FIO_RISKY3_PRIME4 0x038720DDEB5A8415ULL
+
+/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
+  uint64_t n = (uint64_t)(uintptr_t)ptr;
+  n ^= ((n >> 3) ^ FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME2;
+  return n;
+}
+
+#ifdef FIO_EXTERN_COMPLETE
+
 /* Risky Hash initialization constants */
 #define FIO_RISKY3_IV0 0x0000001000000001ULL
 #define FIO_RISKY3_IV1 0x0000010000000010ULL

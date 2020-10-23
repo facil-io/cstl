@@ -608,9 +608,9 @@ These functions include:
 
 * [`fiobj_array_each`](#ary_each)
 
-### `FIOBJ` Hash Maps
+### `FIOBJ` Ordered Hash Maps
 
-`FIOBJ` Hash Maps are based on the core `MAP_x` functions. This means that all these core type functions are available also for this type, using the `fiobj_hash` prefix (i.e., [`MAP_new`](#map_new) becomes [`fiobj_hash_new`](#map_new), [`MAP_set`](#map_set-hash-map) becomes [`fiobj_hash_set`](#map_set-hash-map), etc').
+`FIOBJ` Ordered Hash Maps are based on the core `MAP_x` functions. This means that all these core type functions are available also for this type, using the `fiobj_hash` prefix (i.e., [`MAP_new`](#map_new) becomes [`fiobj_hash_new`](#map_new), [`MAP_set`](#map_set) becomes [`fiobj_hash_set`](#map_set), etc').
 
 In addition, the following `fiobj_hash` functions and MACROs are defined:
 
@@ -682,21 +682,21 @@ In addition, all the functions documented above as `MAP_x`, are defined as `fiob
 
 * [`fiobj_hash_get`](#map_get-hash-map)
 
-* [`fiobj_hash_get_ptr`](#map_get_ptr-hash-map)
+* [`fiobj_hash_get_ptr`](#map_get_ptr)
 
-* [`fiobj_hash_set`](#map_set-hash-map)
+* [`fiobj_hash_set`](#map_set)
 
-* [`fiobj_hash_remove`](#map_remove-hash-map)
+* [`fiobj_hash_set_ptr`](#map_set_ptr)
+
+* [`fiobj_hash_remove`](#map_remove)
+
+* [`fiobj_hash_evict`](#map_evict)
 
 * [`fiobj_hash_count`](#map_count)
 
 * [`fiobj_hash_capa`](#map_capa)
 
 * [`fiobj_hash_reserve`](#map_reserve)
-
-* [`fiobj_hash_last`](#map_last)
-
-* [`fiobj_hash_pop`](#map_pop)
 
 * [`fiobj_hash_compact`](#map_compact)
 
@@ -739,7 +739,6 @@ FIO_LOG_INFO("updated JSON data to look nicer:\n%s", fiobj2cstr(json_str).buf);
 fiobj_free(result);
 FIOBJ_STR_TEMP_DESTROY(json_str);
 ```
-
 
 #### `fiobj_hash_update_json`
 

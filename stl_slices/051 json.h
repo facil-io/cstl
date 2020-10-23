@@ -6,6 +6,7 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -224,33 +225,26 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case 0x20:
     /* consume whitespace */
     ++buffer;
-    if (!((uintptr_t)buffer & 7)) {
-      while (buffer + 8 < stop) {
-        const uint64_t w1 = 0x0101010101010101 * 0x09;
-        const uint64_t w2 = 0x0101010101010101 * 0x0A;
-        const uint64_t w3 = 0x0101010101010101 * 0x0D;
-        const uint64_t w4 = 0x0101010101010101 * 0x20;
-        const uint64_t t1 = ~(w1 ^ (*(uint64_t *)(buffer)));
-        const uint64_t t2 = ~(w2 ^ (*(uint64_t *)(buffer)));
-        const uint64_t t3 = ~(w3 ^ (*(uint64_t *)(buffer)));
-        const uint64_t t4 = ~(w4 ^ (*(uint64_t *)(buffer)));
-        const uint64_t b1 =
-            (((t1 & 0x7f7f7f7f7f7f7f7fULL) + 0x0101010101010101ULL) &
-             (t1 & 0x8080808080808080ULL));
-        const uint64_t b2 =
-            (((t2 & 0x7f7f7f7f7f7f7f7fULL) + 0x0101010101010101ULL) &
-             (t2 & 0x8080808080808080ULL));
-        const uint64_t b3 =
-            (((t3 & 0x7f7f7f7f7f7f7f7fULL) + 0x0101010101010101ULL) &
-             (t3 & 0x8080808080808080ULL));
-        const uint64_t b4 =
-            (((t4 & 0x7f7f7f7f7f7f7f7fULL) + 0x0101010101010101ULL) &
-             (t4 & 0x8080808080808080ULL));
-        if ((b1 | b2 | b3 | b4) != 0x8080808080808080ULL)
-          break;
+    while (buffer + 8 < stop && (buffer[0] == 0x20 || buffer[0] == 0x09 ||
+                                 buffer[0] == 0x0A || buffer[0] == 0x0D)) {
+      const uint64_t w = fio_buf2u64_local(buffer);
+      const uint64_t w1 = 0x0101010101010101 * 0x09; /* '\t' (tab) */
+      const uint64_t w2 = 0x0101010101010101 * 0x0A; /* '\n' (new line) */
+      const uint64_t w3 = 0x0101010101010101 * 0x0D; /* '\r' (CR) */
+      const uint64_t w4 = 0x0101010101010101 * 0x20; /* ' '  (space) */
+      uint64_t b = fio_has_zero_byte64(w1 ^ w) | fio_has_zero_byte64(w2 ^ w) |
+                   fio_has_zero_byte64(w3 ^ w) | fio_has_zero_byte64(w4 ^ w);
+      if (b == 0x8080808080808080ULL) {
         buffer += 8;
+        continue;
       }
+      while ((b & UINT64_C(0x80))) {
+        b >>= 8;
+        ++buffer;
+      }
+      break;
     }
+
     return buffer;
   case ',': /* comma separator */
     if (!p->depth || !(p->expect & 4))
