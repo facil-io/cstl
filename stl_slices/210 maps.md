@@ -78,7 +78,7 @@ Other helpful macros to define might include:
 - `FIO_MAP_KEY_DISCARD(obj)`, handles discarded element data (i.e., when overwriting an existing value in a hash map).
 - `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO).
 - `FIO_MAP_EVICT_LRU`, if set to true (1), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
-- `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when (partial/full) collisions occur. Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default `17`.
+- `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when partial/full collisions occur (effects the load factor). Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default either `7` or `13`.
 
 - `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
 - `FIO_MAP_HASH_FN`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.

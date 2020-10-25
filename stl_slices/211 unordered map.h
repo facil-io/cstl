@@ -607,7 +607,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   --m->count;
   if (old) {
     FIO_MAP_TYPE_COPY(*old, FIO_MAP_OBJ2TYPE(m->map[pos].obj));
-    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos].obj)
+    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos].obj);
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
   }

@@ -15653,9 +15653,9 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #ifndef FIO_MAP_MAX_SEEK /* LIMITED to 255 */
 #if FIO_MAP_ORDERED
 /* The maximum number of bins to rotate when (partial/full) collisions occure */
-#define FIO_MAP_MAX_SEEK (17U)
+#define FIO_MAP_MAX_SEEK (13U)
 #else
-#define FIO_MAP_MAX_SEEK (17U)
+#define FIO_MAP_MAX_SEEK (7U)
 #endif
 #endif
 
@@ -16599,7 +16599,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   --m->count;
   if (old) {
     FIO_MAP_TYPE_COPY(*old, FIO_MAP_OBJ2TYPE(m->map[pos.a].obj));
-    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos.a].obj)
+    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos.a].obj);
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos.a].obj);
   }
@@ -17441,7 +17441,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   --m->count;
   if (old) {
     FIO_MAP_TYPE_COPY(*old, FIO_MAP_OBJ2TYPE(m->map[pos].obj));
-    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos].obj)
+    FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos].obj);
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos].obj);
   }

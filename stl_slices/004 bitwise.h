@@ -557,6 +557,15 @@ FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
+/** Converts a `fio_has_byteX` result to a bitmap. */
+FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
+  result >>= 7;             /* move result to first bit of each byte */
+  result |= (result >> 7);  /* combine 2 bytes of result */
+  result |= (result >> 14); /* combine 4 bytes of result */
+  result |= (result >> 28); /* combine 8 bytes of result */
+  return (((uint8_t)result) & 0xFF);
+}
+
 /** Isolated the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
