@@ -92,7 +92,7 @@ Signal Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-struct {
+static struct {
   int32_t sig;
   volatile int32_t flag;
   void (*callback)(int sig, void *);

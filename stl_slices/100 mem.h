@@ -1141,7 +1141,7 @@ Allocator State
 typedef struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s)
     FIO_NAME(FIO_MEMORY_NAME, __mem_state_s);
 
-struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
+static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
 #if FIO_MEMORY_CACHE_SLOTS
   /** cache array container for available memory chunks */
   struct {

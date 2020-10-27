@@ -2165,6 +2165,15 @@ FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
+/** Converts a `fio_has_byteX` result to a bitmap. */
+FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
+  result >>= 7;             /* move result to first bit of each byte */
+  result |= (result >> 7);  /* combine 2 bytes of result */
+  result |= (result >> 14); /* combine 4 bytes of result */
+  result |= (result >> 28); /* combine 8 bytes of result */
+  return (((uint8_t)result) & 0xFF);
+}
+
 /** Isolated the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
@@ -6907,7 +6916,7 @@ Allocator State
 typedef struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s)
     FIO_NAME(FIO_MEMORY_NAME, __mem_state_s);
 
-struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
+static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
 #if FIO_MEMORY_CACHE_SLOTS
   /** cache array container for available memory chunks */
   struct {
@@ -12875,7 +12884,7 @@ Signal Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-struct {
+static struct {
   int32_t sig;
   volatile int32_t flag;
   void (*callback)(int sig, void *);
@@ -22853,7 +22862,7 @@ FIO_SFUNC uint32_t fiobj___count_noop(FIOBJ o) {
 FIOBJ Integers (bigger numbers)
 ***************************************************************************** */
 
-FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
+FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
                                                       FIOBJ restrict b) {
   return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(a) ==
          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(b);
@@ -22895,7 +22904,7 @@ FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___NUMBER_CLASS_VTBL = {
 FIOBJ Floats (bigger / smaller doubles)
 ***************************************************************************** */
 
-FIOBJ_FUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
+FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
                                                         FIOBJ restrict b) {
   unsigned char r = 0;
   union {
