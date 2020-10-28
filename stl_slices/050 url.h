@@ -380,7 +380,7 @@ URL parsing - Test
  *
  *   i.e.: http://example.com/index.html?page=1#list
  */
-TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
   fprintf(stderr, "* Testing URL (URI) parser.\n");
   struct {
     char *url;

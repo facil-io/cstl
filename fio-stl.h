@@ -4970,7 +4970,7 @@ URL parsing - Test
  *
  *   i.e.: http://example.com/index.html?page=1#list
  */
-TEST_FUNC void FIO_NAME_TEST(stl, url)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
   fprintf(stderr, "* Testing URL (URI) parser.\n");
   struct {
     char *url;
@@ -23684,17 +23684,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
                                 Testing
-
-
-
-
-
 
 
 
@@ -23717,7 +23707,6 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #if !defined(FIO_EXTERN_TEST) || defined(FIO_EXTERN_COMPLETE)
 
 /* Common testing values / Macros */
-#define TEST_FUNC   static __attribute__((unused))
 #define TEST_REPEAT 4096
 
 /* Make sure logging and FIOBJ memory marking are set. */
@@ -23736,24 +23725,103 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
-#define FIO_BITWISE
-#define FIO_BITMAP
-#define FIO_RAND
 #define FIO_ATOMIC
+#define FIO_BITMAP
+#define FIO_BITWISE
+#define FIO_CLI
+#define FIO_GLOB_MATCH
+#define FIO_POLL
+#define FIO_QUEUE
+#define FIO_RAND
 #define FIO_RISKY_HASH
-// #define FIO_MALLOC /* define to tests types with custom allocator */
+#define FIO_SIGNAL
+#define FIO_SOCK
+#define FIO_STREAM
+#define FIO_TIME
+#define FIO_URL
 #include __FILE__
 
-TEST_FUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
-TEST_FUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
+FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
+FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
   return i & (~((uintptr_t)1UL));
 }
 
 /* *****************************************************************************
-URL parsing - Test
+Dynamically Produced Test Types
 ***************************************************************************** */
 
-#define FIO_URL
+static int ary____test_was_destroyed = 0;
+#define FIO_ARRAY_NAME    ary____test
+#define FIO_ARRAY_TYPE    int
+#define FIO_REF_NAME      ary____test
+#define FIO_REF_INIT(obj) obj = (ary____test_s)FIO_ARRAY_INIT
+#define FIO_REF_DESTROY(obj)                                                   \
+  do {                                                                         \
+    ary____test_destroy(&obj);                                                 \
+    ary____test_was_destroyed = 1;                                             \
+  } while (0)
+#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
+#include __FILE__
+
+#define FIO_ARRAY_NAME                 ary2____test
+#define FIO_ARRAY_TYPE                 uint8_t
+#define FIO_ARRAY_TYPE_INVALID         0xFF
+#define FIO_ARRAY_TYPE_COPY(dest, src) (dest) = (src)
+#define FIO_ARRAY_TYPE_DESTROY(obj)    (obj = FIO_ARRAY_TYPE_INVALID)
+#define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
+#define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
+#define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
+#include __FILE__
+
+/* test all defaults */
+#define FIO_ARRAY_NAME ary3____test
+#include __FILE__
+
+#define FIO_UMAP_NAME     __umap_test__size_t
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
+#include __FILE__
+#define FIO_UMAP_NAME     __umap_test__size_lru
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_KEY       size_t
+#define FIO_MAP_EVICT_LRU 1
+#define FIO_MAP_TEST
+#include __FILE__
+#define FIO_OMAP_NAME     __omap_test__size_t
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_EVICT_LRU 0
+#define FIO_MAP_TEST
+#include __FILE__
+#define FIO_OMAP_NAME     __omap_test__size_lru
+#define FIO_MAP_TYPE      size_t
+#define FIO_MAP_KEY       size_t
+#define FIO_MAP_EVICT_LRU 1
+#define FIO_MAP_TEST
+#include __FILE__
+
+#define FIO_STR_NAME fio_big_str
+#define FIO_STR_WRITE_TEST_FUNC
+#include __FILE__
+
+#define FIO_STR_SMALL fio_small_str
+#define FIO_STR_WRITE_TEST_FUNC
+#include __FILE__
+
+#define FIO_MEMORY_NAME                   fio_mem_test_safe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
+#include __FILE__
+
+#define FIO_MEMORY_NAME                   fio_mem_test_unsafe
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
+#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
+#define FIO_MEMORY_ARENA_COUNT            2
+#include __FILE__
+
+#define FIO_FIOBJ
 #include __FILE__
 
 /* *****************************************************************************
@@ -23771,7 +23839,7 @@ typedef struct {
 
 #include __FILE__
 
-TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
+FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
   FIO_LIST_HEAD FIO_LIST_INIT(ls);
   for (int i = 0; i < TEST_REPEAT; ++i) {
@@ -23834,7 +23902,7 @@ TEST_FUNC void fio___dynamic_types_test___linked_list_test(void) {
              "Linked list empty should have been true");
 }
 
-TEST_FUNC void fio___dynamic_types_test___index_list_test(void) {
+FIO_SFUNC void fio___dynamic_types_test___index_list_test(void) {
   fprintf(stderr, "* Testing indexed lists.\n");
   struct {
     size_t i;
@@ -23890,66 +23958,6 @@ TEST_FUNC void fio___dynamic_types_test___index_list_test(void) {
 }
 
 /* *****************************************************************************
-Dynamic Array - Test
-***************************************************************************** */
-
-static int ary____test_was_destroyed = 0;
-#define FIO_ARRAY_NAME    ary____test
-#define FIO_ARRAY_TYPE    int
-#define FIO_REF_NAME      ary____test
-#define FIO_REF_INIT(obj) obj = (ary____test_s)FIO_ARRAY_INIT
-#define FIO_REF_DESTROY(obj)                                                   \
-  do {                                                                         \
-    ary____test_destroy(&obj);                                                 \
-    ary____test_was_destroyed = 1;                                             \
-  } while (0)
-#define FIO_ATOMIC
-#define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
-#include __FILE__
-
-#define FIO_ARRAY_NAME                 ary2____test
-#define FIO_ARRAY_TYPE                 uint8_t
-#define FIO_ARRAY_TYPE_INVALID         0xFF
-#define FIO_ARRAY_TYPE_COPY(dest, src) (dest) = (src)
-#define FIO_ARRAY_TYPE_DESTROY(obj)    (obj = FIO_ARRAY_TYPE_INVALID)
-#define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
-#define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
-#define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
-#include __FILE__
-
-/* test all defaults */
-#define FIO_ARRAY_NAME ary3____test
-#include __FILE__
-
-/* *****************************************************************************
-Unordered Map - Test
-***************************************************************************** */
-
-#define FIO_UMAP_NAME     __umap_test__size_t
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
-#define FIO_MAP_TEST
-#include __FILE__
-#define FIO_UMAP_NAME     __umap_test__size_lru
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_KEY       size_t
-#define FIO_MAP_EVICT_LRU 1
-#define FIO_MAP_TEST
-#include __FILE__
-#define FIO_OMAP_NAME     __omap_test__size_t
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
-#define FIO_MAP_TEST
-#include __FILE__
-#define FIO_OMAP_NAME     __omap_test__size_lru
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_KEY       size_t
-#define FIO_MAP_EVICT_LRU 1
-#define FIO_MAP_TEST
-#include __FILE__
-
-/* *****************************************************************************
 Hash Map / Set - test
 ***************************************************************************** */
 
@@ -23969,15 +23977,15 @@ Hash Map / Set - test
 #define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
 #include __FILE__
 
-TEST_FUNC size_t map_____test_key_copy_counter = 0;
-TEST_FUNC void map_____test_key_copy(char **dest, char *src) {
+FIO_SFUNC size_t map_____test_key_copy_counter = 0;
+FIO_SFUNC void map_____test_key_copy(char **dest, char *src) {
   *dest =
       (char *)FIO_MEM_REALLOC(NULL, 0, (strlen(src) + 1) * sizeof(*dest), 0);
   FIO_ASSERT(*dest, "no memory to allocate key in map_test")
   strcpy(*dest, src);
   ++map_____test_key_copy_counter;
 }
-TEST_FUNC void map_____test_key_destroy(char **dest) {
+FIO_SFUNC void map_____test_key_destroy(char **dest) {
   FIO_MEM_FREE(*dest, strlen(*dest) + 1);
   *dest = NULL;
   --map_____test_key_copy_counter;
@@ -23995,7 +24003,7 @@ TEST_FUNC void map_____test_key_destroy(char **dest) {
 #define HASHOFi(i) i /* fio_risky_hash(&(i), sizeof((i)), 0) */
 #define HASHOFs(s) fio_risky_hash(s, strlen((s)), 0)
 
-TEST_FUNC int set_____test_each_task(size_t o, void *a_) {
+FIO_SFUNC int set_____test_each_task(size_t o, void *a_) {
   uintptr_t *i_p = (uintptr_t *)a_;
   FIO_ASSERT(o == ++(*i_p), "set_each started at a bad offset!");
   FIO_ASSERT(HASHOFi((o - 1)) == set_____test_each_get_key(),
@@ -24003,7 +24011,7 @@ TEST_FUNC int set_____test_each_task(size_t o, void *a_) {
   return 0;
 }
 
-TEST_FUNC void fio___dynamic_types_test___map_test(void) {
+FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
   {
     set_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing dynamic hash / set maps.\n");
@@ -24237,76 +24245,12 @@ TEST_FUNC void fio___dynamic_types_test___map_test(void) {
 #undef HASHOFs
 
 /* *****************************************************************************
-Dynamic Strings - test
-***************************************************************************** */
-
-#define FIO_GLOB_MATCH
-#define FIO_STR_NAME fio_big_str
-#define FIO_STR_WRITE_TEST_FUNC
-#include __FILE__
-
-#define FIO_STR_SMALL fio_small_str
-#define FIO_STR_WRITE_TEST_FUNC
-#include __FILE__
-
-/**
- * Tests the fio_str functionality.
- */
-TEST_FUNC void fio___dynamic_types_test___str(void) {
-  FIO_NAME_TEST(stl, fio_big_str)();
-  FIO_NAME_TEST(stl, fio_small_str)();
-}
-
-/* *****************************************************************************
-Time - test
-***************************************************************************** */
-#define FIO_TIME
-#include __FILE__
-/* *****************************************************************************
-Queue - test
-***************************************************************************** */
-#define FIO_QUEUE
-#include __FILE__
-/* *****************************************************************************
-CLI - test
-***************************************************************************** */
-#define FIO_CLI
-#include __FILE__
-/* *****************************************************************************
-Memory Allocation - test
-***************************************************************************** */
-#define FIO_MEMORY_NAME                   fio_mem_test_safe
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
-#include __FILE__
-#define FIO_MEMORY_NAME                   fio_mem_test_unsafe
-#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
-#include __FILE__
-/* *****************************************************************************
-Socket helper and Stream testing
-***************************************************************************** */
-#define FIO_SOCK
-#define FIO_STREAM
-#define FIO_SIGNAL
-#define FIO_POLL
-#include __FILE__
-
-/* *****************************************************************************
-FIOBJ and JSON testing
-***************************************************************************** */
-#define FIO_FIOBJ
-#include __FILE__
-
-/* *****************************************************************************
 Environment printout
 ***************************************************************************** */
 
 #define FIO_PRINT_SIZE_OF(T) fprintf(stderr, "\t" #T "\t%zu Bytes\n", sizeof(T))
 
-TEST_FUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
   case 2:
     fprintf(stderr, "* 16bit words size (unexpected, unknown effects).\n");
@@ -24554,16 +24498,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
 Testing functiun
 ***************************************************************************** */
 
-TEST_FUNC void fio____test_dynamic_types__stack_poisoner(void) {
-  const size_t len = 1UL << 16;
-  uint8_t buf[1UL << 16];
+FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
+#define FIO___STACK_POISON_LENGTH (1ULL << 16)
+  uint8_t buf[FIO___STACK_POISON_LENGTH];
   __asm__ __volatile__("" ::: "memory");
-  memset(buf, (int)(~0U), len);
+  memset(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
   __asm__ __volatile__("" ::: "memory");
   fio_trylock(buf);
+#undef FIO___STACK_POISON_LENGTH
 }
 
-TEST_FUNC void fio_test_dynamic_types(void) {
+void fio_test_dynamic_types(void) {
   char *filename = (char *)FIO__FILE__;
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
@@ -24615,7 +24560,8 @@ TEST_FUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___str();
+  FIO_NAME_TEST(stl, fio_big_str)();
+  FIO_NAME_TEST(stl, fio_small_str)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, time)();
   fprintf(stderr, "===============\n");
@@ -24671,7 +24617,6 @@ Testing cleanup
 
 #undef FIO_TEST_CSTL
 #undef TEST_REPEAT
-#undef TEST_FUNC
 
 #endif /* FIO_EXTERN_COMPLETE */
 #endif

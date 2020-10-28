@@ -105,8 +105,8 @@ This is an example for a key-value String Hash Map, also sometimes called a "dic
 #define FIO_STR_SMALL str
 #include "fio-stl.h"
 
-/* Set the properties for the key-value Hash Map type called `dict_s` */
-#define FIO_MAP_NAME                 dict
+/* Set the properties for the key-value Unordered Map type called `dict_s` */
+#define FIO_UMAP_NAME                dict
 #define FIO_MAP_TYPE                 str_s
 #define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
 #define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)

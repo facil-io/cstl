@@ -142,6 +142,7 @@ int main(int argc, char const *argv[]) {
 
   /* select IO objects to be monitored */
   fio_poll_monitor(&monitor, srv_fd, NULL, POLLIN);
+  FIO_LOG_INFO("Listening for HTTP echo @ %s", url);
 
   /* loop until the stop flag is raised */
   while (!server_stop_flag) {
@@ -153,6 +154,7 @@ int main(int argc, char const *argv[]) {
 
   /* cleanup */
   fio_poll_close_and_destroy(&monitor);
+  FIO_LOG_INFO("Shutdown complete.");
   return 0;
 }
 

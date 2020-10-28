@@ -60,7 +60,7 @@ LIB_PRIVATE_SUBFOLDERS=
 LIB_CONCAT_FOLDER=stl_slices
 
 # the path and file name to use when unifying *.c, *.h, and *.md files (without extension).
-LIB_CONCAT_TARGET=fio-stl
+LIB_CONCAT_TARGET?=fio-stl
 
 #############################################################################
 # Test Source Code Folder
