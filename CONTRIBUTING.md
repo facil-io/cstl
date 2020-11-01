@@ -2,6 +2,22 @@
 
 Thank you for inquiring `facil.io`'s contribution guide. It's people like you and me, that are willing to share our efforts, who help make the world of open source development so inspiring and wonderful.
 
+## TL;DR;
+
+* Play nice.
+
+* Use `clang-format`.
+
+* PRs to the `fio_stl.h` (the facil.io C STL - Simple Type Library) should go to the [facil.io C STL repository](https://github.com/facil-io/cstl).
+
+* PRs to the `fio.h` or `fio.c` files (the facil.io IO Core) should go to the [facil.io IO Core repository](https://github.com/facil-io/io-core).
+
+* All other PRs should go to **the correct version branch** in the [facil.io main framework repository](https://github.com/boazsegev/facil.io).
+
+* Always add a comment in the CHANGELOG to say what you did and credit yourself.
+
+* All copyrights for whatever you contribute will be owned by myself (Boaz Segev) and between us we'll consider them public domain (I don't want to deal with legal discussions).
+
 ## Guidelines 
 
 ### General Guidelines

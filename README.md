@@ -141,6 +141,8 @@ void example(void) {
 
 If you're submitting a PR, make sure to update the corresponding code slice (file) in the `stl_slices` folder.
 
+Note that the master branch is unstable as it gets. Commits may get squashed, the branch may be overwritten (force push), etc'.
+
 Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](https://github.com/boazsegev/facil.io/CONTRIBUTING.md). 
 
 ## Documentation
