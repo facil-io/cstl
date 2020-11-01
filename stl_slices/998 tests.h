@@ -72,6 +72,9 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_STREAM
 #define FIO_TIME
 #define FIO_URL
+
+// #define FIO_LOCK2 /* a signal based blocking lock is WIP */
+
 #include __FILE__
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }

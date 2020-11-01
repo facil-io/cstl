@@ -162,7 +162,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     data += len & 24;
   }
 
-  uint64_t tmp = (len & 0xFF) << 56; /* add offset information to padding */
+  /* add offset information to padding */
+  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
   switch ((len & 7)) {
   case 7:
@@ -640,7 +641,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     const char *str = "this is a short text, to test risky masking";
     char *tmp = buf + i;
     memcpy(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
     size_t err = 0;
     for (size_t b = 0; b < strlen(str); ++b) {
@@ -651,7 +652,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
   }
   const uint8_t alignment_test_offset = 0;

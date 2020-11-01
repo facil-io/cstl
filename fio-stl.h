@@ -495,19 +495,6 @@ Naming Macros
 Sleep / Thread Scheduling Macros
 ***************************************************************************** */
 
-#ifndef FIO_THREAD_RESCHEDULE
-/**
- * Reschedules the thread by calling nanosleeps for a sinlge nano-second.
- *
- * In practice, the thread will probably sleep for 60ns or more.
- */
-#define FIO_THREAD_RESCHEDULE()                                                \
-  do {                                                                         \
-    const struct timespec tm = {.tv_sec = 0, .tv_nsec = (long)1L};             \
-    nanosleep(&tm, (struct timespec *)NULL);                                   \
-  } while (0)
-#endif
-
 #ifndef FIO_THREAD_WAIT
 /**
  * Calls nonsleep with the requested nano-second count.
@@ -518,6 +505,15 @@ Sleep / Thread Scheduling Macros
                                 .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
     nanosleep(&tm, (struct timespec *)NULL);                                   \
   } while (0)
+#endif
+
+#ifndef FIO_THREAD_RESCHEDULE
+/**
+ * Reschedules the thread by calling nanosleeps for a sinlge nano-second.
+ *
+ * In practice, the thread will probably sleep for 60ns or more.
+ */
+#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
 #endif
 
 /* *****************************************************************************
@@ -960,6 +956,8 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#define FIO_LOCK2                   /* Development inclusion - ignore line */
+#define FIO_ATOMIC                  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -1117,7 +1115,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   if (!(state & group))
     return 0;
   /* release the locks we aquired, which are: ((~state) & group) */
-  fio_atomic_and(lock, (state | (~group)));
+  fio_atomic_and(lock, ~((~state) & group));
   return 1;
 }
 
@@ -1313,7 +1311,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
                "fio_trylock_sublock should succeed");
     FIO_ASSERT(fio_trylock_sublock(&lock, i), "fio_trylock should fail");
     FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "lock should be engaged");
+    FIO_ASSERT(fio_is_sublocked(&lock, i), "sub-lock %d should be engaged", i);
     {
       uint8_t g =
           fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
@@ -1477,7 +1475,7 @@ FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return 0;
-  fio_atomic_and(&lock->lock, (state | (~group)));
+  fio_atomic_and(&lock->lock, ~((~state) & group));
   return 1;
 }
 
@@ -1487,8 +1485,9 @@ Implementation - Extern
 #if defined(FIO_EXTERN_COMPLETE)
 
 struct fio___lock2_wait_s {
+  struct fio___lock2_wait_s *next;
+  struct fio___lock2_wait_s *prev;
   FIO_THREAD_T t;
-  fio___lock2_wait_s *volatile next;
 };
 
 /**
@@ -1502,68 +1501,65 @@ struct fio___lock2_wait_s {
  * Doesn't return until a successful lock was acquired.
  */
 SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1UL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
-  fio___lock2_wait_s self_thread;
   if (!group)
     group = 1;
   __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return;
+  /* note, we now own the part of the lock */
+
+  /* a lock-wide (all groups) lock ID for the waitlist */
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)
+                                ? ((size_t)1ULL << 63)
+                                : (sizeof(inner_lock) >= 4)
+                                      ? ((size_t)1UL << 31)
+                                      : (sizeof(inner_lock) >= 2)
+                                            ? ((size_t)1UL << 15)
+                                            : ((size_t)1UL << 7);
 
   /* initialize self-waiting node memory (using stack memory) */
-  self_thread.t = FIO_THREAD_ID();
-  self_thread.next = NULL; // lock->waiting;
+  fio___lock2_wait_s self_thread = {
+      .next = &self_thread,
+      .prev = &self_thread,
+      .t = FIO_THREAD_ID(),
+  };
 
-  /* enter waitlist lock */
+  /* enter waitlist spinlock */
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
 
   /* add self-thread to end of waitlist */
-  {
-    fio___lock2_wait_s *volatile *i = &(lock->waiting);
-    while (i[0]) {
-      i = &(i[0]->next);
-    }
-    (*i) = &self_thread;
+  if (lock->waiting) {
+    FIO_LIST_PUSH(lock->waiting, &self_thread);
+  } else {
+    lock->waiting = &self_thread;
   }
 
-  /* release waitlist lock and return lock's state */
-  state = (state | (~group)) & (~inner_lock);
-  fio_atomic_and(&lock->lock, (state & (~inner_lock)));
+  /* release waitlist spinlock and unlock any locks we may have aquired */
+  fio_atomic_xor(&lock->lock, (((~state) & group) | inner_lock));
 
   for (;;) {
-    state = fio_atomic_or(&lock->lock, group);
-    if (!(state & group))
+    if (!fio_trylock2(lock, group))
       break;
-    /* `next` may have been added while we didn't look */
-    if (self_thread.next) {
-      /* resume next thread if this isn't for us (possibly different group) */
-      fio_atomic_and(&lock->lock, (state | (~group)));
+    /* it's possible the next thread is waiting for a different group */
+    if (self_thread.next != lock->waiting) {
       FIO_THREAD_RESUME(self_thread.next->t);
     }
+    if (!fio_trylock2(lock, group))
+      break;
     FIO_THREAD_PAUSE(self_thread.t);
   }
 
-  /* lock waitlist */
+  /* remove self from waiting list */
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
-  /* remove self from waiting list */
-  for (fio___lock2_wait_s *volatile *i = &lock->waiting; *i; i = &(*i)->next) {
-    if (*i != &self_thread)
-      continue;
-    *i = (*i)->next;
-    break;
+  if (self_thread.next != lock->waiting) {
+    FIO_THREAD_RESUME(self_thread.next->t);
   }
-  /* unlock waitlist */
+  FIO_LIST_REMOVE(&self_thread);
   fio_atomic_and(&lock->lock, ~inner_lock);
 }
 
@@ -1577,15 +1573,14 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
  *
  */
 SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
-  size_t inner_lock;
-  if (sizeof(inner_lock) >= 8)
-    inner_lock = (size_t)1UL << 63;
-  else if (sizeof(inner_lock) >= 4)
-    inner_lock = (size_t)1UL << 31;
-  else if (sizeof(inner_lock) >= 2)
-    inner_lock = (size_t)1UL << 15;
-  else
-    inner_lock = (size_t)1UL << 7;
+  /* a lock-wide (all groups) lock ID for the waitlist */
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)
+                                ? ((size_t)1ULL << 63)
+                                : (sizeof(inner_lock) >= 4)
+                                      ? ((size_t)1UL << 31)
+                                      : (sizeof(inner_lock) >= 2)
+                                            ? ((size_t)1UL << 15)
+                                            : ((size_t)1UL << 7);
   fio___lock2_wait_s *waiting;
   if (!group)
     group = 1;
@@ -1593,14 +1588,12 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
-  /* unlock group */
   waiting = lock->waiting;
-  fio_atomic_and(&lock->lock, ~group);
+  /* unlock group & waitlist */
+  fio_atomic_and(&lock->lock, ~(group | inner_lock));
   if (waiting) {
     FIO_THREAD_RESUME(waiting->t);
   }
-  /* unlock waitlist */
-  fio_atomic_and(&lock->lock, ~inner_lock);
 }
 #endif /* FIO_EXTERN_COMPLETE */
 
@@ -2213,7 +2206,7 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   return fio_bits_msb_index(fio_bits_lsb(i));
 #else
   switch (fio_bits_lsb(i)) {
-    // clang-format off
+  // clang-format off
     case UINT64_C(0x0): return (size_t)-1;
     case UINT64_C(0x1): return 0;
     case UINT64_C(0x2): return 1;
@@ -2658,9 +2651,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "fio_ct_true(%p) should be true!",
                (void *)i);
   }
-  FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
+  FIO_ASSERT(fio_ct_true(((uintptr_t)~0ULL)) == 1,
              "fio_ct_true(%p) should be true!",
-             (void *)(~0ULL));
+             (void *)(uintptr_t)(~0ULL));
 
   FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
   for (uintptr_t i = 1; i; i <<= 1) {
@@ -2673,9 +2666,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "fio_ct_false(%p) should be zero!",
                (void *)i);
   }
-  FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
+  FIO_ASSERT(fio_ct_false(((uintptr_t)~0ULL)) == 0,
              "fio_ct_false(%p) should be zero!",
-             (void *)(~0ULL));
+             (void *)(uintptr_t)(~0ULL));
   FIO_ASSERT(fio_ct_true(8), "fio_ct_true should be true.");
   FIO_ASSERT(!fio_ct_true(0), "fio_ct_true should be false.");
   FIO_ASSERT(!fio_ct_false(8), "fio_ct_false should be false.");
@@ -2950,7 +2943,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     data += len & 24;
   }
 
-  uint64_t tmp = (len & 0xFF) << 56; /* add offset information to padding */
+  /* add offset information to padding */
+  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
   switch ((len & 7)) {
   case 7:
@@ -3428,7 +3422,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     const char *str = "this is a short text, to test risky masking";
     char *tmp = buf + i;
     memcpy(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
     size_t err = 0;
     for (size_t b = 0; b < strlen(str); ++b) {
@@ -3439,7 +3433,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, strlen(str), (uint64_t)tmp, nonce);
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
   }
   const uint8_t alignment_test_offset = 0;
@@ -8745,8 +8739,8 @@ Time - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
-#define FIO___GMTIME_TEST_RANGE    (4093L * 365) /* test ~4 millenium  */
+#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 24) - 7) /*1day - 7seconds*/
+#define FIO___GMTIME_TEST_RANGE    (2047LL * 365) /* test ~2 millenium  */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
@@ -9983,7 +9977,7 @@ typedef struct {
 } fio_cli_parser_data_s;
 
 #define FIO_CLI_HASH_VAL(s)                                                    \
-  fio_risky_hash((s).buf, (s).len, (uint64_t)fio_cli_start)
+  fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)
 
 /* *****************************************************************************
 Default parameter storage
@@ -15683,6 +15677,11 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #define FIO_MAP_EVICT_LRU 0
 #endif
 
+#ifndef FIO_MAP_SHOULD_OVERWRITE
+/** Tests if `older` should be replaced with `newer`. */
+#define FIO_MAP_SHOULD_OVERWRITE(older, newer) 1
+#endif
+
 #ifndef FIO_MAP_MAX_ELEMENTS
 /** The maximum number of elements allowed before removing old data (FIFO) */
 #define FIO_MAP_MAX_ELEMENTS 0
@@ -15698,7 +15697,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-2LL)
 
 #undef FIO_MAP_HASH_FIX
-/** the value to be used when the hash is a reserved value. */
+/** Validates the hash value and returns the valid value. */
 #define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
 
 /**
@@ -16169,7 +16168,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     return NULL;
   intptr_t i;
 #if FIO_MAP_EVICT_LRU
-  intptr_t next;
+  FIO_MAP_SIZE_TYPE next;
   if (!pos) {
     i = m->last_used;
     *first = m->map;
@@ -16190,7 +16189,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
   }
   ++i;
   *first = m->map;
-  while (i < m->w) {
+  while ((uintptr_t)i < (uintptr_t)m->w) {
     if (m->map[i].hash)
       return m->map + i;
     ++i;
@@ -16555,7 +16554,9 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     m->last_used = pos.a;
 #endif /* FIO_MAP_EVICT_LRU */
     ++m->count;
-  } else if (overwrite) {
+  } else if (overwrite &&
+             FIO_MAP_SHOULD_OVERWRITE(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj),
+                                      obj)) {
     /* overwrite existing */
     FIO_MAP_KEY_DISCARD(key);
     if (old) {
@@ -16979,7 +16980,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     return NULL;
   size_t i;
 #if FIO_MAP_EVICT_LRU
-  intptr_t next;
+  FIO_MAP_SIZE_TYPE next;
   if (!pos) {
     i = m->last_used;
     *first = m->map;
@@ -17395,7 +17396,8 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     m->last_used = pos;
 #endif /* FIO_MAP_EVICT_LRU */
     ++m->count;
-  } else if (overwrite) {
+  } else if (overwrite &&
+             FIO_MAP_SHOULD_OVERWRITE(FIO_MAP_OBJ2TYPE(m->map[pos].obj), obj)) {
     /* overwrite existing */
     FIO_MAP_KEY_DISCARD(key);
     if (old) {
@@ -18600,23 +18602,24 @@ String Macro Helpers
 #define FIO_STR_THAW_(s)     ((s)->special ^= (uint8_t)2)
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
+
 #define FIO_STR_BIG_LEN(s)                                                     \
   ((sizeof(void *) == 4)                                                       \
-       ? (((size_t)(s)->reserved[0]) | ((size_t)(s)->reserved[1] << 8) |       \
-          ((size_t)(s)->reserved[2] << 16))                                    \
-       : (((size_t)(s)->reserved[0]) | ((size_t)(s)->reserved[1] << 8) |       \
-          ((size_t)(s)->reserved[2] << 16) |                                   \
-          ((size_t)(s)->reserved[3] << 24) |                                   \
-          ((size_t)(s)->reserved[4] << 32) |                                   \
-          ((size_t)(s)->reserved[5] << 40) |                                   \
-          ((size_t)(s)->reserved[6] << 48)))
+       ? (((uint32_t)(s)->reserved[0]) | ((uint32_t)(s)->reserved[1] << 8) |   \
+          ((uint32_t)(s)->reserved[2] << 16))                                  \
+       : (((uint64_t)(s)->reserved[0]) | ((uint64_t)(s)->reserved[1] << 8) |   \
+          ((uint64_t)(s)->reserved[2] << 16) |                                 \
+          ((uint64_t)(s)->reserved[3] << 24) |                                 \
+          ((uint64_t)(s)->reserved[4] << 32) |                                 \
+          ((uint64_t)(s)->reserved[5] << 40) |                                 \
+          ((uint64_t)(s)->reserved[6] << 48)))
 #define FIO_STR_BIG_LEN_SET(s, l)                                              \
   do {                                                                         \
     if (sizeof(void *) == 4) {                                                 \
-      if (!((l) & ((~(size_t)0) << 24))) {                                     \
+      if (!((l) & ((~(uint32_t)0) << 24))) {                                   \
         (s)->reserved[0] = (l)&0xFF;                                           \
-        (s)->reserved[1] = ((size_t)(l) >> 8) & 0xFF;                          \
-        (s)->reserved[2] = ((size_t)(l) >> 16) & 0xFF;                         \
+        (s)->reserved[1] = ((uint32_t)(l) >> 8) & 0xFF;                        \
+        (s)->reserved[2] = ((uint32_t)(l) >> 16) & 0xFF;                       \
       } else {                                                                 \
         FIO_LOG_ERROR("facil.io small string length error - too long");        \
         (s)->reserved[0] = 0xFF;                                               \
@@ -18624,14 +18627,14 @@ String Macro Helpers
         (s)->reserved[2] = 0xFF;                                               \
       }                                                                        \
     } else {                                                                   \
-      if (!((l) & ((~(size_t)0) << 56))) {                                     \
+      if (!((l) & ((~(uint64_t)0) << 56))) {                                   \
         (s)->reserved[0] = (l)&0xff;                                           \
-        (s)->reserved[1] = ((size_t)(l) >> 8) & 0xFF;                          \
-        (s)->reserved[2] = ((size_t)(l) >> 16) & 0xFF;                         \
-        (s)->reserved[3] = ((size_t)(l) >> 24) & 0xFF;                         \
-        (s)->reserved[4] = ((size_t)(l) >> 32) & 0xFF;                         \
-        (s)->reserved[5] = ((size_t)(l) >> 40) & 0xFF;                         \
-        (s)->reserved[6] = ((size_t)(l) >> 48) & 0xFF;                         \
+        (s)->reserved[1] = ((uint64_t)(l) >> 8) & 0xFF;                        \
+        (s)->reserved[2] = ((uint64_t)(l) >> 16) & 0xFF;                       \
+        (s)->reserved[3] = ((uint64_t)(l) >> 24) & 0xFF;                       \
+        (s)->reserved[4] = ((uint64_t)(l) >> 32) & 0xFF;                       \
+        (s)->reserved[5] = ((uint64_t)(l) >> 40) & 0xFF;                       \
+        (s)->reserved[6] = ((uint64_t)(l) >> 48) & 0xFF;                       \
       } else {                                                                 \
         FIO_LOG_ERROR("facil.io small string length error - too long");        \
         (s)->reserved[0] = 0xFF;                                               \
@@ -21553,9 +21556,9 @@ typedef enum {
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
 #define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)o) & 7UL))
-#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)(o) | (klass))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)o & (~7ULL))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)o & (7ULL))
+#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
+#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)o & (~7ULL)))
+#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)o & (7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
@@ -22397,8 +22400,8 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
       uint64_t i;
     } punned;
     punned.d = 0; /* dead code, but leave it, just in case */
-    punned.i = (uint64_t)i;
-    punned.i = ((uint64_t)i & (~(uintptr_t)7ULL));
+    punned.i = (uint64_t)(uintptr_t)i;
+    punned.i = ((uint64_t)(uintptr_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
   return FIO_PTR_MATH_RMASK(double, i, 3)[0];
@@ -22453,21 +22456,25 @@ FIOBJ Hash Maps
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
-    return fio_risky_hash(&o, sizeof(o), (uint64_t)target_hash + (uintptr_t)o);
+    return fio_risky_hash(&o,
+                          sizeof(o),
+                          (uint64_t)(uintptr_t)target_hash + (uintptr_t)o);
   case FIOBJ_T_NUMBER: {
     uintptr_t tmp = FIO_NAME2(fiobj, i)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
   }
   case FIOBJ_T_FLOAT: {
     double tmp = FIO_NAME2(fiobj, f)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
   }
   case FIOBJ_T_STRING: /* fallthrough */
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
-                    hash)(o, (uint64_t)target_hash);
+                    hash)(o, (uint64_t)(uintptr_t)target_hash);
   case FIOBJ_T_ARRAY: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-    h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_ARRAY);
+    h += fio_risky_hash(&h,
+                        sizeof(h),
+                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_ARRAY);
     {
       FIOBJ *a = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), ptr)(o);
       const size_t count =
@@ -22483,7 +22490,9 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   case FIOBJ_T_HASH: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
     size_t c = 0;
-    h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_HASH);
+    h += fio_risky_hash(&h,
+                        sizeof(h),
+                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_HASH);
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
       h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
                                   pos->obj.key);
@@ -22495,7 +22504,7 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   case FIOBJ_T_OTHER: {
     /* TODO: can we avoid "stringifying" the object? */
     fio_str_info_s tmp = (*fiobj_object_metadata(o))->to_s(o);
-    return fio_risky_hash(tmp.buf, tmp.len, (uint64_t)target_hash);
+    return fio_risky_hash(tmp.buf, tmp.len, (uint64_t)(uintptr_t)target_hash);
   }
   }
   return 0;
@@ -22536,9 +22545,12 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
-  FIOBJ v = FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      set)(hash, fio_risky_hash(key, len, (uint64_t)hash), tmp, value, NULL);
+  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                     set)(hash,
+                          fio_risky_hash(key, len, (uint64_t)(uintptr_t)hash),
+                          tmp,
+                          value,
+                          NULL);
   fiobj_free(tmp);
   return v;
 }
@@ -22552,8 +22564,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH)
     return FIOBJ_INVALID;
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                     get)(hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp);
+  FIOBJ v = FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      get)(hash, fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash), tmp);
   return v;
 }
 
@@ -22567,9 +22580,11 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 size_t len,
                                 FIOBJ *old) {
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  int r = FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      remove)(hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp, old);
+  int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                   remove)(hash,
+                           fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash),
+                           tmp,
+                           old);
   FIOBJ_STR_TEMP_DESTROY(tmp);
   return r;
 }
@@ -22863,7 +22878,7 @@ FIOBJ Integers (bigger numbers)
 ***************************************************************************** */
 
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
-                                                      FIOBJ restrict b) {
+                                                     FIOBJ restrict b) {
   return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(a) ==
          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(b);
 }
@@ -22905,7 +22920,7 @@ FIOBJ Floats (bigger / smaller doubles)
 ***************************************************************************** */
 
 FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
-                                                        FIOBJ restrict b) {
+                                                       FIOBJ restrict b) {
   unsigned char r = 0;
   union {
     uint64_t u;
@@ -23739,6 +23754,9 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_STREAM
 #define FIO_TIME
 #define FIO_URL
+
+// #define FIO_LOCK2 /* a signal based blocking lock is WIP */
+
 #include __FILE__
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }

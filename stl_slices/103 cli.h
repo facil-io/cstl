@@ -245,7 +245,7 @@ typedef struct {
 } fio_cli_parser_data_s;
 
 #define FIO_CLI_HASH_VAL(s)                                                    \
-  fio_risky_hash((s).buf, (s).len, (uint64_t)fio_cli_start)
+  fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)
 
 /* *****************************************************************************
 Default parameter storage

@@ -136,7 +136,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
     return NULL;
   size_t i;
 #if FIO_MAP_EVICT_LRU
-  intptr_t next;
+  FIO_MAP_SIZE_TYPE next;
   if (!pos) {
     i = m->last_used;
     *first = m->map;
@@ -552,7 +552,8 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     m->last_used = pos;
 #endif /* FIO_MAP_EVICT_LRU */
     ++m->count;
-  } else if (overwrite) {
+  } else if (overwrite &&
+             FIO_MAP_SHOULD_OVERWRITE(FIO_MAP_OBJ2TYPE(m->map[pos].obj), obj)) {
     /* overwrite existing */
     FIO_MAP_KEY_DISCARD(key);
     if (old) {

@@ -605,7 +605,7 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   return fio_bits_msb_index(fio_bits_lsb(i));
 #else
   switch (fio_bits_lsb(i)) {
-    // clang-format off
+  // clang-format off
     case UINT64_C(0x0): return (size_t)-1;
     case UINT64_C(0x1): return 0;
     case UINT64_C(0x2): return 1;
@@ -1050,9 +1050,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "fio_ct_true(%p) should be true!",
                (void *)i);
   }
-  FIO_ASSERT(fio_ct_true((~0ULL)) == 1,
+  FIO_ASSERT(fio_ct_true(((uintptr_t)~0ULL)) == 1,
              "fio_ct_true(%p) should be true!",
-             (void *)(~0ULL));
+             (void *)(uintptr_t)(~0ULL));
 
   FIO_ASSERT(fio_ct_false(0) == 1, "fio_ct_false(0) should be true!");
   for (uintptr_t i = 1; i; i <<= 1) {
@@ -1065,9 +1065,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "fio_ct_false(%p) should be zero!",
                (void *)i);
   }
-  FIO_ASSERT(fio_ct_false((~0ULL)) == 0,
+  FIO_ASSERT(fio_ct_false(((uintptr_t)~0ULL)) == 0,
              "fio_ct_false(%p) should be zero!",
-             (void *)(~0ULL));
+             (void *)(uintptr_t)(~0ULL));
   FIO_ASSERT(fio_ct_true(8), "fio_ct_true should be true.");
   FIO_ASSERT(!fio_ct_true(0), "fio_ct_true should be false.");
   FIO_ASSERT(!fio_ct_false(8), "fio_ct_false should be false.");

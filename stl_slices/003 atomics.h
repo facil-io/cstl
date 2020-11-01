@@ -6,6 +6,8 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#define FIO_LOCK2                   /* Development inclusion - ignore line */
+#define FIO_ATOMIC                  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -163,7 +165,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   if (!(state & group))
     return 0;
   /* release the locks we aquired, which are: ((~state) & group) */
-  fio_atomic_and(lock, (state | (~group)));
+  fio_atomic_and(lock, ~((~state) & group));
   return 1;
 }
 
@@ -359,7 +361,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
                "fio_trylock_sublock should succeed");
     FIO_ASSERT(fio_trylock_sublock(&lock, i), "fio_trylock should fail");
     FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "lock should be engaged");
+    FIO_ASSERT(fio_is_sublocked(&lock, i), "sub-lock %d should be engaged", i);
     {
       uint8_t g =
           fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
@@ -523,7 +525,7 @@ FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return 0;
-  fio_atomic_and(&lock->lock, (state | (~group)));
+  fio_atomic_and(&lock->lock, ~((~state) & group));
   return 1;
 }
 
@@ -533,8 +535,9 @@ Implementation - Extern
 #if defined(FIO_EXTERN_COMPLETE)
 
 struct fio___lock2_wait_s {
+  struct fio___lock2_wait_s *next;
+  struct fio___lock2_wait_s *prev;
   FIO_THREAD_T t;
-  fio___lock2_wait_s *volatile next;
 };
 
 /**
@@ -548,68 +551,65 @@ struct fio___lock2_wait_s {
  * Doesn't return until a successful lock was acquired.
  */
 SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1UL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
-  fio___lock2_wait_s self_thread;
   if (!group)
     group = 1;
   __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return;
+  /* note, we now own the part of the lock */
+
+  /* a lock-wide (all groups) lock ID for the waitlist */
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)
+                                ? ((size_t)1ULL << 63)
+                                : (sizeof(inner_lock) >= 4)
+                                      ? ((size_t)1UL << 31)
+                                      : (sizeof(inner_lock) >= 2)
+                                            ? ((size_t)1UL << 15)
+                                            : ((size_t)1UL << 7);
 
   /* initialize self-waiting node memory (using stack memory) */
-  self_thread.t = FIO_THREAD_ID();
-  self_thread.next = NULL; // lock->waiting;
+  fio___lock2_wait_s self_thread = {
+      .next = &self_thread,
+      .prev = &self_thread,
+      .t = FIO_THREAD_ID(),
+  };
 
-  /* enter waitlist lock */
+  /* enter waitlist spinlock */
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
 
   /* add self-thread to end of waitlist */
-  {
-    fio___lock2_wait_s *volatile *i = &(lock->waiting);
-    while (i[0]) {
-      i = &(i[0]->next);
-    }
-    (*i) = &self_thread;
+  if (lock->waiting) {
+    FIO_LIST_PUSH(lock->waiting, &self_thread);
+  } else {
+    lock->waiting = &self_thread;
   }
 
-  /* release waitlist lock and return lock's state */
-  state = (state | (~group)) & (~inner_lock);
-  fio_atomic_and(&lock->lock, (state & (~inner_lock)));
+  /* release waitlist spinlock and unlock any locks we may have aquired */
+  fio_atomic_xor(&lock->lock, (((~state) & group) | inner_lock));
 
   for (;;) {
-    state = fio_atomic_or(&lock->lock, group);
-    if (!(state & group))
+    if (!fio_trylock2(lock, group))
       break;
-    /* `next` may have been added while we didn't look */
-    if (self_thread.next) {
-      /* resume next thread if this isn't for us (possibly different group) */
-      fio_atomic_and(&lock->lock, (state | (~group)));
+    /* it's possible the next thread is waiting for a different group */
+    if (self_thread.next != lock->waiting) {
       FIO_THREAD_RESUME(self_thread.next->t);
     }
+    if (!fio_trylock2(lock, group))
+      break;
     FIO_THREAD_PAUSE(self_thread.t);
   }
 
-  /* lock waitlist */
+  /* remove self from waiting list */
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
-  /* remove self from waiting list */
-  for (fio___lock2_wait_s *volatile *i = &lock->waiting; *i; i = &(*i)->next) {
-    if (*i != &self_thread)
-      continue;
-    *i = (*i)->next;
-    break;
+  if (self_thread.next != lock->waiting) {
+    FIO_THREAD_RESUME(self_thread.next->t);
   }
-  /* unlock waitlist */
+  FIO_LIST_REMOVE(&self_thread);
   fio_atomic_and(&lock->lock, ~inner_lock);
 }
 
@@ -623,15 +623,14 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
  *
  */
 SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
-  size_t inner_lock;
-  if (sizeof(inner_lock) >= 8)
-    inner_lock = (size_t)1UL << 63;
-  else if (sizeof(inner_lock) >= 4)
-    inner_lock = (size_t)1UL << 31;
-  else if (sizeof(inner_lock) >= 2)
-    inner_lock = (size_t)1UL << 15;
-  else
-    inner_lock = (size_t)1UL << 7;
+  /* a lock-wide (all groups) lock ID for the waitlist */
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)
+                                ? ((size_t)1ULL << 63)
+                                : (sizeof(inner_lock) >= 4)
+                                      ? ((size_t)1UL << 31)
+                                      : (sizeof(inner_lock) >= 2)
+                                            ? ((size_t)1UL << 15)
+                                            : ((size_t)1UL << 7);
   fio___lock2_wait_s *waiting;
   if (!group)
     group = 1;
@@ -639,14 +638,12 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
   while ((fio_atomic_or(&lock->lock, inner_lock) & inner_lock)) {
     FIO_THREAD_RESCHEDULE();
   }
-  /* unlock group */
   waiting = lock->waiting;
-  fio_atomic_and(&lock->lock, ~group);
+  /* unlock group & waitlist */
+  fio_atomic_and(&lock->lock, ~(group | inner_lock));
   if (waiting) {
     FIO_THREAD_RESUME(waiting->t);
   }
-  /* unlock waitlist */
-  fio_atomic_and(&lock->lock, ~inner_lock);
 }
 #endif /* FIO_EXTERN_COMPLETE */
 

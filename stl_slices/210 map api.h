@@ -256,6 +256,11 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #define FIO_MAP_EVICT_LRU 0
 #endif
 
+#ifndef FIO_MAP_SHOULD_OVERWRITE
+/** Tests if `older` should be replaced with `newer`. */
+#define FIO_MAP_SHOULD_OVERWRITE(older, newer) 1
+#endif
+
 #ifndef FIO_MAP_MAX_ELEMENTS
 /** The maximum number of elements allowed before removing old data (FIFO) */
 #define FIO_MAP_MAX_ELEMENTS 0
@@ -271,7 +276,7 @@ Misc Settings (eviction policy, load-factor attempts, etc')
 #define FIO_MAP_HASH_FIXED ((FIO_MAP_HASH)-2LL)
 
 #undef FIO_MAP_HASH_FIX
-/** the value to be used when the hash is a reserved value. */
+/** Validates the hash value and returns the valid value. */
 #define FIO_MAP_HASH_FIX(h) (!h ? FIO_MAP_HASH_FIXED : (h))
 
 /**

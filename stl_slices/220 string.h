@@ -547,23 +547,24 @@ String Macro Helpers
 #define FIO_STR_THAW_(s)     ((s)->special ^= (uint8_t)2)
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
+
 #define FIO_STR_BIG_LEN(s)                                                     \
   ((sizeof(void *) == 4)                                                       \
-       ? (((size_t)(s)->reserved[0]) | ((size_t)(s)->reserved[1] << 8) |       \
-          ((size_t)(s)->reserved[2] << 16))                                    \
-       : (((size_t)(s)->reserved[0]) | ((size_t)(s)->reserved[1] << 8) |       \
-          ((size_t)(s)->reserved[2] << 16) |                                   \
-          ((size_t)(s)->reserved[3] << 24) |                                   \
-          ((size_t)(s)->reserved[4] << 32) |                                   \
-          ((size_t)(s)->reserved[5] << 40) |                                   \
-          ((size_t)(s)->reserved[6] << 48)))
+       ? (((uint32_t)(s)->reserved[0]) | ((uint32_t)(s)->reserved[1] << 8) |   \
+          ((uint32_t)(s)->reserved[2] << 16))                                  \
+       : (((uint64_t)(s)->reserved[0]) | ((uint64_t)(s)->reserved[1] << 8) |   \
+          ((uint64_t)(s)->reserved[2] << 16) |                                 \
+          ((uint64_t)(s)->reserved[3] << 24) |                                 \
+          ((uint64_t)(s)->reserved[4] << 32) |                                 \
+          ((uint64_t)(s)->reserved[5] << 40) |                                 \
+          ((uint64_t)(s)->reserved[6] << 48)))
 #define FIO_STR_BIG_LEN_SET(s, l)                                              \
   do {                                                                         \
     if (sizeof(void *) == 4) {                                                 \
-      if (!((l) & ((~(size_t)0) << 24))) {                                     \
+      if (!((l) & ((~(uint32_t)0) << 24))) {                                   \
         (s)->reserved[0] = (l)&0xFF;                                           \
-        (s)->reserved[1] = ((size_t)(l) >> 8) & 0xFF;                          \
-        (s)->reserved[2] = ((size_t)(l) >> 16) & 0xFF;                         \
+        (s)->reserved[1] = ((uint32_t)(l) >> 8) & 0xFF;                        \
+        (s)->reserved[2] = ((uint32_t)(l) >> 16) & 0xFF;                       \
       } else {                                                                 \
         FIO_LOG_ERROR("facil.io small string length error - too long");        \
         (s)->reserved[0] = 0xFF;                                               \
@@ -571,14 +572,14 @@ String Macro Helpers
         (s)->reserved[2] = 0xFF;                                               \
       }                                                                        \
     } else {                                                                   \
-      if (!((l) & ((~(size_t)0) << 56))) {                                     \
+      if (!((l) & ((~(uint64_t)0) << 56))) {                                   \
         (s)->reserved[0] = (l)&0xff;                                           \
-        (s)->reserved[1] = ((size_t)(l) >> 8) & 0xFF;                          \
-        (s)->reserved[2] = ((size_t)(l) >> 16) & 0xFF;                         \
-        (s)->reserved[3] = ((size_t)(l) >> 24) & 0xFF;                         \
-        (s)->reserved[4] = ((size_t)(l) >> 32) & 0xFF;                         \
-        (s)->reserved[5] = ((size_t)(l) >> 40) & 0xFF;                         \
-        (s)->reserved[6] = ((size_t)(l) >> 48) & 0xFF;                         \
+        (s)->reserved[1] = ((uint64_t)(l) >> 8) & 0xFF;                        \
+        (s)->reserved[2] = ((uint64_t)(l) >> 16) & 0xFF;                       \
+        (s)->reserved[3] = ((uint64_t)(l) >> 24) & 0xFF;                       \
+        (s)->reserved[4] = ((uint64_t)(l) >> 32) & 0xFF;                       \
+        (s)->reserved[5] = ((uint64_t)(l) >> 40) & 0xFF;                       \
+        (s)->reserved[6] = ((uint64_t)(l) >> 48) & 0xFF;                       \
       } else {                                                                 \
         FIO_LOG_ERROR("facil.io small string length error - too long");        \
         (s)->reserved[0] = 0xFF;                                               \

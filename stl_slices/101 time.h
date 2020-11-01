@@ -448,8 +448,8 @@ Time - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#define FIO___GMTIME_TEST_INTERVAL ((60L * 60 * 24) - 7) /* 1day - 7seconds */
-#define FIO___GMTIME_TEST_RANGE    (4093L * 365) /* test ~4 millenium  */
+#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 24) - 7) /*1day - 7seconds*/
+#define FIO___GMTIME_TEST_RANGE    (2047LL * 365) /* test ~2 millenium  */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");

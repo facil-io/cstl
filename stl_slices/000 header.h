@@ -495,19 +495,6 @@ Naming Macros
 Sleep / Thread Scheduling Macros
 ***************************************************************************** */
 
-#ifndef FIO_THREAD_RESCHEDULE
-/**
- * Reschedules the thread by calling nanosleeps for a sinlge nano-second.
- *
- * In practice, the thread will probably sleep for 60ns or more.
- */
-#define FIO_THREAD_RESCHEDULE()                                                \
-  do {                                                                         \
-    const struct timespec tm = {.tv_sec = 0, .tv_nsec = (long)1L};             \
-    nanosleep(&tm, (struct timespec *)NULL);                                   \
-  } while (0)
-#endif
-
 #ifndef FIO_THREAD_WAIT
 /**
  * Calls nonsleep with the requested nano-second count.
@@ -518,6 +505,15 @@ Sleep / Thread Scheduling Macros
                                 .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
     nanosleep(&tm, (struct timespec *)NULL);                                   \
   } while (0)
+#endif
+
+#ifndef FIO_THREAD_RESCHEDULE
+/**
+ * Reschedules the thread by calling nanosleeps for a sinlge nano-second.
+ *
+ * In practice, the thread will probably sleep for 60ns or more.
+ */
+#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
 #endif
 
 /* *****************************************************************************

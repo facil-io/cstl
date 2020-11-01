@@ -265,9 +265,9 @@ typedef enum {
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
 #define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)o) & 7UL))
-#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)(o) | (klass))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)o & (~7ULL))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)o & (7ULL))
+#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
+#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)o & (~7ULL)))
+#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)o & (7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
@@ -1109,8 +1109,8 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
       uint64_t i;
     } punned;
     punned.d = 0; /* dead code, but leave it, just in case */
-    punned.i = (uint64_t)i;
-    punned.i = ((uint64_t)i & (~(uintptr_t)7ULL));
+    punned.i = (uint64_t)(uintptr_t)i;
+    punned.i = ((uint64_t)(uintptr_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
   return FIO_PTR_MATH_RMASK(double, i, 3)[0];
@@ -1165,21 +1165,25 @@ FIOBJ Hash Maps
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
-    return fio_risky_hash(&o, sizeof(o), (uint64_t)target_hash + (uintptr_t)o);
+    return fio_risky_hash(&o,
+                          sizeof(o),
+                          (uint64_t)(uintptr_t)target_hash + (uintptr_t)o);
   case FIOBJ_T_NUMBER: {
     uintptr_t tmp = FIO_NAME2(fiobj, i)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
   }
   case FIOBJ_T_FLOAT: {
     double tmp = FIO_NAME2(fiobj, f)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
   }
   case FIOBJ_T_STRING: /* fallthrough */
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
-                    hash)(o, (uint64_t)target_hash);
+                    hash)(o, (uint64_t)(uintptr_t)target_hash);
   case FIOBJ_T_ARRAY: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-    h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_ARRAY);
+    h += fio_risky_hash(&h,
+                        sizeof(h),
+                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_ARRAY);
     {
       FIOBJ *a = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), ptr)(o);
       const size_t count =
@@ -1195,7 +1199,9 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   case FIOBJ_T_HASH: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
     size_t c = 0;
-    h += fio_risky_hash(&h, sizeof(h), (uint64_t)target_hash + FIOBJ_T_HASH);
+    h += fio_risky_hash(&h,
+                        sizeof(h),
+                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_HASH);
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
       h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
                                   pos->obj.key);
@@ -1207,7 +1213,7 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   case FIOBJ_T_OTHER: {
     /* TODO: can we avoid "stringifying" the object? */
     fio_str_info_s tmp = (*fiobj_object_metadata(o))->to_s(o);
-    return fio_risky_hash(tmp.buf, tmp.len, (uint64_t)target_hash);
+    return fio_risky_hash(tmp.buf, tmp.len, (uint64_t)(uintptr_t)target_hash);
   }
   }
   return 0;
@@ -1248,9 +1254,12 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
-  FIOBJ v = FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      set)(hash, fio_risky_hash(key, len, (uint64_t)hash), tmp, value, NULL);
+  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                     set)(hash,
+                          fio_risky_hash(key, len, (uint64_t)(uintptr_t)hash),
+                          tmp,
+                          value,
+                          NULL);
   fiobj_free(tmp);
   return v;
 }
@@ -1264,8 +1273,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH)
     return FIOBJ_INVALID;
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                     get)(hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp);
+  FIOBJ v = FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      get)(hash, fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash), tmp);
   return v;
 }
 
@@ -1279,9 +1289,11 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 size_t len,
                                 FIOBJ *old) {
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  int r = FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      remove)(hash, fio_risky_hash(buf, len, (uint64_t)hash), tmp, old);
+  int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                   remove)(hash,
+                           fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash),
+                           tmp,
+                           old);
   FIOBJ_STR_TEMP_DESTROY(tmp);
   return r;
 }
@@ -1575,7 +1587,7 @@ FIOBJ Integers (bigger numbers)
 ***************************************************************************** */
 
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
-                                                      FIOBJ restrict b) {
+                                                     FIOBJ restrict b) {
   return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(a) ==
          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(b);
 }
@@ -1617,7 +1629,7 @@ FIOBJ Floats (bigger / smaller doubles)
 ***************************************************************************** */
 
 FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
-                                                        FIOBJ restrict b) {
+                                                       FIOBJ restrict b) {
   unsigned char r = 0;
   union {
     uint64_t u;
