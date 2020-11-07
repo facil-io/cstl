@@ -196,7 +196,7 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if (TEST || DEBUG) && !defined(FIOBJ_MARK_MEMORY)
+#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 #define FIOBJ_MARK_MEMORY 1
 #endif
 

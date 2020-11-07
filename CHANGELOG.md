@@ -57,7 +57,7 @@ This approach will make it easier for contributors to edit the code and submit P
 
 **Security**: a request smuggling attack vector and Transfer Encoding attack vectors in the HTTP/1.1 parser were exposed by Sam Sanoop from [the Snyk Security team (snyk.io)](https://snyk.io). They were fixed in the 0.8.0 HTTP/1.1 version.
 
-**Fix**: fixed some 32 bit compatibility concerns. Credit to @fbrausse for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
+**Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
 
 ### v. 0.7.5 - 2020-05-18
 

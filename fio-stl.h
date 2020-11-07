@@ -851,7 +851,7 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOH___H) && defined(FIO_LOG)
+#if !defined(H___FIO_LOH___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOH___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
@@ -3047,7 +3047,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     data += len & 24;
   }
 
-  uint64_t tmp = (len & 0xFF) << 56; /* add offset information to padding */
+  /* add offset information to padding */
+  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
   switch ((len & 7)) {
   case 7:
@@ -6757,7 +6758,7 @@ Lock type choice
 Allocator debugging helpers
 ***************************************************************************** */
 
-#if DEBUG
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 /* maximum block allocation count. */
 static size_t FIO_NAME(fio___,
                        FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max));
@@ -6820,24 +6821,27 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 
 #define FIO_MEMORY_PRINT_STATS()                                               \
   FIO_LOG_INFO(                                                                \
-      "(fio) Total memory chunks allocated before cleanup %zu\n"               \
-      "          Maximum memory blocks allocated at a single time %zu\n",      \
+      "(" FIO_MACRO2STR(FIO_NAME(                                              \
+          FIO_MEMORY_NAME,                                                     \
+          malloc)) "):\n          "                                            \
+                   "Total memory chunks allocated before cleanup %zu\n"        \
+                   "          Maximum memory blocks allocated at a single "    \
+                   "time %zu",                                                 \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),          \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)))
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
   do {                                                                         \
     if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count))) {      \
       FIO_LOG_ERROR(                                                           \
-          "(fio) Total memory chunks allocated "                               \
-          "after cleanup (POSSIBLE LEAKS): %zu\n",                             \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)));     \
-    } else {                                                                   \
-      FIO_LOG_INFO(                                                            \
-          "(fio) Total memory chunks allocated after cleanup: %zu\n",          \
+          "(" FIO_MACRO2STR(                                                   \
+              FIO_NAME(FIO_MEMORY_NAME,                                        \
+                       malloc)) "):\n          "                               \
+                                "Total memory chunks allocated "               \
+                                "after cleanup (POSSIBLE LEAKS): %zu\n",       \
           FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)));     \
     }                                                                          \
   } while (0)
-#else /* DEBUG */
+#else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)
@@ -6849,7 +6853,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 #define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)
 #define FIO_MEMORY_PRINT_STATS()
 #define FIO_MEMORY_PRINT_STATS_END()
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************
 
@@ -8296,8 +8300,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_TIME                    /* Development inclusion - ignore line */
+#define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "006 atol.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -8379,6 +8386,15 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time);
  * Usually requires 28 to 29 characters, although this may vary.
  */
 SFUNC size_t fio_time2rfc2822(char *target, time_t time);
+
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time);
 
 /* *****************************************************************************
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
@@ -8734,6 +8750,53 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
   return pos - target;
 }
 
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time) {
+  {
+    const struct tm tm = fio_time2gm(time);
+    /* note: day of month is either 1 or 2 digits */
+    char *pos = target;
+    uint16_t tmp;
+    *(pos++) = '[';
+    tmp = tm.tm_mday / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
+    *(pos++) = '/';
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
+    *(pos++) = '/';
+    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+    *(pos++) = ':';
+    tmp = tm.tm_hour / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_min / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_sec / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
+    *(pos++) = ' ';
+    *(pos++) = '+';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = ']';
+    *(pos) = 0;
+    return pos - target;
+  }
+}
+
 /* *****************************************************************************
 Time - test
 ***************************************************************************** */
@@ -8805,6 +8868,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  tm2.tm_wday,
                  buf);
     }
+  }
+  {
+    char buf[48];
+    buf[47] = 0;
+    memset(buf, 'X', 47);
+    fio_time2rfc7231(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2rfc2109(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2rfc2822(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2log(buf, now);
+    FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
   }
   {
     uint64_t start, stop;
@@ -17988,6 +18067,7 @@ Map - cleanup
 #undef FIO_MAP_MAX_FULL_COLLISIONS
 #undef FIO_MAP_MAX_SEEK
 #undef FIO_MAP_EVICT_LRU
+#undef FIO_MAP_SHOULD_OVERWRITE
 
 #undef FIO_MAP_OBJ
 #undef FIO_MAP_OBJ2KEY
@@ -20955,7 +21035,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO_REF_ON_ALLOC()                                                     \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
@@ -20964,18 +21044,18 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 static void __attribute__((destructor))
 FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
-    FIO_LOG_WARNING(
-        "(" FIO_MACRO2STR(FIO_REF_NAME) ") memory leak warning for "
-                                        "type: " FIO_MACRO2STR(
-                                            FIO_REF_TYPE) " - unbalanced "
-                                                          "(%zd) ",
+    FIO_LOG_ERROR(
+        "(" FIO_MACRO2STR(
+            FIO_REF_NAME) "):\n          "
+                          "%zd memory leaks detected for type: " FIO_MACRO2STR(
+                              FIO_REF_TYPE),
         FIO_NAME(FIO_REF_NAME, ___leak_tester));
   }
 }
 #else
 #define FIO_REF_ON_ALLOC()
 #define FIO_REF_ON_FREE()
-#endif
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -21487,7 +21567,7 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if (TEST || DEBUG) && !defined(FIOBJ_MARK_MEMORY)
+#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 #define FIOBJ_MARK_MEMORY 1
 #endif
 
@@ -23724,10 +23804,10 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 /* Common testing values / Macros */
 #define TEST_REPEAT 4096
 
-/* Make sure logging and FIOBJ memory marking are set. */
+/* Make sure logging and memory leak counters are set. */
 #define FIO_LOG
-#ifndef FIOBJ_MARK_MEMORY
-#define FIOBJ_MARK_MEMORY 1
+#ifndef FIO_LEAK_COUNTER
+#define FIO_LEAK_COUNTER 1
 #endif
 #ifndef FIO_FIOBJ
 #define FIO_FIOBJ
@@ -24562,6 +24642,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
+  fiobj_str_new();
+  return;
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");

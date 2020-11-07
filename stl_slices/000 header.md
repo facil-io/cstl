@@ -76,6 +76,16 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 To test the library, define the `FIO_TEST_CSTL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
 
+#### `FIO_TEST_CSTL`
+
+Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
+
+#### `FIO_LEAK_COUNTER`
+
+Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
+
+This also prints out some minimal usage information about each allocator when exiting the program. 
+
 ## Compilation Modes
 
 The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.

@@ -76,6 +76,16 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 To test the library, define the `FIO_TEST_CSTL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
 
+#### `FIO_TEST_CSTL`
+
+Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
+
+#### `FIO_LEAK_COUNTER`
+
+Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
+
+This also prints out some minimal usage information about each allocator when exiting the program. 
+
 ## Compilation Modes
 
 The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
@@ -4234,7 +4244,7 @@ The default optimization stores information about the allocated memory's capacit
 
 * Multiple `write` operations are required.
 
-* It's pre-known that most strings will be longer than a small container's embedded string limit (`(2 * sizeof(char*)) - 2`) and still fit within the default container's embedded string limit (`((2 + FIO_STR_OPTIMIZE_EMBEDDED) * sizeof(char*)) - 2`).
+* It's pre-known that most strings will be longer than a small container's embedded string limit (`(2 * sizeof(char*)) - 2`) and still fit within the default container's embedded string limit (`((4 + FIO_STR_OPTIMIZE_EMBEDDED) * sizeof(char*)) - 2`).
 
    This is because short Strings are stored directly within a String's data container, minimizing both memory indirection and memory allocation.
 
@@ -4244,7 +4254,7 @@ The default optimization stores information about the allocated memory's capacit
 
    The default (larger) container requires 32 bytes, allowing Strings of up to 30 bytes to be stored directly within the container. This is in contrast to the smaller container (16 bytes in size).
 
-   Two bytes (2 bytes) are used for metadata and a terminating NUL character (to ensure C string safety), leaving the embded string capacity at 30 bytes for the default container (and 14 bytes for the small one).
+   Two bytes (2 bytes) are used for metadata and a terminating NUL character (to ensure C string safety), leaving the embedded string capacity at 30 bytes for the default container (and 14 bytes for the small one).
 
    If it's **pre-known** that most strings are likely to be longer than 14 bytes and shorter than 31 bytes (on 64 bit systems), than the default `FIO_STR_NAME` optimization should perform better.
 
@@ -4266,8 +4276,8 @@ The default optimization stores information about the allocated memory's capacit
 void example_task(void *str_, void *ignore_) {
   fio_str_s *str = (fio_str_s *)str_; /* C++ style cast */
   fprintf(stderr, "%s\n", fio_str2ptr(str));
-  fio_str_write(str, ".", 1);
-  fio_str_free(str); /* decreases reference count or frees object */
+  fio_str_write(str, ".", 1); /* write will sporadically allocate memory if required. */
+  fio_str_free(str);          /* decreases reference count or frees object */
   (void)ignore_;
 }
 
@@ -4298,7 +4308,7 @@ void example(void) {
 
 The classic use-case for the smaller dynamic string type is as a `key` in a Map object. The memory "savings" in these cases could become meaningful.
 
-In addition, the `FIO_STR_SMALL` optimization is likely to perform better than the default when Strings are likely to fit within a small container's embedded string limit (`(2 * sizeof(char*)) - 2`), or when Strings are likely to be too long for the default container's embedded string limit, **and**:
+In addition, the `FIO_STR_SMALL` optimization is likely to perform better than the default when Strings are likely to fit within a small container's embedded string limit (`(2 * sizeof(char*)) - 2`), or when Strings are mostly immutable and likely to be too long for the default container's embedded string limit, **and**:
 
 * Strings are likely to require a single `write` operation; **or**
 
@@ -4310,7 +4320,7 @@ In addition, the `FIO_STR_SMALL` optimization is likely to perform better than t
 #define FIO_STR_SMALL key /* results in the type name: key_s */
 #include "fio-stl.h"
 
-#define FIO_MAP_NAME map
+#define FIO_OMAP_NAME map
 #define FIO_MAP_TYPE uintptr_t
 #define FIO_MAP_KEY key_s /* the small string type */
 #define FIO_MAP_KEY_COPY(dest, src) key_init_copy2(&(dest), &(src))
@@ -4320,12 +4330,12 @@ In addition, the `FIO_STR_SMALL` optimization is likely to perform better than t
 
 /* helper for setting values in the map using risky hash with a safe seed */
 FIO_IFUNC uintptr_t map_set2(map_s *m, key_s key, uintptr_t value) {
-  return map_set(m, key_hash(&key, (uint64_t)m), key, value, NULL);
+  return map_set(m, key_hash(&key, (uintptr_t)m), key, value, NULL);
 }
 
 /* helper for getting values from the map using risky hash with a safe seed */
 FIO_IFUNC uintptr_t map_get2(map_s *m, key_s key) {
-  return map_get(m, key_hash(&key, (uint64_t)m), key);
+  return map_get(m, key_hash(&key, (uintptr_t)m), key);
 }
 
 void example(void) {
@@ -4341,11 +4351,9 @@ void example(void) {
       key_destroy(&k);
     }
   }
-  /* short keys don't allocate external memory (string embedded in the object)
-   */
+  /* short keys don't allocate external memory (string embedded in the object) */
   for (int i = 0; i < 10; ++i) {
-    /* short keys fit in pointer + length type... test assumes 64bit addresses
-     */
+    /* short keys fit in pointer + length type... test assumes 64bit addresses */
     const char *prefix = "embed: ";
     key_s k;
     key_init_const(&k, prefix, strlen(prefix)); /* embeds the (short) string */

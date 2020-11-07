@@ -135,7 +135,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO_REF_ON_ALLOC()                                                     \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
@@ -144,18 +144,17 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 static void __attribute__((destructor))
 FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
-    FIO_LOG_WARNING(
-        "(" FIO_MACRO2STR(FIO_REF_NAME) ") memory leak warning for "
-                                        "type: " FIO_MACRO2STR(
-                                            FIO_REF_TYPE) " - unbalanced "
-                                                          "(%zd) ",
+    FIO_LOG_ERROR(
+        "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "
+                                        "%zd memory leak(s) detected for "
+                                        "type: " FIO_MACRO2STR(FIO_REF_TYPE),
         FIO_NAME(FIO_REF_NAME, ___leak_tester));
   }
 }
 #else
 #define FIO_REF_ON_ALLOC()
 #define FIO_REF_ON_FREE()
-#endif
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE

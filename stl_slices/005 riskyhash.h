@@ -266,7 +266,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     data += len & 24;
   }
 
-  uint64_t tmp = (len & 0xFF) << 56; /* add offset information to padding */
+  /* add offset information to padding */
+  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
   switch ((len & 7)) {
   case 7:

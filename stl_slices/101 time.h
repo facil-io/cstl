@@ -5,8 +5,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_TIME                    /* Development inclusion - ignore line */
+#define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "006 atol.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -88,6 +91,15 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time);
  * Usually requires 28 to 29 characters, although this may vary.
  */
 SFUNC size_t fio_time2rfc2822(char *target, time_t time);
+
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time);
 
 /* *****************************************************************************
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
@@ -443,6 +455,53 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
   return pos - target;
 }
 
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time) {
+  {
+    const struct tm tm = fio_time2gm(time);
+    /* note: day of month is either 1 or 2 digits */
+    char *pos = target;
+    uint16_t tmp;
+    *(pos++) = '[';
+    tmp = tm.tm_mday / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
+    *(pos++) = '/';
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
+    *(pos++) = '/';
+    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+    *(pos++) = ':';
+    tmp = tm.tm_hour / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_min / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_sec / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
+    *(pos++) = ' ';
+    *(pos++) = '+';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = ']';
+    *(pos) = 0;
+    return pos - target;
+  }
+}
+
 /* *****************************************************************************
 Time - test
 ***************************************************************************** */
@@ -514,6 +573,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  tm2.tm_wday,
                  buf);
     }
+  }
+  {
+    char buf[48];
+    buf[47] = 0;
+    memset(buf, 'X', 47);
+    fio_time2rfc7231(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2rfc2109(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2rfc2822(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
+    memset(buf, 'X', 47);
+    fio_time2log(buf, now);
+    FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
   }
   {
     uint64_t start, stop;

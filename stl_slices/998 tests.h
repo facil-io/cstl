@@ -42,10 +42,10 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 /* Common testing values / Macros */
 #define TEST_REPEAT 4096
 
-/* Make sure logging and FIOBJ memory marking are set. */
+/* Make sure logging and memory leak counters are set. */
 #define FIO_LOG
-#ifndef FIOBJ_MARK_MEMORY
-#define FIOBJ_MARK_MEMORY 1
+#ifndef FIO_LEAK_COUNTER
+#define FIO_LEAK_COUNTER 1
 #endif
 #ifndef FIO_FIOBJ
 #define FIO_FIOBJ

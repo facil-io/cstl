@@ -988,7 +988,7 @@ Lock type choice
 Allocator debugging helpers
 ***************************************************************************** */
 
-#if DEBUG
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 /* maximum block allocation count. */
 static size_t FIO_NAME(fio___,
                        FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max));
@@ -1051,24 +1051,27 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 
 #define FIO_MEMORY_PRINT_STATS()                                               \
   FIO_LOG_INFO(                                                                \
-      "(fio) Total memory chunks allocated before cleanup %zu\n"               \
-      "          Maximum memory blocks allocated at a single time %zu\n",      \
+      "(" FIO_MACRO2STR(FIO_NAME(                                              \
+          FIO_MEMORY_NAME,                                                     \
+          malloc)) "):\n          "                                            \
+                   "Total memory chunks allocated before cleanup %zu\n"        \
+                   "          Maximum memory blocks allocated at a single "    \
+                   "time %zu",                                                 \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),          \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max)))
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
   do {                                                                         \
     if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count))) {      \
       FIO_LOG_ERROR(                                                           \
-          "(fio) Total memory chunks allocated "                               \
-          "after cleanup (POSSIBLE LEAKS): %zu\n",                             \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)));     \
-    } else {                                                                   \
-      FIO_LOG_INFO(                                                            \
-          "(fio) Total memory chunks allocated after cleanup: %zu\n",          \
+          "(" FIO_MACRO2STR(                                                   \
+              FIO_NAME(FIO_MEMORY_NAME,                                        \
+                       malloc)) "):\n          "                               \
+                                "Total memory chunks allocated "               \
+                                "after cleanup (POSSIBLE LEAKS): %zu\n",       \
           FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)));     \
     }                                                                          \
   } while (0)
-#else /* DEBUG */
+#else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)
@@ -1080,7 +1083,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
 #define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)
 #define FIO_MEMORY_PRINT_STATS()
 #define FIO_MEMORY_PRINT_STATS_END()
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************
 
