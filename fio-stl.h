@@ -21045,10 +21045,9 @@ static void __attribute__((destructor))
 FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
     FIO_LOG_ERROR(
-        "(" FIO_MACRO2STR(
-            FIO_REF_NAME) "):\n          "
-                          "%zd memory leaks detected for type: " FIO_MACRO2STR(
-                              FIO_REF_TYPE),
+        "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "
+                                        "%zd memory leak(s) detected for "
+                                        "type: " FIO_MACRO2STR(FIO_REF_TYPE),
         FIO_NAME(FIO_REF_NAME, ___leak_tester));
   }
 }
@@ -21635,10 +21634,10 @@ typedef enum {
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
-#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)o) & 7UL))
+#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 #define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)o & (~7ULL)))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)o & (7ULL)))
+#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))
+#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)(o) & (7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
@@ -24642,8 +24641,6 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
-  fiobj_str_new();
-  return;
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");

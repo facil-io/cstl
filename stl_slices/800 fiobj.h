@@ -264,10 +264,10 @@ typedef enum {
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
-#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)o) & 7UL))
+#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 #define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)o & (~7ULL)))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)o & (7ULL)))
+#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))
+#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)(o) & (7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
