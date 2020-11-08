@@ -39,8 +39,8 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOH___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
-#define H___FIO_LOH___H
+#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
+#define H___FIO_LOG___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
