@@ -100,7 +100,7 @@ void example(void) {
 
 #ifndef FIO_ARRAY_TYPE_CONCAT_COPY
 #define FIO_ARRAY_TYPE_CONCAT_COPY        FIO_ARRAY_TYPE_COPY
-#define FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE 1
+#define FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE FIO_ARRAY_TYPE_COPY_SIMPLE
 #endif
 /**
  * The FIO_ARRAY_DESTROY_AFTER_COPY macro should be set if
@@ -766,12 +766,15 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(dest_));
   FIO_NAME(FIO_ARRAY_NAME, s) *src =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(src_));
-  if (!dest || !src || src->start == src->end)
+  if (!dest || !src)
+    return dest_;
+  const uint32_t offset = FIO_NAME(FIO_ARRAY_NAME, count)(dest_);
+  const uint32_t added = FIO_NAME(FIO_ARRAY_NAME, count)(src_);
+  const uint32_t total = offset + added;
+  if (!added)
     return dest_;
 
-  const uint32_t offset = FIO_NAME(FIO_ARRAY_NAME, count)(dest_);
-  const uint32_t total = offset + FIO_NAME(FIO_ARRAY_NAME, count)(src_);
-  if (total < offset || total < total - offset)
+  if (total < offset || total + offset < total)
     return NULL; /* item count overflow */
 
   const uint32_t capa = FIO_NAME(FIO_ARRAY_NAME, reserve)(dest_, total);
@@ -781,28 +784,29 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
     memmove(dest->ary,
             dest->ary + dest->start,
             (dest->end - dest->start) * sizeof(*dest->ary));
+    dest->start = 0;
+    dest->end = offset;
   }
 #if FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE
   /* copy data */
   memcpy(FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_) + offset,
          FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_),
-         FIO_NAME(FIO_ARRAY_NAME, count)(src_));
+         added);
 #else
   {
-    FIO_ARRAY_TYPE *const a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
+    FIO_ARRAY_TYPE *const a1 = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
     FIO_ARRAY_TYPE *const a2 = FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_);
-    const uint32_t to_copy = total - offset;
-    for (uint32_t i = 0; i < to_copy; ++i) {
-      FIO_ARRAY_TYPE_CONCAT_COPY(a[i + offset], a2[i]);
+    for (uint32_t i = 0; i < added; ++i) {
+      FIO_ARRAY_TYPE_CONCAT_COPY(a1[i + offset], a2[i]);
     }
   }
 #endif /* FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE */
   /* update dest */
   if (!FIO_ARRAY_IS_EMBEDDED(dest)) {
-    dest->end += src->end - src->start;
+    dest->end += added;
     return dest_;
-  }
-  dest->start = total;
+  } else
+    dest->start = total;
   return dest_;
 }
 
@@ -1880,12 +1884,13 @@ Dynamic Arrays - cleanup
 #undef FIO_ARRAY_TYPE_INVALID_SIMPLE
 #undef FIO_ARRAY_TYPE_COPY
 #undef FIO_ARRAY_TYPE_COPY_SIMPLE
+#undef FIO_ARRAY_TYPE_CONCAT_COPY
+#undef FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE
 #undef FIO_ARRAY_TYPE_DESTROY
 #undef FIO_ARRAY_TYPE_DESTROY_SIMPLE
 #undef FIO_ARRAY_DESTROY_AFTER_COPY
 #undef FIO_ARRAY_TYPE_CMP
 #undef FIO_ARRAY_TYPE_CMP_SIMPLE
-#undef FIO_ARRAY_TYPE_CONCAT_COPY
 #undef FIO_ARRAY_PADDING
 #undef FIO_ARRAY_SIZE2WORDS
 #undef FIO_ARRAY_POS2ABS

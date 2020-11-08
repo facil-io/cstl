@@ -23,13 +23,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
    */
   uint64_t total = 0;
 #ifdef FIO_MAP_KEY
-  fprintf(
-      stderr,
-      "* testing unordered map (hash-map)" FIO_MACRO2STR(FIO_MAP_NAME) "\n");
+  fprintf(stderr,
+          "* testing %s map (hash-map) " FIO_MACRO2STR(FIO_MAP_NAME) "\n",
+          (FIO_MAP_ORDERED ? "ordered  " : "unordered"));
 #define FIO_MAP_TEST_KEY FIO_MAP_KEY
 #else
   fprintf(stderr,
-          "* testing unordered map (set)" FIO_MACRO2STR(FIO_MAP_NAME) "\n");
+          "* testing %s map (set) " FIO_MACRO2STR(FIO_MAP_NAME) "\n",
+          (FIO_MAP_ORDERED ? "ordered  " : "unordered"));
 #define FIO_MAP_TEST_KEY FIO_MAP_TYPE
 #endif
   FIO_NAME(FIO_MAP_NAME, s) m = FIO_MAP_INIT;

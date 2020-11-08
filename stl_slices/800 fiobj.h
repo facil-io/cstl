@@ -2246,7 +2246,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     fiobj_free(removed);
   }
   {
-    fprintf(stderr, "* Testing FIOBJ hash ownership after concat.\n");
+    fprintf(stderr, "* Testing FIOBJ array ownership after concat.\n");
     FIOBJ a1, a2;
     a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     a2 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
