@@ -183,6 +183,13 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
+/** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
+#ifdef FIO_MEMORY_DISABLE
+#ifndef FIO_MALLOC_TMP_USE_SYSTEM
+#define FIO_MALLOC_TMP_USE_SYSTEM 1
+#endif
+#endif
+
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
 /**
  * The logarithmic size of a single allocatiion "chunk" (16 blocks).
@@ -412,11 +419,11 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 /* *****************************************************************************
 Temporarily (at least) set memory allocation macros to use this allocator
 ***************************************************************************** */
-#ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
+#ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
@@ -440,9 +447,9 @@ Memory Allocation - start implementation
 #ifdef FIO_EXTERN_COMPLETE
 /* internal workings start here */
 /* *****************************************************************************
-FIO_MALLOC_FORCE_SYSTEM - use the system allocator
+FIO_MEMORY_DISABLE - use the system allocator
 ***************************************************************************** */
-#ifdef FIO_MALLOC_FORCE_SYSTEM
+#if defined(FIO_MEMORY_DISABLE)
 
 SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
@@ -484,7 +491,7 @@ SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 }
 #endif /* FIO_TEST_CSTL */
 
-#else /* FIO_MALLOC_FORCE_SYSTEM */
+#else /* FIO_MEMORY_DISABLE */
 /* *****************************************************************************
 
 
@@ -2460,7 +2467,7 @@ Memory pool cleanup
 #undef FIO_ALIGN_NEW
 #undef FIO_MEMORY_MALLOC_ZERO_POINTER
 
-#endif /* FIO_MALLOC_FORCE_SYSTEM */
+#endif /* FIO_MEMORY_DISABLE */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_MEMORY_NAME */
 

@@ -247,7 +247,11 @@ Frees allocated memory.
 
 #### `FIO_MALLOC_TMP_USE_SYSTEM`
 
-When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions.
+When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions for newly created types.
+
+#### `FIO_MEMORY_DISABLE`
+
+When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will route to the system's `malloc`. Set this when compiling to test the effects of all custom memory allocators working together.
 
 ### Naming and Misc. Macros
 

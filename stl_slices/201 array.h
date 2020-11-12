@@ -192,18 +192,18 @@ Dynamic Arrays - API
   { 0 }
 #endif
 
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+
 /* Allocates a new array object on the heap and initializes it's memory. */
 FIO_IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
 
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
 /* Frees an array's internal data AND it's container! */
 FIO_IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
-#else
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Destroys any objects stored in the array and frees the internal state. */
-IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary);
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary);
 
 /** Returns the number of elements in the Array. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary);
@@ -233,7 +233,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary);
  * Note: the reserved capacity includes existing data. If the requested reserved
  * capacity is equal (or less) then the existing capacity, nothing will be done.
  */
-IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary,
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary,
                                                  int32_t capa);
 
 /**
@@ -257,7 +257,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest,
  *
  * Returns a pointer to the new object, or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary,
                                                     int32_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old);
@@ -277,7 +277,7 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary,
  * If `start_at` is negative (i.e., -1), than seeking will be performed in
  * reverse, where -1 == last index (-2 == second to last, etc').
  */
-IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
+SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
                                              FIO_ARRAY_TYPE data,
                                              int32_t start_at);
 
@@ -293,7 +293,7 @@ IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
  * This action is O(n) where n in the length of the array.
  * It could get expensive.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary,
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary,
                                            int32_t index,
                                            FIO_ARRAY_TYPE *old);
 
@@ -306,17 +306,17 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary,
  * This action is O(n) where n in the length of the array.
  * It could get expensive.
  */
-IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary,
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary,
                                                  FIO_ARRAY_TYPE data);
 
 /** Attempts to lower the array's memory consumption. */
-IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary);
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary);
 
 /**
  * Pushes an object to the end of the Array. Returns a pointer to the new object
  * or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary,
                                                      FIO_ARRAY_TYPE data);
 
 /**
@@ -327,7 +327,7 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary,
  *
  * Returns -1 on error (Array is empty) and 0 on success.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary, FIO_ARRAY_TYPE *old);
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary, FIO_ARRAY_TYPE *old);
 
 /**
  * Unshifts an object to the beginning of the Array. Returns a pointer to the
@@ -335,7 +335,7 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary, FIO_ARRAY_TYPE *old);
  *
  * This could be expensive, causing `memmove`.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary,
                                                         FIO_ARRAY_TYPE data);
 
 /**
@@ -346,7 +346,7 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary,
  *
  * Returns -1 on error (Array is empty) and 0 on success.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
                                           FIO_ARRAY_TYPE *old);
 
 /**
@@ -623,7 +623,7 @@ Dynamic Arrays - implementation
 ***************************************************************************** */
 
 /* Destroys any objects stored in the array and frees the internal state. */
-IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   union {
@@ -654,7 +654,7 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
 }
 
 /** Reserves a minimal capacity for the array. */
-IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                  int32_t capa_) {
   const uint32_t abs_capa =
       (capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_);
@@ -822,7 +822,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
  *
  * Returns a pointer to the new object, or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
                                                     int32_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old) {
@@ -968,7 +968,7 @@ invalid:
  *
  * Returns a pointer to the new object, or NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
                                                     int32_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old) {
@@ -1075,7 +1075,7 @@ IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
  * If `start_at` is negative (i.e., -1), than seeking will be performed in
  * reverse, where -1 == last index (-2 == second to last, etc').
  */
-IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
+SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
                                              FIO_ARRAY_TYPE data,
                                              int32_t start_at) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
@@ -1114,7 +1114,7 @@ IFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
  *
  * Returns 0 on success and -1 on error.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
                                            int32_t index,
                                            FIO_ARRAY_TYPE *old) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
@@ -1182,7 +1182,7 @@ invalid:
  *
  * Returns the number of items removed.
  */
-IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
                                                  FIO_ARRAY_TYPE data) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) * ary;
@@ -1216,7 +1216,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
 }
 
 /** Attempts to lower the array's memory consumption. */
-IFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
@@ -1263,7 +1263,7 @@ re_embed:
 /**
  * Pushes an object to the end of the Array. Returns NULL on error.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
                                                      FIO_ARRAY_TYPE data) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
@@ -1315,7 +1315,7 @@ needs_memory_embedded:
  *
  * Returns -1 on error (Array is empty) and 0 on success.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
                                         FIO_ARRAY_TYPE *old) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
@@ -1360,7 +1360,7 @@ IFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
  *
  * This could be expensive, causing `memmove`.
  */
-IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
+SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
                                                         FIO_ARRAY_TYPE data) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
@@ -1420,7 +1420,7 @@ needs_memory_embed:
  *
  * Returns -1 on error (Array is empty) and 0 on success.
  */
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
+SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
                                           FIO_ARRAY_TYPE *old) {
 
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
@@ -1509,6 +1509,12 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
 Dynamic Arrays - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+/* make suer the functions are defined for the testing */
+#ifdef FIO_REF_CONSTRUCTOR_ONLY
+IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
+IFUNC int FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val) memset(&(dest), (int)(val), sizeof(o))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \

@@ -433,12 +433,12 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_TYPE *old);
 
 /** Sets the object only if missing. Otherwise keeps existing value. */
-SFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set_if_missing)(FIO_MAP_PTR map,
-                                                          FIO_MAP_HASH hash,
+FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set_if_missing)(FIO_MAP_PTR map,
+                                                              FIO_MAP_HASH hash,
 #ifdef FIO_MAP_KEY
-                                                          FIO_MAP_KEY key,
+                                                              FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
-                                                          FIO_MAP_TYPE obj);
+                                                              FIO_MAP_TYPE obj);
 
 /** Removes all objects from the map. */
 SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map);

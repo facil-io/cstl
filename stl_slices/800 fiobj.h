@@ -179,6 +179,13 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* yes, well...*/
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #endif
+/* make sure functions are exported if requested */
+#ifdef FIOBJ_EXTERN
+#define FIO_EXTERN
+#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
+#define FIO_EXTERN_COMPLETE 2
+#endif
+#endif
 #include __FILE__
 
 #define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
@@ -405,6 +412,13 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+/* make sure functions are exported if requested */
+#ifdef FIOBJ_EXTERN
+#define FIO_EXTERN
+#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
+#define FIO_EXTERN_COMPLETE 2
+#endif
+#endif
 #include __FILE__
 
 /* *****************************************************************************
@@ -479,6 +493,13 @@ FIOBJ Strings
 #define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+/* make sure functions are exported if requested */
+#ifdef FIOBJ_EXTERN
+#define FIO_EXTERN
+#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
+#define FIO_EXTERN_COMPLETE 2
+#endif
+#endif
 #include __FILE__
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -607,6 +628,13 @@ FIOBJ Arrays
 #define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+/* make sure functions are exported if requested */
+#ifdef FIOBJ_EXTERN
+#define FIO_EXTERN
+#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
+#define FIO_EXTERN_COMPLETE 2
+#endif
+#endif
 #include __FILE__
 
 /* *****************************************************************************
@@ -641,6 +669,13 @@ FIOBJ Hash Maps
 #define FIO_MEM_REALLOC_          FIOBJ_MEM_REALLOC
 #define FIO_MEM_FREE_             FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_  FIOBJ_MEM_REALLOC_IS_SAFE
+/* make sure functions are exported if requested */
+#ifdef FIOBJ_EXTERN
+#define FIO_EXTERN
+#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
+#define FIO_EXTERN_COMPLETE 2
+#endif
+#endif
 #include __FILE__
 
 /** Calculates an object's hash value for a specific hash map object. */

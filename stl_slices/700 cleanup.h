@@ -47,7 +47,8 @@ Common cleanup
 #undef FIO_MEMORY_NAME /* postponed due to possible use in macros */
 
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
-#if FIO_EXTERN_COMPLETE == 2
+#if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \
+    FIO_EXTERN_COMPLETE == 2
 #undef FIO_EXTERN_COMPLETE
 #endif
 

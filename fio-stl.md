@@ -247,7 +247,11 @@ Frees allocated memory.
 
 #### `FIO_MALLOC_TMP_USE_SYSTEM`
 
-When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions.
+When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions for newly created types.
+
+#### `FIO_MEMORY_DISABLE`
+
+When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will route to the system's `malloc`. Set this when compiling to test the effects of all custom memory allocators working together.
 
 ### Naming and Misc. Macros
 
@@ -1506,6 +1510,8 @@ Multiple allocators can be defined using `FIO_MEMORY_NAME` and including `fio-st
 
 The shortcut `FIO_MALLOC` MACRO will define a local memory allocator shared by any facil.io types that are defined after that macro (in multiple `include` space).
 
+When `FIO_MEMORY_DISABLE` is defined, all custom memory allocators will route to the system's `malloc`.
+
 ### Why Use a Local Memory Allocation?
 
 Using a local memory allocator allows types to [enjoy locality and enhanced performance within their allocation subgroup](https://youtu.be/nZNd5FjSquk).
@@ -1514,7 +1520,7 @@ The facil.io Simple Template Library includes a fast, concurrent, memory allocat
 
 Multiple allocators can be defined using the `FIO_MEMORY_NAME` macro, allowing different objects types to have different memory allocators, resulting in better cache locality and less contention in multi-threaded programs.
 
-The facil.io allocator also increases security by zero-ing out the memory earlier and always returning zeroed out memory (see default`FIO_MEMORY_INITIALIZE_ALLOCATIONS`).
+The facil.io allocator also increases security by zero-ing out the memory earlier and always returning zeroed out memory (see default `FIO_MEMORY_INITIALIZE_ALLOCATIONS`).
 
 Reallocated memory might be filled with junk data after the valid data, but this allocator solves this issue by offering [`fio_realloc2`](#fio_realloc2).
 
@@ -1546,7 +1552,7 @@ This behavior, including the allocator's default alignment, can be tuned / chang
 
 It should be possible to use tcmalloc or jemalloc alongside facil.io's allocator.
 
-It's also possible to prevent facil.io's custom allocator from compiling by defining `FIO_MALLOC_FORCE_SYSTEM` (`-DFIO_MALLOC_FORCE_SYSTEM`).
+It's also possible to prevent facil.io's custom allocator from compiling by defining `FIO_MEMORY_DISABLE` (`-DFIO_MEMORY_DISABLE`).
 
 ### The Memory Allocator's API
 
@@ -1654,7 +1660,7 @@ However, if a multi-threaded process, calling this function from the child proce
 
 ### Memory Allocator Creation MACROS
 
-#### `FIO_MALLOC`
+#### `FIO_MALLOC` (shortcut)
 
 This shortcut macros defines a general allocator with the prefix `fio` (i.e., `fio_malloc`, `fio_free`, etc').
 
@@ -1664,6 +1670,7 @@ Some setup macros are automatically defined and the `FIO_MEM_REALLOC` macro fami
 
 
 It is similar to using:
+
 ```c
 /* for a general allocator, increase system allocation size to 8Gb */
 #define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 23
@@ -1699,6 +1706,10 @@ It is similar to using:
 **REQUIRED**: the prefix for the memory-pool allocator.
 
 This also automatically updates the temporary memory allocation macros (`FIO_MEM_REALLOC_`, etc') so all types defined in the same `include` statement as the allocator will use this allocator instead of the default allocator assigned using `FIO_MEM_REALLOC` (nothe the `_`).
+
+#### `FIO_MALLOC_OVERRIDE_SYSTEM`
+
+Overrides the system's default `malloc` to use this allocator instead.
 
 #### `FIO_MEMORY_ALIGN_LOG`
 
@@ -5125,6 +5136,10 @@ The `FIOBJ_T_PRIMITIVE` class / type resolves to one of the following types:
 
 * `FIOBJ_T_FALSE`: indicates a `fiobj_false()` object.
 
+In the facil.io web application framework, there are extensions to the core `FIOBJ` primitives, including:
+
+* [`FIOBJ_T_IO`](fiobj_io)
+
 The following functions / MACROs help identify a `FIOBJ` object's underlying type.
 
 #### `FIOBJ_TYPE(o)`
@@ -5146,6 +5161,8 @@ The following functions / MACROs help identify a `FIOBJ` object's underlying typ
 ```
 
 Returns the object's type class. This is limited to one of the core types. `FIOBJ_T_PRIMITIVE` and `FIOBJ_T_OTHER` may be returned (they aren't expended to their underlying type).
+
+**Note**: some numbers (`FIOBJ_T_NUMBER` / `FIOBJ_T_FLOAT`) may return `FIOBJ_T_OTHER` when `FIOBJ_TYPE_CLASS` is used, but return their proper type when `FIOBJ_TYPE` is used. This is due to memory optimizations being unavailable for some numerical values.
 
 #### `FIOBJ_IS_INVALID(o)`
 
@@ -5186,6 +5203,8 @@ Avoid calling this function directly. Use the MACRO instead.
 `FIOBJ` objects are **copied by reference** (not by value). Once their reference count is reduced to zero, their memory is freed.
 
 This is extremely important to note, especially in multi-threaded environments. This implied that: **access to a dynamic `FIOBJ` object is _NOT_ thread-safe** and `FIOBJ` objects that may be written to (such as Arrays, Strings and Hash Maps) should **not** be shared across threads (unless properly protected).
+
+The `FIOBJ` soft type system uses an "**ownership**" memory model. When placing a **value** in an Array or a Hash Map, the "ownership" is moved. Freeing the Array / Hash Map will free the object (unless `fiobj_dup` was called). Hash Maps "**own**" their _values_ (but **not** the _keys_).
 
 #### `fiobj_dup`
 
@@ -5828,16 +5847,14 @@ To extend the `FIOBJ` soft type system, there are a number of requirements:
 
 #### `FIOBJ` Pointer Tagging
 
-The `FIOBJ` types is often identified by th a bit "tag" added to the pointer.
+The `FIOBJ` types is often identified by th a bit "tag" added to the pointer. All extension types **must** be tagged as `FIOBJ_T_OTHER`.
 
-The facil.io memory allocator (`fio_malloc`), as well as most system allocators, promise a 64 bit allocation alignment.
+The facil.io memory allocator (`fio_malloc`), as well as most system allocators, promise a 64 bit allocation alignment. The `FIOBJ` types leverage this behavior by utilizing the least significant 3 bits that are always zero. However, this implementation might change in the future, so it's better to use the macros `FIOBJ_PTR_TAG` and `FIOBJ_PTR_UNTAG`.
 
-The `FIOBJ` types leverage this behavior by utilizing the least significant 3 bits that are always zero.
-
-The following macros should be defined for tagging an extension `FIOBJ` type, allowing the `FIO_REF_NAME` constructor / destructor to manage pointer tagging.
+The following macros should be defined for tagging an extension `FIOBJ` type, allowing the `FIO_REF_NAME` constructor / destructor to manage pointer tagging, reference counting and access to the `FIOBJ` virtual table (see later on).
 
 ```c
-#define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
 ```
@@ -5846,7 +5863,9 @@ The following macros should be defined for tagging an extension `FIOBJ` type, al
 
 `FIOBJ` extensions use a virtual function table that is shared by all the objects of that type/class.
 
-Basically, the virtual function table is a `struct` with the Type ID and function pointers.
+Basically, the virtual function table is a `struct` with the **Type ID** and function pointers.
+
+**Type ID** values under 100 are reserved for facil.io and might cause conflicts with the existing type values if used (i.e., `FIOBJ_T_FALSE == 34`).
 
 All function pointers must be populated (where `each1` is only called if `count` returns a non-zero value).
 
@@ -5883,26 +5902,23 @@ typedef struct {
 
 #### `FIOBJ` Extension Example
 
-For our example, let us implement a static string extension type.
+For our example, let us implement a static string extension type. We will use the Type ID 100 because values under 100 are reserved.
+
+Let's call our example header file `fiobj_static.h`, so we can find it later.
 
 The API for this type and the header might look something like this:
 
 ```c
+#ifndef FIO_STAT_STRING_HEADER_H
 /* *****************************************************************************
 FIOBJ Static String Extension Header Example
-
-Copyright: Boaz Segev, 2019
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef FIO_STAT_STRING_HEADER_H
 #define FIO_STAT_STRING_HEADER_H
 /* *****************************************************************************
 Perliminaries - include the FIOBJ extension, but not it's implementation
 ***************************************************************************** */
-#define FIO_EXTERN 1
-#define FIOBJ_EXTERN 1
+#define FIO_EXTERN
+#define FIOBJ_EXTERN
 #define FIO_FIOBJ
 #include "fio-stl.h"
 
@@ -5911,7 +5927,7 @@ Defining the Type ID and the API
 ***************************************************************************** */
 
 /** The Static String Type ID */
-#define FIOBJ_T_STATIC_STRING 101UL
+#define FIOBJ_T_STATIC_STRING 100UL
 
 /** Returns a new static string object. The string is considered immutable. */
 FIOBJ fiobj_static_new(const char *str, size_t len);
@@ -5925,18 +5941,13 @@ size_t fiobj_static_len(FIOBJ s);
 #endif
 ```
 
-**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIOBJ_EXTERN_COMPLETE` macro.
+**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIOBJ_EXTERN_COMPLETE` macro **before** including the `fio-stl.h` file (as well as defining `FIO_FIOBJ` and `FIOBJ_EXTERN`).
 
 The implementation may look like this.
 
 ```c
 /* *****************************************************************************
 FIOBJ Static String Extension Implementation Example
-
-Copyright: Boaz Segev, 2019
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #include <fiobj_static.h> // include the header file here, whatever it's called
 
@@ -5965,6 +5976,7 @@ static uint32_t static_string_each1(FIOBJ o, int32_t start_at,
  * return value is currently ignored, but this might change in the future.
  */
 static int static_string_free2(FIOBJ o);
+
 /** The virtual function table object. */
 static const FIOBJ_class_vtable_s FIOBJ___STATIC_STRING_VTABLE = {
     .type_id = FIOBJ_T_STATIC_STRING,
@@ -5981,18 +5993,15 @@ static const FIOBJ_class_vtable_s FIOBJ___STATIC_STRING_VTABLE = {
 The Static String Type (internal implementation)
 ***************************************************************************** */
 
-/* in this example, all functions defined by fio-stl.h will be static (local) */
-#undef FIO_EXTERN
-#undef FIOBJ_EXTERN
 /* leverage the small-string type to hold static string data */
 #define FIO_STR_SMALL fiobj_static_string
 /* add required pointer tagging */
-#define FIO_PTR_TAG(p) ((uintptr_t)p | FIOBJ_T_OTHER)
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
 /* add required reference counter / wrapper type */
-#define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_NAME fiobj_static_string
+#define FIO_REF_CONSTRUCTOR_ONLY
 /* initialization - for demonstration purposes, we don't use it here. */
 #define FIO_REF_INIT(o)                                                        \
   do {                                                                         \
@@ -6059,7 +6068,7 @@ static double static_string_to_f(FIOBJ o) {
   fio_str_info_s s = fiobj_static_string_info(o);
   if (s.len)
     return fio_atof(&s.buf);
-  return 0;
+  return 0.0L;
 }
 /** Returns the number of exposed elements held by the object, if any. */
 static uint32_t static_string_count(FIOBJ o) {
@@ -6079,7 +6088,8 @@ static int static_string_free2(FIOBJ o) { return fiobj_static_string_free(o); }
 Example usage:
 
 ```c
-#include "fiobj_static.h" // include FIOBJ extension type
+#define FIOBJ_EXTERN_COMPLETE // we will place the FIOBJ implementation here.
+#include "fiobj_static.h"     // include FIOBJ extension type
 int main(void) {
   FIOBJ o = fiobj_static_new("my static string", 16);
   /* example test of virtual table redirection */
