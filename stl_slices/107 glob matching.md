@@ -16,7 +16,7 @@ The following patterns are recognized:
 
 * `*` - matches any string, including an empty string.
 		
-		i.e., the following patterns will match against the string `"String"`:
+	i.e., the following patterns will match against the string `"String"`:
 
     `"*"`
 
@@ -26,7 +26,7 @@ The following patterns are recognized:
 
 * `?` - matches any single **byte** (does NOT support UTF-8 characters).
 		
-		i.e., the following patterns will match against the string `"String"`:
+	i.e., the following patterns will match against the string `"String"`:
 
     `"?tring"`
 
@@ -38,9 +38,9 @@ The following patterns are recognized:
 
     Byte ranges are supported using `'-'` (i.e., `[!0-9]`)
 
-		Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-		
-		i.e., the following patterns will match against the string `"String"`:
+	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+	
+	i.e., the following patterns will match against the string `"String"`:
 
     `"[!a-z]tring"`
 
@@ -50,9 +50,9 @@ The following patterns are recognized:
 
 * `[...]` - matches any **byte** that **is** withing the brackets (does **not** support UTF-8 characters).
 
-		Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-		
-		i.e., the following patterns will match against the string `"String"`:
+	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+	
+	i.e., the following patterns will match against the string `"String"`:
 
     `"[A-Z]tring"`
 

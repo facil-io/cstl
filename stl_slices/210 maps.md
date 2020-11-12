@@ -26,7 +26,7 @@ FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
 }
 ```
 
-Hash maps and sets are extremely useful and common mapping / dictionary primitives, also sometimes known as "dictionary".
+HashMaps (a.k.a., Hash Tables) and sets are extremely useful and common mapping / dictionary primitives, also sometimes known as "dictionary".
 
 Hash maps use both a `hash` and a `key` to identify a `value`. The `hash` value is calculated by feeding the key's data to a hash function (such as Risky Hash or SipHash).
 
@@ -38,7 +38,13 @@ Some map implementations support a FIFO limited storage, which could be used for
 
 The facil.io library offers both ordered and unordered maps. Unordered maps are often faster and use less memory. If iteration is performed, ordered maps might be better.
 
+Ordered hash maps (or hash tables) are defined using `FIO_OMAP_NAME`.
+
+Unordered hash maps (or hash tables) are defined using `FIO_UMAP_NAME`.
+
 Indexing the map allows LRU (least recently used) eviction, but comes at a performance cost in both memory (due to the extra data per object) and speed (due to out of order memory access and increased cache misses).
+
+To enable LRU indexing on the map, define `FIO_MAP_EVICT_LRU` as `1` (true).
 
 Ordered maps are constructed using an ordered Array + an index map that uses 4 or 8 bytes per array index.
 
@@ -52,7 +58,7 @@ The map implementations have protection features against too many full collision
 
 ### Map Overview 
 
-To create a map, define `FIO_MAP_NAME` or `FIO_UMAP_NAME` (unordered).
+To create a map, define `FIO_MAP_NAME`, `FIO_OMAP_NAME`(ordered) **or** `FIO_UMAP_NAME` (unordered).
 
 To create a hash map (rather then a set), also define `FIO_MAP_KEY` (containing the key's type).
 
@@ -78,8 +84,8 @@ Other helpful macros to define might include:
 - `FIO_MAP_KEY_DISCARD(obj)`, handles discarded element data (i.e., when overwriting an existing value in a hash map).
 
 - `FIO_MAP_SHOULD_OVERWRITE(older, newer)`, if set it should return `0` (false) to prevent an overwriting instruction. This can be used to compare timestamps between to items and test that `newer` is actually newer than `older`.
-- `FIO_MAP_EVICT_LRU`, if set to true (1), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
-- `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO).
+- `FIO_MAP_EVICT_LRU`, if set to true (`1`), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
+- `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO). By default, no auto-eviction is performed.
 
 - `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
 - `FIO_MAP_HASH_FN`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.

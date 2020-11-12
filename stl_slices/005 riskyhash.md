@@ -1,7 +1,6 @@
 ## Risky Hash (data hashing):
 
-If the `FIO_RISKY_HASH` macro is defined than the following static function will
-be defined:
+[Risky Hash](./riskyhash) is facil.io's fast hashing solution that balances non-cryptographic security consideration and speed. If the `FIO_RISKY_HASH` macro is defined than the following static function will be defined:
 
 #### `fio_risky_hash`
 

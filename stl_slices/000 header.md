@@ -48,6 +48,8 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Bitmap helpers](#bitmap-helpers) - defined by `FIO_BITMAP`
 
+* [Glob Matching](#globe-matching) - defined by `FIO_GLOB_MATCH`
+
 * [Data Hashing (using Risky Hash)](#risky-hash-data-hashing) - defined by `FIO_RISKY_HASH`
 
 * [Pseudo Random Generation](#pseudo-random-generation) - defined by `FIO_RAND`
@@ -67,6 +69,8 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 * [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
 
 * [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
+
+* [Polling with `poll`](#basic-io-polling) - defined by `FIO_POLL`
 
 * [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
 

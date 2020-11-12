@@ -81,6 +81,8 @@ void fio_poll_destroy(fio_poll_s *p);
 
 Destroys the polling object, freeing its resources.
 
+**Note**: the monitored file descriptors will remain untouched (possibly open). To close all the monitored file descriptors, call `fio_poll_close_and_destroy` instead.
+
 #### `fio_poll_close_and_destroy`
 
 ```c
