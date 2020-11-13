@@ -54,6 +54,16 @@ SFUNC int64_t fio_atol(char **pstr);
 /** A helper function that converts between String data to a signed double. */
 SFUNC double fio_atof(char **pstr);
 
+/**
+ * Maps characters to alphanumerical value, where numbers have their natural
+ * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
+ *
+ * Out of bound values return 255.
+ *
+ * This allows calculations for up to base 36.
+ */
+IFUNC uint8_t fio_c2i(unsigned char c);
+
 /* *****************************************************************************
 Numbers to Strings - API
 ***************************************************************************** */
@@ -98,6 +108,37 @@ typedef struct {
   uint8_t sign;
 } fio___number_s;
 
+/**
+ * Maps characters to alphanumerical value, where numbers have their natural
+ * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
+ *
+ * Out of bound values return 255.
+ *
+ * This allows calculations for up to base 36.
+ */
+IFUNC uint8_t fio_c2i(unsigned char c) {
+  static uint8_t fio___alphanumerical_map[256] = {
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   255, 255,
+      255, 255, 255, 255, 255, 10,  11,  12,  13,  14,  15,  16,  17,  18,  19,
+      20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,  34,
+      35,  255, 255, 255, 255, 255, 255, 10,  11,  12,  13,  14,  15,  16,  17,
+      18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,
+      33,  34,  35,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255};
+  return fio___alphanumerical_map[c];
+}
+
 /** Reads number information in base 2. Returned expo in base 2. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
   fio___number_s r = (fio___number_s){0};
@@ -113,15 +154,15 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
   return r;
 }
 
-/** Reads number information, up to base 10 numbers. Returned expo in `base`. */
 FIO_IFUNC fio___number_s fio___aton_read_b2_bX(char **pstr, uint8_t base) {
   fio___number_s r = (fio___number_s){0};
   const uint64_t limit = ((~0ULL) / base) - (base - 1);
-  while (**pstr >= '0' && **pstr < ('0' + base) && r.val <= (limit)) {
-    r.val = (r.val * base) + (**pstr - '0');
+  register uint8_t tmp;
+  while ((tmp = fio_c2i(**pstr)) < base && r.val <= (limit)) {
+    r.val = (r.val * base) + tmp;
     ++(*pstr);
   }
-  while (**pstr >= '0' && **pstr < ('0' + base)) {
+  while (fio_c2i(**pstr) < base) {
     ++r.expo;
     ++(*pstr);
   }
@@ -133,18 +174,13 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
   fio___number_s r = (fio___number_s){0};
   const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
   for (; !(r.val & mask);) {
-    uint8_t tmp;
-    if (**pstr >= '0' && **pstr <= '9')
-      tmp = **pstr - '0';
-    else if (((**pstr | 32) >= 'a' && (**pstr | 32) <= 'f'))
-      tmp = (**pstr | 32) - ('a' - 10);
-    else
+    uint8_t tmp = fio_c2i(**pstr);
+    if (tmp > 15)
       return r;
     r.val = (r.val << 4) | tmp;
     ++(*pstr);
   }
-  while ((**pstr >= '0' && **pstr <= '9') ||
-         ((**pstr | 32) >= 'a' && (**pstr | 32) <= 'f'))
+  while ((fio_c2i(**pstr)) < 16)
     ++r.expo;
   return r;
 }
@@ -563,7 +599,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
       }
       __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
       int64_t n = a2l(&bf);
-      FIO_ASSERT(n == i, "roundtrip error for %s: %s != %lld", name, bf, i);
+      bf = buf;
+      FIO_ASSERT(n == i,
+                 "roundtrip error for %s: %s != %lld (got %lld)",
+                 name,
+                 buf,
+                 i,
+                 a2l(&bf));
     }
     trt = FIO_NAME_TEST(stl, atol_time)() - start;
     start = FIO_NAME_TEST(stl, atol_time)();

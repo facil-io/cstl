@@ -1079,6 +1079,19 @@ string).
 
 Returns the number of bytes actually written (excluding the NUL terminator).
 
+
+#### `fio_c2i`
+
+```c
+uint8_t fio_c2i(unsigned char c);
+```
+
+Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+
+Out of bound values return 255.
+
+This allows calculations for up to base 36.
+
 -------------------------------------------------------------------------------
 ## URL (URI) parsing
 
