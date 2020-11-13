@@ -117,7 +117,7 @@ typedef struct {
  * This allows calculations for up to base 36.
  */
 IFUNC uint8_t fio_c2i(unsigned char c) {
-  static uint8_t fio___alphanumerical_map[256] = {
+  static const uint8_t fio___alphanumerical_map[256] = {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
