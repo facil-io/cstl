@@ -659,6 +659,7 @@ FIOBJ Hash Maps
 #endif
 #define FIO_MAP_TYPE              FIOBJ
 #define FIO_MAP_TYPE_DESTROY(o)   fiobj_free(o)
+#define FIO_MAP_TYPE_DISCARD(o)   fiobj_free(o)
 #define FIO_MAP_KEY               FIOBJ
 #define FIO_MAP_KEY_CMP(a, b)     FIO_NAME_BL(fiobj, eq)((a), (b))
 #define FIO_MAP_KEY_COPY(dest, o) (dest = fiobj_dup(o))
@@ -685,6 +686,14 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                          set2)(FIOBJ hash, FIOBJ key, FIOBJ value);
 
+/**
+ * Inserts a value to a hash map, with a default hash value calculation.
+ *
+ * If the key already exists in the Hash Map, the value will be freed instead.
+ */
+FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                         set_if_missing2)(FIOBJ hash, FIOBJ key, FIOBJ value);
+
 /** Finds a value in a hash map, with a default hash value calculation. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(FIOBJ hash,
                                                                    FIOBJ key);
@@ -694,7 +703,7 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                        remove2)(FIOBJ hash, FIOBJ key, FIOBJ *old);
 
 /**
- * Sets a String value in a hash map, allocating the String and automatically
+ * Sets a value in a hash map, allocating the key String and automatically
  * calculating the hash value.
  */
 FIO_IFUNC
@@ -702,15 +711,15 @@ FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                set3)(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 
 /**
- * Finds a String value in a hash map, using a temporary String and
- * automatically calculating the hash value.
+ * Finds a value in the hash map, using a temporary String and automatically
+ * calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                          get3)(FIOBJ hash, const char *buf, size_t len);
 
 /**
- * Removes a String value in a hash map, using a temporary String and
- * automatically calculating the hash value.
+ * Removes a value in a hash map, using a temporary String and automatically
+ * calculating the hash value.
  */
 FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                        remove3)(FIOBJ hash,
@@ -1260,6 +1269,18 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   return FIO_NAME(
       FIO_NAME(fiobj, FIOBJ___NAME_HASH),
       set)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, value, NULL);
+}
+
+/**
+ * Inserts a value to a hash map, with a default hash value calculation.
+ *
+ * If the key already exists in the Hash Map, the value will be freed instead.
+ */
+FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                         set_if_missing2)(FIOBJ hash, FIOBJ key, FIOBJ value) {
+  return FIO_NAME(
+      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+      set_if_missing)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, value);
 }
 
 /** Finds a value in a hash map, automatically calculating the hash value. */
@@ -2320,6 +2341,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(o, k, tmp);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set_if_missing2)
+      (o, k, fiobj_dup(tmp));
       fiobj_free(k);
     }
 

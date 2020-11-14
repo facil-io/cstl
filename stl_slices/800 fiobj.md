@@ -638,6 +638,16 @@ FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
 
 Inserts a value to a hash map, with a default hash value calculation.
 
+#### `fiobj_hash_set_if_missing2`
+
+```c
+FIOBJ fiobj_hash_set_if_missing2(FIOBJ hash, FIOBJ key, FIOBJ value);
+```
+
+Inserts a value to a hash map, with a default hash value calculation.
+
+If the key already exists in the Hash Map, the value will be freed instead.
+
 #### `fiobj_hash_get2`
 
 ```c
