@@ -210,15 +210,6 @@ Stream Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
 /* Frees any internal data AND the object's container! */
 SFUNC void fio_stream_destroy(fio_stream_s *s) {

@@ -70,15 +70,6 @@ struct FIO_NAME(FIO_MAP_NAME, s) {
 /* *****************************************************************************
 Ordered Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 #ifndef FIO_MAP_CAPA
 #define FIO_MAP_CAPA(bits) (((uintptr_t)1ULL << (bits)) - 1)
@@ -177,15 +168,6 @@ Ordered Map Implementation - possibly externed functions.
   ((sizeof(FIO_NAME(FIO_MAP_NAME, each_s)) + sizeof(FIO_MAP_SIZE_TYPE)) *      \
    FIO_MAP_CAPA(bits))
 #endif
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 /* *****************************************************************************
 Ordered Map Implementation - helper functions.

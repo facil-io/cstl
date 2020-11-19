@@ -2170,15 +2170,14 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
 /** Isolated the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
-#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-/** Returns the index of the most significant (highest) bit. */
-#define fio_bits_msb_index(i) __builtin_clz(i)
-#else
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   uint64_t r = 0;
   if (!i)
     goto zero;
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return __builtin_clzll(i);
+#else
 #define fio___bits_msb_index_step(x)                                           \
   if (i >= ((uint64_t)1) << x)                                                 \
     r += x, i >>= x;
@@ -2190,23 +2189,23 @@ FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   fio___bits_msb_index_step(1);
 #undef fio___bits_msb_index_step
   return r;
+#endif
 zero:
   r = (size_t)-1;
   return r;
 }
-#endif
 
-#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-/** Returns the index of the least significant (lowest) bit. */
-#define fio_bits_lsb_index(i) __builtin_ctz(i)
-#else
 /** Returns the index of the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
-#if 0
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  if (!i)
+    return (size_t)-1;
+  return __builtin_ctzll(i);
+#elif 0
   return fio_bits_msb_index(fio_bits_lsb(i));
 #else
-  switch (fio_bits_lsb(i)) {
   // clang-format off
+  switch (fio_bits_lsb(i)) {
     case UINT64_C(0x0): return (size_t)-1;
     case UINT64_C(0x1): return 0;
     case UINT64_C(0x2): return 1;
@@ -2272,12 +2271,11 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
     case UINT64_C(0x2000000000000000): return 61;
     case UINT64_C(0x4000000000000000): return 62;
     case UINT64_C(0x8000000000000000): return 63;
-    // clang-format on
   }
+  // clang-format on
   return -1;
-#endif /* map vs math */
+#endif /* __builtin vs. math vs. map */
 }
-#endif
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
@@ -12372,15 +12370,6 @@ Stream Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
 /* Frees any internal data AND the object's container! */
 SFUNC void fio_stream_destroy(fio_stream_s *s) {
@@ -14460,7 +14449,6 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   return dest_;
 }
 
-#if 1
 /**
  * Sets `index` to the value in `data`.
  *
@@ -14476,7 +14464,6 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
                                                     int32_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old) {
-  /* TODO: rewrite to add feature (negative expansion)? */
   FIO_NAME(FIO_ARRAY_NAME, s) * ary;
   FIO_ARRAY_TYPE *a;
   uint32_t count;
@@ -14605,119 +14592,6 @@ invalid:
 
   return NULL;
 }
-#else
-
-/**
- * Sets `index` to the value in `data`.
- *
- * If `index` is negative, it will be counted from the end of the Array (-1 ==
- * last element).
- *
- * If `old` isn't NULL, the existing data will be copied to the location pointed
- * to by `old` before the copy in the Array is destroyed.
- *
- * Returns a pointer to the new object, or NULL on error.
- */
-SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
-                                                    int32_t index,
-                                                    FIO_ARRAY_TYPE data,
-                                                    FIO_ARRAY_TYPE *old) {
-  /* TODO: (WIP) try another approach, maybe it would perform better. */
-  FIO_ARRAY_TYPE inv = FIO_ARRAY_TYPE_INVALID;
-  uint8_t pre_existing = 1;
-  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
-  uint32_t count;
-  FIO_ARRAY_TYPE *pos;
-  switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    count = ary->end - ary->start;
-    if (index < 0) {
-      index += count;
-    }
-    if (index >= 0) {
-      if (index >= ary->capa) {
-        /* we need more memory */
-        pre_existing = 0;
-      } else if (ary->start + index > ary->capa) {
-        /* we need to move the memory back (make start smaller) */
-        pre_existing = 0;
-      }
-      if (index >= ary->start + ary->end) {
-        /* zero out elements in between */
-        pre_existing = 0;
-      }
-    } else {
-      if (ary->end - index >= ary->capa) {
-        /* we need more memory */
-      } else if (index + (int32_t)ary->start < 0) {
-        /* we need to move the memory back (make start smaller) */
-      }
-      if (index < -1) {
-        /* zero out elements in between */
-      }
-    }
-    pos = ary->ary + ary->start + index;
-    break;
-  case 1:
-    count = ary->start;
-    if (index < 0) {
-      index += count;
-    }
-    if (index >= 0) {
-      pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      if (index >= FIO_ARRAY_EMBEDDED_CAPA) {
-        /* we need more memory */
-        if (index >= ary->end) {
-          /* zero out elements in between */
-        }
-        pre_existing = 0;
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      } else {
-        if (index >= ary->start) {
-          /* zero out elements in between */
-          pre_existing = 0;
-        }
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      }
-    } else {
-      pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index + ary->start;
-      if (ary->start - index >= FIO_ARRAY_EMBEDDED_CAPA) {
-        /* we need more memory */
-
-        pre_existing = 0;
-        pos = ary->ary + ary->start + index;
-      } else if (index + (int32_t)ary->start < 0) {
-        /* we need to move memory (place index at 0) */
-        pre_existing = 0;
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded;
-      }
-    }
-    break;
-  default:
-    if (old) {
-      FIO_ARRAY_TYPE_COPY(old[0], FIO_ARRAY_TYPE_INVALID);
-    };
-    return NULL;
-  }
-  /* copy / clear object */
-  if (pre_existing) {
-    if (old) {
-      FIO_ARRAY_TYPE_COPY(old[0], pos[0]);
-#if FIO_ARRAY_DESTROY_AFTER_COPY
-      FIO_ARRAY_TYPE_DESTROY(pos[0]);
-#endif
-    } else {
-      FIO_ARRAY_TYPE_DESTROY(pos[0]);
-    }
-  } else if (old) {
-    FIO_ARRAY_TYPE_COPY(old[0], FIO_ARRAY_TYPE_INVALID);
-  }
-  FIO_ARRAY_TYPE_COPY(pos[0], FIO_ARRAY_TYPE_INVALID);
-  FIO_ARRAY_TYPE_COPY(pos[0], data);
-  return pos;
-}
-#endif
 
 /**
  * Returns the index of the object or -1 if the object wasn't found.
@@ -15005,7 +14879,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
   return -1;
 }
 
-/** TODO
+/**
  * Unshifts an object to the beginning of the Array. Returns -1 on error.
  *
  * This could be expensive, causing `memmove`.
@@ -15062,7 +14936,7 @@ needs_memory_embed:
   return ary->ary + ary->start;
 }
 
-/** TODO
+/**
  * Removes an object from the beginning of the Array.
  *
  * If `old` is set, the data is copied to the location pointed to by `old`
@@ -15118,7 +14992,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
   return -1;
 }
 
-/** TODO
+/**
  * Iteration using a callback for each entry in the array.
  *
  * The callback task function must accept an the entry data as well as an opaque
@@ -16240,15 +16114,6 @@ struct FIO_NAME(FIO_MAP_NAME, s) {
 /* *****************************************************************************
 Ordered Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 #ifndef FIO_MAP_CAPA
 #define FIO_MAP_CAPA(bits) (((uintptr_t)1ULL << (bits)) - 1)
@@ -16347,15 +16212,6 @@ Ordered Map Implementation - possibly externed functions.
   ((sizeof(FIO_NAME(FIO_MAP_NAME, each_s)) + sizeof(FIO_MAP_SIZE_TYPE)) *      \
    FIO_MAP_CAPA(bits))
 #endif
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 /* *****************************************************************************
 Ordered Map Implementation - helper functions.
@@ -17046,15 +16902,6 @@ struct FIO_NAME(FIO_MAP_NAME, s) {
 /* *****************************************************************************
 Unordered Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 #ifndef FIO_MAP_CAPA
 #define FIO_MAP_CAPA(bits) ((uintptr_t)1ULL << (bits))
@@ -17174,15 +17021,6 @@ Unordered Map Implementation - possibly externed functions.
   ((sizeof(FIO_NAME(FIO_MAP_NAME, each_s)) + sizeof(uint8_t)) *                \
    FIO_MAP_CAPA(bits))
 #endif
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 /* *****************************************************************************
 Unordered Map Implementation - helper functions.
@@ -17379,7 +17217,6 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
         if (result == UINT64_C(0x8080808080808080))
           continue;
         result ^= UINT64_C(0x8080808080808080);
-        /* TODO: use __builtin_ctz for starting the loop */
         for (int j = 0; j < 8 && result; ++j) {
           const FIO_MAP_SIZE_TYPE n = i + j;
           if ((result & UINT64_C(0x80))) {
@@ -22135,7 +21972,7 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                        remove2)(FIOBJ hash, FIOBJ key, FIOBJ *old);
 
 /**
- * Sets a String value in a hash map, allocating the String and automatically
+ * Sets a value in a hash map, allocating the key String and automatically
  * calculating the hash value.
  */
 FIO_IFUNC
@@ -22143,15 +21980,15 @@ FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                set3)(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 
 /**
- * Finds a String value in a hash map, using a temporary String and
- * automatically calculating the hash value.
+ * Finds a value in the hash map, using a temporary String and automatically
+ * calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                          get3)(FIOBJ hash, const char *buf, size_t len);
 
 /**
- * Removes a String value in a hash map, using a temporary String and
- * automatically calculating the hash value.
+ * Removes a value in a hash map, using a temporary String and automatically
+ * calculating the hash value.
  */
 FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                        remove3)(FIOBJ hash,
@@ -22786,7 +22623,7 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   return r;
 }
 
-/** TODO: Updates a hash using information from another Hash. */
+/** Updates a hash using information from another Hash. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
                                                                     FIOBJ src) {
   if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||

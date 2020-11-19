@@ -63,15 +63,6 @@ struct FIO_NAME(FIO_MAP_NAME, s) {
 /* *****************************************************************************
 Unordered Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 #ifndef FIO_MAP_CAPA
 #define FIO_MAP_CAPA(bits) ((uintptr_t)1ULL << (bits))
@@ -191,15 +182,6 @@ Unordered Map Implementation - possibly externed functions.
   ((sizeof(FIO_NAME(FIO_MAP_NAME, each_s)) + sizeof(uint8_t)) *                \
    FIO_MAP_CAPA(bits))
 #endif
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 
 /* *****************************************************************************
 Unordered Map Implementation - helper functions.
@@ -396,7 +378,6 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
         if (result == UINT64_C(0x8080808080808080))
           continue;
         result ^= UINT64_C(0x8080808080808080);
-        /* TODO: use __builtin_ctz for starting the loop */
         for (int j = 0; j < 8 && result; ++j) {
           const FIO_MAP_SIZE_TYPE n = i + j;
           if ((result & UINT64_C(0x80))) {

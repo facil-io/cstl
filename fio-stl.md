@@ -3892,22 +3892,6 @@ To limit the number of elements in a map (FIFO, ignoring last access time), allo
 
 If `FIO_MAP_MAX_ELEMENTS` is `0`, then the theoretical maximum number of elements should be: `(1 << 32) - 1`. In practice, the safe limit should be calculated as `1 << 31` or `1 << 30`. The same is true for `FIO_MAP_BIG`, only relative to 64 bits.
 
-Example:
-
-```c
-/* TODO */
-/* We'll use small immutable binary strings as keys */
-#define FIO_STR_SMALL str
-#include "fio-stl.h"
-
-#define FIO_MAP_NAME number_map /* results in the type: number_map_s */
-#define FIO_MAP_TYPE size_t
-#define FIO_MAP_KEY str_s
-#define FIO_MAP_KEY_DESTROY(k) key_destroy(&k)
-#define FIO_MAP_KEY_DISCARD(k) key_destroy(&k)
-#include "fio-stl.h"
-```
-
 ### Hash Map / Set - API (initialization)
 
 #### `MAP_new`
@@ -5699,6 +5683,16 @@ FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
 ```
 
 Inserts a value to a hash map, with a default hash value calculation.
+
+#### `fiobj_hash_set_if_missing2`
+
+```c
+FIOBJ fiobj_hash_set_if_missing2(FIOBJ hash, FIOBJ key, FIOBJ value);
+```
+
+Inserts a value to a hash map, with a default hash value calculation.
+
+If the key already exists in the Hash Map, the value will be freed instead.
 
 #### `fiobj_hash_get2`
 

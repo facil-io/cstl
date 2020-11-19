@@ -569,15 +569,14 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
 /** Isolated the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
-#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-/** Returns the index of the most significant (highest) bit. */
-#define fio_bits_msb_index(i) __builtin_clz(i)
-#else
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   uint64_t r = 0;
   if (!i)
     goto zero;
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return __builtin_clzll(i);
+#else
 #define fio___bits_msb_index_step(x)                                           \
   if (i >= ((uint64_t)1) << x)                                                 \
     r += x, i >>= x;
@@ -589,23 +588,23 @@ FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   fio___bits_msb_index_step(1);
 #undef fio___bits_msb_index_step
   return r;
+#endif
 zero:
   r = (size_t)-1;
   return r;
 }
-#endif
 
-#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-/** Returns the index of the least significant (lowest) bit. */
-#define fio_bits_lsb_index(i) __builtin_ctz(i)
-#else
 /** Returns the index of the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
-#if 0
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  if (!i)
+    return (size_t)-1;
+  return __builtin_ctzll(i);
+#elif 0
   return fio_bits_msb_index(fio_bits_lsb(i));
 #else
-  switch (fio_bits_lsb(i)) {
   // clang-format off
+  switch (fio_bits_lsb(i)) {
     case UINT64_C(0x0): return (size_t)-1;
     case UINT64_C(0x1): return 0;
     case UINT64_C(0x2): return 1;
@@ -671,12 +670,11 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
     case UINT64_C(0x2000000000000000): return 61;
     case UINT64_C(0x4000000000000000): return 62;
     case UINT64_C(0x8000000000000000): return 63;
-    // clang-format on
   }
+  // clang-format on
   return -1;
-#endif /* map vs math */
+#endif /* __builtin vs. math vs. map */
 }
-#endif
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */

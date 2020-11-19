@@ -1354,7 +1354,7 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   return r;
 }
 
-/** TODO: Updates a hash using information from another Hash. */
+/** Updates a hash using information from another Hash. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
                                                                     FIOBJ src) {
   if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||

@@ -810,7 +810,6 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   return dest_;
 }
 
-#if 1
 /**
  * Sets `index` to the value in `data`.
  *
@@ -826,7 +825,6 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
                                                     int32_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old) {
-  /* TODO: rewrite to add feature (negative expansion)? */
   FIO_NAME(FIO_ARRAY_NAME, s) * ary;
   FIO_ARRAY_TYPE *a;
   uint32_t count;
@@ -955,119 +953,6 @@ invalid:
 
   return NULL;
 }
-#else
-
-/**
- * Sets `index` to the value in `data`.
- *
- * If `index` is negative, it will be counted from the end of the Array (-1 ==
- * last element).
- *
- * If `old` isn't NULL, the existing data will be copied to the location pointed
- * to by `old` before the copy in the Array is destroyed.
- *
- * Returns a pointer to the new object, or NULL on error.
- */
-SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
-                                                    int32_t index,
-                                                    FIO_ARRAY_TYPE data,
-                                                    FIO_ARRAY_TYPE *old) {
-  /* TODO: (WIP) try another approach, maybe it would perform better. */
-  FIO_ARRAY_TYPE inv = FIO_ARRAY_TYPE_INVALID;
-  uint8_t pre_existing = 1;
-  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
-  uint32_t count;
-  FIO_ARRAY_TYPE *pos;
-  switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    count = ary->end - ary->start;
-    if (index < 0) {
-      index += count;
-    }
-    if (index >= 0) {
-      if (index >= ary->capa) {
-        /* we need more memory */
-        pre_existing = 0;
-      } else if (ary->start + index > ary->capa) {
-        /* we need to move the memory back (make start smaller) */
-        pre_existing = 0;
-      }
-      if (index >= ary->start + ary->end) {
-        /* zero out elements in between */
-        pre_existing = 0;
-      }
-    } else {
-      if (ary->end - index >= ary->capa) {
-        /* we need more memory */
-      } else if (index + (int32_t)ary->start < 0) {
-        /* we need to move the memory back (make start smaller) */
-      }
-      if (index < -1) {
-        /* zero out elements in between */
-      }
-    }
-    pos = ary->ary + ary->start + index;
-    break;
-  case 1:
-    count = ary->start;
-    if (index < 0) {
-      index += count;
-    }
-    if (index >= 0) {
-      pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      if (index >= FIO_ARRAY_EMBEDDED_CAPA) {
-        /* we need more memory */
-        if (index >= ary->end) {
-          /* zero out elements in between */
-        }
-        pre_existing = 0;
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      } else {
-        if (index >= ary->start) {
-          /* zero out elements in between */
-          pre_existing = 0;
-        }
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index;
-      }
-    } else {
-      pos = FIO_ARRAY2EMBEDDED(ary)->embedded + index + ary->start;
-      if (ary->start - index >= FIO_ARRAY_EMBEDDED_CAPA) {
-        /* we need more memory */
-
-        pre_existing = 0;
-        pos = ary->ary + ary->start + index;
-      } else if (index + (int32_t)ary->start < 0) {
-        /* we need to move memory (place index at 0) */
-        pre_existing = 0;
-        pos = FIO_ARRAY2EMBEDDED(ary)->embedded;
-      }
-    }
-    break;
-  default:
-    if (old) {
-      FIO_ARRAY_TYPE_COPY(old[0], FIO_ARRAY_TYPE_INVALID);
-    };
-    return NULL;
-  }
-  /* copy / clear object */
-  if (pre_existing) {
-    if (old) {
-      FIO_ARRAY_TYPE_COPY(old[0], pos[0]);
-#if FIO_ARRAY_DESTROY_AFTER_COPY
-      FIO_ARRAY_TYPE_DESTROY(pos[0]);
-#endif
-    } else {
-      FIO_ARRAY_TYPE_DESTROY(pos[0]);
-    }
-  } else if (old) {
-    FIO_ARRAY_TYPE_COPY(old[0], FIO_ARRAY_TYPE_INVALID);
-  }
-  FIO_ARRAY_TYPE_COPY(pos[0], FIO_ARRAY_TYPE_INVALID);
-  FIO_ARRAY_TYPE_COPY(pos[0], data);
-  return pos;
-}
-#endif
 
 /**
  * Returns the index of the object or -1 if the object wasn't found.
@@ -1355,7 +1240,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
   return -1;
 }
 
-/** TODO
+/**
  * Unshifts an object to the beginning of the Array. Returns -1 on error.
  *
  * This could be expensive, causing `memmove`.
@@ -1412,7 +1297,7 @@ needs_memory_embed:
   return ary->ary + ary->start;
 }
 
-/** TODO
+/**
  * Removes an object from the beginning of the Array.
  *
  * If `old` is set, the data is copied to the location pointed to by `old`
@@ -1468,7 +1353,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
   return -1;
 }
 
-/** TODO
+/**
  * Iteration using a callback for each entry in the array.
  *
  * The callback task function must accept an the entry data as well as an opaque
