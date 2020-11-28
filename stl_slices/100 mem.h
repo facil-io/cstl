@@ -85,8 +85,8 @@ Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
 #ifdef FIO_MEMORY_NAME
 
-#undef FIO_ALIGN
-#undef FIO_ALIGN_NEW
+#undef FIO_MEM_ALIGN
+#undef FIO_MEM_ALIGN_NEW
 
 #ifndef FIO_MEMORY_ALIGN_LOG
 /** Allocation alignment, MUST be >= 3 and <= 10*/
@@ -106,12 +106,12 @@ Memory Allocation - Setup Alignment Info
 
 /* inform the compiler that the returned value is aligned on 16 byte marker */
 #if __clang__ || __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 8)
-#define FIO_ALIGN __attribute__((assume_aligned(FIO_MEMORY_ALIGN_SIZE)))
-#define FIO_ALIGN_NEW                                                          \
+#define FIO_MEM_ALIGN __attribute__((assume_aligned(FIO_MEMORY_ALIGN_SIZE)))
+#define FIO_MEM_ALIGN_NEW                                                      \
   __attribute__((malloc, assume_aligned(FIO_MEMORY_ALIGN_SIZE)))
 #else
-#define FIO_ALIGN
-#define FIO_ALIGN_NEW
+#define FIO_MEM_ALIGN
+#define FIO_MEM_ALIGN_NEW
 #endif /* (__clang__ || __GNUC__)... */
 
 /* *****************************************************************************
@@ -128,7 +128,7 @@ Memory Allocation - API
  * `mempool_malloc` promises a best attempt at providing locality between
  * consecutive calls, but locality can't be guaranteed.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size);
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size);
 
 /**
  * same as calling `fio_malloc(size_per_unit * unit_count)`;
@@ -136,9 +136,9 @@ SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size);
  * Allocations above FIO_MEMORY_BLOCK_ALLOC_LIMIT will be redirected to `mmap`,
  * as if `mempool_mmap` was called.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                   calloc)(size_t size_per_unit,
-                                           size_t unit_count);
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc)(size_t size_per_unit,
+                                               size_t unit_count);
 
 /** Frees memory that was allocated using this library. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr);
@@ -147,8 +147,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr);
  * Re-allocates memory. An attempt to avoid copying the data is made only for
  * big memory allocations (larger than FIO_MEMORY_BLOCK_ALLOC_LIMIT).
  */
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
-                                                         size_t new_size);
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
+                                                             size_t new_size);
 
 /**
  * Re-allocates memory. An attempt to avoid copying the data is made only for
@@ -156,9 +156,9 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
  *
  * This variation is slightly faster as it might copy less data.
  */
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
-                                                          size_t new_size,
-                                                          size_t copy_len);
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
+                                                              size_t new_size,
+                                                              size_t copy_len);
 
 /**
  * Allocates memory directly using `mmap`, this is preferred for objects that
@@ -169,7 +169,7 @@ SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
  *
  * `mempoll_free` can be used for deallocating the memory.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size);
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size);
 
 /**
  * When forking is called manually, call this function to reset the facil.io
@@ -451,30 +451,30 @@ FIO_MEMORY_DISABLE - use the system allocator
 ***************************************************************************** */
 #if defined(FIO_MEMORY_DISABLE)
 
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   return calloc(size, 1);
 #else
   return malloc(size);
 #endif
 }
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                   calloc)(size_t size_per_unit,
-                                           size_t unit_count) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc)(size_t size_per_unit,
+                                               size_t unit_count) {
   return calloc(size_per_unit, unit_count);
 }
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) { free(ptr); }
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
-                                                         size_t new_size) {
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
+                                                             size_t new_size) {
   return realloc(ptr, new_size);
 }
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
-                                                          size_t new_size,
-                                                          size_t copy_len) {
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
+                                                              size_t new_size,
+                                                              size_t copy_len) {
   return realloc(ptr, new_size);
   (void)copy_len;
 }
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   return calloc(size, 1);
 }
 
@@ -1748,9 +1748,9 @@ Small allocation internal API
 /* SublimeText marker */
 void fio___mem_slice_new___(void);
 /** slice a block to allocate a set number of bytes. */
-FIO_SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                       __mem_slice_new)(size_t bytes,
-                                                        void *is_realloc) {
+FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                           __mem_slice_new)(size_t bytes,
+                                                            void *is_realloc) {
   int32_t last_pos = 0;
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
@@ -1918,9 +1918,8 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
 
 /* SublimeText marker */
 void fio___mem_big_slice_new___(void);
-FIO_SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                       __mem_big_slice_new)(size_t bytes,
-                                                            void *is_realloc) {
+FIO_SFUNC void *FIO_MEM_ALIGN_NEW
+FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
   int32_t last_pos = 0;
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
@@ -2058,9 +2057,9 @@ void fio___malloc__(void);
  * `mempool_malloc` promises a best attempt at providing locality between
  * consecutive calls, but locality can't be guaranteed.
  */
-FIO_IFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                       ___malloc)(size_t size,
-                                                  void *is_realloc) {
+FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                           ___malloc)(size_t size,
+                                                      void *is_realloc) {
   void *p = NULL;
   if (!size)
     goto malloc_zero;
@@ -2107,7 +2106,7 @@ void fio_malloc__(void);
  * `mempool_malloc` promises a best attempt at providing locality between
  * consecutive calls, but locality can't be guaranteed.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
   return FIO_NAME(FIO_MEMORY_NAME, ___malloc)(size, NULL);
 }
 
@@ -2119,9 +2118,9 @@ void fio_calloc__(void);
  * Allocations above FIO_MEMORY_BLOCK_ALLOC_LIMIT will be redirected to `mmap`,
  * as if `mempool_mmap` was called.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
-                                   calloc)(size_t size_per_unit,
-                                           size_t unit_count) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc)(size_t size_per_unit,
+                                               size_t unit_count) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   return FIO_NAME(FIO_MEMORY_NAME, malloc)(size_per_unit * unit_count);
 #else
@@ -2174,8 +2173,8 @@ void fio_realloc__(void);
  * Re-allocates memory. An attempt to avoid copying the data is made only for
  * big memory allocations (larger than FIO_MEMORY_BLOCK_ALLOC_LIMIT).
  */
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
-                                                         size_t new_size) {
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
+                                                             size_t new_size) {
   return FIO_NAME(FIO_MEMORY_NAME, realloc2)(ptr, new_size, new_size);
 }
 
@@ -2206,9 +2205,9 @@ void fio_realloc2__(void);
  *
  * This variation is slightly faster as it might copy less data.
  */
-SFUNC void *FIO_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
-                                                          size_t new_size,
-                                                          size_t copy_len) {
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
+                                                              size_t new_size,
+                                                              size_t copy_len) {
   void *mem = NULL;
   if (!new_size)
     goto act_as_free;
@@ -2290,7 +2289,7 @@ void fio_mmap__(void);
  *
  * `mempoll_free` can be used for deallocating the memory.
  */
-SFUNC void *FIO_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (!size)
     return FIO_NAME(FIO_MEMORY_NAME, malloc)(0);
   size_t pages = FIO_MEM_BYTES2PAGES(size + FIO_MEMORY_ALIGN_SIZE);
@@ -2463,8 +2462,8 @@ Memory pool cleanup
 ***************************************************************************** */
 #undef FIO___MEMSET
 #undef FIO___MEMCPY2
-#undef FIO_ALIGN
-#undef FIO_ALIGN_NEW
+#undef FIO_MEM_ALIGN
+#undef FIO_MEM_ALIGN_NEW
 #undef FIO_MEMORY_MALLOC_ZERO_POINTER
 
 #endif /* FIO_MEMORY_DISABLE */

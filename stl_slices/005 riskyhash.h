@@ -38,7 +38,7 @@ Feel free to copy, use and enjoy according to the license provided.
 Risky Hash - API
 ***************************************************************************** */
 
-/**  Computes a facil.io Risky Hash (Risky v.3). */
+/** Computes a facil.io Risky Hash (Risky v.3). */
 SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
@@ -215,11 +215,12 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 #else
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
+  FIO_ALIGN(16)
   uint64_t v[4] = {FIO_RISKY3_IV0,
                    FIO_RISKY3_IV1,
                    FIO_RISKY3_IV2,
                    FIO_RISKY3_IV3};
-  uint64_t w[4];
+  FIO_ALIGN(16) uint64_t w[4];
   const uint8_t *data = (const uint8_t *)data_;
 
 #define FIO_RISKY3_ROUND64(vi, w_)                                             \
@@ -572,9 +573,10 @@ Hashing speed test
 
 typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
 
-SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
-                                  char *name,
-                                  uint8_t mem_alignment_ofset) {
+FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
+                                      char *name,
+                                      uint8_t mem_alignment_ofset,
+                                      uint8_t fast) {
 #ifdef DEBUG
   fprintf(stderr,
           "* Testing %s speed "
@@ -583,7 +585,7 @@ SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t cycles_start_at = (8192 << 4);
 #else
   fprintf(stderr, "* Testing %s speed.\n", name);
-  uint64_t cycles_start_at = (8192 << 8);
+  uint64_t cycles_start_at = (8192 << (3 + (fast * 2)));
 #endif
   /* test based on code from BearSSL with credit to Thomas Pornin */
   size_t const buffer_len = 8192;
@@ -662,23 +664,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
             "The following speed tests use a memory alignment offset of %d "
             "bytes.\n",
             (int)(alignment_test_offset & 7));
+#if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
-                         alignment_test_offset);
+                         alignment_test_offset,
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
-                         alignment_test_offset);
+                         alignment_test_offset,
+                         4);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
-                         1);
+                         1,
+                         4);
   if (0) {
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
-                           alignment_test_offset);
+                           alignment_test_offset,
+                           4);
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (unaligned)",
-                           1);
+                           1,
+                           4);
   }
+#endif
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,

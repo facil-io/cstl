@@ -187,6 +187,14 @@ Basic macros and included files
 #define DEPRECATED(reason) __attribute__((deprecated(reason)))
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define FIO_ALIGN(bytes) __attribute__((aligned(bytes)))
+#elif defined(__INTEL_COMPILER) || defined(_MSC_VER)
+#define FIO_ALIGN(bytes) __declspec(align(bytes))
+#else
+#define FIO_ALIGN(bytes)
+#endif
+
 #if !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_value
 #endif

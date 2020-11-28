@@ -67,6 +67,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_QUEUE
 #define FIO_RAND
 #define FIO_RISKY_HASH
+#define FIO_SHA1
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_STREAM
@@ -880,6 +881,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, sha1)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");

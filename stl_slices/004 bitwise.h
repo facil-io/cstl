@@ -72,6 +72,16 @@ FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
 }
 #endif
 
+#ifdef __SIZEOF_INT128__
+#if __has_builtin(__builtin_bswap128)
+#define fio_bswap128(i) __builtin_bswap128((__uint128_t)(i))
+#else
+FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
+  return ((__uint128_t)fio_bswap64(i) << 64) | fio_bswap64(i >> 64);
+}
+#endif
+#endif /* __SIZEOF_INT128__ */
+
 /* *****************************************************************************
 Big Endian / Small Endian
 ***************************************************************************** */
@@ -114,6 +124,11 @@ Big Endian / Small Endian
 /** Network byte order to Local byte order, 62 bit integer */
 #define fio_ntol64(i) (i)
 
+#ifdef __SIZEOF_INT128__
+/** Network byte order to Local byte order, 128 bit integer */
+#define fio_ntol128(i) (i)
+#endif /* __SIZEOF_INT128__ */
+
 #else /* Little Endian */
 
 /** Local byte order to Network byte order, 16 bit integer */
@@ -129,6 +144,13 @@ Big Endian / Small Endian
 #define fio_ntol32(i) fio_bswap32((i))
 /** Network byte order to Local byte order, 62 bit integer */
 #define fio_ntol64(i) fio_bswap64((i))
+
+#ifdef __SIZEOF_INT128__
+/** Local byte order to Network byte order, 128 bit integer */
+#define fio_lton128(i) fio_bswap128((i))
+/** Network byte order to Local byte order, 128 bit integer */
+#define fio_ntol128(i) fio_bswap128((i))
+#endif /* __SIZEOF_INT128__ */
 
 #endif /* __BIG_ENDIAN__ */
 
@@ -187,44 +209,63 @@ FIO_IFUNC uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
 #endif
 
 #if __has_builtin(__builtin_rotatrightt8)
-/** 8Bit left rotation, inlined. */
+/** 8Bit right rotation, inlined. */
 #define fio_rrot8(i, bits) __builtin_rotateright8(i, bits)
 #else
-/** 8Bit left rotation, inlined. */
+/** 8Bit right rotation, inlined. */
 FIO_IFUNC uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
   return ((i >> (bits & 7UL)) | (i << ((-(bits)) & 7UL)));
 }
 #endif
 
 #if __has_builtin(__builtin_rotateright16)
-/** 16Bit left rotation, inlined. */
+/** 16Bit right rotation, inlined. */
 #define fio_rrot16(i, bits) __builtin_rotateright16(i, bits)
 #else
-/** 16Bit left rotation, inlined. */
+/** 16Bit right rotation, inlined. */
 FIO_IFUNC uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
   return ((i >> (bits & 15UL)) | (i << ((-(bits)) & 15UL)));
 }
 #endif
 
 #if __has_builtin(__builtin_rotateright32)
-/** 32Bit left rotation, inlined. */
+/** 32Bit right rotation, inlined. */
 #define fio_rrot32(i, bits) __builtin_rotateright32(i, bits)
 #else
-/** 32Bit left rotation, inlined. */
+/** 32Bit right rotation, inlined. */
 FIO_IFUNC uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
   return ((i >> (bits & 31UL)) | (i << ((-(bits)) & 31UL)));
 }
 #endif
 
 #if __has_builtin(__builtin_rotateright64)
-/** 64Bit left rotation, inlined. */
+/** 64Bit right rotation, inlined. */
 #define fio_rrot64(i, bits) __builtin_rotateright64(i, bits)
 #else
-/** 64Bit left rotation, inlined. */
+/** 64Bit right rotation, inlined. */
 FIO_IFUNC uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
   return ((i >> ((bits)&63UL)) | (i << ((-(bits)) & 63UL)));
 }
 #endif
+
+#ifdef __SIZEOF_INT128__
+#if __has_builtin(__builtin_rotateright128) &&                                 \
+    __has_builtin(__builtin_rotateleft128)
+/** 128Bit left rotation, inlined. */
+#define fio_lrot128(i, bits) __builtin_rotateleft128(i, bits)
+/** 128Bit right rotation, inlined. */
+#define fio_rrot128(i, bits) __builtin_rotateright128(i, bits)
+#else
+/** 128Bit left rotation, inlined. */
+FIO_IFUNC __uint128_t fio_lrot128(__uint128_t i, uint8_t bits) {
+  return ((i << ((bits)&127UL)) | (i >> ((-(bits)) & 127UL)));
+}
+/** 128Bit right rotation, inlined. */
+FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
+  return ((i >> ((bits)&127UL)) | (i << ((-(bits)) & 127UL)));
+}
+#endif
+#endif /* __SIZEOF_INT128__ */
 
 /* *****************************************************************************
 Unaligned memory read / write operations
@@ -260,6 +301,19 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   *((uint64_t *)buf) = i; /* fio_u2buf64 */
 }
 
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
+  const __uint128_t *tmp = (const __uint128_t *)c; /* fio_buf2u64 */
+  return *tmp;
+}
+
+/** Writes a local 128 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
+  *((__uint128_t *)buf) = i; /* fio_u2buf64 */
+}
+#endif /* __SIZEOF_INT128__ */
+
 #else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
@@ -294,6 +348,20 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
 
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
+  __uint128_t tmp; /* fio_buf2u1128 */
+  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  return tmp;
+}
+
+/** Writes a local 128 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
+  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf128 */
+}
+#endif /* __SIZEOF_INT128__ */
+
 #endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (reversed order). */
@@ -322,19 +390,57 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_bswap)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_local)(buf, fio_bswap64(i));
 }
 
-#if __LITTLE_ENDIAN__
+#ifdef __SIZEOF_INT128__
+/** Writes a local 64 bit number to an unaligned buffer in reversed order. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_bswap)(void *buf, __uint128_t i) {
+  FIO_NAME2(fio_u, buf128_local)(buf, fio_bswap128(i));
+}
+#endif /* __SIZEOF_INT128__ */
+
 /** Converts an unaligned byte stream to a 16 bit number (Big Endian). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16)(const void *c) { /* fio_buf2u16 */
-  return FIO_NAME2(fio_buf, u16_bswap)(c);
+  uint16_t i = FIO_NAME2(fio_buf, u16_local)(c);
+  return fio_lton16(i);
 }
 /** Converts an unaligned byte stream to a 32 bit number (Big Endian). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32)(const void *c) { /* fio_buf2u32 */
-  return FIO_NAME2(fio_buf, u32_bswap)(c);
+  uint32_t i = FIO_NAME2(fio_buf, u32_local)(c);
+  return fio_lton32(i);
 }
 /** Converts an unaligned byte stream to a 64 bit number (Big Endian). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64)(const void *c) { /* fio_buf2u64 */
-  return FIO_NAME2(fio_buf, u64_bswap)(c);
+  uint64_t i = FIO_NAME2(fio_buf, u64_local)(c);
+  return fio_lton64(i);
 }
+
+/** Writes a local 16 bit number to an unaligned buffer in Big Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf16)(void *buf, uint16_t i) {
+  FIO_NAME2(fio_u, buf16_local)(buf, fio_ntol16(i));
+}
+/** Writes a local 32 bit number to an unaligned buffer in Big Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf32)(void *buf, uint32_t i) {
+  FIO_NAME2(fio_u, buf32_local)(buf, fio_ntol32(i));
+}
+/** Writes a local 64 bit number to an unaligned buffer in Big Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf64)(void *buf, uint64_t i) {
+  FIO_NAME2(fio_u, buf64_local)(buf, fio_ntol64(i));
+}
+
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (Big Endian). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf,
+                                u128)(const void *c) { /* fio_buf2u64 */
+  __uint128_t i = FIO_NAME2(fio_buf, u128_local)(c);
+  return fio_lton128(i);
+}
+/** Writes a local 128 bit number to an unaligned buffer in Big Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128)(void *buf, __uint128_t i) {
+  FIO_NAME2(fio_u, buf128_local)(buf, fio_ntol128(i));
+}
+#endif /* __SIZEOF_INT128__ */
+
+#if __LITTLE_ENDIAN__
+
 /** Converts an unaligned byte stream to a 16 bit number (Little Endian). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_little)(const void *c) {
   return FIO_NAME2(fio_buf, u16_local)(c); /* fio_buf2u16 */
@@ -348,18 +454,6 @@ FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_little)(const void *c) {
   return FIO_NAME2(fio_buf, u64_local)(c); /* fio_buf2u64 */
 }
 
-/** Writes a local 16 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16)(void *buf, uint16_t i) {
-  FIO_NAME2(fio_u, buf16_bswap)(buf, i);
-}
-/** Writes a local 32 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32)(void *buf, uint32_t i) {
-  FIO_NAME2(fio_u, buf32_bswap)(buf, i);
-}
-/** Writes a local 64 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64)(void *buf, uint64_t i) {
-  FIO_NAME2(fio_u, buf64_bswap)(buf, i);
-}
 /** Writes a local 16 bit number to an unaligned buffer in Little Endian. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_little)(void *buf, uint16_t i) {
   FIO_NAME2(fio_u, buf16_local)(buf, i);
@@ -372,19 +466,20 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf32_little)(void *buf, uint32_t i) {
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_local)(buf, i);
 }
+
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (Little Endian). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_little)(const void *c) {
+  return FIO_NAME2(fio_buf, u128_local)(c); /* fio_buf2u64 */
+}
+/** Writes a local 128 bit number to an unaligned buffer in Little Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_little)(void *buf, __uint128_t i) {
+  FIO_NAME2(fio_u, buf128_local)(buf, i);
+}
+#endif /* __SIZEOF_INT128__ */
+
 #else
-/** Converts an unaligned byte stream to a 16 bit number (Big Endian). */
-FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16)(const void *c) { /* fio_buf2u16 */
-  return FIO_NAME2(fio_buf, u16_local)(c);
-}
-/** Converts an unaligned byte stream to a 32 bit number (Big Endian). */
-FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32)(const void *c) { /* fio_buf2u32 */
-  return FIO_NAME2(fio_buf, u32_local)(c);
-}
-/** Converts an unaligned byte stream to a 64 bit number (Big Endian). */
-FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64)(const void *c) { /* fio_buf2u64 */
-  return FIO_NAME2(fio_buf, u64_local)(c);
-}
+
 /** Converts an unaligned byte stream to a 16 bit number (Little Endian). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_little)(const void *c) {
   return FIO_NAME2(fio_buf, u16_bswap)(c); /* fio_buf2u16 */
@@ -398,18 +493,6 @@ FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_little)(const void *c) {
   return FIO_NAME2(fio_buf, u64_bswap)(c); /* fio_buf2u64 */
 }
 
-/** Writes a local 16 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16)(void *buf, uint16_t i) {
-  FIO_NAME2(fio_u, buf16_local)(buf, i);
-}
-/** Writes a local 32 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32)(void *buf, uint32_t i) {
-  FIO_NAME2(fio_u, buf32_local)(buf, i);
-}
-/** Writes a local 64 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64)(void *buf, uint64_t i) {
-  FIO_NAME2(fio_u, buf64_local)(buf, i);
-}
 /** Writes a local 16 bit number to an unaligned buffer in Little Endian. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_little)(void *buf, uint16_t i) {
   FIO_NAME2(fio_u, buf16_bswap)(buf, i);
@@ -423,7 +506,18 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_bswap)(buf, i);
 }
 
-#endif
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (Little Endian). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_little)(const void *c) {
+  return FIO_NAME2(fio_buf, u128_bswap)(c); /* fio_buf2u64 */
+}
+/** Writes a local 128 bit number to an unaligned buffer in Little Endian. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_little)(void *buf, __uint128_t i) {
+  FIO_NAME2(fio_u, buf128_bswap)(buf, i);
+}
+#endif /* __SIZEOF_INT128__ */
+
+#endif /* __LITTLE_ENDIAN__ */
 
 /** Convinience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
@@ -556,6 +650,43 @@ FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
+
+#ifdef __SIZEOF_INT128__
+/**
+ * Detects a byte where all the bits are set (255) within an 16 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC __uint128_t fio_has_full_byte128(__uint128_t row) {
+  const __uint128_t allF7 = ((__uint128_t)(0x7F7F7F7F7F7F7F7FULL) << 64) |
+                            (__uint128_t)(0x7F7F7F7F7F7F7F7FULL);
+  const __uint128_t all80 = ((__uint128_t)(0x8080808080808080) << 64) |
+                            (__uint128_t)(0x8080808080808080);
+  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
+                            (__uint128_t)(0x0101010101010101);
+  return ((row & allF7) + all01) & (row & all80);
+}
+
+/**
+ * Detects a byte where no bits are set (0) within an 8 byte vector.
+ *
+ * The zero byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
+  return fio_has_full_byte64(~row);
+}
+
+/**
+ * Detects if `byte` exists within an 8 byte vector.
+ *
+ * The requested byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
+  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
+                            (__uint128_t)(0x0101010101010101);
+  return fio_has_full_byte64(~(row ^ (all01 * byte)));
+}
+#endif /* __SIZEOF_INT128__ */
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
 FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
@@ -811,88 +942,44 @@ Byte masking (XOR) - no nonce
  * When the buffer's memory is aligned, the function may perform significantly
  * better.
  */
-FIO_IFUNC void fio_xmask(char *buf, size_t len, uint64_t mask) {
-  register union { /* type punning */
-    char *restrict p8;
-    uint64_t *restrict p64;
-  } pn, mpn;
-
-  if (((uintptr_t)buf & 7) && len >= 8) {
-    uint64_t tmp;
-    mpn.p64 = &mask;
-    uint8_t pos = 0;
-    /* mask each byte until we reach alignment */
-    switch (((uintptr_t)buf & 7)) {
-    case 1:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 2:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 3:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 4:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 5:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 6:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos; /* fallthrough */
-    case 7:
-      buf[pos] ^= mpn.p8[pos];
-      ++pos;
-    }
-    /* advance */
-    len -= pos;
-    buf += pos;
-    /* rotate mask so it is aligned */
-    tmp = mask;
-    pn.p64 = &tmp;
-    mpn.p8[0] = pn.p8[((0 + pos) & 7)];
-    mpn.p8[1] = pn.p8[((1 + pos) & 7)];
-    mpn.p8[2] = pn.p8[((2 + pos) & 7)];
-    mpn.p8[3] = pn.p8[((3 + pos) & 7)];
-    mpn.p8[4] = pn.p8[((4 + pos) & 7)];
-    mpn.p8[5] = pn.p8[((5 + pos) & 7)];
-    mpn.p8[6] = pn.p8[((6 + pos) & 7)];
-    mpn.p8[7] = pn.p8[((7 + pos) & 7)];
-  }
-  pn.p8 = buf;
-  mpn.p64 = &mask;
-  register const uint64_t m = mask;
-  /** loop while greater than 8 bytes remain */
+FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
+  register uint8_t *buf = (uint8_t *)buf_;
+  register uint64_t m = mask;
   for (size_t i = 7; i < len; i += 8) {
-    *pn.p64 ^= m;
-    ++pn.p64;
+    uint64_t tmp;
+    tmp = FIO_NAME2(fio_buf, u64_local)(buf);
+    tmp ^= m;
+    FIO_NAME2(fio_u, buf64_local)(buf, tmp);
+    buf += 8;
   }
-
+  uint64_t t = mask;
+  register union { /* type punning */
+    uint8_t *restrict p8;
+    uint64_t *restrict p64;
+  } pn;
+  pn.p64 = &t;
   switch ((len & 7)) {
   case 7:
-    pn.p8[6] ^= mpn.p8[6];
+    buf[6] ^= pn.p8[6];
   /* fallthrough */
   case 6:
-    pn.p8[5] ^= mpn.p8[5];
+    buf[5] ^= pn.p8[5];
   /* fallthrough */
   case 5:
-    pn.p8[4] ^= mpn.p8[4];
+    buf[4] ^= pn.p8[4];
   /* fallthrough */
   case 4:
-    pn.p8[3] ^= mpn.p8[3];
+    buf[3] ^= pn.p8[3];
   /* fallthrough */
   case 3:
-    pn.p8[2] ^= mpn.p8[2];
+    buf[2] ^= pn.p8[2];
   /* fallthrough */
   case 2:
-    pn.p8[1] ^= mpn.p8[1];
+    buf[1] ^= pn.p8[1];
   /* fallthrough */
   case 1:
-    pn.p8[0] ^= mpn.p8[0];
+    buf[0] ^= pn.p8[0];
     /* fallthrough */
-  case 0:
-    break;
   }
 }
 
