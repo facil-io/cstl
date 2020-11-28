@@ -582,7 +582,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
           "* Testing %s speed "
           "(DEBUG mode detected - speed may be affected).\n",
           name);
-  uint64_t cycles_start_at = (8192 << 4);
+  uint64_t cycles_start_at = (8192 << (4 + (fast * 2)));
 #else
   fprintf(stderr, "* Testing %s speed.\n", name);
   uint64_t cycles_start_at = (8192 << (3 + (fast * 2)));
