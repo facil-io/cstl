@@ -204,6 +204,10 @@ typedef struct {
 #define FIO_REF_NAME    client
 #define FIO_REF_CONSTRUCTOR_ONLY
 #define FIO_REF_FLEX_TYPE char
+#define FIO_REF_DESTROY(obj)                                                   \
+  do {                                                                         \
+    fio_stream_destroy(&(obj).out);                                            \
+  } while (0)
 #include "fio-stl.h"
 
 static void http_send_response(client_s *c,
