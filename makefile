@@ -139,22 +139,13 @@ endif
 # Tests are performed unless the value is empty / missing
 
 TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
-TEST4SOCKET:=     # --- adds linker flags, not compilation flags
-TEST4SSL:=        # HAVE_OPENSSL / HAVE_BEARSSL + HAVE_S2N
+TEST4SOCKET:=     # --- tests for socket library linker flags
+TEST4CRYPTO:=     # HAVE_OPENSSL / HAVE_BEARSSL + HAVE_SODIUM
 TEST4SENDFILE:=   # HAVE_SENDFILE
 TEST4TM_ZONE:=    # HAVE_TM_TM_ZONE
 TEST4ZLIB:=       # HAVE_ZLIB
 TEST4PG:=         # HAVE_POSTGRESQL
 TEST4ENDIAN:=     # __BIG_ENDIAN__=?
-
-#############################################################################
-# facil.io compilation flag helpers
-#############################################################################
-
-# add FIO_PUBSUB_SUPPORT flag if requested
-ifdef FIO_PUBSUB_SUPPORT
-  FLAGS:=$(FLAGS) FIO_PUBSUB_SUPPORT=$(FIO_PUBSUB_SUPPORT)
-endif
 
 #############################################################################
 # OS Specific Settings (debugger, disassembler, etc')
@@ -456,7 +447,7 @@ endif # TEST4SOCKET
 # SSL/ TLS Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4SSL
+ifdef TEST4CRYPTO
 
 # BearSSL requirement C application code
 # (source code variation)
@@ -510,11 +501,15 @@ OPENSSL_LDFLAGS:="-lssl" "-lcrypto"
 ifeq ($(shell $(PKG_CONFIG) -- openssl >/dev/null 2>&1; echo $$?), 0)
   OPENSSL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags openssl)
   OPENSSL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs openssl)
+else ifeq ($(shell $(PKG_CONFIG) -- libsodium >/dev/null 2>&1; echo $$?), 0)
+  OPENSSL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libsodium)
+  OPENSSL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libsodium)
 endif
 
 
 # add BearSSL/OpenSSL library flags (exclusive)
 ifdef FIO_NO_TLS
+  $(info * Skipping crypto library detection.)
 else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_BEARSSL_SOURCE), $(EMPTY)), 0)
   $(info * Detected the BearSSL source code library, setting HAVE_BEARSSL)
   # TODO: when BearSSL support arrived, set the FIO_TLS_FOUND flag as well
@@ -532,18 +527,16 @@ else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPEN
   CFLAGS+=$(OPENSSL_CFLAGS)
   PKGC_REQ_OPENSSL=openssl >= 1.1, openssl < 1.2
   PKGC_REQ+=$$(PKGC_REQ_OPENSSL)
+else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", "-lsodium") , 0)
+  # Sodium Crypto Library: https://doc.libsodium.org/usage
+  $(info * Detected the Sodium library, setting HAVE_SODIUM)
+  FLAGS:=$(FLAGS) HAVE_SODIUM
+  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) sodium
 else
   $(info * No compatible SSL/TLS library detected.)
-endif
+endif # FIO_NO_TLS
 
-# S2N TLS/SSL library: https://github.com/awslabs/s2n
-ifeq ($(call TRY_COMPILE, "\#include <s2n.h>\\n int main(void) {}", "-ls2n") , 0)
-  $(info * Detected the s2n library, setting HAVE_S2N)
-  FLAGS:=$(FLAGS) HAVE_S2N
-  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) s2n
-endif
-
-endif # TEST4SSL
+endif # TEST4CRYPTO
 #############################################################################
 # ZLib Library Detection
 # (no need to edit)

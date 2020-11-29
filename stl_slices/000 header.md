@@ -275,6 +275,34 @@ Marks a function as `static`, `inline` and possibly unused.
 
 Marks a function as `static` and possibly unused.
 
+#### `FIO_WEAK`
+
+```c
+#define FIO_WEAK __attribute__((weak))
+```
+
+Marks a function as weak
+
+#### `FIO_CONSTRUCTOR`
+
+```c
+#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
+```
+
+Marks a function as a _constructor_ - **if supported**.
+
+When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, before `main` is called.
+
+#### `FIO_DESTRUCTOR`
+
+```c
+#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+```
+
+Marks a function as a _destructor_ - **if supported**.
+
+When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
+
 #### `FIO_MACRO2STR`
 
 ```c

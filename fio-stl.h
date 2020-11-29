@@ -586,6 +586,12 @@ Miscellaneous helper macros
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
 
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
+
+/** Marks a function as a destructor - if supported. */
+#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+
 /* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */
@@ -3449,23 +3455,39 @@ typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
 
 FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
                                       char *name,
+                                      uint8_t size_log,
                                       uint8_t mem_alignment_ofset,
                                       uint8_t fast) {
+  /* test based on code from BearSSL with credit to Thomas Pornin */
+  if (size_log >= 21 || ((sizeof(uint64_t) - 1) >> size_log)) {
+    FIO_LOG_ERROR("fio_test_hash_function called with a log size too big.");
+    return;
+  }
+  mem_alignment_ofset &= 7;
+  size_t const buffer_len = (1ULL << size_log);
+  uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
+  if (size_log < 13)
+    cycles_start_at <<= (13 - size_log);
+  else if (size_log > 13)
+    cycles_start_at >>= (size_log - 13);
+
 #ifdef DEBUG
   fprintf(stderr,
-          "* Testing %s speed "
+          "* Testing %s speed with %zu byte blocks"
           "(DEBUG mode detected - speed may be affected).\n",
-          name);
-  uint64_t cycles_start_at = (8192 << (4 + (fast * 2)));
+          name,
+          buffer_len);
 #else
-  fprintf(stderr, "* Testing %s speed.\n", name);
-  uint64_t cycles_start_at = (8192 << (3 + (fast * 2)));
+  fprintf(stderr,
+          "* Testing %s speed with %zu byte blocks.\n",
+          name,
+          buffer_len);
 #endif
-  /* test based on code from BearSSL with credit to Thomas Pornin */
-  size_t const buffer_len = 8192;
-  uint8_t buffer_[8200];
-  uint8_t *buffer = buffer_ + (mem_alignment_ofset & 7);
-  // uint64_t buffer[1024];
+
+  uint8_t *buffer_mem =
+      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset), 0);
+  uint8_t *buffer = buffer_mem + mem_alignment_ofset;
+
   memset(buffer, 'T', buffer_len);
   /* warmup */
   uint64_t hash = 0;
@@ -3494,6 +3516,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     cycles <<= 1;
   }
+  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset));
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
@@ -3541,23 +3564,33 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
+                         7,
+                         alignment_test_offset,
+                         3);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         13,
                          alignment_test_offset,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
+                         13,
                          alignment_test_offset,
                          4);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
+                         13,
                          1,
                          4);
   if (0) {
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
+                           13,
                            alignment_test_offset,
                            4);
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (unaligned)",
+                           13,
                            1,
                            4);
   }
@@ -3996,11 +4029,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
                          (char *)"fio_sha1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
+                         (char *)"fio_sha1",
+                         13,
                          0,
                          1);
 #if HAVE_OPENSSL
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
                          (char *)"OpenSSL SHA1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA1",
+                         13,
                          0,
                          1);
 #endif /* HAVE_OPENSSL */
@@ -7509,8 +7554,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
-                                                    __mem_state_cleanup)(void) {
+FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
@@ -7605,8 +7649,7 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
 }
 
 /* initializes (allocates) the arenas and state machine */
-FIO_SFUNC void __attribute__((constructor))
-FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
+FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
   /* allocate the state machine */

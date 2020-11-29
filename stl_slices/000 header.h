@@ -586,6 +586,12 @@ Miscellaneous helper macros
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
 
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
+
+/** Marks a function as a destructor - if supported. */
+#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+
 /* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */

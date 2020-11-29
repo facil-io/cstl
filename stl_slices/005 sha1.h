@@ -257,11 +257,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
                          (char *)"fio_sha1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
+                         (char *)"fio_sha1",
+                         13,
                          0,
                          1);
 #if HAVE_OPENSSL
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
                          (char *)"OpenSSL SHA1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA1",
+                         13,
                          0,
                          1);
 #endif /* HAVE_OPENSSL */

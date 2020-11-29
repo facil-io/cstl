@@ -1317,8 +1317,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
-                                                    __mem_state_cleanup)(void) {
+FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
@@ -1413,8 +1412,7 @@ FIO_SFUNC __attribute__((destructor)) void FIO_NAME(FIO_MEMORY_NAME,
 }
 
 /* initializes (allocates) the arenas and state machine */
-FIO_SFUNC void __attribute__((constructor))
-FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
+FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
   /* allocate the state machine */
