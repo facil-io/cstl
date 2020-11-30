@@ -613,7 +613,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    memcpy(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -624,7 +624,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       __asm__ volatile("" ::: "memory");
     }
     end = clock();
-    memcpy(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
     if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
         cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
@@ -660,7 +660,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce = fio_rand64();
     const char *str = "this is a short text, to test risky masking";
     char *tmp = buf + i;
-    memcpy(tmp, str, strlen(str));
+    FIO_MEMCPY(tmp, str, strlen(str));
     fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
     size_t err = 0;

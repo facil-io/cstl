@@ -222,11 +222,13 @@ Basic macros and included files
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
 
-/* memcopy selectors */
+/* memcpy selectors / overriding */
+#ifndef FIO_MEMCPY
 #if __has_builtin(__builtin_memcpy)
-#define FIO___MEMCPY __builtin_memcpy
+#define FIO_MEMCPY __builtin_memcpy
 #else
-#define FIO___MEMCPY memcpy
+#define FIO_MEMCPY memcpy
+#endif
 #endif
 
 /* *****************************************************************************

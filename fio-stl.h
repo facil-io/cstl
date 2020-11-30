@@ -222,11 +222,13 @@ Basic macros and included files
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
 
-/* memcopy selectors */
+/* memcpy selectors / overriding */
+#ifndef FIO_MEMCPY
 #if __has_builtin(__builtin_memcpy)
-#define FIO___MEMCPY __builtin_memcpy
+#define FIO_MEMCPY __builtin_memcpy
 #else
-#define FIO___MEMCPY memcpy
+#define FIO_MEMCPY memcpy
+#endif
 #endif
 
 /* *****************************************************************************
@@ -889,9 +891,9 @@ __attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
   va_end(argv);
   if (len___log <= 0 || len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
-      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER,
-             "...\n\tWARNING: TRUNCATED!",
-             24);
+      FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
+                 "...\n\tWARNING: TRUNCATED!",
+                 24);
       len___log = FIO_LOG____LENGTH_BORDER + 24;
     } else {
       fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
@@ -1934,46 +1936,46 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
   uint64_t tmp; /* fio_buf2u64 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
   __uint128_t tmp; /* fio_buf2u1128 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf128 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf128 */
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -2849,7 +2851,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     } while (!mask || !counter);
     fio_rand_bytes(data, 128);
     for (uint8_t i = 0; i < 16; ++i) {
-      memcpy(buf + i, data, 128);
+      FIO_MEMCPY(buf + i, data, 128);
       fio_xmask(buf + i, 128, mask);
       fio_xmask(buf + i, 128, mask);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
@@ -2860,7 +2862,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                  "fio_xmask rountrip (with move) error");
     }
     for (uint8_t i = 0; i < 16; ++i) {
-      memcpy(buf + i, data, 128);
+      FIO_MEMCPY(buf + i, data, 128);
       fio_xmask2(buf + i, 128, mask, counter);
       fio_xmask2(buf + i, 128, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 CM rountrip error");
@@ -3493,7 +3495,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    memcpy(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -3504,7 +3506,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       __asm__ volatile("" ::: "memory");
     }
     end = clock();
-    memcpy(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
     if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
         cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
@@ -3540,7 +3542,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce = fio_rand64();
     const char *str = "this is a short text, to test risky masking";
     char *tmp = buf + i;
-    memcpy(tmp, str, strlen(str));
+    FIO_MEMCPY(tmp, str, strlen(str));
     fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
     FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
     size_t err = 0;
@@ -3943,13 +3945,13 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   uint32_t vec[16];
 
   for (size_t i = 63; i < len; i += 64) {
-    memcpy(vec, buf, 64);
+    FIO_MEMCPY(vec, buf, 64);
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
   memset(vec, 0, sizeof(vec));
   if ((len & 63)) {
-    memcpy(vec, buf, (len & 63));
+    FIO_MEMCPY(vec, buf, (len & 63));
   }
   ((uint8_t *)vec)[(len & 63)] = 0x80;
 
@@ -4592,10 +4594,10 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  memcpy(dest + written, "Infinity", 9);
+  FIO_MEMCPY(dest + written, "Infinity", 9);
   return written + 8;
 is_nan:
-  memcpy(dest, "NaN", 4);
+  FIO_MEMCPY(dest, "NaN", 4);
   return 3;
 }
 
@@ -4646,7 +4648,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test + 1] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -4654,7 +4656,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -4679,7 +4681,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test + 1] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -4687,7 +4689,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -5010,7 +5012,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    memcpy(buffer, "1234567890.123", 14);
+    FIO_MEMCPY(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();
@@ -7007,7 +7009,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
         return (void *)NULL;
       }
       fio___memcpy_aligned(result, mem, prev_len); /* copy data */
-      // memcpy(result, mem, prev_len);
+      // FIO_MEMCPY(result, mem, prev_len);
       munmap(mem, prev_len); /* free original memory */
     }
     return result;
@@ -7196,7 +7198,7 @@ memset / memcpy selectors
 #if FIO_MEMORY_USE_FIO_MEMCOPY
 #define FIO___MEMCPY2 fio___memcpy_aligned
 #else
-#define FIO___MEMCPY2 FIO___MEMCPY
+#define FIO___MEMCPY2 FIO_MEMCPY
 #endif /* FIO_MEMORY_USE_FIO_MEMCOPY */
 
 /* *****************************************************************************
@@ -10592,7 +10594,7 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
   fio___cli_default_values.len += d.len + 1;
 
   ((char *)val.buf)[val.len] = 0;
-  memcpy((char *)val.buf, d.buf, val.len);
+  FIO_MEMCPY((char *)val.buf, d.buf, val.len);
   FIO_LOG_DEBUG("CLI stored a string: %s", val.buf);
   return val;
 }
@@ -11234,7 +11236,7 @@ static void on_data_server(int fd, size_t index, void *udata) {
   (void)udata; // unused for server
   (void)index; // we don't use the array index in this example
   char buf[65536];
-  memcpy(buf, "echo: ", 6);
+ FIO_MEMCPY(buf, "echo: ", 6);
   ssize_t len = 0;
   struct sockaddr_storage peer;
   socklen_t peer_addrlen = sizeof(peer);
@@ -11704,7 +11706,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
     return -1;
   }
   addr.sun_family = AF_UNIX;
-  memcpy(addr.sun_path, address, addr_len + 1); /* copy the NUL byte. */
+  FIO_MEMCPY(addr.sun_path, address, addr_len + 1); /* copy the NUL byte. */
 #if defined(__APPLE__)
   addr.sun_len = addr_len;
 #endif
@@ -12904,7 +12906,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
                  (uint32_t)(slice << FIO_STREAM___EMBD_BIT_OFFSET);
-      FIO___MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
+      FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;
     }
@@ -13062,7 +13064,7 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     if (written > len[0])
       written = len[0];
     if (written) {
-      FIO___MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
+      FIO_MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
       len[0] -= written;
     }
     if (len[0]) {
@@ -13081,9 +13083,9 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     if (written > len[0])
       written = len[0];
     if (written) {
-      FIO___MEMCPY(buf[0] + buf_offset,
-                   u.ext->buf + u.ext->offset + offset,
-                   written);
+      FIO_MEMCPY(buf[0] + buf_offset,
+                 u.ext->buf + u.ext->offset + offset,
+                 written);
       len[0] -= written;
     }
     if (len[0]) {
@@ -14749,7 +14751,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (capa_ >= 0) {
         /* copy items at begining of memory stack */
         if (count) {
-          FIO___MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
+          FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
         }
         FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
         *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
@@ -14762,9 +14764,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       }
       /* copy items at ending of memory stack */
       if (count) {
-        FIO___MEMCPY(tmp + (capa - count),
-                     ary->ary + ary->start,
-                     count * sizeof(*tmp));
+        FIO_MEMCPY(tmp + (capa - count),
+                   ary->ary + ary->start,
+                   count * sizeof(*tmp));
       }
       FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
@@ -14784,9 +14786,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     if (capa_ >= 0) {
       /* copy items at begining of memory stack */
       if (ary->start) {
-        FIO___MEMCPY(tmp,
-                     FIO_ARRAY2EMBEDDED(ary)->embedded,
-                     ary->start * sizeof(*tmp));
+        FIO_MEMCPY(tmp,
+                   FIO_ARRAY2EMBEDDED(ary)->embedded,
+                   ary->start * sizeof(*tmp));
       }
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
           .start = 0,
@@ -14798,9 +14800,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     }
     /* copy items at ending of memory stack */
     if (ary->start) {
-      FIO___MEMCPY(tmp + (capa - ary->start),
-                   FIO_ARRAY2EMBEDDED(ary)->embedded,
-                   ary->start * sizeof(*tmp));
+      FIO_MEMCPY(tmp + (capa - ary->start),
+                 FIO_ARRAY2EMBEDDED(ary)->embedded,
+                 ary->start * sizeof(*tmp));
     }
     *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
         .start = (capa - ary->start),
@@ -14852,9 +14854,9 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   }
 #if FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE
   /* copy data */
-  memcpy(FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_) + offset,
-         FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_),
-         added);
+  FIO_MEMCPY(FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_) + offset,
+             FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_),
+             added);
 #else
   {
     FIO_ARRAY_TYPE *const a1 = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
@@ -15178,7 +15180,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
       FIO_MEM_REALLOC_(NULL, 0, (ary->end - ary->start) * sizeof(*tmp), 0);
   if (!tmp)
     return;
-  memcpy(tmp, ary->ary + ary->start, count * sizeof(*ary->ary));
+  FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*ary->ary));
   FIO_MEM_FREE_(ary->ary, ary->capa * sizeof(*ary->ary));
   *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
       .start = 0,
@@ -15197,9 +15199,9 @@ re_embed:
         .start = (uint32_t)count,
     };
     if (count) {
-      FIO___MEMCPY(FIO_ARRAY2EMBEDDED(ary)->embedded,
-                   tmp + offset,
-                   count * sizeof(*tmp));
+      FIO_MEMCPY(FIO_ARRAY2EMBEDDED(ary)->embedded,
+                 tmp + offset,
+                 count * sizeof(*tmp));
     }
     if (tmp) {
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
@@ -19152,7 +19154,7 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
                                    sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1),
                                    0);
       if (data)
-        memcpy(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
+        FIO_MEMCPY(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
     }
   } else {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
@@ -19163,7 +19165,7 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
                                       sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1),
                                       0);
       if (data)
-        memcpy(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
+        FIO_MEMCPY(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
     }
   }
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
@@ -19222,7 +19224,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
     if (len && str)
-      memcpy(FIO_STR_SMALL_DATA(s), str, len);
+      FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
@@ -19257,7 +19259,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
     if (len && str)
-      memcpy(FIO_STR_SMALL_DATA(s), str, len);
+      FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
@@ -19283,7 +19285,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   FIO_STR_BIG_DATA(s) = i.buf;
   FIO_STR_BIG_LEN_SET(s, len);
   if (str)
-    memcpy(FIO_STR_BIG_DATA(s), str, len);
+    FIO_MEMCPY(FIO_STR_BIG_DATA(s), str, len);
   return i;
 }
 
@@ -19478,7 +19480,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
   size_t const org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, resize)(s_, src_len + org_len);
   if (src)
-    memcpy(state.buf + org_len, src, src_len);
+    FIO_MEMCPY(state.buf + org_len, src, src_len);
   return state;
 }
 
@@ -19541,9 +19543,9 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
     FIO_NAME(FIO_STR_NAME, init_copy)
     ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), NULL, amount);
-    memcpy(FIO_STR_BIG_DATA(&tmp),
-           FIO_STR_SMALL_DATA(s),
-           FIO_STR_SMALL_CAPA(s));
+    FIO_MEMCPY(FIO_STR_BIG_DATA(&tmp),
+               FIO_STR_SMALL_DATA(s),
+               FIO_STR_SMALL_CAPA(s));
     FIO_STR_BIG_LEN_SET(&tmp, FIO_STR_SMALL_LEN(s));
     *s = tmp;
     i = (fio_str_info_s){
@@ -19580,7 +19582,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
         s->special = 0;
         tmp[data_len] = 0;
         if (data_len)
-          memcpy(tmp, FIO_STR_BIG_DATA(s), data_len);
+          FIO_MEMCPY(tmp, FIO_STR_BIG_DATA(s), data_len);
       }
     }
     if (tmp) {
@@ -19904,7 +19906,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest_,
   const size_t old_len = FIO_NAME(FIO_STR_NAME, len)(dest_);
   fio_str_info_s state =
       FIO_NAME(FIO_STR_NAME, resize)(dest_, src_state.len + old_len);
-  memcpy(state.buf + old_len, src_state.buf, src_state.len);
+  FIO_MEMCPY(state.buf + old_len, src_state.buf, src_state.len);
   return state;
 }
 
@@ -19963,7 +19965,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
             (state.len - start_pos) - old_len);
   }
   if (src_len) {
-    memcpy(state.buf + start_pos, src, src_len);
+    FIO_MEMCPY(state.buf + start_pos, src, src_len);
   }
 
   return FIO_NAME(FIO_STR_NAME, resize)(s_, new_size);
@@ -20092,14 +20094,14 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
   dest.buf += dest.len;
   /* is escaping required? - simple memcpy if we don't need to escape */
   if (set_at) {
-    memcpy(dest.buf, src, len);
+    FIO_MEMCPY(dest.buf, src, len);
     dest.buf -= dest.len;
     dest.len += len;
     return dest;
   }
   /* simple memcpy until first char that needs escaping */
   if (at >= 8) {
-    memcpy(dest.buf, src, at);
+    FIO_MEMCPY(dest.buf, src, at);
   } else {
     at = 0;
   }
@@ -20688,8 +20690,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
           (char *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*path) * (path_len + 1), 0);
       if (!path)
         return state;
-      memcpy(path, home, home_len);
-      memcpy(path + home_len, filename + 1, filename_len);
+      FIO_MEMCPY(path, home, home_len);
+      FIO_MEMCPY(path + home_len, filename + 1, filename_len);
       path[path_len] = 0;
       filename = path;
     }
@@ -22643,7 +22645,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
                               .len = 5};
     }
     fio_str_info_s i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(j);
-    memcpy(fiobj___2cstr___buffer__perthread, i.buf, i.len + 1);
+    FIO_MEMCPY(fiobj___2cstr___buffer__perthread, i.buf, i.len + 1);
     fiobj_free(j);
     i.buf = fiobj___2cstr___buffer__perthread;
     return i;

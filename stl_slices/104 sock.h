@@ -44,7 +44,7 @@ static void on_data_server(int fd, size_t index, void *udata) {
   (void)udata; // unused for server
   (void)index; // we don't use the array index in this example
   char buf[65536];
-  memcpy(buf, "echo: ", 6);
+ FIO_MEMCPY(buf, "echo: ", 6);
   ssize_t len = 0;
   struct sockaddr_storage peer;
   socklen_t peer_addrlen = sizeof(peer);
@@ -514,7 +514,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
     return -1;
   }
   addr.sun_family = AF_UNIX;
-  memcpy(addr.sun_path, address, addr_len + 1); /* copy the NUL byte. */
+  FIO_MEMCPY(addr.sun_path, address, addr_len + 1); /* copy the NUL byte. */
 #if defined(__APPLE__)
   addr.sun_len = addr_len;
 #endif

@@ -320,7 +320,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
                  (uint32_t)(slice << FIO_STREAM___EMBD_BIT_OFFSET);
-      FIO___MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
+      FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;
     }
@@ -478,7 +478,7 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     if (written > len[0])
       written = len[0];
     if (written) {
-      FIO___MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
+      FIO_MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
       len[0] -= written;
     }
     if (len[0]) {
@@ -497,9 +497,9 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     if (written > len[0])
       written = len[0];
     if (written) {
-      FIO___MEMCPY(buf[0] + buf_offset,
-                   u.ext->buf + u.ext->offset + offset,
-                   written);
+      FIO_MEMCPY(buf[0] + buf_offset,
+                 u.ext->buf + u.ext->offset + offset,
+                 written);
       len[0] -= written;
     }
     if (len[0]) {

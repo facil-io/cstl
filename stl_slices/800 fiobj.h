@@ -950,7 +950,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
                               .len = 5};
     }
     fio_str_info_s i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(j);
-    memcpy(fiobj___2cstr___buffer__perthread, i.buf, i.len + 1);
+    FIO_MEMCPY(fiobj___2cstr___buffer__perthread, i.buf, i.len + 1);
     fiobj_free(j);
     i.buf = fiobj___2cstr___buffer__perthread;
     return i;

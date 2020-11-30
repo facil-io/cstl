@@ -303,6 +303,14 @@ Marks a function as a _destructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
 
+#### `FIO_MEMCPY`
+
+```c
+#define FIO_MEMCPY memcpy // or __builtin_memcpy if unavailable
+```
+
+Makes it easy to override `memcpy` implementations.
+
 #### `FIO_MACRO2STR`
 
 ```c

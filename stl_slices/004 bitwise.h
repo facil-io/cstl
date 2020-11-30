@@ -319,46 +319,46 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
   uint64_t tmp; /* fio_buf2u64 */
-  memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf64 */
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
   __uint128_t tmp; /* fio_buf2u1128 */
-  FIO___MEMCPY(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY(&tmp, c, sizeof(tmp));
   return tmp;
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  FIO___MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf128 */
+  FIO_MEMCPY(buf, &i, sizeof(i)); /* fio_u2buf128 */
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -1234,7 +1234,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     } while (!mask || !counter);
     fio_rand_bytes(data, 128);
     for (uint8_t i = 0; i < 16; ++i) {
-      memcpy(buf + i, data, 128);
+      FIO_MEMCPY(buf + i, data, 128);
       fio_xmask(buf + i, 128, mask);
       fio_xmask(buf + i, 128, mask);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
@@ -1245,7 +1245,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                  "fio_xmask rountrip (with move) error");
     }
     for (uint8_t i = 0; i < 16; ++i) {
-      memcpy(buf + i, data, 128);
+      FIO_MEMCPY(buf + i, data, 128);
       fio_xmask2(buf + i, 128, mask, counter);
       fio_xmask2(buf + i, 128, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 CM rountrip error");

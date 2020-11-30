@@ -686,7 +686,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (capa_ >= 0) {
         /* copy items at begining of memory stack */
         if (count) {
-          FIO___MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
+          FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
         }
         FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
         *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
@@ -699,9 +699,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       }
       /* copy items at ending of memory stack */
       if (count) {
-        FIO___MEMCPY(tmp + (capa - count),
-                     ary->ary + ary->start,
-                     count * sizeof(*tmp));
+        FIO_MEMCPY(tmp + (capa - count),
+                   ary->ary + ary->start,
+                   count * sizeof(*tmp));
       }
       FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
@@ -721,9 +721,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     if (capa_ >= 0) {
       /* copy items at begining of memory stack */
       if (ary->start) {
-        FIO___MEMCPY(tmp,
-                     FIO_ARRAY2EMBEDDED(ary)->embedded,
-                     ary->start * sizeof(*tmp));
+        FIO_MEMCPY(tmp,
+                   FIO_ARRAY2EMBEDDED(ary)->embedded,
+                   ary->start * sizeof(*tmp));
       }
       *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
           .start = 0,
@@ -735,9 +735,9 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     }
     /* copy items at ending of memory stack */
     if (ary->start) {
-      FIO___MEMCPY(tmp + (capa - ary->start),
-                   FIO_ARRAY2EMBEDDED(ary)->embedded,
-                   ary->start * sizeof(*tmp));
+      FIO_MEMCPY(tmp + (capa - ary->start),
+                 FIO_ARRAY2EMBEDDED(ary)->embedded,
+                 ary->start * sizeof(*tmp));
     }
     *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
         .start = (capa - ary->start),
@@ -789,9 +789,9 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   }
 #if FIO_ARRAY_TYPE_CONCAT_COPY_SIMPLE
   /* copy data */
-  memcpy(FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_) + offset,
-         FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_),
-         added);
+  FIO_MEMCPY(FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_) + offset,
+             FIO_NAME2(FIO_ARRAY_NAME, ptr)(src_),
+             added);
 #else
   {
     FIO_ARRAY_TYPE *const a1 = FIO_NAME2(FIO_ARRAY_NAME, ptr)(dest_);
@@ -1115,7 +1115,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, compact)(FIO_ARRAY_PTR ary_) {
       FIO_MEM_REALLOC_(NULL, 0, (ary->end - ary->start) * sizeof(*tmp), 0);
   if (!tmp)
     return;
-  memcpy(tmp, ary->ary + ary->start, count * sizeof(*ary->ary));
+  FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*ary->ary));
   FIO_MEM_FREE_(ary->ary, ary->capa * sizeof(*ary->ary));
   *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
       .start = 0,
@@ -1134,9 +1134,9 @@ re_embed:
         .start = (uint32_t)count,
     };
     if (count) {
-      FIO___MEMCPY(FIO_ARRAY2EMBEDDED(ary)->embedded,
-                   tmp + offset,
-                   count * sizeof(*tmp));
+      FIO_MEMCPY(FIO_ARRAY2EMBEDDED(ary)->embedded,
+                 tmp + offset,
+                 count * sizeof(*tmp));
     }
     if (tmp) {
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);

@@ -695,7 +695,7 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
                                    sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1),
                                    0);
       if (data)
-        memcpy(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
+        FIO_MEMCPY(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
     }
   } else {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
@@ -706,7 +706,7 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
                                       sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1),
                                       0);
       if (data)
-        memcpy(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
+        FIO_MEMCPY(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
     }
   }
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
@@ -765,7 +765,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
     if (len && str)
-      memcpy(FIO_STR_SMALL_DATA(s), str, len);
+      FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
@@ -800,7 +800,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
     if (len && str)
-      memcpy(FIO_STR_SMALL_DATA(s), str, len);
+      FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
     i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
@@ -826,7 +826,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   FIO_STR_BIG_DATA(s) = i.buf;
   FIO_STR_BIG_LEN_SET(s, len);
   if (str)
-    memcpy(FIO_STR_BIG_DATA(s), str, len);
+    FIO_MEMCPY(FIO_STR_BIG_DATA(s), str, len);
   return i;
 }
 
@@ -1021,7 +1021,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
   size_t const org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, resize)(s_, src_len + org_len);
   if (src)
-    memcpy(state.buf + org_len, src, src_len);
+    FIO_MEMCPY(state.buf + org_len, src, src_len);
   return state;
 }
 
@@ -1084,9 +1084,9 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
     FIO_NAME(FIO_STR_NAME, init_copy)
     ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), NULL, amount);
-    memcpy(FIO_STR_BIG_DATA(&tmp),
-           FIO_STR_SMALL_DATA(s),
-           FIO_STR_SMALL_CAPA(s));
+    FIO_MEMCPY(FIO_STR_BIG_DATA(&tmp),
+               FIO_STR_SMALL_DATA(s),
+               FIO_STR_SMALL_CAPA(s));
     FIO_STR_BIG_LEN_SET(&tmp, FIO_STR_SMALL_LEN(s));
     *s = tmp;
     i = (fio_str_info_s){
@@ -1123,7 +1123,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
         s->special = 0;
         tmp[data_len] = 0;
         if (data_len)
-          memcpy(tmp, FIO_STR_BIG_DATA(s), data_len);
+          FIO_MEMCPY(tmp, FIO_STR_BIG_DATA(s), data_len);
       }
     }
     if (tmp) {
@@ -1447,7 +1447,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest_,
   const size_t old_len = FIO_NAME(FIO_STR_NAME, len)(dest_);
   fio_str_info_s state =
       FIO_NAME(FIO_STR_NAME, resize)(dest_, src_state.len + old_len);
-  memcpy(state.buf + old_len, src_state.buf, src_state.len);
+  FIO_MEMCPY(state.buf + old_len, src_state.buf, src_state.len);
   return state;
 }
 
@@ -1506,7 +1506,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
             (state.len - start_pos) - old_len);
   }
   if (src_len) {
-    memcpy(state.buf + start_pos, src, src_len);
+    FIO_MEMCPY(state.buf + start_pos, src, src_len);
   }
 
   return FIO_NAME(FIO_STR_NAME, resize)(s_, new_size);
@@ -1635,14 +1635,14 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
   dest.buf += dest.len;
   /* is escaping required? - simple memcpy if we don't need to escape */
   if (set_at) {
-    memcpy(dest.buf, src, len);
+    FIO_MEMCPY(dest.buf, src, len);
     dest.buf -= dest.len;
     dest.len += len;
     return dest;
   }
   /* simple memcpy until first char that needs escaping */
   if (at >= 8) {
-    memcpy(dest.buf, src, at);
+    FIO_MEMCPY(dest.buf, src, at);
   } else {
     at = 0;
   }
@@ -2231,8 +2231,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
           (char *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*path) * (path_len + 1), 0);
       if (!path)
         return state;
-      memcpy(path, home, home_len);
-      memcpy(path + home_len, filename + 1, filename_len);
+      FIO_MEMCPY(path, home, home_len);
+      FIO_MEMCPY(path + home_len, filename + 1, filename_len);
       path[path_len] = 0;
       filename = path;
     }

@@ -530,10 +530,10 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  memcpy(dest + written, "Infinity", 9);
+  FIO_MEMCPY(dest + written, "Infinity", 9);
   return written + 8;
 is_nan:
-  memcpy(dest, "NaN", 4);
+  FIO_MEMCPY(dest, "NaN", 4);
   return 3;
 }
 
@@ -584,7 +584,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test + 1] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -592,7 +592,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -617,7 +617,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test + 1] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -625,7 +625,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
         for (int pre_test = 0; pre_test < pb->prefix_len; ++pre_test) {
           if (bf[pre_test] == pb->prefix[pre_test])
             continue;
-          FIO___MEMCPY(buf, pb->prefix, pb->prefix_len);
+          FIO_MEMCPY(buf, pb->prefix, pb->prefix_len);
           bf = buf;
           break;
         }
@@ -948,7 +948,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    memcpy(buffer, "1234567890.123", 14);
+    FIO_MEMCPY(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();

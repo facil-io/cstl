@@ -770,7 +770,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
         return (void *)NULL;
       }
       fio___memcpy_aligned(result, mem, prev_len); /* copy data */
-      // memcpy(result, mem, prev_len);
+      // FIO_MEMCPY(result, mem, prev_len);
       munmap(mem, prev_len); /* free original memory */
     }
     return result;
@@ -959,7 +959,7 @@ memset / memcpy selectors
 #if FIO_MEMORY_USE_FIO_MEMCOPY
 #define FIO___MEMCPY2 fio___memcpy_aligned
 #else
-#define FIO___MEMCPY2 FIO___MEMCPY
+#define FIO___MEMCPY2 FIO_MEMCPY
 #endif /* FIO_MEMORY_USE_FIO_MEMCOPY */
 
 /* *****************************************************************************

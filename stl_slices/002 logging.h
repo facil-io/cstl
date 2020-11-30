@@ -63,9 +63,9 @@ __attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
   va_end(argv);
   if (len___log <= 0 || len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
-      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER,
-             "...\n\tWARNING: TRUNCATED!",
-             24);
+      FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
+                 "...\n\tWARNING: TRUNCATED!",
+                 24);
       len___log = FIO_LOG____LENGTH_BORDER + 24;
     } else {
       fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
