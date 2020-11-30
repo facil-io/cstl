@@ -925,8 +925,10 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
+#if !DEBUG
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, lock_speed)();
+#endif
   fprintf(stderr, "===============\n");
   {
     char timebuf[64];

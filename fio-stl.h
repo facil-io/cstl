@@ -21890,6 +21890,13 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 
 #else
 
+FIO_IFUNC void *FIO_NAME(fiobj_mem, realloc2)(void *ptr,
+                                              size_t new_size,
+                                              size_t copy_len) {
+  return FIO_MEM_REALLOC(ptr, new_size, new_size, copy_len);
+}
+FIO_IFUNC void FIO_NAME(fiobj_mem, free)(void *ptr) { FIO_MEM_FREE(ptr, -1); }
+
 #define FIOBJ_MEM_REALLOC         FIO_MEM_REALLOC
 #define FIOBJ_MEM_FREE            FIO_MEM_FREE
 #define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
@@ -25069,8 +25076,10 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
+#if !DEBUG
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, lock_speed)();
+#endif
   fprintf(stderr, "===============\n");
   {
     char timebuf[64];
