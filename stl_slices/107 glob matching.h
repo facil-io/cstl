@@ -16,19 +16,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-      A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
+                            Globe Matching
 
 
 
@@ -49,15 +37,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 
 
 
-
-
-
-
                           Globe Matching Implementation
-
-
-
-
 
 
 

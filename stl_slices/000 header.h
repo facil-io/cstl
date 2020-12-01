@@ -136,19 +136,7 @@ extern "C" {
 
 
 
-
-
-
-
-
-
                             Constants (included once)
-
-
-
-
-
-
 
 
 
@@ -372,6 +360,14 @@ typedef struct fio_str_info_s {
   /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
   size_t capa;
 } fio_str_info_s;
+
+/** An information type for reporting/storing buffer data. */
+typedef struct fio_buf_info_s {
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The string's length, if any. */
+  size_t len;
+} fio_buf_info_s;
 
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
@@ -604,19 +600,7 @@ End persistent segment (end include-once guard)
 
 
 
-
-
-
-
-
-
                           Common internal Macros
-
-
-
-
-
-
 
 
 
@@ -757,13 +741,7 @@ Common macros
 
 
 
-
-
-
                           Internal Dependencies
-
-
-
 
 
 
@@ -803,7 +781,7 @@ Common macros
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME)
+    defined(FIO_UMAP_NAME) || defined(FIO_SHA1)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif

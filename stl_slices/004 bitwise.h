@@ -15,19 +15,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             Bit-Byte Operations
-
-
-
-
-
-s
 
 
 
@@ -1016,19 +1004,7 @@ Bitewise helpers cleanup
 
 
 
-
-
-
-
-
-
                                 Bitmap Helpers
-
-
-
-
-
-
 
 
 

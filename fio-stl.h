@@ -136,19 +136,7 @@ extern "C" {
 
 
 
-
-
-
-
-
-
                             Constants (included once)
-
-
-
-
-
-
 
 
 
@@ -372,6 +360,14 @@ typedef struct fio_str_info_s {
   /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
   size_t capa;
 } fio_str_info_s;
+
+/** An information type for reporting/storing buffer data. */
+typedef struct fio_buf_info_s {
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The string's length, if any. */
+  size_t len;
+} fio_buf_info_s;
 
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
@@ -604,19 +600,7 @@ End persistent segment (end include-once guard)
 
 
 
-
-
-
-
-
-
                           Common internal Macros
-
-
-
-
-
-
 
 
 
@@ -757,13 +741,7 @@ Common macros
 
 
 
-
-
-
                           Internal Dependencies
-
-
-
 
 
 
@@ -803,7 +781,7 @@ Common macros
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME)
+    defined(FIO_UMAP_NAME) || defined(FIO_SHA1)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -836,12 +814,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
-
-
-
-
-
-
 
 
 
@@ -980,19 +952,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             Atomic Operations
-
-
-
-
-
-
 
 
 
@@ -1362,19 +1322,7 @@ Atomics - cleanup
 
 
 
-
-
-
-
-
-
                       Multi-Lock with Mutex Emulation
-
-
-
-
-
-
 
 
 
@@ -1632,19 +1580,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             Bit-Byte Operations
-
-
-
-
-
-s
 
 
 
@@ -2633,19 +2569,7 @@ Bitewise helpers cleanup
 
 
 
-
-
-
-
-
-
                                 Bitmap Helpers
-
-
-
-
-
-
 
 
 
@@ -2894,19 +2818,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                         Risky Hash - a fast and simple hash
-
-
-
-
-
-
 
 
 
@@ -3024,7 +2936,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     v3 ^= seed;
   }
 
-  for (size_t i = len >> 5; i; --i) {
+  for (size_t i = 31; i < len; i += 32) {
     /* vectorized 32 bytes / 256 bit access */
     FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
                         FIO_RISKY_BUF2U64(data + 8),
@@ -3129,7 +3041,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     v[3] ^= seed;
   }
 
-  for (size_t i = len >> 5; i; --i) {
+  for (size_t i = 31; i < len; i += 32) {
     /* vectorized 32 bytes / 256 bit access */
     FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
                         FIO_RISKY_BUF2U64(data + 8),
@@ -3230,19 +3142,7 @@ Risky Hash - Cleanup
 
 
 
-
-
-
-
-
-
                       Psedo-Random Generator Functions
-
-
-
-
-
-
 
 
 
@@ -3487,7 +3387,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
 #endif
 
   uint8_t *buffer_mem =
-      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset), 0);
+      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_ofset;
 
   memset(buffer, 'T', buffer_len);
@@ -3518,7 +3418,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     cycles <<= 1;
   }
-  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset));
+  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset) + 64);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
@@ -3790,19 +3690,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                                     SHA 1
-
-
-
-
-
-
 
 
 
@@ -4078,19 +3966,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             String <=> Number helpers
-
-
-
-
-
-
 
 
 
@@ -5066,25 +4942,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-
-
-
                                   URI Parsing
-
-
-
-
-
-
-
-
-
 
 
 
@@ -5748,19 +5606,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                                 JSON Parsing
-
-
-
-
-
-
 
 
 
@@ -6257,19 +6103,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                       Custom Memory Allocator / Pooling
-
-
-
-
-
-
 
 
 
@@ -7163,20 +6997,8 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
 
 
 
-
-
-
-
-
-
                   Memory allocation implementation starts here
                     helper function and setup are complete
-
-
-
-
-
-
 
 
 
@@ -8784,19 +8606,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                                   Time Helpers
-
-
-
-
-
-
 
 
 
@@ -9439,20 +9249,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                                 Task / Timer Queues
                                 (Event Loop Engine)
-
-
-
-
-
-
 
 
 
@@ -10305,19 +10103,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   CLI helpers - command line interface parsing
-
-
-
-
-
-
 
 
 
@@ -11204,18 +10990,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                         Basic Socket Helpers / IO Polling
-
-
-
-
-
 
 
 
@@ -12031,19 +11806,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-      A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
+                        POSIX Portable Polling with `poll`
 
 
 
@@ -12144,17 +11907,7 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p);
 
 
 
-
-
-
-
-
                           Poll Monitoring Implementation
-
-
-
-
-
 
 
 
@@ -12600,19 +12353,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
       A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
 
 
 
@@ -13345,19 +13086,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-      A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
+                              Signal Monitoring
 
 
 
@@ -13397,15 +13126,7 @@ SFUNC int fio_signal_forget(int sig);
 
 
 
-
-
-
-
                           Signal Monitoring Implementation
-
-
-
-
 
 
 
@@ -13602,19 +13323,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-      A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
+                            Globe Matching
 
 
 
@@ -13635,15 +13344,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 
 
 
-
-
-
-
                           Globe Matching Implementation
-
-
-
-
 
 
 
@@ -13856,12 +13557,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
-
-
-
-
-
-
 
 
 
@@ -14080,17 +13775,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             Dynamic Arrays
-
-
-
-
 
 
 
@@ -15875,19 +15560,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   Common Map Settings (ordered / unordered)
-
-
-
-
-
-
 
 
 
@@ -16487,19 +16160,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   Unordered Map - an Unordered Hash Map / Set
-
-
-
-
-
-
 
 
 
@@ -17281,19 +16942,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   Unordered Map - an Unordered Hash Map / Set
-
-
-
-
-
-
 
 
 
@@ -18473,19 +18122,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                         Dynamic Strings (binary safe)
-
-
-
-
-
-
 
 
 
@@ -21240,20 +20877,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                       Reference Counting / Wrapper
                    (must be placed after all type macros)
-
-
-
-
-
-
 
 
 
@@ -21481,19 +21106,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   A Template for New Types / Modules
-
-
-
-
-
-
 
 
 
@@ -21636,19 +21249,7 @@ Module Cleanup
 
 
 
-
-
-
-
-
-
                             Common Cleanup
-
-
-
-
-
-
 
 
 
@@ -21722,19 +21323,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                           FIOBJ - soft (dynamic) types
-
-
-
-
-
-
 
 
 
@@ -24162,19 +23751,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                                 Testing
-
-
-
-
-
-
 
 
 
@@ -25113,18 +24690,6 @@ Testing cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif
 /* *****************************************************************************
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

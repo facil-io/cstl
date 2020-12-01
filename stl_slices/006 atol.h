@@ -14,19 +14,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             String <=> Number helpers
-
-
-
-
-
-
 
 
 

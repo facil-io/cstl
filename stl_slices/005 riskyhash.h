@@ -12,19 +12,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                         Risky Hash - a fast and simple hash
-
-
-
-
-
-
 
 
 
@@ -142,7 +130,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     v3 ^= seed;
   }
 
-  for (size_t i = len >> 5; i; --i) {
+  for (size_t i = 31; i < len; i += 32) {
     /* vectorized 32 bytes / 256 bit access */
     FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
                         FIO_RISKY_BUF2U64(data + 8),
@@ -247,7 +235,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     v[3] ^= seed;
   }
 
-  for (size_t i = len >> 5; i; --i) {
+  for (size_t i = 31; i < len; i += 32) {
     /* vectorized 32 bytes / 256 bit access */
     FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
                         FIO_RISKY_BUF2U64(data + 8),
@@ -348,19 +336,7 @@ Risky Hash - Cleanup
 
 
 
-
-
-
-
-
-
                       Psedo-Random Generator Functions
-
-
-
-
-
-
 
 
 
@@ -605,7 +581,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
 #endif
 
   uint8_t *buffer_mem =
-      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset), 0);
+      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_ofset;
 
   memset(buffer, 'T', buffer_len);
@@ -636,7 +612,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     cycles <<= 1;
   }
-  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset));
+  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset) + 64);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {

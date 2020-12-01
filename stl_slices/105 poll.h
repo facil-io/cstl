@@ -22,19 +22,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
-      A packet based data stream for storing / buffering endless data.
-
-
-
-
-
-
+                        POSIX Portable Polling with `poll`
 
 
 
@@ -135,17 +123,7 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p);
 
 
 
-
-
-
-
-
                           Poll Monitoring Implementation
-
-
-
-
-
 
 
 

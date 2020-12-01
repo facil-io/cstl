@@ -967,6 +967,8 @@ Returns the end state of the mask.
 
 The function may perform significantly better when the buffer's memory is aligned.
 
+**Note**: this function could be used to obfuscate data in locally stored buffers, mitigating risks such as data leaks that may occur when memory is swapped to disk. However, this function should **never** be used as an alternative to actual encryption.
+
 -------------------------------------------------------------------------------
 
 ## Bitmap helpers

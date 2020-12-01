@@ -14,19 +14,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                             Atomic Operations
-
-
-
-
-
-
 
 
 
@@ -396,19 +384,7 @@ Atomics - cleanup
 
 
 
-
-
-
-
-
-
                       Multi-Lock with Mutex Emulation
-
-
-
-
-
-
 
 
 

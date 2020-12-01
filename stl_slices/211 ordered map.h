@@ -17,19 +17,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                   Unordered Map - an Unordered Hash Map / Set
-
-
-
-
-
-
 
 
 

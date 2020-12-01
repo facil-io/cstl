@@ -18,19 +18,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                       Custom Memory Allocator / Pooling
-
-
-
-
-
-
 
 
 
@@ -924,20 +912,8 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
 
 
 
-
-
-
-
-
-
                   Memory allocation implementation starts here
                     helper function and setup are complete
-
-
-
-
-
-
 
 
 

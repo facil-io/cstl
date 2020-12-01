@@ -16,20 +16,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-
-
-
-
-
                       Reference Counting / Wrapper
                    (must be placed after all type macros)
-
-
-
-
-
-
 
 
 
