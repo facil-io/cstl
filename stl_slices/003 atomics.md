@@ -258,7 +258,7 @@ Doesn't return until a successful lock was acquired.
 
 ```c
 void fio_unlock2(fio_lock2_s *lock, size_t group);
-  ```
+```
 
 Unlocks a multilock, regardless of who owns the locked group.
 
