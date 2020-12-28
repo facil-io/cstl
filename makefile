@@ -1,12 +1,26 @@
 #############################################################################
 # This makefile was composed for facil.io
 #
-# Copyright (c) 2016-2019 Boaz Segev
+# Copyright (c) 2016-2020 Boaz Segev
 # License MIT or ISC
 #
-# This makefile should be easilty portable.
+# This makefile SHOULD be easilty portable and Should work on any POSIX
+# system for any project... under the following assumptions:
 #
-# Should work on any POSIX system for any project.
+# * If your code has a `main` function, that code should be placed in the
+#   `MAIN_ROOT` folder and/or `MAIN_SUBFOLDERS` (i.e., `./src`).
+#
+# * If your code provides a library style API, the published functions are
+#   in the `LIB_ROOT` folder and/or `LIB_XXX_SUBFOLDERS` (i.e., `./lib`).
+#
+# * If you want to concat a number of header / source / markdown (docs) files
+#   than place them in the `LIB_CONCAT_FOLDER`.
+#
+# * Test files are independent (each test files compiles and runs as is) and
+#   placed in the `TEST_ROOT` folder (i.e., `./tests`).
+#
+#   Run tests (i.e., the test file `foo.c`) with:       `make test/foo`
+#   Run tests after linking with the library code with: `make test/lib/foo`
 #
 #############################################################################
 
@@ -25,7 +39,7 @@ TMP_ROOT=tmp
 DEST?=$(TMP_ROOT)
 
 # output folder for `make libdump` - dumps all library files (not source files) in one place.
-DUMP_LIB=libdump
+DUMP_LIB?=libdump
 
 #############################################################################
 # Source Code Folder Settings
@@ -57,7 +71,7 @@ LIB_PRIVATE_SUBFOLDERS=
 # a folder containing code that should be unified into a single file
 #
 # Note: files will be unified in the same order the system provides (usually, file anme)
-LIB_CONCAT_FOLDER=stl_slices
+LIB_CONCAT_FOLDER?=stl_slices
 
 # the path and file name to use when unifying *.c, *.h, and *.md files (without extension).
 LIB_CONCAT_TARGET?=fio-stl
@@ -501,9 +515,13 @@ OPENSSL_LDFLAGS:="-lssl" "-lcrypto"
 ifeq ($(shell $(PKG_CONFIG) -- openssl >/dev/null 2>&1; echo $$?), 0)
   OPENSSL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags openssl)
   OPENSSL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs openssl)
-else ifeq ($(shell $(PKG_CONFIG) -- libsodium >/dev/null 2>&1; echo $$?), 0)
-  OPENSSL_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libsodium)
-  OPENSSL_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libsodium)
+endif
+ifeq ($(shell $(PKG_CONFIG) -- libsodium >/dev/null 2>&1; echo $$?), 0)
+  LIBSODIUM_CFLAGS:=$(shell $(PKG_CONFIG) --cflags libsodium)
+  LIBSODIUM_LDFLAGS:=$(shell $(PKG_CONFIG) --libs libsodium)
+else
+  LIBSODIUM_CFLAGS:=
+  LIBSODIUM_LDFLAGS:=-lsodium
 endif
 
 
@@ -527,11 +545,12 @@ else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPEN
   CFLAGS+=$(OPENSSL_CFLAGS)
   PKGC_REQ_OPENSSL=openssl >= 1.1, openssl < 1.2
   PKGC_REQ+=$$(PKGC_REQ_OPENSSL)
-else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", "-lsodium") , 0)
+else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", $(LIBSODIUM_CFLAGS) $(LIBSODIUM_LDFLAGS)) , 0)
   # Sodium Crypto Library: https://doc.libsodium.org/usage
   $(info * Detected the Sodium library, setting HAVE_SODIUM)
   FLAGS:=$(FLAGS) HAVE_SODIUM
-  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) sodium
+  LDFLAGS+=$(LIBSODIUM_CFLAGS)
+  CFLAGS+=$(LIBSODIUM_LDFLAGS)
 else
   $(info * No compatible SSL/TLS library detected.)
 endif # FIO_NO_TLS
