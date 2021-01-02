@@ -4000,9 +4000,20 @@ SFUNC double fio_atof(char **pstr);
  *
  * Out of bound values return 255.
  *
- * This allows calculations for up to base 36.
+ * This allows parsing of numeral strings for up to base 36.
  */
 IFUNC uint8_t fio_c2i(unsigned char c);
+
+/**
+ * Maps numeral values to alphanumerical characters, where numbers have their
+ * natural values (0-9) and `A-Z` are the values 10-35.
+ *
+ * Accepts values up to 63. Returns zero for values over 35. Out of bound values
+ * produce undefined behavior.
+ *
+ * This allows printing of numerals for up to base 36.
+ */
+IFUNC uint8_t fio_i2c(unsigned char i);
 
 /* *****************************************************************************
 Numbers to Strings - API
@@ -4011,15 +4022,18 @@ Numbers to Strings - API
 /**
  * A helper function that writes a signed int64_t to a string.
  *
- * No overflow guard is provided, make sure there's at least 68 bytes
- * available (for base 2).
+ * No overflow guard is provided, make sure there's at least 68 bytes available
+ * (for base 2).
  *
  * Offers special support for base 2 (binary), base 8 (octal), base 10 and base
- * 16 (hex). An unsupported base will silently default to base 10. Prefixes
- * are automatically added (i.e., "0x" for hex and "0b" for base 2).
+ * 16 (hex) where prefixes are automatically added if required (i.e.,`"0x"` for
+ * hex and `"0b"` for base 2, and `"0"` for octal).
  *
- * Returns the number of bytes actually written (excluding the NUL
- * terminator).
+ * Supports any base up to base 36 (using 0-9,A-Z).
+ *
+ * An unsupported base will log an error and print zero.
+ *
+ * Returns the number of bytes actually written (excluding the NUL terminator).
  */
 SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
 
@@ -4054,7 +4068,7 @@ typedef struct {
  *
  * Out of bound values return 255.
  *
- * This allows calculations for up to base 36.
+ * This allows parsing of numeral strings for up to base 36.
  */
 IFUNC uint8_t fio_c2i(unsigned char c) {
   static const uint8_t fio___alphanumerical_map[256] = {
@@ -4077,6 +4091,23 @@ IFUNC uint8_t fio_c2i(unsigned char c) {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
   return fio___alphanumerical_map[c];
+}
+
+/**
+ * Maps numeral values to alphanumerical characters, where numbers have their
+ * natural values (0-9) and `A-Z` are the values 10-35.
+ *
+ * Accepts values up to 63. Returns zero for values over 35. Out of bound values
+ * produce undefined behavior.
+ *
+ * This allows printing of numerals for up to base 36.
+ */
+IFUNC uint8_t fio_i2c(unsigned char i) {
+  static const uint8_t fio___alphanumerical_map[64] = {
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B',
+      'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+      'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+  return fio___alphanumerical_map[i & 63];
 }
 
 /** Reads number information in base 2. Returned expo in base 2. */
@@ -4249,15 +4280,13 @@ Numbers to Strings - Implementation
 ***************************************************************************** */
 
 SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
-  // clang-format off
-  const char notation[] = {'0', '1', '2', '3', '4', '5', '6', '7',
-                           '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-  // clang-format on
   size_t len = 0;
   char buf[48]; /* we only need up to 20 for base 10, but base 3 needs 41... */
 
   if (!num)
     goto zero;
+  if (base > 36)
+    goto base_error;
 
   switch (base) {
   case 1: /* fallthrough */
@@ -4345,33 +4374,30 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       while (i < 8) {
         uint8_t tmp = (n & 0xF000000000000000) >> 60;
         uint8_t tmp2 = (n & 0x0F00000000000000) >> 56;
-        dest[len++] = notation[tmp];
-        dest[len++] = notation[tmp2];
+        dest[len++] = fio_i2c(tmp);
+        dest[len++] = fio_i2c(tmp2);
         i++;
         n = n << 8;
       }
       dest[len] = 0;
       return len;
     }
-  case 3: /* fallthrough */
-  case 4: /* fallthrough */
-  case 5: /* fallthrough */
-  case 6: /* fallthrough */
-  case 7: /* fallthrough */
-  case 9: /* fallthrough */
-    /* rare bases */
+  case 0: /* fallthrough */
+  case 10:
+    /* Base 10 */
     {
-      int64_t t = num / base;
+      int64_t t = num / 10;
       uint64_t l = 0;
       if (num < 0) {
-        num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
+        num = 0 - num; /* might fail due to overflow, but fixed with tail
+        (t) */
         t = (int64_t)0 - t;
         dest[len++] = '-';
       }
       while (num) {
-        buf[l++] = '0' + (num - (t * base));
+        buf[l++] = '0' + (num - (t * 10));
         num = t;
-        t = num / base;
+        t = num / 10;
       }
       while (l) {
         --l;
@@ -4382,30 +4408,31 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     }
 
   default:
-    break;
-  }
-  /* Base 10, the default base */
-  {
-    int64_t t = num / 10;
-    uint64_t l = 0;
-    if (num < 0) {
-      num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-      t = (int64_t)0 - t;
-      dest[len++] = '-';
+    /* any base up to base 36 */
+    {
+      int64_t t = num / base;
+      uint64_t l = 0;
+      if (num < 0) {
+        num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
+        t = (int64_t)0 - t;
+        dest[len++] = '-';
+      }
+      while (num) {
+        buf[l++] = fio_i2c(num - (t * base));
+        num = t;
+        t = num / base;
+      }
+      while (l) {
+        --l;
+        dest[len++] = buf[l];
+      }
+      dest[len] = 0;
+      return len;
     }
-    while (num) {
-      buf[l++] = '0' + (num - (t * 10));
-      num = t;
-      t = num / 10;
-    }
-    while (l) {
-      --l;
-      dest[len++] = buf[l];
-    }
-    dest[len] = 0;
-    return len;
   }
 
+base_error:
+  FIO_LOG_ERROR("fio_ltoa base out of range");
 zero:
   switch (base) {
   case 1:
@@ -4627,6 +4654,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
                i,
                i2);
+  }
+  for (unsigned char i = 0; i < 36; ++i) {
+    FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.")
   }
   fprintf(stderr, "* Testing fio_atol samples.\n");
 #define TEST_ATOL(s, n)                                                        \

@@ -35,15 +35,15 @@ size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
 
 A helper function that writes a signed int64_t to a string.
 
-No overflow guard is provided, make sure there's at least 68 bytes available
-(for base 2).
+No overflow guard is provided, make sure there's at least 68 bytes available (for base 2).
 
-Offers special support for base 2 (binary), base 8 (octal), base 10 and base 16
-(hex). An unsupported base will silently default to base 10. Prefixes are
-automatically added (i.e., "0x" for hex and "0b" for base 2).
+Offers special support for base 2 (binary), base 8 (octal), base 10 and base 16 (hex) where prefixes are automatically added if required (i.e.,`"0x"` for hex and `"0b"` for base 2, and `"0"` for octal).
+
+Supports any base up to base 36 (using 0-9,A-Z).
+
+An unsupported base will log an error and print zero.
 
 Returns the number of bytes actually written (excluding the NUL terminator).
-
 
 #### `fio_ftoa`
 
