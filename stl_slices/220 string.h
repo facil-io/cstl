@@ -6,7 +6,8 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_STR_NAME fio            /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
+#define FIO_ATOL                    /* Development inclusion - ignore line */
+#include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -1554,10 +1555,6 @@ String API - C / JSON escaping
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
                                                           const void *src_,
                                                           size_t len) {
-  // clang-format off
-  const char escape_hex_chars[] = {'0', '1', '2', '3', '4', '5', '6', '7',
-                                   '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-  // clang-format on
   const uint8_t *src = (const uint8_t *)src_;
   size_t extra_len = 0;
   size_t at = 0;
@@ -1703,13 +1700,13 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
         dest.buf[at++] = 'u';
         dest.buf[at++] = '0';
         dest.buf[at++] = '0';
-        dest.buf[at++] = escape_hex_chars[src[i] >> 4];
-        dest.buf[at++] = escape_hex_chars[src[i] & 15];
+        dest.buf[at++] = fio_i2c(src[i] >> 4);
+        dest.buf[at++] = fio_i2c(src[i] & 15);
       } else {
         /* non UTF-8 data... encode as...? */
         dest.buf[at++] = 'x';
-        dest.buf[at++] = escape_hex_chars[src[i] >> 4];
-        dest.buf[at++] = escape_hex_chars[src[i] & 15];
+        dest.buf[at++] = fio_i2c(src[i] >> 4);
+        dest.buf[at++] = fio_i2c(src[i] & 15);
       }
     }
   }
@@ -1722,21 +1719,6 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
                                                             const void *src_,
                                                             size_t len) {
-  const uint8_t is_hex[] = {
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  1,  2,  3,  4, 5, 6, 7, 8, 9, 10, 0,  0,
-      0,  0,  0,  0, 0, 11, 12, 13, 14, 15, 16, 0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 11, 12, 13,
-      14, 15, 16, 0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0,  0,  0,
-      0,  0,  0,  0, 0, 0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0};
-
   fio_str_info_s dest;
   {
     const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s);
@@ -1811,18 +1793,18 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
       break; /* from switch */
     case 'u': {
       /* test UTF-8 notation */
-      if (is_hex[src[1]] && is_hex[src[2]] && is_hex[src[3]] &&
-          is_hex[src[4]]) {
-        uint32_t u =
-            ((((is_hex[src[1]] - 1) << 4) | (is_hex[src[2]] - 1)) << 8) |
-            (((is_hex[src[3]] - 1) << 4) | (is_hex[src[4]] - 1));
-        if ((((is_hex[src[1]] - 1) << 4) | (is_hex[src[2]] - 1)) == 0xD8U &&
-            src[5] == '\\' && src[6] == 'u' && is_hex[src[7]] &&
-            is_hex[src[8]] && is_hex[src[9]] && is_hex[src[10]]) {
+      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16 &&
+          fio_c2i(src[3]) < 16 && fio_c2i(src[4]) < 16) {
+        uint32_t u = (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) << 8) |
+                     ((fio_c2i(src[3]) << 4) | fio_c2i(src[4]));
+        if (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) == 0xD8U &&
+            src[5] == '\\' && src[6] == 'u' && fio_c2i(src[7]) < 16 &&
+            fio_c2i(src[8]) < 16 && fio_c2i(src[9]) < 16 &&
+            fio_c2i(src[10]) < 16) {
           /* surrogate-pair */
           u = (u & 0x03FF) << 10;
-          u |= ((((((is_hex[src[7]] - 1) << 4) | (is_hex[src[8]] - 1)) << 8) |
-                 (((is_hex[src[9]] - 1) << 4) | (is_hex[src[10]] - 1))) &
+          u |= (((((fio_c2i(src[7]) << 4) | fio_c2i(src[8])) << 8) |
+                 ((fio_c2i(src[9]) << 4) | fio_c2i(src[10]))) &
                 0x03FF);
           u += 0x10000;
           src += 6;
@@ -1848,8 +1830,8 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
         goto invalid_escape;
     }
     case 'x': { /* test for hex notation */
-      if (is_hex[src[1]] && is_hex[src[2]]) {
-        dest.buf[at++] = ((is_hex[src[1]] - 1) << 4) | (is_hex[src[2]] - 1);
+      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16) {
+        dest.buf[at++] = (fio_c2i(src[1]) << 4) | fio_c2i(src[2]);
         src += 3;
         break; /* from switch */
       } else
