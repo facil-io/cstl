@@ -781,7 +781,18 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
  * Use `fiobj_dup` to collect an actual reference to the returned object.
  */
 FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
-
+/**
+ * Uses JavaScript style notation to find data in an object structure.
+ *
+ * For example, "[0].name" will return the "name" property of the first object
+ * in an array object.
+ *
+ * Returns a temporary reference to the object or FIOBJ_INVALID on an error.
+ *
+ * Use `fiobj_dup` to collect an actual reference to the returned object.
+ */
+#define fiobj_json_find2(object, str, length)                                  \
+  fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
 /* *****************************************************************************
 
 
@@ -2265,9 +2276,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         "{\"true\":true,\"false\":false,\"null\":null,\"array\":[1,2,3,4.2,"
         "\"five\"],"
         "\"string\":\"hello\\tjson\\bworld!\\r\\n\",\"hash\":{\"true\":true,"
-        "\"false\":false},\"array2\":[1,2,3,4.2,\"five\",{\"hash\":true}]}";
+        "\"false\":false},\"array2\":[1,2,3,4.2,\"five\",{\"hash\":true},[{"
+        "\"hash\":{\"true\":true}}]]}";
     o = fiobj_json_parse2(json, strlen(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
+    FIO_ASSERT(fiobj_json_find2(o, "array2[6][0].hash.true", 22) ==
+                   fiobj_true(),
+               "fiobj_json_find2 failed");
     FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);
 #ifdef DEBUG
     fprintf(stderr, "JSON: %s\n", FIO_NAME2(fiobj, cstr)(j).buf);

@@ -5426,6 +5426,21 @@ Returns a temporary reference to the object or `FIOBJ_INVALID` on an error.
 
 Use `fiobj_dup` to collect an actual reference to the returned object.
 
+**Note**:
+
+Using the search algorithm with long object names and/or deeper nesting levels might incur a performance penalty due to the fact that the algorithm tests for all possible object name permutations.
+
+i.e., `"name1.name2.name3"` will first be tested as the whole string (`"name1.name2.name3"`), then `"name1.name2" + "name.3"` will be tested, then `"name1" + "name2.name.3"` will be tested for and `"name1" + "name2" + "name3"` will only be attempted last (allowing all permutations to be reviewed rather than assuming a `.` is always a delimiter).
+
+#### `fiobj_json_find2`
+
+```c
+#define fiobj_json_find2(object, str, length)                                  \
+  fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+```
+
+A macro helper for [`fiobj_json_find`](#fiobj_json_find).
+
 ### `FIOBJ` Primitive Types
 
 The `true`, `false` and `null` primitive type functions (in addition to the common functions) are only their simple static constructor / accessor functions.
