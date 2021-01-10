@@ -187,6 +187,7 @@ FIO_IFUNC void *FIO_NAME(fiobj_mem, realloc2)(void *ptr,
                                               size_t new_size,
                                               size_t copy_len) {
   return FIO_MEM_REALLOC(ptr, new_size, new_size, copy_len);
+  (void)copy_len; /* might be unused */
 }
 FIO_IFUNC void FIO_NAME(fiobj_mem, free)(void *ptr) { FIO_MEM_FREE(ptr, -1); }
 
@@ -768,6 +769,18 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
 /** Helper macro, calls `fiobj_json_parse` with string information */
 #define fiobj_json_parse2(data_, len_, consumed)                               \
   fiobj_json_parse((fio_str_info_s){.buf = data_, .len = len_}, consumed)
+
+/**
+ * Uses JavaScript style notation to find data in an object structure.
+ *
+ * For example, "[0].name" will return the "name" property of the first object
+ * in an array object.
+ *
+ * Returns a temporary reference to the object or FIOBJ_INVALID on an error.
+ *
+ * Use `fiobj_dup` to collect an actual reference to the returned object.
+ */
+FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
 
 /* *****************************************************************************
 
@@ -2049,6 +2062,68 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
   }
   fiobj_free(p.key);
   return p.top;
+}
+
+/** Uses JSON (JavaScript) notation to find data in an object structure. Returns
+ * a temporary object. */
+FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
+  for (;;) {
+  top:
+    if (!n.len)
+      return o;
+    switch (FIOBJ_TYPE_CLASS(o)) {
+    case FIOBJ_T_ARRAY: {
+      if (n.len <= 2 || n.buf[0] != '[' || n.buf[1] < '0' || n.buf[1] > '9')
+        return FIOBJ_INVALID;
+      size_t i = 0;
+      ++n.buf;
+      --n.len;
+      while (n.len && fio_c2i(n.buf[0]) < 10) {
+        i = (i * 10) + fio_c2i(n.buf[0]);
+        ++n.buf;
+        --n.len;
+      }
+      if (!n.len || n.buf[0] != ']')
+        return FIOBJ_INVALID;
+      o = fiobj_array_get(o, i);
+      ++n.buf;
+      --n.len;
+      if (n.len) {
+        if (n.buf[0] == '.') {
+          ++n.buf;
+          --n.len;
+        } else if (n.buf[0] != '[') {
+          return FIOBJ_INVALID;
+        }
+        continue;
+      }
+      return o;
+    }
+    case FIOBJ_T_HASH: {
+      FIOBJ tmp = fiobj_hash_get3(o, n.buf, n.len);
+      if (tmp != FIOBJ_INVALID)
+        return tmp;
+      char *end = n.buf + n.len - 1;
+      while (end > n.buf) {
+        while (end > n.buf && end[0] != '.' && end[0] != '[')
+          --end;
+        if (end == n.buf)
+          return FIOBJ_INVALID;
+        const size_t t_len = end - n.buf;
+        tmp = fiobj_hash_get3(o, n.buf, t_len);
+        if (tmp != FIOBJ_INVALID) {
+          o = tmp;
+          n.len -= t_len + (end[0] == '.');
+          n.buf = end + (end[0] == '.');
+          goto top;
+        }
+        --end;
+      }
+    } /* fallthrough */
+    default:
+      return FIOBJ_INVALID;
+    }
+  }
 }
 
 /* *****************************************************************************

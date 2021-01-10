@@ -270,6 +270,19 @@ This function is **recursive** and could cause a **stack explosion** error.
 
 The facil.io library attempts to protect against this error by limiting recursive access to `FIOBJ_MAX_NESTING`... however, this also assumes that a user / developer doesn't exceed the maximum nesting limit (or errors may occur).
 
+#### `fiobj_json_find`
+
+```c
+FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
+```
+
+Uses JavaScript (JSON) style notation to find data in an object structure.
+
+For example, `"[0].name"` will return the `"name"` property of the first object in an Array object.
+
+Returns a temporary reference to the object or `FIOBJ_INVALID` on an error.
+
+Use `fiobj_dup` to collect an actual reference to the returned object.
 
 ### `FIOBJ` Primitive Types
 
