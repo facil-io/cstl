@@ -204,7 +204,9 @@ Basic macros and included files
 #include <unistd.h>
 #endif
 
-#if FIO_UNALIGNED_ACCESS && (__amd64 || __amd64__ || __x86_64 || __x86_64__)
+#if FIO_UNALIGNED_ACCESS &&                                                    \
+    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
+     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64)
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
 #else
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0

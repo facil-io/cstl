@@ -204,7 +204,9 @@ Basic macros and included files
 #include <unistd.h>
 #endif
 
-#if FIO_UNALIGNED_ACCESS && (__amd64 || __amd64__ || __x86_64 || __x86_64__)
+#if FIO_UNALIGNED_ACCESS &&                                                    \
+    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
+     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64)
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
 #else
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
@@ -24463,10 +24465,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {
     fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
-    if (page != 4096)
+    if (page != (1UL << FIO_MEM_PAGE_SIZE_LOG))
       FIO_LOG_WARNING("page size mismatch!\n          "
                       "facil.io should be recompiled with:\n          "
-                      "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
+                      "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf`\"",
                       log2(page));
   }
 }
