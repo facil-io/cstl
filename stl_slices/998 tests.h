@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -573,7 +573,8 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
 Environment printout
 ***************************************************************************** */
 
-#define FIO_PRINT_SIZE_OF(T) fprintf(stderr, "\t" #T "\t%zu Bytes\n", sizeof(T))
+#define FIO_PRINT_SIZE_OF(T)                                                   \
+  fprintf(stderr, "\t%-17s%zu Bytes\n", #T, sizeof(T))
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -602,14 +603,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   FIO_PRINT_SIZE_OF(double);
   FIO_PRINT_SIZE_OF(size_t);
   FIO_PRINT_SIZE_OF(void *);
+  FIO_PRINT_SIZE_OF(uintmax_t);
+  FIO_PRINT_SIZE_OF(long double);
+#ifdef __SIZEOF_INT128__
+  FIO_PRINT_SIZE_OF(__uint128_t);
+#endif
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {
-    fprintf(stderr, "\tPage\t%ld bytes.\n", page);
-    FIO_ASSERT((page >> FIO_MEM_PAGE_SIZE_LOG) <= 1,
-               "page size mismatch!\n          "
-               "facil.io should be recompiled with "
-               "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
-               log2(page));
+    fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
+    if (page != 4096)
+      FIO_LOG_WARNING("page size mismatch!\n          "
+                      "facil.io should be recompiled with:\n          "
+                      "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
+                      log2(page));
   }
 }
 #undef FIO_PRINT_SIZE_OF

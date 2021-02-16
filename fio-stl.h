@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -805,7 +805,7 @@ Common macros
 #endif
 #endif /* FIO_ATOL */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -937,7 +937,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #endif /* FIO_LOG */
 #undef FIO_LOG
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -1564,7 +1564,7 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
 #endif /* FIO_LOCK2 */
 #undef FIO_LOCK2
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -2805,7 +2805,7 @@ Bit-Byte operations - cleanup
 #endif /* FIO_BITMAP */
 #undef FIO_BITMAP
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -3673,7 +3673,7 @@ Random - Cleanup
 #endif /* FIO_RAND */
 #undef FIO_RAND
 /* *****************************************************************************
-Copyright: Boaz Segev, 2020
+Copyright: Boaz Segev, 2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -3951,7 +3951,7 @@ Module Cleanup
 #endif /* FIO_SHA1 */
 #undef FIO_SHA1
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -4959,7 +4959,7 @@ Numbers <=> Strings - Cleanup
 #endif /* FIO_ATOL */
 #undef FIO_ATOL
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -5621,7 +5621,7 @@ FIO_URL - Cleanup
 #undef FIO_URL
 #undef FIO_URI
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -6114,7 +6114,7 @@ failed:
 #undef FIO_JSON
 #endif /* FIO_JSON */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -8619,7 +8619,7 @@ Memory management macros
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -9262,7 +9262,7 @@ Time Cleanup
 #undef FIO_TIME
 #endif /* FIO_TIME */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -10111,7 +10111,7 @@ Queue/Timer Cleanup
 #undef FIO_QUEUE
 #endif /* FIO_QUEUE */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -11007,7 +11007,7 @@ CLI - cleanup
 #endif /* FIO_CLI */
 #undef FIO_CLI
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -11813,7 +11813,7 @@ FIO_SOCK - cleanup
 #undef FIO_SOCK
 #endif
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -12368,7 +12368,7 @@ Module Cleanup
 #undef FIO_POLL
 #endif /* FIO_POLL */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -13099,7 +13099,7 @@ Module Cleanup
 #endif /* FIO_STREAM */
 #undef FIO_STREAM
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -13336,7 +13336,7 @@ Module Cleanup
 #endif /* FIO_SIGNAL */
 #undef FIO_SIGNAL
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -13578,7 +13578,7 @@ Module Cleanup
 #endif /* FIO_GLOB_MATCH */
 #undef FIO_GLOB_MATCH
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -13789,7 +13789,7 @@ Linked Lists (embeded) - cleanup
 #undef FIO_LIST_TYPE_PTR
 #endif
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -15574,7 +15574,7 @@ Dynamic Arrays - cleanup
 #undef FIO_ARRAY_EMBEDDED_CAPA
 #undef FIO_ARRAY2EMBEDDED
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -16172,7 +16172,7 @@ Common Map Settings - Finish
 ***************************************************************************** */
 #endif
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -16955,7 +16955,7 @@ Ordered Map Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_MAP_NAME */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -18139,7 +18139,7 @@ Map - cleanup
 #undef FIO_MAP___IMAP_DELETED
 #undef FIO_MAP_TEST
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -18755,7 +18755,9 @@ String Macro Helpers
  * directly to `mmap` (due to their size, usually over 12KB).
  */
 #define FIO_STR_CAPA2WORDS(num)                                                \
-  ((size_t)((size_t)(num) | (sizeof(long double) - 1)))
+  ((size_t)(                                                                   \
+      (size_t)(num) |                                                          \
+      ((sizeof(long double) > 16) ? (sizeof(long double) - 1) : (size_t)15)))
 
 /* *****************************************************************************
 String Constructors (inline)
@@ -20407,7 +20409,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              "small string length reporting error after write!");
   FIO_ASSERT(FIO_NAME2(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
              "small string pointer reporting error after write!");
-  FIO_ASSERT(strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(!FIO_NAME2(FIO_STR_NAME, ptr)(&str)[4] &&
+                 strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)) == 4,
              "small string NUL missing after write (%zu)!",
              strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME2(FIO_STR_NAME, ptr)(&str), "Worl"),
@@ -20427,7 +20430,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
                  sizeof(FIO_NAME(FIO_STR_NAME, s)) - 1,
              "Long String capacity update error (%zu != %zu)!",
              FIO_NAME(FIO_STR_NAME, capa)(&str),
-             sizeof(FIO_NAME(FIO_STR_NAME, s)));
+             FIO_STR_SMALL_CAPA(&str));
+
   FIO_ASSERT(FIO_NAME2(FIO_STR_NAME, ptr)(&str) ==
                  FIO_NAME(FIO_STR_NAME, info)(&str).buf,
              "Long String `ptr` !>= "
@@ -20874,7 +20878,7 @@ String Cleanup
 
 #endif /* FIO_STR_NAME */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -21105,7 +21109,7 @@ Reference Counter (Wrapper) Cleanup
 #undef FIO_REF_DESTRUCTOR
 #endif
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -21309,7 +21313,7 @@ Common cleanup
 
 #endif /* !FIO_STL_KEEP__ */
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -23843,7 +23847,7 @@ FIOBJ cleanup
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -24417,7 +24421,8 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
 Environment printout
 ***************************************************************************** */
 
-#define FIO_PRINT_SIZE_OF(T) fprintf(stderr, "\t" #T "\t%zu Bytes\n", sizeof(T))
+#define FIO_PRINT_SIZE_OF(T)                                                   \
+  fprintf(stderr, "\t%-17s%zu Bytes\n", #T, sizeof(T))
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -24446,14 +24451,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   FIO_PRINT_SIZE_OF(double);
   FIO_PRINT_SIZE_OF(size_t);
   FIO_PRINT_SIZE_OF(void *);
+  FIO_PRINT_SIZE_OF(uintmax_t);
+  FIO_PRINT_SIZE_OF(long double);
+#ifdef __SIZEOF_INT128__
+  FIO_PRINT_SIZE_OF(__uint128_t);
+#endif
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {
-    fprintf(stderr, "\tPage\t%ld bytes.\n", page);
-    FIO_ASSERT((page >> FIO_MEM_PAGE_SIZE_LOG) <= 1,
-               "page size mismatch!\n          "
-               "facil.io should be recompiled with "
-               "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
-               log2(page));
+    fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
+    if (page != 4096)
+      FIO_LOG_WARNING("page size mismatch!\n          "
+                      "facil.io should be recompiled with:\n          "
+                      "`CFLAGS=-DFIO_MEM_PAGE_SIZE_LOG = %.0lf",
+                      log2(page));
   }
 }
 #undef FIO_PRINT_SIZE_OF

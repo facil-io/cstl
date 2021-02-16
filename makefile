@@ -103,10 +103,10 @@ CMAKE_REQUIRE_PACKAGE=Threads
 
 # any libraries required (only names, ommit the "-l" at the begining)
 LINKER_LIBS=pthread m
-# optimization level.
-OPTIMIZATION=-O2 -march=native
+# optimization level. (-march=native fails with some ARM compilers)
+OPTIMIZATION=-O2 
 # optimization level in debug mode.
-OPTIMIZATION_DEBUG=-O0 -march=native -fsanitize=address -fsanitize=thread -fsanitize=undefined -fno-omit-frame-pointer
+OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=thread -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 # any extra include folders, space seperated list. (i.e. `pg_config --includedir`)

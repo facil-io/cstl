@@ -33,7 +33,7 @@ static size_t TEST_CYCLES_REPEAT;
  *
  * To compensate, it provides fio_realloc2 that copies only the valid data.
  *
- * If thiis flag is set, the test will run using this compensation, assuming all
+ * If this flag is set, the test will run using this compensation, assuming all
  * previously allocated memory should be copied (but no risk of copy overflow
  * performance hit).
  */
@@ -96,8 +96,9 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
                      total_pointers);
       fprintf(stderr, "* Avrg. micro-seconds per malloc: %zu\n", clock_alloc);
       fprintf(stderr, "* Avrg. micro-seconds per calloc: %zu\n", clock_calloc);
-      fprintf(
-          stderr, "* Avrg. micro-seconds per realloc: %zu\n", clock_realloc);
+      fprintf(stderr,
+              "* Avrg. micro-seconds per realloc: %zu\n",
+              clock_realloc);
       fprintf(stderr,
               "* Avrg. micro-seconds per free (realloc): %zu\n",
               clock_free);
@@ -321,8 +322,8 @@ int main(int argc, char const *argv[]) {
           "\n=== WARNING: performance tests using the DEBUG mode are "
           "invalid. \n");
 #endif
-  fio_cli_set_default("-t", "1");
-  const size_t thread_count = fio_cli_get_i("-t");
+
+  const size_t thread_count = fio_cli_get_i("-t") ? fio_cli_get_i("-t") : 1;
   fio_cli_end();
   fio_free(fio_malloc(16)); /* initialize allocator if needed */
   free(malloc(16));         /* initialize allocator if needed */

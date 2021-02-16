@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -615,7 +615,9 @@ String Macro Helpers
  * directly to `mmap` (due to their size, usually over 12KB).
  */
 #define FIO_STR_CAPA2WORDS(num)                                                \
-  ((size_t)((size_t)(num) | (sizeof(long double) - 1)))
+  ((size_t)(                                                                   \
+      (size_t)(num) |                                                          \
+      ((sizeof(long double) > 16) ? (sizeof(long double) - 1) : (size_t)15)))
 
 /* *****************************************************************************
 String Constructors (inline)
@@ -2267,7 +2269,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              "small string length reporting error after write!");
   FIO_ASSERT(FIO_NAME2(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
              "small string pointer reporting error after write!");
-  FIO_ASSERT(strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(!FIO_NAME2(FIO_STR_NAME, ptr)(&str)[4] &&
+                 strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)) == 4,
              "small string NUL missing after write (%zu)!",
              strlen(FIO_NAME2(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME2(FIO_STR_NAME, ptr)(&str), "Worl"),
@@ -2287,7 +2290,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
                  sizeof(FIO_NAME(FIO_STR_NAME, s)) - 1,
              "Long String capacity update error (%zu != %zu)!",
              FIO_NAME(FIO_STR_NAME, capa)(&str),
-             sizeof(FIO_NAME(FIO_STR_NAME, s)));
+             FIO_STR_SMALL_CAPA(&str));
+
   FIO_ASSERT(FIO_NAME2(FIO_STR_NAME, ptr)(&str) ==
                  FIO_NAME(FIO_STR_NAME, info)(&str).buf,
              "Long String `ptr` !>= "
