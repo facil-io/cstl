@@ -7660,7 +7660,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
   /* reference could have been added while waiting for the lock */
-  if (c->ref)
+  if (fio_atomic_add_fetch(&c->ref, 1) != 1)
     goto in_use;
 
   /* remove all blocks from the block allocation list */
@@ -7688,6 +7688,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
   return;
 
 in_use:
+  fio_atomic_sub_fetch(&c->ref, 1);
   FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
   return;
 }
@@ -7772,13 +7773,12 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
 
   /* place in free list */
-  if (c->ref > 1) {
-    FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-    FIO_LIST_NODE *n =
-        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
-    FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
-    FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-  }
+  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+  FIO_LIST_NODE *n =
+      (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
+  FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
+  FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+
   /* free chunk reference */
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(c);
 }
@@ -7794,13 +7794,17 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 
   /* try to collect from list */
-  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
-      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
+  while (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
+         &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
     FIO_LIST_REMOVE(n);
+    c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)((void *)n);
+    if (fio_atomic_add_fetch(&c->ref, 1) == 1) {
+      /* chunk is waiting on a lock to be removed */
+      fio_atomic_sub(&c->ref, 1);
+      continue;
+    }
     p = (void *)n;
-    c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
-    fio_atomic_add(&c->ref, 1); /* update chunk reference, needs atomic op. */
     goto done;
   }
 
