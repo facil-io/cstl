@@ -826,7 +826,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
 }
 
 /* *****************************************************************************
-Testing functiun
+Testing function
 ***************************************************************************** */
 
 FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {

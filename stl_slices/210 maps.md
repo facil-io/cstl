@@ -6,7 +6,8 @@
 #include "fio-stl.h"
 
 /* Set the properties for the key-value Hash Map type called `dict_s` */
-#define FIO_UMAP_NAME                dict
+#define FIO_MAP_NAME                 dict
+#define FIO_MAP_ORDERED              0
 #define FIO_MAP_TYPE                 str_s
 #define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
 #define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
@@ -58,14 +59,15 @@ The map implementations have protection features against too many full collision
 
 ### Map Overview 
 
-To create a map, define `FIO_MAP_NAME`, `FIO_OMAP_NAME`(ordered) **or** `FIO_UMAP_NAME` (unordered).
+To create a map, define `FIO_MAP_NAME`, `FIO_OMAP_NAME` (ordered) **or** `FIO_UMAP_NAME` (unordered).
 
 To create a hash map (rather then a set), also define `FIO_MAP_KEY` (containing the key's type).
 
 To create an unordered map either use `FIO_UMAP_NAME` or define `FIO_MAP_ORDERED`.
 
-Other helpful macros to define might include:
+Helpful macros to define might include:
 
+- `FIO_MAP_ORDERED`, if `1`, the map will be ordered if `0` unordered.
 - `FIO_MAP_TYPE`, which defaults to `void *`
 - `FIO_MAP_TYPE_INVALID`, which defaults to `((FIO_MAP_TYPE){0})`
 - `FIO_MAP_TYPE_COPY(dest, src)`, which defaults to `(dest) = (src)`

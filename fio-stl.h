@@ -2867,7 +2867,7 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
 /* *****************************************************************************
 Risky Hash - Implementation
 
-Note: I don't remember what information I used when designining this, but Risky
+Note: I don't remember what information I used when designing this, but Risky
 Hash is probably NOT cryptographically safe (though I wanted it to be).
 
 Here's a few resources about hashes that might explain more:

@@ -16,7 +16,7 @@ Benchmark with keep-alive:
 Note: This is a **TOY** example, no security whatsoever!!!
 ***************************************************************************** */
 
-/* include some of the moduls we use... */
+/* include some of the modules we use... */
 #define FIO_LOG
 #define FIO_URL
 #define FIO_SOCK
