@@ -112,6 +112,11 @@ FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
   (void)clk_id;
 }
 #warning fio_time functions defined using gettimeofday patch.
+#elif defined(FIO_OS_WIN)
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  *result = *gmtime(timep);
+  return result;
+}
 #endif
 
 /* *****************************************************************************
@@ -586,7 +591,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)tm;
     }
     stop = fio_time_micro();
@@ -598,7 +603,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       volatile struct tm tm;
       time_t tmp = now;
       gmtime_r(&tmp, (struct tm *)&tm);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
     }
     stop = fio_time_micro();
     fprintf(stderr,
@@ -610,7 +615,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     for (size_t i = 0; i < (1 << 17); ++i) {
       tm_now = fio_time2gm(now + i);
       time_t t_tmp = fio_gm2time(tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)t_tmp;
     }
     stop = fio_time_micro();
@@ -621,7 +626,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     for (size_t i = 0; i < (1 << 17); ++i) {
       tm_now = fio_time2gm(now + i);
       volatile time_t t_tmp = mktime((struct tm *)&tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)t_tmp;
     }
     stop = fio_time_micro();

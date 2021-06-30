@@ -129,14 +129,32 @@ int main(int argc, char const *argv[]) {
   }
   // we should cleanup, though we'll exit with Ctrl+C, so it's won't matter.
   fio_cli_end();
-  close(state.fd);
+  fio_sock_close(state.fd);
   return 0;
   (void)argv;
 }
 
 
 ***************************************************************************** */
-#if defined(FIO_SOCK) && FIO_HAVE_UNIX_TOOLS && !defined(FIO_SOCK_POLL_LIST)
+#if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
+
+#if FIO_OS_WIN
+#if _MSC_VER
+#pragma comment(lib, "Ws2_32.lib")
+#endif
+#include <iphlpapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#ifndef FIO_SOCK_FD_ISVALID
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x3FFFFFFF)
+#endif
+/** Acts as POSIX write. Use this macro for portability with WinSock2. */
+#define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)
+/** Acts as POSIX read. Use this macro for portability with WinSock2. */
+#define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd) closesocket(fd)
+#elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
@@ -145,6 +163,18 @@ int main(int argc, char const *argv[]) {
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#ifndef FIO_SOCK_FD_ISVALID
+#define FIO_SOCK_FD_ISVALID(fd) ((int)fd != (int)-1)
+#endif
+/** Acts as POSIX write. Use this macro for portability with WinSock2. */
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+/** Acts as POSIX read. Use this macro for portability with WinSock2. */
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd)            close(fd)
+#else
+#error FIO_SOCK requires a supported OS (Windows / POSIX).
+#endif
 
 /* *****************************************************************************
 IO Poll - API
@@ -214,7 +244,9 @@ typedef enum {
   FIO_SOCK_NONBLOCK = 2,
   FIO_SOCK_TCP = 4,
   FIO_SOCK_UDP = 8,
+#if FIO_OS_POSIX
   FIO_SOCK_UNIX = 16,
+#endif
 } fio_sock_open_flags_e;
 
 /** A helper macro that waits on a single IO with no callbacks (0 = no event) */
@@ -265,8 +297,10 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
+#if FIO_OS_POSIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
+#endif
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd);
@@ -300,8 +334,11 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
     args.on_data = fio___sock_poll_mock_ev;
   if (!args.on_error)
     args.on_error = fio___sock_poll_mock_ev;
-
+#if FIO_OS_WIN
+  event_count = WSAPoll(args.fds, args.count, args.timeout);
+#else
   event_count = poll(args.fds, args.count, args.timeout);
+#endif
   if (args.before_events)
     args.before_events(args.udata);
   if (event_count <= 0)
@@ -341,8 +378,11 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
                             uint16_t flags) {
   struct addrinfo *addr = NULL;
   int fd;
-  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP |
-                    (uint16_t)FIO_SOCK_UNIX))) {
+  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP
+#if FIO_OS_POSIX
+                    | (uint16_t)FIO_SOCK_UNIX
+#endif
+                    ))) {
   case FIO_SOCK_UDP:
     addr = fio_sock_address_new(address, port, SOCK_DGRAM);
     if (!addr) {
@@ -369,19 +409,21 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
       if (fd != -1 && listen(fd, SOMAXCONN) == -1) {
         FIO_LOG_ERROR("(fio_sock_open) failed on call to listen: %s",
                       strerror(errno));
-        close(fd);
+        fio_sock_close(fd);
         fd = -1;
       }
     }
     fio_sock_address_free(addr);
     return fd;
+#if FIO_OS_POSIX
   case FIO_SOCK_UNIX:
     return fio_sock_open_unix(address,
                               (flags & FIO_SOCK_CLIENT),
                               (flags & FIO_SOCK_NONBLOCK));
+#endif
   }
   FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
-                "FIO_SOCK_UNIX flags are exclisive");
+                "FIO_SOCK_UNIX flags are exclusive");
   return -1;
 }
 
@@ -424,8 +466,33 @@ SFUNC int fio_sock_set_non_block(int fd) {
 #endif
 #elif defined(FIONBIO)
   /* Otherwise, use the old way of doing it */
-  static int flags = 1;
+#if FIO_OS_WIN
+  unsigned long flags = 1;
+  if (ioctlsocket(fd, FIONBIO, &flags)) {
+    switch (WSAGetLastError()) {
+    case WSANOTINITIALISED:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
+      break;
+    case WSAENETDOWN:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAENETDOWN");
+      break;
+    case WSAEINPROGRESS:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAEINPROGRESS");
+      break;
+    case WSAENOTSOCK:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAENOTSOCK");
+      break;
+    case WSAEFAULT:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAEFAULT");
+      break;
+    }
+    return -1;
+  }
+  return 0;
+#else
+  int flags = 1;
   return ioctl(fd, FIONBIO, &flags);
+#endif /* FIO_OS_WIN */
 #else
 #error No functions / argumnet macros for non-blocking sockets.
 #endif
@@ -435,22 +502,42 @@ SFUNC int fio_sock_set_non_block(int fd) {
 SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
   int fd = -1;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    SOCKET fd_tmp;
+    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
+        INVALID_SOCKET) {
+      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      continue;
+    }
+    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
+      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
+      errno = ERANGE;
+    }
+    fd = (int)fd_tmp;
+#else
     if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       continue;
     }
+#endif
     {
       // avoid the "address taken"
       int optval = 1;
-      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
     }
     if (bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG("Failed attempt to bind socket (%d) to address %s",
+                    fd,
+                    strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG("Couldn't set socket (%d) to non-blocking mode %s",
+                    fd,
+                    strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
@@ -466,18 +553,53 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   int fd = -1;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    SOCKET fd_tmp;
+    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
+        INVALID_SOCKET) {
+      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      continue;
+    }
+    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
+      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
+      errno = ERANGE;
+    }
+    fd = (int)fd_tmp;
+#else
     if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       continue;
     }
+#endif
 
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG(
+          "Failed attempt to set client socket (%d) to non-blocking %s",
+          fd,
+          strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
-    if (connect(fd, p->ai_addr, p->ai_addrlen) == -1 && errno != EINPROGRESS) {
-      close(fd);
+    if (connect(fd, p->ai_addr, p->ai_addrlen) == -1 &&
+#if FIO_OS_WIN
+        (WSAGetLastError() != WSAEWOULDBLOCK || errno != EINPROGRESS)
+#else
+        errno != EINPROGRESS
+#endif
+    ) {
+#if FIO_OS_WIN
+      FIO_LOG_DEBUG(
+          "Couldn't connect client socket (%d) to remote address %s (%d)",
+          fd,
+          strerror(errno),
+          WSAGetLastError());
+#else
+      FIO_LOG_DEBUG("Couldn't connect client socket (%d) to remote address %s",
+                    fd,
+                    strerror(errno));
+#endif
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
@@ -489,6 +611,7 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   return fd;
 }
 
+#if FIO_OS_POSIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -519,14 +642,14 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
   if (nonblock && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_DEBUG("couldn't set socket to nonblocking mode");
-    close(fd);
+    fio_sock_close(fd);
     return -1;
   }
   if (is_client) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
         errno != EINPROGRESS) {
       FIO_LOG_DEBUG("couldn't connect unix client: %s", strerror(errno));
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
   } else {
@@ -534,23 +657,40 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
       // umask(old_umask);
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
     // umask(old_umask);
     if (listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
   }
   return fd;
 }
+#elif FIO_OS_WIN
 
-#endif
+static WSADATA fio___sock_useless_windows_data;
+FIO_CONSTRUCTOR(fio___sock_win_init) {
+  static uint8_t flag = 0;
+  if (!flag) {
+    flag |= 1;
+    if (WSAStartup(MAKEWORD(2, 2), &fio___sock_useless_windows_data)) {
+      FIO_LOG_FATAL("WinSock2 unavailable.");
+      exit(-1);
+    }
+    atexit((void (*)(void))(WSACleanup));
+  }
+}
+
+// FIO_DESTRUCTOR void fio___sock_win_cleanup(void) { (); }
+#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+
 /* *****************************************************************************
 Socket helper testing
 ***************************************************************************** */
+#ifdef FIO_TEST_CSTL
 FIO_SFUNC void fio___sock_test_before_events(void *udata) {
   *(size_t *)udata = 0;
 }
@@ -582,18 +722,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     const char *msg;
     uint16_t flag;
   } server_tests[] = {
-      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+    {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+#if FIO_OS_POSIX
 #ifdef P_tmpdir
-      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
-       NULL,
-       "Unix",
-       FIO_SOCK_UNIX},
+    {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
+     NULL,
+     "Unix",
+     FIO_SOCK_UNIX},
 #else
-      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+    {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
 #endif
-      /* accept doesn't work with UDP, not like this... UDP test is seperate */
-      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
-      {.address = NULL},
+#endif
+    /* accept doesn't work with UDP, not like this... UDP test is seperate */
+    // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+    {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
     size_t flag = (size_t)-1;
@@ -651,7 +793,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     int cl = fio_sock_open(server_tests[i].address,
                            server_tests[i].port,
                            server_tests[i].flag | FIO_SOCK_CLIENT);
-    FIO_ASSERT(cl != -1, "client socket failed to open");
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+               "client socket failed to open (%d)",
+               cl);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = NULL,
                   .on_data = NULL,
@@ -687,8 +831,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     FIO_ASSERT(flag == 2, "Event should have occured here! (%zu)", flag);
     FIO_LOG_INFO("error may have been emitted.");
 
-    int accepted = accept(srv, NULL, NULL);
-    FIO_ASSERT(accepted != -1, "client socket failed to open");
+    intptr_t accepted = accept(srv, NULL, NULL);
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+               "accepted socket failed to open (%zd)",
+               (ssize_t)accepted);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = fio___sock_test_on_event,
                   .on_data = NULL,
@@ -716,7 +862,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                   .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
     FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
 
-    if (write(accepted, "hello", 5) > 0) {
+    if (fio_sock_write(accepted, "hello", 5) > 0) {
       // wait for read
       fio_sock_poll(.before_events = fio___sock_test_before_events,
                     .on_ready = NULL,
@@ -738,17 +884,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
       {
         char buf[64];
         errno = 0;
-        FIO_ASSERT(read(cl, buf, 64) > 0,
+        FIO_ASSERT(fio_sock_read(cl, buf, 64) > 0,
                    "Read should have read some data...\n\t"
                    "error: %s",
                    strerror(errno));
       }
       FIO_ASSERT(flag == 3, "Event should have occured here! (%zu)", flag);
     } else
-      FIO_ASSERT(0, "write failed! error: %s", strerror(errno));
-    close(accepted);
-    close(cl);
-    close(srv);
+      FIO_ASSERT(0,
+                 "send(fd:%ld) failed! error: %s",
+                 accepted,
+                 strerror(errno));
+    fio_sock_close(accepted);
+    fio_sock_close(cl);
+    fio_sock_close(srv);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = NULL,
                   .on_data = NULL,
@@ -757,50 +906,60 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                   .udata = &flag,
                   .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
     FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+#if FIO_OS_POSIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);
+#endif
   }
   {
     /* UDP semi test */
     fprintf(stderr, "* Testing UDP socket (abbreviated test)\n");
-    int srv = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
+    int srv =
+        fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
     int n = 0; /* try for 32Mb */
     socklen_t sn = sizeof(n);
-    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP default receive buffer is %d bytes\n", n);
     n = 32 * 1024 * 1024; /* try for 32Mb */
     sn = sizeof(n);
-    while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, sn) == -1) {
+    while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) == -1) {
       /* failed - repeat attempt at 0.5Mb interval */
       if (n >= (1024 * 1024)) // OS may have returned max value
         n -= 512 * 1024;
       else
         break;
     }
-    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);
     FIO_ASSERT(srv != -1,
                "Couldn't open UDP server socket: %s",
                strerror(errno));
-    int cl = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
+    FIO_LOG_INFO("Opening client UDP socket.");
+    int cl = fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
     FIO_ASSERT(cl != -1,
                "Couldn't open UDP client socket: %s",
                strerror(errno));
-    FIO_ASSERT(send(cl, "hello", 5, 0) != -1,
+    FIO_LOG_INFO("Starting UDP roundtrip.");
+    FIO_ASSERT(fio_sock_write(cl, "hello", 5) != -1,
                "couldn't send datagram from client");
     char buf[64];
+    FIO_LOG_INFO("Receiving UDP msg.");
     FIO_ASSERT(recvfrom(srv, buf, 64, 0, NULL, NULL) != -1,
                "couldn't read datagram");
     FIO_ASSERT(!memcmp(buf, "hello", 5), "transmission error");
-    close(srv);
-    close(cl);
+    FIO_LOG_INFO("cleaning up UDP sockets.");
+    fio_sock_close(srv);
+    fio_sock_close(cl);
   }
-#endif /* __cplusplus */
+#endif /* !__cplusplus */
 }
+
+#endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
 FIO_SOCK - cleanup
 ***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_SOCK
 #endif

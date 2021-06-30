@@ -146,7 +146,7 @@ extern "C" {
 #define H___FIO_CSTL_INCLUDE_ONCE_H
 
 /* *****************************************************************************
-Basic macros and included files
+Compiler detection, GCC / CLang features and OS dependent included files
 ***************************************************************************** */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -187,6 +187,54 @@ Basic macros and included files
 #define __thread _Thread_value
 #endif
 
+#if defined(__clang__) || defined(__GNUC__)
+/** Clobber CPU registers and prevent compiler reordering optimizations. */
+#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
+#elif defined(_MSC_VER)
+/** Clobber CPU registers and prevent compiler reordering optimizations. */
+#define FIO_COMPILER_GUARD asm("")
+#pragma message("Warning: Windows doesn't provide a low-level C memory barrier")
+#else
+#warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
+#define FIO_COMPILER_GUARD asm volatile("" ::: "memory")
+#endif
+
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+#define FIO_HAVE_UNIX_TOOLS 1
+#define FIO_OS_POSIX        1
+#define FIO___PRINTF_STYLE  printf
+#elif defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) ||              \
+    defined(__MINGW32__) || defined(__BORLANDC__)
+#define FIO_OS_WIN     1
+#define POSIX_C_SOURCE 200809L
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include <processthreadsapi.h>
+static inline int kill(long long p, int sig) {
+  return (int)TerminateProcess((HANDLE)p, (UINT)sig) - 1;
+}
+#endif
+#if defined(__MINGW32__)
+/* Mingw supports */
+#define FIO_HAVE_UNIX_TOOLS    2
+#define __USE_MINGW_ANSI_STDIO 1
+#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#elif defined(__CYGWIN__)
+/* TODO: cygwin support */
+#define FIO_HAVE_UNIX_TOOLS    3
+#define __USE_MINGW_ANSI_STDIO 1
+#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#else
+#define FIO_HAVE_UNIX_TOOLS 0
+typedef SSIZE_T ssize_t;
+#endif /* __CYGWIN__ __MINGW32__ */
+#else
+#define FIO_HAVE_UNIX_TOOLS 0
+#warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
+#endif
+
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
@@ -195,12 +243,14 @@ Basic macros and included files
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 
-#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
-#define FIO_HAVE_UNIX_TOOLS 1
-#elif defined(__CYGWIN__) || defined(__MINGW32__)
-#define FIO_HAVE_UNIX_TOOLS 2
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 0
+#endif
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 0
 #endif
 
 #if FIO_HAVE_UNIX_TOOLS
@@ -226,6 +276,39 @@ Basic macros and included files
 #endif
 
 /* *****************************************************************************
+Function Attributes
+***************************************************************************** */
+
+/** Marks a function as `static`, `inline` and possibly unused. */
+#define FIO_IFUNC static inline __attribute__((unused))
+
+/** Marks a function as `static` and possibly unused. */
+#define FIO_SFUNC static __attribute__((unused))
+
+/** Marks a function as weak */
+#define FIO_WEAK __attribute__((weak))
+
+#if _MSC_VER
+#pragma section(".CRT$XCU", read)
+#undef FIO_CONSTRUCTOR
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  static void fname(void);                                                     \
+  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
+  static void fname(void)
+#else
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  FIO_SFUNC __attribute__((constructor)) void fname FIO_NOOP(void)
+#endif
+
+/** Marks a function as a destructor - if supported. Consider using atexit() */
+#define FIO_DESTRUCTOR(fname)                                                  \
+  FIO_SFUNC                                                                    \
+  __attribute__((destructor)) void fname FIO_NOOP(void)
+
+/* *****************************************************************************
 Macro Stringifier
 ***************************************************************************** */
 
@@ -234,6 +317,29 @@ Macro Stringifier
 /** Converts a macro's content to a string literal. */
 #define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
 #endif
+
+/* *****************************************************************************
+Naming Macros
+***************************************************************************** */
+
+/* Used for naming functions and types */
+#define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
+#define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
+  FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div)
+
+/** Used for naming functions and variables resulting in: prefix_postfix */
+#define FIO_NAME(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _)
+
+/** Sets naming convention for conversion functions, i.e.: foo2bar */
+#define FIO_NAME2(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
+
+/** Sets naming convention for boolean testing functions, i.e.: foo_is_true */
+#define FIO_NAME_BL(prefix, postfix)                                           \
+  FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
+
+/** Used internally to name test functions. */
+#define FIO_NAME_TEST(prefix, postfix)                                         \
+  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
 
 /* *****************************************************************************
 Version Macros
@@ -481,33 +587,21 @@ typedef struct fio___index32_node_s {
 #endif
 
 /* *****************************************************************************
-Naming Macros
-***************************************************************************** */
-
-/* Used for naming functions and types */
-#define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
-#define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
-  FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div)
-
-/** Used for naming functions and variables resulting in: prefix_postfix */
-#define FIO_NAME(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _)
-
-/** Sets naming convention for conversion functions, i.e.: foo2bar */
-#define FIO_NAME2(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
-
-/** Sets naming convention for boolean testing functions, i.e.: foo_is_true */
-#define FIO_NAME_BL(prefix, postfix)                                           \
-  FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
-
-/** Used internally to name test functions. */
-#define FIO_NAME_TEST(prefix, postfix)                                         \
-  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
-
-/* *****************************************************************************
 Sleep / Thread Scheduling Macros
 ***************************************************************************** */
 
 #ifndef FIO_THREAD_WAIT
+#if FIO_OS_WIN
+/**
+ * Calls NtDelayExecution with the requested nano-second count.
+ */
+#define FIO_THREAD_WAIT(nano_sec)                                              \
+  do {                                                                         \
+    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
+  } while (0)
+// https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
+
+#elif FIO_OS_POSIX
 /**
  * Calls nonsleep with the requested nano-second count.
  */
@@ -517,6 +611,8 @@ Sleep / Thread Scheduling Macros
                                 .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
     nanosleep(&tm, (struct timespec *)NULL);                                   \
   } while (0)
+
+#endif
 #endif
 
 #ifndef FIO_THREAD_RESCHEDULE
@@ -581,20 +677,45 @@ Miscellaneous helper macros
 #define FIO_ASSERT_DEBUG(...)
 #endif
 
-/** Marks a function as `static`, `inline` and possibly unused. */
-#define FIO_IFUNC static inline __attribute__((unused))
+/* *****************************************************************************
+Patch for Windows
+***************************************************************************** */
+#if FIO_OS_WIN
+/* Enable console colors */
+FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
+  HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode = 0;
+  if (!c) {
+    return;
+  }
+  if (!GetConsoleMode(c, &mode)) {
+    return;
+  }
+  mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  SetConsoleMode(c, mode);
+}
 
-/** Marks a function as `static` and possibly unused. */
-#define FIO_SFUNC static __attribute__((unused))
-
-/** Marks a function as weak */
-#define FIO_WEAK __attribute__((weak))
-
-/** Marks a function as a constructor - if supported. */
-#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
-
-/** Marks a function as a destructor - if supported. */
-#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+/* as close to pead as we can get here... */
+static inline __attribute__((unused)) ssize_t fio_pread(int fd,
+                                                        void *buf,
+                                                        size_t len,
+                                                        size_t offset) {
+  ssize_t ret = -1;
+  int64_t pos = _lseeki64(fd, 0LL, SEEK_CUR);
+  if (pos == -1)
+    goto done;
+  if ((size_t)_lseeki64(fd, offset, SEEK_SET) != offset) {
+    _lseeki64(fd, pos, SEEK_SET);
+    goto done;
+  }
+  ret = _read(fd, buf, len);
+  _lseeki64(fd, pos, SEEK_SET);
+done:
+  return ret;
+}
+#else
+#define fio_pread pread
+#endif
 
 /* *****************************************************************************
 End persistent segment (end include-once guard)
@@ -622,11 +743,12 @@ Memory allocation macros
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
 #endif
 
-#if !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
+#if defined(FIO_MEM_REST) || !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
 
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
+#undef FIO_MEM_REST
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
@@ -763,6 +885,11 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
+/* Modules that require FIO_SOCK */
+#if defined(FIO_POLL)
+#define FIO_SOCK
+#endif
+
 /* Modules that require FIO_TIME */
 #if defined(FIO_QUEUE) || defined(FIO_RAND)
 #ifndef FIO_TIME
@@ -809,4 +936,5 @@ Common macros
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
+
 #endif /* FIO_ATOL */

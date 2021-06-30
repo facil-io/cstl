@@ -171,8 +171,21 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
+/** No custom memory allocations for Windows... sorry. */
+#if FIO_OS_WIN
+#ifndef FIO_MEMORY_DISABLE
+#define FIO_MEMORY_DISABLE 1
+#if _MSC_VER
+#pragma message(                                                               \
+    "Warning: Custom memory allocation is currently unavailable on Windows")
+#else
+#warning Custom memory allocation is currently unavailable on Windows.
+#endif /* _MSC_VER */
+#endif /* FIO_MEMORY_DISABLE */
+#endif /* FIO_OS_WIN */
+
 /** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
-#ifdef FIO_MEMORY_DISABLE
+#if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #endif
@@ -180,7 +193,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
 /**
- * The logarithmic size of a single allocatiion "chunk" (16 blocks).
+ * The logarithmic size of a single allocation "chunk" (16 blocks).
  *
  * Limited to >=17 and <=24.
  *
@@ -278,11 +291,11 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
-#if FIO_MEMORY_ARENA_COUNT > 0
+#if FIO_MEMORY_ARENA_COUNT != 1
 /** If true, uses a pthread mutex instead of a spinlock. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #else
-/** If true, uses a pthread mutex instead of a spinlock. */
+/** If no arenas, uses a spinlock instead of a pthread mutex. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #endif
 #endif
@@ -401,6 +414,9 @@ SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void);
 
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void);
+
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 
@@ -469,6 +485,8 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void) {}
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {}
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {}
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
 SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
@@ -496,10 +514,6 @@ Helpers and System Memory Allocation
 ***************************************************************************** */
 #ifndef H___FIO_MEM_INCLUDE_ONCE___H
 #define H___FIO_MEM_INCLUDE_ONCE___H
-
-#if FIO_HAVE_UNIX_TOOLS
-#include <unistd.h>
-#endif /* H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
   (((size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) >> (FIO_MEM_PAGE_SIZE_LOG))
@@ -648,7 +662,7 @@ FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
 /* *****************************************************************************
 POSIX Allocaion
 ***************************************************************************** */
-#if FIO_HAVE_UNIX_TOOLS || __has_include("sys/mman.h")
+#if FIO_OS_POSIX || __has_include("sys/mman.h")
 #include <sys/mman.h>
 
 /* Mitigates MAP_ANONYMOUS not being defined on older versions of MacOS */
@@ -971,7 +985,7 @@ Lock type choice
 Allocator debugging helpers
 ***************************************************************************** */
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 /* maximum block allocation count. */
 static size_t FIO_NAME(fio___,
                        FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max));
@@ -1282,7 +1296,7 @@ Allocator State Initialization & Cleanup
       (sizeof(*FIO_NAME(FIO_MEMORY_NAME, __mem_state)) +                       \
        (sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s)) * (arean_count))))
 
-/* function declerations for functions called during cleanup */
+/* function declarations for functions called during cleanup */
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void);
@@ -1293,7 +1307,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
+FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
@@ -1388,7 +1402,7 @@ FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
 }
 
 /* initializes (allocates) the arenas and state machine */
-FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
+FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
   /* allocate the state machine */
@@ -1430,6 +1444,7 @@ FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
 #endif /* DEBUG */
+  (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list);
   (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_state);
   (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings);
 }
@@ -1521,6 +1536,23 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 }
 
+void fio_malloc_print_free_block_list___(void);
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev ==
+      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks)
+    return;
+  fprintf(stderr,
+          FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME,
+                                 malloc)) " allocator free block list:\n");
+  FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
+  for (size_t i = 0; n != &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks;
+       ++i) {
+    fprintf(stderr, "\t[%zu] %p\n", i, (void *)n);
+    n = n->prev;
+  }
+}
+
 /* *****************************************************************************
 chunk allocation / deallocation
 ***************************************************************************** */
@@ -1537,25 +1569,8 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 
-FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
-  /* should we free the chunk? */
-  if (!c || fio_atomic_sub_fetch(&c->ref, 1))
-    return;
-
-  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-  /* reference could have been added while waiting for the lock */
-  if (fio_atomic_add_fetch(&c->ref, 1) != 1)
-    goto in_use;
-
-  /* remove all blocks from the block allocation list */
-  for (size_t b = 0; b < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++b) {
-    FIO_LIST_NODE *n =
-        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
-    if (n->prev && n->next) {
-      FIO_LIST_REMOVE(n);
-    }
-  }
 #if FIO_MEMORY_CACHE_SLOTS
   /* place in cache...? */
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->cache.pos <
@@ -1568,14 +1583,26 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
   FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(c);
-  return;
+}
 
-in_use:
-  fio_atomic_sub_fetch(&c->ref, 1);
-  FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-  return;
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
+  /* should we free the chunk? */
+  if (!c || fio_atomic_sub_fetch(&c->ref, 1)) {
+    FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+    return;
+  }
+
+  /* remove all blocks from the block allocation list */
+  for (size_t b = 0; b < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++b) {
+    FIO_LIST_NODE *n =
+        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
+    if (n->prev && n->next) {
+      FIO_LIST_REMOVE(n);
+    }
+  }
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(c);
 }
 
 /* SublimeText marker */
@@ -1600,7 +1627,7 @@ FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *
   }
   if (c) {
     FIO_MEMORY_ON_CHUNK_UNCACHE(c);
-    c->ref = 1;
+    *c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)){.ref = 1};
     return c;
   }
 #endif /* FIO_MEMORY_CACHE_SLOTS */
@@ -1625,21 +1652,24 @@ block allocation / deallocation
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
     size_t b) {
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  /** only reset a block't free-list header */
-  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
-               0,
-               sizeof(FIO_LIST_NODE));
-#else
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   if (c->blocks[b].pos >= (int32_t)(FIO_MEMORY_UNITS_PER_BLOCK - 4)) {
+    /* zero out the whole block */
     FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
                  0,
                  FIO_MEMORY_BLOCK_SIZE);
   } else {
+    /* zero out only the memory that was used */
     FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
                  0,
                  (((size_t)c->blocks[b].pos) << FIO_MEMORY_ALIGN_LOG));
   }
+#else
+  /** only reset a block's free-list header */
+  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
+               0,
+               (((FIO_MEMORY_ALIGN_SIZE - 1) + sizeof(FIO_LIST_NODE)) &
+                (~(FIO_MEMORY_ALIGN_SIZE - 1))));
 #endif /*FIO_MEMORY_INITIALIZE_ALLOCATIONS*/
   c->blocks[b].pos = 0;
 }
@@ -1662,9 +1692,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_LIST_NODE *n =
       (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
   FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
-  FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-
-  /* free chunk reference */
+  /* free chunk reference while in locked state */
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(c);
 }
 
@@ -1679,17 +1707,14 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 
   /* try to collect from list */
-  while (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
-         &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev !=
+      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
     FIO_LIST_REMOVE(n);
     c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)((void *)n);
-    if (fio_atomic_add_fetch(&c->ref, 1) == 1) {
-      /* chunk is waiting on a lock to be removed */
-      fio_atomic_sub(&c->ref, 1);
-      continue;
-    }
+    fio_atomic_add_fetch(&c->ref, 1);
     p = (void *)n;
+    b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
     goto done;
   }
 
@@ -1707,13 +1732,14 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
         (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
     FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
   }
+  /* set block index to zero */
+  b = 0;
 
 done:
   FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
   if (!p)
     return p;
-  b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
-  /* update block reference and alloccation position */
+  /* update block reference and allocation position */
   c->blocks[b].ref = 1;
   c->blocks[b].pos = 0;
   return p;
@@ -1749,7 +1775,7 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     const size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, block);
 
     /* if we are the only thread holding a reference to this block... reset. */
-    if (c->blocks[b].ref == 1 && c->blocks[b].pos) {
+    if (fio_atomic_add(&c->blocks[b].ref, 1) == 1 && c->blocks[b].pos) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
       FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(c, b);
     }
@@ -1758,6 +1784,7 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     if (last_pos && is_realloc == FIO_NAME(FIO_MEMORY_NAME,
                                            __mem_chunk2ptr)(c, b, last_pos)) {
       c->blocks[b].pos = bytes + last_pos;
+      fio_atomic_sub(&c->blocks[b].ref, 1);
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return is_realloc;
     }
@@ -1765,16 +1792,20 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     /* enough space? allocate */
     if (c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, c->blocks[b].pos);
-      fio_atomic_add(&c->blocks[b].ref, 1); /* keep inside lock for reset */
       a->last_pos = c->blocks[b].pos;
       c->blocks[b].pos += bytes;
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return p;
     }
+    /* release reference added */
+    if (is_realloc)
+      fio_atomic_sub(&c->blocks[b].ref, 1);
+    else
+      FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(a->block);
 
     /*
      * allocate a new block before freeing the existing block
-     * this prevents the last chunk from deallocating and reallocating
+     * this prevents the last chunk from de-allocating and reallocating
      */
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
     last_pos = 0;
@@ -1795,7 +1826,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_slice_free)(void *p) {
 }
 
 /* *****************************************************************************
-big block allocation / deallocation
+big block allocation / de-allocation
 ***************************************************************************** */
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
 
@@ -1817,19 +1848,25 @@ void fio___mem_big_block__reset_memory___(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) * b) {
 
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  /* reset chunk header, which is always bigger than big_block header*/
-  FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
-#else
-
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   /* zero out memory */
   if (b->pos >= (int32_t)(FIO_MEMORY_UNITS_PER_BIG_BLOCK - 10)) {
+    /* zero out everything */
     FIO___MEMSET((void *)b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
   } else {
+    /* zero out only the used part of the memory */
     FIO___MEMSET((void *)b,
                  0,
                  (((size_t)b->pos << FIO_MEMORY_ALIGN_LOG) +
                   FIO_MEMORY_BIG_BLOCK_HEADER_SIZE));
+  }
+#else
+  /* reset chunk header, which is always bigger than big_block header*/
+  FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
+  /* zero out possible block memory (if required) */
+  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
+    FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)
+    ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i);
   }
 #endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
   b->ref = 1;
@@ -1850,17 +1887,15 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *p) {
 
   /* zero out memory */
   FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(b);
-/* zero out possible block memory (if required) */
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
-    FIO_LIST_NODE *n = (FIO_LIST_NODE *)FIO_NAME(
-        FIO_MEMORY_NAME,
-        __mem_chunk2ptr)((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i, 0);
-    n->prev = n->next = NULL;
-  }
-#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
-  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)
+#if FIO_MEMORY_CACHE_SLOTS
+  /* lock for chunk de-allocation review () */
+  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)
   ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b);
+#else
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)
+  ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b);
+#endif
 }
 
 /* SublimeText marker */
@@ -1994,24 +2029,26 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
       "Custom memory allocator " FIO_MACRO2STR(FIO_NAME(
           FIO_MEMORY_NAME,
           malloc)) " initialized with:\n"
-                   "\t* system allocation size:                   %zu bytes\n"
                    "\t* system allocation arenas:                 %zu arenas\n"
-                   "\t* cached allocation limit:                  %zu units\n"
+                   "\t* system allocation size:                   %zu bytes\n"
                    "\t* system allocation overhead (theoretical): %zu bytes\n"
                    "\t* system allocation overhead (actual):      %zu bytes\n"
+                   "\t* cached system allocations (max):          %zu units\n"
                    "\t* memory block size:                        %zu bytes\n"
+                   "\t* blocks per system allocation:             %zu blocks\n"
                    "\t* allocation units per block:               %zu units\n"
                    "\t* arena per-allocation limit:               %zu bytes\n"
                    "\t* local per-allocation limit (before mmap): %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
-      (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE,
       (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count,
-      (size_t)FIO_MEMORY_CACHE_SLOTS,
+      (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE,
       (size_t)FIO_MEMORY_HEADER_SIZE,
       (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE % (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_CACHE_SLOTS,
       (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
       (size_t)FIO_MEMORY_UNITS_PER_BLOCK,
       (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT,
       (size_t)FIO_MEMORY_ALLOC_LIMIT,
@@ -2122,6 +2159,12 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) {
     return;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(ptr);
+  if (!c) {
+    FIO_LOG_ERROR(FIO_MACRO2STR(
+        FIO_NAME(FIO_MEMORY_NAME,
+                 free)) " attempting to free a pointer owned by a NULL chunk.");
+    return;
+  }
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER) {
@@ -2376,7 +2419,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   return NULL;
 }
 
-/* main test functin */
+/* main test function */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   fprintf(stderr,
           "* Testing core memory allocator " FIO_MACRO2STR(
@@ -2385,11 +2428,11 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   fprintf(stderr,
           "* validating allocation alignment on %zu byte border.\n",
-          FIO_MEMORY_ALIGN_SIZE);
+          (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
     FIO_ASSERT(!((uintptr_t)p & alignment_mask),
-               "allocation alignment error allocatiing %zu bytes!",
+               "allocation alignment error allocating %zu bytes!",
                i);
     FIO_NAME(FIO_MEMORY_NAME, free)(p);
   }
@@ -2417,21 +2460,21 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   }
   fprintf(stderr,
           "* re-validating allocation alignment on %zu byte border.\n",
-          FIO_MEMORY_ALIGN_SIZE);
+          (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
     FIO_ASSERT(!((uintptr_t)p & alignment_mask),
-               "allocation alignment error allocatiing %zu bytes!",
+               "allocation alignment error allocating %zu bytes!",
                i);
     FIO_NAME(FIO_MEMORY_NAME, free)(p);
   }
 
-#if DEBUG && FIO_EXTERN_COMPLETE
+#if DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)();
   FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)();
   FIO_ASSERT(!FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),
              "memory leaks?");
-#endif /* DEBUG && FIO_EXTERN_COMPLETE */
+#endif /* DEBUG */
 }
 #endif /* FIO_TEST_CSTL */
 

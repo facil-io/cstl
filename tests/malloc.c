@@ -351,7 +351,7 @@ int main(int argc, char const *argv[]) {
             "but shouldn't be).\n"
             "\n     When initializing memory, which is facil.io's recommended "
             "default,\n"
-            "       theres an added performance cost.\n\n");
+            "     theres an added performance cost.\n\n");
   }
   fprintf(stderr,
           "Test allocation ranges: %zu - %zu bytes.\n",

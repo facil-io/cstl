@@ -22,9 +22,12 @@ Note: This is a **TOY** example, no security whatsoever!!!
 #define FIO_SOCK
 #define FIO_SIGNAL
 #define FIO_CLI
+#define FIO_TIME
 #define FIO_POLL
 // #define FIO_POLL_DEBUG
 #include "fio-stl.h"
+
+// #define FIO_MEMORY_DISABLE 1
 
 /* Short string object used for response objects. */
 #define FIO_STREAM
@@ -99,10 +102,14 @@ int main(int argc, char const *argv[]) {
   fio_url_s a = fio_url_parse(url, url_len);
   if (!a.host.buf && !a.port.buf) {
     /* Unix Socket */
+#if FIO_OS_WIN
+    FIO_ASSERT(0, "Unix style sockets are unsupported on Windows.");
+#else
     srv_fd = fio_sock_open(a.path.buf,
                            NULL,
                            FIO_SOCK_UNIX | FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
     FIO_LOG_DEBUG("Opened a Unix Socket (%d).", srv_fd);
+#endif
   } else if (!a.scheme.buf || a.scheme.len != 3 ||
              (a.scheme.buf[0] | 32) != 'u' || (a.scheme.buf[1] | 32) != 'd' ||
              (a.scheme.buf[2] | 32) != 'p') {
@@ -138,7 +145,9 @@ int main(int argc, char const *argv[]) {
   /* select signals to be monitored */
   fio_signal_monitor(SIGINT, on_signal, NULL);
   fio_signal_monitor(SIGTERM, on_signal, NULL);
+#if FIO_OS_POSIX
   fio_signal_monitor(SIGQUIT, on_signal, NULL);
+#endif
 
   /* select IO objects to be monitored */
   fio_poll_monitor(&monitor, srv_fd, NULL, POLLIN);
@@ -236,7 +245,7 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
     /* read from the stream, copy might not be required. updates buf and len. */
     fio_stream_read(&c->out, &buf, &len);
     /* write to the IO object */
-    if (!len || write(fd, buf, len) <= 0)
+    if (!len || fio_sock_write(fd, buf, len) <= 0)
       goto finish;
     /* advance the stream by the amount actually written to the IO (partial?) */
     fio_stream_advance(&c->out, len);
@@ -255,7 +264,8 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   client_s *c = arg;
   if (!arg)
     goto accept_new_connections;
-  ssize_t r = read(fd, c->buf + c->buf_pos, HTTP_CLIENT_BUFFER - c->buf_pos);
+  ssize_t r =
+      fio_sock_read(fd, c->buf + c->buf_pos, HTTP_CLIENT_BUFFER - c->buf_pos);
   if (r > 0) {
     c->buf_pos += r;
     c->buf[c->buf_pos] = 0;
@@ -302,7 +312,7 @@ accept_error:
 FIO_SFUNC void on_close(int fd, void *arg) {
   client_free(arg);
   if (arg) {
-    close(fd);
+    fio_sock_close(fd);
   } else {
     FIO_LOG_DEBUG2("on_close callback called for %d, stopping.", fd);
     server_stop_flag = 1;
@@ -433,7 +443,7 @@ static int http1_on_body_chunk(http1_parser_s *parser,
 /** called when a protocol error occurred. */
 static int http1_on_error(http1_parser_s *parser) {
   client_s *c = (client_s *)parser;
-  close(c->fd);
+  fio_sock_close(c->fd);
   c->fd = -1;
   return -1;
 }

@@ -23,6 +23,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if defined(FIO_ATOMIC) && !defined(H___FIO_ATOMIC___H)
 #define H___FIO_ATOMIC___H 1
+
 /* C11 Atomics are defined? */
 #if defined(__ATOMIC_RELAXED)
 /** An atomic load operation, returns value in pointer. */
@@ -101,11 +102,50 @@ Feel free to copy, use and enjoy according to the license provided.
 /** An atomic NOT AND ((~)&) operation, returns previous value */
 #define fio_atomic_nand_fetch(p_obj, value) __sync_nand_and_fetch((p_obj), (value))
 
-// clang-format on
+
+#elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#ifdef _MSC_VER
+#pragma message ("Fallback to C11 atomics, might be missing some features.")
+#undef FIO_COMPILER_GUARD
+#define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
+#else
+#warning Fallback to C11 atomics, might be missing some features.
+#endif /* _MSC_VER */
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) atomic_compare_exchange_strong((p_obj), (p_expected), (p_desired))
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) atomic_exchange((p_obj), (value))
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) atomic_fetch_add((p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) atomic_fetch_sub((p_obj), (value))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) atomic_fetch_and((p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) atomic_fetch_xor((p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value) atomic_fetch_or((p_obj), (value))
+/** An atomic NOT AND ((~)&) operation, returns previous value */
+#define fio_atomic_nand(p_obj, value) atomic_fetch_nand((p_obj), (value))
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
 
 #else
-#error Required builtin "__sync_add_and_fetch" not found.
+#error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
 #endif
+// clang-format on
 
 #define FIO_LOCK_INIT         0
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
@@ -113,7 +153,7 @@ typedef volatile unsigned char fio_lock_i;
 
 /** Tries to lock a specific sublock. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_sublock(fio_lock_i *lock, uint8_t sub) {
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   sub &= 7;
   uint8_t sub_ = 1U << sub;
   return ((fio_atomic_or(lock, sub_) & sub_) >> sub);
@@ -148,7 +188,7 @@ FIO_IFUNC void fio_unlock_sublock(fio_lock_i *lock, uint8_t sub) {
 FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
@@ -177,7 +217,7 @@ FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_full(fio_lock_i *lock) {
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   fio_lock_i old = fio_atomic_or(lock, ~(fio_lock_i)0);
   if (!old)
     return 0;
@@ -497,7 +537,7 @@ Implementation - Inline
 FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return 0;
@@ -529,7 +569,7 @@ struct fio___lock2_wait_s {
 SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return;

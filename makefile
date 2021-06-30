@@ -102,7 +102,13 @@ CMAKE_REQUIRE_PACKAGE=Threads
 #############################################################################
 
 # any libraries required (only names, ommit the "-l" at the begining)
-LINKER_LIBS=pthread m
+ifneq ($(OS),Windows_NT)
+  # POSIX libraries
+  LINKER_LIBS=pthread m
+else
+  # Windows libraries
+  LINKER_LIBS=Ws2_32
+endif
 # optimization level. (-march=native fails with some ARM compilers)
 OPTIMIZATION=-O2 
 # optimization level in debug mode.
@@ -110,13 +116,9 @@ OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=thread -fsanitize=undefined
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 # any extra include folders, space seperated list. (i.e. `pg_config --includedir`)
-INCLUDE=./
+INCLUDE=.
 # any preprocessosr defined flags we want, space seperated list (i.e. DEBUG )
 FLAGS:=
-# c compiler
-CC?=gcc
-# c++ compiler
-CXX?=g++
 # C specific compiler options
 C_EXTRA_OPT:=
 # C++ specific compiler options
@@ -165,12 +167,20 @@ TEST4ENDIAN:=     # __BIG_ENDIAN__=?
 # OS Specific Settings (debugger, disassembler, etc')
 #############################################################################
 
-
+# Set default C and C++ compilers
 ifneq ($(OS),Windows_NT)
   OS:=$(shell uname)
+  CC?=gcc
+  CXX?=g++
+else ifneq (,$(findstring version,$(shell gcc -v 2>&1)))
+  CC?=gcc
+  CXX?=g++
 else
   $(warning *** Windows systems might not work with this makefile / library.)
+  CC?=cl
+  CXX?=cl
 endif
+
 ifeq ($(OS),Darwin) # Run MacOS commands
   # debugger
   DB=lldb
@@ -219,12 +229,16 @@ LIB_OBJS=$(foreach source, $(LIBSRC), $(addprefix $(TMP_ROOT)/, $(addsuffix .o, 
 
 OBJS_DEPENDENCY:=$(LIB_OBJS:.o=.d) $(MAIN_OBJS:.o=.d) 
 
+
 #############################################################################
 # Combining single-file library
 #############################################################################
 
 ifdef LIB_CONCAT_FOLDER
 ifdef LIB_CONCAT_TARGET
+ifneq ($(OS),Windows_NT)
+# POSIX implementation
+
 LIB_CONCAT_HEADERS=$(wildcard $(LIB_CONCAT_FOLDER)/*.h)
 LIB_CONCAT_SOURCES=$(wildcard $(LIB_CONCAT_FOLDER)/*.c)
 LIB_CONCAT_DOCS=$(wildcard $(LIB_CONCAT_FOLDER)/*.md)
@@ -233,19 +247,26 @@ ifneq ($(LIB_CONCAT_HEADERS), $(EMPTY))
   $(shell rm $(LIB_CONCAT_TARGET).h 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.h >> $(LIB_CONCAT_TARGET).h)
 endif
+
 ifneq ($(LIB_CONCAT_SOURCES), $(EMPTY))
   $(info * Building single-file source: $(LIB_CONCAT_TARGET).c)
   $(shell rm $(LIB_CONCAT_TARGET).c 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.c >> $(LIB_CONCAT_TARGET).c)
 endif
+
 ifneq ($(LIB_CONCAT_DOCS), $(EMPTY))
   $(info * Building documentation: $(LIB_CONCAT_TARGET).md)
   $(shell rm $(LIB_CONCAT_TARGET).md 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.md >> $(LIB_CONCAT_TARGET).md)
 endif
 
-endif
-endif
+else
+# Windows implementation
+$(warning *** Single-file library concatination requires a POSIX system.)
+endif #Windows_NT
+
+endif # LIB_CONCAT_TARGET
+endif # LIB_CONCAT_FOLDER
 
 #############################################################################
 # TRY_RUN, TRY_COMPILE and TRY_COMPILE_AND_RUN functions
@@ -271,9 +292,12 @@ EMPTY:=
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=70306
 #############################################################################
 
+
+ifneq ($(strip $(CC)),gcc)
 ifeq ($(shell $(CC) -v 2>&1 | grep -o "^gcc version [0-7]\." | grep -o "^gcc version"),gcc version)
   OPTIMIZATION+=-fno-ipa-icf
   $(info * Disabled `-fipa-icf` optimization, might be buggy with this gcc version.)
+endif
 endif
 
 #############################################################################
@@ -610,13 +634,20 @@ endif # TEST4ENDIAN
 # Updated flags and final values
 # (don't edit)
 #############################################################################
-
+ifneq ($(OS),Windows_NT)
 FLAGS_STR=$(foreach flag,$(FLAGS),$(addprefix -D, $(flag)))
+#POSIX
 CFLAGS:=$(CFLAGS) -g -std=$(CSTD) -fpic $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
 CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD) -fpic  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
+else
+# Windows
+INCLUDE_STR:=$(subst /,\,$(INCLUDE_STR))
+CFLAGS:=$(CFLAGS) -g -std=$(CSTD) $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
+CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD)  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
+endif
+
 LINKER_FLAGS=$(LDFLAGS) $(foreach lib,$(LINKER_LIBS),$(addprefix -l,$(lib))) $(foreach lib,$(LINKER_LIBS_EXT),$(addprefix -l,$(lib)))
 CFLAGS_DEPENDENCY=-MT $@ -MMD -MP
-
 
 # Build a "Requires:" string for the pkgconfig/facil.pc file
 # unfortunately, leading or trailing commas are interpreted as
@@ -641,6 +672,13 @@ endif
 # Tasks - Building
 #############################################################################
 
+ifeq ($(OS),Windows_NT)
+# Windows libraries
+BUILDTREE:=$(subst /,\,$(BUILDTREE))
+endif
+
+
+
 $(NAME): build
 
 build: | create_tree build_objects
@@ -654,11 +692,21 @@ build_objects: $(LIB_OBJS) $(MAIN_OBJS)
 .PHONY : clean
 clean: | _.___clean
 
+ifneq ($(OS),Windows_NT)
+# POSIX libraries
 .PHONY : %.___clean
 %.___clean:
 	-@rm -f $(BIN) 2> /dev/null || echo "" >> /dev/null
 	-@rm -R -f $(TMP_ROOT) 2> /dev/null || echo "" >> /dev/null
 	-@mkdir -p $(BUILDTREE) 2> /dev/null
+else
+# Windows libraries
+.PHONY : %.___clean
+%.___clean:
+	-@del /f /q $(subst /,\,$(BIN))
+	-@del /s /f /q $(subst /,\,$(TMP_ROOT))
+	-@mkdir $(BUILDTREE)
+endif
 
 .PHONY : run
 run: | build
@@ -677,9 +725,18 @@ db: | db.___clean set_debug_flags___ build
 	DEBUG=1 $(MAKE) build
 	$(DB) $(BIN)
 
+ifneq ($(OS),Windows_NT)
+# POSIX libraries
 .PHONY : create_tree
 create_tree:
 	-@mkdir -p $(BUILDTREE) 2> /dev/null
+else
+# Windows libraries
+.PHONY : create_tree
+create_tree:
+	-@mkdir $(BUILDTREE)
+endif
+
 
 lib: | create_tree lib_build
 

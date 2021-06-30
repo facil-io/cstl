@@ -93,7 +93,19 @@ Big Endian / Small Endian
 #endif
 #elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
     !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
+#else
 #error Could not detect byte order on this system.
+#endif
+
 #endif
 
 #if __BIG_ENDIAN__
@@ -1058,25 +1070,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   {
     uint64_t tmp = 1;
     tmp = FIO_RROT(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
                "fio_rrot failed");
     tmp = FIO_LROT(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
     tmp = 1;
     tmp = fio_rrot32(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
     tmp = fio_lrot32(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
     tmp = 1;
     tmp = fio_rrot64(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 63), "fio_rrot64 failed");
     tmp = fio_lrot64(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
   }
 

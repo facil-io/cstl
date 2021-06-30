@@ -367,7 +367,7 @@ Random - Implementation
 
 #ifdef FIO_EXTERN_COMPLETE
 
-#if FIO_HAVE_UNIX_TOOLS ||                                                     \
+#if FIO_OS_POSIX ||                                                            \
     (__has_include("sys/resource.h") && __has_include("sys/time.h"))
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -598,7 +598,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     start = clock();
     for (size_t i = cycles; i > 0; i--) {
       hash += h((char *)buffer, buffer_len);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
     }
     end = clock();
     FIO_MEMCPY(buffer, &hash, sizeof(hash));

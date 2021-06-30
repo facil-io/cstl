@@ -283,20 +283,20 @@ Marks a function as `static` and possibly unused.
 
 Marks a function as weak
 
-#### `FIO_CONSTRUCTOR`
+#### `FIO_CONSTRUCTOR(fname)`
 
 ```c
-#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
+#define FIO_CONSTRUCTOR(fname) FIO_SFUNC __attribute__((constructor)) void fname (void)
 ```
 
 Marks a function as a _constructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, before `main` is called.
 
-#### `FIO_DESTRUCTOR`
+#### `FIO_DESTRUCTOR(fname)`
 
 ```c
-#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+#define FIO_DESTRUCTOR(fname) FIO_SFUNC __attribute__((destructor)) void fname (void)
 ```
 
 Marks a function as a _destructor_ - **if supported**.

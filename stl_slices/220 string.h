@@ -1508,7 +1508,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(printf, 2, 0)))
+SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 0)))
 FIO_NAME(FIO_STR_NAME,
          vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
   va_list argv_cpy;
@@ -1529,7 +1529,7 @@ FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(printf, 2, 3)))
+SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 3)))
 FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
   va_list argv;
   va_start(argv, format);
@@ -2148,7 +2148,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
     /* copy up to 128Mb at a time... why? because pread might fail */
     const size_t to_read =
         (limit & (((size_t)1 << 27) - 1)) | ((!!(limit >> 27)) << 27);
-    if (pread(fd, state.buf + write_pos, to_read, start_at) !=
+    if (fio_pread(fd, state.buf + write_pos, to_read, start_at) !=
         (ssize_t)to_read) {
       goto error;
     }

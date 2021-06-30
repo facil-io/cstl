@@ -608,6 +608,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 #ifdef __SIZEOF_INT128__
   FIO_PRINT_SIZE_OF(__uint128_t);
 #endif
+#if FIO_OS_POSIX || defined(_SC_PAGESIZE)
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {
     fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
@@ -617,6 +618,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
                       "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf`\"",
                       log2(page));
   }
+#endif /* FIO_OS_POSIX */
 }
 #undef FIO_PRINT_SIZE_OF
 
@@ -635,7 +637,7 @@ FIO_SFUNC void fio___lock_speedtest_task_inner(void *s) {
   size_t *r = (size_t *)s;
   static size_t i;
   for (i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
     ++r[0];
   }
 }
@@ -717,7 +719,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
 
   start = fio_time_micro();
   for (size_t i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
   }
   end = fio_time_micro();
   fprintf(stderr,
@@ -738,7 +740,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       test_funcs[fn].task(NULL); /* warmup */
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-        __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+        FIO_COMPILER_GUARD;
         test_funcs[fn].task(NULL);
       }
       end = fio_time_micro();
@@ -754,13 +756,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   start = fio_time_micro();
   for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
     size_t result = 0;
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
     fio___lock_speedtest_task_inner(&result);
   }
   end = fio_time_micro();
   fprintf(stderr, " %zu mms\n", (size_t)(end - start));
   clock_t long_work = end - start;
-  fprintf(stderr, "(%zu mms):\n", long_work);
+  fprintf(stderr, "(%zu mms):\n", (size_t)long_work);
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
@@ -774,7 +776,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       result = 0;
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+        FIO_COMPILER_GUARD;
         test_funcs[fn].task(&result);
       }
       end = fio_time_micro();
@@ -793,7 +795,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
           "\n* Speed testing locking schemes - %zu threads, long work (%zu "
           "mms):\n",
           (size_t)FIO___LOCK2_TEST_THREADS,
-          long_work);
+          (size_t)long_work);
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
@@ -832,9 +834,9 @@ Testing function
 FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 #define FIO___STACK_POISON_LENGTH (1ULL << 16)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
-  __asm__ __volatile__("" ::: "memory");
+  FIO_COMPILER_GUARD;
   memset(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
-  __asm__ __volatile__("" ::: "memory");
+  FIO_COMPILER_GUARD;
   fio_trylock(buf);
 #undef FIO___STACK_POISON_LENGTH
 }

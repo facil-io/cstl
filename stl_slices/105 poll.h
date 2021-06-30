@@ -31,11 +31,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
 
-#if !FIO_HAVE_UNIX_TOOLS
-#warning "POSIX is required for the fio_poll API."
-#endif
-#include <poll.h>
-
 #ifndef FIO_POLL_HAS_UDATA_COLLECTION
 /* A unique `udata` per fd (true)? or a global `udata` (false)?*/
 #define FIO_POLL_HAS_UDATA_COLLECTION 1
@@ -255,9 +250,9 @@ FIO_IFUNC int fio___poll_monitor(fio_poll_s *p,
     return -1;
   int32_t pos = fio___poll_index_get(&p->index, fd, 0);
   struct pollfd *i = fio___poll_fds2ptr(&p->fds);
-  if (i && pos != -1 && i[pos].fd == fd)
+  if (i && pos != -1 && (int)i[pos].fd == fd)
     goto edit_existing;
-  if (i && pos != -1 && i[pos].fd == -1)
+  if (i && pos != -1 && (int)i[pos].fd == -1)
     goto renew_monitoring;
   /* insert new entry */
   i = fio___poll_fds_push(&p->fds,
@@ -359,12 +354,16 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 #else
 #define FIO___POLL_UDATA_GET(index) ud_ary[0]
 #endif
+#if FIO_OS_WIN
+  r = WSAPoll(fds_ary, len, timeout);
+#else
   r = poll(fds_ary, len, timeout);
+#endif
 
   /* process events */
   if (r > 0) {
-    int i = 0;
-    int c = 0;
+    int i = 0; /* index in fds_ary array. */
+    int c = 0; /* count events handled, to stop loop if no more events. */
     do {
       if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
         cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
@@ -381,9 +380,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         fds_ary[i].events = 0; /* never retain events after closure / error */
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
                            fds_ary[i].fd);
-        /* if it was re-inserted to the queue, remove it */
+        /* TODO?: improve re-insertion prevention */
         fio_poll_forget(p, fds_ary[i].fd);
       }
+      /* any more events? */
+      c += !!fds_ary[i].revents;
+      /* any unfired events? */
       fds_ary[i].events &= ~fds_ary[i].revents;
       if (fds_ary[i].events) {
         /* unfired events await */
@@ -398,12 +400,11 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
                            fds_ary[i].fd);
       }
-      /* any more events? */
-      c += !!fds_ary[i].revents;
       ++i;
       if (i < len && c < r)
         continue;
       if (to_copy != i) {
+        /* copy remaining events in incomplete loop, if any. */
         while (i < len) {
           FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
                              fds_ary[i].fd);
@@ -425,8 +426,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
       }
       break;
     } while (1);
-  } else
+  } else {
     to_copy = len;
+  }
 
   /* insert all unfired events back to the (thread safe) queue */
   fio_lock(&p->lock);
@@ -467,7 +469,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
     return old;
   fio_lock(&p->lock);
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  if (fio___poll_fds_get(&p->fds, pos).fd == fd) {
+  if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
     /* pos is correct (index 0 could have been a false positive) */
     fio___poll_index_remove(&p->index, fd, 0, NULL);
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
@@ -487,7 +489,7 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
                                  p->settings.on_close);
   fio_unlock(&tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
-    if (fio___poll_fds_get(&tmp.fds, i).fd == -1)
+    if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
       continue;
     close(fio___poll_fds_get(&tmp.fds, i).fd);
 #if FIO_POLL_HAS_UDATA_COLLECTION
@@ -526,12 +528,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   for (int i = 128; i--;) {
     size_t pos = fio___poll_index_get(&p.index, i, 0);
     if ((i & 3) == 3) {
-      FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).fd != i, "fd wasn't removed?");
+      FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd != i,
+                 "fd wasn't removed?");
       FIO_ASSERT((int)(uintptr_t)fio___poll_udata_get(&p.udata, pos) != i,
                  "udata value wasn't removed?");
       continue;
     }
-    FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).fd == i,
+    FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd == i,
                "index value [%zu] doesn't match fd (%d != %d)",
                pos,
                fio___poll_fds_get(&p.fds, pos).fd,

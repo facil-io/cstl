@@ -612,7 +612,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
           break;
         }
       }
-      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+      FIO_COMPILER_GUARD; /* don't optimize this loop */
       int64_t n = a2l(&bf);
       bf = buf;
       FIO_ASSERT(n == i,
@@ -645,7 +645,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
           break;
         }
       }
-      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+      FIO_COMPILER_GUARD; /* don't optimize this loop */
     }
     tw = FIO_NAME_TEST(stl, atol_time)() - start;
     // clang-format off
@@ -973,7 +973,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += fio_atol(&pos);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
       // FIO_ASSERT(r == exp, "fio_atol failed during speed test");
     }
     stop = clock();
@@ -986,7 +986,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += strtol(pos, NULL, 10);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
       // FIO_ASSERT(r == exp, "system strtol failed during speed test");
     }
     stop = clock();

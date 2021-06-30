@@ -86,12 +86,16 @@ int main(int argc, char const *argv[]) {
   FIO_ASSERT(url_len < 1024, "URL address too long");
   fio_url_s a = fio_url_parse(fio_cli_unnamed(0), url_len);
   if (!a.host.buf && !a.port.buf) {
+#if FIO_OS_WIN
+    FIO_ASSERT(0, "Unix style sockets are unsupported on Windows.");
+#else
     /* Unix Socket */
     client_fd =
         fio_sock_open(a.path.buf,
                       NULL,
                       FIO_SOCK_UNIX | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
     FIO_LOG_DEBUG("Opened a Unix Socket (%d).", client_fd);
+#endif
   } else if (!a.scheme.buf || a.scheme.len != 3 ||
              (a.scheme.buf[0] | 32) != 'u' || (a.scheme.buf[1] | 32) != 'd' ||
              (a.scheme.buf[2] | 32) != 'p') {
@@ -152,7 +156,7 @@ int main(int argc, char const *argv[]) {
   }
 
   /* cleanup */
-  close(client_fd);
+  fio_sock_close(client_fd);
   fio_poll_destroy(&monitor);
   return 0;
 }
@@ -189,7 +193,7 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
     /* read from the stream, copy might not be required. updates buf and len. */
     fio_stream_read(&output_stream, &buf, &len);
     /* write to the IO object */
-    if (!len || write(fd, buf, len) <= 0)
+    if (!len || fio_sock_write(fd, buf, len) <= 0)
       goto finish;
     /* advance the stream by the amount actually written to the IO (partial?) */
     fio_stream_advance(&output_stream, len);
@@ -210,7 +214,7 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   /* is this the STDIO file descriptor? (see `main` for details) */
   if (arg) {
     /* read from STDIO and add data to outgoing stream */
-    ssize_t l = read(fd, buf, 4080);
+    ssize_t l = fio_sock_read(fd, buf, 4080);
     if (l > 0) {
       fio_stream_add(&output_stream,
                      fio_stream_pack_data(buf, (size_t)l, 0, 1, NULL));

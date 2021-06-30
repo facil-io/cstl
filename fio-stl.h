@@ -146,7 +146,7 @@ extern "C" {
 #define H___FIO_CSTL_INCLUDE_ONCE_H
 
 /* *****************************************************************************
-Basic macros and included files
+Compiler detection, GCC / CLang features and OS dependent included files
 ***************************************************************************** */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -187,6 +187,54 @@ Basic macros and included files
 #define __thread _Thread_value
 #endif
 
+#if defined(__clang__) || defined(__GNUC__)
+/** Clobber CPU registers and prevent compiler reordering optimizations. */
+#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
+#elif defined(_MSC_VER)
+/** Clobber CPU registers and prevent compiler reordering optimizations. */
+#define FIO_COMPILER_GUARD asm("")
+#pragma message("Warning: Windows doesn't provide a low-level C memory barrier")
+#else
+#warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
+#define FIO_COMPILER_GUARD asm volatile("" ::: "memory")
+#endif
+
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+#define FIO_HAVE_UNIX_TOOLS 1
+#define FIO_OS_POSIX        1
+#define FIO___PRINTF_STYLE  printf
+#elif defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) ||              \
+    defined(__MINGW32__) || defined(__BORLANDC__)
+#define FIO_OS_WIN     1
+#define POSIX_C_SOURCE 200809L
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include <processthreadsapi.h>
+static inline int kill(long long p, int sig) {
+  return (int)TerminateProcess((HANDLE)p, (UINT)sig) - 1;
+}
+#endif
+#if defined(__MINGW32__)
+/* Mingw supports */
+#define FIO_HAVE_UNIX_TOOLS    2
+#define __USE_MINGW_ANSI_STDIO 1
+#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#elif defined(__CYGWIN__)
+/* TODO: cygwin support */
+#define FIO_HAVE_UNIX_TOOLS    3
+#define __USE_MINGW_ANSI_STDIO 1
+#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#else
+#define FIO_HAVE_UNIX_TOOLS 0
+typedef SSIZE_T ssize_t;
+#endif /* __CYGWIN__ __MINGW32__ */
+#else
+#define FIO_HAVE_UNIX_TOOLS 0
+#warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
+#endif
+
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
@@ -195,12 +243,14 @@ Basic macros and included files
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 
-#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
-#define FIO_HAVE_UNIX_TOOLS 1
-#elif defined(__CYGWIN__) || defined(__MINGW32__)
-#define FIO_HAVE_UNIX_TOOLS 2
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 0
+#endif
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 0
 #endif
 
 #if FIO_HAVE_UNIX_TOOLS
@@ -226,6 +276,39 @@ Basic macros and included files
 #endif
 
 /* *****************************************************************************
+Function Attributes
+***************************************************************************** */
+
+/** Marks a function as `static`, `inline` and possibly unused. */
+#define FIO_IFUNC static inline __attribute__((unused))
+
+/** Marks a function as `static` and possibly unused. */
+#define FIO_SFUNC static __attribute__((unused))
+
+/** Marks a function as weak */
+#define FIO_WEAK __attribute__((weak))
+
+#if _MSC_VER
+#pragma section(".CRT$XCU", read)
+#undef FIO_CONSTRUCTOR
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  static void fname(void);                                                     \
+  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
+  static void fname(void)
+#else
+/** Marks a function as a constructor - if supported. */
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  FIO_SFUNC __attribute__((constructor)) void fname FIO_NOOP(void)
+#endif
+
+/** Marks a function as a destructor - if supported. Consider using atexit() */
+#define FIO_DESTRUCTOR(fname)                                                  \
+  FIO_SFUNC                                                                    \
+  __attribute__((destructor)) void fname FIO_NOOP(void)
+
+/* *****************************************************************************
 Macro Stringifier
 ***************************************************************************** */
 
@@ -234,6 +317,29 @@ Macro Stringifier
 /** Converts a macro's content to a string literal. */
 #define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
 #endif
+
+/* *****************************************************************************
+Naming Macros
+***************************************************************************** */
+
+/* Used for naming functions and types */
+#define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
+#define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
+  FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div)
+
+/** Used for naming functions and variables resulting in: prefix_postfix */
+#define FIO_NAME(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _)
+
+/** Sets naming convention for conversion functions, i.e.: foo2bar */
+#define FIO_NAME2(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
+
+/** Sets naming convention for boolean testing functions, i.e.: foo_is_true */
+#define FIO_NAME_BL(prefix, postfix)                                           \
+  FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
+
+/** Used internally to name test functions. */
+#define FIO_NAME_TEST(prefix, postfix)                                         \
+  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
 
 /* *****************************************************************************
 Version Macros
@@ -481,33 +587,21 @@ typedef struct fio___index32_node_s {
 #endif
 
 /* *****************************************************************************
-Naming Macros
-***************************************************************************** */
-
-/* Used for naming functions and types */
-#define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
-#define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
-  FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div)
-
-/** Used for naming functions and variables resulting in: prefix_postfix */
-#define FIO_NAME(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _)
-
-/** Sets naming convention for conversion functions, i.e.: foo2bar */
-#define FIO_NAME2(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
-
-/** Sets naming convention for boolean testing functions, i.e.: foo_is_true */
-#define FIO_NAME_BL(prefix, postfix)                                           \
-  FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
-
-/** Used internally to name test functions. */
-#define FIO_NAME_TEST(prefix, postfix)                                         \
-  FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
-
-/* *****************************************************************************
 Sleep / Thread Scheduling Macros
 ***************************************************************************** */
 
 #ifndef FIO_THREAD_WAIT
+#if FIO_OS_WIN
+/**
+ * Calls NtDelayExecution with the requested nano-second count.
+ */
+#define FIO_THREAD_WAIT(nano_sec)                                              \
+  do {                                                                         \
+    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
+  } while (0)
+// https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
+
+#elif FIO_OS_POSIX
 /**
  * Calls nonsleep with the requested nano-second count.
  */
@@ -517,6 +611,8 @@ Sleep / Thread Scheduling Macros
                                 .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
     nanosleep(&tm, (struct timespec *)NULL);                                   \
   } while (0)
+
+#endif
 #endif
 
 #ifndef FIO_THREAD_RESCHEDULE
@@ -581,20 +677,45 @@ Miscellaneous helper macros
 #define FIO_ASSERT_DEBUG(...)
 #endif
 
-/** Marks a function as `static`, `inline` and possibly unused. */
-#define FIO_IFUNC static inline __attribute__((unused))
+/* *****************************************************************************
+Patch for Windows
+***************************************************************************** */
+#if FIO_OS_WIN
+/* Enable console colors */
+FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
+  HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD mode = 0;
+  if (!c) {
+    return;
+  }
+  if (!GetConsoleMode(c, &mode)) {
+    return;
+  }
+  mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  SetConsoleMode(c, mode);
+}
 
-/** Marks a function as `static` and possibly unused. */
-#define FIO_SFUNC static __attribute__((unused))
-
-/** Marks a function as weak */
-#define FIO_WEAK __attribute__((weak))
-
-/** Marks a function as a constructor - if supported. */
-#define FIO_CONSTRUCTOR FIO_SFUNC __attribute__((constructor))
-
-/** Marks a function as a destructor - if supported. */
-#define FIO_DESTRUCTOR FIO_SFUNC __attribute__((destructor))
+/* as close to pead as we can get here... */
+static inline __attribute__((unused)) ssize_t fio_pread(int fd,
+                                                        void *buf,
+                                                        size_t len,
+                                                        size_t offset) {
+  ssize_t ret = -1;
+  int64_t pos = _lseeki64(fd, 0LL, SEEK_CUR);
+  if (pos == -1)
+    goto done;
+  if ((size_t)_lseeki64(fd, offset, SEEK_SET) != offset) {
+    _lseeki64(fd, pos, SEEK_SET);
+    goto done;
+  }
+  ret = _read(fd, buf, len);
+  _lseeki64(fd, pos, SEEK_SET);
+done:
+  return ret;
+}
+#else
+#define fio_pread pread
+#endif
 
 /* *****************************************************************************
 End persistent segment (end include-once guard)
@@ -622,11 +743,12 @@ Memory allocation macros
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
 #endif
 
-#if !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
+#if defined(FIO_MEM_REST) || !defined(FIO_MEM_REALLOC) || !defined(FIO_MEM_FREE)
 
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
+#undef FIO_MEM_REST
 
 /* if a global allocator was previously defined route macros to fio_malloc */
 #ifdef H___FIO_MALLOC___H
@@ -763,6 +885,11 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
+/* Modules that require FIO_SOCK */
+#if defined(FIO_POLL)
+#define FIO_SOCK
+#endif
+
 /* Modules that require FIO_TIME */
 #if defined(FIO_QUEUE) || defined(FIO_RAND)
 #ifndef FIO_TIME
@@ -809,6 +936,7 @@ Common macros
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
+
 #endif /* FIO_ATOL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
@@ -858,8 +986,7 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 
 #undef FIO_LOG2STDERR
 
-#pragma weak FIO_LOG2STDERR
-__attribute__((format(printf, 1, 0), weak)) void FIO_LOG2STDERR(
+__attribute__((format(FIO___PRINTF_STYLE, 1, 0), weak)) void FIO_LOG2STDERR(
     const char *format,
     ...) {
   char tmp___log[FIO_LOG____LENGTH_ON_STACK];
@@ -937,7 +1064,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #undef FIO_LOG_ERROR
 #define FIO_LOG_ERROR(...)   FIO_LOG_PRINT__(FIO_LOG_LEVEL_ERROR, "\x1B[1mERROR:\x1B[0m    " __VA_ARGS__)
 #undef FIO_LOG_FATAL
-#define FIO_LOG_FATAL(...)   FIO_LOG_PRINT__(FIO_LOG_LEVEL_FATAL, "\x1B[1;7mFATAL:\x1B[0m    " __VA_ARGS__)
+#define FIO_LOG_FATAL(...)   FIO_LOG_PRINT__(FIO_LOG_LEVEL_FATAL, "\x1B[1m\x1B[7mFATAL:\x1B[0m    " __VA_ARGS__)
 // clang-format on
 
 #endif /* FIO_LOG */
@@ -967,6 +1094,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if defined(FIO_ATOMIC) && !defined(H___FIO_ATOMIC___H)
 #define H___FIO_ATOMIC___H 1
+
 /* C11 Atomics are defined? */
 #if defined(__ATOMIC_RELAXED)
 /** An atomic load operation, returns value in pointer. */
@@ -1045,11 +1173,50 @@ Feel free to copy, use and enjoy according to the license provided.
 /** An atomic NOT AND ((~)&) operation, returns previous value */
 #define fio_atomic_nand_fetch(p_obj, value) __sync_nand_and_fetch((p_obj), (value))
 
-// clang-format on
+
+#elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#ifdef _MSC_VER
+#pragma message ("Fallback to C11 atomics, might be missing some features.")
+#undef FIO_COMPILER_GUARD
+#define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
+#else
+#warning Fallback to C11 atomics, might be missing some features.
+#endif /* _MSC_VER */
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) atomic_compare_exchange_strong((p_obj), (p_expected), (p_desired))
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) atomic_exchange((p_obj), (value))
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) atomic_fetch_add((p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) atomic_fetch_sub((p_obj), (value))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) atomic_fetch_and((p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) atomic_fetch_xor((p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value) atomic_fetch_or((p_obj), (value))
+/** An atomic NOT AND ((~)&) operation, returns previous value */
+#define fio_atomic_nand(p_obj, value) atomic_fetch_nand((p_obj), (value))
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
 
 #else
-#error Required builtin "__sync_add_and_fetch" not found.
+#error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
 #endif
+// clang-format on
 
 #define FIO_LOCK_INIT         0
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
@@ -1057,7 +1224,7 @@ typedef volatile unsigned char fio_lock_i;
 
 /** Tries to lock a specific sublock. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_sublock(fio_lock_i *lock, uint8_t sub) {
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   sub &= 7;
   uint8_t sub_ = 1U << sub;
   return ((fio_atomic_or(lock, sub_) & sub_) >> sub);
@@ -1092,7 +1259,7 @@ FIO_IFUNC void fio_unlock_sublock(fio_lock_i *lock, uint8_t sub) {
 FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
@@ -1121,7 +1288,7 @@ FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_full(fio_lock_i *lock) {
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   fio_lock_i old = fio_atomic_or(lock, ~(fio_lock_i)0);
   if (!old)
     return 0;
@@ -1441,7 +1608,7 @@ Implementation - Inline
 FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return 0;
@@ -1473,7 +1640,7 @@ struct fio___lock2_wait_s {
 SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   if (!group)
     group = 1;
-  __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+  FIO_COMPILER_GUARD;
   size_t state = fio_atomic_or(&lock->lock, group);
   if (!(state & group))
     return;
@@ -1664,7 +1831,19 @@ Big Endian / Small Endian
 #endif
 #elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
     !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
+#else
 #error Could not detect byte order on this system.
+#endif
+
 #endif
 
 #if __BIG_ENDIAN__
@@ -2629,25 +2808,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   {
     uint64_t tmp = 1;
     tmp = FIO_RROT(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << ((sizeof(uint64_t) << 3) - 1)),
                "fio_rrot failed");
     tmp = FIO_LROT(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
     tmp = 1;
     tmp = fio_rrot32(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
     tmp = fio_lrot32(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
     tmp = 1;
     tmp = fio_rrot64(tmp, 1);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 63), "fio_rrot64 failed");
     tmp = fio_lrot64(tmp, 3);
-    __asm__ volatile("" ::: "memory");
+    FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
   }
 
@@ -3179,7 +3358,7 @@ Random - Implementation
 
 #ifdef FIO_EXTERN_COMPLETE
 
-#if FIO_HAVE_UNIX_TOOLS ||                                                     \
+#if FIO_OS_POSIX ||                                                            \
     (__has_include("sys/resource.h") && __has_include("sys/time.h"))
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -3410,7 +3589,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     start = clock();
     for (size_t i = cycles; i > 0; i--) {
       hash += h((char *)buffer, buffer_len);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
     }
     end = clock();
     FIO_MEMCPY(buffer, &hash, sizeof(hash));
@@ -4571,7 +4750,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
           break;
         }
       }
-      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+      FIO_COMPILER_GUARD; /* don't optimize this loop */
       int64_t n = a2l(&bf);
       bf = buf;
       FIO_ASSERT(n == i,
@@ -4604,7 +4783,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
           break;
         }
       }
-      __asm__ volatile("" ::: "memory"); /* don't optimize this loop */
+      FIO_COMPILER_GUARD; /* don't optimize this loop */
     }
     tw = FIO_NAME_TEST(stl, atol_time)() - start;
     // clang-format off
@@ -4932,7 +5111,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += fio_atol(&pos);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
       // FIO_ASSERT(r == exp, "fio_atol failed during speed test");
     }
     stop = clock();
@@ -4945,7 +5124,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
       r += strtol(pos, NULL, 10);
-      __asm__ volatile("" ::: "memory");
+      FIO_COMPILER_GUARD;
       // FIO_ASSERT(r == exp, "system strtol failed during speed test");
     }
     stop = clock();
@@ -6293,8 +6472,21 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
+/** No custom memory allocations for Windows... sorry. */
+#if FIO_OS_WIN
+#ifndef FIO_MEMORY_DISABLE
+#define FIO_MEMORY_DISABLE 1
+#if _MSC_VER
+#pragma message(                                                               \
+    "Warning: Custom memory allocation is currently unavailable on Windows")
+#else
+#warning Custom memory allocation is currently unavailable on Windows.
+#endif /* _MSC_VER */
+#endif /* FIO_MEMORY_DISABLE */
+#endif /* FIO_OS_WIN */
+
 /** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
-#ifdef FIO_MEMORY_DISABLE
+#if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #endif
@@ -6302,7 +6494,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
 /**
- * The logarithmic size of a single allocatiion "chunk" (16 blocks).
+ * The logarithmic size of a single allocation "chunk" (16 blocks).
  *
  * Limited to >=17 and <=24.
  *
@@ -6400,11 +6592,11 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
-#if FIO_MEMORY_ARENA_COUNT > 0
+#if FIO_MEMORY_ARENA_COUNT != 1
 /** If true, uses a pthread mutex instead of a spinlock. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
 #else
-/** If true, uses a pthread mutex instead of a spinlock. */
+/** If no arenas, uses a spinlock instead of a pthread mutex. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #endif
 #endif
@@ -6523,6 +6715,9 @@ SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void);
 
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void);
+
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 
@@ -6591,6 +6786,8 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void) {}
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {}
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {}
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
 SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
@@ -6618,10 +6815,6 @@ Helpers and System Memory Allocation
 ***************************************************************************** */
 #ifndef H___FIO_MEM_INCLUDE_ONCE___H
 #define H___FIO_MEM_INCLUDE_ONCE___H
-
-#if FIO_HAVE_UNIX_TOOLS
-#include <unistd.h>
-#endif /* H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
   (((size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) >> (FIO_MEM_PAGE_SIZE_LOG))
@@ -6770,7 +6963,7 @@ FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
 /* *****************************************************************************
 POSIX Allocaion
 ***************************************************************************** */
-#if FIO_HAVE_UNIX_TOOLS || __has_include("sys/mman.h")
+#if FIO_OS_POSIX || __has_include("sys/mman.h")
 #include <sys/mman.h>
 
 /* Mitigates MAP_ANONYMOUS not being defined on older versions of MacOS */
@@ -7093,7 +7286,7 @@ Lock type choice
 Allocator debugging helpers
 ***************************************************************************** */
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 /* maximum block allocation count. */
 static size_t FIO_NAME(fio___,
                        FIO_NAME(FIO_MEMORY_NAME, state_chunk_count_max));
@@ -7404,7 +7597,7 @@ Allocator State Initialization & Cleanup
       (sizeof(*FIO_NAME(FIO_MEMORY_NAME, __mem_state)) +                       \
        (sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s)) * (arean_count))))
 
-/* function declerations for functions called during cleanup */
+/* function declarations for functions called during cleanup */
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void);
@@ -7415,7 +7608,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
+FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
 
@@ -7510,7 +7703,7 @@ FIO_DESTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void) {
 }
 
 /* initializes (allocates) the arenas and state machine */
-FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
+FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
   /* allocate the state machine */
@@ -7552,6 +7745,7 @@ FIO_CONSTRUCTOR void FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)(void) {
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
 #endif /* DEBUG */
+  (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list);
   (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_state);
   (void)FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings);
 }
@@ -7643,6 +7837,23 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 }
 
+void fio_malloc_print_free_block_list___(void);
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev ==
+      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks)
+    return;
+  fprintf(stderr,
+          FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME,
+                                 malloc)) " allocator free block list:\n");
+  FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
+  for (size_t i = 0; n != &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks;
+       ++i) {
+    fprintf(stderr, "\t[%zu] %p\n", i, (void *)n);
+    n = n->prev;
+  }
+}
+
 /* *****************************************************************************
 chunk allocation / deallocation
 ***************************************************************************** */
@@ -7659,25 +7870,8 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 
-FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
-  /* should we free the chunk? */
-  if (!c || fio_atomic_sub_fetch(&c->ref, 1))
-    return;
-
-  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-  /* reference could have been added while waiting for the lock */
-  if (fio_atomic_add_fetch(&c->ref, 1) != 1)
-    goto in_use;
-
-  /* remove all blocks from the block allocation list */
-  for (size_t b = 0; b < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++b) {
-    FIO_LIST_NODE *n =
-        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
-    if (n->prev && n->next) {
-      FIO_LIST_REMOVE(n);
-    }
-  }
 #if FIO_MEMORY_CACHE_SLOTS
   /* place in cache...? */
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->cache.pos <
@@ -7690,14 +7884,26 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
   FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(c);
-  return;
+}
 
-in_use:
-  fio_atomic_sub_fetch(&c->ref, 1);
-  FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-  return;
+FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
+    FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
+  /* should we free the chunk? */
+  if (!c || fio_atomic_sub_fetch(&c->ref, 1)) {
+    FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+    return;
+  }
+
+  /* remove all blocks from the block allocation list */
+  for (size_t b = 0; b < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++b) {
+    FIO_LIST_NODE *n =
+        (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
+    if (n->prev && n->next) {
+      FIO_LIST_REMOVE(n);
+    }
+  }
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(c);
 }
 
 /* SublimeText marker */
@@ -7722,7 +7928,7 @@ FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *
   }
   if (c) {
     FIO_MEMORY_ON_CHUNK_UNCACHE(c);
-    c->ref = 1;
+    *c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)){.ref = 1};
     return c;
   }
 #endif /* FIO_MEMORY_CACHE_SLOTS */
@@ -7747,21 +7953,24 @@ block allocation / deallocation
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
     size_t b) {
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  /** only reset a block't free-list header */
-  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
-               0,
-               sizeof(FIO_LIST_NODE));
-#else
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   if (c->blocks[b].pos >= (int32_t)(FIO_MEMORY_UNITS_PER_BLOCK - 4)) {
+    /* zero out the whole block */
     FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
                  0,
                  FIO_MEMORY_BLOCK_SIZE);
   } else {
+    /* zero out only the memory that was used */
     FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
                  0,
                  (((size_t)c->blocks[b].pos) << FIO_MEMORY_ALIGN_LOG));
   }
+#else
+  /** only reset a block's free-list header */
+  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
+               0,
+               (((FIO_MEMORY_ALIGN_SIZE - 1) + sizeof(FIO_LIST_NODE)) &
+                (~(FIO_MEMORY_ALIGN_SIZE - 1))));
 #endif /*FIO_MEMORY_INITIALIZE_ALLOCATIONS*/
   c->blocks[b].pos = 0;
 }
@@ -7784,9 +7993,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_LIST_NODE *n =
       (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
   FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
-  FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
-
-  /* free chunk reference */
+  /* free chunk reference while in locked state */
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(c);
 }
 
@@ -7801,17 +8008,14 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 
   /* try to collect from list */
-  while (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.next !=
-         &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
+  if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev !=
+      &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
     FIO_LIST_REMOVE(n);
     c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)((void *)n);
-    if (fio_atomic_add_fetch(&c->ref, 1) == 1) {
-      /* chunk is waiting on a lock to be removed */
-      fio_atomic_sub(&c->ref, 1);
-      continue;
-    }
+    fio_atomic_add_fetch(&c->ref, 1);
     p = (void *)n;
+    b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
     goto done;
   }
 
@@ -7829,13 +8033,14 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
         (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
     FIO_LIST_PUSH(&FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks, n);
   }
+  /* set block index to zero */
+  b = 0;
 
 done:
   FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
   if (!p)
     return p;
-  b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
-  /* update block reference and alloccation position */
+  /* update block reference and allocation position */
   c->blocks[b].ref = 1;
   c->blocks[b].pos = 0;
   return p;
@@ -7871,7 +8076,7 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     const size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, block);
 
     /* if we are the only thread holding a reference to this block... reset. */
-    if (c->blocks[b].ref == 1 && c->blocks[b].pos) {
+    if (fio_atomic_add(&c->blocks[b].ref, 1) == 1 && c->blocks[b].pos) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
       FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(c, b);
     }
@@ -7880,6 +8085,7 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     if (last_pos && is_realloc == FIO_NAME(FIO_MEMORY_NAME,
                                            __mem_chunk2ptr)(c, b, last_pos)) {
       c->blocks[b].pos = bytes + last_pos;
+      fio_atomic_sub(&c->blocks[b].ref, 1);
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return is_realloc;
     }
@@ -7887,16 +8093,20 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     /* enough space? allocate */
     if (c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, c->blocks[b].pos);
-      fio_atomic_add(&c->blocks[b].ref, 1); /* keep inside lock for reset */
       a->last_pos = c->blocks[b].pos;
       c->blocks[b].pos += bytes;
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return p;
     }
+    /* release reference added */
+    if (is_realloc)
+      fio_atomic_sub(&c->blocks[b].ref, 1);
+    else
+      FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(a->block);
 
     /*
      * allocate a new block before freeing the existing block
-     * this prevents the last chunk from deallocating and reallocating
+     * this prevents the last chunk from de-allocating and reallocating
      */
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
     last_pos = 0;
@@ -7917,7 +8127,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_slice_free)(void *p) {
 }
 
 /* *****************************************************************************
-big block allocation / deallocation
+big block allocation / de-allocation
 ***************************************************************************** */
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
 
@@ -7939,19 +8149,25 @@ void fio___mem_big_block__reset_memory___(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) * b) {
 
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  /* reset chunk header, which is always bigger than big_block header*/
-  FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
-#else
-
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   /* zero out memory */
   if (b->pos >= (int32_t)(FIO_MEMORY_UNITS_PER_BIG_BLOCK - 10)) {
+    /* zero out everything */
     FIO___MEMSET((void *)b, 0, FIO_MEMORY_SYS_ALLOCATION_SIZE);
   } else {
+    /* zero out only the used part of the memory */
     FIO___MEMSET((void *)b,
                  0,
                  (((size_t)b->pos << FIO_MEMORY_ALIGN_LOG) +
                   FIO_MEMORY_BIG_BLOCK_HEADER_SIZE));
+  }
+#else
+  /* reset chunk header, which is always bigger than big_block header*/
+  FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
+  /* zero out possible block memory (if required) */
+  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
+    FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)
+    ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i);
   }
 #endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
   b->ref = 1;
@@ -7972,17 +8188,15 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *p) {
 
   /* zero out memory */
   FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(b);
-/* zero out possible block memory (if required) */
-#if !FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  for (size_t i = 0; i < FIO_MEMORY_BLOCKS_PER_ALLOCATION; ++i) {
-    FIO_LIST_NODE *n = (FIO_LIST_NODE *)FIO_NAME(
-        FIO_MEMORY_NAME,
-        __mem_chunk2ptr)((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b, i, 0);
-    n->prev = n->next = NULL;
-  }
-#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
-  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)
+#if FIO_MEMORY_CACHE_SLOTS
+  /* lock for chunk de-allocation review () */
+  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)
   ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b);
+#else
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)
+  ((FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)b);
+#endif
 }
 
 /* SublimeText marker */
@@ -8116,24 +8330,26 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
       "Custom memory allocator " FIO_MACRO2STR(FIO_NAME(
           FIO_MEMORY_NAME,
           malloc)) " initialized with:\n"
-                   "\t* system allocation size:                   %zu bytes\n"
                    "\t* system allocation arenas:                 %zu arenas\n"
-                   "\t* cached allocation limit:                  %zu units\n"
+                   "\t* system allocation size:                   %zu bytes\n"
                    "\t* system allocation overhead (theoretical): %zu bytes\n"
                    "\t* system allocation overhead (actual):      %zu bytes\n"
+                   "\t* cached system allocations (max):          %zu units\n"
                    "\t* memory block size:                        %zu bytes\n"
+                   "\t* blocks per system allocation:             %zu blocks\n"
                    "\t* allocation units per block:               %zu units\n"
                    "\t* arena per-allocation limit:               %zu bytes\n"
                    "\t* local per-allocation limit (before mmap): %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
-      (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE,
       (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count,
-      (size_t)FIO_MEMORY_CACHE_SLOTS,
+      (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE,
       (size_t)FIO_MEMORY_HEADER_SIZE,
       (size_t)FIO_MEMORY_SYS_ALLOCATION_SIZE % (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_CACHE_SLOTS,
       (size_t)FIO_MEMORY_BLOCK_SIZE,
+      (size_t)FIO_MEMORY_BLOCKS_PER_ALLOCATION,
       (size_t)FIO_MEMORY_UNITS_PER_BLOCK,
       (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT,
       (size_t)FIO_MEMORY_ALLOC_LIMIT,
@@ -8244,6 +8460,12 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) {
     return;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(ptr);
+  if (!c) {
+    FIO_LOG_ERROR(FIO_MACRO2STR(
+        FIO_NAME(FIO_MEMORY_NAME,
+                 free)) " attempting to free a pointer owned by a NULL chunk.");
+    return;
+  }
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER) {
@@ -8498,7 +8720,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   return NULL;
 }
 
-/* main test functin */
+/* main test function */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   fprintf(stderr,
           "* Testing core memory allocator " FIO_MACRO2STR(
@@ -8507,11 +8729,11 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   fprintf(stderr,
           "* validating allocation alignment on %zu byte border.\n",
-          FIO_MEMORY_ALIGN_SIZE);
+          (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
     FIO_ASSERT(!((uintptr_t)p & alignment_mask),
-               "allocation alignment error allocatiing %zu bytes!",
+               "allocation alignment error allocating %zu bytes!",
                i);
     FIO_NAME(FIO_MEMORY_NAME, free)(p);
   }
@@ -8539,21 +8761,21 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   }
   fprintf(stderr,
           "* re-validating allocation alignment on %zu byte border.\n",
-          FIO_MEMORY_ALIGN_SIZE);
+          (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
     FIO_ASSERT(!((uintptr_t)p & alignment_mask),
-               "allocation alignment error allocatiing %zu bytes!",
+               "allocation alignment error allocating %zu bytes!",
                i);
     FIO_NAME(FIO_MEMORY_NAME, free)(p);
   }
 
-#if DEBUG && FIO_EXTERN_COMPLETE
+#if DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)();
   FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)();
   FIO_ASSERT(!FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count)),
              "memory leaks?");
-#endif /* DEBUG && FIO_EXTERN_COMPLETE */
+#endif /* DEBUG */
 }
 #endif /* FIO_TEST_CSTL */
 
@@ -8743,6 +8965,11 @@ FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
   (void)clk_id;
 }
 #warning fio_time functions defined using gettimeofday patch.
+#elif defined(FIO_OS_WIN)
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  *result = *gmtime(timep);
+  return result;
+}
 #endif
 
 /* *****************************************************************************
@@ -9217,7 +9444,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)tm;
     }
     stop = fio_time_micro();
@@ -9229,7 +9456,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       volatile struct tm tm;
       time_t tmp = now;
       gmtime_r(&tmp, (struct tm *)&tm);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
     }
     stop = fio_time_micro();
     fprintf(stderr,
@@ -9241,7 +9468,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     for (size_t i = 0; i < (1 << 17); ++i) {
       tm_now = fio_time2gm(now + i);
       time_t t_tmp = fio_gm2time(tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)t_tmp;
     }
     stop = fio_time_micro();
@@ -9252,7 +9479,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     for (size_t i = 0; i < (1 << 17); ++i) {
       tm_now = fio_time2gm(now + i);
       volatile time_t t_tmp = mktime((struct tm *)&tm_now);
-      __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+      FIO_COMPILER_GUARD;
       (void)t_tmp;
     }
     stop = fio_time_micro();
@@ -11148,14 +11375,32 @@ int main(int argc, char const *argv[]) {
   }
   // we should cleanup, though we'll exit with Ctrl+C, so it's won't matter.
   fio_cli_end();
-  close(state.fd);
+  fio_sock_close(state.fd);
   return 0;
   (void)argv;
 }
 
 
 ***************************************************************************** */
-#if defined(FIO_SOCK) && FIO_HAVE_UNIX_TOOLS && !defined(FIO_SOCK_POLL_LIST)
+#if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
+
+#if FIO_OS_WIN
+#if _MSC_VER
+#pragma comment(lib, "Ws2_32.lib")
+#endif
+#include <iphlpapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#ifndef FIO_SOCK_FD_ISVALID
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x3FFFFFFF)
+#endif
+/** Acts as POSIX write. Use this macro for portability with WinSock2. */
+#define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)
+/** Acts as POSIX read. Use this macro for portability with WinSock2. */
+#define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd) closesocket(fd)
+#elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
@@ -11164,6 +11409,18 @@ int main(int argc, char const *argv[]) {
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#ifndef FIO_SOCK_FD_ISVALID
+#define FIO_SOCK_FD_ISVALID(fd) ((int)fd != (int)-1)
+#endif
+/** Acts as POSIX write. Use this macro for portability with WinSock2. */
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+/** Acts as POSIX read. Use this macro for portability with WinSock2. */
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd)            close(fd)
+#else
+#error FIO_SOCK requires a supported OS (Windows / POSIX).
+#endif
 
 /* *****************************************************************************
 IO Poll - API
@@ -11233,7 +11490,9 @@ typedef enum {
   FIO_SOCK_NONBLOCK = 2,
   FIO_SOCK_TCP = 4,
   FIO_SOCK_UDP = 8,
+#if FIO_OS_POSIX
   FIO_SOCK_UNIX = 16,
+#endif
 } fio_sock_open_flags_e;
 
 /** A helper macro that waits on a single IO with no callbacks (0 = no event) */
@@ -11284,8 +11543,10 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
+#if FIO_OS_POSIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
+#endif
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd);
@@ -11319,8 +11580,11 @@ FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
     args.on_data = fio___sock_poll_mock_ev;
   if (!args.on_error)
     args.on_error = fio___sock_poll_mock_ev;
-
+#if FIO_OS_WIN
+  event_count = WSAPoll(args.fds, args.count, args.timeout);
+#else
   event_count = poll(args.fds, args.count, args.timeout);
+#endif
   if (args.before_events)
     args.before_events(args.udata);
   if (event_count <= 0)
@@ -11360,8 +11624,11 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
                             uint16_t flags) {
   struct addrinfo *addr = NULL;
   int fd;
-  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP |
-                    (uint16_t)FIO_SOCK_UNIX))) {
+  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP
+#if FIO_OS_POSIX
+                    | (uint16_t)FIO_SOCK_UNIX
+#endif
+                    ))) {
   case FIO_SOCK_UDP:
     addr = fio_sock_address_new(address, port, SOCK_DGRAM);
     if (!addr) {
@@ -11388,19 +11655,21 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
       if (fd != -1 && listen(fd, SOMAXCONN) == -1) {
         FIO_LOG_ERROR("(fio_sock_open) failed on call to listen: %s",
                       strerror(errno));
-        close(fd);
+        fio_sock_close(fd);
         fd = -1;
       }
     }
     fio_sock_address_free(addr);
     return fd;
+#if FIO_OS_POSIX
   case FIO_SOCK_UNIX:
     return fio_sock_open_unix(address,
                               (flags & FIO_SOCK_CLIENT),
                               (flags & FIO_SOCK_NONBLOCK));
+#endif
   }
   FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
-                "FIO_SOCK_UNIX flags are exclisive");
+                "FIO_SOCK_UNIX flags are exclusive");
   return -1;
 }
 
@@ -11443,8 +11712,33 @@ SFUNC int fio_sock_set_non_block(int fd) {
 #endif
 #elif defined(FIONBIO)
   /* Otherwise, use the old way of doing it */
-  static int flags = 1;
+#if FIO_OS_WIN
+  unsigned long flags = 1;
+  if (ioctlsocket(fd, FIONBIO, &flags)) {
+    switch (WSAGetLastError()) {
+    case WSANOTINITIALISED:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
+      break;
+    case WSAENETDOWN:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAENETDOWN");
+      break;
+    case WSAEINPROGRESS:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAEINPROGRESS");
+      break;
+    case WSAENOTSOCK:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAENOTSOCK");
+      break;
+    case WSAEFAULT:
+      FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSAEFAULT");
+      break;
+    }
+    return -1;
+  }
+  return 0;
+#else
+  int flags = 1;
   return ioctl(fd, FIONBIO, &flags);
+#endif /* FIO_OS_WIN */
 #else
 #error No functions / argumnet macros for non-blocking sockets.
 #endif
@@ -11454,22 +11748,42 @@ SFUNC int fio_sock_set_non_block(int fd) {
 SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
   int fd = -1;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    SOCKET fd_tmp;
+    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
+        INVALID_SOCKET) {
+      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      continue;
+    }
+    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
+      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
+      errno = ERANGE;
+    }
+    fd = (int)fd_tmp;
+#else
     if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       continue;
     }
+#endif
     {
       // avoid the "address taken"
       int optval = 1;
-      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
     }
     if (bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG("Failed attempt to bind socket (%d) to address %s",
+                    fd,
+                    strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG("Couldn't set socket (%d) to non-blocking mode %s",
+                    fd,
+                    strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
@@ -11485,18 +11799,53 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   int fd = -1;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    SOCKET fd_tmp;
+    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
+        INVALID_SOCKET) {
+      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      continue;
+    }
+    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
+      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
+      errno = ERANGE;
+    }
+    fd = (int)fd_tmp;
+#else
     if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       continue;
     }
+#endif
 
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      close(fd);
+      FIO_LOG_DEBUG(
+          "Failed attempt to set client socket (%d) to non-blocking %s",
+          fd,
+          strerror(errno));
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
-    if (connect(fd, p->ai_addr, p->ai_addrlen) == -1 && errno != EINPROGRESS) {
-      close(fd);
+    if (connect(fd, p->ai_addr, p->ai_addrlen) == -1 &&
+#if FIO_OS_WIN
+        (WSAGetLastError() != WSAEWOULDBLOCK || errno != EINPROGRESS)
+#else
+        errno != EINPROGRESS
+#endif
+    ) {
+#if FIO_OS_WIN
+      FIO_LOG_DEBUG(
+          "Couldn't connect client socket (%d) to remote address %s (%d)",
+          fd,
+          strerror(errno),
+          WSAGetLastError());
+#else
+      FIO_LOG_DEBUG("Couldn't connect client socket (%d) to remote address %s",
+                    fd,
+                    strerror(errno));
+#endif
+      fio_sock_close(fd);
       fd = -1;
       continue;
     }
@@ -11508,6 +11857,7 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   return fd;
 }
 
+#if FIO_OS_POSIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -11538,14 +11888,14 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
   if (nonblock && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_DEBUG("couldn't set socket to nonblocking mode");
-    close(fd);
+    fio_sock_close(fd);
     return -1;
   }
   if (is_client) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
         errno != EINPROGRESS) {
       FIO_LOG_DEBUG("couldn't connect unix client: %s", strerror(errno));
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
   } else {
@@ -11553,23 +11903,40 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
       // umask(old_umask);
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
     // umask(old_umask);
     if (listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
-      close(fd);
+      fio_sock_close(fd);
       return -1;
     }
   }
   return fd;
 }
+#elif FIO_OS_WIN
 
-#endif
+static WSADATA fio___sock_useless_windows_data;
+FIO_CONSTRUCTOR(fio___sock_win_init) {
+  static uint8_t flag = 0;
+  if (!flag) {
+    flag |= 1;
+    if (WSAStartup(MAKEWORD(2, 2), &fio___sock_useless_windows_data)) {
+      FIO_LOG_FATAL("WinSock2 unavailable.");
+      exit(-1);
+    }
+    atexit((void (*)(void))(WSACleanup));
+  }
+}
+
+// FIO_DESTRUCTOR void fio___sock_win_cleanup(void) { (); }
+#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+
 /* *****************************************************************************
 Socket helper testing
 ***************************************************************************** */
+#ifdef FIO_TEST_CSTL
 FIO_SFUNC void fio___sock_test_before_events(void *udata) {
   *(size_t *)udata = 0;
 }
@@ -11601,18 +11968,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     const char *msg;
     uint16_t flag;
   } server_tests[] = {
-      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+    {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+#if FIO_OS_POSIX
 #ifdef P_tmpdir
-      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
-       NULL,
-       "Unix",
-       FIO_SOCK_UNIX},
+    {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
+     NULL,
+     "Unix",
+     FIO_SOCK_UNIX},
 #else
-      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+    {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
 #endif
-      /* accept doesn't work with UDP, not like this... UDP test is seperate */
-      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
-      {.address = NULL},
+#endif
+    /* accept doesn't work with UDP, not like this... UDP test is seperate */
+    // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+    {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
     size_t flag = (size_t)-1;
@@ -11670,7 +12039,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     int cl = fio_sock_open(server_tests[i].address,
                            server_tests[i].port,
                            server_tests[i].flag | FIO_SOCK_CLIENT);
-    FIO_ASSERT(cl != -1, "client socket failed to open");
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+               "client socket failed to open (%d)",
+               cl);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = NULL,
                   .on_data = NULL,
@@ -11706,8 +12077,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     FIO_ASSERT(flag == 2, "Event should have occured here! (%zu)", flag);
     FIO_LOG_INFO("error may have been emitted.");
 
-    int accepted = accept(srv, NULL, NULL);
-    FIO_ASSERT(accepted != -1, "client socket failed to open");
+    intptr_t accepted = accept(srv, NULL, NULL);
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+               "accepted socket failed to open (%zd)",
+               (ssize_t)accepted);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = fio___sock_test_on_event,
                   .on_data = NULL,
@@ -11735,7 +12108,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                   .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
     FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
 
-    if (write(accepted, "hello", 5) > 0) {
+    if (fio_sock_write(accepted, "hello", 5) > 0) {
       // wait for read
       fio_sock_poll(.before_events = fio___sock_test_before_events,
                     .on_ready = NULL,
@@ -11757,17 +12130,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
       {
         char buf[64];
         errno = 0;
-        FIO_ASSERT(read(cl, buf, 64) > 0,
+        FIO_ASSERT(fio_sock_read(cl, buf, 64) > 0,
                    "Read should have read some data...\n\t"
                    "error: %s",
                    strerror(errno));
       }
       FIO_ASSERT(flag == 3, "Event should have occured here! (%zu)", flag);
     } else
-      FIO_ASSERT(0, "write failed! error: %s", strerror(errno));
-    close(accepted);
-    close(cl);
-    close(srv);
+      FIO_ASSERT(0,
+                 "send(fd:%ld) failed! error: %s",
+                 accepted,
+                 strerror(errno));
+    fio_sock_close(accepted);
+    fio_sock_close(cl);
+    fio_sock_close(srv);
     fio_sock_poll(.before_events = fio___sock_test_before_events,
                   .on_ready = NULL,
                   .on_data = NULL,
@@ -11776,51 +12152,61 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                   .udata = &flag,
                   .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
     FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+#if FIO_OS_POSIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);
+#endif
   }
   {
     /* UDP semi test */
     fprintf(stderr, "* Testing UDP socket (abbreviated test)\n");
-    int srv = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
+    int srv =
+        fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
     int n = 0; /* try for 32Mb */
     socklen_t sn = sizeof(n);
-    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP default receive buffer is %d bytes\n", n);
     n = 32 * 1024 * 1024; /* try for 32Mb */
     sn = sizeof(n);
-    while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, sn) == -1) {
+    while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) == -1) {
       /* failed - repeat attempt at 0.5Mb interval */
       if (n >= (1024 * 1024)) // OS may have returned max value
         n -= 512 * 1024;
       else
         break;
     }
-    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, &n, &sn) &&
+    if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);
     FIO_ASSERT(srv != -1,
                "Couldn't open UDP server socket: %s",
                strerror(errno));
-    int cl = fio_sock_open(NULL, "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
+    FIO_LOG_INFO("Opening client UDP socket.");
+    int cl = fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
     FIO_ASSERT(cl != -1,
                "Couldn't open UDP client socket: %s",
                strerror(errno));
-    FIO_ASSERT(send(cl, "hello", 5, 0) != -1,
+    FIO_LOG_INFO("Starting UDP roundtrip.");
+    FIO_ASSERT(fio_sock_write(cl, "hello", 5) != -1,
                "couldn't send datagram from client");
     char buf[64];
+    FIO_LOG_INFO("Receiving UDP msg.");
     FIO_ASSERT(recvfrom(srv, buf, 64, 0, NULL, NULL) != -1,
                "couldn't read datagram");
     FIO_ASSERT(!memcmp(buf, "hello", 5), "transmission error");
-    close(srv);
-    close(cl);
+    FIO_LOG_INFO("cleaning up UDP sockets.");
+    fio_sock_close(srv);
+    fio_sock_close(cl);
   }
-#endif /* __cplusplus */
+#endif /* !__cplusplus */
 }
+
+#endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
 FIO_SOCK - cleanup
 ***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_SOCK
 #endif
 /* *****************************************************************************
@@ -11855,11 +12241,6 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
-
-#if !FIO_HAVE_UNIX_TOOLS
-#warning "POSIX is required for the fio_poll API."
-#endif
-#include <poll.h>
 
 #ifndef FIO_POLL_HAS_UDATA_COLLECTION
 /* A unique `udata` per fd (true)? or a global `udata` (false)?*/
@@ -12080,9 +12461,9 @@ FIO_IFUNC int fio___poll_monitor(fio_poll_s *p,
     return -1;
   int32_t pos = fio___poll_index_get(&p->index, fd, 0);
   struct pollfd *i = fio___poll_fds2ptr(&p->fds);
-  if (i && pos != -1 && i[pos].fd == fd)
+  if (i && pos != -1 && (int)i[pos].fd == fd)
     goto edit_existing;
-  if (i && pos != -1 && i[pos].fd == -1)
+  if (i && pos != -1 && (int)i[pos].fd == -1)
     goto renew_monitoring;
   /* insert new entry */
   i = fio___poll_fds_push(&p->fds,
@@ -12184,12 +12565,16 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 #else
 #define FIO___POLL_UDATA_GET(index) ud_ary[0]
 #endif
+#if FIO_OS_WIN
+  r = WSAPoll(fds_ary, len, timeout);
+#else
   r = poll(fds_ary, len, timeout);
+#endif
 
   /* process events */
   if (r > 0) {
-    int i = 0;
-    int c = 0;
+    int i = 0; /* index in fds_ary array. */
+    int c = 0; /* count events handled, to stop loop if no more events. */
     do {
       if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
         cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
@@ -12206,9 +12591,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         fds_ary[i].events = 0; /* never retain events after closure / error */
         FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
                            fds_ary[i].fd);
-        /* if it was re-inserted to the queue, remove it */
+        /* TODO?: improve re-insertion prevention */
         fio_poll_forget(p, fds_ary[i].fd);
       }
+      /* any more events? */
+      c += !!fds_ary[i].revents;
+      /* any unfired events? */
       fds_ary[i].events &= ~fds_ary[i].revents;
       if (fds_ary[i].events) {
         /* unfired events await */
@@ -12223,12 +12611,11 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
                            fds_ary[i].fd);
       }
-      /* any more events? */
-      c += !!fds_ary[i].revents;
       ++i;
       if (i < len && c < r)
         continue;
       if (to_copy != i) {
+        /* copy remaining events in incomplete loop, if any. */
         while (i < len) {
           FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
                              fds_ary[i].fd);
@@ -12250,8 +12637,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
       }
       break;
     } while (1);
-  } else
+  } else {
     to_copy = len;
+  }
 
   /* insert all unfired events back to the (thread safe) queue */
   fio_lock(&p->lock);
@@ -12292,7 +12680,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
     return old;
   fio_lock(&p->lock);
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  if (fio___poll_fds_get(&p->fds, pos).fd == fd) {
+  if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
     /* pos is correct (index 0 could have been a false positive) */
     fio___poll_index_remove(&p->index, fd, 0, NULL);
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
@@ -12312,7 +12700,7 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
                                  p->settings.on_close);
   fio_unlock(&tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
-    if (fio___poll_fds_get(&tmp.fds, i).fd == -1)
+    if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
       continue;
     close(fio___poll_fds_get(&tmp.fds, i).fd);
 #if FIO_POLL_HAS_UDATA_COLLECTION
@@ -12351,12 +12739,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   for (int i = 128; i--;) {
     size_t pos = fio___poll_index_get(&p.index, i, 0);
     if ((i & 3) == 3) {
-      FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).fd != i, "fd wasn't removed?");
+      FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd != i,
+                 "fd wasn't removed?");
       FIO_ASSERT((int)(uintptr_t)fio___poll_udata_get(&p.udata, pos) != i,
                  "udata value wasn't removed?");
       continue;
     }
-    FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).fd == i,
+    FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd == i,
                "index value [%zu] doesn't match fd (%d != %d)",
                pos,
                fio___poll_fds_get(&p.fds, pos).fd,
@@ -12891,8 +13280,10 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
       if (written) {
         ssize_t act;
       retry_on_signal:
-        act =
-            pread(u.f->fd, buf[0] + buf_offset, written, u.f->offset + offset);
+        act = fio_pread(u.f->fd,
+                        buf[0] + buf_offset,
+                        written,
+                        u.f->offset + offset);
         if (act <= 0) {
           /* no more data in the file? */
           FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));
@@ -13141,9 +13532,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_SIGNAL_MONITOR_MAX 24
 #endif
 
-#if !FIO_HAVE_UNIX_TOOLS
-#warning "POSIX is required for the fio_signal API."
+#if !(FIO_OS_POSIX) && !(FIO_OS_WIN) /* use FIO_HAVE_UNIX_TOOLS instead? */
+#error Either POSIX or Windows are required for the fio_signal API.
 #endif
+
 #include <signal.h>
 /* *****************************************************************************
 Signal Monitoring API
@@ -13175,13 +13567,14 @@ SFUNC int fio_signal_forget(int sig);
 ***************************************************************************** */
 
 /* *****************************************************************************
-Signal Monitoring Implementation - inlined static functions
-***************************************************************************** */
-
-/* *****************************************************************************
 Signal Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
+
+/* *****************************************************************************
+POSIX implementation
+***************************************************************************** */
+#ifdef FIO_OS_POSIX
 
 static struct {
   int32_t sig;
@@ -13247,22 +13640,6 @@ SFUNC int fio_signal_monitor(int sig,
   return -1;
 }
 
-/** Reviews all signals, calling any relevant callbacks. */
-SFUNC int fio_signal_review(void) {
-  int c = 0;
-  for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
-      return c;
-    if (fio_atomic_exchange(&fio___signal_watchers[i].flag, 0)) {
-      ++c;
-      if (fio___signal_watchers[i].callback)
-        fio___signal_watchers[i].callback(fio___signal_watchers[i].sig,
-                                          fio___signal_watchers[i].udata);
-    }
-  }
-  return c;
-}
-
 /** Stops monitoring the specified signal. */
 SFUNC int fio_signal_forget(int sig) {
   if (!sig)
@@ -13287,6 +13664,139 @@ SFUNC int fio_signal_forget(int sig) {
 }
 
 /* *****************************************************************************
+Windows Implementation
+***************************************************************************** */
+#elif FIO_OS_WIN
+
+static struct {
+  int32_t sig;
+  volatile int32_t flag;
+  void (*callback)(int sig, void *);
+  void *udata;
+#if FIO_HAVE_UNIX_TOOLS
+  void (*old)(int sig);
+#else
+  int (*old)(int sig, int ignr__);
+#endif
+} fio___signal_watchers[FIO_SIGNAL_MONITOR_MAX];
+
+#if FIO_HAVE_UNIX_TOOLS
+FIO_SFUNC void fio___signal_catcher(int sig) {
+#else
+FIO_SFUNC int fio___signal_catcher(int sig, int ignr__) {
+#endif
+  for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
+    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+      return; /* initialized list is finished */
+    if (fio___signal_watchers[i].sig != sig)
+      continue;
+    /* mark flag */
+    fio_atomic_exchange(&fio___signal_watchers[i].flag, 1);
+    /* pass-through if exists */
+    if (fio___signal_watchers[i].old &&
+        (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_IGN &&
+        (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_DFL) {
+#if FIO_HAVE_UNIX_TOOLS
+      fio___signal_watchers[i].old(sig);
+#else
+      fio___signal_watchers[i].old(sig, ignr__);
+#endif
+      fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
+    } else {
+      signal(sig, fio___signal_catcher);
+    }
+#if !FIO_HAVE_UNIX_TOOLS
+    return 0;
+#endif
+  }
+}
+
+/**
+ * Starts to monitor for the specified signal, setting an optional callback.
+ */
+SFUNC int fio_signal_monitor(int sig,
+                             void (*callback)(int sig, void *),
+                             void *udata) {
+  if (!sig)
+    return -1;
+  for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
+    /* updating an existing monitor */
+    if (fio___signal_watchers[i].sig == sig) {
+      fio___signal_watchers[i].callback = callback;
+      fio___signal_watchers[i].udata = udata;
+      return 0;
+    }
+    /* slot busy */
+    if (fio___signal_watchers[i].sig || fio___signal_watchers[i].callback)
+      continue;
+    /* place monitor in this slot */
+    fio___signal_watchers[i].sig = sig;
+    fio___signal_watchers[i].callback = callback;
+    fio___signal_watchers[i].udata = udata;
+    fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
+    if ((intptr_t)SIG_ERR == (intptr_t)fio___signal_watchers[i].old) {
+      fio___signal_watchers[i].sig = 0;
+      fio___signal_watchers[i].callback = NULL;
+      fio___signal_watchers[i].udata = (void *)1;
+      fio___signal_watchers[i].old = NULL;
+      FIO_LOG_ERROR("couldn't set signal handler: %s", strerror(errno));
+      return -1;
+    }
+    return 0;
+  }
+  return -1;
+}
+
+/** Stops monitoring the specified signal. */
+SFUNC int fio_signal_forget(int sig) {
+  if (!sig)
+    return -1;
+  for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
+    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+      return -1; /* initialized list is finished */
+    if (fio___signal_watchers[i].sig != sig)
+      continue;
+    fio___signal_watchers[i].callback = NULL;
+    fio___signal_watchers[i].udata = (void *)1;
+    fio___signal_watchers[i].sig = 0;
+    if (fio___signal_watchers[i].old) {
+      if ((intptr_t)signal(sig, fio___signal_watchers[i].old) ==
+          (intptr_t)SIG_ERR)
+        goto sig_error;
+    } else {
+      if ((intptr_t)signal(sig, SIG_DFL) == (intptr_t)SIG_ERR)
+        goto sig_error;
+    }
+    return 0;
+  }
+  return -1;
+sig_error:
+  FIO_LOG_ERROR("couldn't unset signal handler: %s", strerror(errno));
+  return -1;
+}
+#endif /* POSIX vs WINDOWS */
+
+/* *****************************************************************************
+Common OS implementation
+***************************************************************************** */
+
+/** Reviews all signals, calling any relevant callbacks. */
+SFUNC int fio_signal_review(void) {
+  int c = 0;
+  for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
+    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+      return c;
+    if (fio_atomic_exchange(&fio___signal_watchers[i].flag, 0)) {
+      ++c;
+      if (fio___signal_watchers[i].callback)
+        fio___signal_watchers[i].callback(fio___signal_watchers[i].sig,
+                                          fio___signal_watchers[i].udata);
+    }
+  }
+  return c;
+}
+
+/* *****************************************************************************
 Signal Monitoring Testing?
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
@@ -13298,22 +13808,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal)(void) {
     int sig;
     const char *name;
   } t[] = {
-      FIO___SIGNAL_MEMBER(SIGHUP),
-      FIO___SIGNAL_MEMBER(SIGINT),
-      FIO___SIGNAL_MEMBER(SIGQUIT),
-      FIO___SIGNAL_MEMBER(SIGILL),
-      FIO___SIGNAL_MEMBER(SIGTRAP),
-      FIO___SIGNAL_MEMBER(SIGABRT),
-      FIO___SIGNAL_MEMBER(SIGBUS),
-      FIO___SIGNAL_MEMBER(SIGFPE),
-      FIO___SIGNAL_MEMBER(SIGUSR1),
-      FIO___SIGNAL_MEMBER(SIGSEGV),
-      FIO___SIGNAL_MEMBER(SIGUSR2),
-      FIO___SIGNAL_MEMBER(SIGPIPE),
-      FIO___SIGNAL_MEMBER(SIGALRM),
-      FIO___SIGNAL_MEMBER(SIGTERM),
-      FIO___SIGNAL_MEMBER(SIGCHLD),
-      FIO___SIGNAL_MEMBER(SIGCONT),
+    FIO___SIGNAL_MEMBER(SIGINT),
+    FIO___SIGNAL_MEMBER(SIGILL),
+    FIO___SIGNAL_MEMBER(SIGABRT),
+    FIO___SIGNAL_MEMBER(SIGSEGV),
+    FIO___SIGNAL_MEMBER(SIGTERM),
+#if FIO_OS_POSIX
+    FIO___SIGNAL_MEMBER(SIGQUIT),
+    FIO___SIGNAL_MEMBER(SIGHUP),
+    FIO___SIGNAL_MEMBER(SIGTRAP),
+    FIO___SIGNAL_MEMBER(SIGBUS),
+    FIO___SIGNAL_MEMBER(SIGFPE),
+    FIO___SIGNAL_MEMBER(SIGUSR1),
+    FIO___SIGNAL_MEMBER(SIGUSR2),
+    FIO___SIGNAL_MEMBER(SIGPIPE),
+    FIO___SIGNAL_MEMBER(SIGALRM),
+    FIO___SIGNAL_MEMBER(SIGCHLD),
+    FIO___SIGNAL_MEMBER(SIGCONT),
+#endif
   };
 #undef FIO___SIGNAL_MEMBER
   size_t e = 0;
@@ -19659,7 +20171,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(printf, 2, 0)))
+SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 0)))
 FIO_NAME(FIO_STR_NAME,
          vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
   va_list argv_cpy;
@@ -19680,7 +20192,7 @@ FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(printf, 2, 3)))
+SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 3)))
 FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
   va_list argv;
   va_start(argv, format);
@@ -20299,7 +20811,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
     /* copy up to 128Mb at a time... why? because pread might fail */
     const size_t to_read =
         (limit & (((size_t)1 << 27) - 1)) | ((!!(limit >> 27)) << 27);
-    if (pread(fd, state.buf + write_pos, to_read, start_at) !=
+    if (fio_pread(fd, state.buf + write_pos, to_read, start_at) !=
         (ssize_t)to_read) {
       goto error;
     }
@@ -21051,7 +21563,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*o) + sizeof(FIO_REF_TYPE), 0);
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
-    return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG((FIO_REF_TYPE *)o));
+    return (FIO_REF_TYPE_PTR)(o);
   FIO_REF_ON_ALLOC();
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
@@ -21084,7 +21596,7 @@ IFUNC int FIO_NAME(FIO_REF_NAME,
     return 0;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
-  FIO_MEM_FREE_(o, sizeof(*o));
+  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
   FIO_REF_ON_FREE();
   return 1;
 }
@@ -24467,6 +24979,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 #ifdef __SIZEOF_INT128__
   FIO_PRINT_SIZE_OF(__uint128_t);
 #endif
+#if FIO_OS_POSIX || defined(_SC_PAGESIZE)
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {
     fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
@@ -24476,6 +24989,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
                       "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf`\"",
                       log2(page));
   }
+#endif /* FIO_OS_POSIX */
 }
 #undef FIO_PRINT_SIZE_OF
 
@@ -24494,7 +25008,7 @@ FIO_SFUNC void fio___lock_speedtest_task_inner(void *s) {
   size_t *r = (size_t *)s;
   static size_t i;
   for (i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
     ++r[0];
   }
 }
@@ -24576,7 +25090,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
 
   start = fio_time_micro();
   for (size_t i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
   }
   end = fio_time_micro();
   fprintf(stderr,
@@ -24597,7 +25111,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       test_funcs[fn].task(NULL); /* warmup */
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_TASK; ++i) {
-        __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+        FIO_COMPILER_GUARD;
         test_funcs[fn].task(NULL);
       }
       end = fio_time_micro();
@@ -24613,13 +25127,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   start = fio_time_micro();
   for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
     size_t result = 0;
-    __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+    FIO_COMPILER_GUARD;
     fio___lock_speedtest_task_inner(&result);
   }
   end = fio_time_micro();
   fprintf(stderr, " %zu mms\n", (size_t)(end - start));
   clock_t long_work = end - start;
-  fprintf(stderr, "(%zu mms):\n", long_work);
+  fprintf(stderr, "(%zu mms):\n", (size_t)long_work);
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
@@ -24633,7 +25147,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       result = 0;
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        __asm__ volatile("" ::: "memory"); /* clobber CPU registers */
+        FIO_COMPILER_GUARD;
         test_funcs[fn].task(&result);
       }
       end = fio_time_micro();
@@ -24652,7 +25166,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
           "\n* Speed testing locking schemes - %zu threads, long work (%zu "
           "mms):\n",
           (size_t)FIO___LOCK2_TEST_THREADS,
-          long_work);
+          (size_t)long_work);
   for (int test_repeat = 0; test_repeat < FIO___LOCK2_TEST_REPEAT;
        ++test_repeat) {
     if (FIO___LOCK2_TEST_REPEAT > 1)
@@ -24691,9 +25205,9 @@ Testing function
 FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 #define FIO___STACK_POISON_LENGTH (1ULL << 16)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
-  __asm__ __volatile__("" ::: "memory");
+  FIO_COMPILER_GUARD;
   memset(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
-  __asm__ __volatile__("" ::: "memory");
+  FIO_COMPILER_GUARD;
   fio_trylock(buf);
 #undef FIO___STACK_POISON_LENGTH
 }
