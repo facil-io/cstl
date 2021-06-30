@@ -197,9 +197,13 @@ Basic macros and included files
 #include <string.h>
 #include <time.h>
 
-#if defined(__unix__) || defined(__linux__) || defined(__APPLE__) ||           \
-    defined(__CYGWIN__)
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #define FIO_HAVE_UNIX_TOOLS 1
+#elif defined(__CYGWIN__) || defined(__MINGW32__)
+#define FIO_HAVE_UNIX_TOOLS 2
+#endif
+
+#if FIO_HAVE_UNIX_TOOLS
 #include <sys/param.h>
 #include <unistd.h>
 #endif
@@ -2837,7 +2841,7 @@ Risky Hash - API
 /** Computes a facil.io Risky Hash (Risky v.3). */
 SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 
-/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+/** Adds bit of entropy to pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
@@ -2901,7 +2905,8 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 /* read u64 in little endian */
 #define FIO_RISKY_BUF2U64 fio_buf2u64_little
 
-#if 1 /* switch to 0 if the compiler's optimizer prefers arrays... */
+/* switch to 0 if the compiler's optimizer prefers arrays... */
+#if 0
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   register uint64_t v0 = FIO_RISKY3_IV0;
@@ -3388,7 +3393,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
           buffer_len);
 #endif
 
-  uint8_t *buffer_mem =
+  uint8_t *buffer_mem = (uint8_t *)
       FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_ofset;
 
@@ -5890,12 +5895,12 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '{':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    p->expect = 0;
     if (p->depth == JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
     fio_bitmap_unset(p->nesting, p->depth);
     fio_json_on_start_object(p);
+    p->expect = 0;
     return buffer + 1;
   case '}':
     if (fio_bitmap_get(p->nesting, p->depth) || !p->depth || (p->expect & 3))
@@ -5913,12 +5918,12 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '[':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    fio_json_on_start_array(p);
-    p->expect = 2;
     if (p->depth == JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
+    fio_json_on_start_array(p);
     fio_bitmap_set(p->nesting, p->depth);
+    p->expect = 2;
     return buffer + 1;
   case ']':
     if (!fio_bitmap_get(p->nesting, p->depth) || !p->depth)
@@ -9350,7 +9355,7 @@ Queue API
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
 
-/** Destroys a queue and reinitializes it, after freeing any used resources. */
+/** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q);
 
 /** Creates a new queue object (allocated on the heap). */
@@ -9531,7 +9536,7 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
 
-/** Destroys a queue and reinitializes it, after freeing any used resources. */
+/** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   fio_lock(&q->lock);
   while (q->r) {
@@ -10129,9 +10134,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 map settings.h"       /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
+#include "211 ordered map.h"        /* Development inclusion - ignore line */
 #include "211 unordered map.h"      /* Development inclusion - ignore line */
-#include "212 ordered map.h"        /* Development inclusion - ignore line */
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -10734,7 +10739,7 @@ print_help:
               p + tmp);
       break;
     }
-    /* print aliase information */
+    /* print alias information */
     tmp = first_len;
     while (p[tmp] && (p[tmp] == ' ' || p[tmp] == ',')) {
       ++tmp;
@@ -11047,7 +11052,7 @@ static void on_data_server(int fd, size_t index, void *udata) {
   (void)udata; // unused for server
   (void)index; // we don't use the array index in this example
   char buf[65536];
- FIO_MEMCPY(buf, "echo: ", 6);
+  FIO_MEMCPY(buf, "echo: ", 6);
   ssize_t len = 0;
   struct sockaddr_storage peer;
   socklen_t peer_addrlen = sizeof(peer);
@@ -12013,7 +12018,7 @@ FIO_IFUNC void *fio___poll_udata_get(void **pu, int32_t pos) {
 }
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 /* *****************************************************************************
-Poll Monitoring Implementation - inlined static functions
+Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
 
 /* do we have a constructor? */
@@ -12141,7 +12146,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Polling is thread safe, but has different effects on different threads.
  *
  * Adding a new file descriptor from one thread while polling in a different
- * thread will not poll that IO untill `fio_poll_review` is called again.
+ * thread will not poll that IO until `fio_poll_review` is called again.
  */
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   int r = -1;
@@ -12230,7 +12235,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
           fds_ary[to_copy].fd = fds_ary[i].fd;
           fds_ary[to_copy].events = fds_ary[i].events;
           FIO_ASSERT(!fds_ary[i].revents,
-                     "Event unhandlerd for %d",
+                     "Event unhandled for %d",
                      fds_ary[i].fd);
           fds_ary[to_copy].revents = 0;
           FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
@@ -23600,7 +23605,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         "\"hash\":{\"true\":true}}]]}";
     o = fiobj_json_parse2(json, strlen(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
-    FIO_ASSERT(fiobj_json_find2(o, "array2[6][0].hash.true", 22) ==
+    FIO_ASSERT(fiobj_json_find2(o, (char *)"array2[6][0].hash.true", 22) ==
                    fiobj_true(),
                "fiobj_json_find2 failed");
     FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);
@@ -24680,7 +24685,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
 }
 
 /* *****************************************************************************
-Testing functiun
+Testing function
 ***************************************************************************** */
 
 FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {

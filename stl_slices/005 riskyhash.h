@@ -29,7 +29,7 @@ Risky Hash - API
 /** Computes a facil.io Risky Hash (Risky v.3). */
 SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 
-/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+/** Adds bit of entropy to pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
@@ -93,7 +93,8 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 /* read u64 in little endian */
 #define FIO_RISKY_BUF2U64 fio_buf2u64_little
 
-#if 1 /* switch to 0 if the compiler's optimizer prefers arrays... */
+/* switch to 0 if the compiler's optimizer prefers arrays... */
+#if 0
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   register uint64_t v0 = FIO_RISKY3_IV0;
@@ -580,7 +581,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
           buffer_len);
 #endif
 
-  uint8_t *buffer_mem =
+  uint8_t *buffer_mem = (uint8_t *)
       FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_ofset;
 

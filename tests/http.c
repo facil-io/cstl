@@ -71,10 +71,10 @@ int main(int argc, char const *argv[]) {
   int srv_fd;
   fio_cli_start(argc,
                 argv,
-                0, /* require 1 unnamed argument - the address to connect to */
+                0, /* allow 1 unnamed argument - the address to connect to */
                 1,
                 "A simple HTTP \"hello world\" example, listening on the "
-                "speciified URL. i.e.\n"
+                "specified URL. i.e.\n"
                 "\tNAME <url>\n\n"
                 "Unix socket examples:\n"
                 "\tNAME unix://./my.sock\n"
@@ -124,13 +124,13 @@ int main(int argc, char const *argv[]) {
                   buf + a.host.len + 1);
   } else {
     /* UDP Socket */
-    FIO_ASSERT(0, "This example doesn't supporrt UDP sockets.");
+    FIO_ASSERT(0, "This example doesn't support UDP sockets.");
   }
 
   /* we're dome with the CLI, release resources */
   fio_cli_end();
 
-  /* test socket / connection sccess */
+  /* test socket / connection success */
   if (srv_fd == -1) {
     FIO_LOG_FATAL("Couldn't open connection");
   }

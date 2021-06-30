@@ -266,12 +266,12 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '{':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    p->expect = 0;
     if (p->depth == JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
     fio_bitmap_unset(p->nesting, p->depth);
     fio_json_on_start_object(p);
+    p->expect = 0;
     return buffer + 1;
   case '}':
     if (fio_bitmap_get(p->nesting, p->depth) || !p->depth || (p->expect & 3))
@@ -289,12 +289,12 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '[':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    fio_json_on_start_array(p);
-    p->expect = 2;
     if (p->depth == JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
+    fio_json_on_start_array(p);
     fio_bitmap_set(p->nesting, p->depth);
+    p->expect = 2;
     return buffer + 1;
   case ']':
     if (!fio_bitmap_get(p->nesting, p->depth) || !p->depth)

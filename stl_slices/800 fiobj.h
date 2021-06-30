@@ -2280,7 +2280,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         "\"hash\":{\"true\":true}}]]}";
     o = fiobj_json_parse2(json, strlen(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
-    FIO_ASSERT(fiobj_json_find2(o, "array2[6][0].hash.true", 22) ==
+    FIO_ASSERT(fiobj_json_find2(o, (char *)"array2[6][0].hash.true", 22) ==
                    fiobj_true(),
                "fiobj_json_find2 failed");
     FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);

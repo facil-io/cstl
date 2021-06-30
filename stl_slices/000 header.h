@@ -197,9 +197,13 @@ Basic macros and included files
 #include <string.h>
 #include <time.h>
 
-#if defined(__unix__) || defined(__linux__) || defined(__APPLE__) ||           \
-    defined(__CYGWIN__)
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #define FIO_HAVE_UNIX_TOOLS 1
+#elif defined(__CYGWIN__) || defined(__MINGW32__)
+#define FIO_HAVE_UNIX_TOOLS 2
+#endif
+
+#if FIO_HAVE_UNIX_TOOLS
 #include <sys/param.h>
 #include <unistd.h>
 #endif

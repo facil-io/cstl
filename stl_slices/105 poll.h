@@ -193,7 +193,7 @@ FIO_IFUNC void *fio___poll_udata_get(void **pu, int32_t pos) {
 }
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 /* *****************************************************************************
-Poll Monitoring Implementation - inlined static functions
+Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
 
 /* do we have a constructor? */
@@ -321,7 +321,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Polling is thread safe, but has different effects on different threads.
  *
  * Adding a new file descriptor from one thread while polling in a different
- * thread will not poll that IO untill `fio_poll_review` is called again.
+ * thread will not poll that IO until `fio_poll_review` is called again.
  */
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   int r = -1;
@@ -410,7 +410,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
           fds_ary[to_copy].fd = fds_ary[i].fd;
           fds_ary[to_copy].events = fds_ary[i].events;
           FIO_ASSERT(!fds_ary[i].revents,
-                     "Event unhandlerd for %d",
+                     "Event unhandled for %d",
                      fds_ary[i].fd);
           fds_ary[to_copy].revents = 0;
           FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);

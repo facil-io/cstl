@@ -16,17 +16,34 @@ typedef struct {
 #define JSON_PARSER_CAST(ptr) FIO_PTR_FROM_FIELD(my_json_parser_s, p, ptr)
 #define JSON_PARSER2OUTPUT(p) (&JSON_PARSER_CAST(p)->out)
 
+FIO_IFUNC void my_json_write_nesting(fio_json_parser_s *p) {
+  my_json_parser_s *j = JSON_PARSER_CAST(p);
+  if (fio_cli_get_bool("-p")) {
+    fio_str_write(&j->out, "\n", 1);
+    for (uint32_t i = 0; i < p->depth; ++i) {
+      fio_str_write(&j->out, "  ", 2);
+    }
+  }
+}
+
 FIO_IFUNC void my_json_write_seperator(fio_json_parser_s *p) {
   my_json_parser_s *j = JSON_PARSER_CAST(p);
   if (j->counter) {
     switch (fio_json_parser_is_in_object(p)) {
     case 0: /* array */
-      if (fio_json_parser_is_in_array(p))
+      if (fio_json_parser_is_in_array(p)) {
         fio_str_write(&j->out, ",", 1);
+        my_json_write_nesting(p);
+      }
       break;
     case 1: /* object */
       // note the reverse `if` statement due to operation ordering
-      fio_str_write(&j->out, (fio_json_parser_is_key(p) ? "," : ":"), 1);
+      if (fio_json_parser_is_key(p)) {
+        fio_str_write(&j->out, ",", 1);
+        my_json_write_nesting(p);
+      } else {
+        fio_str_write(&j->out, ":", 1);
+      }
       break;
     }
   }
@@ -61,8 +78,9 @@ FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f) {
   fio_str_write(JSON_PARSER2OUTPUT(p), buffer, len);
 }
 /** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void
-fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
+FIO_JSON_CB void fio_json_on_string(fio_json_parser_s *p,
+                                    const void *start,
+                                    size_t len) {
   my_json_write_seperator(p);
   fio_str_write(JSON_PARSER2OUTPUT(p), "\"", 1);
   fio_str_write(JSON_PARSER2OUTPUT(p), start, len);
@@ -72,11 +90,13 @@ fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
 FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p) {
   my_json_write_seperator(p);
   fio_str_write(JSON_PARSER2OUTPUT(p), "{", 1);
+  my_json_write_nesting(p);
   JSON_PARSER_CAST(p)->counter = 0;
   return 0;
 }
 /** a dictionary object closure detected */
 FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p) {
+  my_json_write_nesting(p);
   fio_str_write(JSON_PARSER2OUTPUT(p), "}", 1);
   JSON_PARSER_CAST(p)->counter = 1;
 }
@@ -84,11 +104,13 @@ FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p) {
 FIO_JSON_CB int fio_json_on_start_array(fio_json_parser_s *p) {
   my_json_write_seperator(p);
   fio_str_write(JSON_PARSER2OUTPUT(p), "[", 1);
+  my_json_write_nesting(p);
   JSON_PARSER_CAST(p)->counter = 0;
   return 0;
 }
 /** an array closure was detected */
 FIO_JSON_CB void fio_json_on_end_array(fio_json_parser_s *p) {
+  my_json_write_nesting(p);
   fio_str_write(JSON_PARSER2OUTPUT(p), "]", 1);
   JSON_PARSER_CAST(p)->counter = 1;
 }
@@ -99,8 +121,9 @@ FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p) {
 }
 /** the JSON parsing encountered an error */
 FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p) {
-  fio_str_write(
-      JSON_PARSER2OUTPUT(p), "--- ERROR, invalid JSON after this point.\0", 42);
+  fio_str_write(JSON_PARSER2OUTPUT(p),
+                "--- ERROR, invalid JSON after this point.\0",
+                42);
 }
 
 void run_my_json_minifier(char *json, size_t len) {
@@ -157,7 +180,7 @@ int main(int argc, char const *argv[]) {
   FIO_LOG_DEBUG2("attempting to parse:\n%s\n", fio_str2ptr(&json));
 
   // Parsing the JSON and cleanup
-  run_my_json_example(fio_str2ptr(&json), fio_str_len(&json));
+  run_my_json_minifier(fio_str2ptr(&json), fio_str_len(&json));
   fio_str_destroy(&json);
   return 0;
 }

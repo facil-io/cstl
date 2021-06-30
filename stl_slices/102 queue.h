@@ -81,7 +81,7 @@ Queue API
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
 
-/** Destroys a queue and reinitializes it, after freeing any used resources. */
+/** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q);
 
 /** Creates a new queue object (allocated on the heap). */
@@ -262,7 +262,7 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
 
-/** Destroys a queue and reinitializes it, after freeing any used resources. */
+/** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   fio_lock(&q->lock);
   while (q->r) {

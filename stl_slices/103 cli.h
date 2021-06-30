@@ -11,9 +11,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 map settings.h"       /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
+#include "211 ordered map.h"        /* Development inclusion - ignore line */
 #include "211 unordered map.h"      /* Development inclusion - ignore line */
-#include "212 ordered map.h"        /* Development inclusion - ignore line */
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -616,7 +616,7 @@ print_help:
               p + tmp);
       break;
     }
-    /* print aliase information */
+    /* print alias information */
     tmp = first_len;
     while (p[tmp] && (p[tmp] == ' ' || p[tmp] == ',')) {
       ++tmp;
