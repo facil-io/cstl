@@ -211,7 +211,7 @@ SFUNC int64_t fio_atol(char **pstr) {
   unsigned char invert = 0;
   fio___number_s n = (fio___number_s){0};
 
-  while ((int)(unsigned char)isspace(*p))
+  while ((int)(unsigned char)isspace((unsigned char)*p))
     ++p;
   if (*p == '-') {
     invert = 1;

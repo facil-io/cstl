@@ -684,15 +684,21 @@ Patch for Windows
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
-  DWORD mode = 0;
-  if (!c) {
-    return;
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
   }
-  if (!GetConsoleMode(c, &mode)) {
-    return;
+  c = GetStdHandle(STD_ERROR_HANDLE);
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
   }
-  mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-  SetConsoleMode(c, mode);
 }
 
 /* as close to pead as we can get here... */

@@ -49,28 +49,27 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 __attribute__((format(FIO___PRINTF_STYLE, 1, 0), weak)) void FIO_LOG2STDERR(
     const char *format,
     ...) {
-  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
   va_list argv;
+  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
   va_start(argv, format);
   int len___log = vsnprintf(tmp___log, FIO_LOG_LENGTH_LIMIT - 2, format, argv);
   va_end(argv);
-  if (len___log <= 0 || len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
+  if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
       FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
                  "...\n\tWARNING: TRUNCATED!",
                  24);
       len___log = FIO_LOG____LENGTH_BORDER + 24;
-    } else {
-      fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
-             39,
-             1,
-             stderr);
-      return;
     }
+    tmp___log[len___log++] = '\n';
+    tmp___log[len___log] = '0';
+    fwrite(tmp___log, 1, len___log, stderr);
+    return;
   }
-  tmp___log[len___log++] = '\n';
-  tmp___log[len___log] = '0';
-  fwrite(tmp___log, len___log, 1, stderr);
+  fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
+         1,
+         39,
+         stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK
 #undef FIO_LOG____LENGTH_BORDER

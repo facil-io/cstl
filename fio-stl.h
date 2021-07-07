@@ -684,15 +684,21 @@ Patch for Windows
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
-  DWORD mode = 0;
-  if (!c) {
-    return;
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
   }
-  if (!GetConsoleMode(c, &mode)) {
-    return;
+  c = GetStdHandle(STD_ERROR_HANDLE);
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
   }
-  mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-  SetConsoleMode(c, mode);
 }
 
 /* as close to pead as we can get here... */
@@ -989,28 +995,27 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 __attribute__((format(FIO___PRINTF_STYLE, 1, 0), weak)) void FIO_LOG2STDERR(
     const char *format,
     ...) {
-  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
   va_list argv;
+  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
   va_start(argv, format);
   int len___log = vsnprintf(tmp___log, FIO_LOG_LENGTH_LIMIT - 2, format, argv);
   va_end(argv);
-  if (len___log <= 0 || len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
+  if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
       FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
                  "...\n\tWARNING: TRUNCATED!",
                  24);
       len___log = FIO_LOG____LENGTH_BORDER + 24;
-    } else {
-      fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
-             39,
-             1,
-             stderr);
-      return;
     }
+    tmp___log[len___log++] = '\n';
+    tmp___log[len___log] = '0';
+    fwrite(tmp___log, 1, len___log, stderr);
+    return;
   }
-  tmp___log[len___log++] = '\n';
-  tmp___log[len___log] = '0';
-  fwrite(tmp___log, len___log, 1, stderr);
+  fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
+         1,
+         39,
+         stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK
 #undef FIO_LOG____LENGTH_BORDER
@@ -4349,7 +4354,7 @@ SFUNC int64_t fio_atol(char **pstr) {
   unsigned char invert = 0;
   fio___number_s n = (fio___number_s){0};
 
-  while ((int)(unsigned char)isspace(*p))
+  while ((int)(unsigned char)isspace((unsigned char)*p))
     ++p;
   if (*p == '-') {
     invert = 1;
