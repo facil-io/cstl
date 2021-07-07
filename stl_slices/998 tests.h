@@ -615,7 +615,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
     if (page != (1UL << FIO_MEM_PAGE_SIZE_LOG))
       FIO_LOG_WARNING("page size mismatch!\n          "
                       "facil.io should be recompiled with:\n          "
-                      "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf`\"",
+                      "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf\"`",
                       log2(page));
   }
 #endif /* FIO_OS_POSIX */
