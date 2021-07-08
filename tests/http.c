@@ -60,7 +60,7 @@ FIO_SFUNC void on_data(int fd, void *arg);
 FIO_SFUNC void on_close(int fd, void *arg);
 
 /** The IO polling object - it keeps a one-shot list of monitored IOs. */
-static fio_poll_s monitor = FIO_POLL_INIT(on_data, on_ready, on_close);
+static fio_poll_s *monitor;
 
 /* facil.io delays signal callbacks so they can safely with no restrictions. */
 FIO_SFUNC void on_signal(int sig, void *udata);
@@ -150,19 +150,23 @@ int main(int argc, char const *argv[]) {
 #endif
 
   /* select IO objects to be monitored */
-  fio_poll_monitor(&monitor, srv_fd, NULL, POLLIN);
+  monitor = fio_poll_new(.on_data = on_data,
+                         .on_ready = on_ready,
+                         .on_close = on_close);
+  fio_poll_monitor(monitor, srv_fd, NULL, POLLIN);
   FIO_LOG_INFO("Listening for HTTP echo @ %s", url);
 
   /* loop until the stop flag is raised */
   while (!server_stop_flag) {
     /* review IO events (calls the registered callbacks) */
-    fio_poll_review(&monitor, 1000);
+    fio_poll_review(monitor, 1000);
     /* review signals (calls the registered callback) */
     fio_signal_review();
   }
 
   /* cleanup */
-  fio_poll_close_and_destroy(&monitor);
+  fio_poll_close_and_destroy(monitor);
+  fio_poll_free(monitor);
   FIO_LOG_INFO("Shutdown complete.");
   return 0;
 }
@@ -256,7 +260,7 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
 finish:
   /* if there's data left to write, monitor the outgoing buffer. */
   if (fio_stream_any(&c->out))
-    fio_poll_monitor(&monitor, fd, arg, POLLOUT);
+    fio_poll_monitor(monitor, fd, arg, POLLOUT);
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
@@ -286,7 +290,7 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   }
 
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(&monitor, fd, arg, POLLIN);
+  fio_poll_monitor(monitor, fd, arg, POLLIN);
   return;
 
 accept_new_connections : {
@@ -296,16 +300,16 @@ accept_new_connections : {
   fio_sock_set_non_block(cl);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
   c->fd = cl;
-  fio_poll_monitor(&monitor, cl, c, POLLIN | POLLOUT);
+  fio_poll_monitor(monitor, cl, c, POLLIN | POLLOUT);
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(&monitor, fd, NULL, POLLIN);
+  fio_poll_monitor(monitor, fd, NULL, POLLIN);
   return;
 }
 
 accept_error:
   FIO_LOG_ERROR("Couldn't accept connection? %s", strerror(errno));
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(&monitor, fd, NULL, POLLIN);
+  fio_poll_monitor(monitor, fd, NULL, POLLIN);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
@@ -358,7 +362,7 @@ static int http1_on_request(http1_parser_s *parser) {
   c->headers_len = 0;
   c->body_len = 0;
 
-  fio_poll_monitor(&monitor, c->fd, c, POLLOUT);
+  fio_poll_monitor(monitor, c->fd, c, POLLOUT);
   return 0;
 }
 

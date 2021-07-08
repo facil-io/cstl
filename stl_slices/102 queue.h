@@ -66,7 +66,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed. */
   size_t count;
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
   fio___task_ring_s mem;
 } fio_queue_s;
 
@@ -76,7 +76,10 @@ Queue API
 
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .lock = FIO___LOCK_INIT((queue).lock)                                      \
+  }
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -130,11 +133,11 @@ typedef struct fio___timer_event_s fio___timer_event_s;
 
 typedef struct {
   fio___timer_event_s *next;
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
-#define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO_LOCK_INIT }
+#define FIO_TIMER_QUEUE_INIT(timer)                                            \
+  { .lock = FIO___LOCK_INIT((timer).lock) }
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
@@ -235,10 +238,10 @@ FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *tq) {
     goto missing_tq;
   if (!tq || !tq->next)
     return v;
-  fio_lock(&tq->lock);
+  FIO___LOCK_LOCK(tq->lock);
   if (tq->next)
     v = tq->next->due;
-  fio_unlock(&tq->lock);
+  FIO___LOCK_UNLOCK(tq->lock);
   return v;
 
 missing_tq:
@@ -257,21 +260,25 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->r = &q->mem;
   q->w = &q->mem;
   q->count = 0;
-  q->lock = FIO_LOCK_INIT;
+  FIO___LOCK_INIT(q->lock);
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
 
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   while (q->r) {
     fio___task_ring_s *tmp = q->r;
     q->r = q->r->next;
     if (tmp != &q->mem)
       FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
+  FIO___LOCK_UNLOCK(q->lock);
+  FIO___LOCK_DESTROY(q->lock);
+#if !FIO_USE_PTHREAD_MUTEX_TMP
   fio_queue_init(q);
+#endif
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -320,12 +327,12 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
   return t;
 }
 
-int fio_queue_push___(void); /* sublimetext marker */
+int fio_queue_push___(void); /* sublime text marker */
 /** Pushes a task to the queue. Returns -1 on error. */
 SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
   if (!task.fn)
     return 0;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (fio___task_ring_push(q->w, task)) {
     if (q->w != &q->mem && q->mem.next == NULL) {
       q->w->next = &q->mem;
@@ -346,10 +353,10 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   ++q->count;
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return -1;
 }
 
@@ -359,7 +366,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
                                          fio_queue_task_s task) {
   if (!task.fn)
     return 0;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (fio___task_ring_unpop(q->r, task)) {
     /* such a shame... but we must allocate a while task block for one task */
     fio___task_ring_s *tmp =
@@ -373,10 +380,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   ++q->count;
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return -1;
 }
 
@@ -386,7 +393,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   fio___task_ring_s *to_free = NULL;
   if (!q->count)
     return t;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (!q->count)
     goto finish;
   if (!(t = fio___task_ring_pop(q->r)).fn) {
@@ -404,7 +411,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     q->mem.w = q->mem.r = q->mem.dir = 0;
   }
 finish:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   if (to_free && to_free != &q->mem) {
     FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
@@ -476,9 +483,9 @@ init_error:
 FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
                                       fio___timer_event_s *t) {
   if (tq && (t->repetitions < 0 || fio_atomic_sub_fetch(&t->repetitions, 1))) {
-    fio_lock(&tq->lock);
+    FIO___LOCK_LOCK(tq->lock);
     fio___timer_insert(&tq->next, t);
-    fio_unlock(&tq->lock);
+    FIO___LOCK_UNLOCK(tq->lock);
     return;
   }
   if (t->on_finish)
@@ -502,7 +509,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
   size_t r = 0;
   if (!start_at)
     start_at = fio_time_milli();
-  if (fio_trylock(&timer->lock))
+  if (FIO___LOCK_TRYLOCK(timer->lock))
     return 0;
   fio___timer_event_s *t;
   while ((t = fio___timer_pop(&timer->next, start_at))) {
@@ -512,7 +519,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                    .udata2 = t);
     ++r;
   }
-  fio_unlock(&timer->lock);
+  FIO___LOCK_UNLOCK(timer->lock);
   return r;
 }
 
@@ -528,9 +535,9 @@ SFUNC void fio_timer_schedule FIO_NOOP(fio_timer_queue_s *timer,
   t = fio___timer_event_new(args);
   if (!t)
     return;
-  fio_lock(&timer->lock);
+  FIO___LOCK_LOCK(timer->lock);
   fio___timer_insert(&timer->next, t);
-  fio_unlock(&timer->lock);
+  FIO___LOCK_UNLOCK(timer->lock);
   return;
 no_timer_queue:
   if (args.on_finish)
@@ -551,10 +558,11 @@ no_timer_queue:
  */
 SFUNC void fio_timer_destroy(fio_timer_queue_s *tq) {
   fio___timer_event_s *next;
-  fio_lock(&tq->lock);
+  FIO___LOCK_LOCK(tq->lock);
   next = tq->next;
   tq->next = NULL;
-  fio_unlock(&tq->lock);
+  FIO___LOCK_UNLOCK(tq->lock);
+  FIO___LOCK_DESTROY(tq->lock);
   while (next) {
     fio___timer_event_s *tmp = next;
 
@@ -738,7 +746,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
     uintptr_t tester = 0;
-    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
+    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT(tq);
 
     /* test failuers */
     fio_timer_schedule(&tq,
@@ -794,6 +802,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
     tester = 0;
     fio_timer_destroy(&tq);
+    tq = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(tq);
     FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */

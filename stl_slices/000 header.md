@@ -132,6 +132,17 @@ When defined, this macro will force full code generation.
 
 If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
 
+
+#### `FIO_USE_PTHREAD_MUTEX` and `FIO_USE_PTHREAD_MUTEX_TMP`
+
+Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation on POSIX systems.
+
+This default choice can be altered by setting the `FIO_USE_PTHREAD_MUTEX` or `FIO_USE_PTHREAD_MUTEX_TMP` to true (`1`).
+
+The `FIO_USE_PTHREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
+
+The `FIO_USE_PTHREAD_MUTEX` macro will alter the default behavior for all future include statements.
+
 -------------------------------------------------------------------------------
 
 ## Version and Common Helper Macros

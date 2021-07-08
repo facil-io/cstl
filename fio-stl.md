@@ -132,6 +132,17 @@ When defined, this macro will force full code generation.
 
 If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
 
+
+#### `FIO_USE_PTHREAD_MUTEX` and `FIO_USE_PTHREAD_MUTEX_TMP`
+
+Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation on POSIX systems.
+
+This default choice can be altered by setting the `FIO_USE_PTHREAD_MUTEX` or `FIO_USE_PTHREAD_MUTEX_TMP` to true (`1`).
+
+The `FIO_USE_PTHREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
+
+The `FIO_USE_PTHREAD_MUTEX` macro will alter the default behavior for all future include statements.
+
 -------------------------------------------------------------------------------
 
 ## Version and Common Helper Macros
@@ -2260,7 +2271,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed (read-only). */
   size_t count;
-  fio_lock_i lock;
+  fio_lock_i lock; /* unless FIO_USE_PTHREAD_MUTEX(_TMP) is true */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```
@@ -2286,7 +2297,10 @@ void fio_queue_init(fio_queue_s *q);
 void fio_queue_destroy(fio_queue_s *q);
 ```
 
-Destroys a queue and reinitializes it, after freeing any used resources.
+Destroys a queue and re-initializes it, after freeing any used resources.
+
+**Note**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be re-initialized explicitly before re-used after being destroyed (call `fio_queue_init`).
 
 #### `FIO_QUEUE_STATIC_INIT(queue)`
 
@@ -2297,7 +2311,7 @@ Destroys a queue and reinitializes it, after freeing any used resources.
 
 May be used to initialize global, static memory, queues.
 
-**Note**: use `fio_queue_init` is possible. This macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+**Note**: while the use `FIO_QUEUE_STATIC_INIT` is possible only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`),  this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
 
 #### `fio_queue_new`
 
@@ -2411,7 +2425,7 @@ The `fio_timer_queue_s` struct should be considered an opaque data type and acce
 To create a `fio_timer_queue_s` on the stack (or statically):
 
 ```c
-fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
+fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT(foo_timer);
 ```
 
 A timer could be allocated dynamically:
@@ -2419,12 +2433,15 @@ A timer could be allocated dynamically:
 ```c
 fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
 FIO_ASSERT_ALLOC(foo_timer);
-*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
+*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(*foo_timer);
 ```
 
-#### `FIO_TIMER_QUEUE_INIT`
+#### `FIO_TIMER_QUEUE_INIT(timer)`
 
 This is a MACRO used to initialize a `fio_timer_queue_s` object.
+
+**Note**: the use `FIO_TIMER_QUEUE_INIT` is possible as a static initialization only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`).
+
 
 ### Timer API
 
@@ -2508,6 +2525,9 @@ Clears any waiting timer bound tasks.
 The timer queue must NEVER be freed when there's a chance that timer tasks are waiting to be performed in a `fio_queue_s`.
 
 This is due to the fact that the tasks may try to reschedule themselves (if they repeat).
+
+**Note 2**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
 
 -------------------------------------------------------------------------------
 ## CLI (command line interface)
@@ -2913,7 +2933,7 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
 #### `FIO_POLL_INIT`
 
 ```c
-#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
+#define FIO_POLL_INIT(var_name, on_data_func, on_ready_func, on_close_func)    \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -2921,11 +2941,13 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO_LOCK_INIT                                                      \
+    .lock = FIO_LOCK_INIT((var_name).lock)                                     \
   }
 ```
 
 A `fio_poll_s` object initialization macro.
+
+Static initialization in only possible on POSIX systems.
 
 #### `fio_poll_new`
 

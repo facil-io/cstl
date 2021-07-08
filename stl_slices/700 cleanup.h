@@ -34,6 +34,13 @@ Common cleanup
 #undef FIO_MEM_REALLOC_IS_SAFE_
 #undef FIO_MEMORY_NAME /* postponed due to possible use in macros */
 
+#undef FIO___LOCK_TYPE
+#undef FIO___LOCK_INIT
+#undef FIO___LOCK_LOCK
+#undef FIO___LOCK_LOCK_TRY
+#undef FIO___LOCK_UNLOCK
+#undef FIO_USE_PTHREAD_MUTEX_TMP
+
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
 #if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \
     FIO_EXTERN_COMPLETE == 2

@@ -52,7 +52,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
-#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
+#define FIO_POLL_INIT(poll_name, on_data_func, on_ready_func, on_close_func)   \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -60,7 +60,15 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO_LOCK_INIT                                                      \
+    .lock = FIO___LOCK_INIT((poll_name).lock)                                  \
+  }
+#define FIO___POLL_INIT_TMP(on_data_func, on_ready_func, on_close_func)        \
+  {                                                                            \
+    .settings = {                                                              \
+        .on_data = on_data_func,                                               \
+        .on_ready = on_ready_func,                                             \
+        .on_close = on_close_func,                                             \
+    },                                                                         \
   }
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -158,7 +166,7 @@ struct fio_poll_s {
 #else
   void *udata;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
 };
 
 /* *****************************************************************************
@@ -198,8 +206,8 @@ FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
   fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   if (p) {
     *p = (fio_poll_s) {
-      .settings = settings, .lock = FIO_LOCK_INIT, .index = FIO_MAP_INIT,
-      .fds = FIO_ARRAY_INIT,
+      .settings = settings, .lock = FIO___LOCK_INIT(p->lock),
+      .index = FIO_MAP_INIT, .fds = FIO_ARRAY_INIT,
 #if FIO_POLL_HAS_UDATA_COLLECTION
       .udata = FIO_ARRAY_INIT,
 #endif
@@ -221,7 +229,7 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
     fio___poll_index_destroy(&p->index);
     fio___poll_fds_destroy(&p->fds);
     fio___poll_udata_destroy(&p->udata);
-    p->lock = FIO_LOCK_INIT;
+    FIO___LOCK_DESTROY(p->lock);
   }
 }
 
@@ -302,9 +310,9 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   if (!p || fd == -1)
     return r;
   flags &= POLLIN | POLLOUT | POLLPRI;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   r = fio___poll_monitor(p, fd, udata, flags);
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
 
@@ -326,7 +334,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     return r;
 
   /* move all data to a copy (thread safety) */
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   cpy = *p;
   p->index = (fio___poll_index_s)FIO_MAP_INIT;
   p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
@@ -334,7 +342,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
 
   /* move if conditions out of the loop */
   if (!cpy.settings.on_data)
@@ -430,15 +438,15 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     to_copy = len;
   }
 
-  /* insert all unfired events back to the (thread safe) queue */
-  fio_lock(&p->lock);
+  /* insert all un-fired events back to the (thread safe) queue */
+  FIO___LOCK_LOCK(p->lock);
   if (to_copy == len && !fio___poll_index_count(&p->index)) {
     /* it's possible to move the data set as is */
     FIO_POLL_DEBUG_LOG(
         "fio_poll_review overwriting %zu items for pending events",
         to_copy);
     *p = cpy;
-    cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
+    cpy = (fio_poll_s)FIO___POLL_INIT_TMP(NULL, NULL, NULL);
   } else {
     FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
                        to_copy);
@@ -449,7 +457,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
                          fds_ary[i].events);
     }
   }
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
 
   /* cleanup memory */
   fio___poll_index_destroy(&cpy.index);
@@ -467,7 +475,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   FIO_POLL_DEBUG_LOG("fio_poll_forget called for %d", fd);
   if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
     return old;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
   if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
     /* pos is correct (index 0 could have been a false positive) */
@@ -475,19 +483,19 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
     old = fio___poll_udata_get(&p->udata, (int32_t)pos);
   }
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
   return old;
 }
 
 /** Closes all sockets, calling the `on_close` and reinitializing the object. */
 SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
   fio_poll_s tmp;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   tmp = *p;
-  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
-                                 p->settings.on_ready,
-                                 p->settings.on_close);
-  fio_unlock(&tmp.lock);
+  *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
+                                       p->settings.on_ready,
+                                       p->settings.on_close);
+  FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
     if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
       continue;
@@ -511,7 +519,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
+  fio_poll_s p = FIO_POLL_INIT(p, NULL, NULL, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),

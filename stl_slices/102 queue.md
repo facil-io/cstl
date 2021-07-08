@@ -35,7 +35,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed (read-only). */
   size_t count;
-  fio_lock_i lock;
+  fio_lock_i lock; /* unless FIO_USE_PTHREAD_MUTEX(_TMP) is true */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```
@@ -61,7 +61,10 @@ void fio_queue_init(fio_queue_s *q);
 void fio_queue_destroy(fio_queue_s *q);
 ```
 
-Destroys a queue and reinitializes it, after freeing any used resources.
+Destroys a queue and re-initializes it, after freeing any used resources.
+
+**Note**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be re-initialized explicitly before re-used after being destroyed (call `fio_queue_init`).
 
 #### `FIO_QUEUE_STATIC_INIT(queue)`
 
@@ -72,7 +75,7 @@ Destroys a queue and reinitializes it, after freeing any used resources.
 
 May be used to initialize global, static memory, queues.
 
-**Note**: use `fio_queue_init` is possible. This macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+**Note**: while the use `FIO_QUEUE_STATIC_INIT` is possible only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`),  this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
 
 #### `fio_queue_new`
 
@@ -186,7 +189,7 @@ The `fio_timer_queue_s` struct should be considered an opaque data type and acce
 To create a `fio_timer_queue_s` on the stack (or statically):
 
 ```c
-fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
+fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT(foo_timer);
 ```
 
 A timer could be allocated dynamically:
@@ -194,12 +197,15 @@ A timer could be allocated dynamically:
 ```c
 fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
 FIO_ASSERT_ALLOC(foo_timer);
-*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
+*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(*foo_timer);
 ```
 
-#### `FIO_TIMER_QUEUE_INIT`
+#### `FIO_TIMER_QUEUE_INIT(timer)`
 
 This is a MACRO used to initialize a `fio_timer_queue_s` object.
+
+**Note**: the use `FIO_TIMER_QUEUE_INIT` is possible as a static initialization only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`).
+
 
 ### Timer API
 
@@ -283,5 +289,8 @@ Clears any waiting timer bound tasks.
 The timer queue must NEVER be freed when there's a chance that timer tasks are waiting to be performed in a `fio_queue_s`.
 
 This is due to the fact that the tasks may try to reschedule themselves (if they repeat).
+
+**Note 2**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
 
 -------------------------------------------------------------------------------

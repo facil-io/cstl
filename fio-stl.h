@@ -183,7 +183,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define FIO_ALIGN(bytes)
 #endif
 
-#if !defined(__clang__) && !defined(__GNUC__)
+#if _MSC_VER
+#define __thread __declspec(thread)
+#elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_value
 #endif
 
@@ -777,6 +779,59 @@ Memory allocation macros
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_REALLOC) */
+
+/* *****************************************************************************
+Locking selector
+***************************************************************************** */
+
+#ifndef FIO_USE_PTHREAD_MUTEX
+#define FIO_USE_PTHREAD_MUTEX 0
+#endif
+
+#ifndef FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_USE_PTHREAD_MUTEX_TMP FIO_USE_PTHREAD_MUTEX
+#endif
+
+#if _MSC_VER
+#include <synchapi.h>
+#undef FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_USE_PTHREAD_MUTEX_TMP 1
+#define FIO___LOCK_TYPE           HANDLE
+#define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
+#define FIO___LOCK_DESTROY(lock)  CloseHandle((lock))
+#define FIO___LOCK_LOCK(lock)                                                  \
+  (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
+#define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
+#define FIO___LOCK_UNLOCK(lock)  ReleaseMutex((lock))
+
+#elif FIO_USE_PTHREAD_MUTEX_TMP
+#include <pthread.h>
+#define FIO___LOCK_TYPE pthread_mutex_t
+#define FIO___LOCK_INIT(lock)                                                  \
+  ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
+#define FIO___LOCK_DESTROY(lock) pthread_mutex_destroy(&(lock))
+#define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
+#define FIO___LOCK_UNLOCK(lock)                                                \
+  do {                                                                         \
+    int tmp__ = pthread_mutex_unlock(&(lock));                                 \
+    if (tmp__) {                                                               \
+      FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
+                    __LINE__,                                                  \
+                    tmp__,                                                     \
+                    strerror(tmp__));                                          \
+    }                                                                          \
+  } while (0)
+
+#else
+#define FIO___LOCK_TYPE          fio_lock_i
+#define FIO___LOCK_INIT(lock)    ((lock) = FIO_LOCK_INIT)
+#define FIO___LOCK_DESTROY(lock) FIO___LOCK_INIT((lock))
+#define FIO___LOCK_LOCK(lock)    fio_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) fio_trylock(&(lock))
+#define FIO___LOCK_UNLOCK(lock)  fio_unlock(&(lock))
+#endif
+
 /* *****************************************************************************
 Common macros
 ***************************************************************************** */
@@ -928,9 +983,10 @@ Common macros
 
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
-    defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
-    defined(FIO_QUEUE) || defined(FIO_JSON) || defined(FIO_SIGNAL) ||          \
-    defined(FIO_BITMAP)
+    (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
+    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
+    defined(FIO_SIGNAL) || defined(FIO_BITMAP)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -1220,6 +1276,20 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
+
+#define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                      \
+  ((sizeof(*ptr) == 1)                                                         \
+       ? (fn##8)((uint8_t *)ptr, __VA_ARGS__)                                  \
+       : (sizeof(*ptr) == 2)                                                   \
+             ? (fn##16)((uint16_t *)ptr, __VA_ARGS__)                          \
+             : (sizeof(*ptr) == 4)                                             \
+                   ? (fn##32)((uint32_t *)ptr, __VA_ARGS__)                    \
+                   : (sizeof(*ptr) == 8)                                       \
+                         ? (fn##64)((uint64_t *)ptr, __VA_ARGS__)              \
+                         : fn##_varlen((uint64_t *)ptr,                        \
+                                       sizeof(*ptr),                           \
+                                       __VA_ARGS__))
+
 #endif
 // clang-format on
 
@@ -6592,17 +6662,16 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #endif
 
 #ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
+#if FIO_USE_PTHREAD_MUTEX
 /*
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
-#if FIO_MEMORY_ARENA_COUNT != 1
+#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
+#else
 /** If true, uses a pthread mutex instead of a spinlock. */
 #define FIO_MEMORY_USE_PTHREAD_MUTEX 1
-#else
-/** If no arenas, uses a spinlock instead of a pthread mutex. */
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
 #endif
 #endif
 
@@ -6620,25 +6689,25 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEM_PAGE_SIZE_LOG 12 /* 4096 bytes per page */
 #endif
 
-#if !defined(FIO_MEM_PAGE_ALLOC) || !defined(FIO_MEM_PAGE_REALLOC) ||          \
-    !defined(FIO_MEM_PAGE_FREE)
+#if !defined(FIO_MEM_SYS_ALLOC) || !defined(FIO_MEM_SYS_REALLOC) ||            \
+    !defined(FIO_MEM_SYS_FREE)
 /**
  * The following MACROS, when all of them are defined, allow the memory
  * allocator to collect memory from the system using an alternative method.
  *
- * - FIO_MEM_PAGE_ALLOC(pages, alignment_log)
+ * - FIO_MEM_SYS_ALLOC(pages, alignment_log)
  *
- * - FIO_MEM_PAGE_REALLOC(ptr, old_pages, new_pages, alignment_log)
+ * - FIO_MEM_SYS_REALLOC(ptr, old_pages, new_pages, alignment_log)
  *
- * - FIO_MEM_PAGE_FREE(ptr, pages) FIO_MEM_PAGE_FREE_def_func((ptr), (pages))
+ * - FIO_MEM_SYS_FREE(ptr, pages) FIO_MEM_SYS_FREE_def_func((ptr), (pages))
  *
  * Note that the alignment property for the allocated memory is essential and
  * may me quite large.
  */
-#undef FIO_MEM_PAGE_ALLOC
-#undef FIO_MEM_PAGE_REALLOC
-#undef FIO_MEM_PAGE_FREE
-#endif /* undefined FIO_MEM_PAGE_ALLOC... */
+#undef FIO_MEM_SYS_ALLOC
+#undef FIO_MEM_SYS_REALLOC
+#undef FIO_MEM_SYS_FREE
+#endif /* undefined FIO_MEM_SYS_ALLOC... */
 
 /* *****************************************************************************
 Memory Allocation - configuration value - results and constants
@@ -6822,7 +6891,8 @@ Helpers and System Memory Allocation
 #define H___FIO_MEM_INCLUDE_ONCE___H
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
-  (((size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) >> (FIO_MEM_PAGE_SIZE_LOG))
+  (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
+   ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
 
 /* *****************************************************************************
 Aligned memory copying
@@ -6978,7 +7048,7 @@ POSIX Allocaion
 #else
 #define MAP_ANONYMOUS 0
 #endif /* defined(MAP_ANONYMOUS) */
-#endif /* FIO_MEM_PAGE_ALLOC */
+#endif /* FIO_MEM_SYS_ALLOC */
 
 /* inform the compiler that the returned value is aligned on 16 byte marker */
 #if __clang__ || __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 8)
@@ -6994,13 +7064,13 @@ POSIX Allocaion
 /*
  * allocates memory using `mmap`, but enforces alignment.
  */
-FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
-                                            uint8_t alignment_log) {
+FIO_SFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
+                                           uint8_t alignment_log) {
   void *result;
   static void *next_alloc = (void *)0x01;
   const size_t alignment_mask = (1ULL << alignment_log) - 1;
   const size_t alignment_size = (1ULL << alignment_log);
-  pages <<= FIO_MEM_PAGE_SIZE_LOG;
+  bytes = FIO_MEM_BYTES2PAGES(bytes);
   next_alloc =
       (void *)(((uintptr_t)next_alloc + alignment_mask) & alignment_mask);
 /* hope for the best? */
@@ -7013,7 +7083,7 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
                 0);
 #else
   result = mmap(next_alloc,
-                pages,
+                bytes,
                 PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS,
                 -1,
@@ -7022,9 +7092,9 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
   if (result == MAP_FAILED)
     return (void *)NULL;
   if (((uintptr_t)result & alignment_mask)) {
-    munmap(result, pages);
+    munmap(result, bytes);
     result = mmap(NULL,
-                  pages + alignment_size,
+                  bytes + alignment_size,
                   PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS,
                   -1,
@@ -7038,102 +7108,101 @@ FIO_SFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
       munmap(result, offset);
       result = (void *)((uintptr_t)result + offset);
     }
-    munmap((void *)((uintptr_t)result + pages), alignment_size - offset);
+    munmap((void *)((uintptr_t)result + bytes), alignment_size - offset);
   }
-  next_alloc = (void *)((uintptr_t)result + (pages << 2));
+  next_alloc = (void *)((uintptr_t)result + (bytes << 2));
   return result;
 }
 
 /*
  * Re-allocates memory using `mmap`, enforcing alignment.
  */
-FIO_SFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
-                                              size_t prev_pages,
-                                              size_t new_pages,
-                                              uint8_t alignment_log) {
-  const size_t prev_len = prev_pages << FIO_MEM_PAGE_SIZE_LOG;
-  const size_t new_len = new_pages << FIO_MEM_PAGE_SIZE_LOG;
-  if (new_len > prev_len) {
+FIO_SFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
+                                             size_t old_len,
+                                             size_t new_len,
+                                             uint8_t alignment_log) {
+  old_len = FIO_MEM_BYTES2PAGES(old_len);
+  new_len = FIO_MEM_BYTES2PAGES(new_len);
+  if (new_len > old_len) {
     void *result;
 #if defined(__linux__)
-    result = mremap(mem, prev_len, new_len, 0);
+    result = mremap(mem, old_len, new_len, 0);
     if (result != MAP_FAILED)
       return result;
 #endif
-    result = mmap((void *)((uintptr_t)mem + prev_len),
-                  new_len - prev_len,
+    result = mmap((void *)((uintptr_t)mem + old_len),
+                  new_len - old_len,
                   PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS,
                   -1,
                   0);
-    if (result == (void *)((uintptr_t)mem + prev_len)) {
+    if (result == (void *)((uintptr_t)mem + old_len)) {
       result = mem;
     } else {
       /* copy and free */
-      munmap(result, new_len - prev_len); /* free the failed attempt */
+      munmap(result, new_len - old_len); /* free the failed attempt */
       result =
-          FIO_MEM_PAGE_ALLOC_def_func(new_pages,
-                                      alignment_log); /* allocate new memory */
+          FIO_MEM_SYS_ALLOC_def_func(new_len,
+                                     alignment_log); /* allocate new memory */
       if (!result) {
         return (void *)NULL;
       }
-      fio___memcpy_aligned(result, mem, prev_len); /* copy data */
+      fio___memcpy_aligned(result, mem, old_len); /* copy data */
       // FIO_MEMCPY(result, mem, prev_len);
-      munmap(mem, prev_len); /* free original memory */
+      munmap(mem, old_len); /* free original memory */
     }
     return result;
   }
-  if (prev_len != new_len) /* remove dangling pages */
-    munmap((void *)((uintptr_t)mem + new_len), prev_len - new_len);
+  if (old_len != new_len) /* remove dangling pages */
+    munmap((void *)((uintptr_t)mem + new_len), old_len - new_len);
   return mem;
 }
 
 /* frees memory using `munmap`. */
-FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
-  munmap(mem, (pages << FIO_MEM_PAGE_SIZE_LOG));
+FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
+  bytes = FIO_MEM_BYTES2PAGES(bytes);
+  munmap(mem, bytes);
 }
 
 /* *****************************************************************************
-Non-POSIX allocaion - unsupported at this time
+Non-POSIX allocation - unsupported at this time
 ***************************************************************************** */
 #else /* FIO_HAVE_UNIX_TOOLS */
 
-FIO_IFUNC void *FIO_MEM_PAGE_ALLOC_def_func(size_t pages,
-                                            uint8_t alignment_log) {
+FIO_IFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
+                                           uint8_t alignment_log) {
   // return aligned_alloc((pages << 12), (1UL << alignment_log));
   exit(-1);
-  (void)pages;
+  (void)bytes;
   (void)alignment_log;
 }
 
-FIO_IFUNC void *FIO_MEM_PAGE_REALLOC_def_func(void *mem,
-                                              size_t prev_pages,
-                                              size_t new_pages,
-                                              uint8_t alignment_log) {
-  (void)prev_pages;
+FIO_IFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
+                                             size_t old_len,
+                                             size_t new_len,
+                                             uint8_t alignment_log) {
+  (void)old_len;
   (void)alignment_log;
-  return realloc(mem, (new_pages << 12));
+  new_len = FIO_MEM_BYTES2PAGES(new_len);
+  return realloc(mem, new_len);
 }
 
-FIO_IFUNC void FIO_MEM_PAGE_FREE_def_func(void *mem, size_t pages) {
+FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
   free(mem);
-  (void)pages;
+  (void)bytes;
 }
 
 #endif /* FIO_HAVE_UNIX_TOOLS */
 /* *****************************************************************************
 Overridable system allocation macros
 ***************************************************************************** */
-#ifndef FIO_MEM_PAGE_ALLOC
-#define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
-  FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
-#define FIO_MEM_PAGE_REALLOC(ptr, old_pages, new_pages, alignment_log)         \
-  FIO_MEM_PAGE_REALLOC_def_func((ptr),                                         \
-                                (old_pages),                                   \
-                                (new_pages),                                   \
-                                (alignment_log))
-#define FIO_MEM_PAGE_FREE(ptr, pages) FIO_MEM_PAGE_FREE_def_func((ptr), (pages))
-#endif /* FIO_MEM_PAGE_ALLOC */
+#ifndef FIO_MEM_SYS_ALLOC
+#define FIO_MEM_SYS_ALLOC(pages, alignment_log)                                \
+  FIO_MEM_SYS_ALLOC_def_func((pages), (alignment_log))
+#define FIO_MEM_SYS_REALLOC(ptr, old_pages, new_pages, alignment_log)          \
+  FIO_MEM_SYS_REALLOC_def_func((ptr), (old_pages), (new_pages), (alignment_log))
+#define FIO_MEM_SYS_FREE(ptr, pages) FIO_MEM_SYS_FREE_def_func((ptr), (pages))
+#endif /* FIO_MEM_SYS_ALLOC */
 
 /* *****************************************************************************
 Testing helpers
@@ -7696,7 +7765,7 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
   /* dealloc the state machine */
   const size_t s = FIO_MEMORY_STATE_SIZE(
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
-  FIO_MEM_PAGE_FREE(FIO_NAME(FIO_MEMORY_NAME, __mem_state), s);
+  FIO_MEM_SYS_FREE(FIO_NAME(FIO_MEMORY_NAME, __mem_state), s);
   FIO_NAME(FIO_MEMORY_NAME, __mem_state) =
       (FIO_NAME(FIO_MEMORY_NAME, __mem_state_s *))NULL;
 
@@ -7732,7 +7801,7 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
 
     const size_t s = FIO_MEMORY_STATE_SIZE(arean_count);
     FIO_NAME(FIO_MEMORY_NAME, __mem_state) =
-        (FIO_NAME(FIO_MEMORY_NAME, __mem_state_s *))FIO_MEM_PAGE_ALLOC(s, 0);
+        (FIO_NAME(FIO_MEMORY_NAME, __mem_state_s *))FIO_MEM_SYS_ALLOC(s, 0);
     FIO_ASSERT_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __mem_state));
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arean_count;
   }
@@ -7870,8 +7939,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
   if (!c)
     return;
-  FIO_MEM_PAGE_FREE(((void *)c),
-                    (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG));
+  FIO_MEM_SYS_FREE(((void *)c), FIO_MEMORY_SYS_ALLOCATION_SIZE);
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 
@@ -7939,8 +8007,8 @@ FIO_IFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *
 #endif /* FIO_MEMORY_CACHE_SLOTS */
 
   /* system allocation */
-  c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_PAGE_ALLOC(
-      (FIO_MEMORY_SYS_ALLOCATION_SIZE >> FIO_MEM_PAGE_SIZE_LOG),
+  c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_SYS_ALLOC(
+      FIO_MEMORY_SYS_ALLOCATION_SIZE,
       FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
 
   if (!c)
@@ -8490,7 +8558,7 @@ mmap_free:
                0,
                ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) -
                    FIO_MEMORY_ALIGN_SIZE);
-  FIO_MEM_PAGE_FREE(c, c->marker);
+  FIO_MEM_SYS_FREE(c, (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG);
   FIO_MEMORY_ON_CHUNK_FREE(c);
 }
 
@@ -8511,16 +8579,15 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
 FIO_SFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
     size_t new_size) {
-  const size_t new_page_len =
-      FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_ALIGN_SIZE);
-  c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_PAGE_REALLOC(
+  const size_t new_len = FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_ALIGN_SIZE);
+  c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_SYS_REALLOC(
       c,
       c->marker,
-      new_page_len,
+      new_len,
       FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
-  c->marker = (uint32_t)new_page_len;
+  c->marker = (uint32_t)(new_len >> FIO_MEM_PAGE_SIZE_LOG);
   return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
 }
 
@@ -8624,11 +8691,11 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
     return NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)
-          FIO_MEM_PAGE_ALLOC(pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+          FIO_MEM_SYS_ALLOC(pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
     return NULL;
   FIO_MEMORY_ON_CHUNK_ALLOC(c);
-  c->marker = (uint32_t)pages;
+  c->marker = (uint32_t)(pages >> FIO_MEM_PAGE_SIZE_LOG);
   return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
 }
 
@@ -9572,7 +9639,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed. */
   size_t count;
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
   fio___task_ring_s mem;
 } fio_queue_s;
 
@@ -9582,7 +9649,10 @@ Queue API
 
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .lock = FIO___LOCK_INIT((queue).lock)                                      \
+  }
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -9636,11 +9706,11 @@ typedef struct fio___timer_event_s fio___timer_event_s;
 
 typedef struct {
   fio___timer_event_s *next;
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
-#define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO_LOCK_INIT }
+#define FIO_TIMER_QUEUE_INIT(timer)                                            \
+  { .lock = FIO___LOCK_INIT((timer).lock) }
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
@@ -9741,10 +9811,10 @@ FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *tq) {
     goto missing_tq;
   if (!tq || !tq->next)
     return v;
-  fio_lock(&tq->lock);
+  FIO___LOCK_LOCK(tq->lock);
   if (tq->next)
     v = tq->next->due;
-  fio_unlock(&tq->lock);
+  FIO___LOCK_UNLOCK(tq->lock);
   return v;
 
 missing_tq:
@@ -9763,21 +9833,25 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->r = &q->mem;
   q->w = &q->mem;
   q->count = 0;
-  q->lock = FIO_LOCK_INIT;
+  FIO___LOCK_INIT(q->lock);
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
 
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   while (q->r) {
     fio___task_ring_s *tmp = q->r;
     q->r = q->r->next;
     if (tmp != &q->mem)
       FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
+  FIO___LOCK_UNLOCK(q->lock);
+  FIO___LOCK_DESTROY(q->lock);
+#if !FIO_USE_PTHREAD_MUTEX_TMP
   fio_queue_init(q);
+#endif
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -9826,12 +9900,12 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
   return t;
 }
 
-int fio_queue_push___(void); /* sublimetext marker */
+int fio_queue_push___(void); /* sublime text marker */
 /** Pushes a task to the queue. Returns -1 on error. */
 SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
   if (!task.fn)
     return 0;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (fio___task_ring_push(q->w, task)) {
     if (q->w != &q->mem && q->mem.next == NULL) {
       q->w->next = &q->mem;
@@ -9852,10 +9926,10 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   ++q->count;
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return -1;
 }
 
@@ -9865,7 +9939,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
                                          fio_queue_task_s task) {
   if (!task.fn)
     return 0;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (fio___task_ring_unpop(q->r, task)) {
     /* such a shame... but we must allocate a while task block for one task */
     fio___task_ring_s *tmp =
@@ -9879,10 +9953,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   ++q->count;
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   return -1;
 }
 
@@ -9892,7 +9966,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   fio___task_ring_s *to_free = NULL;
   if (!q->count)
     return t;
-  fio_lock(&q->lock);
+  FIO___LOCK_LOCK(q->lock);
   if (!q->count)
     goto finish;
   if (!(t = fio___task_ring_pop(q->r)).fn) {
@@ -9910,7 +9984,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     q->mem.w = q->mem.r = q->mem.dir = 0;
   }
 finish:
-  fio_unlock(&q->lock);
+  FIO___LOCK_UNLOCK(q->lock);
   if (to_free && to_free != &q->mem) {
     FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
@@ -9982,9 +10056,9 @@ init_error:
 FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
                                       fio___timer_event_s *t) {
   if (tq && (t->repetitions < 0 || fio_atomic_sub_fetch(&t->repetitions, 1))) {
-    fio_lock(&tq->lock);
+    FIO___LOCK_LOCK(tq->lock);
     fio___timer_insert(&tq->next, t);
-    fio_unlock(&tq->lock);
+    FIO___LOCK_UNLOCK(tq->lock);
     return;
   }
   if (t->on_finish)
@@ -10008,7 +10082,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
   size_t r = 0;
   if (!start_at)
     start_at = fio_time_milli();
-  if (fio_trylock(&timer->lock))
+  if (FIO___LOCK_TRYLOCK(timer->lock))
     return 0;
   fio___timer_event_s *t;
   while ((t = fio___timer_pop(&timer->next, start_at))) {
@@ -10018,7 +10092,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
                    .udata2 = t);
     ++r;
   }
-  fio_unlock(&timer->lock);
+  FIO___LOCK_UNLOCK(timer->lock);
   return r;
 }
 
@@ -10034,9 +10108,9 @@ SFUNC void fio_timer_schedule FIO_NOOP(fio_timer_queue_s *timer,
   t = fio___timer_event_new(args);
   if (!t)
     return;
-  fio_lock(&timer->lock);
+  FIO___LOCK_LOCK(timer->lock);
   fio___timer_insert(&timer->next, t);
-  fio_unlock(&timer->lock);
+  FIO___LOCK_UNLOCK(timer->lock);
   return;
 no_timer_queue:
   if (args.on_finish)
@@ -10057,10 +10131,11 @@ no_timer_queue:
  */
 SFUNC void fio_timer_destroy(fio_timer_queue_s *tq) {
   fio___timer_event_s *next;
-  fio_lock(&tq->lock);
+  FIO___LOCK_LOCK(tq->lock);
   next = tq->next;
   tq->next = NULL;
-  fio_unlock(&tq->lock);
+  FIO___LOCK_UNLOCK(tq->lock);
+  FIO___LOCK_DESTROY(tq->lock);
   while (next) {
     fio___timer_event_s *tmp = next;
 
@@ -10244,7 +10319,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
     uintptr_t tester = 0;
-    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
+    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT(tq);
 
     /* test failuers */
     fio_timer_schedule(&tq,
@@ -10300,6 +10375,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
     tester = 0;
     fio_timer_destroy(&tq);
+    tq = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(tq);
     FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */
@@ -11397,7 +11473,7 @@ int main(int argc, char const *argv[]) {
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x3FFFFFFF)
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x7FFFFFFF)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)
@@ -12268,7 +12344,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
-#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
+#define FIO_POLL_INIT(poll_name, on_data_func, on_ready_func, on_close_func)   \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -12276,7 +12352,15 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO_LOCK_INIT                                                      \
+    .lock = FIO___LOCK_INIT((poll_name).lock)                                  \
+  }
+#define FIO___POLL_INIT_TMP(on_data_func, on_ready_func, on_close_func)        \
+  {                                                                            \
+    .settings = {                                                              \
+        .on_data = on_data_func,                                               \
+        .on_ready = on_ready_func,                                             \
+        .on_close = on_close_func,                                             \
+    },                                                                         \
   }
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -12374,7 +12458,7 @@ struct fio_poll_s {
 #else
   void *udata;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
 };
 
 /* *****************************************************************************
@@ -12414,8 +12498,8 @@ FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
   fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   if (p) {
     *p = (fio_poll_s) {
-      .settings = settings, .lock = FIO_LOCK_INIT, .index = FIO_MAP_INIT,
-      .fds = FIO_ARRAY_INIT,
+      .settings = settings, .lock = FIO___LOCK_INIT(p->lock),
+      .index = FIO_MAP_INIT, .fds = FIO_ARRAY_INIT,
 #if FIO_POLL_HAS_UDATA_COLLECTION
       .udata = FIO_ARRAY_INIT,
 #endif
@@ -12437,7 +12521,7 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
     fio___poll_index_destroy(&p->index);
     fio___poll_fds_destroy(&p->fds);
     fio___poll_udata_destroy(&p->udata);
-    p->lock = FIO_LOCK_INIT;
+    FIO___LOCK_DESTROY(p->lock);
   }
 }
 
@@ -12518,9 +12602,9 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   if (!p || fd == -1)
     return r;
   flags &= POLLIN | POLLOUT | POLLPRI;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   r = fio___poll_monitor(p, fd, udata, flags);
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
 
@@ -12542,7 +12626,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     return r;
 
   /* move all data to a copy (thread safety) */
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   cpy = *p;
   p->index = (fio___poll_index_s)FIO_MAP_INIT;
   p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
@@ -12550,7 +12634,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
 
   /* move if conditions out of the loop */
   if (!cpy.settings.on_data)
@@ -12646,15 +12730,15 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     to_copy = len;
   }
 
-  /* insert all unfired events back to the (thread safe) queue */
-  fio_lock(&p->lock);
+  /* insert all un-fired events back to the (thread safe) queue */
+  FIO___LOCK_LOCK(p->lock);
   if (to_copy == len && !fio___poll_index_count(&p->index)) {
     /* it's possible to move the data set as is */
     FIO_POLL_DEBUG_LOG(
         "fio_poll_review overwriting %zu items for pending events",
         to_copy);
     *p = cpy;
-    cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
+    cpy = (fio_poll_s)FIO___POLL_INIT_TMP(NULL, NULL, NULL);
   } else {
     FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
                        to_copy);
@@ -12665,7 +12749,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
                          fds_ary[i].events);
     }
   }
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
 
   /* cleanup memory */
   fio___poll_index_destroy(&cpy.index);
@@ -12683,7 +12767,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   FIO_POLL_DEBUG_LOG("fio_poll_forget called for %d", fd);
   if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
     return old;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
   if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
     /* pos is correct (index 0 could have been a false positive) */
@@ -12691,19 +12775,19 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
     old = fio___poll_udata_get(&p->udata, (int32_t)pos);
   }
-  fio_unlock(&p->lock);
+  FIO___LOCK_UNLOCK(p->lock);
   return old;
 }
 
 /** Closes all sockets, calling the `on_close` and reinitializing the object. */
 SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
   fio_poll_s tmp;
-  fio_lock(&p->lock);
+  FIO___LOCK_LOCK(p->lock);
   tmp = *p;
-  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
-                                 p->settings.on_ready,
-                                 p->settings.on_close);
-  fio_unlock(&tmp.lock);
+  *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
+                                       p->settings.on_ready,
+                                       p->settings.on_close);
+  FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
     if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
       continue;
@@ -12727,7 +12811,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
+  fio_poll_s p = FIO_POLL_INIT(p, NULL, NULL, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
@@ -21826,6 +21910,13 @@ Common cleanup
 #undef FIO_MEM_REALLOC_IS_SAFE_
 #undef FIO_MEMORY_NAME /* postponed due to possible use in macros */
 
+#undef FIO___LOCK_TYPE
+#undef FIO___LOCK_INIT
+#undef FIO___LOCK_LOCK
+#undef FIO___LOCK_LOCK_TRY
+#undef FIO___LOCK_UNLOCK
+#undef FIO_USE_PTHREAD_MUTEX_TMP
+
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
 #if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \
     FIO_EXTERN_COMPLETE == 2
@@ -24989,8 +25080,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   if (page > 0) {
     fprintf(stderr, "\t%-17s%ld bytes.\n", "Page", page);
     if (page != (1UL << FIO_MEM_PAGE_SIZE_LOG))
-      FIO_LOG_WARNING("page size mismatch!\n          "
-                      "facil.io should be recompiled with:\n          "
+      FIO_LOG_WARNING("unexpected page size != 4096\n          "
+                      "facil.io could be recompiled with:\n          "
                       "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf\"`",
                       log2(page));
   }

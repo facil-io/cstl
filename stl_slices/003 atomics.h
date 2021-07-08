@@ -144,6 +144,20 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
+
+#define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                      \
+  ((sizeof(*ptr) == 1)                                                         \
+       ? (fn##8)((uint8_t *)ptr, __VA_ARGS__)                                  \
+       : (sizeof(*ptr) == 2)                                                   \
+             ? (fn##16)((uint16_t *)ptr, __VA_ARGS__)                          \
+             : (sizeof(*ptr) == 4)                                             \
+                   ? (fn##32)((uint32_t *)ptr, __VA_ARGS__)                    \
+                   : (sizeof(*ptr) == 8)                                       \
+                         ? (fn##64)((uint64_t *)ptr, __VA_ARGS__)              \
+                         : fn##_varlen((uint64_t *)ptr,                        \
+                                       sizeof(*ptr),                           \
+                                       __VA_ARGS__))
+
 #endif
 // clang-format on
 

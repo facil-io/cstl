@@ -48,7 +48,7 @@ FIO_SFUNC void on_data(int fd, void *arg);
 FIO_SFUNC void on_close(int fd, void *arg);
 
 /** The IO polling object - it keeps a one-shot list of monitored IOs. */
-fio_poll_s monitor = FIO_POLL_INIT(on_data, on_ready, on_close);
+static fio_poll_s *monitor;
 
 /* facil.io delays signal callbacks so they can safely with no restrictions. */
 FIO_SFUNC void on_signal(int sig, void *udata);
@@ -144,20 +144,23 @@ int main(int argc, char const *argv[]) {
   fio_signal_monitor(SIGQUIT, on_signal, NULL);
 
   /* select IO objects to be monitored */
-  fio_poll_monitor(&monitor, client_fd, NULL, POLLIN | POLLOUT);
-  fio_poll_monitor(&monitor, fileno(stdin), (void *)1, POLLIN); /* mark STDIO */
+  monitor = fio_poll_new(.on_data = on_data,
+                         .on_ready = on_ready,
+                         .on_close = on_close);
+  fio_poll_monitor(monitor, client_fd, NULL, POLLIN | POLLOUT);
+  fio_poll_monitor(monitor, fileno(stdin), (void *)1, POLLIN); /* mark STDIO */
 
   /* loop until the stop flag is raised */
   while (!stop) {
     /* review IO events (calls the registered callbacks) */
-    fio_poll_review(&monitor, 1000);
+    fio_poll_review(monitor, 1000);
     /* review signals (calls the registered callback) */
     fio_signal_review();
   }
 
   /* cleanup */
   fio_sock_close(client_fd);
-  fio_poll_destroy(&monitor);
+  fio_poll_free(monitor);
   return 0;
 }
 
@@ -204,7 +207,7 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
 finish:
   /* if there's data left to write, monitor the outgoing buffer. */
   if (fio_stream_any(&output_stream))
-    fio_poll_monitor(&monitor, fd, arg, POLLOUT);
+    fio_poll_monitor(monitor, fd, arg, POLLOUT);
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
@@ -219,7 +222,7 @@ FIO_SFUNC void on_data(int fd, void *arg) {
       fio_stream_add(&output_stream,
                      fio_stream_pack_data(buf, (size_t)l, 0, 1, NULL));
       /* make sure the outgoing buffer is moniitored, so data is written. */
-      fio_poll_monitor(&monitor, client_fd, NULL, POLLOUT);
+      fio_poll_monitor(monitor, client_fd, NULL, POLLOUT);
     }
     FIO_LOG_DEBUG2("Read %zu bytes from %d", l, fd);
     goto done;
@@ -251,7 +254,7 @@ FIO_SFUNC void on_data(int fd, void *arg) {
 
 done:
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(&monitor, fd, arg, POLLIN);
+  fio_poll_monitor(monitor, fd, arg, POLLIN);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */

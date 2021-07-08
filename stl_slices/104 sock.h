@@ -146,7 +146,7 @@ int main(int argc, char const *argv[]) {
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x3FFFFFFF)
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x7FFFFFFF)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)

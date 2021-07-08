@@ -183,7 +183,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define FIO_ALIGN(bytes)
 #endif
 
-#if !defined(__clang__) && !defined(__GNUC__)
+#if _MSC_VER
+#define __thread __declspec(thread)
+#elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_value
 #endif
 
@@ -777,6 +779,59 @@ Memory allocation macros
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_REALLOC) */
+
+/* *****************************************************************************
+Locking selector
+***************************************************************************** */
+
+#ifndef FIO_USE_PTHREAD_MUTEX
+#define FIO_USE_PTHREAD_MUTEX 0
+#endif
+
+#ifndef FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_USE_PTHREAD_MUTEX_TMP FIO_USE_PTHREAD_MUTEX
+#endif
+
+#if _MSC_VER
+#include <synchapi.h>
+#undef FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_USE_PTHREAD_MUTEX_TMP 1
+#define FIO___LOCK_TYPE           HANDLE
+#define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
+#define FIO___LOCK_DESTROY(lock)  CloseHandle((lock))
+#define FIO___LOCK_LOCK(lock)                                                  \
+  (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
+#define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
+#define FIO___LOCK_UNLOCK(lock)  ReleaseMutex((lock))
+
+#elif FIO_USE_PTHREAD_MUTEX_TMP
+#include <pthread.h>
+#define FIO___LOCK_TYPE pthread_mutex_t
+#define FIO___LOCK_INIT(lock)                                                  \
+  ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
+#define FIO___LOCK_DESTROY(lock) pthread_mutex_destroy(&(lock))
+#define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
+#define FIO___LOCK_UNLOCK(lock)                                                \
+  do {                                                                         \
+    int tmp__ = pthread_mutex_unlock(&(lock));                                 \
+    if (tmp__) {                                                               \
+      FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
+                    __LINE__,                                                  \
+                    tmp__,                                                     \
+                    strerror(tmp__));                                          \
+    }                                                                          \
+  } while (0)
+
+#else
+#define FIO___LOCK_TYPE          fio_lock_i
+#define FIO___LOCK_INIT(lock)    ((lock) = FIO_LOCK_INIT)
+#define FIO___LOCK_DESTROY(lock) FIO___LOCK_INIT((lock))
+#define FIO___LOCK_LOCK(lock)    fio_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) fio_trylock(&(lock))
+#define FIO___LOCK_UNLOCK(lock)  fio_unlock(&(lock))
+#endif
+
 /* *****************************************************************************
 Common macros
 ***************************************************************************** */
@@ -928,9 +983,10 @@ Common macros
 
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
-    defined(FIO_POLL) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||    \
-    defined(FIO_QUEUE) || defined(FIO_JSON) || defined(FIO_SIGNAL) ||          \
-    defined(FIO_BITMAP)
+    (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
+    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
+    defined(FIO_SIGNAL) || defined(FIO_BITMAP)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
