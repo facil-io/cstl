@@ -3010,6 +3010,8 @@ Adds a file descriptor to be monitored, adds events to be monitored or updates t
 
 Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
 
+On systems where `POLLRDHUP` is supported, it is always monitored for.
+
 Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
 
 Returns -1 on error.

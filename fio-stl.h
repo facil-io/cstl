@@ -12977,7 +12977,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
   fio_poll_s p = FIO_POLL_INIT(p, NULL, NULL, NULL);
+#ifdef POLLRDHUP
+  /* if defined, the event is automatically monitored, so test for it. */
+  short events[4] = {
+      POLLRDHUP | POLLOUT,
+      POLLRDHUP | POLLIN,
+      POLLRDHUP | POLLOUT | POLLIN,
+      POLLRDHUP | POLLOUT | POLLIN,
+  };
+#else
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
+#endif
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
                "fio_poll_monitor failed for fd %d",
