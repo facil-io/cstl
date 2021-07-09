@@ -12431,7 +12431,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifndef FIO_POLL_FRAGMENTATION_LIMIT
-#define FIO_POLL_FRAGMENTATION_LIMIT 100
+/**
+ * * When the polling array is fragmented by more than the set value, it will be
+ * de-fragmented on the idle cycle (if no events occur).
+ * */
+#define FIO_POLL_FRAGMENTATION_LIMIT 63
 #endif
 /* *****************************************************************************
 Polling API
@@ -12577,6 +12581,10 @@ FIO_IFUNC void **fio___poll_udata_push(void **pu, void *udata) {
     *pu = udata;
   return pu;
 }
+FIO_IFUNC void **fio___poll_udata_pop(void **pu, void *ignr) {
+  return pu;
+  (void)ignr;
+}
 FIO_IFUNC void **fio___poll_udata_set(void **pu,
                                       int32_t pos,
                                       void *udata,
@@ -12604,11 +12612,11 @@ FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
   fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   if (p) {
     *p = (fio_poll_s) {
-      .settings = settings, .lock = FIO___LOCK_INIT(p->lock),
-      .index = FIO_MAP_INIT, .fds = FIO_ARRAY_INIT,
+      .settings = settings, .index = FIO_MAP_INIT, .fds = FIO_ARRAY_INIT,
 #if FIO_POLL_HAS_UDATA_COLLECTION
       .udata = FIO_ARRAY_INIT,
 #endif
+      .lock = FIO___LOCK_INIT(p->lock), .forgotten = 0,
     };
   }
   return p;
@@ -12789,7 +12797,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
           cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
           FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
                              fds_ary[i].fd);
-          /* TODO?: improve re-insertion prevention */
+          /* handle possible re-insertion after events */
           fio_poll_forget(p, fds_ary[i].fd);
           /* never retain event monitoring after closure / error */
           fds_ary[i].events = 0;
@@ -12850,9 +12858,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 
   /* insert all un-fired events back to the (thread safe) queue */
   FIO___LOCK_LOCK(p->lock);
-  if (!r && p->forgotten >= FIO_POLL_FRAGMENTATION_LIMIT) {
-    /* defragment list */
-    FIO_POLL_DEBUG_LOG("fio_poll_review defragmentation cycle");
+  if ((FIO_POLL_FRAGMENTATION_LIMIT > 0) && !r &&
+      (p->forgotten >= (FIO_POLL_FRAGMENTATION_LIMIT))) {
+    /* de-fragment list */
+    FIO_POLL_DEBUG_LOG("fio_poll_review de-fragmentation cycle");
     fio_poll_s cpy2;
     cpy2 = *p;
     p->forgotten = 0;
@@ -12931,11 +12940,18 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
                        fd,
                        (int)pos);
     fio___poll_index_remove(&p->index, fd, 0, NULL);
+    old = fio___poll_udata_get(&p->udata, (int32_t)pos);
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].events = 0;
-    old = fio___poll_udata_get(&p->udata, (int32_t)pos);
     fio___poll_udata_set(&p->udata, (int32_t)pos, NULL, NULL);
     ++p->forgotten;
+    while (p->forgotten && (pos = fio___poll_fds_count(&p->fds) - 1) >= 0 &&
+           (fio___poll_fds_get(&p->fds, pos).fd == -1 ||
+            !fio___poll_fds_get(&p->fds, pos).events)) {
+      fio___poll_fds_pop(&p->fds, NULL);
+      fio___poll_udata_pop(&p->udata, NULL);
+      --p->forgotten;
+    }
   }
   FIO___LOCK_UNLOCK(p->lock);
   return old;

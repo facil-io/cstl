@@ -149,6 +149,14 @@ When set to true (the default value), the `udata` value is unique per file descr
 
 When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
 
+#### `FIO_POLL_FRAGMENTATION_LIMIT`
+
+```c
+#define FIO_POLL_FRAGMENTATION_LIMIT 63
+```
+
+When the polling array is fragmented by more than the set value, it will be de-fragmented on the idle cycle (if no events occur).
+
 #### `FIO_POLL_DEBUG`
 
 If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.

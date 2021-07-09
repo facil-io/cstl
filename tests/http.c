@@ -25,9 +25,8 @@ Note: This is a **TOY** example, no security whatsoever!!!
 #define FIO_TIME
 #define FIO_POLL
 // #define FIO_POLL_DEBUG
-#include "fio-stl.h"
-
 // #define FIO_MEMORY_DISABLE 1
+#include "fio-stl.h"
 
 /* Short string object used for response objects. */
 #define FIO_STREAM
