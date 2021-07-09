@@ -12774,7 +12774,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int i = 0; /* index in fds_ary array. */
     int c = 0; /* count events handled, to stop loop if no more events. */
     do {
-      if (fds_ary[i].fd != -1) {
+      if ((int)fds_ary[i].fd != -1) {
         if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
           cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
           FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
@@ -12863,7 +12863,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
     for (size_t i = 0; i < fio___poll_fds_count(&cpy2.fds); ++i) {
-      if (fio___poll_fds_get(&cpy2.fds, i).fd == -1 ||
+      if ((int)fio___poll_fds_get(&cpy2.fds, i).fd == -1 ||
           !fio___poll_fds_get(&cpy2.fds, i).events)
         continue;
       fio___poll_monitor(p,
@@ -12877,7 +12877,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     fio___poll_index_destroy(&cpy2.index);
     to_copy = 0;
     for (int i = 0; i < len; ++i) {
-      if (fds_ary[i].fd == -1 || !fds_ary[i].events)
+      if ((int)fds_ary[i].fd == -1 || !fds_ary[i].events)
         continue;
       ++to_copy;
       fio___poll_monitor(p,
