@@ -295,18 +295,18 @@ Function Attributes
 #undef FIO_CONSTRUCTOR
 /** Marks a function as a constructor - if supported. */
 
-#if 1 /* does MSVC require a linker comment to avoide optimizing this away? */
+#if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
+  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
-  __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
 #else
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
-
 #endif
 
 #else
@@ -330,6 +330,17 @@ Macro Stringifier
 #define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
 #endif
 
+/* *****************************************************************************
+Conditional Likelihood
+***************************************************************************** */
+
+#if defined(__clang__) || defined(__GNUC__)
+#define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
+#define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
+#else
+#define FIO_LIKELY(cond)   (cond)
+#define FIO_UNLIKELY(cond) (cond)
+#endif
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */

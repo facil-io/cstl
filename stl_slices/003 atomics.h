@@ -142,21 +142,51 @@ Feel free to copy, use and enjoy according to the license provided.
 /** An atomic OR (|) operation, returns new value */
 #define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
 
+#elif _MSC_VER
+#pragma message ("WARNING: WinAPI atomics have less features, but this is what this compiler has, so...")
+
+#include <intrin.h>
+#define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                   \
+  ((sizeof(*ptr) == 1)                                                         \
+       ? fn##8((int8_t volatile *)(ptr), __VA_ARGS__)                          \
+       : (sizeof(*ptr) == 2)                                                   \
+             ? fn##16((int16_t volatile *)(ptr), __VA_ARGS__)                  \
+             : (sizeof(*ptr) == 4)                                             \
+                   ? fn((int32_t volatile *)(ptr), __VA_ARGS__)                \
+                   : fn##64((int64_t volatile *)(ptr), __VA_ARGS__))
+
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected))
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
+
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchangeAdd, (p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchangeAdd, (p_obj), (0ULL - (value)))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedAnd, (p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedXor, (p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value)  FIO___ATOMICS_FN_ROUTE(_InterlockedOr, (p_obj), (value))
+
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)), (*(p_obj)))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)), (*(p_obj)))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)), (*(p_obj)))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)), (*(p_obj)))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) (fio_atomic_or((p_obj), (value)), (*(p_obj)))
+
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
-
-#define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                      \
-  ((sizeof(*ptr) == 1)                                                         \
-       ? (fn##8)((uint8_t *)ptr, __VA_ARGS__)                                  \
-       : (sizeof(*ptr) == 2)                                                   \
-             ? (fn##16)((uint16_t *)ptr, __VA_ARGS__)                          \
-             : (sizeof(*ptr) == 4)                                             \
-                   ? (fn##32)((uint32_t *)ptr, __VA_ARGS__)                    \
-                   : (sizeof(*ptr) == 8)                                       \
-                         ? (fn##64)((uint64_t *)ptr, __VA_ARGS__)              \
-                         : fn##_varlen((uint64_t *)ptr,                        \
-                                       sizeof(*ptr),                           \
-                                       __VA_ARGS__))
 
 #endif
 // clang-format on
