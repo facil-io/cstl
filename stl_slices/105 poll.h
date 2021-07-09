@@ -552,7 +552,7 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
     fio___poll_udata_set(&p->udata, (int32_t)pos, NULL, NULL);
     ++p->forgotten;
     while (p->forgotten && (pos = fio___poll_fds_count(&p->fds) - 1) >= 0 &&
-           (fio___poll_fds_get(&p->fds, pos).fd == -1 ||
+           ((int)fio___poll_fds_get(&p->fds, pos).fd == -1 ||
             !fio___poll_fds_get(&p->fds, pos).events)) {
       fio___poll_fds_pop(&p->fds, NULL);
       fio___poll_udata_pop(&p->udata, NULL);

@@ -138,6 +138,9 @@ int main(int argc, char const *argv[]) {
 ***************************************************************************** */
 #if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
 
+/* *****************************************************************************
+OS specific patches.
+***************************************************************************** */
 #if FIO_OS_WIN
 #if _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
@@ -154,6 +157,24 @@ int main(int argc, char const *argv[]) {
 #define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd) closesocket(fd)
+/** Protects against type size overflow on Windows, where FD > MAX_INT. */
+FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
+  int r = -1;
+  SOCKET c = accept(s, addr, addrlen);
+  if (c == INVALID_SOCKET)
+    return r;
+  if (FIO_SOCK_FD_ISVALID(c)) {
+    r = (int)c;
+    return r;
+  }
+  closesocket(c);
+  errno = ERANGE;
+  FIO_LOG_ERROR("Windows SOCKET value overflowed int limits (was: %zu)",
+                (size_t)c);
+  return r;
+}
+#define accept fio_sock_accept
+
 #elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
 #include <netdb.h>

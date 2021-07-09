@@ -313,16 +313,10 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   return;
 
 accept_new_connections : {
-  intptr_t cl = accept(fd, NULL, NULL);
-  /* tests for type overflow (Windows) as well as failed connection. */
-  if (!FIO_SOCK_FD_ISVALID(cl)) {
-    if (cl != -1) {
-      /* type overflow on Windows, fd too high. */
-      fio_sock_close(cl);
-      errno = ERANGE;
-    }
+  /* accept is a macro for fio_sock_accept, which int Windows safe. */
+  int cl = accept(fd, NULL, NULL);
+  if (cl == -1)
     goto accept_error;
-  }
   fio_sock_set_non_block(cl);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
   c->fd = cl;
