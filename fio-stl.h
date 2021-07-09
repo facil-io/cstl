@@ -294,11 +294,21 @@ Function Attributes
 #pragma section(".CRT$XCU", read)
 #undef FIO_CONSTRUCTOR
 /** Marks a function as a constructor - if supported. */
+
+#if 1 /* does MSVC require a linker comment to avoide optimizing this away? */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
-  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
+  __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
+#else
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  static void fname(void);                                                     \
+  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  static void fname(void)
+
+#endif
+
 #else
 /** Marks a function as a constructor - if supported. */
 #define FIO_CONSTRUCTOR(fname)                                                 \
@@ -721,6 +731,8 @@ static inline __attribute__((unused)) ssize_t fio_pread(int fd,
 done:
   return ret;
 }
+
+#define strcasecmp _stricmp
 #else
 #define fio_pread pread
 #endif
@@ -798,7 +810,7 @@ Locking selector
 #define FIO_USE_PTHREAD_MUTEX_TMP 1
 #define FIO___LOCK_TYPE           HANDLE
 #define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
-#define FIO___LOCK_DESTROY(lock)  CloseHandle((lock))
+#define FIO___LOCK_DESTROY(lock)  (CloseHandle((lock)), lock = NULL)
 #define FIO___LOCK_LOCK(lock)                                                  \
   (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
 #define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
@@ -809,7 +821,8 @@ Locking selector
 #define FIO___LOCK_TYPE pthread_mutex_t
 #define FIO___LOCK_INIT(lock)                                                  \
   ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
-#define FIO___LOCK_DESTROY(lock) pthread_mutex_destroy(&(lock))
+#define FIO___LOCK_DESTROY(lock)                                               \
+  (pthread_mutex_destroy(&(lock)), FIO___LOCK_INIT(lock))
 #define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
 #define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
@@ -984,9 +997,9 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
-    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
     (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
-    defined(FIO_SIGNAL) || defined(FIO_BITMAP)
+    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -2511,7 +2524,7 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
 }
 
 /** Isolated the least significant (lowest) bit. */
-FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
@@ -9017,7 +9030,8 @@ SFUNC size_t fio_time2log(char *target, time_t time);
 /* *****************************************************************************
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 ***************************************************************************** */
-#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
+#warning fio_time functions defined using gettimeofday patch.
 #include <sys/time.h>
 #define CLOCK_REALTIME 0
 #ifndef CLOCK_MONOTONIC
@@ -9036,14 +9050,103 @@ FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
   return 0;
   (void)clk_id;
 }
-#warning fio_time functions defined using gettimeofday patch.
-#elif defined(FIO_OS_WIN)
+
+#endif
+/* *****************************************************************************
+Patch and types for Windows
+***************************************************************************** */
+#if FIO_OS_WIN
+#if _MSC_VER
+#pragma message("warning: fio_time functions defined using a patch.")
+#else
+#warning fio_time functions defined using a patch.
+#endif
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   *result = *gmtime(timep);
   return result;
 }
+
+#if !FIO_HAVE_UNIX_TOOLS
+/* patch clock_gettime */
+
+#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
+    CLOCK_REALTIME == CLOCK_MONOTONIC
+#undef CLOCK_MONOTONIC
+#undef CLOCK_REALTIME
 #endif
 
+#ifndef CLOCK_REALTIME
+#ifdef CLOCK_MONOTONIC
+#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
+#else
+#define CLOCK_REALTIME 0
+#endif
+#endif
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+#define clock_gettime fio___patch_clock_gettime
+/* based on:
+ * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
+ */
+FIO_SFUNC int fio___patch_clock_gettime(const uint32_t clk_type,
+                                        struct timespec *tv) {
+  if (!tv)
+    return -1;
+  static union {
+    uint64_t u;
+    LARGE_INTEGER li;
+  } freq = {.u = 0};
+  static double tick2n = 0;
+
+  switch (clk_type) {
+  case CLOCK_REALTIME:
+    union {
+      uint64_t u;
+      FILETIME ft;
+    } realtime;
+    GetSystemTimePreciseAsFileTime(&realtime.ft);
+    tv->tv_sec = realtime.u / 10000000;
+    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
+    return 0;
+
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+  case CLOCK_PROCESS_CPUTIME_ID:
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+  case CLOCK_THREAD_CPUTIME_ID:
+#endif
+  case CLOCK_MONOTONIC:
+    union {
+      uint64_t u;
+      LARGE_INTEGER li;
+    } monotime;
+    if (!QueryPerformanceCounter(&monotime.li))
+      return fio___patch_clock_gettime(CLOCK_REALTIME, tv);
+    if (!freq.u)
+      QueryPerformanceFrequency(&freq.li);
+    if (!freq.u) {
+      tick2n = 0;
+      freq.u = 1;
+    } else {
+      tick2n = (double)1000000000 / freq.u;
+    }
+    tv->tv_sec = monotime.u / freq.u;
+    tv->tv_nsec = (uint64_t)(
+        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
+    return 0;
+  }
+  return -1;
+}
+
+#endif /* FIO_HAVE_UNIX_TOOLS */
+#endif /* FIO_OS_WIN */
 /* *****************************************************************************
 Time Inline Helpers
 ***************************************************************************** */
@@ -10437,7 +10540,6 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
@@ -12328,6 +12430,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_POLL_HAS_UDATA_COLLECTION 1
 #endif
 
+#ifndef FIO_POLL_FRAGMENTATION_LIMIT
+#define FIO_POLL_FRAGMENTATION_LIMIT 100
+#endif
 /* *****************************************************************************
 Polling API
 ***************************************************************************** */
@@ -12411,8 +12516,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
  */
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 
-/** Closes all sockets, calling the `on_close` and reinitializing the object. */
-SFUNC void fio_poll_close_and_destroy(fio_poll_s *p);
+/** Closes all sockets, calling the `on_close`. */
+SFUNC void fio_poll_close_all(fio_poll_s *p);
 
 /* *****************************************************************************
 
@@ -12432,7 +12537,7 @@ Poll Monitoring Implementation - The polling type(s)
 #define FIO_RISKY_HASH
 #define FIO_MAP_TYPE         int32_t
 #define FIO_MAP_HASH         uint32_t
-#define FIO_MAP_TYPE_INVALID -1 /* allow monitoring of fd == 0*/
+#define FIO_MAP_TYPE_INVALID (-1) /* allow monitoring of fd == 0*/
 #define FIO_UMAP_NAME        fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
@@ -12459,6 +12564,7 @@ struct fio_poll_s {
   void *udata;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
   FIO___LOCK_TYPE lock;
+  size_t forgotten;
 };
 
 /* *****************************************************************************
@@ -12602,6 +12708,9 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   if (!p || fd == -1)
     return r;
   flags &= POLLIN | POLLOUT | POLLPRI;
+#ifdef POLLRDHUP
+  flags |= POLLRDHUP;
+#endif
   FIO___LOCK_LOCK(p->lock);
   r = fio___poll_monitor(p, fd, udata, flags);
   FIO___LOCK_UNLOCK(p->lock);
@@ -12665,40 +12774,49 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int i = 0; /* index in fds_ary array. */
     int c = 0; /* count events handled, to stop loop if no more events. */
     do {
-      if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
-        cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
-                           fds_ary[i].fd);
-      }
-      if ((fds_ary[i].revents & POLLOUT)) {
-        cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
-                           fds_ary[i].fd);
-      }
-      if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
-        cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        fds_ary[i].events = 0; /* never retain events after closure / error */
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
-                           fds_ary[i].fd);
-        /* TODO?: improve re-insertion prevention */
-        fio_poll_forget(p, fds_ary[i].fd);
-      }
-      /* any more events? */
-      c += !!fds_ary[i].revents;
-      /* any unfired events? */
-      fds_ary[i].events &= ~fds_ary[i].revents;
-      if (fds_ary[i].events) {
-        /* unfired events await */
-        fds_ary[to_copy].fd = fds_ary[i].fd;
-        fds_ary[to_copy].events = fds_ary[i].events;
-        fds_ary[to_copy].revents = 0;
-        FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
-        ++to_copy;
-        FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
-                           fds_ary[i].fd);
-      } else {
-        FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
-                           fds_ary[i].fd);
+      if (fds_ary[i].fd != -1) {
+        if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
+          cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
+                             fds_ary[i].fd);
+        }
+        if ((fds_ary[i].revents & POLLOUT)) {
+          cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
+                             fds_ary[i].fd);
+        }
+        if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
+          cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
+                             fds_ary[i].fd);
+          /* TODO?: improve re-insertion prevention */
+          fio_poll_forget(p, fds_ary[i].fd);
+          /* never retain event monitoring after closure / error */
+          fds_ary[i].events = 0;
+        }
+        /* did we perform any events? */
+        c += !!fds_ary[i].revents;
+        /* any unfired events for the fd? */
+        fds_ary[i].events &= ~(fds_ary[i].revents);
+#ifdef POLLRDHUP
+        fds_ary[i].events &= ~POLLRDHUP;
+#endif
+        if (fds_ary[i].events) {
+          /* unfired events await */
+          fds_ary[to_copy].fd = fds_ary[i].fd;
+          fds_ary[to_copy].events = fds_ary[i].events;
+#ifdef POLLRDHUP
+          fds_ary[to_copy].events |= POLLRDHUP;
+#endif
+          fds_ary[to_copy].revents = 0;
+          FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
+          ++to_copy;
+          FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
+                             fds_ary[i].fd);
+        } else {
+          FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
+                             fds_ary[i].fd);
+        }
       }
       ++i;
       if (i < len && c < r)
@@ -12708,11 +12826,11 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         while (i < len) {
           FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
                              fds_ary[i].fd);
+          FIO_ASSERT_DEBUG(!fds_ary[i].revents,
+                           "Event unhandled for %d",
+                           fds_ary[i].fd);
           fds_ary[to_copy].fd = fds_ary[i].fd;
           fds_ary[to_copy].events = fds_ary[i].events;
-          FIO_ASSERT(!fds_ary[i].revents,
-                     "Event unhandled for %d",
-                     fds_ary[i].fd);
           fds_ary[to_copy].revents = 0;
           FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
           ++to_copy;
@@ -12732,7 +12850,46 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 
   /* insert all un-fired events back to the (thread safe) queue */
   FIO___LOCK_LOCK(p->lock);
-  if (to_copy == len && !fio___poll_index_count(&p->index)) {
+  if (!r && p->forgotten >= FIO_POLL_FRAGMENTATION_LIMIT) {
+    /* defragment list */
+    FIO_POLL_DEBUG_LOG("fio_poll_review defragmentation cycle");
+    fio_poll_s cpy2;
+    cpy2 = *p;
+    p->forgotten = 0;
+    p->index = (fio___poll_index_s)FIO_MAP_INIT;
+    p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
+#if FIO_POLL_HAS_UDATA_COLLECTION
+    p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
+#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
+
+    for (size_t i = 0; i < fio___poll_fds_count(&cpy2.fds); ++i) {
+      if (fio___poll_fds_get(&cpy2.fds, i).fd == -1 ||
+          !fio___poll_fds_get(&cpy2.fds, i).events)
+        continue;
+      fio___poll_monitor(p,
+                         fio___poll_fds_get(&cpy2.fds, i).fd,
+                         fio___poll_udata_get(&cpy2.udata, i),
+                         fio___poll_fds_get(&cpy2.fds, i).events);
+    }
+
+    fio___poll_fds_destroy(&cpy2.fds);
+    fio___poll_udata_destroy(&cpy2.udata);
+    fio___poll_index_destroy(&cpy2.index);
+    to_copy = 0;
+    for (int i = 0; i < len; ++i) {
+      if (fds_ary[i].fd == -1 || !fds_ary[i].events)
+        continue;
+      ++to_copy;
+      fio___poll_monitor(p,
+                         fds_ary[i].fd,
+                         FIO___POLL_UDATA_GET(i),
+                         fds_ary[i].events);
+    }
+    FIO_POLL_DEBUG_LOG(
+        "fio_poll_review resubmitted %zu items for pending events",
+        to_copy);
+
+  } else if (to_copy == len && !fio___poll_index_count(&p->index)) {
     /* it's possible to move the data set as is */
     FIO_POLL_DEBUG_LOG(
         "fio_poll_review overwriting %zu items for pending events",
@@ -12768,25 +12925,31 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
     return old;
   FIO___LOCK_LOCK(p->lock);
-  uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
-    /* pos is correct (index 0 could have been a false positive) */
+  int32_t pos = fio___poll_index_get(&p->index, fd, 0);
+  if (pos != -1 && (int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
+    FIO_POLL_DEBUG_LOG("fio_poll_forget evicting %d at position [%d]",
+                       fd,
+                       (int)pos);
     fio___poll_index_remove(&p->index, fd, 0, NULL);
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
+    fio___poll_fds2ptr(&p->fds)[(int32_t)pos].events = 0;
     old = fio___poll_udata_get(&p->udata, (int32_t)pos);
+    fio___poll_udata_set(&p->udata, (int32_t)pos, NULL, NULL);
+    ++p->forgotten;
   }
   FIO___LOCK_UNLOCK(p->lock);
   return old;
 }
 
-/** Closes all sockets, calling the `on_close` and reinitializing the object. */
-SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
+/** Closes all sockets, calling the `on_close`. */
+SFUNC void fio_poll_close_all(fio_poll_s *p) {
   fio_poll_s tmp;
   FIO___LOCK_LOCK(p->lock);
   tmp = *p;
   *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
                                        p->settings.on_ready,
                                        p->settings.on_close);
+  p->lock = tmp.lock;
   FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
     if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
@@ -12800,7 +12963,9 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
                           fio___poll_udata2ptr(&tmp.udata)[0]);
 #endif
   }
-  fio_poll_destroy(&tmp);
+  fio___poll_index_destroy(&tmp.index);
+  fio___poll_fds_destroy(&tmp.fds);
+  fio___poll_udata_destroy(&tmp.udata);
 }
 
 /* *****************************************************************************
@@ -12882,10 +13047,13 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_STREAM___H
 
 #if !FIO_HAVE_UNIX_TOOLS
-#warning "POSIX is required for the fio_stream API."
+#if _MSC_VER
+#pragma message("POSIX is required for the fio_stream API, or issues may occure.")
+#else
+#warning "POSIX behavior is expected by the fio_stream API."
+#endif
 #endif
 #include <sys/stat.h>
-#include <unistd.h>
 
 #ifndef FIO_STREAM_COPY_PER_PACKET
 /** Break apart large memory blocks into smaller pieces. by default 96Kb */
@@ -13762,41 +13930,27 @@ static struct {
   volatile int32_t flag;
   void (*callback)(int sig, void *);
   void *udata;
-#if FIO_HAVE_UNIX_TOOLS
   void (*old)(int sig);
-#else
-  int (*old)(int sig, int ignr__);
-#endif
 } fio___signal_watchers[FIO_SIGNAL_MONITOR_MAX];
 
-#if FIO_HAVE_UNIX_TOOLS
 FIO_SFUNC void fio___signal_catcher(int sig) {
-#else
-FIO_SFUNC int fio___signal_catcher(int sig, int ignr__) {
-#endif
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
       return; /* initialized list is finished */
     if (fio___signal_watchers[i].sig != sig)
       continue;
     /* mark flag */
-    fio_atomic_exchange(&fio___signal_watchers[i].flag, 1);
+    fio___signal_watchers[i].flag = 1;
     /* pass-through if exists */
     if (fio___signal_watchers[i].old &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_IGN &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_DFL) {
-#if FIO_HAVE_UNIX_TOOLS
       fio___signal_watchers[i].old(sig);
-#else
-      fio___signal_watchers[i].old(sig, ignr__);
-#endif
       fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
     } else {
-      signal(sig, fio___signal_catcher);
+      fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
     }
-#if !FIO_HAVE_UNIX_TOOLS
-    return 0;
-#endif
+    break;
   }
 }
 
@@ -13875,7 +14029,8 @@ SFUNC int fio_signal_review(void) {
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
       return c;
-    if (fio_atomic_exchange(&fio___signal_watchers[i].flag, 0)) {
+    if (fio___signal_watchers[i].flag) {
+      fio___signal_watchers[i].flag = 0;
       ++c;
       if (fio___signal_watchers[i].callback)
         fio___signal_watchers[i].callback(fio___signal_watchers[i].sig,

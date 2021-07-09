@@ -24,10 +24,13 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_STREAM___H
 
 #if !FIO_HAVE_UNIX_TOOLS
-#warning "POSIX is required for the fio_stream API."
+#if _MSC_VER
+#pragma message("POSIX is required for the fio_stream API, or issues may occure.")
+#else
+#warning "POSIX behavior is expected by the fio_stream API."
+#endif
 #endif
 #include <sys/stat.h>
-#include <unistd.h>
 
 #ifndef FIO_STREAM_COPY_PER_PACKET
 /** Break apart large memory blocks into smaller pieces. by default 96Kb */

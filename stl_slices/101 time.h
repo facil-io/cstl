@@ -92,7 +92,8 @@ SFUNC size_t fio_time2log(char *target, time_t time);
 /* *****************************************************************************
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 ***************************************************************************** */
-#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
+#warning fio_time functions defined using gettimeofday patch.
 #include <sys/time.h>
 #define CLOCK_REALTIME 0
 #ifndef CLOCK_MONOTONIC
@@ -111,14 +112,103 @@ FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
   return 0;
   (void)clk_id;
 }
-#warning fio_time functions defined using gettimeofday patch.
-#elif defined(FIO_OS_WIN)
+
+#endif
+/* *****************************************************************************
+Patch and types for Windows
+***************************************************************************** */
+#if FIO_OS_WIN
+#if _MSC_VER
+#pragma message("warning: fio_time functions defined using a patch.")
+#else
+#warning fio_time functions defined using a patch.
+#endif
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   *result = *gmtime(timep);
   return result;
 }
+
+#if !FIO_HAVE_UNIX_TOOLS
+/* patch clock_gettime */
+
+#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
+    CLOCK_REALTIME == CLOCK_MONOTONIC
+#undef CLOCK_MONOTONIC
+#undef CLOCK_REALTIME
 #endif
 
+#ifndef CLOCK_REALTIME
+#ifdef CLOCK_MONOTONIC
+#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
+#else
+#define CLOCK_REALTIME 0
+#endif
+#endif
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+#define clock_gettime fio___patch_clock_gettime
+/* based on:
+ * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
+ */
+FIO_SFUNC int fio___patch_clock_gettime(const uint32_t clk_type,
+                                        struct timespec *tv) {
+  if (!tv)
+    return -1;
+  static union {
+    uint64_t u;
+    LARGE_INTEGER li;
+  } freq = {.u = 0};
+  static double tick2n = 0;
+
+  switch (clk_type) {
+  case CLOCK_REALTIME:
+    union {
+      uint64_t u;
+      FILETIME ft;
+    } realtime;
+    GetSystemTimePreciseAsFileTime(&realtime.ft);
+    tv->tv_sec = realtime.u / 10000000;
+    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
+    return 0;
+
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+  case CLOCK_PROCESS_CPUTIME_ID:
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+  case CLOCK_THREAD_CPUTIME_ID:
+#endif
+  case CLOCK_MONOTONIC:
+    union {
+      uint64_t u;
+      LARGE_INTEGER li;
+    } monotime;
+    if (!QueryPerformanceCounter(&monotime.li))
+      return fio___patch_clock_gettime(CLOCK_REALTIME, tv);
+    if (!freq.u)
+      QueryPerformanceFrequency(&freq.li);
+    if (!freq.u) {
+      tick2n = 0;
+      freq.u = 1;
+    } else {
+      tick2n = (double)1000000000 / freq.u;
+    }
+    tv->tv_sec = monotime.u / freq.u;
+    tv->tv_nsec = (uint64_t)(
+        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
+    return 0;
+  }
+  return -1;
+}
+
+#endif /* FIO_HAVE_UNIX_TOOLS */
+#endif /* FIO_OS_WIN */
 /* *****************************************************************************
 Time Inline Helpers
 ***************************************************************************** */

@@ -698,7 +698,7 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
 }
 
 /** Isolated the least significant (lowest) bit. */
-FIO_IFUNC size_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {

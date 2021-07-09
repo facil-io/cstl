@@ -171,41 +171,27 @@ static struct {
   volatile int32_t flag;
   void (*callback)(int sig, void *);
   void *udata;
-#if FIO_HAVE_UNIX_TOOLS
   void (*old)(int sig);
-#else
-  int (*old)(int sig, int ignr__);
-#endif
 } fio___signal_watchers[FIO_SIGNAL_MONITOR_MAX];
 
-#if FIO_HAVE_UNIX_TOOLS
 FIO_SFUNC void fio___signal_catcher(int sig) {
-#else
-FIO_SFUNC int fio___signal_catcher(int sig, int ignr__) {
-#endif
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
       return; /* initialized list is finished */
     if (fio___signal_watchers[i].sig != sig)
       continue;
     /* mark flag */
-    fio_atomic_exchange(&fio___signal_watchers[i].flag, 1);
+    fio___signal_watchers[i].flag = 1;
     /* pass-through if exists */
     if (fio___signal_watchers[i].old &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_IGN &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_DFL) {
-#if FIO_HAVE_UNIX_TOOLS
       fio___signal_watchers[i].old(sig);
-#else
-      fio___signal_watchers[i].old(sig, ignr__);
-#endif
       fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
     } else {
-      signal(sig, fio___signal_catcher);
+      fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
     }
-#if !FIO_HAVE_UNIX_TOOLS
-    return 0;
-#endif
+    break;
   }
 }
 
@@ -284,7 +270,8 @@ SFUNC int fio_signal_review(void) {
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
       return c;
-    if (fio_atomic_exchange(&fio___signal_watchers[i].flag, 0)) {
+    if (fio___signal_watchers[i].flag) {
+      fio___signal_watchers[i].flag = 0;
       ++c;
       if (fio___signal_watchers[i].callback)
         fio___signal_watchers[i].callback(fio___signal_watchers[i].sig,

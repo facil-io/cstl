@@ -2995,7 +2995,7 @@ Destroys the polling object, freeing its resources.
 #### `fio_poll_close_and_destroy`
 
 ```c
-void fio_poll_close_and_destroy(fio_poll_s *p);
+void fio_poll_close_all(fio_poll_s *p);
 ```
 
 Closes all monitored connections, calling the `on_close` callbacks for all of them.

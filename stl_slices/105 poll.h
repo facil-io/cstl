@@ -36,6 +36,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_POLL_HAS_UDATA_COLLECTION 1
 #endif
 
+#ifndef FIO_POLL_FRAGMENTATION_LIMIT
+#define FIO_POLL_FRAGMENTATION_LIMIT 100
+#endif
 /* *****************************************************************************
 Polling API
 ***************************************************************************** */
@@ -119,8 +122,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
  */
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
 
-/** Closes all sockets, calling the `on_close` and reinitializing the object. */
-SFUNC void fio_poll_close_and_destroy(fio_poll_s *p);
+/** Closes all sockets, calling the `on_close`. */
+SFUNC void fio_poll_close_all(fio_poll_s *p);
 
 /* *****************************************************************************
 
@@ -140,7 +143,7 @@ Poll Monitoring Implementation - The polling type(s)
 #define FIO_RISKY_HASH
 #define FIO_MAP_TYPE         int32_t
 #define FIO_MAP_HASH         uint32_t
-#define FIO_MAP_TYPE_INVALID -1 /* allow monitoring of fd == 0*/
+#define FIO_MAP_TYPE_INVALID (-1) /* allow monitoring of fd == 0*/
 #define FIO_UMAP_NAME        fio___poll_index
 #include __FILE__
 #define FIO_ARRAY_TYPE           struct pollfd
@@ -167,6 +170,7 @@ struct fio_poll_s {
   void *udata;
 #endif /* FIO_POLL_HAS_UDATA_COLLECTION */
   FIO___LOCK_TYPE lock;
+  size_t forgotten;
 };
 
 /* *****************************************************************************
@@ -310,6 +314,9 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   if (!p || fd == -1)
     return r;
   flags &= POLLIN | POLLOUT | POLLPRI;
+#ifdef POLLRDHUP
+  flags |= POLLRDHUP;
+#endif
   FIO___LOCK_LOCK(p->lock);
   r = fio___poll_monitor(p, fd, udata, flags);
   FIO___LOCK_UNLOCK(p->lock);
@@ -373,40 +380,49 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int i = 0; /* index in fds_ary array. */
     int c = 0; /* count events handled, to stop loop if no more events. */
     do {
-      if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
-        cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
-                           fds_ary[i].fd);
-      }
-      if ((fds_ary[i].revents & POLLOUT)) {
-        cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
-                           fds_ary[i].fd);
-      }
-      if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
-        cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-        fds_ary[i].events = 0; /* never retain events after closure / error */
-        FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
-                           fds_ary[i].fd);
-        /* TODO?: improve re-insertion prevention */
-        fio_poll_forget(p, fds_ary[i].fd);
-      }
-      /* any more events? */
-      c += !!fds_ary[i].revents;
-      /* any unfired events? */
-      fds_ary[i].events &= ~fds_ary[i].revents;
-      if (fds_ary[i].events) {
-        /* unfired events await */
-        fds_ary[to_copy].fd = fds_ary[i].fd;
-        fds_ary[to_copy].events = fds_ary[i].events;
-        fds_ary[to_copy].revents = 0;
-        FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
-        ++to_copy;
-        FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
-                           fds_ary[i].fd);
-      } else {
-        FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
-                           fds_ary[i].fd);
+      if (fds_ary[i].fd != -1) {
+        if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
+          cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
+                             fds_ary[i].fd);
+        }
+        if ((fds_ary[i].revents & POLLOUT)) {
+          cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
+                             fds_ary[i].fd);
+        }
+        if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
+          cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
+          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
+                             fds_ary[i].fd);
+          /* TODO?: improve re-insertion prevention */
+          fio_poll_forget(p, fds_ary[i].fd);
+          /* never retain event monitoring after closure / error */
+          fds_ary[i].events = 0;
+        }
+        /* did we perform any events? */
+        c += !!fds_ary[i].revents;
+        /* any unfired events for the fd? */
+        fds_ary[i].events &= ~(fds_ary[i].revents);
+#ifdef POLLRDHUP
+        fds_ary[i].events &= ~POLLRDHUP;
+#endif
+        if (fds_ary[i].events) {
+          /* unfired events await */
+          fds_ary[to_copy].fd = fds_ary[i].fd;
+          fds_ary[to_copy].events = fds_ary[i].events;
+#ifdef POLLRDHUP
+          fds_ary[to_copy].events |= POLLRDHUP;
+#endif
+          fds_ary[to_copy].revents = 0;
+          FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
+          ++to_copy;
+          FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
+                             fds_ary[i].fd);
+        } else {
+          FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
+                             fds_ary[i].fd);
+        }
       }
       ++i;
       if (i < len && c < r)
@@ -416,11 +432,11 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         while (i < len) {
           FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
                              fds_ary[i].fd);
+          FIO_ASSERT_DEBUG(!fds_ary[i].revents,
+                           "Event unhandled for %d",
+                           fds_ary[i].fd);
           fds_ary[to_copy].fd = fds_ary[i].fd;
           fds_ary[to_copy].events = fds_ary[i].events;
-          FIO_ASSERT(!fds_ary[i].revents,
-                     "Event unhandled for %d",
-                     fds_ary[i].fd);
           fds_ary[to_copy].revents = 0;
           FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
           ++to_copy;
@@ -440,7 +456,46 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
 
   /* insert all un-fired events back to the (thread safe) queue */
   FIO___LOCK_LOCK(p->lock);
-  if (to_copy == len && !fio___poll_index_count(&p->index)) {
+  if (!r && p->forgotten >= FIO_POLL_FRAGMENTATION_LIMIT) {
+    /* defragment list */
+    FIO_POLL_DEBUG_LOG("fio_poll_review defragmentation cycle");
+    fio_poll_s cpy2;
+    cpy2 = *p;
+    p->forgotten = 0;
+    p->index = (fio___poll_index_s)FIO_MAP_INIT;
+    p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
+#if FIO_POLL_HAS_UDATA_COLLECTION
+    p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
+#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
+
+    for (size_t i = 0; i < fio___poll_fds_count(&cpy2.fds); ++i) {
+      if (fio___poll_fds_get(&cpy2.fds, i).fd == -1 ||
+          !fio___poll_fds_get(&cpy2.fds, i).events)
+        continue;
+      fio___poll_monitor(p,
+                         fio___poll_fds_get(&cpy2.fds, i).fd,
+                         fio___poll_udata_get(&cpy2.udata, i),
+                         fio___poll_fds_get(&cpy2.fds, i).events);
+    }
+
+    fio___poll_fds_destroy(&cpy2.fds);
+    fio___poll_udata_destroy(&cpy2.udata);
+    fio___poll_index_destroy(&cpy2.index);
+    to_copy = 0;
+    for (int i = 0; i < len; ++i) {
+      if (fds_ary[i].fd == -1 || !fds_ary[i].events)
+        continue;
+      ++to_copy;
+      fio___poll_monitor(p,
+                         fds_ary[i].fd,
+                         FIO___POLL_UDATA_GET(i),
+                         fds_ary[i].events);
+    }
+    FIO_POLL_DEBUG_LOG(
+        "fio_poll_review resubmitted %zu items for pending events",
+        to_copy);
+
+  } else if (to_copy == len && !fio___poll_index_count(&p->index)) {
     /* it's possible to move the data set as is */
     FIO_POLL_DEBUG_LOG(
         "fio_poll_review overwriting %zu items for pending events",
@@ -476,25 +531,31 @@ SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
   if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
     return old;
   FIO___LOCK_LOCK(p->lock);
-  uint32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  if ((int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
-    /* pos is correct (index 0 could have been a false positive) */
+  int32_t pos = fio___poll_index_get(&p->index, fd, 0);
+  if (pos != -1 && (int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
+    FIO_POLL_DEBUG_LOG("fio_poll_forget evicting %d at position [%d]",
+                       fd,
+                       (int)pos);
     fio___poll_index_remove(&p->index, fd, 0, NULL);
     fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
+    fio___poll_fds2ptr(&p->fds)[(int32_t)pos].events = 0;
     old = fio___poll_udata_get(&p->udata, (int32_t)pos);
+    fio___poll_udata_set(&p->udata, (int32_t)pos, NULL, NULL);
+    ++p->forgotten;
   }
   FIO___LOCK_UNLOCK(p->lock);
   return old;
 }
 
-/** Closes all sockets, calling the `on_close` and reinitializing the object. */
-SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
+/** Closes all sockets, calling the `on_close`. */
+SFUNC void fio_poll_close_all(fio_poll_s *p) {
   fio_poll_s tmp;
   FIO___LOCK_LOCK(p->lock);
   tmp = *p;
   *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
                                        p->settings.on_ready,
                                        p->settings.on_close);
+  p->lock = tmp.lock;
   FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
     if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
@@ -508,7 +569,9 @@ SFUNC void fio_poll_close_and_destroy(fio_poll_s *p) {
                           fio___poll_udata2ptr(&tmp.udata)[0]);
 #endif
   }
-  fio_poll_destroy(&tmp);
+  fio___poll_index_destroy(&tmp.index);
+  fio___poll_fds_destroy(&tmp.fds);
+  fio___poll_udata_destroy(&tmp.udata);
 }
 
 /* *****************************************************************************

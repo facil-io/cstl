@@ -165,7 +165,7 @@ int main(int argc, char const *argv[]) {
   }
 
   /* cleanup */
-  fio_poll_close_and_destroy(monitor);
+  fio_poll_close_all(monitor);
   fio_poll_free(monitor);
   FIO_LOG_INFO("Shutdown complete.");
   return 0;
@@ -180,8 +180,9 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
   /* since there are no restrictions, we can safely print to the log. */
   FIO_LOG_INFO("Exit signal %d detected, shutting down.", sig);
   /* If the signal repeats, crash. */
-  if (fio_atomic_exchange(&server_stop_flag, 1))
+  if (server_stop_flag)
     exit(-1);
+  server_stop_flag = 1;
   (void)sig;
   (void)udata;
 }
@@ -213,6 +214,15 @@ typedef struct {
   char buf[]; /* header and data buffer */
 } client_s;
 
+/** Sends a "dynamic" HTTP response. */
+static void http_send_response(client_s *c,
+                               int status,
+                               fio_str_info_s status_str,
+                               size_t header_count,
+                               fio_str_info_s headers[][2],
+                               fio_str_info_s body);
+
+#if FIO_OS_POSIX /* on POSIX we can take the easy path for constructors. */
 #define FIO_MEMORY_NAME fio_client_memory_allocator
 #define FIO_REF_NAME    client
 #define FIO_REF_CONSTRUCTOR_ONLY
@@ -223,12 +233,22 @@ typedef struct {
   } while (0)
 #include "fio-stl.h"
 
-static void http_send_response(client_s *c,
-                               int status,
-                               fio_str_info_s status_str,
-                               size_t header_count,
-                               fio_str_info_s headers[][2],
-                               fio_str_info_s body);
+#else /* on Windows the reference counter is not yet supported... so: */
+
+FIO_IFUNC client_s *client_new(size_t len) {
+  client_s *c = malloc(sizeof(*c) + len);
+  FIO_ASSERT_ALLOC(c);
+  memset(c, 0, sizeof(*c));
+  return c;
+}
+
+FIO_IFUNC void client_free(client_s *c) {
+  if (!c)
+    return;
+  fio_stream_destroy(&c->out);
+  free(c);
+}
+#endif
 
 /* *****************************************************************************
 IO callback(s)
@@ -300,6 +320,7 @@ accept_new_connections : {
   fio_sock_set_non_block(cl);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
   c->fd = cl;
+  client_free(fio_poll_forget(monitor, cl)); /* if on_close wasn't called. */
   fio_poll_monitor(monitor, cl, c, POLLIN | POLLOUT);
   /* remember to reschedule event monitoring (one-shot by design) */
   fio_poll_monitor(monitor, fd, NULL, POLLIN);
@@ -314,9 +335,9 @@ accept_error:
 
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(int fd, void *arg) {
-  client_free(arg);
+  fio_sock_close(fd);
   if (arg) {
-    fio_sock_close(fd);
+    client_free(arg);
   } else {
     FIO_LOG_DEBUG2("on_close callback called for %d, stopping.", fd);
     server_stop_flag = 1;

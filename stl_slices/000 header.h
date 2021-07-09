@@ -294,11 +294,21 @@ Function Attributes
 #pragma section(".CRT$XCU", read)
 #undef FIO_CONSTRUCTOR
 /** Marks a function as a constructor - if supported. */
+
+#if 1 /* does MSVC require a linker comment to avoide optimizing this away? */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
-  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
+  __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
+#else
+#define FIO_CONSTRUCTOR(fname)                                                 \
+  static void fname(void);                                                     \
+  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  static void fname(void)
+
+#endif
+
 #else
 /** Marks a function as a constructor - if supported. */
 #define FIO_CONSTRUCTOR(fname)                                                 \
@@ -721,6 +731,8 @@ static inline __attribute__((unused)) ssize_t fio_pread(int fd,
 done:
   return ret;
 }
+
+#define strcasecmp _stricmp
 #else
 #define fio_pread pread
 #endif
@@ -798,7 +810,7 @@ Locking selector
 #define FIO_USE_PTHREAD_MUTEX_TMP 1
 #define FIO___LOCK_TYPE           HANDLE
 #define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
-#define FIO___LOCK_DESTROY(lock)  CloseHandle((lock))
+#define FIO___LOCK_DESTROY(lock)  (CloseHandle((lock)), lock = NULL)
 #define FIO___LOCK_LOCK(lock)                                                  \
   (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
 #define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
@@ -809,7 +821,8 @@ Locking selector
 #define FIO___LOCK_TYPE pthread_mutex_t
 #define FIO___LOCK_INIT(lock)                                                  \
   ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
-#define FIO___LOCK_DESTROY(lock) pthread_mutex_destroy(&(lock))
+#define FIO___LOCK_DESTROY(lock)                                               \
+  (pthread_mutex_destroy(&(lock)), FIO___LOCK_INIT(lock))
 #define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
 #define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
@@ -984,9 +997,9 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
-    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
     (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
-    defined(FIO_SIGNAL) || defined(FIO_BITMAP)
+    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
