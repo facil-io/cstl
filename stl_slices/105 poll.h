@@ -59,7 +59,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
-#define FIO_POLL_INIT(poll_name, on_data_func, on_ready_func, on_close_func)   \
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -67,15 +67,7 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO___LOCK_INIT((poll_name).lock)                                  \
-  }
-#define FIO___POLL_INIT_TMP(on_data_func, on_ready_func, on_close_func)        \
-  {                                                                            \
-    .settings = {                                                              \
-        .on_data = on_data_func,                                               \
-        .on_ready = on_ready_func,                                             \
-        .on_close = on_close_func,                                             \
-    },                                                                         \
+    .lock = FIO___LOCK_INIT                                                    \
   }
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -222,7 +214,7 @@ FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
 #if FIO_POLL_HAS_UDATA_COLLECTION
       .udata = FIO_ARRAY_INIT,
 #endif
-      .lock = FIO___LOCK_INIT(p->lock), .forgotten = 0,
+      .lock = FIO___LOCK_INIT, .forgotten = 0,
     };
   }
   return p;
@@ -510,7 +502,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         "fio_poll_review overwriting %zu items for pending events",
         to_copy);
     *p = cpy;
-    cpy = (fio_poll_s)FIO___POLL_INIT_TMP(NULL, NULL, NULL);
+    cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
   } else {
     FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
                        to_copy);
@@ -568,9 +560,9 @@ SFUNC void fio_poll_close_all(fio_poll_s *p) {
   fio_poll_s tmp;
   FIO___LOCK_LOCK(p->lock);
   tmp = *p;
-  *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
-                                       p->settings.on_ready,
-                                       p->settings.on_close);
+  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
+                                 p->settings.on_ready,
+                                 p->settings.on_close);
   p->lock = tmp.lock;
   FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
@@ -598,7 +590,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(p, NULL, NULL, NULL);
+  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
 #ifdef POLLRDHUP
   /* if defined, the event is automatically monitored, so test for it. */
   short events[4] = {

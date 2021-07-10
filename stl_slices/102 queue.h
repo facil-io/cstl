@@ -76,10 +76,7 @@ Queue API
 
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  {                                                                            \
-    .r = &(queue).mem, .w = &(queue).mem,                                      \
-    .lock = FIO___LOCK_INIT((queue).lock)                                      \
-  }
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO___LOCK_INIT }
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -136,8 +133,8 @@ typedef struct {
   FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
-#define FIO_TIMER_QUEUE_INIT(timer)                                            \
-  { .lock = FIO___LOCK_INIT((timer).lock) }
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO___LOCK_INIT }
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
@@ -260,7 +257,7 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->r = &q->mem;
   q->w = &q->mem;
   q->count = 0;
-  FIO___LOCK_INIT(q->lock);
+  q->lock = FIO___LOCK_INIT;
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
@@ -276,9 +273,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
   }
   FIO___LOCK_UNLOCK(q->lock);
   FIO___LOCK_DESTROY(q->lock);
-#if !FIO_USE_PTHREAD_MUTEX_TMP
   fio_queue_init(q);
-#endif
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -744,7 +739,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
     uintptr_t tester = 0;
-    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT(tq);
+    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
     /* test failuers */
     fio_timer_schedule(&tq,
@@ -772,6 +767,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
+    fprintf(stderr, "  Note: no more errors should pront for this test.\n");
 
     /* test endless task */
     tester = 0;
@@ -800,7 +796,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
     tester = 0;
     fio_timer_destroy(&tq);
-    tq = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(tq);
     FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */

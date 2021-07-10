@@ -26,7 +26,7 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
 #### `FIO_POLL_INIT`
 
 ```c
-#define FIO_POLL_INIT(var_name, on_data_func, on_ready_func, on_close_func)    \
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)    \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -34,7 +34,7 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO_LOCK_INIT((var_name).lock)                                     \
+    .lock = FIO_LOCK_INIT,                                     \
   }
 ```
 

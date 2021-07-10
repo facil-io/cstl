@@ -964,8 +964,8 @@ Locking selector
 #if FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_THREAD
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
-#define FIO___LOCK_INIT(lk)      ((lk) = (FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
-#define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
+#define FIO___LOCK_INIT          ((FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_DESTROY(lock) fio_thread_mutex_destroy(&(lock))
 #define FIO___LOCK_LOCK(lock)                                                  \
   do {                                                                         \
     if (fio_thread_mutex_lock(&(lock)))                                        \
@@ -989,8 +989,8 @@ Locking selector
 
 #else
 #define FIO___LOCK_TYPE          fio_lock_i
-#define FIO___LOCK_INIT(lock)    ((lock) = FIO_LOCK_INIT)
-#define FIO___LOCK_DESTROY(lock) FIO___LOCK_INIT((lock))
+#define FIO___LOCK_INIT          (FIO_LOCK_INIT)
+#define FIO___LOCK_DESTROY(lock) ((lock) = FIO___LOCK_INIT)
 #define FIO___LOCK_LOCK(lock)    fio_lock(&(lock))
 #define FIO___LOCK_TRYLOCK(lock) fio_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)  fio_unlock(&(lock))

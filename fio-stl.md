@@ -2311,7 +2311,7 @@ When using the optional `pthread_mutex_t` implementation or using timers on Wind
 
 May be used to initialize global, static memory, queues.
 
-**Note**: while the use `FIO_QUEUE_STATIC_INIT` is possible only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`),  this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+**Note**: while the use `FIO_QUEUE_STATIC_INIT` is possible,  this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
 
 #### `fio_queue_new`
 
@@ -2425,7 +2425,7 @@ The `fio_timer_queue_s` struct should be considered an opaque data type and acce
 To create a `fio_timer_queue_s` on the stack (or statically):
 
 ```c
-fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT(foo_timer);
+fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
 ```
 
 A timer could be allocated dynamically:
@@ -2436,12 +2436,9 @@ FIO_ASSERT_ALLOC(foo_timer);
 *foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(*foo_timer);
 ```
 
-#### `FIO_TIMER_QUEUE_INIT(timer)`
+#### `FIO_TIMER_QUEUE_INIT`
 
-This is a MACRO used to initialize a `fio_timer_queue_s` object.
-
-**Note**: the use `FIO_TIMER_QUEUE_INIT` is possible as a static initialization only when using facil.io spinlock (a POSIX system without `FIO_USE_PTHREAD_MUTEX(_TMP)`).
-
+This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
 
 ### Timer API
 
@@ -2933,7 +2930,7 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
 #### `FIO_POLL_INIT`
 
 ```c
-#define FIO_POLL_INIT(var_name, on_data_func, on_ready_func, on_close_func)    \
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)    \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -2941,7 +2938,7 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO_LOCK_INIT((var_name).lock)                                     \
+    .lock = FIO_LOCK_INIT,                                     \
   }
 ```
 

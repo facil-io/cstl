@@ -964,8 +964,8 @@ Locking selector
 #if FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_THREAD
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
-#define FIO___LOCK_INIT(lk)      ((lk) = (FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
-#define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
+#define FIO___LOCK_INIT          ((FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_DESTROY(lock) fio_thread_mutex_destroy(&(lock))
 #define FIO___LOCK_LOCK(lock)                                                  \
   do {                                                                         \
     if (fio_thread_mutex_lock(&(lock)))                                        \
@@ -989,8 +989,8 @@ Locking selector
 
 #else
 #define FIO___LOCK_TYPE          fio_lock_i
-#define FIO___LOCK_INIT(lock)    ((lock) = FIO_LOCK_INIT)
-#define FIO___LOCK_DESTROY(lock) FIO___LOCK_INIT((lock))
+#define FIO___LOCK_INIT          (FIO_LOCK_INIT)
+#define FIO___LOCK_DESTROY(lock) ((lock) = FIO___LOCK_INIT)
 #define FIO___LOCK_LOCK(lock)    fio_lock(&(lock))
 #define FIO___LOCK_TRYLOCK(lock) fio_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)  fio_unlock(&(lock))
@@ -9856,9 +9856,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
 #endif
-  FIO_LOG_INFO("Testing time values between %zd and %zd",
-               (ssize_t)t,
-               (ssize_t)end);
   while (t < end) {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;
@@ -10074,10 +10071,7 @@ Queue API
 
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  {                                                                            \
-    .r = &(queue).mem, .w = &(queue).mem,                                      \
-    .lock = FIO___LOCK_INIT((queue).lock)                                      \
-  }
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO___LOCK_INIT }
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -10134,8 +10128,8 @@ typedef struct {
   FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
-#define FIO_TIMER_QUEUE_INIT(timer)                                            \
-  { .lock = FIO___LOCK_INIT((timer).lock) }
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO___LOCK_INIT }
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
@@ -10258,7 +10252,7 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->r = &q->mem;
   q->w = &q->mem;
   q->count = 0;
-  FIO___LOCK_INIT(q->lock);
+  q->lock = FIO___LOCK_INIT;
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
 }
@@ -10274,9 +10268,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
   }
   FIO___LOCK_UNLOCK(q->lock);
   FIO___LOCK_DESTROY(q->lock);
-#if !FIO_USE_PTHREAD_MUTEX_TMP
   fio_queue_init(q);
-#endif
 }
 
 /** Frees a queue object after calling fio_queue_destroy. */
@@ -10742,7 +10734,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
     uintptr_t tester = 0;
-    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT(tq);
+    fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
     /* test failuers */
     fio_timer_schedule(&tq,
@@ -10770,6 +10762,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
+    fprintf(stderr, "  Note: no more errors should pront for this test.\n");
 
     /* test endless task */
     tester = 0;
@@ -10798,7 +10791,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
     tester = 0;
     fio_timer_destroy(&tq);
-    tq = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(tq);
     FIO_ASSERT(tester == 1, "fio_timer_destroy should have called `on_finish`");
 
     /* test single-use task */
@@ -12794,7 +12786,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
-#define FIO_POLL_INIT(poll_name, on_data_func, on_ready_func, on_close_func)   \
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
   {                                                                            \
     .settings =                                                                \
         {                                                                      \
@@ -12802,15 +12794,7 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO___LOCK_INIT((poll_name).lock)                                  \
-  }
-#define FIO___POLL_INIT_TMP(on_data_func, on_ready_func, on_close_func)        \
-  {                                                                            \
-    .settings = {                                                              \
-        .on_data = on_data_func,                                               \
-        .on_ready = on_ready_func,                                             \
-        .on_close = on_close_func,                                             \
-    },                                                                         \
+    .lock = FIO___LOCK_INIT                                                    \
   }
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -12957,7 +12941,7 @@ FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
 #if FIO_POLL_HAS_UDATA_COLLECTION
       .udata = FIO_ARRAY_INIT,
 #endif
-      .lock = FIO___LOCK_INIT(p->lock), .forgotten = 0,
+      .lock = FIO___LOCK_INIT, .forgotten = 0,
     };
   }
   return p;
@@ -13245,7 +13229,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
         "fio_poll_review overwriting %zu items for pending events",
         to_copy);
     *p = cpy;
-    cpy = (fio_poll_s)FIO___POLL_INIT_TMP(NULL, NULL, NULL);
+    cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
   } else {
     FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
                        to_copy);
@@ -13303,9 +13287,9 @@ SFUNC void fio_poll_close_all(fio_poll_s *p) {
   fio_poll_s tmp;
   FIO___LOCK_LOCK(p->lock);
   tmp = *p;
-  *p = (fio_poll_s)FIO___POLL_INIT_TMP(p->settings.on_data,
-                                       p->settings.on_ready,
-                                       p->settings.on_close);
+  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
+                                 p->settings.on_ready,
+                                 p->settings.on_close);
   p->lock = tmp.lock;
   FIO___LOCK_UNLOCK(tmp.lock);
   for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
@@ -13333,7 +13317,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(p, NULL, NULL, NULL);
+  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
 #ifdef POLLRDHUP
   /* if defined, the event is automatically monitored, so test for it. */
   short events[4] = {
