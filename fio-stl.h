@@ -193,8 +193,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
 #define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
 #elif defined(_MSC_VER)
+#include <intrin.h>
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD asm("")
+#define FIO_COMPILER_GUARD _ReadWriteBarrier()
 #pragma message("Warning: Windows doesn't provide a low-level C memory barrier")
 #else
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
@@ -701,9 +702,52 @@ Miscellaneous helper macros
 #endif
 
 /* *****************************************************************************
-Patch for Windows
+Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
+***************************************************************************** */
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
+#warning fio_time functions defined using gettimeofday patch.
+#include <sys/time.h>
+#define CLOCK_REALTIME 0
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 0
+#endif
+#define clock_gettime fio___patch_clock_gettime
+// clock_gettime is not implemented on older versions of OS X (< 10.12).
+// If implemented, CLOCK_MONOTONIC will have already been defined.
+FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
+  struct timeval now;
+  int rv = gettimeofday(&now, NULL);
+  if (rv)
+    return rv;
+  t->tv_sec = now.tv_sec;
+  t->tv_nsec = now.tv_usec * 1000;
+  return 0;
+  (void)clk_id;
+}
+
+#endif
+/* *****************************************************************************
+Patches for Windows
 ***************************************************************************** */
 #if FIO_OS_WIN
+#if _MSC_VER
+#pragma message("warning: time access functions are using a patch.")
+#else
+#warning time access functions are using a patch.
+#endif
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+#include <io.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  *result = *gmtime(timep);
+  return result;
+}
+
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -743,11 +787,111 @@ done:
   return ret;
 }
 
-#define strcasecmp _stricmp
-#else
-#define fio_pread pread
+#define strcasecmp    _stricmp
+#define stat          _stat64
+#define fstat         _fstat64
+#define open          _open
+#define O_APPEND      _O_APPEND
+#define O_BINARY      _O_BINARY
+#define O_CREAT       _O_CREAT
+#define O_CREAT       _O_CREAT
+#define O_SHORT_LIVED _O_SHORT_LIVED
+#define O_CREAT       _O_CREAT
+#define O_TEMPORARY   _O_TEMPORARY
+#define O_CREAT       _O_CREAT
+#define O_EXCL        _O_EXCL
+#define O_NOINHERIT   _O_NOINHERIT
+#define O_RANDOM      _O_RANDOM
+#define O_RDONLY      _O_RDONLY
+#define O_RDWR        _O_RDWR
+#define O_SEQUENTIAL  _O_SEQUENTIAL
+#define O_TEXT        _O_TEXT
+#define O_TRUNC       _O_TRUNC
+#define O_WRONLY      _O_WRONLY
+#define O_U16TEXT     _O_U16TEXT
+#define O_U8TEXT      _O_U8TEXT
+#define O_WTEXT       _O_WTEXT
+
+#if !FIO_HAVE_UNIX_TOOLS
+/* patch clock_gettime */
+
+#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
+    CLOCK_REALTIME == CLOCK_MONOTONIC
+#undef CLOCK_MONOTONIC
+#undef CLOCK_REALTIME
 #endif
 
+#ifndef CLOCK_REALTIME
+#ifdef CLOCK_MONOTONIC
+#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
+#else
+#define CLOCK_REALTIME 0
+#endif
+#endif
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+#define clock_gettime fio___patch_clock_gettime
+/* based on:
+ * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
+ */
+FIO_SFUNC int fio___patch_clock_gettime(const uint32_t clk_type,
+                                        struct timespec *tv) {
+  if (!tv)
+    return -1;
+  static union {
+    uint64_t u;
+    LARGE_INTEGER li;
+  } freq = {.u = 0};
+  static double tick2n = 0;
+
+  switch (clk_type) {
+  case CLOCK_REALTIME:
+    union {
+      uint64_t u;
+      FILETIME ft;
+    } realtime;
+    GetSystemTimePreciseAsFileTime(&realtime.ft);
+    tv->tv_sec = realtime.u / 10000000;
+    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
+    return 0;
+
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+  case CLOCK_PROCESS_CPUTIME_ID:
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+  case CLOCK_THREAD_CPUTIME_ID:
+#endif
+  case CLOCK_MONOTONIC:
+    union {
+      uint64_t u;
+      LARGE_INTEGER li;
+    } monotime;
+    if (!QueryPerformanceCounter(&monotime.li))
+      return fio___patch_clock_gettime(CLOCK_REALTIME, tv);
+    if (!freq.u)
+      QueryPerformanceFrequency(&freq.li);
+    if (!freq.u) {
+      tick2n = 0;
+      freq.u = 1;
+    } else {
+      tick2n = (double)1000000000 / freq.u;
+    }
+    tv->tv_sec = monotime.u / freq.u;
+    tv->tv_nsec = (uint64_t)(
+        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
+    return 0;
+  }
+  return -1;
+}
+
+#endif /* FIO_HAVE_UNIX_TOOLS */
+
+#else /* using POSIX pread */
+#define fio_pread pread
+#endif
 /* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */
@@ -816,29 +960,20 @@ Locking selector
 #endif
 
 #if _MSC_VER
-#include <synchapi.h>
 #undef FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_USE_PTHREAD_MUTEX_TMP 1
-#define FIO___LOCK_TYPE           HANDLE
-#define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
-#define FIO___LOCK_DESTROY(lock)  (CloseHandle((lock)), lock = NULL)
-#define FIO___LOCK_LOCK(lock)                                                  \
-  (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
-#define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
-#define FIO___LOCK_UNLOCK(lock)  ReleaseMutex((lock))
+#endif
 
-#elif FIO_USE_PTHREAD_MUTEX_TMP
-#include <pthread.h>
-#define FIO___LOCK_TYPE pthread_mutex_t
-#define FIO___LOCK_INIT(lock)                                                  \
-  ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
-#define FIO___LOCK_DESTROY(lock)                                               \
-  (pthread_mutex_destroy(&(lock)), FIO___LOCK_INIT(lock))
-#define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
-#define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
+#if FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_THREAD
+#define FIO___LOCK_TYPE          fio_thread_mutex_t
+#define FIO___LOCK_INIT(lock)    ((lock) = FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
+#define FIO___LOCK_LOCK(lock)    fio_thread_mutex_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) fio_thread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
   do {                                                                         \
-    int tmp__ = pthread_mutex_unlock(&(lock));                                 \
+    int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
     if (tmp__) {                                                               \
       FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
                     __LINE__,                                                  \
@@ -975,6 +1110,10 @@ Common macros
 #define FIO_SOCK
 #endif
 
+#if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL))
+#define FIO_THREADS
+#endif
+
 /* Modules that require FIO_TIME */
 #if defined(FIO_QUEUE) || defined(FIO_RAND)
 #ifndef FIO_TIME
@@ -1010,7 +1149,8 @@ Common macros
     (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
     ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
     (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
-    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP)
+    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP) ||             \
+    (defined(FIO_THREADS) && FIO_OS_WIN)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -1315,7 +1455,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
 
 /** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected))
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (*(p_expected) == FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected)))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
 
@@ -1534,10 +1674,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   r1.s = fio_atomic_compare_exchange_p(&s.s,&s.s, &r1.s);
   r1.l = fio_atomic_compare_exchange_p(&s.l,&s.l, &r1.l);
   r1.w = fio_atomic_compare_exchange_p(&s.w,&s.w, &r1.w);
-  FIO_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c");
-  FIO_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s");
-  FIO_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l");
-  FIO_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w");
+  FIO_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c (%zu got %zu)", (size_t)s.c, (size_t)r1.c);
+  FIO_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s (%zu got %zu)", (size_t)s.s, (size_t)r1.s);
+  FIO_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l (%zu got %zu)", (size_t)s.l, (size_t)r1.l);
+  FIO_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w (%zu got %zu)", (size_t)s.w, (size_t)r1.w);
   // clang-format on
 
   uint64_t val = 1;
@@ -1556,6 +1696,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(fio_atomic_or_fetch(&val, 1) == 3,
              "fio_atomic_or_fetch should return new value");
   FIO_ASSERT(val == 3, "fio_atomic_or_fetch should update value");
+#if !_MSC_VER /* don't test missing MSVC features */
   FIO_ASSERT(fio_atomic_nand_fetch(&val, 4) == ~0ULL,
              "fio_atomic_nand_fetch should return new value");
   FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
@@ -1563,7 +1704,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(fio_atomic_nand(&val, 4) == 3ULL,
              "fio_atomic_nand should return old value");
   FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
-
+#endif /* !_MSC_VER */
   FIO_ASSERT(!fio_is_locked(&lock),
              "lock should be initialized in unlocked state");
   FIO_ASSERT(!fio_trylock(&lock), "fio_trylock should succeed");
@@ -3846,13 +3987,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
   fprintf(stderr,
           "\t  zeros / ones (bit frequency)\t%.05f\n",
           ((float)1.0 * totals[0]) / totals[1]);
-  FIO_ASSERT(totals[0] < totals[1] + (total_bits / 20) &&
-                 totals[1] < totals[0] + (total_bits / 20),
-             "randomness isn't random?");
+  if (!(totals[0] < totals[1] + (total_bits / 20) &&
+        totals[1] < totals[0] + (total_bits / 20)))
+    FIO_LOG_ERROR("randomness isn't random?");
   fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
   /* expect avarage hemming distance of 25% == 16 bits */
-  FIO_ASSERT(hemming >= 14 && hemming <= 18,
-             "randomness isn't random (hemming distance failed)?");
+  if (!(hemming >= 14 && hemming <= 18))
+    FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
   /* test chi-square ... I think */
   if (len * sizeof(*stream) > 2560) {
     double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
@@ -5273,6 +5414,241 @@ Numbers <=> Strings - Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_ATOL */
 #undef FIO_ATOL
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_THREADS                 /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "003 atomics.h"            /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                        Simple Portable Threads
+
+
+
+
+***************************************************************************** */
+#ifdef FIO_THREADS
+
+/* *****************************************************************************
+Module Settings
+
+At this point, define any MACROs and customaizable settings avsailable to the
+developer.
+***************************************************************************** */
+
+#if FIO_OS_POSIX
+#include <pthread.h>
+#include <sched.h>
+typedef pthread_t fio_thread_t;
+typedef pthread_mutex_t fio_thread_mutex_t;
+/** Used this macro for static initialization. */
+#define FIO_THREAD_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+
+#elif FIO_OS_WIN
+#include <synchapi.h>
+typedef HANDLE fio_thread_t;
+typedef HANDLE fio_thread_mutex_t;
+/** Used this macro for static initialization. */
+#define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t)0)
+#else
+#error facil.io Simple Portable Threads require a POSIX system or Windows
+#endif
+
+/* *****************************************************************************
+Module API
+***************************************************************************** */
+
+/** Starts a new thread, returns 0 on success and -1 on failure. */
+FIO_IFUNC int fio_thread_create(fio_thread_t *t,
+                                void *(*fn)(void *),
+                                void *arg);
+
+FIO_IFUNC int fio_thread_join(fio_thread_t t);
+
+/** Detaches the thread, so thread resources are freed automatically. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t t);
+
+/** Ends the current running thread. */
+void fio_thread_exit(void);
+
+/* Returns non-zero if both threads refer to the same thread. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b);
+
+/** Returns the current thread. */
+FIO_IFUNC fio_thread_t fio_thread_current(void);
+
+/** Yields thread execution. */
+FIO_IFUNC void fio_thread_yield(void);
+
+/**
+ * Initializes a simple Mutex.
+ *
+ * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
+ */
+
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m);
+
+/** Locks a simple Mutex, returning -1 on error. */
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m);
+
+/** Attempts to lock a simple Mutex, returning zero on success. */
+FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
+
+/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
+
+/** Destroys the simple Mutex (cleanup). */
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+
+/* *****************************************************************************
+POSIX Implementation - inlined static functions
+***************************************************************************** */
+#if FIO_OS_POSIX
+// clang-format off
+/** Starts a new thread, returns 0 on success and -1 on failure. */
+FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg); }
+
+FIO_IFUNC int fio_thread_join(fio_thread_t t) { return pthread_join(t, NULL); }
+
+/** Detaches the thread, so thread resources are freed automatically. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return pthread_detach(t); }
+
+/** Ends the current running thread. */
+void fio_thread_exit(void) { pthread_exit(NULL); }
+
+/* Returns non-zero if both threads refer to the same thread. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return pthread_equal(a, b); }
+
+/** Returns the current thread. */
+FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
+
+/** Yields thread execution. */
+FIO_IFUNC void fio_thread_yield(void) { sched_yield(); }
+
+/** Initializes a simple Mutex. */
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return pthread_mutex_init(m, NULL); }
+
+/** Locks a simple Mutex, returning -1 on error. */
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) { return pthread_mutex_lock(m); }
+
+/** Attempts to lock a simple Mutex, returning zero on success. */
+FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) { return pthread_mutex_trylock(m); }
+
+/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return pthread_mutex_unlock(m); }
+
+/** Destroys the simple Mutex (cleanup). */
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_destroy(m); *m = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER; }
+
+// clang-format on
+/* *****************************************************************************
+Windows Implementation - inlined static functions
+***************************************************************************** */
+#elif FIO_OS_WIN
+#include <process.h>
+// clang-format off
+/** Starts a new thread, returns 0 on success and -1 on failure. */
+FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthread((void(*)(void *))(uintptr_t)fn, 0, arg); return (!!t) - 1; }
+
+FIO_IFUNC int fio_thread_join(fio_thread_t t) { return (WaitForSingleObject(t, INFINITE) != WAIT_FAILED) - 1; }
+
+/** Detaches the thread, so thread resources are freed automatically. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
+
+/** Ends the current running thread. */
+void fio_thread_exit(void) { _endthread(); }
+
+/* Returns non-zero if both threads refer to the same thread. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return GetThreadId(a) == GetThreadId(b); }
+
+/** Returns the current thread. */
+FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }
+
+/** Yields thread execution. */
+FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
+
+SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
+
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
+
+/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ReleaseMutex(m) - 1; }
+
+/** Destroys the simple Mutex (cleanup). */
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(m); m = FIO_THREAD_MUTEX_INIT; }
+
+// clang-format on
+
+/** Locks a simple Mutex, returning -1 on error. */
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
+  if (!*m && fio___thread_mutex_lazy_init(m))
+    return -1;
+  return (WaitForSingleObject((*m), INFINITE) == WAIT_OBJECT_0) - 1;
+}
+
+/** Attempts to lock a simple Mutex, returning zero on success. */
+FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
+  if (!*m && fio___thread_mutex_lazy_init(m))
+    return -1;
+  return (WaitForSingleObject((*m), 0) == WAIT_OBJECT_0) - 1;
+}
+#endif
+/* *****************************************************************************
+Module Implementation - possibly externed functions.
+***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
+
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+
+*/
+#if FIO_OS_WIN
+/** Initializes a simple Mutex */
+SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
+  static fio_lock_i lock = FIO_LOCK_INIT;
+  /* lazy initialization */
+  fio_lock(&lock);
+  if (!*m) { /* retest, as this may chave changed... */
+    *m = CreateMutexW(NULL, FALSE, NULL);
+  }
+  fio_unlock(&lock);
+  return (!!m) - 1;
+}
+#endif
+
+/* *****************************************************************************
+Module Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_THREADS)(void) {
+  /*
+   * TODO? test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_MODULE_PTR
+#endif /* FIO_THREADS */
+#undef FIO_THREADS
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -9069,126 +9445,6 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
 SFUNC size_t fio_time2log(char *target, time_t time);
 
 /* *****************************************************************************
-Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
-***************************************************************************** */
-#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
-#warning fio_time functions defined using gettimeofday patch.
-#include <sys/time.h>
-#define CLOCK_REALTIME 0
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 0
-#endif
-#define clock_gettime fio___patch_clock_gettime
-// clock_gettime is not implemented on older versions of OS X (< 10.12).
-// If implemented, CLOCK_MONOTONIC will have already been defined.
-FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
-  struct timeval now;
-  int rv = gettimeofday(&now, NULL);
-  if (rv)
-    return rv;
-  t->tv_sec = now.tv_sec;
-  t->tv_nsec = now.tv_usec * 1000;
-  return 0;
-  (void)clk_id;
-}
-
-#endif
-/* *****************************************************************************
-Patch and types for Windows
-***************************************************************************** */
-#if FIO_OS_WIN
-#if _MSC_VER
-#pragma message("warning: fio_time functions defined using a patch.")
-#else
-#warning fio_time functions defined using a patch.
-#endif
-#include <sysinfoapi.h>
-#include <time.h>
-#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
-
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  *result = *gmtime(timep);
-  return result;
-}
-
-#if !FIO_HAVE_UNIX_TOOLS
-/* patch clock_gettime */
-
-#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
-    CLOCK_REALTIME == CLOCK_MONOTONIC
-#undef CLOCK_MONOTONIC
-#undef CLOCK_REALTIME
-#endif
-
-#ifndef CLOCK_REALTIME
-#ifdef CLOCK_MONOTONIC
-#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
-#else
-#define CLOCK_REALTIME 0
-#endif
-#endif
-
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
-
-#define clock_gettime fio___patch_clock_gettime
-/* based on:
- * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
- */
-FIO_SFUNC int fio___patch_clock_gettime(const uint32_t clk_type,
-                                        struct timespec *tv) {
-  if (!tv)
-    return -1;
-  static union {
-    uint64_t u;
-    LARGE_INTEGER li;
-  } freq = {.u = 0};
-  static double tick2n = 0;
-
-  switch (clk_type) {
-  case CLOCK_REALTIME:
-    union {
-      uint64_t u;
-      FILETIME ft;
-    } realtime;
-    GetSystemTimePreciseAsFileTime(&realtime.ft);
-    tv->tv_sec = realtime.u / 10000000;
-    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
-    return 0;
-
-#ifdef CLOCK_PROCESS_CPUTIME_ID
-  case CLOCK_PROCESS_CPUTIME_ID:
-#endif
-#ifdef CLOCK_THREAD_CPUTIME_ID
-  case CLOCK_THREAD_CPUTIME_ID:
-#endif
-  case CLOCK_MONOTONIC:
-    union {
-      uint64_t u;
-      LARGE_INTEGER li;
-    } monotime;
-    if (!QueryPerformanceCounter(&monotime.li))
-      return fio___patch_clock_gettime(CLOCK_REALTIME, tv);
-    if (!freq.u)
-      QueryPerformanceFrequency(&freq.li);
-    if (!freq.u) {
-      tick2n = 0;
-      freq.u = 1;
-    } else {
-      tick2n = (double)1000000000 / freq.u;
-    }
-    tv->tv_sec = monotime.u / freq.u;
-    tv->tv_nsec = (uint64_t)(
-        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
-    return 0;
-  }
-  return -1;
-}
-
-#endif /* FIO_HAVE_UNIX_TOOLS */
-#endif /* FIO_OS_WIN */
-/* *****************************************************************************
 Time Inline Helpers
 ***************************************************************************** */
 
@@ -10297,8 +10553,6 @@ Queue - test
 #define FIO___QUEUE_TEST_PRINT 0
 #endif
 
-#include "pthread.h"
-
 #define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
 
 typedef struct {
@@ -10398,15 +10652,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
         void (*act)(fio_queue_s *);
       } thread_tasks;
       thread_tasks.act = fio_queue_perform_all;
-      pthread_t *threads =
-          (pthread_t *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
+      fio_thread_t *threads = (fio_thread_t *)
+          FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
       for (size_t j = 0; j < t_count; ++j) {
-        if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
+        if (fio_thread_create(threads + j, thread_tasks.t, q)) {
           abort();
         }
       }
       for (size_t j = 0; j < t_count; ++j) {
-        pthread_join(threads[j], NULL);
+        fio_thread_join(threads[j]);
       }
       FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
     }
@@ -13136,7 +13390,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if !FIO_HAVE_UNIX_TOOLS
 #if _MSC_VER
-#pragma message("POSIX is required for the fio_stream API, or issues may occure.")
+#pragma message(                                                               \
+    "POSIX is required for the fio_stream API, or issues may occure.")
 #else
 #warning "POSIX behavior is expected by the fio_stream API."
 #endif
@@ -15039,9 +15294,11 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
 #define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                         \
-           first___ = NULL,                                                    \
-           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
+                ____type_t) *first___ = NULL,                                  \
+                            *pos =                                             \
+                                FIO_NAME(array_name,                           \
+                                         each_next)((array), &first___, NULL); \
        pos;                                                                    \
        pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 #endif
@@ -15230,6 +15487,9 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
     return NULL;
   return i + a;
 }
+
+/** Used internally for the EACH macro */
+typedef FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, ____type_t);
 
 /* *****************************************************************************
 Exported functions
@@ -19415,7 +19675,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, vprintf)(FIO_STR_PTR s,
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               printf)(FIO_STR_PTR s, const char *format, ...);
 
-#if FIO_HAVE_UNIX_TOOLS
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -19425,8 +19684,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
  * for sockets).
  *
  * The file descriptor will remain open and should be closed manually.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s,
                                                     int fd,
@@ -19439,14 +19696,11 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s,
  *
  * If the file can't be located, opened or read, or if `start_at` is beyond
  * the EOF position, NULL is returned in the state's `data` field.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s,
                                                       const char *filename,
                                                       intptr_t start_at,
                                                       intptr_t limit);
-#endif
 
 /* *****************************************************************************
 String API - C / JSON escaping
@@ -21092,14 +21346,13 @@ s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
 String - read file
 ***************************************************************************** */
 
-#if FIO_HAVE_UNIX_TOOLS
-#ifndef H___FIO_UNIX_TOOLS4STR_INCLUDED_H
+#if FIO_HAVE_UNIX_TOOLS && !defined(H___FIO_UNIX_TOOLS4STR_INCLUDED_H)
 #define H___FIO_UNIX_TOOLS4STR_INCLUDED_H
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif /* H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
+#endif /* FIO_HAVE_UNIX_TOOLS && !H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
 
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
@@ -21204,7 +21457,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
       filename = path;
     }
   }
-
   file = open(filename, O_RDONLY);
   if (-1 == file) {
     goto finish;
@@ -21218,8 +21470,6 @@ finish:
   }
   return state;
 }
-
-#endif /* FIO_HAVE_UNIX_TOOLS */
 
 /* *****************************************************************************
 
@@ -24771,6 +25021,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_STREAM
 #define FIO_TIME
 #define FIO_URL
+#define FIO_THREADS
 
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
@@ -25339,10 +25590,6 @@ Locking - Speed Test
 #define FIO___LOCK2_TEST_THREADS 32U
 #define FIO___LOCK2_TEST_REPEAT  1
 
-#ifndef H___FIO_LOCK2___H
-#include <pthread.h>
-#endif
-
 FIO_SFUNC void fio___lock_speedtest_task_inner(void *s) {
   size_t *r = (size_t *)s;
   static size_t i;
@@ -25373,17 +25620,17 @@ static void *fio___lock_mytask_lock2(void *s) {
 #endif
 
 static void *fio___lock_mytask_mutex(void *s) {
-  static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_mutex_lock(&mutex);
+  static fio_thread_mutex_t mutex = FIO_THREAD_MUTEX_INIT;
+  fio_thread_mutex_lock(&mutex);
   if (s)
     fio___lock_speedtest_task_inner(s);
-  pthread_mutex_unlock(&mutex);
+  fio_thread_mutex_unlock(&mutex);
   return NULL;
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   uint64_t start, end;
-  pthread_t threads[FIO___LOCK2_TEST_THREADS];
+  fio_thread_t threads[FIO___LOCK2_TEST_THREADS];
 
   struct {
     size_t type_size;
@@ -25406,9 +25653,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       },
 #endif
       {
-          .type_size = sizeof(pthread_mutex_t),
-          .type_name = "pthread_mutex_t",
-          .name = "pthreads (pthread_mutex)",
+          .type_size = sizeof(fio_thread_mutex_t),
+          .type_name = "fio_thread_mutex_t",
+          .name = "OS threads (pthread_mutex / Windows handle)",
           .task = fio___lock_mytask_mutex,
       },
       {
@@ -25519,10 +25766,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       result = 0;
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        pthread_create(threads + i, NULL, test_funcs[fn].task, &result);
+        fio_thread_create(threads + i, test_funcs[fn].task, &result);
       }
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        pthread_join(threads[i], NULL);
+        fio_thread_join(threads[i]);
       }
       end = fio_time_micro();
       fprintf(stderr,

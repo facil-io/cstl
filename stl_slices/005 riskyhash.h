@@ -726,13 +726,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
   fprintf(stderr,
           "\t  zeros / ones (bit frequency)\t%.05f\n",
           ((float)1.0 * totals[0]) / totals[1]);
-  FIO_ASSERT(totals[0] < totals[1] + (total_bits / 20) &&
-                 totals[1] < totals[0] + (total_bits / 20),
-             "randomness isn't random?");
+  if (!(totals[0] < totals[1] + (total_bits / 20) &&
+        totals[1] < totals[0] + (total_bits / 20)))
+    FIO_LOG_ERROR("randomness isn't random?");
   fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
   /* expect avarage hemming distance of 25% == 16 bits */
-  FIO_ASSERT(hemming >= 14 && hemming <= 18,
-             "randomness isn't random (hemming distance failed)?");
+  if (!(hemming >= 14 && hemming <= 18))
+    FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
   /* test chi-square ... I think */
   if (len * sizeof(*stream) > 2560) {
     double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);

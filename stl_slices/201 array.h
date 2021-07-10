@@ -394,9 +394,11 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
 #define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                         \
-           first___ = NULL,                                                    \
-           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
+                ____type_t) *first___ = NULL,                                  \
+                            *pos =                                             \
+                                FIO_NAME(array_name,                           \
+                                         each_next)((array), &first___, NULL); \
        pos;                                                                    \
        pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
 #endif
@@ -585,6 +587,9 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
     return NULL;
   return i + a;
 }
+
+/** Used internally for the EACH macro */
+typedef FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, ____type_t);
 
 /* *****************************************************************************
 Exported functions

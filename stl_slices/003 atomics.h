@@ -159,7 +159,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
 
 /** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected))
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (*(p_expected) == FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected)))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
 
@@ -378,10 +378,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   r1.s = fio_atomic_compare_exchange_p(&s.s,&s.s, &r1.s);
   r1.l = fio_atomic_compare_exchange_p(&s.l,&s.l, &r1.l);
   r1.w = fio_atomic_compare_exchange_p(&s.w,&s.w, &r1.w);
-  FIO_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c");
-  FIO_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s");
-  FIO_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l");
-  FIO_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w");
+  FIO_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c (%zu got %zu)", (size_t)s.c, (size_t)r1.c);
+  FIO_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s (%zu got %zu)", (size_t)s.s, (size_t)r1.s);
+  FIO_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l (%zu got %zu)", (size_t)s.l, (size_t)r1.l);
+  FIO_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w (%zu got %zu)", (size_t)s.w, (size_t)r1.w);
   // clang-format on
 
   uint64_t val = 1;
@@ -400,6 +400,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(fio_atomic_or_fetch(&val, 1) == 3,
              "fio_atomic_or_fetch should return new value");
   FIO_ASSERT(val == 3, "fio_atomic_or_fetch should update value");
+#if !_MSC_VER /* don't test missing MSVC features */
   FIO_ASSERT(fio_atomic_nand_fetch(&val, 4) == ~0ULL,
              "fio_atomic_nand_fetch should return new value");
   FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
@@ -407,7 +408,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(fio_atomic_nand(&val, 4) == 3ULL,
              "fio_atomic_nand should return old value");
   FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
-
+#endif /* !_MSC_VER */
   FIO_ASSERT(!fio_is_locked(&lock),
              "lock should be initialized in unlocked state");
   FIO_ASSERT(!fio_trylock(&lock), "fio_trylock should succeed");

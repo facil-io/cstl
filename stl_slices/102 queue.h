@@ -580,8 +580,6 @@ Queue - test
 #define FIO___QUEUE_TEST_PRINT 0
 #endif
 
-#include "pthread.h"
-
 #define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
 
 typedef struct {
@@ -681,15 +679,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
         void (*act)(fio_queue_s *);
       } thread_tasks;
       thread_tasks.act = fio_queue_perform_all;
-      pthread_t *threads =
-          (pthread_t *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
+      fio_thread_t *threads = (fio_thread_t *)
+          FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
       for (size_t j = 0; j < t_count; ++j) {
-        if (pthread_create(threads + j, NULL, thread_tasks.t, q)) {
+        if (fio_thread_create(threads + j, thread_tasks.t, q)) {
           abort();
         }
       }
       for (size_t j = 0; j < t_count; ++j) {
-        pthread_join(threads[j], NULL);
+        fio_thread_join(threads[j]);
       }
       FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
     }

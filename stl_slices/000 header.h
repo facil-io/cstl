@@ -193,8 +193,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
 #define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
 #elif defined(_MSC_VER)
+#include <intrin.h>
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD asm("")
+#define FIO_COMPILER_GUARD _ReadWriteBarrier()
 #pragma message("Warning: Windows doesn't provide a low-level C memory barrier")
 #else
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
@@ -701,9 +702,52 @@ Miscellaneous helper macros
 #endif
 
 /* *****************************************************************************
-Patch for Windows
+Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
+***************************************************************************** */
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
+#warning fio_time functions defined using gettimeofday patch.
+#include <sys/time.h>
+#define CLOCK_REALTIME 0
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 0
+#endif
+#define clock_gettime fio___patch_clock_gettime
+// clock_gettime is not implemented on older versions of OS X (< 10.12).
+// If implemented, CLOCK_MONOTONIC will have already been defined.
+FIO_IFUNC int fio___patch_clock_gettime(int clk_id, struct timespec *t) {
+  struct timeval now;
+  int rv = gettimeofday(&now, NULL);
+  if (rv)
+    return rv;
+  t->tv_sec = now.tv_sec;
+  t->tv_nsec = now.tv_usec * 1000;
+  return 0;
+  (void)clk_id;
+}
+
+#endif
+/* *****************************************************************************
+Patches for Windows
 ***************************************************************************** */
 #if FIO_OS_WIN
+#if _MSC_VER
+#pragma message("warning: time access functions are using a patch.")
+#else
+#warning time access functions are using a patch.
+#endif
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+#include <io.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  *result = *gmtime(timep);
+  return result;
+}
+
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -743,11 +787,111 @@ done:
   return ret;
 }
 
-#define strcasecmp _stricmp
-#else
-#define fio_pread pread
+#define strcasecmp    _stricmp
+#define stat          _stat64
+#define fstat         _fstat64
+#define open          _open
+#define O_APPEND      _O_APPEND
+#define O_BINARY      _O_BINARY
+#define O_CREAT       _O_CREAT
+#define O_CREAT       _O_CREAT
+#define O_SHORT_LIVED _O_SHORT_LIVED
+#define O_CREAT       _O_CREAT
+#define O_TEMPORARY   _O_TEMPORARY
+#define O_CREAT       _O_CREAT
+#define O_EXCL        _O_EXCL
+#define O_NOINHERIT   _O_NOINHERIT
+#define O_RANDOM      _O_RANDOM
+#define O_RDONLY      _O_RDONLY
+#define O_RDWR        _O_RDWR
+#define O_SEQUENTIAL  _O_SEQUENTIAL
+#define O_TEXT        _O_TEXT
+#define O_TRUNC       _O_TRUNC
+#define O_WRONLY      _O_WRONLY
+#define O_U16TEXT     _O_U16TEXT
+#define O_U8TEXT      _O_U8TEXT
+#define O_WTEXT       _O_WTEXT
+
+#if !FIO_HAVE_UNIX_TOOLS
+/* patch clock_gettime */
+
+#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
+    CLOCK_REALTIME == CLOCK_MONOTONIC
+#undef CLOCK_MONOTONIC
+#undef CLOCK_REALTIME
 #endif
 
+#ifndef CLOCK_REALTIME
+#ifdef CLOCK_MONOTONIC
+#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
+#else
+#define CLOCK_REALTIME 0
+#endif
+#endif
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+#define clock_gettime fio___patch_clock_gettime
+/* based on:
+ * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
+ */
+FIO_SFUNC int fio___patch_clock_gettime(const uint32_t clk_type,
+                                        struct timespec *tv) {
+  if (!tv)
+    return -1;
+  static union {
+    uint64_t u;
+    LARGE_INTEGER li;
+  } freq = {.u = 0};
+  static double tick2n = 0;
+
+  switch (clk_type) {
+  case CLOCK_REALTIME:
+    union {
+      uint64_t u;
+      FILETIME ft;
+    } realtime;
+    GetSystemTimePreciseAsFileTime(&realtime.ft);
+    tv->tv_sec = realtime.u / 10000000;
+    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
+    return 0;
+
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+  case CLOCK_PROCESS_CPUTIME_ID:
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+  case CLOCK_THREAD_CPUTIME_ID:
+#endif
+  case CLOCK_MONOTONIC:
+    union {
+      uint64_t u;
+      LARGE_INTEGER li;
+    } monotime;
+    if (!QueryPerformanceCounter(&monotime.li))
+      return fio___patch_clock_gettime(CLOCK_REALTIME, tv);
+    if (!freq.u)
+      QueryPerformanceFrequency(&freq.li);
+    if (!freq.u) {
+      tick2n = 0;
+      freq.u = 1;
+    } else {
+      tick2n = (double)1000000000 / freq.u;
+    }
+    tv->tv_sec = monotime.u / freq.u;
+    tv->tv_nsec = (uint64_t)(
+        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
+    return 0;
+  }
+  return -1;
+}
+
+#endif /* FIO_HAVE_UNIX_TOOLS */
+
+#else /* using POSIX pread */
+#define fio_pread pread
+#endif
 /* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */
@@ -816,29 +960,20 @@ Locking selector
 #endif
 
 #if _MSC_VER
-#include <synchapi.h>
 #undef FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_USE_PTHREAD_MUTEX_TMP 1
-#define FIO___LOCK_TYPE           HANDLE
-#define FIO___LOCK_INIT(lock)     (lock = CreateMutexW(NULL, FALSE, NULL))
-#define FIO___LOCK_DESTROY(lock)  (CloseHandle((lock)), lock = NULL)
-#define FIO___LOCK_LOCK(lock)                                                  \
-  (WaitForSingleObject((lock), INFINITE) != WAIT_OBJECT_0)
-#define FIO___LOCK_TRYLOCK(lock) (SingleObject((lock), 0) != WAIT_OBJECT_0)
-#define FIO___LOCK_UNLOCK(lock)  ReleaseMutex((lock))
+#endif
 
-#elif FIO_USE_PTHREAD_MUTEX_TMP
-#include <pthread.h>
-#define FIO___LOCK_TYPE pthread_mutex_t
-#define FIO___LOCK_INIT(lock)                                                  \
-  ((lock) = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER)
-#define FIO___LOCK_DESTROY(lock)                                               \
-  (pthread_mutex_destroy(&(lock)), FIO___LOCK_INIT(lock))
-#define FIO___LOCK_LOCK(lock)    pthread_mutex_lock(&(lock))
-#define FIO___LOCK_TRYLOCK(lock) pthread_mutex_trylock(&(lock))
+#if FIO_USE_PTHREAD_MUTEX_TMP
+#define FIO_THREAD
+#define FIO___LOCK_TYPE          fio_thread_mutex_t
+#define FIO___LOCK_INIT(lock)    ((lock) = FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
+#define FIO___LOCK_LOCK(lock)    fio_thread_mutex_lock(&(lock))
+#define FIO___LOCK_TRYLOCK(lock) fio_thread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
   do {                                                                         \
-    int tmp__ = pthread_mutex_unlock(&(lock));                                 \
+    int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
     if (tmp__) {                                                               \
       FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
                     __LINE__,                                                  \
@@ -975,6 +1110,10 @@ Common macros
 #define FIO_SOCK
 #endif
 
+#if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL))
+#define FIO_THREADS
+#endif
+
 /* Modules that require FIO_TIME */
 #if defined(FIO_QUEUE) || defined(FIO_RAND)
 #ifndef FIO_TIME
@@ -1010,7 +1149,8 @@ Common macros
     (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
     ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
     (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
-    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP)
+    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP) ||             \
+    (defined(FIO_THREADS) && FIO_OS_WIN)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif

@@ -25,7 +25,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if !FIO_HAVE_UNIX_TOOLS
 #if _MSC_VER
-#pragma message("POSIX is required for the fio_stream API, or issues may occure.")
+#pragma message(                                                               \
+    "POSIX is required for the fio_stream API, or issues may occure.")
 #else
 #warning "POSIX behavior is expected by the fio_stream API."
 #endif

@@ -420,7 +420,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, vprintf)(FIO_STR_PTR s,
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               printf)(FIO_STR_PTR s, const char *format, ...);
 
-#if FIO_HAVE_UNIX_TOOLS
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -430,8 +429,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
  * for sockets).
  *
  * The file descriptor will remain open and should be closed manually.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s,
                                                     int fd,
@@ -444,14 +441,11 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s,
  *
  * If the file can't be located, opened or read, or if `start_at` is beyond
  * the EOF position, NULL is returned in the state's `data` field.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s,
                                                       const char *filename,
                                                       intptr_t start_at,
                                                       intptr_t limit);
-#endif
 
 /* *****************************************************************************
 String API - C / JSON escaping
@@ -2097,14 +2091,13 @@ s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
 String - read file
 ***************************************************************************** */
 
-#if FIO_HAVE_UNIX_TOOLS
-#ifndef H___FIO_UNIX_TOOLS4STR_INCLUDED_H
+#if FIO_HAVE_UNIX_TOOLS && !defined(H___FIO_UNIX_TOOLS4STR_INCLUDED_H)
 #define H___FIO_UNIX_TOOLS4STR_INCLUDED_H
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif /* H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
+#endif /* FIO_HAVE_UNIX_TOOLS && !H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
 
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
@@ -2209,7 +2202,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
       filename = path;
     }
   }
-
   file = open(filename, O_RDONLY);
   if (-1 == file) {
     goto finish;
@@ -2223,8 +2215,6 @@ finish:
   }
   return state;
 }
-
-#endif /* FIO_HAVE_UNIX_TOOLS */
 
 /* *****************************************************************************
 

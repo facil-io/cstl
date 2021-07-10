@@ -61,6 +61,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_STREAM
 #define FIO_TIME
 #define FIO_URL
+#define FIO_THREADS
 
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
@@ -629,10 +630,6 @@ Locking - Speed Test
 #define FIO___LOCK2_TEST_THREADS 32U
 #define FIO___LOCK2_TEST_REPEAT  1
 
-#ifndef H___FIO_LOCK2___H
-#include <pthread.h>
-#endif
-
 FIO_SFUNC void fio___lock_speedtest_task_inner(void *s) {
   size_t *r = (size_t *)s;
   static size_t i;
@@ -663,17 +660,17 @@ static void *fio___lock_mytask_lock2(void *s) {
 #endif
 
 static void *fio___lock_mytask_mutex(void *s) {
-  static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-  pthread_mutex_lock(&mutex);
+  static fio_thread_mutex_t mutex = FIO_THREAD_MUTEX_INIT;
+  fio_thread_mutex_lock(&mutex);
   if (s)
     fio___lock_speedtest_task_inner(s);
-  pthread_mutex_unlock(&mutex);
+  fio_thread_mutex_unlock(&mutex);
   return NULL;
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
   uint64_t start, end;
-  pthread_t threads[FIO___LOCK2_TEST_THREADS];
+  fio_thread_t threads[FIO___LOCK2_TEST_THREADS];
 
   struct {
     size_t type_size;
@@ -696,9 +693,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       },
 #endif
       {
-          .type_size = sizeof(pthread_mutex_t),
-          .type_name = "pthread_mutex_t",
-          .name = "pthreads (pthread_mutex)",
+          .type_size = sizeof(fio_thread_mutex_t),
+          .type_name = "fio_thread_mutex_t",
+          .name = "OS threads (pthread_mutex / Windows handle)",
           .task = fio___lock_mytask_mutex,
       },
       {
@@ -809,10 +806,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
       result = 0;
       start = fio_time_micro();
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        pthread_create(threads + i, NULL, test_funcs[fn].task, &result);
+        fio_thread_create(threads + i, test_funcs[fn].task, &result);
       }
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        pthread_join(threads[i], NULL);
+        fio_thread_join(threads[i]);
       }
       end = fio_time_micro();
       fprintf(stderr,
