@@ -235,7 +235,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
 
 /** Converts a `struct tm` to time in seconds (assuming UTC). */
 SFUNC time_t fio_gm2time(struct tm tm) {
-  time_t time = 0;
+  int64_t time = 0;
   // we start with the algorithm described here:
   // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
   // Credit to Howard Hinnant.
@@ -247,13 +247,13 @@ SFUNC time_t fio_gm2time(struct tm tm) {
         (153L * (tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10)) + 2) / 5 + tm.tm_mday -
         1;                                                       // 0-365
     const uint32_t doe = yoe * 365L + yoe / 4 - yoe / 100 + doy; // 0-146096
-    time = era * 146097L + doe - 719468L; // time == days from epoch
+    time = era * 146097LL + doe - 719468LL; // time == days from epoch
   }
 
   /* Adjust for hour, minute and second */
-  time = time * 24L + tm.tm_hour;
-  time = time * 60L + tm.tm_min;
-  time = time * 60L + tm.tm_sec;
+  time = time * 24LL + tm.tm_hour;
+  time = time * 60LL + tm.tm_min;
+  time = time * 60LL + tm.tm_sec;
 
   if (tm.tm_isdst > 0) {
     time -= 60 * 60;
@@ -263,7 +263,7 @@ SFUNC time_t fio_gm2time(struct tm tm) {
     time += tm.tm_gmtoff;
   }
 #endif
-  return time;
+  return (time_t)time;
 }
 
 static const char *FIO___DAY_NAMES[] =
@@ -485,18 +485,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     t += FIO___GMTIME_TEST_INTERVAL;
     tm2 = fio_time2gm(tmp);
     FIO_ASSERT(fio_gm2time(tm2) == tmp,
-               "fio_gm2time roundtrip error (%ld != %ld)",
-               (long)fio_gm2time(tm2),
-               (long)tmp);
+               "fio_gm2time roundtrip error (%zu != %zu)",
+               (size_t)fio_gm2time(tm2),
+               (size_t)tmp);
     gmtime_r(&tmp, &tm1);
     if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
         tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
         tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
         tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
       char buf[256];
+      FIO_LOG_ERROR("system gmtime_r != fio_time2gm for %ld!\n", (long)t);
       fio_time2rfc7231(buf, tmp);
       FIO_ASSERT(0,
-                 "system gmtime_r != fio_time2gm for %ld!\n"
+                 "\n"
                  "-- System:\n"
                  "\ttm_year: %d\n"
                  "\ttm_mon: %d\n"
@@ -517,7 +518,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  "\ttm_wday: %d\n"
                  "-- As String:\n"
                  "\t%s",
-                 (long)t,
                  tm1.tm_year,
                  tm1.tm_mon,
                  tm1.tm_mday,
@@ -538,6 +538,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     }
   }
   {
+    fprintf(stderr, "  Testing for NUL terminator @fio_time2rfcX.\n");
     char buf[48];
     buf[47] = 0;
     memset(buf, 'X', 47);
@@ -558,6 +559,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
 #if DEBUG
     fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
 #endif
+    fprintf(stderr, "  performance testing fio_time2gm vs gmtime_r\n");
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);

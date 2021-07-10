@@ -356,7 +356,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
         n <<= i;
       }
 #else
-      while ((i < 64) && (n & 0x8000000000000000) == 0) {
+      while ((i < 64) && (n & 0x8000000000000000ULL) == 0) {
         n <<= 1;
         i++;
       }
@@ -373,7 +373,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
 #endif
       /* write to dest. */
       while (i < 64) {
-        dest[len++] = ((n & 0x8000000000000000) ? '1' : '0');
+        dest[len++] = ((n & 0x8000000000000000ULL) ? '1' : '0');
         n = n << 1;
         i++;
       }
@@ -409,19 +409,19 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       uint8_t i = 0;    /* counting bits */
       dest[len++] = '0';
       dest[len++] = 'x';
-      while ((n & 0xFF00000000000000) == 0) { // since n != 0, then i < 8
+      while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
         n = n << 8;
         i++;
       }
       /* make sure the Hex representation doesn't appear misleadingly signed. */
-      if (i && (n & 0x8000000000000000) && (n & 0x00FFFFFFFFFFFFFF)) {
+      if (i && (n & 0x8000000000000000ULL) && (n & 0x00FFFFFFFFFFFFFFULL)) {
         dest[len++] = '0';
         dest[len++] = '0';
       }
       /* write the damn thing, high to low */
       while (i < 8) {
-        uint8_t tmp = (n & 0xF000000000000000) >> 60;
-        uint8_t tmp2 = (n & 0x0F00000000000000) >> 56;
+        uint8_t tmp = (n & 0xF000000000000000ULL) >> 60;
+        uint8_t tmp2 = (n & 0x0F00000000000000ULL) >> 56;
         dest[len++] = fio_i2c(tmp);
         dest[len++] = fio_i2c(tmp2);
         i++;
@@ -674,9 +674,6 @@ SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol and fio_ltoa.\n");
-  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
-  FIO_NAME_TEST(stl, atol_speed)
-  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
@@ -707,8 +704,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.")
   }
   fprintf(stderr, "* Testing fio_atol samples.\n");
-#define TEST_ATOL(s, n)                                                        \
+#define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \
+    char *s = (char *)s_;                                                      \
     char *p = (char *)(s);                                                     \
     int64_t r = fio_atol(&p);                                                  \
     FIO_ASSERT(r == (n),                                                       \
@@ -717,9 +715,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (size_t)r,                                                      \
                (size_t)n);                                                     \
     FIO_ASSERT((s) + strlen((s)) == p,                                         \
-               "fio_atol test error! %s reading position not at end (%zu)",    \
+               "fio_atol test error! %s reading position not at end "          \
+               "(!%zu == %zu)\n\t0x%p - 0x%p",                                 \
                (s),                                                            \
-               (size_t)(p - (s)));                                             \
+               (size_t)strlen((s)),                                            \
+               (size_t)(p - (s)),                                              \
+               (void *)p,                                                      \
+               (void *)s);                                                     \
     char buf[72];                                                              \
     buf[fio_ltoa(buf, n, 2)] = 0;                                              \
     p = buf;                                                                   \
@@ -757,8 +759,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 
   TEST_ATOL("0x1", 1);
   TEST_ATOL("-0x1", -1);
-  TEST_ATOL("-0xa", -10);                                /* sign before hex */
-  TEST_ATOL("0xe5d4c3b2a1908770", -1885667171979196560); /* sign within hex */
+  TEST_ATOL("-0xa", -10);                                  /* sign before hex */
+  TEST_ATOL("0xe5d4c3b2a1908770", -1885667171979196560LL); /* sign within hex */
   TEST_ATOL("0b00000000000011", 3);
   TEST_ATOL("-0b00000000000011", -3);
   TEST_ATOL("0b0000000000000000000000000000000000000000000000000", 0);
@@ -775,6 +777,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_ATOL("9223372036854775806",
             9223372036854775806LL); /* almost INT64_MAX */
 #undef TEST_ATOL
+
+  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
+  FIO_NAME_TEST(stl, atol_speed)
+  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
 
 #ifdef FIO_ATOF_ALT
 #define TEST_DOUBLE(s, d, stop)                                                \

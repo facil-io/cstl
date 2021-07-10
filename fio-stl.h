@@ -1455,7 +1455,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
 
 /** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (*(p_expected) == FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected)))
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),(*(p_desired)),(*(p_expected))), (*(p_obj) == *(p_desired)))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
 
@@ -1480,7 +1480,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)), (*(p_obj)))
 /** An atomic OR (|) operation, returns new value */
 #define fio_atomic_or_fetch(p_obj, value) (fio_atomic_or((p_obj), (value)), (*(p_obj)))
-
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
 
@@ -3990,7 +3989,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
   if (!(totals[0] < totals[1] + (total_bits / 20) &&
         totals[1] < totals[0] + (total_bits / 20)))
     FIO_LOG_ERROR("randomness isn't random?");
-  fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
+  fprintf(stderr,
+          "\t  avarage hemming distance\t%zu (should be: 14-18)\n",
+          (size_t)hemming);
   /* expect avarage hemming distance of 25% == 16 bits */
   if (!(hemming >= 14 && hemming <= 18))
     FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
@@ -4764,7 +4765,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
         n <<= i;
       }
 #else
-      while ((i < 64) && (n & 0x8000000000000000) == 0) {
+      while ((i < 64) && (n & 0x8000000000000000ULL) == 0) {
         n <<= 1;
         i++;
       }
@@ -4781,7 +4782,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
 #endif
       /* write to dest. */
       while (i < 64) {
-        dest[len++] = ((n & 0x8000000000000000) ? '1' : '0');
+        dest[len++] = ((n & 0x8000000000000000ULL) ? '1' : '0');
         n = n << 1;
         i++;
       }
@@ -4817,19 +4818,19 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       uint8_t i = 0;    /* counting bits */
       dest[len++] = '0';
       dest[len++] = 'x';
-      while ((n & 0xFF00000000000000) == 0) { // since n != 0, then i < 8
+      while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
         n = n << 8;
         i++;
       }
       /* make sure the Hex representation doesn't appear misleadingly signed. */
-      if (i && (n & 0x8000000000000000) && (n & 0x00FFFFFFFFFFFFFF)) {
+      if (i && (n & 0x8000000000000000ULL) && (n & 0x00FFFFFFFFFFFFFFULL)) {
         dest[len++] = '0';
         dest[len++] = '0';
       }
       /* write the damn thing, high to low */
       while (i < 8) {
-        uint8_t tmp = (n & 0xF000000000000000) >> 60;
-        uint8_t tmp2 = (n & 0x0F00000000000000) >> 56;
+        uint8_t tmp = (n & 0xF000000000000000ULL) >> 60;
+        uint8_t tmp2 = (n & 0x0F00000000000000ULL) >> 56;
         dest[len++] = fio_i2c(tmp);
         dest[len++] = fio_i2c(tmp2);
         i++;
@@ -5082,9 +5083,6 @@ SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol and fio_ltoa.\n");
-  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
-  FIO_NAME_TEST(stl, atol_speed)
-  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
@@ -5115,8 +5113,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.")
   }
   fprintf(stderr, "* Testing fio_atol samples.\n");
-#define TEST_ATOL(s, n)                                                        \
+#define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \
+    char *s = (char *)s_;                                                      \
     char *p = (char *)(s);                                                     \
     int64_t r = fio_atol(&p);                                                  \
     FIO_ASSERT(r == (n),                                                       \
@@ -5125,9 +5124,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (size_t)r,                                                      \
                (size_t)n);                                                     \
     FIO_ASSERT((s) + strlen((s)) == p,                                         \
-               "fio_atol test error! %s reading position not at end (%zu)",    \
+               "fio_atol test error! %s reading position not at end "          \
+               "(!%zu == %zu)\n\t0x%p - 0x%p",                                 \
                (s),                                                            \
-               (size_t)(p - (s)));                                             \
+               (size_t)strlen((s)),                                            \
+               (size_t)(p - (s)),                                              \
+               (void *)p,                                                      \
+               (void *)s);                                                     \
     char buf[72];                                                              \
     buf[fio_ltoa(buf, n, 2)] = 0;                                              \
     p = buf;                                                                   \
@@ -5165,8 +5168,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 
   TEST_ATOL("0x1", 1);
   TEST_ATOL("-0x1", -1);
-  TEST_ATOL("-0xa", -10);                                /* sign before hex */
-  TEST_ATOL("0xe5d4c3b2a1908770", -1885667171979196560); /* sign within hex */
+  TEST_ATOL("-0xa", -10);                                  /* sign before hex */
+  TEST_ATOL("0xe5d4c3b2a1908770", -1885667171979196560LL); /* sign within hex */
   TEST_ATOL("0b00000000000011", 3);
   TEST_ATOL("-0b00000000000011", -3);
   TEST_ATOL("0b0000000000000000000000000000000000000000000000000", 0);
@@ -5183,6 +5186,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_ATOL("9223372036854775806",
             9223372036854775806LL); /* almost INT64_MAX */
 #undef TEST_ATOL
+
+  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
+  FIO_NAME_TEST(stl, atol_speed)
+  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
 
 #ifdef FIO_ATOF_ALT
 #define TEST_DOUBLE(s, d, stop)                                                \
@@ -9590,7 +9597,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
 
 /** Converts a `struct tm` to time in seconds (assuming UTC). */
 SFUNC time_t fio_gm2time(struct tm tm) {
-  time_t time = 0;
+  int64_t time = 0;
   // we start with the algorithm described here:
   // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
   // Credit to Howard Hinnant.
@@ -9602,13 +9609,13 @@ SFUNC time_t fio_gm2time(struct tm tm) {
         (153L * (tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10)) + 2) / 5 + tm.tm_mday -
         1;                                                       // 0-365
     const uint32_t doe = yoe * 365L + yoe / 4 - yoe / 100 + doy; // 0-146096
-    time = era * 146097L + doe - 719468L; // time == days from epoch
+    time = era * 146097LL + doe - 719468LL; // time == days from epoch
   }
 
   /* Adjust for hour, minute and second */
-  time = time * 24L + tm.tm_hour;
-  time = time * 60L + tm.tm_min;
-  time = time * 60L + tm.tm_sec;
+  time = time * 24LL + tm.tm_hour;
+  time = time * 60LL + tm.tm_min;
+  time = time * 60LL + tm.tm_sec;
 
   if (tm.tm_isdst > 0) {
     time -= 60 * 60;
@@ -9618,7 +9625,7 @@ SFUNC time_t fio_gm2time(struct tm tm) {
     time += tm.tm_gmtoff;
   }
 #endif
-  return time;
+  return (time_t)time;
 }
 
 static const char *FIO___DAY_NAMES[] =
@@ -9840,18 +9847,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     t += FIO___GMTIME_TEST_INTERVAL;
     tm2 = fio_time2gm(tmp);
     FIO_ASSERT(fio_gm2time(tm2) == tmp,
-               "fio_gm2time roundtrip error (%ld != %ld)",
-               (long)fio_gm2time(tm2),
-               (long)tmp);
+               "fio_gm2time roundtrip error (%zu != %zu)",
+               (size_t)fio_gm2time(tm2),
+               (size_t)tmp);
     gmtime_r(&tmp, &tm1);
     if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
         tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
         tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
         tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
       char buf[256];
+      FIO_LOG_ERROR("system gmtime_r != fio_time2gm for %ld!\n", (long)t);
       fio_time2rfc7231(buf, tmp);
       FIO_ASSERT(0,
-                 "system gmtime_r != fio_time2gm for %ld!\n"
+                 "\n"
                  "-- System:\n"
                  "\ttm_year: %d\n"
                  "\ttm_mon: %d\n"
@@ -9872,7 +9880,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  "\ttm_wday: %d\n"
                  "-- As String:\n"
                  "\t%s",
-                 (long)t,
                  tm1.tm_year,
                  tm1.tm_mon,
                  tm1.tm_mday,
@@ -9893,6 +9900,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     }
   }
   {
+    fprintf(stderr, "  Testing for NUL terminator @fio_time2rfcX.\n");
     char buf[48];
     buf[47] = 0;
     memset(buf, 'X', 47);
@@ -9913,6 +9921,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
 #if DEBUG
     fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
 #endif
+    fprintf(stderr, "  performance testing fio_time2gm vs gmtime_r\n");
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);
@@ -25803,6 +25812,7 @@ void fio_test_dynamic_types(void) {
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();
+  FIO_NAME_TEST(stl, time)();
   fprintf(stderr, "===============\n");
   fprintf(stderr, "Testing Dynamic Types (%s)\n", filename);
   fprintf(

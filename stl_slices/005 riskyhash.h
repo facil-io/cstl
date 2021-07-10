@@ -729,7 +729,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
   if (!(totals[0] < totals[1] + (total_bits / 20) &&
         totals[1] < totals[0] + (total_bits / 20)))
     FIO_LOG_ERROR("randomness isn't random?");
-  fprintf(stderr, "\t  avarage hemming distance\t%zu\n", (size_t)hemming);
+  fprintf(stderr,
+          "\t  avarage hemming distance\t%zu (should be: 14-18)\n",
+          (size_t)hemming);
   /* expect avarage hemming distance of 25% == 16 bits */
   if (!(hemming >= 14 && hemming <= 18))
     FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");

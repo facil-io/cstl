@@ -744,7 +744,8 @@ Patches for Windows
 #include <fcntl.h>
 
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  *result = *gmtime(timep);
+  if (result)
+    *result = *gmtime(timep);
   return result;
 }
 

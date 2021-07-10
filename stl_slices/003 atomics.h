@@ -159,7 +159,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
 
 /** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (*(p_expected) == FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),*(p_desired),*(p_expected)))
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),(*(p_desired)),(*(p_expected))), (*(p_obj) == *(p_desired)))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
 
@@ -184,7 +184,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)), (*(p_obj)))
 /** An atomic OR (|) operation, returns new value */
 #define fio_atomic_or_fetch(p_obj, value) (fio_atomic_or((p_obj), (value)), (*(p_obj)))
-
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
 
