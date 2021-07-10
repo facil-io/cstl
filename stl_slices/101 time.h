@@ -489,9 +489,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
 #endif
-  FIO_LOG_INFO("Testing time values between %zd and %zd",
-               (ssize_t)t,
-               (ssize_t)end);
   while (t < end) {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;
