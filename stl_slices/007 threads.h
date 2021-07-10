@@ -162,13 +162,13 @@ FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
 
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
 
-FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((*m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ReleaseMutex(m) - 1; }
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ((m && *m) ? ReleaseMutex(*m) : 0) -1; }
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(m); m = FIO_THREAD_MUTEX_INIT; }
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(*m); *m = FIO_THREAD_MUTEX_INIT; }
 
 // clang-format on
 
@@ -218,7 +218,7 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
 Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_THREADS)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
   /*
    * TODO? test module here
    */

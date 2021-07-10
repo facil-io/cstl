@@ -744,8 +744,9 @@ Patches for Windows
 #include <fcntl.h>
 
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  if (result)
-    *result = *gmtime(timep);
+  struct tm *t = gmtime(timep);
+  if (t && result)
+    *result = *t;
   return result;
 }
 
@@ -960,26 +961,29 @@ Locking selector
 #define FIO_USE_PTHREAD_MUTEX_TMP FIO_USE_PTHREAD_MUTEX
 #endif
 
-#if _MSC_VER
-#undef FIO_USE_PTHREAD_MUTEX_TMP
-#define FIO_USE_PTHREAD_MUTEX_TMP 1
-#endif
-
 #if FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_THREAD
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
-#define FIO___LOCK_INIT(lock)    ((lock) = FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_INIT(lk)      ((lk) = (FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
 #define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
-#define FIO___LOCK_LOCK(lock)    fio_thread_mutex_lock(&(lock))
+#define FIO___LOCK_LOCK(lock)                                                  \
+  do {                                                                         \
+    if (fio_thread_mutex_lock(&(lock)))                                        \
+      FIO_LOG_ERROR("Couldn't lock mutex @ %s:%d - error (%d): %s",            \
+                    __FILE__,                                                  \
+                    __LINE__,                                                  \
+                    errno,                                                     \
+                    strerror(errno));                                          \
+  } while (0)
 #define FIO___LOCK_TRYLOCK(lock) fio_thread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
   do {                                                                         \
-    int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
-    if (tmp__) {                                                               \
-      FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
+    if (fio_thread_mutex_unlock(&(lock))) {                                    \
+      FIO_LOG_ERROR("Couldn't release mutex @ %s:%d - error (%d): %s",         \
+                    __FILE__,                                                  \
                     __LINE__,                                                  \
-                    tmp__,                                                     \
-                    strerror(tmp__));                                          \
+                    errno,                                                     \
+                    strerror(errno));                                          \
     }                                                                          \
   } while (0)
 

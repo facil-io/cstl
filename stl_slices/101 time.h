@@ -470,16 +470,28 @@ Time - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 24) - 7) /*1day - 7seconds*/
-#define FIO___GMTIME_TEST_RANGE    (2047LL * 365) /* test ~2 millenium  */
+#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 23) + 1027) /* 23:17:07 */
+#if 1 || FIO_OS_WIN
+#define FIO___GMTIME_TEST_RANGE (1001LL * 376) /* test 0.5 millenia */
+#else
+#define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
+#endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
   struct tm tm1, tm2;
   const time_t now = fio_time_real().tv_sec;
+#if FIO_OS_WIN
+  const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = 1; /* Windows fails on some date ranges. */
+#else
   const time_t end =
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+#endif
+  FIO_LOG_INFO("Testing time values between %zd and %zd",
+               (ssize_t)t,
+               (ssize_t)end);
   while (t < end) {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;
@@ -538,7 +550,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     }
   }
   {
-    fprintf(stderr, "  Testing for NUL terminator @fio_time2rfcX.\n");
     char buf[48];
     buf[47] = 0;
     memset(buf, 'X', 47);

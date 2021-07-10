@@ -744,7 +744,9 @@ Patches for Windows
 #include <fcntl.h>
 
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  *result = *gmtime(timep);
+  struct tm *t = gmtime(timep);
+  if (t && result)
+    *result = *t;
   return result;
 }
 
@@ -959,26 +961,29 @@ Locking selector
 #define FIO_USE_PTHREAD_MUTEX_TMP FIO_USE_PTHREAD_MUTEX
 #endif
 
-#if _MSC_VER
-#undef FIO_USE_PTHREAD_MUTEX_TMP
-#define FIO_USE_PTHREAD_MUTEX_TMP 1
-#endif
-
 #if FIO_USE_PTHREAD_MUTEX_TMP
 #define FIO_THREAD
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
-#define FIO___LOCK_INIT(lock)    ((lock) = FIO_THREAD_MUTEX_INIT)
+#define FIO___LOCK_INIT(lk)      ((lk) = (FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
 #define FIO___LOCK_DESTROY(lock) (fio_thread_mutex_destroy(&(lock)))
-#define FIO___LOCK_LOCK(lock)    fio_thread_mutex_lock(&(lock))
+#define FIO___LOCK_LOCK(lock)                                                  \
+  do {                                                                         \
+    if (fio_thread_mutex_lock(&(lock)))                                        \
+      FIO_LOG_ERROR("Couldn't lock mutex @ %s:%d - error (%d): %s",            \
+                    __FILE__,                                                  \
+                    __LINE__,                                                  \
+                    errno,                                                     \
+                    strerror(errno));                                          \
+  } while (0)
 #define FIO___LOCK_TRYLOCK(lock) fio_thread_mutex_trylock(&(lock))
 #define FIO___LOCK_UNLOCK(lock)                                                \
   do {                                                                         \
-    int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
-    if (tmp__) {                                                               \
-      FIO_LOG_ERROR("Couldn't free mutex@%d! error (%d): %s",                  \
+    if (fio_thread_mutex_unlock(&(lock))) {                                    \
+      FIO_LOG_ERROR("Couldn't release mutex @ %s:%d - error (%d): %s",         \
+                    __FILE__,                                                  \
                     __LINE__,                                                  \
-                    tmp__,                                                     \
-                    strerror(tmp__));                                          \
+                    errno,                                                     \
+                    strerror(errno));                                          \
     }                                                                          \
   } while (0)
 
@@ -5585,13 +5590,13 @@ FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
 
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
 
-FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((*m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ReleaseMutex(m) - 1; }
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ((m && *m) ? ReleaseMutex(*m) : 0) -1; }
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(m); m = FIO_THREAD_MUTEX_INIT; }
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(*m); *m = FIO_THREAD_MUTEX_INIT; }
 
 // clang-format on
 
@@ -5641,7 +5646,7 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
 Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_THREADS)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
   /*
    * TODO? test module here
    */
@@ -9832,16 +9837,28 @@ Time - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 24) - 7) /*1day - 7seconds*/
-#define FIO___GMTIME_TEST_RANGE    (2047LL * 365) /* test ~2 millenium  */
+#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 23) + 1027) /* 23:17:07 */
+#if 1 || FIO_OS_WIN
+#define FIO___GMTIME_TEST_RANGE (1001LL * 376) /* test 0.5 millenia */
+#else
+#define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
+#endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
   struct tm tm1, tm2;
   const time_t now = fio_time_real().tv_sec;
+#if FIO_OS_WIN
+  const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = 1; /* Windows fails on some date ranges. */
+#else
   const time_t end =
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+#endif
+  FIO_LOG_INFO("Testing time values between %zd and %zd",
+               (ssize_t)t,
+               (ssize_t)end);
   while (t < end) {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;
@@ -9900,7 +9917,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
     }
   }
   {
-    fprintf(stderr, "  Testing for NUL terminator @fio_time2rfcX.\n");
     char buf[48];
     buf[47] = 0;
     memset(buf, 'X', 47);
@@ -25812,7 +25828,6 @@ void fio_test_dynamic_types(void) {
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();
-  FIO_NAME_TEST(stl, time)();
   fprintf(stderr, "===============\n");
   fprintf(stderr, "Testing Dynamic Types (%s)\n", filename);
   fprintf(
