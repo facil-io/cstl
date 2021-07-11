@@ -2141,7 +2141,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
     /* copy up to 128Mb at a time... why? because pread might fail */
     const size_t to_read =
         (limit & (((size_t)1 << 27) - 1)) | ((!!(limit >> 27)) << 27);
-    if (fio_pread(fd, state.buf + write_pos, to_read, start_at) !=
+    if (pread(fd, state.buf + write_pos, to_read, start_at) !=
         (ssize_t)to_read) {
       goto error;
     }
