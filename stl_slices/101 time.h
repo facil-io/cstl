@@ -489,7 +489,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
 #endif
-  while (t < end) {
+  do {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;
     tm2 = fio_time2gm(tmp);
@@ -545,7 +545,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
                  tm2.tm_wday,
                  buf);
     }
-  }
+  } while (t < end);
   {
     char buf[48];
     buf[47] = 0;

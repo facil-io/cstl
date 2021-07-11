@@ -8,7 +8,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_CSTL_PATCHES_H
 
 /* *****************************************************************************
+
+
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
+
+
 ***************************************************************************** */
 #if (defined(__MACH__) && !defined(CLOCK_REALTIME))
 #warning fio_time functions defined using gettimeofday patch.
@@ -164,21 +168,23 @@ Patched functions
 FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
-  static union {
+  union {
     uint64_t u;
     LARGE_INTEGER li;
-  } freq = {.u = 0};
+  } static freq = {.u = 0};
   static double tick2n = 0;
+  union {
+    uint64_t u;
+    FILETIME ft;
+    LARGE_INTEGER li;
+  } tu;
 
   switch (clk_type) {
   case CLOCK_REALTIME:
-    union {
-      uint64_t u;
-      FILETIME ft;
-    } realtime;
-    GetSystemTimePreciseAsFileTime(&realtime.ft);
-    tv->tv_sec = realtime.u / 10000000;
-    tv->tv_nsec = realtime.u - (tv->tv_sec * 10000000);
+  realtime_clock:
+    GetSystemTimePreciseAsFileTime(&tu.ft);
+    tv->tv_sec = tu.u / 10000000;
+    tv->tv_nsec = tu.u - (tv->tv_sec * 10000000);
     return 0;
 
 #ifdef CLOCK_PROCESS_CPUTIME_ID
@@ -188,12 +194,8 @@ FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   case CLOCK_THREAD_CPUTIME_ID:
 #endif
   case CLOCK_MONOTONIC:
-    union {
-      uint64_t u;
-      LARGE_INTEGER li;
-    } monotime;
-    if (!QueryPerformanceCounter(&monotime.li))
-      return fio_clock_gettime(CLOCK_REALTIME, tv);
+    if (!QueryPerformanceCounter(&tu.li))
+      goto realtime_clock;
     if (!freq.u)
       QueryPerformanceFrequency(&freq.li);
     if (!freq.u) {
@@ -202,9 +204,9 @@ FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
     } else {
       tick2n = (double)1000000000 / freq.u;
     }
-    tv->tv_sec = monotime.u / freq.u;
-    tv->tv_nsec = (uint64_t)(
-        0ULL + ((double)(monotime.u - (tv->tv_sec * freq.u)) * tick2n));
+    tv->tv_sec = tu.u / freq.u;
+    tv->tv_nsec =
+        (uint64_t)(0ULL + ((double)(tu.u - (tv->tv_sec * freq.u)) * tick2n));
     return 0;
   }
   return -1;
@@ -250,6 +252,7 @@ bad_file:
   return -1;
 }
 
+/** patch for kill */
 SFUNC int fio_kill(int pid, int signum) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   int error;
@@ -351,7 +354,13 @@ SFUNC int fio_kill(int pid, int signum) {
 #endif /* FIO_EXTERN_COMPLETE */
 
 /* *****************************************************************************
+
+
+
 Patches for POSIX
+
+
+
 ***************************************************************************** */
 #elif FIO_OS_POSIX /* POSIX patches */
 #endif
