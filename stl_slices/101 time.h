@@ -489,6 +489,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
       now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
   time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
 #endif
+  FIO_ASSERT(t < end, "time testing range overflowed.");
   do {
     time_t tmp = t;
     t += FIO___GMTIME_TEST_INTERVAL;

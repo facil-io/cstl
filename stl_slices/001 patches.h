@@ -154,6 +154,7 @@ SFUNC int fio_kill(int pid, int signum);
 #if !FIO_HAVE_UNIX_TOOLS
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
+#define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
 #endif
 
 /* *****************************************************************************
