@@ -292,18 +292,19 @@ Function Attributes
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
-#define FIO_CONSTRUCTOR(fname)                                                 \
+#define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
   static void fname(void);                                                     \
   __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
   static void fname(void)
 #else
-#define FIO_CONSTRUCTOR(fname)                                                 \
+#define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
   static void fname(void);                                                     \
   __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
   __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
 #endif
+#define FIO_CONSTRUCTOR(fname) FIO___CONSTRUCTOR_INTERNAL(fname)
 
 #else
 /** Marks a function as a constructor - if supported. */
@@ -917,7 +918,9 @@ Common macros
 #define FIO_SOCK
 #endif
 
-#if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL))
+#if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
+    defined(FIO_MEMORY_USE_PTHREAD_MUTEX) ||                                   \
+    defined(FIO_USE_PTHREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 

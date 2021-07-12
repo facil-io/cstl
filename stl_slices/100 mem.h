@@ -171,19 +171,6 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
-/** No custom memory allocations for Windows... sorry. */
-#if FIO_OS_WIN
-#ifndef FIO_MEMORY_DISABLE
-#define FIO_MEMORY_DISABLE 1
-#if _MSC_VER
-#pragma message(                                                               \
-    "Warning: Custom memory allocation is currently unavailable on Windows")
-#else
-#warning Custom memory allocation is currently unavailable on Windows.
-#endif /* _MSC_VER */
-#endif /* FIO_MEMORY_DISABLE */
-#endif /* FIO_OS_WIN */
-
 /** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
 #if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
@@ -301,7 +288,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_USE_FIO_MEMSET
 /** If true, uses a facil.io custom implementation. */
-#define FIO_MEMORY_USE_FIO_MEMSET 0
+#define FIO_MEMORY_USE_FIO_MEMSET 1
 #endif
 
 #ifndef FIO_MEMORY_USE_FIO_MEMCOPY
@@ -660,7 +647,13 @@ FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
 }
 
 /* *****************************************************************************
+
+
+
 POSIX Allocaion
+
+
+
 ***************************************************************************** */
 #if FIO_OS_POSIX || __has_include("sys/mman.h")
 #include <sys/mman.h>
@@ -772,8 +765,7 @@ FIO_SFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
         return (void *)NULL;
       }
       fio___memcpy_aligned(result, mem, old_len); /* copy data */
-      // FIO_MEMCPY(result, mem, prev_len);
-      munmap(mem, old_len); /* free original memory */
+      munmap(mem, old_len);                       /* free original memory */
     }
     return result;
   }
@@ -789,9 +781,104 @@ FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
 }
 
 /* *****************************************************************************
-Non-POSIX allocation - unsupported at this time
+
+
+
+Windows Allocaion
+
+
+
 ***************************************************************************** */
-#else /* FIO_HAVE_UNIX_TOOLS */
+#elif FIO_OS_WIN
+#include <memoryapi.h>
+
+FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
+  bytes = FIO_MEM_BYTES2PAGES(bytes);
+  if (!VirtualFree(mem, 0, MEM_RELEASE))
+    FIO_LOG_ERROR("Memory address at %p couldn't be returned to the system",
+                  mem);
+  (void)bytes;
+}
+
+FIO_IFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
+                                           uint8_t alignment_log) {
+  // return aligned_alloc((pages << 12), (1UL << alignment_log));
+  void *result;
+  size_t attempts = 0;
+  static void *next_alloc = (void *)0x01;
+  const uintptr_t alignment_rounder = (1ULL << alignment_log) - 1;
+  const uintptr_t alignment_mask = ~alignment_rounder;
+  bytes = FIO_MEM_BYTES2PAGES(bytes);
+  do {
+    next_alloc =
+        (void *)(((uintptr_t)next_alloc + alignment_rounder) & alignment_mask);
+    FIO_ASSERT_DEBUG(!((uintptr_t)next_alloc & alignment_rounder),
+                     "alignment allocation rounding error?");
+    result =
+        VirtualAlloc(next_alloc, (bytes << 2), MEM_RESERVE, PAGE_READWRITE);
+    next_alloc = (void *)((uintptr_t)next_alloc + (bytes << 2));
+  } while (!result && (attempts++) < 1024);
+  if (result) {
+    result = VirtualAlloc(result, bytes, MEM_COMMIT, PAGE_READWRITE);
+    FIO_ASSERT_DEBUG(result, "couldn't commit memory after reservation?!");
+
+  } else {
+    FIO_LOG_ERROR("Couldn't allocate memory from the system, error %zu."
+                  "\n\t%zu attempts with final address %p",
+                  GetLastError(),
+                  attempts,
+                  next_alloc);
+  }
+  return result;
+}
+
+FIO_IFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
+                                             size_t old_len,
+                                             size_t new_len,
+                                             uint8_t alignment_log) {
+  if (!new_len)
+    goto free_mem;
+  old_len = FIO_MEM_BYTES2PAGES(old_len);
+  new_len = FIO_MEM_BYTES2PAGES(new_len);
+  if (new_len > old_len) {
+    /* extend allocation */
+    void *tmp = VirtualAlloc((void *)((uintptr_t)mem + old_len),
+                             new_len - old_len,
+                             MEM_COMMIT,
+                             PAGE_READWRITE);
+    if (tmp)
+      return mem;
+    /* Alloc, Copy, Free... sorry... */
+    tmp = FIO_MEM_SYS_ALLOC_def_func(new_len, alignment_log);
+    if (!tmp) {
+      FIO_LOG_ERROR("sysem realloc failed to allocate memory.");
+      return NULL;
+    }
+    fio___memcpy_aligned(tmp, mem, old_len);
+    FIO_MEM_SYS_FREE_def_func(mem, old_len);
+    mem = tmp;
+  } else if (old_len > new_len) {
+    /* shrink allocation */
+    if (!VirtualFree((void *)((uintptr_t)mem + new_len),
+                     old_len - new_len,
+                     MEM_DECOMMIT))
+      FIO_LOG_ERROR("failed to decommit memory range @ %p.", mem);
+  }
+  return mem;
+free_mem:
+  FIO_MEM_SYS_FREE_def_func(mem, old_len);
+  mem = NULL;
+  return NULL;
+}
+
+/* *****************************************************************************
+
+
+Unsupported?
+
+
+***************************************************************************** */
+#else /* FIO_OS_POSIX / FIO_OS_WIN */
 
 FIO_IFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
                                            uint8_t alignment_log) {
@@ -816,7 +903,7 @@ FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
   (void)bytes;
 }
 
-#endif /* FIO_HAVE_UNIX_TOOLS */
+#endif /* FIO_OS_POSIX / FIO_OS_WIN */
 /* *****************************************************************************
 Overridable system allocation macros
 ***************************************************************************** */
@@ -955,14 +1042,13 @@ memset / memcpy selectors
 Lock type choice
 ***************************************************************************** */
 #if FIO_MEMORY_USE_PTHREAD_MUTEX
-#include "pthread.h"
-#define FIO_MEMORY_LOCK_TYPE            pthread_mutex_t
-#define FIO_MEMORY_LOCK_TYPE_INIT(lock) pthread_mutex_init(&(lock), NULL)
-#define FIO_MEMORY_TRYLOCK(lock)        pthread_mutex_trylock(&(lock))
-#define FIO_MEMORY_LOCK(lock)           pthread_mutex_lock(&(lock))
+#define FIO_MEMORY_LOCK_TYPE            fio_thread_mutex_t
+#define FIO_MEMORY_LOCK_TYPE_INIT(lock) fio_thread_mutex_init(&(lock))
+#define FIO_MEMORY_TRYLOCK(lock)        fio_thread_mutex_trylock(&(lock))
+#define FIO_MEMORY_LOCK(lock)           fio_thread_mutex_lock(&(lock))
 #define FIO_MEMORY_UNLOCK(lock)                                                \
   do {                                                                         \
-    int tmp__ = pthread_mutex_unlock(&(lock));                                 \
+    int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
     if (tmp__) {                                                               \
       FIO_LOG_ERROR("Couldn't free mutex! error (%d): %s",                     \
                     tmp__,                                                     \
@@ -1415,7 +1501,12 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     if (arean_count == (size_t)-1UL)
       arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
 #else
+#if _MSC_VER
+#pragma message(                                                               \
+    "Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.")
+#else
 #warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.
+#endif
 #endif /* _SC_NPROCESSORS_ONLN */
 
     if (arean_count >= FIO_MEMORY_ARENA_COUNT_MAX)
@@ -1439,6 +1530,9 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[i].block =
         FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
   }
+#endif
+#if _MSC_VER
+  atexit(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup));
 #endif
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
@@ -2354,8 +2448,6 @@ Memory Allocation - test
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
-#include "pthread.h"
-
 /* contention testing (multi-threaded) */
 FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
                               mem_tsk)(void *i_) {
@@ -2437,22 +2529,28 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count +
       (1 + (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count >> 1));
   for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
-    pthread_t threads[thread_count];
+#if _MSC_VER
+    fio_thread_t threads[(FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2];
+    FIO_ASSERT(((FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2) >= thread_count,
+               "Please use CLang or GCC to test this memory allocator");
+#else
+    fio_thread_t threads[thread_count];
+#endif
     fprintf(stderr,
             "* Testing %zu byte allocation blocks with %zu threads.\n",
             (size_t)(cycles),
             (thread_count + 1));
     for (size_t i = 1; i < thread_count; ++i) {
-      if (pthread_create(threads + i,
-                         NULL,
-                         FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk),
-                         (void *)cycles)) {
+      if (fio_thread_create(
+              threads + i,
+              FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk),
+              (void *)cycles)) {
         abort();
       }
     }
     FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
     for (size_t i = 1; i < thread_count; ++i) {
-      pthread_join(threads[i], NULL);
+      fio_thread_join(threads[i]);
     }
   }
   fprintf(stderr,

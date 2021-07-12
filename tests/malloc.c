@@ -12,17 +12,20 @@
 #define FIO_LOG
 #define FIO_TIME
 #define FIO_ATOMIC
+#define FIO_THREADS
 #include <fio-stl.h>
 #define FIO_CLI
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #include <fio-stl.h>
 
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/resource.h>
 #include <time.h>
+
+#if !FIO_OS_WIN
+#include <sys/resource.h>
+#endif
 
 static size_t TEST_CYCLES_START;
 static size_t TEST_CYCLES_END;
@@ -327,7 +330,14 @@ int main(int argc, char const *argv[]) {
   fio_cli_end();
   fio_free(fio_malloc(16)); /* initialize allocator if needed */
   free(malloc(16));         /* initialize allocator if needed */
-  pthread_t threads[thread_count];
+#if _MSC_VER
+  fio_thread_t threads[100];
+  FIO_ASSERT(thread_count < 100,
+             "Windows MSVC has anooying limitations and defaults.");
+
+#else
+  fio_thread_t threads[thread_count];
+#endif
 
   fprintf(stderr, "========================================\n");
   fprintf(stderr, FIO_MALLOC_TEST_NOTICE "\n");
@@ -365,22 +375,21 @@ int main(int argc, char const *argv[]) {
           thread_count);
   if (warmup) {
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(pthread_create(threads + i, NULL, test_facil_malloc, NULL) ==
-                     0,
+      FIO_ASSERT(fio_thread_create(threads + i, test_facil_malloc, NULL) == 0,
                  "Couldn't spawn thread.");
     }
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+      FIO_ASSERT(fio_thread_join(threads[i]) == 0, "Couldn't join thread");
     }
     test_mem_functions(NULL, calloc, NULL, NULL);
   }
 
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_create(threads + i, NULL, test_facil_malloc, NULL) == 0,
+    FIO_ASSERT(fio_thread_create(threads + i, test_facil_malloc, NULL) == 0,
                "Couldn't spawn thread.");
   }
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+    FIO_ASSERT(fio_thread_join(threads[i]) == 0, "Couldn't join thread");
   }
   test_mem_functions(NULL, NULL, NULL, NULL);
 
@@ -392,21 +401,20 @@ int main(int argc, char const *argv[]) {
           thread_count);
   if (warmup) {
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) ==
-                     0,
+      FIO_ASSERT(fio_thread_create(threads + i, test_system_malloc, NULL) == 0,
                  "Couldn't spawn thread.");
     }
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+      FIO_ASSERT(fio_thread_join(threads[i]) == 0, "Couldn't join thread");
     }
     test_mem_functions(NULL, calloc, NULL, NULL);
   }
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_create(threads + i, NULL, test_system_malloc, NULL) == 0,
+    FIO_ASSERT(fio_thread_create(threads + i, test_system_malloc, NULL) == 0,
                "Couldn't spawn thread.");
   }
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(pthread_join(threads[i], NULL) == 0, "Couldn't join thread");
+    FIO_ASSERT(fio_thread_join(threads[i]) == 0, "Couldn't join thread");
   }
   test_mem_functions(NULL, NULL, NULL, NULL);
 

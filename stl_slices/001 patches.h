@@ -169,10 +169,10 @@ Patched functions
 FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
-  union {
+  static union {
     uint64_t u;
     LARGE_INTEGER li;
-  } static freq = {.u = 0};
+  } freq = {.u = 0};
   static double tick2n = 0;
   union {
     uint64_t u;

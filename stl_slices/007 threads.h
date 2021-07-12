@@ -20,7 +20,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_THREADS
+#if defined(FIO_THREADS) && !defined(H___FIO_THREADS___H)
+#define H___FIO_THREADS___H
 
 /* *****************************************************************************
 Module Settings
