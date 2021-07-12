@@ -286,11 +286,11 @@ SFUNC int fio_kill(int pid, int sig) {
 #endif
   case SIGTERM:
   case SIGINT: /* terminate */
-    if (!TerminateProcess(process_handle, 1))
+    if (!TerminateProcess(handle, 1))
       goto something_went_wrong;
     break;
   case 0: /* check status */
-    if (!GetExitCodeProcess(process_handle, &status))
+    if (!GetExitCodeProcess(handle, &status))
       goto something_went_wrong;
     if (status != STILL_ACTIVE) {
       errno = ESRCH;
@@ -303,7 +303,7 @@ SFUNC int fio_kill(int pid, int sig) {
   }
 
   if (pid) {
-    CloseHandle(process_handle);
+    CloseHandle(handle);
   }
   return 0;
 
@@ -323,7 +323,7 @@ something_went_wrong:
   }
 cleanup_after_error:
   if (handle && pid)
-    CloseHandle(process_handle);
+    CloseHandle(handle);
   return -1;
 }
 
