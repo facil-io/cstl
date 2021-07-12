@@ -1230,102 +1230,77 @@ bad_file:
 }
 
 /** patch for kill */
-SFUNC int fio_kill(int pid, int signum) {
+SFUNC int fio_kill(int pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  int error;
-  int must_close = 0;
-  HANDLE process_handle;
-
-  if (signum < 0 || signum >= NSIG) {
+  HANDLE handle;
+  DWORD status;
+  if (sig < 0 || sig >= NSIG) {
     errno = EINVAL;
     return -1;
   }
-
-  if (pid == 0) {
-    // Linux: send to every process in the process group of the calling process
-    // Windows: current process
-    process_handle = GetCurrentProcess();
-  } else if (pid == -1) {
-    // Linux: send to every process for which the calling process has permission
-    // to send signals Windows: current process
-    process_handle = GetCurrentProcess();
-  } else {
-    process_handle =
-        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
-    must_close = 1;
-  }
-
-  if (process_handle == NULL) {
-    error = GetLastError();
-    if (error == ERROR_INVALID_PARAMETER) {
-      errno = ESRCH;
-    } else if (error == ERROR_ACCESS_DENIED) {
-      errno = EPERM;
-    } else {
-      errno = error;
-    }
+#ifdef SIGCONT
+  if (sig == SIGCONT) {
+    errno = ENOSYS;
     return -1;
   }
+#endif
 
-  switch (signum) {
+  if (pid == -1)
+    pid = 0;
+
+  if (!pid)
+    handle = GetCurrentProcess();
+  else
+    handle =
+        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
+  if (!handle)
+    goto something_went_wrong;
+
+  switch (sig) {
 #ifdef SIGKILL
   case SIGKILL:
 #endif
   case SIGTERM:
-  case SIGINT: {
-    // exterminate
-    if (TerminateProcess(process_handle, 1)) {
-      errno = 0;
-      error = 0;
-    }
-    // extermination failed
-    DWORD status;
-    error = GetLastError();
-    if (error == ERROR_ACCESS_DENIED &&
-        GetExitCodeProcess(process_handle, &status) && status != STILL_ACTIVE) {
-      errno = ESRCH;
-      error = -1;
-    }
+  case SIGINT: /* terminate */
+    if (!TerminateProcess(process_handle, 1))
+      goto something_went_wrong;
     break;
-  }
-#ifdef SIGCONT
-  case SIGCONT:
-    // wake up al threads
-    // WakeAllConditionVariable. threads need to wait for some ConditionVariable
-    // (IntitializeConditionVariable, SleepConditionVariable*)
-    // or cycle with ResumeThread through all threads, needs all thread handles
-    errno = ENOSYS;
-    error = -1;
-    break;
-#endif
-  case 0: {
-    // only check if process is still alive
-    DWORD status;
-    if (!GetExitCodeProcess(process_handle, &status)) {
-      errno = GetLastError();
-      error = -1;
-    }
-
+  case 0: /* check status */
+    if (!GetExitCodeProcess(process_handle, &status))
+      goto something_went_wrong;
     if (status != STILL_ACTIVE) {
       errno = ESRCH;
-      error = -1;
+      goto cleanup_after_error;
     }
-
-    error = 0;
     break;
-  }
-
-  default:
-    // unsupported signal
+  default: /* not supported? */
     errno = ENOSYS;
-    error = -1;
+    goto cleanup_after_error;
   }
 
-  if (must_close) {
+  if (pid) {
     CloseHandle(process_handle);
   }
+  return 0;
 
-  return error;
+something_went_wrong:
+
+  switch (GetLastError()) {
+  case ERROR_INVALID_PARAMETER:
+    errno = ESRCH;
+    break;
+  case ERROR_ACCESS_DENIED:
+    errno = EPERM;
+    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
+      errno = ESRCH;
+    break;
+  default:
+    errno = GetLastError();
+  }
+cleanup_after_error:
+  if (handle && pid)
+    CloseHandle(process_handle);
+  return -1;
 }
 
 #endif /* FIO_EXTERN_COMPLETE */
