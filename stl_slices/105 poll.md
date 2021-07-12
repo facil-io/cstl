@@ -10,7 +10,9 @@ There's no real limit on the number of file descriptors that can be monitored, e
 
 It is recommended to use a system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
 
-By defining `FIO_POLL` on a POSIX system, the following functions will be defined.
+By defining `FIO_POLL`, the following functions will be defined.
+
+**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
 
 ### `FIO_POLL` API
 

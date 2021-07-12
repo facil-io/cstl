@@ -39,7 +39,7 @@ Common cleanup
 #undef FIO___LOCK_LOCK
 #undef FIO___LOCK_LOCK_TRY
 #undef FIO___LOCK_UNLOCK
-#undef FIO_USE_PTHREAD_MUTEX_TMP
+#undef FIO_USE_THREAD_MUTEX_TMP
 
 /* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
 #if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \

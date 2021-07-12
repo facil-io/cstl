@@ -2,8 +2,8 @@
 #define FIO_TEST_CSTL
 #endif
 
-#ifndef FIO_USE_PTHREAD_MUTEX
-#define FIO_USE_PTHREAD_MUTEX 1
+#ifndef FIO_USE_THREAD_MUTEX
+#define FIO_USE_THREAD_MUTEX 1
 #endif
 
 #include "fio-stl.h"

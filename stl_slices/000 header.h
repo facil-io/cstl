@@ -756,15 +756,15 @@ Memory allocation macros
 Locking selector
 ***************************************************************************** */
 
-#ifndef FIO_USE_PTHREAD_MUTEX
-#define FIO_USE_PTHREAD_MUTEX 0
+#ifndef FIO_USE_THREAD_MUTEX
+#define FIO_USE_THREAD_MUTEX 0
 #endif
 
-#ifndef FIO_USE_PTHREAD_MUTEX_TMP
-#define FIO_USE_PTHREAD_MUTEX_TMP FIO_USE_PTHREAD_MUTEX
+#ifndef FIO_USE_THREAD_MUTEX_TMP
+#define FIO_USE_THREAD_MUTEX_TMP FIO_USE_THREAD_MUTEX
 #endif
 
-#if FIO_USE_PTHREAD_MUTEX_TMP
+#if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_THREAD
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
 #define FIO___LOCK_INIT          ((FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
@@ -919,8 +919,7 @@ Common macros
 #endif
 
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
-    defined(FIO_MEMORY_USE_PTHREAD_MUTEX) ||                                   \
-    defined(FIO_USE_PTHREAD_MUTEX_TMP)
+    defined(FIO_MEMORY_USE_PTHREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 
@@ -956,9 +955,9 @@ Common macros
 
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
-    (defined(FIO_POLL) && !FIO_USE_PTHREAD_MUTEX_TMP) ||                       \
+    (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||                        \
     ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
-    (defined(FIO_QUEUE) && !FIO_USE_PTHREAD_MUTEX_TMP) || defined(FIO_JSON) || \
+    (defined(FIO_QUEUE) && !FIO_USE_THREAD_MUTEX_TMP) || defined(FIO_JSON) ||  \
     (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP) ||             \
     (defined(FIO_THREADS) && FIO_OS_WIN)
 #ifndef FIO_ATOMIC

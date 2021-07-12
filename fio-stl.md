@@ -16,6 +16,12 @@ The header could be included multiple times with different results, creating dif
 
 **Note**: facil.io Web Application Developers get many of the features of the C STL through including the `fio.h` header. See the [facil.io IO Core documentation](fio) for more information.
 
+## OS Support
+
+The library in written and tested on POSIX systems. Windows support was added afterwards, leaving the library with a POSIX oriented design.
+
+Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
+
 ## Simple Template Library (STL) Overview
 
 The core Simple Template Library (STL) is a single file header library (`fio-stl.h`).
@@ -133,15 +139,15 @@ When defined, this macro will force full code generation.
 If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
 
 
-#### `FIO_USE_PTHREAD_MUTEX` and `FIO_USE_PTHREAD_MUTEX_TMP`
+#### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
-Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation on POSIX systems.
+Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation.
 
-This default choice can be altered by setting the `FIO_USE_PTHREAD_MUTEX` or `FIO_USE_PTHREAD_MUTEX_TMP` to true (`1`).
+This default choice can be changed so facil.io uses the OS's native `mutex` type (`pthread_mutex_t` on POSIX systems) by setting the `FIO_USE_THREAD_MUTEX` or `FIO_USE_THREAD_MUTEX_TMP` to true (`1`).
 
-The `FIO_USE_PTHREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
+The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
 
-The `FIO_USE_PTHREAD_MUTEX` macro will alter the default behavior for all future include statements.
+The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
 
 -------------------------------------------------------------------------------
 
@@ -2271,7 +2277,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed (read-only). */
   size_t count;
-  fio_lock_i lock; /* unless FIO_USE_PTHREAD_MUTEX(_TMP) is true */
+  fio_lock_i lock; /* unless FIO_USE_THREAD_MUTEX(_TMP) is true */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```
@@ -2676,7 +2682,15 @@ Sets a value for the named argument (but **not** it's aliases).
 
 The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
 
-By defining `FIO_SOCK` on a POSIX system, the following functions will be defined.
+By defining `FIO_SOCK`, the following functions will be defined.
+
+**Note**:
+
+On Windows that `fd` is a 64 bit number with no promises made as to its value. On POSIX systems the `fd` is a 32 bit number which is sequential. 
+
+Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32bit type limit set on POSIX machines.
+
+However, for most implementations this should be a non-issue as it seems (from observation, not knowledge) that Windows maps `fd` values to a kernel array (rather than a process specific array) and it is unlikely that any Windows machine will actually open more than 2 Giga "handles" unless it's doing something wrong.
 
 #### `fio_sock_open`
 
@@ -2698,7 +2712,7 @@ The `flag` integer can be a combination of any of the following flags:
 
 *  `FIO_SOCK_UDP` - Creates a UDP socket.
 
-*  `FIO_SOCK_UNIX ` - Creates a Unix socket. If an existing file / Unix socket exists, they will be deleted and replaced.
+*  `FIO_SOCK_UNIX ` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
 
 *  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
 
@@ -2723,6 +2737,18 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
 
 }
 ```
+
+#### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
+
+```c
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+#define fio_sock_close(fd)            close(fd)
+/* on Windows only */
+#define accept fio_sock_accept
+```
+
+Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
 
 #### `fio_sock_poll`
 
@@ -2901,6 +2927,8 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 
 Creates a new Unix socket and binds it to a local address.
 
+**Note**: available only on POSIX systems.
+
 -------------------------------------------------------------------------------
 ## Basic IO Polling
 
@@ -2914,7 +2942,9 @@ There's no real limit on the number of file descriptors that can be monitored, e
 
 It is recommended to use a system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
 
-By defining `FIO_POLL` on a POSIX system, the following functions will be defined.
+By defining `FIO_POLL`, the following functions will be defined.
+
+**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
 
 ### `FIO_POLL` API
 
@@ -4961,8 +4991,6 @@ Reads data from a file descriptor `fd` at offset `start_at` and pastes it's cont
 
 The file should be a regular file or the operation might fail (can't be used for sockets).
 
-Currently implemented only on POSIX systems.
-
 **Note**: the file descriptor will remain open and should be closed manually.
 
 #### `STR_readfile`
@@ -4977,8 +5005,6 @@ fio_str_info_s STR_readfile(FIO_STR_PTR s,
 Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
 
 If the file can't be located, opened or read, or if `start_at` is beyond the EOF position, NULL is returned in the state's `data` field.
-
-Works on POSIX systems only.
 
 ### String API - Base64 support
 

@@ -16,6 +16,12 @@ The header could be included multiple times with different results, creating dif
 
 **Note**: facil.io Web Application Developers get many of the features of the C STL through including the `fio.h` header. See the [facil.io IO Core documentation](fio) for more information.
 
+## OS Support
+
+The library in written and tested on POSIX systems. Windows support was added afterwards, leaving the library with a POSIX oriented design.
+
+Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
+
 ## Simple Template Library (STL) Overview
 
 The core Simple Template Library (STL) is a single file header library (`fio-stl.h`).
@@ -133,15 +139,15 @@ When defined, this macro will force full code generation.
 If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
 
 
-#### `FIO_USE_PTHREAD_MUTEX` and `FIO_USE_PTHREAD_MUTEX_TMP`
+#### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
-Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation on POSIX systems.
+Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation.
 
-This default choice can be altered by setting the `FIO_USE_PTHREAD_MUTEX` or `FIO_USE_PTHREAD_MUTEX_TMP` to true (`1`).
+This default choice can be changed so facil.io uses the OS's native `mutex` type (`pthread_mutex_t` on POSIX systems) by setting the `FIO_USE_THREAD_MUTEX` or `FIO_USE_THREAD_MUTEX_TMP` to true (`1`).
 
-The `FIO_USE_PTHREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
+The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
 
-The `FIO_USE_PTHREAD_MUTEX` macro will alter the default behavior for all future include statements.
+The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
 
 -------------------------------------------------------------------------------
 

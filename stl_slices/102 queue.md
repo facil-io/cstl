@@ -35,7 +35,7 @@ typedef struct {
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed (read-only). */
   size_t count;
-  fio_lock_i lock; /* unless FIO_USE_PTHREAD_MUTEX(_TMP) is true */
+  fio_lock_i lock; /* unless FIO_USE_THREAD_MUTEX(_TMP) is true */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```

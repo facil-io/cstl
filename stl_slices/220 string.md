@@ -602,8 +602,6 @@ Reads data from a file descriptor `fd` at offset `start_at` and pastes it's cont
 
 The file should be a regular file or the operation might fail (can't be used for sockets).
 
-Currently implemented only on POSIX systems.
-
 **Note**: the file descriptor will remain open and should be closed manually.
 
 #### `STR_readfile`
@@ -618,8 +616,6 @@ fio_str_info_s STR_readfile(FIO_STR_PTR s,
 Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
 
 If the file can't be located, opened or read, or if `start_at` is beyond the EOF position, NULL is returned in the state's `data` field.
-
-Works on POSIX systems only.
 
 ### String API - Base64 support
 

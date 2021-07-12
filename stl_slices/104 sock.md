@@ -2,7 +2,15 @@
 
 The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
 
-By defining `FIO_SOCK` on a POSIX system, the following functions will be defined.
+By defining `FIO_SOCK`, the following functions will be defined.
+
+**Note**:
+
+On Windows that `fd` is a 64 bit number with no promises made as to its value. On POSIX systems the `fd` is a 32 bit number which is sequential. 
+
+Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32bit type limit set on POSIX machines.
+
+However, for most implementations this should be a non-issue as it seems (from observation, not knowledge) that Windows maps `fd` values to a kernel array (rather than a process specific array) and it is unlikely that any Windows machine will actually open more than 2 Giga "handles" unless it's doing something wrong.
 
 #### `fio_sock_open`
 
@@ -24,7 +32,7 @@ The `flag` integer can be a combination of any of the following flags:
 
 *  `FIO_SOCK_UDP` - Creates a UDP socket.
 
-*  `FIO_SOCK_UNIX ` - Creates a Unix socket. If an existing file / Unix socket exists, they will be deleted and replaced.
+*  `FIO_SOCK_UNIX ` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
 
 *  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
 
@@ -49,6 +57,18 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
 
 }
 ```
+
+#### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
+
+```c
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+#define fio_sock_close(fd)            close(fd)
+/* on Windows only */
+#define accept fio_sock_accept
+```
+
+Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
 
 #### `fio_sock_poll`
 
@@ -226,5 +246,7 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 ```
 
 Creates a new Unix socket and binds it to a local address.
+
+**Note**: available only on POSIX systems.
 
 -------------------------------------------------------------------------------
