@@ -40,7 +40,7 @@ It is possible to use the same `makefile` to compile source code and static libr
 On Windows you might want to skip the makefile (if you do not have `make` and `gcc` installed) and run:
 
 ```dos
-cls && cl /Ox tests\stl.c && stl.exe 
+cls && cl /Ox tests\stl.c /I. && stl.exe 
 ```
 
 ## Quick Examples

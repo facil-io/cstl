@@ -1595,7 +1595,6 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #elif _MSC_VER
 #pragma message ("WARNING: WinAPI atomics have less features, but this is what this compiler has, so...")
-
 #include <intrin.h>
 #define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                   \
   ((sizeof(*ptr) == 1)                                                         \
@@ -1605,6 +1604,10 @@ Feel free to copy, use and enjoy according to the license provided.
              : (sizeof(*ptr) == 4)                                             \
                    ? fn((int32_t volatile *)(ptr), __VA_ARGS__)                \
                    : fn##64((int64_t volatile *)(ptr), __VA_ARGS__))
+
+#ifndef _WIN64
+#error Atomics on Windows require 64bit OS and compiler support.
+#endif
 
 /** An atomic load operation, returns value in pointer. */
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
