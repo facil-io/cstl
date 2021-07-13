@@ -48,56 +48,69 @@ typedef HANDLE fio_thread_mutex_t;
 #error facil.io Simple Portable Threads require a POSIX system or Windows
 #endif
 
+#ifdef FIO_THREADS_BYO
+#define FIO_IFUNC_T
+#else
+#define FIO_IFUNC_T FIO_IFUNC
+#endif
+
+#ifdef FIO_THREADS_MUTEX_BYO
+#define FIO_IFUNC_M
+#else
+#define FIO_IFUNC_M FIO_IFUNC
+#endif
+
 /* *****************************************************************************
 Module API
 ***************************************************************************** */
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC int fio_thread_create(fio_thread_t *t,
-                                void *(*fn)(void *),
-                                void *arg);
+FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
+                                  void *(*fn)(void *),
+                                  void *arg);
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t);
+/** Waits for the thread to finish. */
+FIO_IFUNC_T int fio_thread_join(fio_thread_t t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t t);
+FIO_IFUNC_T int fio_thread_detach(fio_thread_t t);
 
 /** Ends the current running thread. */
-void fio_thread_exit(void);
+FIO_IFUNC_T void fio_thread_exit(void);
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b);
+FIO_IFUNC_T int fio_thread_equal(fio_thread_t a, fio_thread_t b);
 
 /** Returns the current thread. */
-FIO_IFUNC fio_thread_t fio_thread_current(void);
+FIO_IFUNC_T fio_thread_t fio_thread_current(void);
 
 /** Yields thread execution. */
-FIO_IFUNC void fio_thread_yield(void);
+FIO_IFUNC_T void fio_thread_yield(void);
 
 /**
  * Initializes a simple Mutex.
  *
  * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
  */
-
-FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m);
+FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
 
 /** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m);
+FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
 
 /** Attempts to lock a simple Mutex, returning zero on success. */
-FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
+FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
+FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 
 /* *****************************************************************************
 POSIX Implementation - inlined static functions
 ***************************************************************************** */
 #if FIO_OS_POSIX
+#ifndef FIO_THREADS_BYO
 // clang-format off
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg); }
@@ -108,7 +121,7 @@ FIO_IFUNC int fio_thread_join(fio_thread_t t) { return pthread_join(t, NULL); }
 FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return pthread_detach(t); }
 
 /** Ends the current running thread. */
-void fio_thread_exit(void) { pthread_exit(NULL); }
+FIO_IFUNC void fio_thread_exit(void) { pthread_exit(NULL); }
 
 /* Returns non-zero if both threads refer to the same thread. */
 FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return pthread_equal(a, b); }
@@ -118,6 +131,9 @@ FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { sched_yield(); }
+
+#endif /* FIO_THREADS_BYO */
+#ifndef FIO_THREADS_MUTEX_BYO
 
 /** Initializes a simple Mutex. */
 FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return pthread_mutex_init(m, NULL); }
@@ -134,12 +150,14 @@ FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return pthread_mu
 /** Destroys the simple Mutex (cleanup). */
 FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_destroy(m); *m = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER; }
 
+#endif /* FIO_THREADS_MUTEX_BYO */
 // clang-format on
 /* *****************************************************************************
 Windows Implementation - inlined static functions
 ***************************************************************************** */
 #elif FIO_OS_WIN
 #include <process.h>
+#ifndef FIO_THREADS_BYO
 // clang-format off
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthread((void(*)(void *))(uintptr_t)fn, 0, arg); return (!!t) - 1; }
@@ -150,7 +168,7 @@ FIO_IFUNC int fio_thread_join(fio_thread_t t) { return (WaitForSingleObject(t, I
 FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
 
 /** Ends the current running thread. */
-void fio_thread_exit(void) { _endthread(); }
+FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
 /* Returns non-zero if both threads refer to the same thread. */
 FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return GetThreadId(a) == GetThreadId(b); }
@@ -160,6 +178,9 @@ FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
+
+#endif /* FIO_THREADS_BYO */
+#ifndef FIO_THREADS_MUTEX_BYO
 
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
 
@@ -187,21 +208,14 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
   return (WaitForSingleObject((*m), 0) == WAIT_OBJECT_0) - 1;
 }
 #endif
+#endif /* FIO_THREADS_MUTEX_BYO */
+
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
-
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
-
-*/
 #if FIO_OS_WIN
+#ifndef FIO_THREADS_MUTEX_BYO
 /** Initializes a simple Mutex */
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
   static fio_lock_i lock = FIO_LOCK_INIT;
@@ -213,8 +227,8 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
   fio_unlock(&lock);
   return (!!m) - 1;
 }
-#endif
-
+#endif /* FIO_THREADS_MUTEX_BYO */
+#endif /* FIO_OS_WIN */
 /* *****************************************************************************
 Module Testing
 ***************************************************************************** */
