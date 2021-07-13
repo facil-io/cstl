@@ -12,6 +12,12 @@ In other words, all the common building blocks one could need in a C project are
 
 The header could be included multiple times with different results, creating different types or exposing different functionality.
 
+## OS Support
+
+The library in written and tested on POSIX systems. Windows support was added afterwards, leaving the library with a POSIX oriented design.
+
+Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
+
 ### Running Tests
 
 Testing the STL locally is easy using:
@@ -30,6 +36,12 @@ make test/cpp         # Test template compilation in a C++ file (no run)... may 
 ```
 
 It is possible to use the same `makefile` to compile source code and static library code. See the makefile for details.
+
+On Windows you might want to skip the makefile (if you do not have `make` and `gcc` installed) and run:
+
+```dos
+cls && cl /Ox tests\stl.c && stl.exe 
+```
 
 ## Quick Examples
 
