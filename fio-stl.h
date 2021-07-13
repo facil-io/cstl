@@ -679,7 +679,7 @@ Miscellaneous helper macros
 #define FIO_ASSERT(cond, ...)                                                  \
   if (!(cond)) {                                                               \
     FIO_LOG_FATAL("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);  \
-    perror("     errno");                                                      \
+    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));                                                      \
     kill(0, SIGINT);                                                           \
     exit(-1);                                                                  \
   }
@@ -5739,11 +5739,20 @@ Windows Implementation - inlined static functions
 #elif FIO_OS_WIN
 #include <process.h>
 #ifndef FIO_THREADS_BYO
+
 // clang-format off
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthread((void(*)(void *))(uintptr_t)fn, 0, arg); return (!!t) - 1; }
+FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthreadex(NULL, 0, (void(*)(void *))(uintptr_t)fn, 0, arg, NULL); return (!!t) - 1; }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) { return (WaitForSingleObject(t, INFINITE) != WAIT_FAILED) - 1; }
+FIO_IFUNC int fio_thread_join(fio_thread_t t) {
+  int r = 0;
+  if (WaitForSingleObject(t, INFINITE) == WAIT_FAILED) {
+    errno = GetLastError();
+    r = -1;
+  } else
+    CloseHandle(t);
+  return r;
+}
 
 /** Detaches the thread, so thread resources are freed automatically. */
 FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
@@ -7258,17 +7267,17 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #define FIO_MEMORY_WARMUP 0
 #endif
 
-#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
+#ifndef FIO_MEMORY_USE_THREAD_MUTEX
 #if FIO_USE_THREAD_MUTEX
 /*
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
 #else
-/** If true, uses a pthread mutex instead of a spinlock. */
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+/** defaults to use a spinlock. */
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
 #endif
 #endif
 
@@ -8027,7 +8036,7 @@ memset / memcpy selectors
 /* *****************************************************************************
 Lock type choice
 ***************************************************************************** */
-#if FIO_MEMORY_USE_PTHREAD_MUTEX
+#if FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_LOCK_TYPE            fio_thread_mutex_t
 #define FIO_MEMORY_LOCK_TYPE_INIT(lock) fio_thread_mutex_init(&(lock))
 #define FIO_MEMORY_TRYLOCK(lock)        fio_thread_mutex_trylock(&(lock))
@@ -8290,7 +8299,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
                             "          Consider recompiling with more arenas.");
     warning_printed = 1;
 #endif /* DEBUG */
-#if FIO_MEMORY_USE_PTHREAD_MUTEX
+#if FIO_MEMORY_USE_THREAD_MUTEX
     /* slow wait for last arena used by the thread */
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
                         ->arena[FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var)]
@@ -8299,7 +8308,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
            FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
 #else
     FIO_THREAD_RESCHEDULE();
-#endif /* FIO_MEMORY_USE_PTHREAD_MUTEX */
+#endif /* FIO_MEMORY_USE_THREAD_MUTEX */
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */
 }
@@ -9589,7 +9598,7 @@ Memory pool cleanup
 #undef FIO_MEMORY_CACHE_SLOTS
 #undef FIO_MEMORY_ALIGN_LOG
 #undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
-#undef FIO_MEMORY_USE_PTHREAD_MUTEX
+#undef FIO_MEMORY_USE_THREAD_MUTEX
 #undef FIO_MEMORY_USE_FIO_MEMSET
 #undef FIO_MEMORY_USE_FIO_MEMCOPY
 #undef FIO_MEMORY_BLOCK_SIZE

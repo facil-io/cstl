@@ -679,7 +679,7 @@ Miscellaneous helper macros
 #define FIO_ASSERT(cond, ...)                                                  \
   if (!(cond)) {                                                               \
     FIO_LOG_FATAL("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);  \
-    perror("     errno");                                                      \
+    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));                                                      \
     kill(0, SIGINT);                                                           \
     exit(-1);                                                                  \
   }

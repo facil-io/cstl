@@ -158,11 +158,20 @@ Windows Implementation - inlined static functions
 #elif FIO_OS_WIN
 #include <process.h>
 #ifndef FIO_THREADS_BYO
+
 // clang-format off
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthread((void(*)(void *))(uintptr_t)fn, 0, arg); return (!!t) - 1; }
+FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthreadex(NULL, 0, (void(*)(void *))(uintptr_t)fn, 0, arg, NULL); return (!!t) - 1; }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) { return (WaitForSingleObject(t, INFINITE) != WAIT_FAILED) - 1; }
+FIO_IFUNC int fio_thread_join(fio_thread_t t) {
+  int r = 0;
+  if (WaitForSingleObject(t, INFINITE) == WAIT_FAILED) {
+    errno = GetLastError();
+    r = -1;
+  } else
+    CloseHandle(t);
+  return r;
+}
 
 /** Detaches the thread, so thread resources are freed automatically. */
 FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
