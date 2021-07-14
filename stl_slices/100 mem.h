@@ -650,7 +650,7 @@ FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
 
 
 
-POSIX Allocaion
+POSIX Allocation
 
 
 
@@ -784,7 +784,7 @@ FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
 
 
 
-Windows Allocaion
+Windows Allocation
 
 
 
