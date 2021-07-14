@@ -239,7 +239,7 @@ SFUNC ssize_t fio_pwrite(int fd, const void *buf, size_t count, off_t offset) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   ssize_t bytes_written = 0;
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == (HANDLE)-1)
+  if (handle == INVALID_HANDLE_VALUE)
     goto bad_file;
   OVERLAPPED overlapped = {0};
   if (offset > 0)
