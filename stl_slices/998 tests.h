@@ -137,14 +137,16 @@ static int ary____test_was_destroyed = 0;
 
 #define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
+#undef FIO_MEMORY_USE_THREAD_MUTEX
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
+#define FIO_MEMORY_ARENA_COUNT      2
 #include __FILE__
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
+#undef FIO_MEMORY_USE_THREAD_MUTEX
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
+#define FIO_MEMORY_ARENA_COUNT      2
 #include __FILE__
 
 #define FIO_FIOBJ

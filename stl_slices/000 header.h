@@ -919,7 +919,7 @@ Common macros
 #endif
 
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
-    defined(FIO_MEMORY_USE_PTHREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
+    defined(FIO_MEMORY_USE_THREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 

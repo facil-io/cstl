@@ -26,6 +26,7 @@ Note: This is a **TOY** example, no security whatsoever!!!
 #define FIO_POLL
 // #define FIO_POLL_DEBUG
 // #define FIO_MEMORY_DISABLE 1
+// #define FIO_USE_THREAD_MUTEX 1
 #include "fio-stl.h"
 
 /* Short string object used for response objects. */

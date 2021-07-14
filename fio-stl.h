@@ -919,7 +919,7 @@ Common macros
 #endif
 
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
-    defined(FIO_MEMORY_USE_PTHREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
+    defined(FIO_MEMORY_USE_THREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 
@@ -22872,9 +22872,9 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* CPU core arena count */
 #define FIO_MEMORY_ARENA_COUNT -1
 #endif
-#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
-/* yes, well...*/
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#if FIO_OS_POSIX && !defined(FIO_MEMORY_USE_THREAD_MUTEX)
+/* yes, well... POSIX Mutexes are decent on the machines I tested. */
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
 #endif
 /* make sure functions are exported if requested */
 #ifdef FIOBJ_EXTERN
@@ -25380,14 +25380,16 @@ static int ary____test_was_destroyed = 0;
 
 #define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
+#undef FIO_MEMORY_USE_THREAD_MUTEX
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
+#define FIO_MEMORY_ARENA_COUNT      2
 #include __FILE__
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX      0
-#define FIO_MEMORY_ARENA_COUNT            2
+#undef FIO_MEMORY_USE_THREAD_MUTEX
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
+#define FIO_MEMORY_ARENA_COUNT      2
 #include __FILE__
 
 #define FIO_FIOBJ

@@ -2086,7 +2086,7 @@ Defines the maximum number of arenas to allocate when using dynamic arena calcul
 
 **Note**: relevant if `FIO_MEMORY_ARENA_COUNT` is zero/negative, since dynamic arena calculation is performed using CPU core calculation.
 
-#### `FIO_MEMORY_USE_PTHREAD_MUTEX`
+#### `FIO_MEMORY_USE_THREAD_MUTEX`
 
 ```c
 /*
@@ -2095,9 +2095,9 @@ Defines the maximum number of arenas to allocate when using dynamic arena calcul
 * and system allocations are performed inside arena locks.
 */
 #if FIO_MEMORY_ARENA_COUNT > 0
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
 #else
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 0
+#define FIO_MEMORY_USE_THREAD_MUTEX 0
 #endif
 ```
 

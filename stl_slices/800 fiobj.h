@@ -163,9 +163,9 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 /* CPU core arena count */
 #define FIO_MEMORY_ARENA_COUNT -1
 #endif
-#ifndef FIO_MEMORY_USE_PTHREAD_MUTEX
-/* yes, well...*/
-#define FIO_MEMORY_USE_PTHREAD_MUTEX 1
+#if FIO_OS_POSIX && !defined(FIO_MEMORY_USE_THREAD_MUTEX)
+/* yes, well... POSIX Mutexes are decent on the machines I tested. */
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
 #endif
 /* make sure functions are exported if requested */
 #ifdef FIOBJ_EXTERN
