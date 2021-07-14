@@ -1428,7 +1428,7 @@ typedef struct {
   uint8_t beautify;
 } fiobj___json_format_internal__s;
 
-/* internal helper funnction for recursive JSON formatting. */
+/* internal helper function for recursive JSON formatting. */
 FIOBJ_FUNC void fiobj___json_format_internal__(
     fiobj___json_format_internal__s *,
     FIOBJ);

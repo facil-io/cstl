@@ -1214,7 +1214,7 @@ SFUNC ssize_t fio_pwrite(int fd, const void *buf, size_t count, off_t offset) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   ssize_t bytes_written = 0;
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == (HANDLE)-1)
+  if (handle == INVALID_HANDLE_VALUE)
     goto bad_file;
   OVERLAPPED overlapped = {0};
   if (offset > 0)
@@ -7196,7 +7196,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 /**
  * Forces the allocator to zero out memory early and often, so allocations
- * return initialized memory (bytes are all zeros.
+ * return initialized memory (bytes are all zeros).
  *
  * This will make the realloc2 safe for use (all data not copied is zero).
  */
@@ -7645,7 +7645,7 @@ FIO_SFUNC void fio___memset_aligned(void *restrict dest_,
 
 
 
-POSIX Allocaion
+POSIX Allocation
 
 
 
@@ -7779,7 +7779,7 @@ FIO_IFUNC void FIO_MEM_SYS_FREE_def_func(void *mem, size_t bytes) {
 
 
 
-Windows Allocaion
+Windows Allocation
 
 
 
@@ -24137,7 +24137,7 @@ typedef struct {
   uint8_t beautify;
 } fiobj___json_format_internal__s;
 
-/* internal helper funnction for recursive JSON formatting. */
+/* internal helper function for recursive JSON formatting. */
 FIOBJ_FUNC void fiobj___json_format_internal__(
     fiobj___json_format_internal__s *,
     FIOBJ);
