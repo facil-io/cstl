@@ -97,24 +97,24 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
                      size_units,
                      pointers_per_unit,
                      total_pointers);
-      fprintf(stderr, "* Avrg. micro-seconds per malloc: %zu\n", clock_alloc);
-      fprintf(stderr, "* Avrg. micro-seconds per calloc: %zu\n", clock_calloc);
+      fprintf(stderr, "* Micro-seconds performing malloc: %zu\n", clock_alloc);
+      fprintf(stderr, "* Micro-seconds performing calloc: %zu\n", clock_calloc);
       fprintf(stderr,
-              "* Avrg. micro-seconds per realloc: %zu\n",
+              "* Micro-seconds performing realloc: %zu\n",
               clock_realloc);
       fprintf(stderr,
-              "* Avrg. micro-seconds per free (realloc): %zu\n",
+              "* Micro-seconds performing free (realloc): %zu\n",
               clock_free);
       fprintf(stderr,
-              "* Avrg. micro-seconds per free (re-cycle): %zu\n",
+              "* Micro-seconds performing free (re-cycle): %zu\n",
               clock_free2);
       fprintf(stderr,
-              "* Avrg. micro-seconds per a zero-life span"
+              "* Micro-seconds performing a zero-life span"
               " (malloc-free): %zu\n",
               fio_optimized);
 #if TEST_WITH_INTERLEAVED_FREE
       fprintf(stderr,
-              "* Avrg. micro-seconds per a facil.io use-case round"
+              "* Micro-seconds performing a facil.io use-case round"
               " (medium-short life): %zu\n",
               fio_optimized2);
 #endif

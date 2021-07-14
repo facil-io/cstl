@@ -201,7 +201,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 /**
  * Forces the allocator to zero out memory early and often, so allocations
- * return initialized memory (bytes are all zeros.
+ * return initialized memory (bytes are all zeros).
  *
  * This will make the realloc2 safe for use (all data not copied is zero).
  */

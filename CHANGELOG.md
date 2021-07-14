@@ -1,5 +1,50 @@
 # Change Log
 
+### v.0.8.0.beta1
+
+I believe C is a beautiful language and many more developers would enjoy it if a few more basic tools were made available to help beginners work with the language - this is why the 0.8.x version family extracted many of the most commonly used building blocks to a single header library ([the facil.io Simple Template Library for C, i.e., facil.io's C STL](https://github.com/facil-io/cstl)).
+
+I know facil.io has these tools and could be used to make developers happy, not just when writing network applications, but when coding any C application.
+
+In some ways, [facil.io's C STL, `fio-stl.h`](https://github.com/facil-io/cstl) is a small standard-library extension with a minimal STL, much like C++ has, only for C, and it holds the best portable core features facil.io offers.
+
+
+Both The [the facil.io C STL](https://github.com/facil-io/cstl) and the [IO Core library](https://github.com/facil-io/io-core) are now developed in independent repositories, separating extension development from core development.
+
+This approach will make it easier for contributors to edit the code for these amalgamation style libraries and submit PRs, as text editors (as well as `clang-format`) have an easier time handling 10 files with a 1000 line each than a single file with 10,000 lines.
+
+**Overview**:
+
+- Major API changes!
+
+   **Important**: Some API changes were made just to unify argument ordering across API functions. This is especially helpful where memory management is concerned, making sure all functions that are named in a similar way behave in a similar way.
+
+- Multiple core rewrites / refinements (while, possibly, replacing old boring bugs with new and interesting one).
+
+- Core types and common helpers have been re-written and consolidated.
+
+   This updates the core type API in an attempt to create a more unified and intuitive API. for both core types and dynamic types (FIOBJ).
+
+   Note that this changes some function and macro names as well as possible behavior.
+
+   Some changes are semantic - such as renaming `fio_atomic_xchange` to `fio_atomic_exchange`.
+
+   Some have meaningful side-effects. i.e., Hash Maps and Arrays are now limited to a theoretical capacity of `(1<<31) - 1` elements, improving memory usage for most common use-cases (though maps support the `FIO_MAP_BIG` macro that changed this to `(1<<63) - 1` elements).
+
+- FIOBJ was re-written from the ground up, unifying the API used for core types and for the FIOBJ library.
+
+    This updates makes the FIOBJ types dynamically extendible, allowing new types to be added, removed or altered during both compilation and runtime stages.
+
+    This update simplifies some behavior (some FIOBJ algorithms are now recursive), making FIOBJ nesting slightly more dangerous (could explode the stack if abused). Nesting limits should be enforced and cyclic nesting should be avoided.
+
+    Also, this update **should** improve type recognition performance for primitive types (`true`, `false`, `null`, numbers, floats, Arrays, Strings and Hash Maps), increasing pointer tagging usage (at the expense of the number range that optimizes away memory allocation).
+
+- Risky Hash algorithm was updated.
+
+**Compatibility**: (2021-07-14) The CSTL library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
+
+**Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( GitHub: @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
+
 ---
 
 ## Previous facil.io versions
@@ -8,56 +53,8 @@ Previous versions had the core-STL feature-set spread across multiple files, res
 
 ---
 
-### v.0.8.0.beta1
 
-I believe C is a beautiful language and many more developers would enjoy it if a few more basic tools were made available to help beginners work with the language - this is why the 0.8.x version family extracted many of the most commonly used (non-network) features to a single header library ([the facil.io Simple Template Library, i.e., facil.io's STL](https://github.com/facil-io/cstl)).
-
-I know facil.io has these tools and could be used to make developers happy, not just when writing network applications, but when coding any application.
-
-In some ways, it's a small standard-library extension with a minimal STL, much like C++ has, only for C, and it holds the best non-network features facil.io offers, [the facil.io Simple Template Library, `fio-stl.h`](https://github.com/facil-io/cstl).
-
-
-Both The [the facil.io Simple Template Library](https://github.com/facil-io/cstl) and the [IO Core library](https://github.com/facil-io/io-core) are now developed in independent repositories, separating extension development from core development.
-
-This approach will make it easier for contributors to edit the code and submit PRs, as text editors (as well as `clang-format`) have an easier time handling 10 files with a 1000 line each than a single file with 10,000 lines.
-
-**Overview**:
-
-- Major API changes!
-
-   **Important**: Some API changes were made just to unify argument ordering across API functions. For example, `http_sendfile` argument orders had changed to fit `fio_sendfile`. This argument reordering is **silent** and **won't raise compilation errors**.
-
-- Multiple core rewrites / refinements (while, possibly, replacing old boring bugs with new and interesting one).
-
-- Core types and common helpers have been re-written and moved to a separate, stand alone, header-library: `fio-stl.h`
-
-   This updates the core type API in an attempt to create a more unified and intuitive API. for both core types and dynamic types (FIOBJ).
-
-   Note that this changes some function and macro names as well as possible behavior.
-
-   Some changes are semantic - such as renaming `fio_atomic_xchange` to `fio_atomic_exchange`.
-
-   Some have meaningful side-effects. i.e., Hash Maps and Arrays are now limited to a theoretical capacity of 1^31 elements, improving memory usage for most common use-cases.
-
-   This increases facil.io's core IO library to a 3 file library (from a 2 file library), however, the `fio-stl.h` library can be used as a powerful single-file macro based library.
-
-- FIOBJ was re-written from the ground up, unifying the API used for core types and for the FIOBJ library.
-
-    This updates make FIOBJ types dynamically extendible, allowing new types to be added, removed or altered during both compilation and runtime stages.
-
-    This update simplifies some behavior (some FIOBJ algorithms are now recursive), making FIOBJ nesting slightly more dangerous (could explode the stack). Nesting limits should be enforced and cyclic nesting should be avoided.
-
-    Also, this update **should** improve type recognition performance for primitive types (`true`, `false`, `null`, numbers, floats, Arrays, Strings and Hash Maps), increasing pointer tagging usage (at the expense of the number range that optimizes away memory allocation).
-
-- Risky Hash algorithm was updated.
-
-- The HTTP static file service just got a lot smarter, with customizable default headers, tests for missing `.html` file extensions, tests for `index.html` in folders and automatic support for `gzip` (`.gz`), `deflate` (`.zz`), `br` pre-compressed resources.
-
-- The old HTTP client API was deprecated in favor of a future (smarter) HTTP client approach that allows for persistent connections, as suggested by @stephenkgu in [issue #87](https://github.com/boazsegev/facil.io/issues/87).
-
-**Security**: a request smuggling attack vector and Transfer Encoding attack vectors in the HTTP/1.1 parser were exposed by Sam Sanoop from [the Snyk Security team (snyk.io)](https://snyk.io). They were fixed in the 0.8.0 HTTP/1.1 version.
-
-**Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
+... For further facio.io IO library updates see the facil.io library CHANGELOG. However, this is the point when the CSTL was born.
 
 ### v. 0.7.5 - 2020-05-18
 
