@@ -112,7 +112,7 @@ Stream API - Consuming the stream
  * be set to zero.
  *
  * Otherwise, `buf` may retain the same value or it may point directly to a
- * memory address wiithin the stream's buffer (the original value may be lost)
+ * memory address within the stream's buffer (the original value may be lost)
  * and `len` will be updated to the largest possible value for valid data that
  * can be read from `buf`.
  *

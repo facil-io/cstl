@@ -692,6 +692,10 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
 }
 #elif FIO_OS_WIN
 
+/* UNIX Sockets?
+ * https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
+ */
+
 static WSADATA fio___sock_useless_windows_data;
 FIO_CONSTRUCTOR(fio___sock_win_init) {
   static uint8_t flag = 0;

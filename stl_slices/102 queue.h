@@ -74,9 +74,18 @@ typedef struct {
 Queue API
 ***************************************************************************** */
 
+#if FIO_USE_THREAD_MUTEX_TMP
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO___LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
+  }
+#else
+/** May be used to initialize global, static memory, queues. */
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+#endif
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -133,8 +142,13 @@ typedef struct {
   FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
+#if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO___LOCK_INIT }
+  { .lock = ((fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT) }
+#else
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO_LOCK_INIT }
+#endif
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */

@@ -206,8 +206,8 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___PRINTF_STYLE  printf
-#elif defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) ||              \
-    defined(__MINGW32__) || defined(__BORLANDC__)
+#elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
+    defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN
@@ -305,6 +305,12 @@ Function Attributes
   static void fname(void)
 #endif
 #define FIO_CONSTRUCTOR(fname) FIO___CONSTRUCTOR_INTERNAL(fname)
+
+#define FIO_DESTRUCTOR_INTERNAL(fname)                                         \
+  static void fname(void);                                                     \
+  FIO_CONSTRUCTOR(fname##__hook) { atexit(fname); }                            \
+  static void fname(void)
+#define FIO_DESTRUCTOR(fname) FIO_DESTRUCTOR_INTERNAL(fname)
 
 #else
 /** Marks a function as a constructor - if supported. */
@@ -529,13 +535,14 @@ typedef struct fio___list_node_s {
 /** Loops through every node in the linked list except the head. */
 #define FIO_LIST_EACH(type, node_name, head, pos)                              \
   for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
+            *next____p_ls_##pos =                                              \
                 FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
        pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(type,                           \
-                                               node_name,                      \
-                                               next____p_ls->node_name.next)))
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
 #endif
 
 /** UNSAFE macro for pushing a node to a list. */
@@ -552,8 +559,11 @@ typedef struct fio___list_node_s {
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = NULL;                                              \
+    (n)->next = (n)->prev = (n);                                               \
   } while (0)
+
+/** UNSAFE macro for testing if a list is empty. */
+#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types
@@ -731,7 +741,7 @@ Memory allocation macros
 #undef FIO_MEM_REST
 
 /* if a global allocator was previously defined route macros to fio_malloc */
-#ifdef H___FIO_MALLOC___H
+#if defined(H___FIO_MALLOC___H)
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   fio_realloc2((ptr), (new_size), (copy_len))

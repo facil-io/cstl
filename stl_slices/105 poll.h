@@ -59,6 +59,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
+#if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
   {                                                                            \
     .settings =                                                                \
@@ -67,8 +68,20 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO___LOCK_INIT                                                    \
+    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
   }
+#else
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
+  {                                                                            \
+    .settings =                                                                \
+        {                                                                      \
+            .on_data = on_data_func,                                           \
+            .on_ready = on_ready_func,                                         \
+            .on_close = on_close_func,                                         \
+        },                                                                     \
+    .lock = FIO_LOCK_INIT                                                      \
+  }
+#endif
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 /** Creates a new polling object / queue. */

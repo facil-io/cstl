@@ -206,8 +206,8 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___PRINTF_STYLE  printf
-#elif defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) ||              \
-    defined(__MINGW32__) || defined(__BORLANDC__)
+#elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
+    defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN
@@ -305,6 +305,12 @@ Function Attributes
   static void fname(void)
 #endif
 #define FIO_CONSTRUCTOR(fname) FIO___CONSTRUCTOR_INTERNAL(fname)
+
+#define FIO_DESTRUCTOR_INTERNAL(fname)                                         \
+  static void fname(void);                                                     \
+  FIO_CONSTRUCTOR(fname##__hook) { atexit(fname); }                            \
+  static void fname(void)
+#define FIO_DESTRUCTOR(fname) FIO_DESTRUCTOR_INTERNAL(fname)
 
 #else
 /** Marks a function as a constructor - if supported. */
@@ -529,13 +535,14 @@ typedef struct fio___list_node_s {
 /** Loops through every node in the linked list except the head. */
 #define FIO_LIST_EACH(type, node_name, head, pos)                              \
   for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
+            *next____p_ls_##pos =                                              \
                 FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
        pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(type,                           \
-                                               node_name,                      \
-                                               next____p_ls->node_name.next)))
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
 #endif
 
 /** UNSAFE macro for pushing a node to a list. */
@@ -552,8 +559,11 @@ typedef struct fio___list_node_s {
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = NULL;                                              \
+    (n)->next = (n)->prev = (n);                                               \
   } while (0)
+
+/** UNSAFE macro for testing if a list is empty. */
+#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types
@@ -731,7 +741,7 @@ Memory allocation macros
 #undef FIO_MEM_REST
 
 /* if a global allocator was previously defined route macros to fio_malloc */
-#ifdef H___FIO_MALLOC___H
+#if defined(H___FIO_MALLOC___H)
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
   fio_realloc2((ptr), (new_size), (copy_len))
@@ -8526,9 +8536,6 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
         FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
   }
 #endif
-#if _MSC_VER
-  atexit(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup));
-#endif
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
 #endif /* DEBUG */
@@ -8687,6 +8694,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
         (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
     if (n->prev && n->next) {
       FIO_LIST_REMOVE(n);
+      n->prev = n->next = NULL;
     }
   }
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(c);
@@ -8798,6 +8806,7 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
       &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
     FIO_LIST_REMOVE(n);
+    n->next = n->prev = NULL;
     c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)((void *)n);
     fio_atomic_add_fetch(&c->ref, 1);
     p = (void *)n;
@@ -10345,9 +10354,18 @@ typedef struct {
 Queue API
 ***************************************************************************** */
 
+#if FIO_USE_THREAD_MUTEX_TMP
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO___LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
+  }
+#else
+/** May be used to initialize global, static memory, queues. */
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+#endif
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q);
@@ -10404,8 +10422,13 @@ typedef struct {
   FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 
+#if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO___LOCK_INIT }
+  { .lock = ((fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT) }
+#else
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO_LOCK_INIT }
+#endif
 
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
@@ -12709,6 +12732,10 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
 }
 #elif FIO_OS_WIN
 
+/* UNIX Sockets?
+ * https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
+ */
+
 static WSADATA fio___sock_useless_windows_data;
 FIO_CONSTRUCTOR(fio___sock_win_init) {
   static uint8_t flag = 0;
@@ -13062,6 +13089,7 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
+#if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
   {                                                                            \
     .settings =                                                                \
@@ -13070,8 +13098,20 @@ typedef struct {
             .on_ready = on_ready_func,                                         \
             .on_close = on_close_func,                                         \
         },                                                                     \
-    .lock = FIO___LOCK_INIT                                                    \
+    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
   }
+#else
+#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
+  {                                                                            \
+    .settings =                                                                \
+        {                                                                      \
+            .on_data = on_data_func,                                           \
+            .on_ready = on_ready_func,                                         \
+            .on_close = on_close_func,                                         \
+        },                                                                     \
+    .lock = FIO_LOCK_INIT                                                      \
+  }
+#endif
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 /** Creates a new polling object / queue. */
@@ -13762,7 +13802,7 @@ Stream API - Consuming the stream
  * be set to zero.
  *
  * Otherwise, `buf` may retain the same value or it may point directly to a
- * memory address wiithin the stream's buffer (the original value may be lost)
+ * memory address within the stream's buffer (the original value may be lost)
  * and `len` will be updated to the largest possible value for valid data that
  * can be read from `buf`.
  *

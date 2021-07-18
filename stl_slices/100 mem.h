@@ -1531,9 +1531,6 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
         FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
   }
 #endif
-#if _MSC_VER
-  atexit(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup));
-#endif
 #ifdef DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)();
 #endif /* DEBUG */
@@ -1692,6 +1689,7 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
         (FIO_LIST_NODE *)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0);
     if (n->prev && n->next) {
       FIO_LIST_REMOVE(n);
+      n->prev = n->next = NULL;
     }
   }
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(c);
@@ -1803,6 +1801,7 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
       &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks) {
     FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
     FIO_LIST_REMOVE(n);
+    n->next = n->prev = NULL;
     c = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)((void *)n);
     fio_atomic_add_fetch(&c->ref, 1);
     p = (void *)n;

@@ -133,13 +133,13 @@ Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never
 void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
 ```
 
-Reads data from the stream (if any), leaving it in the stream.
+Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance).
 
 `buf` MUST point to a buffer with - at least - `len` bytes. This is required in case the packed data is fragmented or references a file and needs to be copied to an available buffer.
 
 On error, or if the stream is empty, `buf` will be set to NULL and `len` will be set to zero.
 
-Otherwise, `buf` may retain the same value or it may point directly to a memory address wiithin the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
+Otherwise, `buf` may retain the same value or it may point directly to a memory address within the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
 
 **Note**: this isn't thread safe.
 
