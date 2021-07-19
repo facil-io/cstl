@@ -101,9 +101,10 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
 #else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void);
 #endif /* FIO_REF_FLEX_TYPE */
+
 /** Increases the reference count. */
-IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
-                                FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
+FIO_IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
+                                    FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
 
 /**
  * Frees a reference counted object (or decreases the reference count).
@@ -117,6 +118,19 @@ IFUNC int FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
 IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
                                  metadata)(FIO_REF_TYPE_PTR wrapped);
 #endif
+
+/* *****************************************************************************
+Inlined Implementation
+***************************************************************************** */
+/** Increases the reference count. */
+FIO_IFUNC FIO_REF_TYPE_PTR
+FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
+  FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
+  fio_atomic_add(&o->ref, 1);
+  return wrapped_;
+}
 
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
@@ -168,16 +182,6 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
   FIO_REF_INIT((ret[0]));
   return (FIO_REF_TYPE_PTR)(FIO_PTR_TAG(ret));
-}
-
-/** Increases the reference count. */
-IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
-                                FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
-  FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
-  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
-      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
-  fio_atomic_add(&o->ref, 1);
-  return wrapped_;
 }
 
 /** Frees a reference counted object (or decreases the reference count). */
