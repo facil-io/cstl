@@ -16,11 +16,13 @@
 # * If you want to concat a number of header / source / markdown (docs) files
 #   than place them in the `LIB_CONCAT_FOLDER`.
 #
-# * Test files are independent (each test files compiles and runs as is) and
+# * Test files are independent, each test files compiles and runs as is, and
 #   placed in the `TEST_ROOT` folder (i.e., `./tests`).
 #
 #   Run tests (i.e., the test file `foo.c`) with:       `make test/foo`
 #   Run tests after linking with the library code with: `make test/lib/foo`
+#   Run tests with DEBUG mode (no optimizations) with:  `make test/db/foo`
+#   Run tests with DEBUG and  linking to library with:  `make test/lib/db/foo`
 #
 #############################################################################
 
