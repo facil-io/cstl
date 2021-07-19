@@ -2874,6 +2874,16 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
 
 Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
 
+#### `fio_sock_wait_io`
+
+```c
+short fio_sock_wait_io(int fd, short events, int timeout)
+```
+
+Uses `poll` to wait until an IO device has one or more of the evens listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) have passed.
+
+Returns 0 on timeout, -1 on error or the events that are valid.
+
 #### `fio_sock_poll`
 
 ```c
@@ -4166,7 +4176,7 @@ Helpful macros to define might include:
 - `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO). By default, no auto-eviction is performed.
 
 - `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
-- `FIO_MAP_HASH_FN`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.
+- `FIO_MAP_HASH_FN(key)`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.
 - `FIO_MAP_BIG`, if defined, the maximum theoretical capacity increases to `(1 << 64) -1`.
 To limit the number of elements in a map (FIFO, ignoring last access time), allowing it to behave similarly to a simple caching primitive, define: `FIO_MAP_MAX_ELEMENTS`.
 - `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when partial/full collisions occur (effects the load factor). Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default either `7` or `13`.

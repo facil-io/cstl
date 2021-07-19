@@ -70,6 +70,16 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
 
 Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
 
+#### `fio_sock_wait_io`
+
+```c
+short fio_sock_wait_io(int fd, short events, int timeout)
+```
+
+Uses `poll` to wait until an IO device has one or more of the evens listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) have passed.
+
+Returns 0 on timeout, -1 on error or the events that are valid.
+
 #### `fio_sock_poll`
 
 ```c

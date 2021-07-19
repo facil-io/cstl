@@ -1151,7 +1151,7 @@ Patched functions
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
  */
 /** patch for clock_gettime */
-FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
+SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
   static union {
@@ -12307,6 +12307,16 @@ SFUNC int fio_sock_set_non_block(int fd);
  */
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
 
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_RW(fd, timeout_)                                         \
+  fio_sock_wait_io(fd, POLLIN | POLLOUT, timeout_)
+
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_R(fd, timeout_) fio_sock_wait_io(fd, POLLIN, timeout_)
+
+/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
+#define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
+
 /* *****************************************************************************
 Small Poll API
 ***************************************************************************** */
@@ -12358,24 +12368,6 @@ typedef struct {
  */
 FIO_IFUNC int fio_sock_poll(fio_sock_poll_args args);
 #define fio_sock_poll(...) fio_sock_poll((fio_sock_poll_args){__VA_ARGS__})
-
-/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
-#define FIO_SOCK_WAIT_RW(fd, timeout_)                                         \
-  fio_sock_poll(.timeout = (timeout_),                                         \
-                .count = 1,                                                    \
-                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW((fd))))
-
-/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
-#define FIO_SOCK_WAIT_R(fd, timeout_)                                          \
-  fio_sock_poll(.timeout = (timeout_),                                         \
-                .count = 1,                                                    \
-                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_R((fd))))
-
-/** A helper macro that waits on a single IO with no callbacks (0 = no event) */
-#define FIO_SOCK_WAIT_W(fd, timeout_)                                          \
-  fio_sock_poll(.timeout = (timeout_),                                         \
-                .count = 1,                                                    \
-                FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_W((fd))))
 
 /* *****************************************************************************
 IO Poll - Implementation (always static / inlined)

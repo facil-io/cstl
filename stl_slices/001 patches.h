@@ -166,7 +166,7 @@ Patched functions
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
  */
 /** patch for clock_gettime */
-FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
+SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
   static union {
