@@ -292,6 +292,8 @@ Function Attributes
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
+#undef FIO_CONSTRUCTOR
+#undef FIO_DESTRUCTOR
 #define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
   static void fname(void);                                                     \
   __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
