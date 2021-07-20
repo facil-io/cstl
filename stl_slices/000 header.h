@@ -45,6 +45,8 @@ This file also contains common helper macros / primitives, such as:
 
 * Naming Macros - i.e., `FIO_NAME` / `FIO_NAME2` / `FIO_NAME_BL`
 
+* OS portable Threads - defined by `FIO_THREADS`
+
 * Sleep / Thread Scheduling Macros - i.e., `FIO_THREAD_RESCHEDULE`
 
 * Logging and Assertion (no heap allocation) - defined by `FIO_LOG`
@@ -67,9 +69,11 @@ This file also contains common helper macros / primitives, such as:
 
 * Socket Helpers - defined by `FIO_SOCK`
 
+* Polling Helpers - defined by `FIO_POLL`
+
 * Data Stream Containers - defined by `FIO_STREAM`
 
-* Signal (passthrough) Monitors - defined by `FIO_SIGNAL`
+* Signal (pass-through) Monitors - defined by `FIO_SIGNAL`
 
 * Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
   if `FIO_MALLOC` is used, it updates `FIO_MEM_REALLOC` etc'
@@ -915,11 +919,15 @@ Common macros
 
 ***************************************************************************** */
 
-/* FIO_MEMORY_NAME dependencies */
+/* Modules that require logging */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
+#endif /* FIO_MALLOC */
+
+/* Modules that require randomness */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
@@ -930,8 +938,10 @@ Common macros
 #define FIO_SOCK
 #endif
 
+/* Modules that require Threads data */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
-    defined(FIO_MEMORY_USE_THREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
+    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 
@@ -944,7 +954,7 @@ Common macros
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
-    defined(FIO_CLI)
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
@@ -968,10 +978,9 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||                        \
-    ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
+    (defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) ||                       \
     (defined(FIO_QUEUE) && !FIO_USE_THREAD_MUTEX_TMP) || defined(FIO_JSON) ||  \
-    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP) ||             \
-    (defined(FIO_THREADS) && FIO_OS_WIN)
+    defined(FIO_SIGNAL) || defined(FIO_BITMAP) || defined(FIO_THREADS)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif

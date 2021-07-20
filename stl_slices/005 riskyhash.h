@@ -373,10 +373,10 @@ Random - Implementation
 #include <sys/time.h>
 #endif
 
-static __thread uint64_t fio___rand_state[4]; /* random state */
-static __thread size_t fio___rand_counter;    /* seed counter */
+static volatile uint64_t fio___rand_state[4]; /* random state */
+static volatile size_t fio___rand_counter;    /* seed counter */
 /* feeds random data to the algorithm through this 256 bit feed. */
-static __thread uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
+static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
                                                  0x7cc568e838f6a40d,
                                                  0x4bb8d885a0fe47d5,
                                                  0x95561f0927ad7ecd};
@@ -433,27 +433,27 @@ IFUNC void fio_rand_reseed(void) {
   {
     struct rusage rusage;
     getrusage(RUSAGE_SELF, &rusage);
-    fio___rand_state[0] =
+    fio___rand_state[0] ^=
         fio_risky_hash(&rusage, sizeof(rusage), fio___rand_state[0]);
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
     uint64_t clk = (uint64_t)fio_time_nano();
-    fio___rand_state[0] =
+    fio___rand_state[0] ^=
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
     clk = fio_time_nano();
-    fio___rand_state[1] =
+    fio___rand_state[1] ^=
         fio_risky_hash(&clk,
                        sizeof(clk),
                        fio___rand_state[1] + fio___rand_counter);
   }
-  fio___rand_state[2] =
-      fio_risky_hash(fio___rand_buffer,
+  fio___rand_state[2] ^=
+      fio_risky_hash((void *)fio___rand_buffer,
                      sizeof(fio___rand_buffer),
                      fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] = fio_risky_hash(fio___rand_state,
-                                       sizeof(fio___rand_state),
-                                       fio___rand_state[1] + jitter_samples);
+  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
+                                        sizeof(fio___rand_state),
+                                        fio___rand_state[1] + jitter_samples);
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
   fio___rand_buffer[2] ^= fio___rand_buffer[0];

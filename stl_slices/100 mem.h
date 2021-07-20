@@ -5,13 +5,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_ATOMIC                  /* Development inclusion - ignore line */
-#define FIO_RAND                    /* Development inclusion - ignore line */
-#define FIO_RISKY_HASH              /* Development inclusion - ignore line */
+#define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
-#define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
+#include "007 threads.h"            /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -1280,7 +1278,15 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
   static size_t warning_printed = 0;
 #endif
   /** thread arena value */
-  static __thread size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+  size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+  {
+    /* select the default arena selection using a thread ID. */
+    union {
+      void *p;
+      fio_thread_t t;
+    } u = {.t = fio_thread_current()};
+    FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var) = (size_t)fio_risky_ptr(u.p);
+  }
   for (;;) {
     /* rotate all arenas to find one that's available */
     for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
@@ -1293,7 +1299,6 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
       if (FIO_MEMORY_TRYLOCK(
               FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[index].lock))
         continue;
-      FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var) = index;
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + index);
     }
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
@@ -1304,7 +1309,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
                             "          Consider recompiling with more arenas.");
     warning_printed = 1;
 #endif /* DEBUG */
-#if FIO_MEMORY_USE_THREAD_MUTEX
+#if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
     /* slow wait for last arena used by the thread */
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
                         ->arena[FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var)]

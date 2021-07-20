@@ -45,6 +45,8 @@ This file also contains common helper macros / primitives, such as:
 
 * Naming Macros - i.e., `FIO_NAME` / `FIO_NAME2` / `FIO_NAME_BL`
 
+* OS portable Threads - defined by `FIO_THREADS`
+
 * Sleep / Thread Scheduling Macros - i.e., `FIO_THREAD_RESCHEDULE`
 
 * Logging and Assertion (no heap allocation) - defined by `FIO_LOG`
@@ -67,9 +69,11 @@ This file also contains common helper macros / primitives, such as:
 
 * Socket Helpers - defined by `FIO_SOCK`
 
+* Polling Helpers - defined by `FIO_POLL`
+
 * Data Stream Containers - defined by `FIO_STREAM`
 
-* Signal (passthrough) Monitors - defined by `FIO_SIGNAL`
+* Signal (pass-through) Monitors - defined by `FIO_SIGNAL`
 
 * Custom Memory Pool / Allocation - defined by `FIO_MEMORY_NAME` / `FIO_MALLOC`,
   if `FIO_MALLOC` is used, it updates `FIO_MEM_REALLOC` etc'
@@ -913,11 +917,15 @@ Common macros
 
 ***************************************************************************** */
 
-/* FIO_MEMORY_NAME dependencies */
+/* Modules that require logging */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
+#endif /* FIO_MALLOC */
+
+/* Modules that require randomness */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
@@ -928,8 +936,10 @@ Common macros
 #define FIO_SOCK
 #endif
 
+/* Modules that require Threads data */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
-    defined(FIO_MEMORY_USE_THREAD_MUTEX) || defined(FIO_USE_THREAD_MUTEX_TMP)
+    defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
 #endif
 
@@ -942,7 +952,7 @@ Common macros
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
-    defined(FIO_CLI)
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
@@ -966,10 +976,9 @@ Common macros
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
     (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||                        \
-    ((defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) && !FIO_OS_WIN) ||      \
+    (defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) ||                       \
     (defined(FIO_QUEUE) && !FIO_USE_THREAD_MUTEX_TMP) || defined(FIO_JSON) ||  \
-    (defined(FIO_SIGNAL) && !FIO_OS_WIN) || defined(FIO_BITMAP) ||             \
-    (defined(FIO_THREADS) && FIO_OS_WIN)
+    defined(FIO_SIGNAL) || defined(FIO_BITMAP) || defined(FIO_THREADS)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -3801,10 +3810,10 @@ Random - Implementation
 #include <sys/time.h>
 #endif
 
-static __thread uint64_t fio___rand_state[4]; /* random state */
-static __thread size_t fio___rand_counter;    /* seed counter */
+static volatile uint64_t fio___rand_state[4]; /* random state */
+static volatile size_t fio___rand_counter;    /* seed counter */
 /* feeds random data to the algorithm through this 256 bit feed. */
-static __thread uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
+static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
                                                  0x7cc568e838f6a40d,
                                                  0x4bb8d885a0fe47d5,
                                                  0x95561f0927ad7ecd};
@@ -3861,27 +3870,27 @@ IFUNC void fio_rand_reseed(void) {
   {
     struct rusage rusage;
     getrusage(RUSAGE_SELF, &rusage);
-    fio___rand_state[0] =
+    fio___rand_state[0] ^=
         fio_risky_hash(&rusage, sizeof(rusage), fio___rand_state[0]);
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
     uint64_t clk = (uint64_t)fio_time_nano();
-    fio___rand_state[0] =
+    fio___rand_state[0] ^=
         fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
     clk = fio_time_nano();
-    fio___rand_state[1] =
+    fio___rand_state[1] ^=
         fio_risky_hash(&clk,
                        sizeof(clk),
                        fio___rand_state[1] + fio___rand_counter);
   }
-  fio___rand_state[2] =
-      fio_risky_hash(fio___rand_buffer,
+  fio___rand_state[2] ^=
+      fio_risky_hash((void *)fio___rand_buffer,
                      sizeof(fio___rand_buffer),
                      fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] = fio_risky_hash(fio___rand_state,
-                                       sizeof(fio___rand_state),
-                                       fio___rand_state[1] + jitter_samples);
+  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
+                                        sizeof(fio___rand_state),
+                                        fio___rand_state[1] + jitter_samples);
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
   fio___rand_buffer[2] ^= fio___rand_buffer[0];
@@ -7010,13 +7019,11 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_ATOMIC                  /* Development inclusion - ignore line */
-#define FIO_RAND                    /* Development inclusion - ignore line */
-#define FIO_RISKY_HASH              /* Development inclusion - ignore line */
+#define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
-#define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
+#include "007 threads.h"            /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -8285,7 +8292,14 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
   static size_t warning_printed = 0;
 #endif
   /** thread arena value */
-  static __thread size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+  size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+  {
+    union {
+      void *p;
+      fio_thread_t t;
+    } u = {.t = fio_thread_current()};
+    FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var) = (size_t)fio_risky_ptr(u.p);
+  }
   for (;;) {
     /* rotate all arenas to find one that's available */
     for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
@@ -8309,7 +8323,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
                             "          Consider recompiling with more arenas.");
     warning_printed = 1;
 #endif /* DEBUG */
-#if FIO_MEMORY_USE_THREAD_MUTEX
+#if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
     /* slow wait for last arena used by the thread */
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
                         ->arena[FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var)]
