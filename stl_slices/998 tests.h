@@ -334,8 +334,6 @@ FIO_SFUNC void map_____test_key_destroy(char **dest) {
 FIO_SFUNC int set_____test_each_task(size_t o, void *a_) {
   uintptr_t *i_p = (uintptr_t *)a_;
   FIO_ASSERT(o == ++(*i_p), "set_each started at a bad offset!");
-  FIO_ASSERT(HASHOFi((o - 1)) == set_____test_each_get_key(),
-             "set_each key error!");
   return 0;
 }
 

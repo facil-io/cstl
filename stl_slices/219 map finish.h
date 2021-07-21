@@ -12,9 +12,9 @@ Map Testing
 #endif                              /* Development inclusion - ignore line */
 #if defined(FIO_MAP_TEST) && defined(FIO_MAP_NAME)
 
-FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(FIO_MAP_TYPE o,
+FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(FIO_MAP_OBJ o,
                                                                void *p) {
-  *(size_t *)p -= (size_t)o;
+  *(size_t *)p -= (size_t)FIO_MAP_OBJ2TYPE(o);
   return 0;
 }
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {

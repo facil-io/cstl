@@ -304,6 +304,22 @@ FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o);
 FIOBJ Containers (iteration)
 ***************************************************************************** */
 
+typedef struct fiobj_each_s {
+  /**
+   * When entering nested iterations (`fiobj_each2`), this allows access to the
+   * container of the object being iterated.
+   */
+  struct fiobj_each_s *parent;
+  /** The object being iterated. Avoid altering this object.*/
+  FIOBJ iterated;
+  /** The value at the current position */
+  FIOBJ value;
+  /** The key (i.e., for Hash Maps), if any. */
+  FIOBJ key;
+  /* The `key` field is only valid when iterating a Hash like object */
+  int key_is_valid;
+} fiobj_each_s;
+
 /**
  * Performs a task for each element held by the FIOBJ object.
  *
@@ -351,7 +367,7 @@ FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_NULL)(void) {
 }
 
 /* *****************************************************************************
-FIOBJ Type - Extendability (FIOBJ_T_OTHER)
+FIOBJ Type - Extensibility (FIOBJ_T_OTHER)
 ***************************************************************************** */
 
 /** FIOBJ types can be extended using virtual function tables. */
@@ -722,6 +738,13 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 const char *buf,
                                 size_t len,
                                 FIOBJ *old);
+
+/* each wrappers / helpers */
+FIO_SFUNC uint32_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                            each1)(FIOBJ map,
+                                   ssize_t start_at,
+                                   int (*task)(FIOBJ value, void *arg),
+                                   void *arg);
 
 /* *****************************************************************************
 FIOBJ JSON support
@@ -1213,7 +1236,7 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
                     each)(o, start_at, task, arg);
   case FIOBJ_T_HASH:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                    each)(o, start_at, task, arg);
+                    each1)(o, start_at, task, arg);
   case FIOBJ_T_OTHER:
     return (*fiobj_object_metadata(o))->each1(o, start_at, task, arg);
   }
@@ -1416,6 +1439,37 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
     (dest, i->obj.key, fiobj_dup(i->obj.value));
   }
+}
+
+/* each wrappers / helpers */
+struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) {
+  int (*task)(FIOBJ value, void *arg);
+  void *arg;
+};
+
+/* each wrappers / helpers */
+FIO_SFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each1_wrapper_task)(
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), couplet_s) o,
+    void *arg) {
+  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) *w = arg;
+  return w->task(o.value, w->arg);
+}
+
+/* each wrappers / helpers */
+FIO_SFUNC uint32_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                            each1)(FIOBJ map,
+                                   ssize_t start_at,
+                                   int (*task)(FIOBJ value, void *arg),
+                                   void *arg) {
+  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) wrapper = {
+      .task = task,
+      .arg = arg,
+  };
+  return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each)(
+      map,
+      start_at,
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each1_wrapper_task),
+      &wrapper);
 }
 
 /* *****************************************************************************

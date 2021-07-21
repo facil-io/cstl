@@ -4431,7 +4431,7 @@ Rehashes the Hash Map / Set. Usually this is performed automatically, no need to
 #### `MAP_each_next`
 
 ```c
-MAP_each_s * MAP_each_next(FIO_MAP_PTR m, MAP_each_s ** first, MAP_each_s * pos);
+MAP_node_s * MAP_each_next(FIO_MAP_PTR m, MAP_node_s ** first, MAP_node_s * pos);
 ```
 
 Returns a pointer to the (next) object's information in the map.
@@ -4439,7 +4439,7 @@ Returns a pointer to the (next) object's information in the map.
 To access the object information, use:
 
 ```c
-MAP_each_s * pos = MAP_each_next(map, NULL);
+MAP_node_s * pos = MAP_each_next(map, NULL);
 ```
 
 - `i->hash` to access the hash value.
@@ -4467,13 +4467,15 @@ The value of `first` is set automatically by the function. Manually changing thi
 ```c
 uint32_t MAP_each(FIO_MAP_PTR m,
                   int32_t start_at,
-                  int (*task)(FIO_MAP_TYPE obj, void *arg),
+                  int (*task)(FIO_MAP_OBJ obj, void *arg),
                   void *arg);
 ```
 
 Iteration using a callback for each element in the map.
 
 The callback task function must accept an element variable as well as an opaque user pointer.
+
+When the map is a Hash Map (has both a key and an object), the value can be accessed using `obj->value` and the key using `obj->key`. However, changing or altering the contents of the key might break the Hash Map, so do NOT do that.
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
@@ -4495,7 +4497,7 @@ _Note: For sets, returns the hash value, for hash maps, returns the key value._
 
 ```c
 #define FIO_MAP_EACH(map_type, map_p, pos)                                    \
-  for (FIO_NAME(map_type, each_s) *pos =                                       \
+  for (FIO_NAME(map_type, node_s) *pos =                                       \
            FIO_NAME(map_type, each_next)(map_p, NULL);                         \
        pos;                                                                    \
        pos = FIO_NAME(map_type, each_next)(map_p, pos))

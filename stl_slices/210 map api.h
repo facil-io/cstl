@@ -336,8 +336,8 @@ Map API
 Types
 ***************************************************************************** */
 
-/** The type for each member in the map. */
-typedef struct FIO_NAME(FIO_MAP_NAME, each_s) FIO_NAME(FIO_MAP_NAME, each_s);
+/** The type for each node in the map. */
+typedef struct FIO_NAME(FIO_MAP_NAME, node_s) FIO_NAME(FIO_MAP_NAME, node_s);
 /** The Map Type (container) itself. */
 typedef struct FIO_NAME(FIO_MAP_NAME, s) FIO_NAME(FIO_MAP_NAME, s);
 
@@ -347,7 +347,7 @@ typedef struct FIO_NAME(FIO_MAP_NAME, s) FIO_NAME(FIO_MAP_NAME, s);
   { 0 }
 #endif
 
-struct FIO_NAME(FIO_MAP_NAME, each_s) {
+struct FIO_NAME(FIO_MAP_NAME, node_s) {
   /** the data being stored in the Map / key-value pair: obj.key obj.value. */
   FIO_MAP_OBJ obj;
 #if FIO_MAP_HASH_CACHED
@@ -465,10 +465,10 @@ Iteration
 ***************************************************************************** */
 
 /** Takes a previous (or NULL) item's position and returns the next. */
-FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos);
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos);
 
 /**
  * Iteration using a callback for each element in the map.
@@ -484,16 +484,8 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
 SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                  each)(FIO_MAP_PTR map,
                                        ssize_t start_at,
-                                       int (*task)(FIO_MAP_TYPE obj, void *arg),
+                                       int (*task)(FIO_MAP_OBJ obj, void *arg),
                                        void *arg);
-
-#ifdef FIO_MAP_KEY
-/** Returns an object's key while in an iteration callback. */
-SFUNC FIO_MAP_KEY FIO_NAME(FIO_MAP_NAME, each_get_key)(void);
-#else
-/** Returns an object's key while in an iteration callback. */
-SFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, each_get_key)(void);
-#endif
 
 /* *****************************************************************************
 
@@ -585,7 +577,7 @@ Iteration Macro
  */
 #define FIO_MAP_EACH(map_name, map_p, pos)                                     \
   for (FIO_NAME(map_name,                                                      \
-                each_s) *first___ = NULL,                                      \
+                node_s) *first___ = NULL,                                      \
                         *pos = FIO_NAME(map_name,                              \
                                         each_next)(map_p, &first___, NULL);    \
        pos;                                                                    \

@@ -39,11 +39,11 @@ Benchmark: https://tessil.github.io/2016/08/29/benchmark-hopscotch-map.html
 /** An Unordered Map Type */
 struct FIO_NAME(FIO_MAP_NAME, s) {
   /** Internal map / memory - do not access directly */
-  FIO_NAME(FIO_MAP_NAME, each_s) * map;
+  FIO_NAME(FIO_MAP_NAME, node_s) * map;
   /** Object count - do not access directly */
   FIO_MAP_SIZE_TYPE count;
 #if FIO_MAP_EVICT_LRU
-  /** LRU evicion monitoring - do not access directly */
+  /** LRU eviction monitoring - do not access directly */
   FIO_MAP_SIZE_TYPE last_used;
 #endif /* FIO_MAP_EVICT_LRU */
   uint8_t bits;
@@ -104,10 +104,10 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   return FIO_MAP_CAPA(m->bits);
 }
 
-FIO_IFUNC FIO_NAME(FIO_MAP_NAME, each_s) *
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, each_s) * pos) {
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m || !first)
@@ -169,7 +169,7 @@ Unordered Map Implementation - possibly externed functions.
 
 #ifndef FIO_MAP_MEMORY_SIZE
 #define FIO_MAP_MEMORY_SIZE(bits)                                              \
-  ((sizeof(FIO_NAME(FIO_MAP_NAME, each_s)) + sizeof(uint8_t)) *                \
+  ((sizeof(FIO_NAME(FIO_MAP_NAME, node_s)) + sizeof(uint8_t)) *                \
    FIO_MAP_CAPA(bits))
 #endif
 
@@ -316,7 +316,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
                                                 size_t bits) {
   if (!m || bits >= (sizeof(FIO_MAP_SIZE_TYPE) * 8))
     return -1;
-  FIO_NAME(FIO_MAP_NAME, each_s) *tmp = (FIO_NAME(FIO_MAP_NAME, each_s) *)
+  FIO_NAME(FIO_MAP_NAME, node_s) *tmp = (FIO_NAME(FIO_MAP_NAME, node_s) *)
       FIO_MEM_REALLOC_(NULL, 0, FIO_MAP_MEMORY_SIZE(bits), 0);
   if (!tmp)
     return -1;
@@ -749,14 +749,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR map) {
 Iteration
 *****************************************************************************
 */
-FIO_SFUNC __thread FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
-FIO_SFUNC __thread FIO_NAME(FIO_MAP_NAME, s) *
-    FIO_NAME(FIO_MAP_NAME, __each_map) = NULL;
 
 SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
                                  each)(FIO_MAP_PTR map,
                                        ssize_t start_at,
-                                       int (*task)(FIO_MAP_TYPE obj, void *arg),
+                                       int (*task)(FIO_MAP_OBJ obj, void *arg),
                                        void *arg) {
   FIO_MAP_SIZE_TYPE count = (FIO_MAP_SIZE_TYPE)start_at;
   FIO_NAME(FIO_MAP_NAME, s) *m =
@@ -775,11 +772,6 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   if ((FIO_MAP_SIZE_TYPE)start_at >= m->count)
     return m->count;
 
-  FIO_NAME(FIO_MAP_NAME, s) *old_map = FIO_NAME(FIO_MAP_NAME, __each_map);
-  FIO_MAP_SIZE_TYPE old_pos = FIO_NAME(FIO_MAP_NAME, __each_pos);
-  FIO_NAME(FIO_MAP_NAME, __each_pos) = 0;
-  FIO_NAME(FIO_MAP_NAME, __each_map) = m;
-
 #if FIO_MAP_EVICT_LRU
   if (start_at) {
     FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
@@ -788,15 +780,13 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
         --start_at;
         continue;
       }
-      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
-      if (task(FIO_MAP_OBJ2TYPE(m->map[pos].obj), arg) == -1)
+      if (task(m->map[pos].obj, arg) == -1)
         goto finish;
     }
   } else {
     FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
       ++count;
-      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
-      if (task(FIO_MAP_OBJ2TYPE(m->map[pos].obj), arg) == -1)
+      if (task(m->map[pos].obj, arg) == -1)
         goto finish;
     }
   }
@@ -832,11 +822,8 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
       row ^= UINT64_C(0x8080808080808080);
       for (int j = 0; j < 8; ++j) {
         if ((row & UINT64_C(0xFF))) {
-          FIO_NAME(FIO_MAP_NAME, __each_pos) = pos + j;
           ++count;
-          if (task(FIO_MAP_OBJ2TYPE(
-                       m->map[FIO_NAME(FIO_MAP_NAME, __each_pos)].obj),
-                   arg) == -1)
+          if (task(m->map[pos + j].obj, arg) == -1)
             goto finish;
         }
         row >>= 8;
@@ -847,10 +834,8 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
   while (pos < FIO_MAP_CAPA(m->bits)) {
     if (FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] &&
         FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] != 255) {
-      FIO_NAME(FIO_MAP_NAME, __each_pos) = pos;
       ++count;
-      if (task(FIO_MAP_OBJ2TYPE(m->map[FIO_NAME(FIO_MAP_NAME, __each_pos)].obj),
-               arg) == -1)
+      if (task(m->map[pos].obj, arg) == -1)
         goto finish;
     }
     ++pos;
@@ -858,35 +843,9 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
 #endif /* FIO_MAP_EVICT_LRU */
 
 finish:
-  FIO_NAME(FIO_MAP_NAME, __each_pos) = old_pos;
-  FIO_NAME(FIO_MAP_NAME, __each_map) = old_map;
   return count;
 }
 
-#ifdef FIO_MAP_KEY
-SFUNC FIO_MAP_KEY FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
-  if (!FIO_NAME(FIO_MAP_NAME, __each_map) ||
-      !FIO_NAME(FIO_MAP_NAME, __each_map)->count)
-    return FIO_MAP_KEY_INVALID;
-  return FIO_NAME(FIO_MAP_NAME, __each_map)
-      ->map[FIO_NAME(FIO_MAP_NAME, __each_pos)]
-      .obj.key;
-}
-#else
-
-SFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, each_get_key)(void) {
-#if FIO_MAP_HASH_CACHED
-  if (!FIO_NAME(FIO_MAP_NAME, __each_map) ||
-      !FIO_NAME(FIO_MAP_NAME, __each_map)->count)
-    return 0;
-  return FIO_NAME(FIO_MAP_NAME, __each_map)
-      ->map[FIO_NAME(FIO_MAP_NAME, __each_pos)]
-      .hash;
-#else
-  return 0;
-#endif
-}
-#endif
 /* *****************************************************************************
 Unordered Map Cleanup
 ***************************************************************************** */
