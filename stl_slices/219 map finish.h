@@ -12,9 +12,9 @@ Map Testing
 #endif                              /* Development inclusion - ignore line */
 #if defined(FIO_MAP_TEST) && defined(FIO_MAP_NAME)
 
-FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(FIO_MAP_OBJ o,
-                                                               void *p) {
-  *(size_t *)p -= (size_t)FIO_MAP_OBJ2TYPE(o);
+FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(
+    FIO_NAME(FIO_MAP_NAME, each_s) * e) {
+  *(size_t *)e->udata -= (size_t)e->value;
   return 0;
 }
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
@@ -166,9 +166,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     tmp = total;
     count = FIO_NAME(FIO_MAP_NAME,
                      each)(&m,
-                           0,
                            FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task)),
-                           (void *)&tmp);
+                           (void *)&tmp,
+                           0);
     FIO_ASSERT(count + 1 == MEMBERS,
                "each task error, repetitions %zu != %zu",
                count,

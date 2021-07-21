@@ -304,20 +304,24 @@ FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o);
 FIOBJ Containers (iteration)
 ***************************************************************************** */
 
+/** Iteration information structure passed to the callback. */
 typedef struct fiobj_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIOBJ const parent;
+  /** The index to start at / the current object's index */
+  uint64_t index;
+  /** Always 1, but may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct fiobj_each_s *info);
+  /** The argument passed along to the task. */
+  void *udata;
   /**
-   * When entering nested iterations (`fiobj_each2`), this allows access to the
-   * container of the object being iterated.
-   */
-  struct fiobj_each_s *parent;
-  /** The object being iterated. Avoid altering this object.*/
-  FIOBJ iterated;
-  /** The value at the current position */
-  FIOBJ value;
-  /** The key (i.e., for Hash Maps), if any. */
-  FIOBJ key;
-  /* The `key` field is only valid when iterating a Hash like object */
-  int key_is_valid;
+   * The objects at the current index.
+   *
+   * For Hash Maps, `obj[0]` is the value and `obj[1]` is the key.
+   * */
+  FIOBJ obj[];
 } fiobj_each_s;
 
 /**
@@ -328,9 +332,9 @@ typedef struct fiobj_each_s {
  * Returns the "stop" position - the number of elements processed + `start_at`.
  */
 FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
-                               int32_t start_at,
-                               int (*task)(FIOBJ child, void *arg),
-                               void *arg);
+                               int (*task)(fiobj_each_s *info),
+                               void *udata,
+                               int32_t start_at);
 
 /**
  * Performs a task for the object itself and each element held by the FIOBJ
@@ -344,8 +348,8 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
  * Returns the number of elements processed.
  */
 FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
-                                int (*task)(FIOBJ child, void *arg),
-                                void *arg);
+                                int (*task)(fiobj_each_s *info),
+                                void *udata);
 
 /* *****************************************************************************
 FIOBJ Primitives (NULL, True, False)
@@ -390,9 +394,9 @@ typedef struct {
   uint32_t (*count)(FIOBJ o);
   /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
   uint32_t (*each1)(FIOBJ o,
-                    int32_t start_at,
-                    int (*task)(FIOBJ child, void *arg),
-                    void *arg);
+                    int (*task)(fiobj_each_s *e),
+                    void *udata,
+                    int32_t start_at);
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
@@ -738,13 +742,6 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 const char *buf,
                                 size_t len,
                                 FIOBJ *old);
-
-/* each wrappers / helpers */
-FIO_SFUNC uint32_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                            each1)(FIOBJ map,
-                                   ssize_t start_at,
-                                   int (*task)(FIOBJ value, void *arg),
-                                   void *arg);
 
 /* *****************************************************************************
 FIOBJ JSON support
@@ -1222,9 +1219,9 @@ FIOBJ Basic Iteration
  * Returns the "stop" position - the number of elements processed + `start_at`.
  */
 FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
-                               int32_t start_at,
-                               int (*task)(FIOBJ child, void *arg),
-                               void *arg) {
+                               int (*task)(fiobj_each_s *e),
+                               void *udata,
+                               int32_t start_at) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE: /* fallthrough */
   case FIOBJ_T_NUMBER:    /* fallthrough */
@@ -1232,13 +1229,19 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
   case FIOBJ_T_FLOAT:
     return 0;
   case FIOBJ_T_ARRAY:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
-                    each)(o, start_at, task, arg);
+    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each)(
+        o,
+        (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each_s *)))task,
+        udata,
+        start_at);
   case FIOBJ_T_HASH:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                    each1)(o, start_at, task, arg);
+    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each)(
+        o,
+        (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each_s *)))task,
+        udata,
+        start_at);
   case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->each1(o, start_at, task, arg);
+    return (*fiobj_object_metadata(o))->each1(o, task, udata, start_at);
   }
   return 0;
 }
@@ -1441,37 +1444,6 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
   }
 }
 
-/* each wrappers / helpers */
-struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) {
-  int (*task)(FIOBJ value, void *arg);
-  void *arg;
-};
-
-/* each wrappers / helpers */
-FIO_SFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each1_wrapper_task)(
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), couplet_s) o,
-    void *arg) {
-  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) *w = arg;
-  return w->task(o.value, w->arg);
-}
-
-/* each wrappers / helpers */
-FIO_SFUNC uint32_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                            each1)(FIOBJ map,
-                                   ssize_t start_at,
-                                   int (*task)(FIOBJ value, void *arg),
-                                   void *arg) {
-  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), ___each_s) wrapper = {
-      .task = task,
-      .arg = arg,
-  };
-  return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each)(
-      map,
-      start_at,
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each1_wrapper_task),
-      &wrapper);
-}
-
 /* *****************************************************************************
 FIOBJ JSON support (inline functions)
 ***************************************************************************** */
@@ -1552,7 +1524,7 @@ typedef struct {
 #include __FILE__
 
 typedef struct {
-  int (*task)(FIOBJ, void *);
+  int (*task)(fiobj_each_s *info);
   void *arg;
   FIOBJ next;
   size_t count;
@@ -1577,15 +1549,21 @@ FIO_SFUNC uint32_t fiobj____each2_element_count(FIOBJ o) {
   }
   return 0;
 }
-FIO_SFUNC int fiobj____each2_wrapper_task(FIOBJ child, void *arg) {
-  fiobj_____each2_data_s *d = (fiobj_____each2_data_s *)arg;
-  d->stop = (d->task(child, d->arg) == -1);
+FIO_SFUNC int fiobj____each2_wrapper_task(fiobj_each_s *e) {
+  fiobj_____each2_data_s *d = (fiobj_____each2_data_s *)e->udata;
+  e->task = d->task;
+  e->udata = d->arg;
+  d->stop = (d->task(e) == -1);
+  d->task = e->task;
+  d->arg = e->udata;
+  e->task = fiobj____each2_wrapper_task;
+  e->udata = d;
   ++d->count;
   if (d->stop)
     return -1;
-  uint32_t c = fiobj____each2_element_count(child);
+  uint32_t c = fiobj____each2_element_count(e->obj[0]);
   if (c) {
-    d->next = child;
+    d->next = e->obj[0];
     d->end = c;
     return -1;
   }
@@ -1604,20 +1582,29 @@ FIO_SFUNC int fiobj____each2_wrapper_task(FIOBJ child, void *arg) {
  * Returns the number of elements processed.
  */
 FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
-                                int (*task)(FIOBJ child, void *arg),
-                                void *arg) {
+                                int (*task)(fiobj_each_s *),
+                                void *udata) {
   /* TODO - move to recursion with nesting limiter? */
   fiobj_____each2_data_s d = {
       .task = task,
-      .arg = arg,
+      .arg = udata,
       .next = FIOBJ_INVALID,
       .stack = FIO_ARRAY_INIT,
   };
+  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each_s) e_tmp = {
+
+      .parent = FIOBJ_INVALID,
+      .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
+                                each_s) *))fiobj____each2_wrapper_task,
+      .udata = &d,
+      .items_at_index = 1,
+      .value = o,
+  };
   fiobj____stack_element_s i = {.obj = o, .pos = 0};
   uint32_t end = fiobj____each2_element_count(o);
-  fiobj____each2_wrapper_task(i.obj, &d);
+  fiobj____each2_wrapper_task((fiobj_each_s *)&e_tmp);
   while (!d.stop && i.obj && i.pos < end) {
-    i.pos = fiobj_each1(i.obj, i.pos, fiobj____each2_wrapper_task, &d);
+    i.pos = fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, i.pos);
     if (d.next != FIOBJ_INVALID) {
       if (fiobj____stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
         FIO_LOG_ERROR("FIOBJ nesting level too deep (%u)."
@@ -2195,22 +2182,25 @@ FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
 FIOBJ and JSON testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(FIOBJ o, void *e_) {
+FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   static size_t index = 0;
-  if (o == FIOBJ_INVALID && !e_) {
+  if (!e) {
     index = 0;
     return -1;
   }
-  int *expect = (int *)e_;
+  int *expect = (int *)e->udata;
   if (expect[index] == -1) {
-    FIO_ASSERT(FIOBJ_TYPE(o) == FIOBJ_T_ARRAY,
+    FIO_ASSERT(FIOBJ_TYPE(e->obj[0]) == FIOBJ_T_ARRAY,
                "each2 ordering issue [%zu] (array).",
                index);
+    FIO_ASSERT(e->items_at_index == 1,
+               "each2 items_at_index value error issue [%zu] (array).",
+               index);
   } else {
-    FIO_ASSERT(FIO_NAME2(fiobj, i)(o) == expect[index],
+    FIO_ASSERT(FIO_NAME2(fiobj, i)(e->obj[0]) == expect[index],
                "each2 ordering issue [%zu] (number) %ld != %d",
                index,
-               FIO_NAME2(fiobj, i)(o),
+               FIO_NAME2(fiobj, i)(e->obj[0]),
                expect[index]);
   }
   ++index;
@@ -2318,7 +2308,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                         9 + 1,
                "each2 repetition count error");
     fiobj_free(o);
-    FIO_NAME_TEST(stl, fiobj_task)(FIOBJ_INVALID, NULL);
+    FIO_NAME_TEST(stl, fiobj_task)(NULL);
   }
   {
     fprintf(stderr, "* Testing FIOBJ JSON handling.\n");

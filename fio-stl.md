@@ -4025,20 +4025,39 @@ Returns -1 on error (Array is empty) and 0 on success.
 #### `ARY_each`
 
 ```c
-uint32_t ARY_each(ARY_s * ary, int32_t start_at,
-                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
-                               void *arg);
+uint32_t ARY_each(ARY_s * ary,
+                  int (*task)(ARY_each_s * info),
+                  void *arg,
+                  int32_t start_at);
 ```
 
 Iteration using a callback for each entry in the array.
 
-The callback task function must accept an the entry data as well as an opaque user pointer.
+The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
 Returns the relative "stop" position (number of items processed + starting point).
 
+The `ARY_each_s` data structure looks like this:
 
+```c
+/** Iteration information structure passed to the callback. */
+typedef ARY_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_ARRAY_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Always 1 and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(ARY_each_s * info);
+  /** The argument passed along to the task. */
+  void *arg;
+  /** The object / value at the current index. */
+  FIO_ARRAY_TYPE value;
+} ARY_each_s;
+```
 
 #### `ARY_each_next`
 
@@ -4467,19 +4486,61 @@ The value of `first` is set automatically by the function. Manually changing thi
 ```c
 uint32_t MAP_each(FIO_MAP_PTR m,
                   int32_t start_at,
-                  int (*task)(FIO_MAP_OBJ obj, void *arg),
+                  int (*task)(MAP_each_s * data),
                   void *arg);
 ```
 
 Iteration using a callback for each element in the map.
 
-The callback task function must accept an element variable as well as an opaque user pointer.
+The callback task function must accept a `MAP_each_s` pointer (actual name matches type name).
 
 When the map is a Hash Map (has both a key and an object), the value can be accessed using `obj->value` and the key using `obj->key`. However, changing or altering the contents of the key might break the Hash Map, so do NOT do that.
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
 Returns the relative "stop" position, i.e., the number of items processed + the starting point.
+
+The `MAP_each_s` data structure looks like this:
+
+```c
+/** Iteration information structure passed to the callback. */
+typedef struct MAP_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_MAP_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct MAP_each_s * info);
+  /** Opaque user data. */
+  void *udata;
+  /** The object / value at the current index. */
+  FIO_MAP_TYPE value;
+#ifdef FIO_MAP_KEY
+  /** The key used to access the specific value. */
+  FIO_MAP_KEY key;
+#endif
+} MAP_each_s;
+
+/**
+ * Iteration using a callback for each element in the map.
+ *
+ * The callback task function must accept an each_s pointer, see above.
+ *
+ * If the callback returns -1, the loop is broken. Any other value is ignored.
+ *
+ * Returns the relative "stop" position, i.e., the number of items processed +
+ * the starting point.
+ */
+SFUNC FIO_MAP_SIZE_TYPE
+    FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
+                                 int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
+                                 void *udata,
+                                 ssize_t start_at);
+
+```
+
 
 #### `MAP_each_get_key`
 

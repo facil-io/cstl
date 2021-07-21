@@ -331,9 +331,11 @@ FIO_SFUNC void map_____test_key_destroy(char **dest) {
 #define HASHOFi(i) i /* fio_risky_hash(&(i), sizeof((i)), 0) */
 #define HASHOFs(s) fio_risky_hash(s, strlen((s)), 0)
 
-FIO_SFUNC int set_____test_each_task(size_t o, void *a_) {
-  uintptr_t *i_p = (uintptr_t *)a_;
-  FIO_ASSERT(o == ++(*i_p), "set_each started at a bad offset!");
+FIO_SFUNC int set_____test_each_task(set_____test_each_s *e) {
+  uintptr_t *i_p = (uintptr_t *)e->udata;
+  FIO_ASSERT(e->items_at_index == 1, "set_each items_at_index is not 1!");
+  FIO_ASSERT(e->value == ++(*i_p), "set_each started at a bad offset!");
+
   return 0;
 }
 
@@ -356,9 +358,9 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
     {
       uintptr_t pos_test = (TEST_REPEAT >> 1);
       size_t count =
-          set_____test_each(&m, pos_test, set_____test_each_task, &pos_test);
+          set_____test_each(&m, set_____test_each_task, &pos_test, pos_test);
       FIO_ASSERT(count == set_____test_count(&m),
-                 "set_each tast returned the wrong counter.");
+                 "set_each task returned the wrong counter.");
       FIO_ASSERT(count == pos_test, "set_each position testing error");
     }
 

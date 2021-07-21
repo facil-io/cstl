@@ -691,34 +691,52 @@ Iteration
  * Returns the relative "stop" position, i.e., the number of items processed +
  * the starting point.
  */
-SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
-                                 each)(FIO_MAP_PTR map,
-                                       ssize_t start_at,
-                                       int (*task)(FIO_MAP_OBJ obj, void *arg),
-                                       void *arg) {
-  FIO_MAP_SIZE_TYPE count = (FIO_MAP_SIZE_TYPE)start_at;
+SFUNC FIO_MAP_SIZE_TYPE
+FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
+                             int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
+                             void *udata,
+                             ssize_t start_at) {
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  FIO_MAP_SIZE_TYPE pos = 0;
   if (!m)
     return 0;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  if (!m->count)
-    return 0;
-
+  FIO_PTR_TAG_VALID_OR_RETURN(map, (FIO_MAP_SIZE_TYPE)-1);
+  FIO_MAP_SIZE_TYPE count = m->count;
   if (start_at < 0) {
-    start_at = m->count + start_at;
+    start_at = count - start_at;
     if (start_at < 0)
       start_at = 0;
   }
-  if ((FIO_MAP_SIZE_TYPE)start_at >= m->count)
-    return m->count;
+  if ((FIO_MAP_SIZE_TYPE)start_at >= count)
+    return count;
+  FIO_MAP_SIZE_TYPE pos = 0;
+  FIO_NAME(FIO_MAP_NAME, each_s)
+  e = {
+      .parent = map,
+      .index = (uint64_t)start_at,
+#ifdef FIO_MAP_KEY
+      .items_at_index = 2,
+#else
+      .items_at_index = 1,
+#endif
+      .task = task,
+      .udata = udata,
+  };
 
   if (m->w == m->count) {
-    while (count < m->count && task(m->map[count++].obj, arg) != -1)
-      ;
-    return count;
+    while (e.index < m->count) {
+      e.value = FIO_MAP_OBJ2TYPE(m->map[e.index].obj);
+#ifdef FIO_MAP_KEY
+      e.key = FIO_MAP_OBJ2KEY(m->map[e.index].obj);
+#endif
+      int r = e.task(&e);
+      ++e.index;
+      if (r == -1)
+        break;
+    }
+    return (FIO_MAP_SIZE_TYPE)(e.index);
   }
+
   pos = 0;
   while (start_at && pos < m->w) {
     if (!m->map[pos++].hash) {
@@ -726,18 +744,24 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
     }
     --start_at;
   }
+
   if (start_at)
     return m->count;
 
-  while (count < m->count && pos < m->w) {
+  while (e.index < m->count && pos < m->w) {
     if (m->map[pos].hash) {
-      ++count;
-      if (task(m->map[pos].obj, arg) == -1)
+      e.value = FIO_MAP_OBJ2TYPE(m->map[pos].obj);
+#ifdef FIO_MAP_KEY
+      e.key = FIO_MAP_OBJ2KEY(m->map[pos].obj);
+#endif
+      int r = e.task(&e);
+      ++e.index;
+      if (r == -1)
         break;
     }
     ++pos;
   }
-  return count;
+  return e.index;
 }
 
 /* *****************************************************************************

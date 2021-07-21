@@ -306,20 +306,39 @@ Returns -1 on error (Array is empty) and 0 on success.
 #### `ARY_each`
 
 ```c
-uint32_t ARY_each(ARY_s * ary, int32_t start_at,
-                               int (*task)(FIO_ARRAY_TYPE obj, void *arg),
-                               void *arg);
+uint32_t ARY_each(ARY_s * ary,
+                  int (*task)(ARY_each_s * info),
+                  void *arg,
+                  int32_t start_at);
 ```
 
 Iteration using a callback for each entry in the array.
 
-The callback task function must accept an the entry data as well as an opaque user pointer.
+The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
 Returns the relative "stop" position (number of items processed + starting point).
 
+The `ARY_each_s` data structure looks like this:
 
+```c
+/** Iteration information structure passed to the callback. */
+typedef ARY_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_ARRAY_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Always 1 and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(ARY_each_s * info);
+  /** The argument passed along to the task. */
+  void *arg;
+  /** The object / value at the current index. */
+  FIO_ARRAY_TYPE value;
+} ARY_each_s;
+```
 
 #### `ARY_each_next`
 

@@ -80,7 +80,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-/** IInternal helper - do not access */
+/** Internal helper - do not access */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
                             __imap)(FIO_NAME(FIO_MAP_NAME, s) * m) {
   return (uint8_t *)(m->map + FIO_MAP_CAPA(m->bits));
@@ -747,55 +747,85 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, rehash)(FIO_MAP_PTR map) {
 
 /* *****************************************************************************
 Iteration
-*****************************************************************************
-*/
+***************************************************************************** */
 
-SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
-                                 each)(FIO_MAP_PTR map,
-                                       ssize_t start_at,
-                                       int (*task)(FIO_MAP_OBJ obj, void *arg),
-                                       void *arg) {
-  FIO_MAP_SIZE_TYPE count = (FIO_MAP_SIZE_TYPE)start_at;
+/**
+ * Iteration using a callback for each element in the map.
+ *
+ * The callback task function must accept an element variable as well as an
+ * opaque user pointer.
+ *
+ * If the callback returns -1, the loop is broken. Any other value is ignored.
+ *
+ * Returns the relative "stop" position, i.e., the number of items processed +
+ * the starting point.
+ */
+SFUNC FIO_MAP_SIZE_TYPE
+FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
+                             int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
+                             void *udata,
+                             ssize_t start_at) {
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m)
     return 0;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  if (!m->count)
-    return 0;
-
+  FIO_PTR_TAG_VALID_OR_RETURN(map, (FIO_MAP_SIZE_TYPE)-1);
   if (start_at < 0) {
-    start_at = m->count + start_at;
+    start_at = m->count - start_at;
     if (start_at < 0)
       start_at = 0;
   }
   if ((FIO_MAP_SIZE_TYPE)start_at >= m->count)
     return m->count;
 
+  FIO_NAME(FIO_MAP_NAME, each_s)
+  e = {
+      .parent = map,
+      .index = (uint64_t)start_at,
+#ifdef FIO_MAP_KEY
+      .items_at_index = 2,
+#else
+      .items_at_index = 1,
+#endif
+      .task = task,
+      .udata = udata,
+  };
+
 #if FIO_MAP_EVICT_LRU
   if (start_at) {
     FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
-      ++count;
       if (start_at) {
         --start_at;
         continue;
       }
-      if (task(m->map[pos].obj, arg) == -1)
+      e.value = FIO_MAP_OBJ2TYPE(m->map[pos].obj);
+#ifdef FIO_MAP_KEY
+      e.key = FIO_MAP_OBJ2KEY(m->map[pos].obj);
+#endif
+      int r = e.task(&e);
+      ++e.index;
+      if (r == -1)
         goto finish;
     }
   } else {
     FIO_INDEXED_LIST_EACH(m->map, node, m->last_used, pos) {
-      ++count;
-      if (task(m->map[pos].obj, arg) == -1)
+      e.value = FIO_MAP_OBJ2TYPE(m->map[pos].obj);
+#ifdef FIO_MAP_KEY
+      e.key = FIO_MAP_OBJ2KEY(m->map[pos].obj);
+#endif
+      int r = e.task(&e);
+      ++e.index;
+      if (r == -1)
         goto finish;
     }
   }
 
-#else  /* FIO_MAP_EVICT_LRU */
+#else /* FIO_MAP_EVICT_LRU */
+
   uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   FIO_MAP_SIZE_TYPE pos = 0;
   if (start_at) {
-    uint64_t *imap64 = (uint64_t *)FIO_NAME(FIO_MAP_NAME, __imap)(m);
+    uint64_t *imap64 = (uint64_t *)imap;
     /* scan map to arrive at starting point. */
     for (FIO_MAP_SIZE_TYPE i = 0; start_at && i < FIO_MAP_CAPA(m->bits);
          i += 8) {
@@ -822,8 +852,13 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
       row ^= UINT64_C(0x8080808080808080);
       for (int j = 0; j < 8; ++j) {
         if ((row & UINT64_C(0xFF))) {
-          ++count;
-          if (task(m->map[pos + j].obj, arg) == -1)
+          e.value = FIO_MAP_OBJ2TYPE(m->map[pos + j].obj);
+#ifdef FIO_MAP_KEY
+          e.key = FIO_MAP_OBJ2KEY(m->map[pos + j].obj);
+#endif
+          int r = e.task(&e);
+          ++e.index;
+          if (r == -1)
             goto finish;
         }
         row >>= 8;
@@ -831,19 +866,23 @@ SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
     }
     pos += 8;
   }
+  /* scan leftover (not 8 byte aligned) byte-map */
   while (pos < FIO_MAP_CAPA(m->bits)) {
-    if (FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] &&
-        FIO_NAME(FIO_MAP_NAME, __imap)(m)[pos] != 255) {
-      ++count;
-      if (task(m->map[pos].obj, arg) == -1)
+    if (imap[pos] && imap[pos] != 255) {
+      e.value = FIO_MAP_OBJ2TYPE(m->map[pos].obj);
+#ifdef FIO_MAP_KEY
+      e.key = FIO_MAP_OBJ2KEY(m->map[pos].obj);
+#endif
+      int r = e.task(&e);
+      ++e.index;
+      if (r == -1)
         goto finish;
     }
     ++pos;
   }
 #endif /* FIO_MAP_EVICT_LRU */
-
 finish:
-  return count;
+  return (FIO_MAP_SIZE_TYPE)e.index;
 }
 
 /* *****************************************************************************

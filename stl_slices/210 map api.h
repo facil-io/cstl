@@ -470,22 +470,41 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
                                       FIO_NAME(FIO_MAP_NAME, node_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * pos);
 
+/** Iteration information structure passed to the callback. */
+typedef struct FIO_NAME(FIO_MAP_NAME, each_s) {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_MAP_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct FIO_NAME(FIO_MAP_NAME, each_s) * info);
+  /** Opaque user data. */
+  void *udata;
+  /** The object / value at the current index. */
+  FIO_MAP_TYPE value;
+#ifdef FIO_MAP_KEY
+  /** The key used to access the specific value. */
+  FIO_MAP_KEY key;
+#endif
+} FIO_NAME(FIO_MAP_NAME, each_s);
+
 /**
  * Iteration using a callback for each element in the map.
  *
- * The callback task function must accept an element variable as well as an
- * opaque user pointer.
+ * The callback task function must accept an each_s pointer, see above.
  *
  * If the callback returns -1, the loop is broken. Any other value is ignored.
  *
  * Returns the relative "stop" position, i.e., the number of items processed +
  * the starting point.
  */
-SFUNC FIO_MAP_SIZE_TYPE FIO_NAME(FIO_MAP_NAME,
-                                 each)(FIO_MAP_PTR map,
-                                       ssize_t start_at,
-                                       int (*task)(FIO_MAP_OBJ obj, void *arg),
-                                       void *arg);
+SFUNC FIO_MAP_SIZE_TYPE
+    FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
+                                 int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
+                                 void *udata,
+                                 ssize_t start_at);
 
 /* *****************************************************************************
 

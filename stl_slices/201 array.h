@@ -339,11 +339,26 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary,
 SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
                                           FIO_ARRAY_TYPE *old);
 
+/** Iteration information structure passed to the callback. */
+typedef struct FIO_NAME(FIO_ARRAY_NAME, each_s) {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_ARRAY_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Always 1, but may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct FIO_NAME(FIO_ARRAY_NAME, each_s) * info);
+  /** Opaque user data. */
+  void *udata;
+  /** The object / value at the current index. */
+  FIO_ARRAY_TYPE value;
+} FIO_NAME(FIO_ARRAY_NAME, each_s);
+
 /**
  * Iteration using a callback for each entry in the array.
  *
- * The callback task function must accept an the entry data as well as an opaque
- * user pointer.
+ * The callback task function must accept an each_s pointer, see above.
  *
  * If the callback returns -1, the loop is broken. Any other value is ignored.
  *
@@ -352,9 +367,32 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
  */
 IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                         each)(FIO_ARRAY_PTR ary,
-                              int32_t start_at,
-                              int (*task)(FIO_ARRAY_TYPE obj, void *arg),
-                              void *arg);
+                              int (*task)(FIO_NAME(FIO_ARRAY_NAME, each_s) *
+                                          info),
+                              void *udata,
+                              int32_t start_at);
+
+#ifndef FIO_ARRAY_EACH
+/**
+ * Iterates through the array using a `for` loop.
+ *
+ * Access the object with the pointer `pos`. The `pos` variable can be named
+ * however you please.
+ *
+ * Avoid editing the array during a FOR loop, although I hope it's possible, I
+ * wouldn't count on it.
+ *
+ * **Note**: this variant supports automatic pointer tagging / untagging.
+ */
+#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
+  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
+                ____type_t) *first___ = NULL,                                  \
+                            *pos =                                             \
+                                FIO_NAME(array_name,                           \
+                                         each_next)((array), &first___, NULL); \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
+#endif
 
 /**
  * Returns a pointer to the (next) object in the array.
@@ -380,28 +418,6 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
                                    each_next)(FIO_ARRAY_PTR ary,
                                               FIO_ARRAY_TYPE **first,
                                               FIO_ARRAY_TYPE *pos);
-
-#ifndef FIO_ARRAY_EACH
-/**
- * Iterates through the array using a `for` loop.
- *
- * Access the object with the pointer `pos`. The `pos` variable can be named
- * however you please.
- *
- * Avoid editing the array during a FOR loop, although I hope it's possible, I
- * wouldn't count on it.
- *
- * **Note**: this variant supports automatic pointer tagging / untagging.
- */
-#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
-                ____type_t) *first___ = NULL,                                  \
-                            *pos =                                             \
-                                FIO_NAME(array_name,                           \
-                                         each_next)((array), &first___, NULL); \
-       pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
-#endif
 
 /* *****************************************************************************
 Dynamic Arrays - embedded arrays
@@ -1361,28 +1377,47 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
  */
 IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                         each)(FIO_ARRAY_PTR ary_,
-                              int32_t start_at,
-                              int (*task)(FIO_ARRAY_TYPE obj, void *arg),
-                              void *arg) {
+                              int (*task)(FIO_NAME(FIO_ARRAY_NAME, each_s) *
+                                          info),
+                              void *udata,
+                              int32_t start_at) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   if (!a)
-    return start_at;
-  {
-    uint32_t count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
+    return (uint32_t)-1;
 
-    if (!a || !task)
-      return start_at;
-    if ((uint32_t)start_at >= count)
-      return count;
+  uint32_t count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
+
+  if (start_at < 0) {
+    start_at = count - start_at;
+    if (start_at < 0)
+      start_at = 0;
   }
 
-  while ((uint32_t)start_at < FIO_NAME(FIO_ARRAY_NAME, count)(ary_)) {
+  if (!a || !task)
+    return (uint32_t)-1;
+
+  if ((uint32_t)start_at >= count)
+    return count;
+
+  FIO_NAME(FIO_ARRAY_NAME, each_s)
+  e = {
+      .parent = ary_,
+      .index = (uint64_t)start_at,
+      .items_at_index = 1,
+      .task = task,
+      .udata = udata,
+  };
+
+  while ((uint32_t)e.index < FIO_NAME(FIO_ARRAY_NAME, count)(ary_)) {
     a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
-    if (task(a[(uint32_t)(start_at++)], arg) == -1) {
-      return (uint32_t)(start_at);
+    e.value = a[e.index];
+    int r = e.task(&e);
+    ++e.index;
+    if (r == -1) {
+      return (uint32_t)(e.index);
     }
   }
-  return start_at;
+  return e.index;
 }
 
 /* *****************************************************************************
@@ -1396,18 +1431,19 @@ IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
 IFUNC int FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-#define FIO_ARRAY_TEST_OBJ_SET(dest, val) memset(&(dest), (int)(val), sizeof(o))
+#define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
+  memset(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \
-  (!memcmp(&o, memset(&v, (int)(val), sizeof(v)), sizeof(o)))
+  (!memcmp(&o, memset(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
 
-FIO_SFUNC int FIO_NAME_TEST(stl,
-                            FIO_NAME(FIO_ARRAY_NAME,
-                                     test_task))(FIO_ARRAY_TYPE o, void *a_) {
+FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task))(
+    FIO_NAME(FIO_ARRAY_NAME, each_s) * i) {
   struct data_s {
     int i;
     int va[];
-  } *d = (struct data_s *)a_;
+  } *d = (struct data_s *)i->udata;
   FIO_ARRAY_TYPE v;
+
   FIO_ARRAY_TEST_OBJ_SET(v, d->va[d->i]);
   ++d->i;
   if (d->va[d->i + 1])
@@ -1702,9 +1738,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
 
       int index = FIO_NAME(FIO_ARRAY_NAME, each)(
           a,
-          d.i,
           FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task)),
-          (void *)&d);
+          (void *)&d,
+          d.i);
       FIO_ASSERT(index == d.i,
                  "index rerturned from each should match next object");
       FIO_ASSERT(*(char *)&d.va[d.i],
