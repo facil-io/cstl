@@ -293,11 +293,10 @@ Function Attributes
 #if _MSC_VER
 #pragma section(".CRT$XCU", read)
 #undef FIO_CONSTRUCTOR
+#undef FIO_DESTRUCTOR
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
-#undef FIO_CONSTRUCTOR
-#undef FIO_DESTRUCTOR
 #define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
   static void fname(void);                                                     \
   __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
@@ -322,12 +321,12 @@ Function Attributes
 /** Marks a function as a constructor - if supported. */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   FIO_SFUNC __attribute__((constructor)) void fname FIO_NOOP(void)
-#endif
 
 /** Marks a function as a destructor - if supported. Consider using atexit() */
 #define FIO_DESTRUCTOR(fname)                                                  \
   FIO_SFUNC                                                                    \
   __attribute__((destructor)) void fname FIO_NOOP(void)
+#endif
 
 /* *****************************************************************************
 Macro Stringifier
