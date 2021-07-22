@@ -101,6 +101,7 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #define stat          _stat64
 #define fstat         _fstat64
 #define open          _open
+#define close         _close
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT

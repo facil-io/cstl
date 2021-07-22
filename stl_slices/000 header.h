@@ -218,6 +218,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
 #if defined(__MINGW32__)
 /* Mingw supports */
 #define FIO_HAVE_UNIX_TOOLS    2

@@ -218,6 +218,9 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
 #if defined(__MINGW32__)
 /* Mingw supports */
 #define FIO_HAVE_UNIX_TOOLS    2
@@ -1096,6 +1099,7 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #define stat          _stat64
 #define fstat         _fstat64
 #define open          _open
+#define close         _close
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
