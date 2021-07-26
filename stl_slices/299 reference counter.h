@@ -106,12 +106,8 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void);
 FIO_IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                     FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
 
-/**
- * Frees a reference counted object (or decreases the reference count).
- *
- * Returns 1 if the object was actually freed, returns 0 otherwise.
- */
-IFUNC int FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
+/** Frees a reference counted object (or decreases the reference count). */
+IFUNC void FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
 
 #ifdef FIO_REF_METADATA
 /** Returns a pointer to the object's metadata, if defined. */
@@ -185,22 +181,22 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 }
 
 /** Frees a reference counted object (or decreases the reference count). */
-IFUNC int FIO_NAME(FIO_REF_NAME,
-                   FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped_) {
+IFUNC void FIO_NAME(FIO_REF_NAME,
+                    FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   if (!wrapped || !wrapped_)
-    return -1;
+    return;
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(wrapped_);
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   if (!o)
-    return -1;
+    return;
   if (fio_atomic_sub_fetch(&o->ref, 1))
-    return 0;
+    return;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
   FIO_REF_ON_FREE();
-  return 1;
 }
 
 #ifdef FIO_REF_METADATA

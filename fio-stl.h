@@ -7188,11 +7188,17 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
-/** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
+/** FIO_MEMORY_DISABLE disables all custom memory allocators. */
 #if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #endif
+#endif
+
+/* Make sure the system's allocator is marked as unsafe. */
+#if FIO_MALLOC_TMP_USE_SYSTEM
+#undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #endif
 
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
@@ -16690,7 +16696,7 @@ Dynamic Arrays - test
 /* make suer the functions are defined for the testing */
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
 IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
@@ -20275,6 +20281,14 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
   if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
     *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
   }
+#ifdef DEBUG
+  {
+    FIO_NAME(FIO_STR_NAME, s) tmp = {0};
+    FIO_ASSERT(!memcmp(&tmp, s, sizeof(tmp)),
+               "new " FIO_MACRO2STR(
+                   FIO_NAME(FIO_STR_NAME, s)) " object not initialized!");
+  }
+#endif
   return (FIO_STR_PTR)FIO_PTR_TAG(s);
 }
 
@@ -22485,12 +22499,8 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void);
 FIO_IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                     FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
 
-/**
- * Frees a reference counted object (or decreases the reference count).
- *
- * Returns 1 if the object was actually freed, returns 0 otherwise.
- */
-IFUNC int FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
+/** Frees a reference counted object (or decreases the reference count). */
+IFUNC void FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
 
 #ifdef FIO_REF_METADATA
 /** Returns a pointer to the object's metadata, if defined. */
@@ -22564,22 +22574,22 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 }
 
 /** Frees a reference counted object (or decreases the reference count). */
-IFUNC int FIO_NAME(FIO_REF_NAME,
-                   FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped_) {
+IFUNC void FIO_NAME(FIO_REF_NAME,
+                    FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   if (!wrapped || !wrapped_)
-    return -1;
+    return;
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(wrapped_);
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   if (!o)
-    return -1;
+    return;
   if (fio_atomic_sub_fetch(&o->ref, 1))
-    return 0;
+    return;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
   FIO_REF_ON_FREE();
-  return 1;
 }
 
 #ifdef FIO_REF_METADATA
@@ -23225,11 +23235,8 @@ typedef struct {
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
-   *
-   * Returns 0 if the object is still alive or 1 if the object was freed. The
-   * return value is currently ignored, but this might change in the future.
    */
-  int (*free2)(FIOBJ o);
+  void (*free2)(FIOBJ o);
 } FIOBJ_class_vtable_s;
 
 FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;

@@ -5370,9 +5370,9 @@ Increases an object's reference count (an atomic operation, thread-safe).
 #### `REF_free` / `REF_free2`
 
 ```c
-int REF_free2(FIO_REF_TYPE * object)
+void REF_free2(FIO_REF_TYPE * object)
 // or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-int REF_free(FIO_REF_TYPE * object)
+void REF_free(FIO_REF_TYPE * object)
 ```
 
 Frees an object or decreases it's reference count (an atomic operation,
@@ -5382,7 +5382,6 @@ Before the object is freed, the `FIO_REF_DESTROY(object)` macro will be called.
 
 If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the
 `FIO_REF_METADATA_DESTROY(metadata)` macro.
-
 
 #### `REF_metadata`
 

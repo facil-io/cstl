@@ -400,11 +400,8 @@ typedef struct {
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
-   *
-   * Returns 0 if the object is still alive or 1 if the object was freed. The
-   * return value is currently ignored, but this might change in the future.
    */
-  int (*free2)(FIOBJ o);
+  void (*free2)(FIOBJ o);
 } FIOBJ_class_vtable_s;
 
 FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;

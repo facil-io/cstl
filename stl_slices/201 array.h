@@ -1428,7 +1428,7 @@ Dynamic Arrays - test
 /* make suer the functions are defined for the testing */
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
 IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
-IFUNC int FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \

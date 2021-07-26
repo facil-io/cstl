@@ -169,11 +169,17 @@ Memory Allocation - configuration macros
 NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
-/** FIO_MEMORY_DISABLE diasbles all custom memory allocators. */
+/** FIO_MEMORY_DISABLE disables all custom memory allocators. */
 #if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #endif
+#endif
+
+/* Make sure the system's allocator is marked as unsafe. */
+#if FIO_MALLOC_TMP_USE_SYSTEM
+#undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #endif
 
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG

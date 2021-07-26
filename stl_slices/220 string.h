@@ -625,6 +625,14 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
   if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
     *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
   }
+#ifdef DEBUG
+  {
+    FIO_NAME(FIO_STR_NAME, s) tmp = {0};
+    FIO_ASSERT(!memcmp(&tmp, s, sizeof(tmp)),
+               "new " FIO_MACRO2STR(
+                   FIO_NAME(FIO_STR_NAME, s)) " object not initialized!");
+  }
+#endif
   return (FIO_STR_PTR)FIO_PTR_TAG(s);
 }
 
