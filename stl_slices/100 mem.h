@@ -651,6 +651,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     src += offset;
     switch ((bytes & 3)) {
 #endif                       /* 32 bit */
+    /* fallthrough */
     case 3:
       *(dest++) = *(src++); /* fallthrough */
     case 2:
@@ -2798,37 +2799,56 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   void *old = &mark;
   mark = fio_risky_hash(&old, sizeof(mark), 0);
 
-  for (size_t i = 0; i < limit - 4; i += 4) {
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i]);
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 2]);
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
+  for (int repeat_cycle_test = 0; repeat_cycle_test < 4; ++repeat_cycle_test) {
+    for (size_t i = 0; i < limit - 4; i += 4) {
+      if (ary[i])
+        fio___memset_test_aligned(ary[i], mark, 16, "mark missing at ary[0]");
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i]);
+      if (ary[i + 1])
+        fio___memset_test_aligned(ary[i + 1],
+                                  mark,
+                                  cycles,
+                                  "mark missing at ary[1]");
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
+      if (ary[i + 2])
+        fio___memset_test_aligned(ary[i + 2],
+                                  mark,
+                                  cycles,
+                                  "mark missing at ary[2]");
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 2]);
+      if (ary[i + 3])
+        fio___memset_test_aligned(ary[i + 3],
+                                  mark,
+                                  cycles,
+                                  "mark missing at ary[3]");
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
 
-    ary[i] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    fio_memset_aligned(ary[i], mark, cycles);
+      ary[i] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      fio_memset_aligned(ary[i], mark, cycles);
 
-    ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
-    ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    fio_memset_aligned(ary[i + 1], mark, cycles);
+      ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
+      ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      fio_memset_aligned(ary[i + 1], mark, cycles);
 
-    ary[i + 2] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    fio_memset_aligned(ary[i + 2], mark, cycles);
-    ary[i + 2] =
-        FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 2], cycles * 2, cycles);
+      ary[i + 2] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      fio_memset_aligned(ary[i + 2], mark, cycles);
+      ary[i + 2] =
+          FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 2], cycles * 2, cycles);
 
-    ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
-    ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-    fio_memset_aligned(ary[i + 3], mark, cycles);
-    ary[i + 3] =
-        FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 3], cycles * 2, cycles);
+      ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
+      ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      fio_memset_aligned(ary[i + 3], mark, cycles);
+      ary[i + 3] =
+          FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 3], cycles * 2, cycles);
 
-    for (int b = 0; b < 4; ++b) {
-      for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
-        FIO_ASSERT(((uint64_t *)(ary[b]))[pos] == mark,
-                   "memory mark corrupted at test ptr %zu",
-                   i + b);
+      for (int b = 0; b < 4; ++b) {
+        for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
+          FIO_ASSERT(((uint64_t *)(ary[b]))[pos] == mark,
+                     "memory mark corrupted at test ptr %zu",
+                     i + b);
+        }
       }
     }
   }

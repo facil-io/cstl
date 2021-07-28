@@ -366,6 +366,8 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
   return 0;
 no_mem:
   FIO___LOCK_UNLOCK(q->lock);
+  FIO_LOG_ERROR("No memory for Queue %p to increase task ring buffer.",
+                (void *)q);
   return -1;
 }
 
@@ -393,6 +395,8 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
   return 0;
 no_mem:
   FIO___LOCK_UNLOCK(q->lock);
+  FIO_LOG_ERROR("No memory for Queue %p to increase task ring buffer.",
+                (void *)q);
   return -1;
 }
 
