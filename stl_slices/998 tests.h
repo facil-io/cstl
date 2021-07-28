@@ -909,6 +909,8 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, poll)();
   fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, mem_helper_speeds)();
+  fprintf(stderr, "===============\n");
   /* test memory allocator that initializes memory to zero */
   FIO_NAME_TEST(FIO_NAME(stl, fio_mem_test_safe), mem)();
   fprintf(stderr, "===============\n");
