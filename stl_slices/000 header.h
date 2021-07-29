@@ -524,20 +524,20 @@ typedef struct fio_buf_info_s {
 Linked Lists Persistent Macros and Types
 ***************************************************************************** */
 
-/** A common linked list node type. */
-typedef struct fio___list_node_s {
-  struct fio___list_node_s *next;
-  struct fio___list_node_s *prev;
-} fio___list_node_s;
+/** A linked list arch-type */
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
 
 /** A linked list node type */
-#define FIO_LIST_NODE fio___list_node_s
+#define FIO_LIST_NODE fio_list_node_s
 /** A linked list head type */
-#define FIO_LIST_HEAD fio___list_node_s
+#define FIO_LIST_HEAD fio_list_node_s
 
 /** Allows initialization of FIO_LIST_HEAD objects. */
 #define FIO_LIST_INIT(obj)                                                     \
-  (obj) = (fio___list_node_s) { .next = &(obj), .prev = &(obj) }
+  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
 
 #ifndef FIO_LIST_EACH
 /** Loops through every node in the linked list except the head. */
@@ -583,19 +583,38 @@ relative to some root pointer (usually the root of an array). This:
 
 2. Could be used for memory optimization if the array limits are known.
 
-The "head" index is usualy validated by reserving the value of `-1` to indicate
+The "head" index is usually validated by reserving the value of `-1` to indicate
 an empty list.
 ***************************************************************************** */
 #ifndef FIO_INDEXED_LIST_EACH
-/** A common linked list node type. */
-typedef struct fio___index32_node_s {
+
+/** A 32 bit indexed linked list node type */
+typedef struct fio_index32_node_s {
   uint32_t next;
   uint32_t prev;
-} fio___index32_node_s;
+} fio_index32_node_s;
 
-/** A linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio___index32_node_s
+/** A 16 bit indexed linked list node type */
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+
+/** An 8 bit indexed linked list node type */
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
+
+/** A 32 bit indexed linked list node type */
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
 #define FIO_INDEXED_LIST32_HEAD uint32_t
+/** A 16 bit indexed linked list node type */
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+/** An 8 bit indexed linked list node type */
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
 
 /** UNSAFE macro for pushing a node to a list. */
 #define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \

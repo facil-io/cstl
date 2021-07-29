@@ -139,14 +139,14 @@ static int ary____test_was_destroyed = 0;
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT      2
+#define FIO_MEMORY_ARENA_COUNT      4
 #include __FILE__
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
-#define FIO_MEMORY_ARENA_COUNT      2
+#define FIO_MEMORY_ARENA_COUNT      4
 #include __FILE__
 
 #define FIO_FIOBJ
@@ -169,7 +169,7 @@ typedef struct {
 
 FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
-  FIO_LIST_HEAD FIO_LIST_INIT(ls);
+  FIO_LIST_HEAD ls = FIO_LIST_INIT(ls);
   for (int i = 0; i < TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
         &ls,

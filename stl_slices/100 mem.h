@@ -1608,7 +1608,8 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     FIO_ASSERT_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __mem_state));
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arean_count;
   }
-  FIO_LIST_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
+  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks =
+      FIO_LIST_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);
   FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)();
 
 #if defined(FIO_MEMORY_WARMUP) && FIO_MEMORY_WARMUP
@@ -2845,7 +2846,31 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
 
       for (int b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
+          FIO_ASSERT(((uint64_t *)(ary[i + b]))[pos] == mark,
+                     "memory mark corrupted at test ptr %zu",
+                     i + b);
+        }
+      }
+      for (int b = 1; b < 4; ++b) {
+        FIO_NAME(FIO_MEMORY_NAME, free)(ary[b]);
+        ary[b] = NULL;
+        FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + b]);
+      }
+      for (int b = 1; b < 4; ++b) {
+        ary[i + b] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+        if (i) {
+          ary[b] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+          fio_memset_aligned(ary[b], mark, cycles);
+        }
+        fio_memset_aligned(ary[i + b], mark, cycles);
+      }
+
+      for (int b = 0; b < 4; ++b) {
+        for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
           FIO_ASSERT(((uint64_t *)(ary[b]))[pos] == mark,
+                     "memory mark corrupted at test ptr %zu",
+                     i + b);
+          FIO_ASSERT(((uint64_t *)(ary[i + b]))[pos] == mark,
                      "memory mark corrupted at test ptr %zu",
                      i + b);
         }
@@ -2880,7 +2905,15 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   }
   const size_t thread_count =
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count +
-      (1 + (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count >> 1));
+      (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count >> 1);
+
+  for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
+    fprintf(stderr,
+            "* Testing %zu byte allocation blocks, single threaded.\n",
+            (size_t)(cycles));
+    FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
+  }
+
   for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
 #if _MSC_VER
     fio_thread_t threads[(FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2];
@@ -2889,11 +2922,12 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 #else
     fio_thread_t threads[thread_count];
 #endif
+
     fprintf(stderr,
-            "* Testing %zu byte allocation blocks with %zu threads.\n",
+            "* Testing %zu byte allocation blocks, using %zu threads.\n",
             (size_t)(cycles),
             (thread_count + 1));
-    for (size_t i = 1; i < thread_count; ++i) {
+    for (size_t i = 0; i < thread_count; ++i) {
       if (fio_thread_create(
               threads + i,
               FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk),
@@ -2902,7 +2936,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
       }
     }
     FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
-    for (size_t i = 1; i < thread_count; ++i) {
+    for (size_t i = 0; i < thread_count; ++i) {
       fio_thread_join(threads[i]);
     }
   }
