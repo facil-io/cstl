@@ -2898,6 +2898,19 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
 }
 ```
 
+#### `fio_sock_open2`
+
+```c
+int fio_sock_open(const char *url, uint16_t flags);
+```
+
+See [`fio_sock_open`](#fio_sock_open) for details. Accepts a single, URL style string instead of an address / port pair.
+
+The `tcp` / `udp` information **may** appear in the URL schema if missing from the flags (i.e., `tcp://localhost:3000/`);
+
+If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or 
+`FIO_SOCK_UDP` that were originally given.
+
 #### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
 
 ```c

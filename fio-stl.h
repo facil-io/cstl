@@ -959,6 +959,11 @@ Common macros
 #define FIO_SOCK
 #endif
 
+/* Modules that require FIO_URL */
+#if defined(FIO_SOCK)
+#define FIO_URL
+#endif
+
 /* Modules that require Threads data */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
@@ -12470,6 +12475,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_SOCK                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -12695,6 +12701,9 @@ typedef enum {
 FIO_IFUNC int fio_sock_open(const char *restrict address,
                             const char *restrict port,
                             uint16_t flags);
+
+/** Creates a new socket, according to the provided flags. */
+SFUNC int fio_sock_open2(const char *url, uint16_t flags);
 
 /**
  * Attempts to resolve an address to a valid IP6 / IP4 address pointer.
@@ -12927,7 +12936,10 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {
-    FIO_LOG_ERROR("(fio_sock_address_new) error: %s", gai_strerror(e));
+    FIO_LOG_ERROR("(fio_sock_address_new(\"%s\", \"%s\")) error: %s",
+                  (address ? address : "NULL"),
+                  (port ? port : "0"),
+                  gai_strerror(e));
     return NULL;
   }
   return a;
@@ -12939,6 +12951,77 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a) { freeaddrinfo(a); }
 FIO_SOCK - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
+
+/** Creates a new socket, according to the provided flags. */
+SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
+  char buf[2048];
+  char port[64];
+  char *addr = buf;
+  char *pr = port;
+
+  /* parse URL */
+  fio_url_s u = fio_url_parse(url, strlen(url));
+#if FIO_OS_POSIX
+  if (!u.host.buf && !u.port.buf && u.path.buf) {
+    /* unix socket */
+    flags &= FIO_SOCK_SERVER | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK;
+    flags |= FIO_SOCK_UNIX;
+    if (u.path.len >= 2048) {
+      errno = EINVAL;
+      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      return -1;
+    }
+    FIO_MEMCPY(buf, u.path.buf, u.path.len);
+    buf[u.path.len] = 0;
+    pr = NULL;
+  } else
+#endif
+  {
+    if (!u.port.len)
+      u.port = u.scheme;
+    if (!u.port.len) {
+      pr = NULL;
+    } else {
+      if (u.port.len >= 64) {
+        errno = EINVAL;
+        FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
+                      url);
+        return -1;
+      }
+      FIO_MEMCPY(port, u.port.buf, u.port.len);
+      port[u.port.len] = 0;
+      if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
+        /* TODO? prefer...? TCP? */
+        if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
+            (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
+          flags |= FIO_SOCK_UDP;
+        else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
+                 (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
+          flags |= FIO_SOCK_TCP;
+        else if ((u.scheme.len == 4 || u.scheme.len == 5) &&
+                 (u.scheme.buf[0] | 32) == 'h' &&
+                 (u.scheme.buf[1] | 32) == 't' &&
+                 (u.scheme.buf[2] | 32) == 't' &&
+                 (u.scheme.buf[3] | 32) == 'p' &&
+                 (u.scheme.len == 4 ||
+                  (u.scheme.len == 5 && (u.scheme.buf[4] | 32) == 's')))
+          flags |= FIO_SOCK_TCP;
+      }
+    }
+    if (u.host.len) {
+      if (u.host.len >= 2048) {
+        errno = EINVAL;
+        FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+        return -1;
+      }
+      FIO_MEMCPY(buf, u.host.buf, u.host.len);
+      buf[u.host.len] = 0;
+    } else {
+      addr = NULL;
+    }
+  }
+  return fio_sock_open(addr, pr, flags);
+}
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd) {
@@ -14741,6 +14824,13 @@ SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
 Stream Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+FIO_SFUNC size_t FIO_NAME_TEST(stl, stream___noop_dealloc_count) = 0;
+FIO_SFUNC void FIO_NAME_TEST(stl, stream___noop_dealloc)(void *ignr_) {
+  fio_atomic_add(&FIO_NAME_TEST(stl, stream___noop_dealloc_count), 1);
+  (void)ignr_;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char *const str =
       (char *)"My Hello World string should be long enough so it can be used "
@@ -14755,15 +14845,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char mem[4000];
   char *buf = mem;
   size_t len = 4000;
+  size_t expect_dealloc = FIO_NAME_TEST(stl, stream___noop_dealloc_count);
+
   fprintf(stderr, "* Testing fio_stream for streaming buffer storage.\n");
-  fio_stream_add(&s, fio_stream_pack_data(str, 11, 3, 1, NULL));
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           11,
+                           3,
+                           1,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
+  ++expect_dealloc;
   FIO_ASSERT(fio_stream_any(&s),
              "stream is empty after `fio_stream_add` (data, copy)");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "copying a packet should deallocate the original");
   for (int i = 0; i < 3; ++i) {
     /* test that read operrations are immutable */
     buf = mem;
     len = 4000;
+
     fio_stream_read(&s, &buf, &len);
+    FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) ==
+                   expect_dealloc,
+               "reading a packet shouldn't deallocate anything");
     FIO_ASSERT(len == 11,
                "fio_stream_read didn't read all data from stream? (%zu)",
                len);
@@ -14776,6 +14881,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
         "fio_stream_read should have been performed with zero-copy");
   }
   fio_stream_advance(&s, len);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "advancing an embedded packet shouldn't deallocate anything");
   FIO_ASSERT(
       !fio_stream_any(&s),
       "after advance, at this point, the stream should have been consumed.");
@@ -14786,14 +14893,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
       !buf && !len,
       "reading from an empty stream should set buf and len to NULL and zero.");
   fio_stream_destroy(&s);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "destroying an empty stream shouldn't deallocate anything");
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
 
   fio_stream_add(&s, fio_stream_pack_data(str, 11, 0, 1, NULL));
-  fio_stream_add(&s, fio_stream_pack_data(str, 49, 11, 0, NULL));
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           49,
+                           11,
+                           0,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
   fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
 
   FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
   FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error.");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "adding a stream shouldn't deallocate it.");
 
   buf = mem;
   len = 4000;
@@ -14806,6 +14923,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading a stream shouldn't deallocate any packets.");
 
   buf = mem;
   len = 8;
@@ -14818,8 +14937,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read partial read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "failing to read a stream shouldn't deallocate any packets.");
 
   fio_stream_advance(&s, 20);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "partial advancing shouldn't deallocate any packets.");
   FIO_ASSERT(fio_stream_packets(&s) == 2, "packet counut error (2).");
   buf = mem;
   len = 4000;
@@ -14831,6 +14954,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading shouldn't deallocate packets the head packet.");
 
   fio_stream_add(&s, fio_stream_pack_fd(open(__FILE__, O_RDONLY), 20, 0, 0));
   FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error (3).");
@@ -14844,6 +14969,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read file read data error?\n%.*s",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading more than one packet shouldn't deallocate anything.");
   buf = mem;
   len = 4000;
   fio_stream_read(&s, &buf, &len);
@@ -14856,7 +14983,34 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              buf);
 
   fio_stream_destroy(&s);
+  ++expect_dealloc;
+
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "destroying a stream should deallocate it's packets.");
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           49,
+                           11,
+                           0,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 49,
+             "fio_stream_read didn't read all data from stream? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp(str + 11, buf, len),
+             "fio_stream_read data error? (%.*s)",
+             (int)len,
+             buf);
+  fio_stream_advance(&s, 80);
+  ++expect_dealloc;
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "partial advancing shouldn't deallocate any packets.");
+  FIO_ASSERT(!fio_stream_any(&s), "stream should be empty at this point.");
+  fio_stream_destroy(&s);
 }
 
 #endif /* FIO_TEST_CSTL */

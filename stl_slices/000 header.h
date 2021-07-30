@@ -959,6 +959,11 @@ Common macros
 #define FIO_SOCK
 #endif
 
+/* Modules that require FIO_URL */
+#if defined(FIO_SOCK)
+#define FIO_URL
+#endif
+
 /* Modules that require Threads data */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \

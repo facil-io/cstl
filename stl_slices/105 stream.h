@@ -606,6 +606,13 @@ SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
 Stream Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+FIO_SFUNC size_t FIO_NAME_TEST(stl, stream___noop_dealloc_count) = 0;
+FIO_SFUNC void FIO_NAME_TEST(stl, stream___noop_dealloc)(void *ignr_) {
+  fio_atomic_add(&FIO_NAME_TEST(stl, stream___noop_dealloc_count), 1);
+  (void)ignr_;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char *const str =
       (char *)"My Hello World string should be long enough so it can be used "
@@ -620,15 +627,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   char mem[4000];
   char *buf = mem;
   size_t len = 4000;
+  size_t expect_dealloc = FIO_NAME_TEST(stl, stream___noop_dealloc_count);
+
   fprintf(stderr, "* Testing fio_stream for streaming buffer storage.\n");
-  fio_stream_add(&s, fio_stream_pack_data(str, 11, 3, 1, NULL));
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           11,
+                           3,
+                           1,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
+  ++expect_dealloc;
   FIO_ASSERT(fio_stream_any(&s),
              "stream is empty after `fio_stream_add` (data, copy)");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "copying a packet should deallocate the original");
   for (int i = 0; i < 3; ++i) {
     /* test that read operrations are immutable */
     buf = mem;
     len = 4000;
+
     fio_stream_read(&s, &buf, &len);
+    FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) ==
+                   expect_dealloc,
+               "reading a packet shouldn't deallocate anything");
     FIO_ASSERT(len == 11,
                "fio_stream_read didn't read all data from stream? (%zu)",
                len);
@@ -641,6 +663,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
         "fio_stream_read should have been performed with zero-copy");
   }
   fio_stream_advance(&s, len);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "advancing an embedded packet shouldn't deallocate anything");
   FIO_ASSERT(
       !fio_stream_any(&s),
       "after advance, at this point, the stream should have been consumed.");
@@ -651,14 +675,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
       !buf && !len,
       "reading from an empty stream should set buf and len to NULL and zero.");
   fio_stream_destroy(&s);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "destroying an empty stream shouldn't deallocate anything");
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
 
   fio_stream_add(&s, fio_stream_pack_data(str, 11, 0, 1, NULL));
-  fio_stream_add(&s, fio_stream_pack_data(str, 49, 11, 0, NULL));
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           49,
+                           11,
+                           0,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
   fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
 
   FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
   FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error.");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "adding a stream shouldn't deallocate it.");
 
   buf = mem;
   len = 4000;
@@ -671,6 +705,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading a stream shouldn't deallocate any packets.");
 
   buf = mem;
   len = 8;
@@ -683,8 +719,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read partial read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "failing to read a stream shouldn't deallocate any packets.");
 
   fio_stream_advance(&s, 20);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "partial advancing shouldn't deallocate any packets.");
   FIO_ASSERT(fio_stream_packets(&s) == 2, "packet counut error (2).");
   buf = mem;
   len = 4000;
@@ -696,6 +736,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read data error? (%.*s)",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading shouldn't deallocate packets the head packet.");
 
   fio_stream_add(&s, fio_stream_pack_fd(open(__FILE__, O_RDONLY), 20, 0, 0));
   FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error (3).");
@@ -709,6 +751,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "fio_stream_read file read data error?\n%.*s",
              (int)len,
              buf);
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "reading more than one packet shouldn't deallocate anything.");
   buf = mem;
   len = 4000;
   fio_stream_read(&s, &buf, &len);
@@ -721,7 +765,34 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              buf);
 
   fio_stream_destroy(&s);
+  ++expect_dealloc;
+
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "destroying a stream should deallocate it's packets.");
+  fio_stream_add(
+      &s,
+      fio_stream_pack_data(str,
+                           49,
+                           11,
+                           0,
+                           FIO_NAME_TEST(stl, stream___noop_dealloc)));
+  buf = mem;
+  len = 4000;
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 49,
+             "fio_stream_read didn't read all data from stream? (%zu)",
+             len);
+  FIO_ASSERT(!memcmp(str + 11, buf, len),
+             "fio_stream_read data error? (%.*s)",
+             (int)len,
+             buf);
+  fio_stream_advance(&s, 80);
+  ++expect_dealloc;
+  FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
+             "partial advancing shouldn't deallocate any packets.");
+  FIO_ASSERT(!fio_stream_any(&s), "stream should be empty at this point.");
+  fio_stream_destroy(&s);
 }
 
 #endif /* FIO_TEST_CSTL */

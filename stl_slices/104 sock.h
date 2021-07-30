@@ -5,6 +5,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_SOCK                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -230,6 +231,9 @@ typedef enum {
 FIO_IFUNC int fio_sock_open(const char *restrict address,
                             const char *restrict port,
                             uint16_t flags);
+
+/** Creates a new socket, according to the provided flags. */
+SFUNC int fio_sock_open2(const char *url, uint16_t flags);
 
 /**
  * Attempts to resolve an address to a valid IP6 / IP4 address pointer.
@@ -462,7 +466,10 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {
-    FIO_LOG_ERROR("(fio_sock_address_new) error: %s", gai_strerror(e));
+    FIO_LOG_ERROR("(fio_sock_address_new(\"%s\", \"%s\")) error: %s",
+                  (address ? address : "NULL"),
+                  (port ? port : "0"),
+                  gai_strerror(e));
     return NULL;
   }
   return a;
@@ -474,6 +481,77 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a) { freeaddrinfo(a); }
 FIO_SOCK - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
+
+/** Creates a new socket, according to the provided flags. */
+SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
+  char buf[2048];
+  char port[64];
+  char *addr = buf;
+  char *pr = port;
+
+  /* parse URL */
+  fio_url_s u = fio_url_parse(url, strlen(url));
+#if FIO_OS_POSIX
+  if (!u.host.buf && !u.port.buf && u.path.buf) {
+    /* unix socket */
+    flags &= FIO_SOCK_SERVER | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK;
+    flags |= FIO_SOCK_UNIX;
+    if (u.path.len >= 2048) {
+      errno = EINVAL;
+      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      return -1;
+    }
+    FIO_MEMCPY(buf, u.path.buf, u.path.len);
+    buf[u.path.len] = 0;
+    pr = NULL;
+  } else
+#endif
+  {
+    if (!u.port.len)
+      u.port = u.scheme;
+    if (!u.port.len) {
+      pr = NULL;
+    } else {
+      if (u.port.len >= 64) {
+        errno = EINVAL;
+        FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
+                      url);
+        return -1;
+      }
+      FIO_MEMCPY(port, u.port.buf, u.port.len);
+      port[u.port.len] = 0;
+      if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
+        /* TODO? prefer...? TCP? */
+        if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
+            (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
+          flags |= FIO_SOCK_UDP;
+        else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
+                 (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
+          flags |= FIO_SOCK_TCP;
+        else if ((u.scheme.len == 4 || u.scheme.len == 5) &&
+                 (u.scheme.buf[0] | 32) == 'h' &&
+                 (u.scheme.buf[1] | 32) == 't' &&
+                 (u.scheme.buf[2] | 32) == 't' &&
+                 (u.scheme.buf[3] | 32) == 'p' &&
+                 (u.scheme.len == 4 ||
+                  (u.scheme.len == 5 && (u.scheme.buf[4] | 32) == 's')))
+          flags |= FIO_SOCK_TCP;
+      }
+    }
+    if (u.host.len) {
+      if (u.host.len >= 2048) {
+        errno = EINVAL;
+        FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+        return -1;
+      }
+      FIO_MEMCPY(buf, u.host.buf, u.host.len);
+      buf[u.host.len] = 0;
+    } else {
+      addr = NULL;
+    }
+  }
+  return fio_sock_open(addr, pr, flags);
+}
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd) {
