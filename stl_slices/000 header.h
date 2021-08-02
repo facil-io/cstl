@@ -728,8 +728,15 @@ Miscellaneous helper macros
 // clang-format on
 
 #ifdef DEBUG
-/** If `DEBUG` is defined, acts as `FIO_ASSERT`, otherwise a NOOP. */
-#define FIO_ASSERT_DEBUG(cond, ...) FIO_ASSERT(cond, __VA_ARGS__)
+/** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
+#define FIO_ASSERT_DEBUG(cond, ...)                                            \
+  if (!(cond)) {                                                               \
+    FIO_LOG_FATAL("(" FIO__FILE__                                              \
+                  ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);               \
+    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));           \
+    kill(0, SIGINT);                                                           \
+    exit(-1);                                                                  \
+  }
 #else
 #define FIO_ASSERT_DEBUG(...)
 #endif

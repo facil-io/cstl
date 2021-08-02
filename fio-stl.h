@@ -728,8 +728,15 @@ Miscellaneous helper macros
 // clang-format on
 
 #ifdef DEBUG
-/** If `DEBUG` is defined, acts as `FIO_ASSERT`, otherwise a NOOP. */
-#define FIO_ASSERT_DEBUG(cond, ...) FIO_ASSERT(cond, __VA_ARGS__)
+/** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
+#define FIO_ASSERT_DEBUG(cond, ...)                                            \
+  if (!(cond)) {                                                               \
+    FIO_LOG_FATAL("(" FIO__FILE__                                              \
+                  ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);               \
+    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));           \
+    kill(0, SIGINT);                                                           \
+    exit(-1);                                                                  \
+  }
 #else
 #define FIO_ASSERT_DEBUG(...)
 #endif
@@ -1407,9 +1414,9 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
-#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 32)
+#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 34)
 #else
-#define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 32)
+#define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 34)
 #define FIO_LOG____LENGTH_BORDER   FIO_LOG_LENGTH_LIMIT
 #endif
 
@@ -1419,25 +1426,25 @@ __attribute__((format(FIO___PRINTF_STYLE, 1, 0), weak)) void FIO_LOG2STDERR(
     const char *format,
     ...) {
   va_list argv;
-  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
+  char tmp___log[FIO_LOG____LENGTH_ON_STACK + 32];
   va_start(argv, format);
   int len___log = vsnprintf(tmp___log, FIO_LOG_LENGTH_LIMIT - 2, format, argv);
   va_end(argv);
   if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
       FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
-                 "...\n\tWARNING: TRUNCATED!",
-                 24);
-      len___log = FIO_LOG____LENGTH_BORDER + 24;
+                 "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
+                 32);
+      len___log = FIO_LOG____LENGTH_BORDER + 32;
     }
     tmp___log[len___log++] = '\n';
     tmp___log[len___log] = '0';
     fwrite(tmp___log, 1, len___log, stderr);
     return;
   }
-  fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
+  fwrite("\x1B[1mERROR:\x1B[0m log output error (can't write).\n",
          1,
-         39,
+         47,
          stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK
@@ -11122,7 +11129,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     t = fio___task_ring_pop(q->r);
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
-    if (to_free && to_free != &q->mem) { // edge case? never happens?
+    if (to_free && to_free != &q->mem) { // edge case
       FIO_MEM_FREE_(to_free, sizeof(*to_free));
     }
     to_free = q->r;
@@ -12734,6 +12741,9 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd);
 
+/** Attempts to maximize the allowed open file limits. returns known limit */
+SFUNC size_t fio_sock_maximize_limits(void);
+
 /**
  * Returns 0 on timeout, -1 on error or the events that are valid.
  *
@@ -13195,6 +13205,48 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
   if (r == 1)
     r = events;
   return r;
+}
+
+/** Attempts to maximize the allowed open file limits. returns known limit */
+SFUNC size_t fio_sock_maximize_limits(void) {
+  ssize_t capa = 0;
+#if FIO_OS_POSIX
+
+#ifdef _SC_OPEN_MAX
+  capa = sysconf(_SC_OPEN_MAX);
+#elif defined(FOPEN_MAX)
+  capa = FOPEN_MAX;
+#endif
+  // try to maximize limits - collect max and set to max
+  struct rlimit rlim = {.rlim_max = 0};
+  if (getrlimit(RLIMIT_NOFILE, &rlim) == -1) {
+    FIO_LOG_WARNING("`getrlimit` failed (%d): %s", errno, strerror(errno));
+    return capa;
+  }
+
+  FIO_LOG_DEBUG2("existing / maximum open file limit detected: %zd / %zd",
+                 (ssize_t)rlim.rlim_cur,
+                 (ssize_t)rlim.rlim_max);
+
+  rlim_t original = rlim.rlim_cur;
+  rlim.rlim_cur = rlim.rlim_max;
+  while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
+    rlim.rlim_cur -= 32;
+
+  FIO_LOG_DEBUG2("new open file limit: %zd", (ssize_t)rlim.rlim_cur);
+
+  getrlimit(RLIMIT_NOFILE, &rlim);
+  capa = rlim.rlim_cur;
+#elif FIO_OS_WIN
+  capa = 1ULL << 10;
+  while (_setmaxstdio(capa) > 0)
+    capa <<= 1;
+  capa >>= 1;
+  FIO_LOG_DEBUG("new open file limit: %zd", (ssize_t)capa);
+#else
+  FIO_LOG_ERROR("No OS detected, couldn't maximize open file limit.");
+#endif
+  return capa;
 }
 
 #if FIO_OS_POSIX

@@ -71,6 +71,7 @@ Starting the program - main()
 
 int main(int argc, char const *argv[]) {
   /* initialize the CLI options */
+  fio_sock_maximize_limits();
   int srv_fd;
   fio_cli_start(argc,
                 argv,
@@ -315,14 +316,14 @@ FIO_SFUNC void on_data(int fd, void *arg) {
 
 accept_new_connections : {
   /* accept is a macro for fio_sock_accept, which int Windows safe. */
-  int cl = accept(fd, NULL, NULL);
-  if (cl == -1)
+  int cfd = accept(fd, NULL, NULL);
+  if (cfd == -1)
     goto accept_error;
-  fio_sock_set_non_block(cl);
+  fio_sock_set_non_block(cfd);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
-  c->fd = cl;
-  client_free(fio_poll_forget(monitor, cl)); /* if on_close wasn't called. */
-  fio_poll_monitor(monitor, cl, c, POLLIN | POLLOUT);
+  c->fd = cfd;
+  client_free(fio_poll_forget(monitor, cfd)); /* if on_close wasn't called. */
+  fio_poll_monitor(monitor, cfd, c, POLLIN | POLLOUT);
   /* remember to reschedule event monitoring (one-shot by design) */
   fio_poll_monitor(monitor, fd, NULL, POLLIN);
   return;

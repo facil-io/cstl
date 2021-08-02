@@ -15,6 +15,8 @@ An application wide integer with a value of either:
 
 The initial value can be set using the `FIO_LOG_LEVEL_DEFAULT` macro. By default, the level is 4 (`FIO_LOG_LEVEL_INFO`) for normal compilation and 5 (`FIO_LOG_LEVEL_DEBUG`) for DEBUG compilation.
 
+**Note**: in **all** of the following `msg` **must** be a string literal (`const char *`).
+
 #### `FIO_LOG2STDERR(msg, ...)`
 
 This `printf` style **function** will log a message to `stderr`, without allocating any memory on the heap for the string (`fprintf` might).
@@ -51,15 +53,13 @@ Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LE
 
 #### `FIO_ASSERT(cond, msg, ...)`
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting (not aborting) the application.
+Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an exit(-1)`.
 
-In addition, a `SIGINT` will be sent to the process and any of it's children before exiting the application, supporting debuggers everywhere :-)
+The use of `SIGINT` should allow debuggers everywhere to pause execution before exiting the program.
 
-#### `FIO_ASSERT_ALLOC(cond, msg, ...)`
+#### `FIO_ASSERT_ALLOC(ptr)`
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting (not aborting) the application.
-
-In addition, a `SIGINT` will be sent to the process and any of it's children before exiting the application, supporting debuggers everywhere :-)
+Reports a failure to allocate memory, exiting the program the same way as `FIO_ASSERT`.
 
 #### `FIO_ASSERT_DEBUG(cond, msg, ...)`
 
@@ -67,8 +67,6 @@ Ignored unless `DEBUG` is defined.
 
 Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and aborting (not exiting) the application.
 
-In addition, a `SIGINT` will be sent to the process and any of it's children before aborting the application, because consistency is important.
-
-**Note**: `msg` MUST be a string literal.
+Note, this macro will **only** raise a `SIGINT` signal, but will not exit the program. This is designed to allow debuggers to catch these occurrences and continue execution when possible.
 
 -------------------------------------------------------------------------------

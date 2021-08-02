@@ -38,9 +38,9 @@ FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
-#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 32)
+#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 34)
 #else
-#define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 32)
+#define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 34)
 #define FIO_LOG____LENGTH_BORDER   FIO_LOG_LENGTH_LIMIT
 #endif
 
@@ -50,25 +50,25 @@ __attribute__((format(FIO___PRINTF_STYLE, 1, 0), weak)) void FIO_LOG2STDERR(
     const char *format,
     ...) {
   va_list argv;
-  char tmp___log[FIO_LOG____LENGTH_ON_STACK];
+  char tmp___log[FIO_LOG____LENGTH_ON_STACK + 32];
   va_start(argv, format);
   int len___log = vsnprintf(tmp___log, FIO_LOG_LENGTH_LIMIT - 2, format, argv);
   va_end(argv);
   if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
       FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
-                 "...\n\tWARNING: TRUNCATED!",
-                 24);
-      len___log = FIO_LOG____LENGTH_BORDER + 24;
+                 "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
+                 32);
+      len___log = FIO_LOG____LENGTH_BORDER + 32;
     }
     tmp___log[len___log++] = '\n';
     tmp___log[len___log] = '0';
     fwrite(tmp___log, 1, len___log, stderr);
     return;
   }
-  fwrite("\x1B[1mERROR\x1B[0m: log output error (can't write).\n",
+  fwrite("\x1B[1mERROR:\x1B[0m log output error (can't write).\n",
          1,
-         39,
+         47,
          stderr);
 }
 #undef FIO_LOG____LENGTH_ON_STACK

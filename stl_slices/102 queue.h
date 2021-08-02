@@ -416,7 +416,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     t = fio___task_ring_pop(q->r);
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
-    if (to_free && to_free != &q->mem) { // edge case? never happens?
+    if (to_free && to_free != &q->mem) { // edge case
       FIO_MEM_FREE_(to_free, sizeof(*to_free));
     }
     to_free = q->r;

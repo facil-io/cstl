@@ -264,6 +264,9 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd);
 
+/** Attempts to maximize the allowed open file limits. returns known limit */
+SFUNC size_t fio_sock_maximize_limits(void);
+
 /**
  * Returns 0 on timeout, -1 on error or the events that are valid.
  *
@@ -725,6 +728,48 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
   if (r == 1)
     r = events;
   return r;
+}
+
+/** Attempts to maximize the allowed open file limits. returns known limit */
+SFUNC size_t fio_sock_maximize_limits(void) {
+  ssize_t capa = 0;
+#if FIO_OS_POSIX
+
+#ifdef _SC_OPEN_MAX
+  capa = sysconf(_SC_OPEN_MAX);
+#elif defined(FOPEN_MAX)
+  capa = FOPEN_MAX;
+#endif
+  // try to maximize limits - collect max and set to max
+  struct rlimit rlim = {.rlim_max = 0};
+  if (getrlimit(RLIMIT_NOFILE, &rlim) == -1) {
+    FIO_LOG_WARNING("`getrlimit` failed (%d): %s", errno, strerror(errno));
+    return capa;
+  }
+
+  FIO_LOG_DEBUG2("existing / maximum open file limit detected: %zd / %zd",
+                 (ssize_t)rlim.rlim_cur,
+                 (ssize_t)rlim.rlim_max);
+
+  rlim_t original = rlim.rlim_cur;
+  rlim.rlim_cur = rlim.rlim_max;
+  while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
+    rlim.rlim_cur -= 32;
+
+  FIO_LOG_DEBUG2("new open file limit: %zd", (ssize_t)rlim.rlim_cur);
+
+  getrlimit(RLIMIT_NOFILE, &rlim);
+  capa = rlim.rlim_cur;
+#elif FIO_OS_WIN
+  capa = 1ULL << 10;
+  while (_setmaxstdio(capa) > 0)
+    capa <<= 1;
+  capa >>= 1;
+  FIO_LOG_DEBUG("new open file limit: %zd", (ssize_t)capa);
+#else
+  FIO_LOG_ERROR("No OS detected, couldn't maximize open file limit.");
+#endif
+  return capa;
 }
 
 #if FIO_OS_POSIX
