@@ -13,7 +13,7 @@ Benchmark with keep-alive:
     ab -c 200 -t 4 -n 1000000 -k http://127.0.0.1:3000/
     wrk -c200 -d4 -t1 http://localhost:3000/
 
-Note: This is a **TOY** example, no security whatsoever!!!
+Note: This is a **TOY** example, with only minimal security.
 ***************************************************************************** */
 
 /* include some of the modules we use... */
@@ -42,6 +42,7 @@ static volatile uint8_t server_stop_flag = 0;
 
 #define HTTP_CLIENT_BUFFER 32768
 #define HTTP_MAX_HEADERS   16
+#define HTTP_TIMEOUTS      5000
 
 /* an echo response is always dynamic (allocated on the heap). */
 #define HTTP_RESPONSE_ECHO 1
@@ -58,10 +59,15 @@ FIO_SFUNC void on_ready(int fd, void *arg);
 FIO_SFUNC void on_data(int fd, void *arg);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(int fd, void *arg);
+/* reviews any listed client objects for timeouts. */
+FIO_SFUNC void review_timeouts(void);
+/* closes and frees any listed client objects for timeouts. */
+FIO_SFUNC void clear_timeouts(void);
 
 /** The IO polling object - it keeps a one-shot list of monitored IOs. */
 static fio_poll_s *monitor;
-
+/** Time tick, the now of the moment. */
+static int64_t fio_now;
 /* facil.io delays signal callbacks so they can safely with no restrictions. */
 FIO_SFUNC void on_signal(int sig, void *udata);
 
@@ -72,6 +78,7 @@ Starting the program - main()
 int main(int argc, char const *argv[]) {
   /* initialize the CLI options */
   fio_sock_maximize_limits();
+  int64_t tick = fio_time_milli();
   int srv_fd;
   fio_cli_start(argc,
                 argv,
@@ -139,13 +146,12 @@ int main(int argc, char const *argv[]) {
   fio_cli_end();
 
   /* test socket / connection success */
-  if (srv_fd == -1) {
-    FIO_LOG_FATAL("Couldn't open connection");
-  }
+  FIO_ASSERT(srv_fd != -1, "Couldn't open connection");
 
   /* select signals to be monitored */
   fio_signal_monitor(SIGINT, on_signal, NULL);
   fio_signal_monitor(SIGTERM, on_signal, NULL);
+  fio_signal_monitor(SIGPIPE, NULL, NULL);
 #if FIO_OS_POSIX
   fio_signal_monitor(SIGQUIT, on_signal, NULL);
 #endif
@@ -163,10 +169,17 @@ int main(int argc, char const *argv[]) {
     fio_poll_review(monitor, 1000);
     /* review signals (calls the registered callback) */
     fio_signal_review();
+    /* review timeouts */
+    fio_now = fio_time_milli();
+    if (tick + 1000 <= fio_now) {
+      tick = fio_now;
+      review_timeouts();
+    }
   }
 
   /* cleanup */
   fio_poll_close_all(monitor);
+  clear_timeouts();
   fio_poll_free(monitor);
   FIO_LOG_INFO("Shutdown complete.");
   return 0;
@@ -192,10 +205,13 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
 IO "Objects"and helpers
 ***************************************************************************** */
 #include "http1_parser.h"
+static FIO_LIST_HEAD timeouts = FIO_LIST_INIT(timeouts);
 
 typedef struct {
   http1_parser_s parser;
   fio_stream_s out;
+  int64_t active;
+  FIO_LIST_NODE timeouts;
   struct {
     char *name;
     char *value;
@@ -212,6 +228,7 @@ typedef struct {
   int buf_pos;
   int buf_consumed;
   int fd;
+  uint8_t ignore;
   char buf[]; /* header and data buffer */
 } client_s;
 
@@ -223,33 +240,23 @@ static void http_send_response(client_s *c,
                                fio_str_info_s headers[][2],
                                fio_str_info_s body);
 
-#if FIO_OS_POSIX /* on POSIX we can take the easy path for constructors. */
 #define FIO_MEMORY_NAME fio_client_memory_allocator
 #define FIO_REF_NAME    client
 #define FIO_REF_CONSTRUCTOR_ONLY
 #define FIO_REF_FLEX_TYPE char
-#define FIO_REF_DESTROY(obj)                                                   \
+#define FIO_REF_INIT(c)                                                        \
   do {                                                                         \
-    fio_stream_destroy(&(obj).out);                                            \
+    (c).timeouts = FIO_LIST_INIT(c.timeouts);                                  \
+    (c).active = fio_now;                                                      \
+  } while (0)
+#define FIO_REF_DESTROY(c)                                                     \
+  do {                                                                         \
+    fio_stream_destroy(&(c).out);                                              \
+    FIO_LIST_REMOVE(&(c).timeouts);                                            \
+    fio_poll_forget(monitor, (c).fd);                                          \
+    fio_sock_close((c).fd);                                                    \
   } while (0)
 #include "fio-stl.h"
-
-#else /* on Windows the reference counter is not yet supported... so: */
-
-FIO_IFUNC client_s *client_new(size_t len) {
-  client_s *c = malloc(sizeof(*c) + len);
-  FIO_ASSERT_ALLOC(c);
-  memset(c, 0, sizeof(*c));
-  return c;
-}
-
-FIO_IFUNC void client_free(client_s *c) {
-  if (!c)
-    return;
-  fio_stream_destroy(&c->out);
-  free(c);
-}
-#endif
 
 /* *****************************************************************************
 IO callback(s)
@@ -262,6 +269,8 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
   client_s *c = arg;
   char mem[32768];
   size_t len = 32768;
+  size_t total = 0;
+  ssize_t sent;
   /* send as much data as we can until the system buffer is full */
   do {
     /* set buffer to copy to, in case a copy is performed */
@@ -270,18 +279,36 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
     /* read from the stream, copy might not be required. updates buf and len. */
     fio_stream_read(&c->out, &buf, &len);
     /* write to the IO object */
-    if (!len || fio_sock_write(fd, buf, len) <= 0)
+    if (!len || (sent = fio_sock_write(fd, buf, len)) <= 0)
       goto finish;
+    total += sent;
     /* advance the stream by the amount actually written to the IO (partial?) */
     fio_stream_advance(&c->out, len);
     /* log */
-    FIO_LOG_DEBUG2("on_ready send %zu bytes to %d.", len, fd);
+    FIO_LOG_DEBUG2("on_ready send %zu bytes to fd %d.", len, fd);
   } while (len);
-
 finish:
+  /* reinsert to timeout list */
+  if (total) {
+    c->active = fio_now;
+    FIO_LIST_REMOVE(&c->timeouts);
+    FIO_LIST_PUSH(&timeouts, &c->timeouts);
+  }
   /* if there's data left to write, monitor the outgoing buffer. */
-  if (fio_stream_any(&c->out))
+  if (fio_stream_any(&c->out)) {
+    /* test that a client isn't flooding us with requests */
+    if (fio_stream_packets(&c->out) >= 8) {
+      FIO_LOG_SECURITY("Throttling client %p @ fd %d for security concerns",
+                       (void *)c,
+                       fd);
+      c->ignore = 1;
+    }
     fio_poll_monitor(monitor, fd, arg, POLLOUT);
+  } else if (c->ignore) {
+    c->ignore = 0;
+    fio_poll_monitor(monitor, fd, arg, POLLIN);
+  }
+  return;
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
@@ -289,11 +316,16 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   client_s *c = arg;
   if (!arg)
     goto accept_new_connections;
+  if (c->ignore)
+    return;
   ssize_t r =
       fio_sock_read(fd, c->buf + c->buf_pos, HTTP_CLIENT_BUFFER - c->buf_pos);
   if (r > 0) {
+    c->active = fio_now;
     c->buf_pos += r;
     c->buf[c->buf_pos] = 0;
+    FIO_LIST_REMOVE(&c->timeouts);
+    FIO_LIST_PUSH(&timeouts, &c->timeouts);
     while ((r = http1_parse(&c->parser,
                             c->buf + c->buf_consumed,
                             (size_t)(c->buf_pos - c->buf_consumed)))) {
@@ -322,7 +354,7 @@ accept_new_connections : {
   fio_sock_set_non_block(cfd);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
   c->fd = cfd;
-  client_free(fio_poll_forget(monitor, cfd)); /* if on_close wasn't called. */
+  FIO_LIST_PUSH(&timeouts, &c->timeouts);
   fio_poll_monitor(monitor, cfd, c, POLLIN | POLLOUT);
   /* remember to reschedule event monitoring (one-shot by design) */
   fio_poll_monitor(monitor, fd, NULL, POLLIN);
@@ -337,12 +369,29 @@ accept_error:
 
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(int fd, void *arg) {
-  fio_sock_close(fd);
   if (arg) {
     client_free(arg);
   } else {
     FIO_LOG_DEBUG2("on_close callback called for %d, stopping.", fd);
     server_stop_flag = 1;
+  }
+}
+
+/* reviews any listed client objects for timeouts. */
+FIO_SFUNC void review_timeouts(void) {
+  int64_t limit = fio_now - HTTP_TIMEOUTS;
+  FIO_LIST_EACH(client_s, timeouts, &timeouts, c) {
+    if (c->active >= limit)
+      break;
+    FIO_LOG_DEBUG2("client @ %p (fd %d) timed out.", (void *)c, c->fd);
+    client_free(c);
+  }
+}
+
+FIO_SFUNC void clear_timeouts(void) {
+  FIO_LIST_EACH(client_s, timeouts, &timeouts, c) {
+    FIO_LOG_DEBUG2("destroying client @ %p (fd %d).", (void *)c, c->fd);
+    client_free(c);
   }
 }
 
@@ -530,5 +579,8 @@ static void http_send_response(client_s *c,
                            ((uintptr_t) final.buf) - (uintptr_t)response,
                            0,
                            (void (*)(void *))str_free));
-  FIO_LOG_DEBUG2("Sending response %d, %zu bytes", status, final.len);
+  FIO_LOG_DEBUG2("Sending response %d, %zu bytes, to fd %d",
+                 status,
+                 final.len,
+                 c->fd);
 }

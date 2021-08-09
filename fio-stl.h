@@ -7153,7 +7153,7 @@ Memory Allocation - Setup Alignment Info
 /* *****************************************************************************
 Memory Helpers - API
 ***************************************************************************** */
-
+#ifndef H___FIO_MEM_INCLUDE_ONCE___H
 /**
  * A 16 byte aligned memset (almost) naive implementation.
  *
@@ -7172,6 +7172,7 @@ SFUNC void fio_memset_aligned(void *restrict dest, uint64_t data, size_t bytes);
  */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
 
+#endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 /* *****************************************************************************
 Memory Allocation - API
 ***************************************************************************** */
@@ -8046,7 +8047,7 @@ free_mem:
 /* *****************************************************************************
 
 
-Unsupported?
+Unknown OS... Unsupported?
 
 
 ***************************************************************************** */
@@ -8092,7 +8093,7 @@ Overridable system allocation macros
 /* *****************************************************************************
 FIO_MEMORY_DISABLE - use the system allocator
 ***************************************************************************** */
-#if defined(FIO_MEMORY_DISABLE)
+#if defined(FIO_MEMORY_DISABLE) || defined(FIO_MALLOC_TMP_USE_SYSTEM)
 
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
@@ -11318,6 +11319,19 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
   fio_atomic_add((uintptr_t *)i_count, 1);
 }
 
+FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
+  static intptr_t counter = 0;
+  if (!i_count1 && !i_count2) {
+    counter = 0;
+    return;
+  }
+  FIO_ASSERT((intptr_t)i_count1 == (intptr_t)counter + 1,
+             "udata1 value error in task");
+  FIO_ASSERT((intptr_t)i_count2 == (intptr_t)counter + 2,
+             "udata2 value error in task");
+  ++counter;
+}
+
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
   for (size_t i = 0; i < t->count; i++) {
@@ -11345,6 +11359,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr,
           "\t- event slots per queue allocation: %zu\n",
           (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
+
+  /* test task user data integrity. */
+  fio___queue_test_static_task(NULL, NULL);
+  for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
+    fio_queue_push(q,
+                   .fn = fio___queue_test_static_task,
+                   .udata1 = (void *)(i + 1),
+                   .udata2 = (void *)(i + 2));
+  }
+  fio_queue_perform_all(q);
+  for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
+       i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
+       ++i) {
+    fio_queue_push(q,
+                   .fn = fio___queue_test_static_task,
+                   .udata1 = (void *)(i + 1),
+                   .udata2 = (void *)(i + 2));
+  }
+  fio_queue_perform_all(q);
+  FIO_ASSERT(!fio_queue_count(q) && fio_queue_perform(q) == -1,
+             "fio_queue_perform_all didn't perform all");
 
   const size_t max_threads = 12; // assumption / pure conjuncture...
   uintptr_t i_count;
@@ -12657,8 +12692,10 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -14004,7 +14041,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int c = 0; /* count events handled, to stop loop if no more events. */
     do {
       if ((int)fds_ary[i].fd != -1) {
-        if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
+        if ((fds_ary[i].revents & (POLLIN /* | POLLPRI */))) {
           cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
           FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
                              fds_ary[i].fd);
@@ -23123,6 +23160,8 @@ FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
+  if (!o)
+    return wrapped_;
   fio_atomic_add(&o->ref, 1);
   return wrapped_;
 }

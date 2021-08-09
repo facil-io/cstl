@@ -605,6 +605,19 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
   fio_atomic_add((uintptr_t *)i_count, 1);
 }
 
+FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
+  static intptr_t counter = 0;
+  if (!i_count1 && !i_count2) {
+    counter = 0;
+    return;
+  }
+  FIO_ASSERT((intptr_t)i_count1 == (intptr_t)counter + 1,
+             "udata1 value error in task");
+  FIO_ASSERT((intptr_t)i_count2 == (intptr_t)counter + 2,
+             "udata2 value error in task");
+  ++counter;
+}
+
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
   for (size_t i = 0; i < t->count; i++) {
@@ -632,6 +645,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr,
           "\t- event slots per queue allocation: %zu\n",
           (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
+
+  /* test task user data integrity. */
+  fio___queue_test_static_task(NULL, NULL);
+  for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
+    fio_queue_push(q,
+                   .fn = fio___queue_test_static_task,
+                   .udata1 = (void *)(i + 1),
+                   .udata2 = (void *)(i + 2));
+  }
+  fio_queue_perform_all(q);
+  for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
+       i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
+       ++i) {
+    fio_queue_push(q,
+                   .fn = fio___queue_test_static_task,
+                   .udata1 = (void *)(i + 1),
+                   .udata2 = (void *)(i + 2));
+  }
+  fio_queue_perform_all(q);
+  FIO_ASSERT(!fio_queue_count(q) && fio_queue_perform(q) == -1,
+             "fio_queue_perform_all didn't perform all");
 
   const size_t max_threads = 12; // assumption / pure conjuncture...
   uintptr_t i_count;

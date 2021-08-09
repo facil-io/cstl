@@ -394,7 +394,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     int c = 0; /* count events handled, to stop loop if no more events. */
     do {
       if ((int)fds_ary[i].fd != -1) {
-        if ((fds_ary[i].revents & (POLLIN | POLLPRI))) {
+        if ((fds_ary[i].revents & (POLLIN /* | POLLPRI */))) {
           cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
           FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
                              fds_ary[i].fd);

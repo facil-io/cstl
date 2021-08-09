@@ -103,7 +103,7 @@ Memory Allocation - Setup Alignment Info
 /* *****************************************************************************
 Memory Helpers - API
 ***************************************************************************** */
-
+#ifndef H___FIO_MEM_INCLUDE_ONCE___H
 /**
  * A 16 byte aligned memset (almost) naive implementation.
  *
@@ -122,6 +122,7 @@ SFUNC void fio_memset_aligned(void *restrict dest, uint64_t data, size_t bytes);
  */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
 
+#endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 /* *****************************************************************************
 Memory Allocation - API
 ***************************************************************************** */
@@ -996,7 +997,7 @@ free_mem:
 /* *****************************************************************************
 
 
-Unsupported?
+Unknown OS... Unsupported?
 
 
 ***************************************************************************** */
@@ -1042,7 +1043,7 @@ Overridable system allocation macros
 /* *****************************************************************************
 FIO_MEMORY_DISABLE - use the system allocator
 ***************************************************************************** */
-#if defined(FIO_MEMORY_DISABLE)
+#if defined(FIO_MEMORY_DISABLE) || defined(FIO_MALLOC_TMP_USE_SYSTEM)
 
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
