@@ -66,6 +66,10 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Task Queue](#task-queue) - defined by `FIO_QUEUE`
 
+* [Thread Portability Helpers](#threads-portable) - defined by `FIO_THREADS`
+
+* [File Utility Helpers](#file-utility-helpers) - defined by `FIO_FILES`
+
 * [Command Line Interface helpers](#cli-command-line-interface) - defined by `FIO_CLI`
 
 * [URL (URI) parsing](#url-uri-parsing) - defined by `FIO_URL`

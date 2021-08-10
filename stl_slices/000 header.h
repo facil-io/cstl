@@ -47,6 +47,8 @@ This file also contains common helper macros / primitives, such as:
 
 * OS portable Threads - defined by `FIO_THREADS`
 
+* OS portable file helpers - defined by `FIO_FILES`
+
 * Sleep / Thread Scheduling Macros - i.e., `FIO_THREAD_RESCHEDULE`
 
 * Logging and Assertion (no heap allocation) - defined by `FIO_LOG`
@@ -976,6 +978,11 @@ Common macros
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
     defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
+#endif
+
+/* Modules that require File Utils */
+#if defined(FIO_STR_NAME)
+#define FIO_FILES
 #endif
 
 /* Modules that require FIO_TIME */

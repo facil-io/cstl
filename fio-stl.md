@@ -66,6 +66,10 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Task Queue](#task-queue) - defined by `FIO_QUEUE`
 
+* [Thread Portability Helpers](#threads-portable) - defined by `FIO_THREADS`
+
+* [File Utility Helpers](#file-utility-helpers) - defined by `FIO_FILES`
+
 * [Command Line Interface helpers](#cli-command-line-interface) - defined by `FIO_CLI`
 
 * [URL (URI) parsing](#url-uri-parsing) - defined by `FIO_URL`
@@ -3541,6 +3545,30 @@ The following patterns are recognized:
 
     `"[sS]tring"`
 
+
+-------------------------------------------------------------------------------
+
+## File Utility Helpers
+
+By defining the macro `FIO_FILES` the following file helper functions are defined:
+
+#### `fio_filename_open`
+
+```c
+int fio_filename_open(const char *filename, int flags);
+```
+
+Opens `filename`, returning the same as values as `open` on POSIX systems.
+
+If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing for `"~\"`).
+
+#### `fio_filename_is_unsafe`
+
+```c
+int fio_filename_is_unsafe(const char *path);
+```
+
+Returns 1 if `path` does folds backwards (has "/../" or "//").
 
 -------------------------------------------------------------------------------
 

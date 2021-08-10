@@ -2099,14 +2099,6 @@ s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
 String - read file
 ***************************************************************************** */
 
-#if FIO_HAVE_UNIX_TOOLS && !defined(H___FIO_UNIX_TOOLS4STR_INCLUDED_H)
-#define H___FIO_UNIX_TOOLS4STR_INCLUDED_H
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif /* FIO_HAVE_UNIX_TOOLS && !H___FIO_UNIX_TOOLS4STR_INCLUDED_H */
-
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -2182,45 +2174,11 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
                                                       intptr_t limit) {
   fio_str_info_s state = {.buf = NULL};
   /* POSIX implementations. */
-  if (filename == NULL || !s_)
+  int fd = fio_filename_open(filename, O_RDONLY);
+  if (fd == -1)
     return state;
-  int file = -1;
-  char *path = NULL;
-  size_t path_len = 0;
-
-  if (filename[0] == '~' && (filename[1] == '/' || filename[1] == '\\')) {
-    char *home = getenv("HOME");
-    if (home) {
-      size_t filename_len = strlen(filename);
-      size_t home_len = strlen(home);
-      if ((home_len + filename_len) >= (1 << 16)) {
-        /* too long */
-        return state;
-      }
-      if (home[home_len - 1] == '/' || home[home_len - 1] == '\\')
-        --home_len;
-      path_len = home_len + filename_len - 1;
-      path =
-          (char *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*path) * (path_len + 1), 0);
-      if (!path)
-        return state;
-      FIO_MEMCPY(path, home, home_len);
-      FIO_MEMCPY(path + home_len, filename + 1, filename_len);
-      path[path_len] = 0;
-      filename = path;
-    }
-  }
-  file = open(filename, O_RDONLY);
-  if (-1 == file) {
-    goto finish;
-  }
-  state = FIO_NAME(FIO_STR_NAME, readfd)(s_, file, start_at, limit);
-  close(file);
-
-finish:
-  if (path) {
-    FIO_MEM_FREE_(path, path_len + 1);
-  }
+  state = FIO_NAME(FIO_STR_NAME, readfd)(s_, fd, start_at, limit);
+  close(fd);
   return state;
 }
 
