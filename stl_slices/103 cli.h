@@ -783,6 +783,8 @@ CLI Data Access API
 
 /** Returns the argument's value as a NUL terminated C String. */
 SFUNC char const *fio_cli_get(char const *name) {
+  if (!name)
+    return NULL;
   fio___cli_cstr_s n = {.buf = name, .len = strlen(name)};
   if (!fio___cli_hash_count(&fio___cli_values)) {
     return NULL;

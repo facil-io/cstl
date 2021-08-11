@@ -1372,11 +1372,12 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     thread_default_arena = (size_t)fio_risky_ptr(u.p) %
                            FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-    FIO_LOG_DEBUG("thread %p (%p) associated with arena %zu / %zu",
-                  u.p,
-                  (void *)fio_risky_ptr(u.p),
-                  thread_default_arena,
-                  (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
+    // FIO_LOG_DEBUG("thread %p (%p) associated with arena %zu / %zu",
+    //               u.p,
+    //               (void *)fio_risky_ptr(u.p),
+    //               thread_default_arena,
+    //               (size_t)FIO_NAME(FIO_MEMORY_NAME,
+    //               __mem_state)->arena_count);
   }
   for (;;) {
     /* rotate all arenas to find one that's available */
