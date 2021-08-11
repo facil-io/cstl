@@ -300,7 +300,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #endif
 
 #ifndef FIO_MEMORY_USE_THREAD_MUTEX
-#if FIO_USE_THREAD_MUTEX
+#if FIO_USE_THREAD_MUTEX_TMP
 /*
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is

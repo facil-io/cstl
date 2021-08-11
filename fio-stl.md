@@ -2141,6 +2141,8 @@ Defines the maximum number of arenas to allocate when using dynamic arena calcul
 
 If true, uses a `pthread mutex` instead of a `fio_lock_i` spinlock.
 
+When setting `FIO_USE_THREAD_MUTEX_TMP` or `FIO_USE_THREAD_MUTEX` to true (`1`), than the default value of this macro will be `1`. However, this macro can be used to override the default `FIO_USE_THREAD_MUTEX` / `FIO_USE_THREAD_MUTEX_TMP`.
+
 #### `FIO_MEMORY_WARMUP`
 
 ```c

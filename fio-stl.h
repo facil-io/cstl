@@ -1140,6 +1140,8 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #define fstat         _fstat64
 #define open          _open
 #define close         _close
+#define write         _write
+#define read          _read
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
@@ -7363,7 +7365,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #endif
 
 #ifndef FIO_MEMORY_USE_THREAD_MUTEX
-#if FIO_USE_THREAD_MUTEX
+#if FIO_USE_THREAD_MUTEX_TMP
 /*
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
@@ -15745,6 +15747,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #if defined(FIO_FILES) && !defined(H___FIO_FILES___H)
 #define H___FIO_FILES___H
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 /* *****************************************************************************
 File Helper API
 ***************************************************************************** */
@@ -15760,17 +15766,102 @@ SFUNC int fio_filename_open(const char *filename, int flags);
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe(const char *path);
 
+/**
+ * Writes data to a file, returning the number of bytes written.
+ *
+ * Returns -1 on error.
+ *
+ * Since some systems have a limit on the number of bytes that can be written at
+ * a single time, this function fragments the system calls into smaller `write`
+ * blocks, allowing large data to be written.
+ *
+ * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+ */
+FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
+
+/**
+ * Overwrites `filename` with the data in the buffer.
+ *
+ * If `path` starts with a `"~/"` than it will be relative to the user's home
+ * folder (on Windows, testing for `"~\"`).
+ *
+ * Returns -1 on error or 0 on success. On error, the state of the file is
+ * undefined (may be doesn't exit / nothing written / partially written).
+ */
+FIO_IFUNC int fio_filename_overwrite(const char *filename,
+                                     const void *buf,
+                                     size_t len);
+
+/* *****************************************************************************
+File Helper Inline Implementation
+***************************************************************************** */
+
+/**
+ * Writes data to a file, returning the number of bytes written.
+ *
+ * Returns -1 on error.
+ *
+ * Since some systems have a limit on the number of bytes that can be written at
+ * a single time, this function fragments the system calls into smaller `write`
+ * blocks, allowing large data to be written.
+ *
+ * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+ */
+FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
+  ssize_t total = 0;
+  const char *buf = (const char *)buf_;
+  const size_t write_limit = (1ULL << 17);
+  while (len > write_limit) {
+    ssize_t w = write(fd, buf, write_limit);
+    if (w > 0) {
+      len -= w;
+      buf += w;
+      total += w;
+      continue;
+    }
+    /* if (w == -1 && errno == EINTR) continue; */
+    if (total == 0)
+      return -1;
+    return total;
+  }
+  while (len) {
+    ssize_t w = write(fd, buf, len);
+    if (w > 0) {
+      len -= w;
+      buf += w;
+      continue;
+    }
+    if (total == 0)
+      return -1;
+    return total;
+  }
+  return total;
+}
+
+/**
+ * Overwrites `filename` with the data in the buffer.
+ *
+ * If `path` starts with a `"~/"` than it will be relative to the user's home
+ * folder (on Windows, testing for `"~\"`).
+ */
+FIO_IFUNC int fio_filename_overwrite(const char *filename,
+                                     const void *buf,
+                                     size_t len) {
+  int fd = fio_filename_open(filename, O_RDWR | O_CREAT | O_TRUNC);
+  if (fd == -1)
+    return -1;
+  ssize_t w = fio_fd_write(fd, buf, len);
+  close(fd);
+  if ((size_t)w != len)
+    return -1;
+  return 0;
+}
+
 /* *****************************************************************************
 File Helper Implementation
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
-#if FIO_OS_POSIX
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 /**
  * Opens `filename`, returning the same as values as `open` on POSIX systems.
  *
