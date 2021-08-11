@@ -2732,7 +2732,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     uint64_t buf1[64];
     uint8_t *buf = (uint8_t *)buf1;
     fio_memset_aligned(buf1, ~(uint64_t)0, sizeof(*buf1) * 64);
-    char *data = "This should be an uneven amount of characters, say 53";
+    char *data =
+        (char *)"This should be an uneven amount of characters, say 53";
     fio_memcpy_aligned(buf, data, strlen(data));
     FIO_ASSERT(!memcmp(buf, data, strlen(data)) && buf[strlen(data)] == 0xFF,
                "fio_memcpy_aligned should not overflow or underflow on uneven "
@@ -2831,25 +2832,25 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
                                   "mark missing at ary[3]");
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
 
-      ary[i] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       fio_memset_aligned(ary[i], mark, cycles);
 
-      ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i + 1] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
-      ary[i + 1] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i + 1] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       fio_memset_aligned(ary[i + 1], mark, cycles);
 
-      ary[i + 2] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i + 2] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       fio_memset_aligned(ary[i + 2], mark, cycles);
-      ary[i + 2] =
-          FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 2], cycles * 2, cycles);
+      ary[i + 2] = (char *)FIO_NAME(FIO_MEMORY_NAME,
+                                    realloc2)(ary[i + 2], cycles * 2, cycles);
 
-      ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
-      ary[i + 3] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+      ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       fio_memset_aligned(ary[i + 3], mark, cycles);
-      ary[i + 3] =
-          FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i + 3], cycles * 2, cycles);
+      ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME,
+                                    realloc2)(ary[i + 3], cycles * 2, cycles);
 
       for (int b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
@@ -2864,9 +2865,9 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
         FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + b]);
       }
       for (int b = 1; b < 4; ++b) {
-        ary[i + b] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+        ary[i + b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
         if (i) {
-          ary[b] = FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
+          ary[b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
           fio_memset_aligned(ary[b], mark, cycles);
         }
         fio_memset_aligned(ary[i + b], mark, cycles);
