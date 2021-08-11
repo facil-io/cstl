@@ -1124,10 +1124,11 @@ memset / memcpy selectors
 Lock type choice
 ***************************************************************************** */
 #if FIO_MEMORY_USE_THREAD_MUTEX
-#define FIO_MEMORY_LOCK_TYPE            fio_thread_mutex_t
-#define FIO_MEMORY_LOCK_TYPE_INIT(lock) fio_thread_mutex_init(&(lock))
-#define FIO_MEMORY_TRYLOCK(lock)        fio_thread_mutex_trylock(&(lock))
-#define FIO_MEMORY_LOCK(lock)           fio_thread_mutex_lock(&(lock))
+#define FIO_MEMORY_LOCK_TYPE fio_thread_mutex_t
+#define FIO_MEMORY_LOCK_TYPE_INIT(lock)                                        \
+  ((lock) = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT)
+#define FIO_MEMORY_TRYLOCK(lock) fio_thread_mutex_trylock(&(lock))
+#define FIO_MEMORY_LOCK(lock)    fio_thread_mutex_lock(&(lock))
 #define FIO_MEMORY_UNLOCK(lock)                                                \
   do {                                                                         \
     int tmp__ = fio_thread_mutex_unlock(&(lock));                              \
@@ -1362,23 +1363,28 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
   static size_t warning_printed = 0;
 #endif
   /** thread arena value */
-  size_t FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+  size_t thread_default_arena;
   {
     /* select the default arena selection using a thread ID. */
     union {
       void *p;
       fio_thread_t t;
     } u = {.t = fio_thread_current()};
-    FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var) = (size_t)fio_risky_ptr(u.p);
+    thread_default_arena = (size_t)fio_risky_ptr(u.p) %
+                           FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
+    FIO_LOG_DEBUG("thread %p (%p) associated with arena %zu / %zu",
+                  u.p,
+                  (void *)fio_risky_ptr(u.p),
+                  thread_default_arena,
+                  (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
   }
   for (;;) {
     /* rotate all arenas to find one that's available */
     for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
          ++i) {
       /* first attempt is the last used arena, then cycle with offset */
-      size_t index = i + FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
-      if (index >= FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
-        index = 0;
+      size_t index = i + thread_default_arena;
+      index %= FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
 
       if (FIO_MEMORY_TRYLOCK(
               FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[index].lock))
@@ -1396,12 +1402,11 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
     /* slow wait for last arena used by the thread */
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
-                        ->arena[FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var)]
+                        ->arena[thread_default_arena]
                         .lock);
-    return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena +
-           FIO_NAME(FIO_MEMORY_NAME, __mem_arena_var);
+    return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + thread_default_arena;
 #else
-    FIO_THREAD_RESCHEDULE();
+    // FIO_THREAD_RESCHEDULE();
 #endif /* FIO_MEMORY_USE_THREAD_MUTEX */
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */

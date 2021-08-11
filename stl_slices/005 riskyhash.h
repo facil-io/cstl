@@ -79,7 +79,11 @@ Here's a few resources about hashes that might explain more:
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   uint64_t n = (uint64_t)(uintptr_t)ptr;
-  n ^= ((n >> 3) ^ FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME2;
+  n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n ^= fio_rrot64(n, 7);
+  n ^= fio_rrot64(n, 13);
+  n ^= fio_rrot64(n, 17);
+  n ^= fio_rrot64(n, 31);
   return n;
 }
 

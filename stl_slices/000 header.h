@@ -812,6 +812,7 @@ Locking selector
 
 #if FIO_USE_THREAD_MUTEX_TMP
 #define FIO_THREAD
+#define FIO___LOCK_NAME          "OS mutex"
 #define FIO___LOCK_TYPE          fio_thread_mutex_t
 #define FIO___LOCK_INIT          ((FIO___LOCK_TYPE)FIO_THREAD_MUTEX_INIT)
 #define FIO___LOCK_DESTROY(lock) fio_thread_mutex_destroy(&(lock))
@@ -837,6 +838,7 @@ Locking selector
   } while (0)
 
 #else
+#define FIO___LOCK_NAME          "facil.io spinlocks"
 #define FIO___LOCK_TYPE          fio_lock_i
 #define FIO___LOCK_INIT          (FIO_LOCK_INIT)
 #define FIO___LOCK_DESTROY(lock) ((lock) = FIO___LOCK_INIT)
