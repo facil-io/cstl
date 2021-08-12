@@ -59,6 +59,9 @@ FIO_SFUNC void on_ready(int fd, void *arg);
 FIO_SFUNC void on_data(int fd, void *arg);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(int fd, void *arg);
+/* Signal review callback. */
+FIO_SFUNC void on_signal(int sig, void *udata);
+
 /* reviews any listed client objects for timeouts. */
 FIO_SFUNC void review_timeouts(void);
 /* closes and frees any listed client objects for timeouts. */
@@ -68,18 +71,19 @@ FIO_SFUNC void clear_timeouts(void);
 static fio_poll_s *monitor;
 /** Time tick, the now of the moment. */
 static int64_t fio_now;
-/* facil.io delays signal callbacks so they can safely with no restrictions. */
-FIO_SFUNC void on_signal(int sig, void *udata);
+/** Timeout management using a linked list. */
+static FIO_LIST_HEAD timeouts; /* will be initialized in main */
 
 /* *****************************************************************************
 Starting the program - main()
 ***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
-  /* initialize the CLI options */
   fio_sock_maximize_limits();
+  timeouts = FIO_LIST_INIT(timeouts);
   int64_t tick = fio_time_milli();
   int srv_fd;
+  /* initialize the CLI options */
   fio_cli_start(argc,
                 argv,
                 0, /* allow 1 unnamed argument - the address to connect to */
@@ -205,7 +209,6 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
 IO "Objects"and helpers
 ***************************************************************************** */
 #include "http1_parser.h"
-static FIO_LIST_HEAD timeouts = FIO_LIST_INIT(timeouts);
 
 typedef struct {
   http1_parser_s parser;
