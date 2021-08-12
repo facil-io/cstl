@@ -3572,6 +3572,16 @@ int fio_filename_is_unsafe(const char *path);
 
 Returns 1 if `path` does folds backwards (has "/../" or "//").
 
+#### `fio_filename_tmp`
+
+```c
+int fio_filename_tmp(void);
+```
+
+Creates a temporary file, returning its file descriptor.
+
+Returns -1 on error.
+
 #### `fio_filename_overwrite`
 
 ```c

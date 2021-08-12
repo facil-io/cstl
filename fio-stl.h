@@ -958,13 +958,6 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
-/* Modules that require randomness */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
-#ifndef FIO_RAND
-#define FIO_RAND
-#endif
-#endif /* FIO_MALLOC */
-
 /* Modules that require FIO_SOCK */
 #if defined(FIO_POLL)
 #define FIO_SOCK
@@ -993,6 +986,13 @@ Common macros
 #define FIO_TIME
 #endif
 #endif /* FIO_QUEUE */
+
+/* Modules that require randomness */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES)
+#ifndef FIO_RAND
+#define FIO_RAND
+#endif
+#endif /* FIO_MALLOC */
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
@@ -1030,7 +1030,8 @@ Common macros
 
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
-    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON)
+    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON) ||              \
+    defined(FIO_FILES)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
@@ -15729,8 +15730,10 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_FILES module            /* Development inclusion - ignore line */
+#define FIO_FILES                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "005 riskyhash.h"          /* Development inclusion - ignore line */
+#include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -15766,18 +15769,8 @@ SFUNC int fio_filename_open(const char *filename, int flags);
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe(const char *path);
 
-/**
- * Writes data to a file, returning the number of bytes written.
- *
- * Returns -1 on error.
- *
- * Since some systems have a limit on the number of bytes that can be written at
- * a single time, this function fragments the system calls into smaller `write`
- * blocks, allowing large data to be written.
- *
- * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
- */
-FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
+/** Creates a temporary file, returning its file descriptor. */
+SFUNC int fio_filename_tmp(void);
 
 /**
  * Overwrites `filename` with the data in the buffer.
@@ -15791,6 +15784,19 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
 FIO_IFUNC int fio_filename_overwrite(const char *filename,
                                      const void *buf,
                                      size_t len);
+
+/**
+ * Writes data to a file, returning the number of bytes written.
+ *
+ * Returns -1 on error.
+ *
+ * Since some systems have a limit on the number of bytes that can be written at
+ * a single time, this function fragments the system calls into smaller `write`
+ * blocks, allowing large data to be written.
+ *
+ * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+ */
+FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
 
 /* *****************************************************************************
 File Helper Inline Implementation
@@ -15930,6 +15936,60 @@ SFUNC int fio_filename_is_unsafe(const char *path) {
     ++path;
     path = strchr(path, sep);
   }
+}
+
+/** Creates a temporary file, returning its file descriptor. */
+SFUNC int fio_filename_tmp(void) {
+  // create a temporary file to contain the data.
+  int fd;
+  char name_template[512];
+  size_t len = 0;
+#if FIO_OS_WIN
+  const char sep = '\\';
+  const char *tmp = NULL;
+#else
+  const char sep = '/';
+  const char *tmp = NULL;
+#endif
+
+  if (!tmp)
+    tmp = getenv("TMPDIR");
+  if (!tmp)
+    tmp = getenv("TMP");
+  if (!tmp)
+    tmp = getenv("TEMP");
+#if defined(P_tmpdir)
+  if (!tmp && sizeof(P_tmpdir) <= 464 && sizeof(P_tmpdir) > 0) {
+    tmp = P_tmpdir;
+  }
+#endif
+  if (tmp && (len = strlen(tmp))) {
+    FIO_MEMCPY(name_template, tmp, len);
+    if (tmp[len - 1] != sep) {
+      name_template[len++] = sep;
+    }
+  } else {
+    /* use current folder */
+    name_template[len++] = '.';
+    name_template[len++] = sep;
+  }
+
+  FIO_MEMCPY(name_template + len, "facil_io_tmpfile_", 17);
+  len += 17;
+  do {
+#ifdef O_TMPFILE
+    uint64_t r = fio_rand64();
+    size_t delta = fio_ltoa(name_template + len, r, 32);
+    name_template[delta + len] = 0;
+    fd = open(name_template, O_CREAT | O_TMPFILE | O_EXCL | O_RDWR);
+#else
+    FIO_MEMCPY(name_template + len, "XXXXXXXXXXXX", 12);
+    name_template[12 + len] = 0;
+    fd = mkstemp(name_template);
+#endif
+  } while (fd == -1 && errno == EEXIST);
+  return fd;
+  (void)tmp;
 }
 
 /* *****************************************************************************

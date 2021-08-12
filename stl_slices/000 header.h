@@ -958,13 +958,6 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
-/* Modules that require randomness */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
-#ifndef FIO_RAND
-#define FIO_RAND
-#endif
-#endif /* FIO_MALLOC */
-
 /* Modules that require FIO_SOCK */
 #if defined(FIO_POLL)
 #define FIO_SOCK
@@ -993,6 +986,13 @@ Common macros
 #define FIO_TIME
 #endif
 #endif /* FIO_QUEUE */
+
+/* Modules that require randomness */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES)
+#ifndef FIO_RAND
+#define FIO_RAND
+#endif
+#endif /* FIO_MALLOC */
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
@@ -1030,7 +1030,8 @@ Common macros
 
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
-    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON)
+    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON) ||              \
+    defined(FIO_FILES)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
