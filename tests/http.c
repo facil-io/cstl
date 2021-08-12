@@ -231,7 +231,7 @@ typedef struct {
   int buf_pos;
   int buf_consumed;
   int fd;
-  uint8_t ignore;
+  uint8_t throttle;
   char buf[]; /* header and data buffer */
 } client_s;
 
@@ -299,16 +299,9 @@ finish:
   }
   /* if there's data left to write, monitor the outgoing buffer. */
   if (fio_stream_any(&c->out)) {
-    /* test that a client isn't flooding us with requests */
-    if (fio_stream_packets(&c->out) >= 8) {
-      FIO_LOG_SECURITY("Throttling client %p @ fd %d for security concerns",
-                       (void *)c,
-                       fd);
-      c->ignore = 1;
-    }
     fio_poll_monitor(monitor, fd, arg, POLLOUT);
-  } else if (c->ignore) {
-    c->ignore = 0;
+  } else if (c->throttle) {
+    c->throttle = 0;
     fio_poll_monitor(monitor, fd, arg, POLLIN);
   }
   return;
@@ -319,7 +312,15 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   client_s *c = arg;
   if (!arg)
     goto accept_new_connections;
-  if (c->ignore)
+  /* test that a client isn't flooding us with requests */
+  if (!c->throttle && fio_stream_packets(&c->out) >= 8) {
+    FIO_LOG_SECURITY("Throttling client %p @ fd %d for security concerns",
+                     (void *)c,
+                     fd);
+    c->throttle = 1;
+  }
+  /* do not process or monitor throttled clients for incoming data */
+  if (c->throttle)
     return;
   ssize_t r =
       fio_sock_read(fd, c->buf + c->buf_pos, HTTP_CLIENT_BUFFER - c->buf_pos);
