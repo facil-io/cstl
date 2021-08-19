@@ -71,7 +71,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *stream);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-/** Destroys the object, reinitializing its container. */
+/** Destroys the object, re-initializing its container. */
 SFUNC void fio_stream_destroy(fio_stream_s *stream);
 
 /* *****************************************************************************
@@ -130,14 +130,14 @@ SFUNC void fio_stream_advance(fio_stream_s *stream, size_t len);
 /**
  * Returns true if there's any data in the stream.
  *
- * Note: this isn't truely thread safe.
+ * Note: this isn't truly thread safe.
  */
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
 
 /**
  * Returns the number of packets waiting in the stream.
  *
- * Note: this isn't truely thread safe.
+ * Note: this isn't truly thread safe.
  */
 FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *stream);
 
@@ -183,18 +183,10 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-/**
- * Returns true if there's any data iin the stream.
- *
- * Note: this isn't thread safe.
- */
+/* Returns true if there's any data in the stream */
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
 
-/**
- * Returns the number of packets waiting in the stream.
- *
- * Note: this isn't truely thread safe.
- */
+/* Returns the number of packets waiting in the stream */
 FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *s) { return s->packets; }
 
 /* *****************************************************************************

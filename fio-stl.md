@@ -902,6 +902,10 @@ Performs the operation indicated in constant time.
 
     Tests if `condition` is non-zero (returns `a` / `b`).
 
+- `fio_ct_max(a, b)`
+
+    Returns `a` if a >= `b` (performs a **signed** comparison).
+
 #### Simulating SIMD instructions
 
 
@@ -2669,12 +2673,12 @@ Returns the number of tasks pushed to the queue. A value of `0` indicates no new
 #### `fio_timer_next_at`
 
 ```c
-uint64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
+int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
 ```
 
 Returns the millisecond at which the next event should occur.
 
-If no timer is due (list is empty), returns `(uint64_t)-1`.
+If no timer is due (list is empty), returns `-1`.
 
 **Note**: Unless manually specified, millisecond timers are relative to  `fio_time_milli()`.
 

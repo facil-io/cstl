@@ -129,6 +129,10 @@ Performs the operation indicated in constant time.
 
     Tests if `condition` is non-zero (returns `a` / `b`).
 
+- `fio_ct_max(a, b)`
+
+    Returns `a` if a >= `b` (performs a **signed** comparison).
+
 #### Simulating SIMD instructions
 
 

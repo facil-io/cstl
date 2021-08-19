@@ -106,11 +106,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #ifdef _MSC_VER
-#pragma message ("Fallback to C11 atomics, might be missing some features.")
+#pragma message ("Fallback to C11 atomic header, might be missing some features.")
 #undef FIO_COMPILER_GUARD
 #define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
 #else
-#warning Fallback to C11 atomics, might be missing some features.
+#warning Fallback to C11 atomic header, might be missing some features.
 #endif /* _MSC_VER */
 /** An atomic load operation, returns value in pointer. */
 #define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))

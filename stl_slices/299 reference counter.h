@@ -116,7 +116,7 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
 #endif
 
 /* *****************************************************************************
-Inlined Implementation
+Inline Implementation
 ***************************************************************************** */
 /** Increases the reference count. */
 FIO_IFUNC FIO_REF_TYPE_PTR

@@ -591,6 +591,14 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
+/** Returns `a` if a >= `b`. */
+FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintptr_t a = a_, b = b_;
+  return (
+      intptr_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+}
+
 /* *****************************************************************************
 SIMD emulation helpers
 ***************************************************************************** */
@@ -1151,6 +1159,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
              "fio_ct_if_bool selection error (true).");
   FIO_ASSERT(fio_ct_if(0, 1, 2) == 2, "fio_ct_if selection error (false).");
   FIO_ASSERT(fio_ct_if(8, 1, 2) == 1, "fio_ct_if selection error (true).");
+  FIO_ASSERT(fio_ct_max(1, 2) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(2, 1) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-1, 2) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(2, -1) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(1, -2) == 1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-2, 1) == 1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-1, -2) == -1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-2, -1) == -1, "fio_ct_max error.");
   {
     uint8_t bitmap[1024];
     memset(bitmap, 0, 1024);

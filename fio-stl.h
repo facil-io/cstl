@@ -1624,11 +1624,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #ifdef _MSC_VER
-#pragma message ("Fallback to C11 atomics, might be missing some features.")
+#pragma message ("Fallback to C11 atomic header, might be missing some features.")
 #undef FIO_COMPILER_GUARD
 #define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
 #else
-#warning Fallback to C11 atomics, might be missing some features.
+#warning Fallback to C11 atomic header, might be missing some features.
 #endif /* _MSC_VER */
 /** An atomic load operation, returns value in pointer. */
 #define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
@@ -2823,6 +2823,14 @@ FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
+/** Returns `a` if a >= `b`. */
+FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintptr_t a = a_, b = b_;
+  return (
+      intptr_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+}
+
 /* *****************************************************************************
 SIMD emulation helpers
 ***************************************************************************** */
@@ -3383,6 +3391,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
              "fio_ct_if_bool selection error (true).");
   FIO_ASSERT(fio_ct_if(0, 1, 2) == 2, "fio_ct_if selection error (false).");
   FIO_ASSERT(fio_ct_if(8, 1, 2) == 1, "fio_ct_if selection error (true).");
+  FIO_ASSERT(fio_ct_max(1, 2) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(2, 1) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-1, 2) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(2, -1) == 2, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(1, -2) == 1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-2, 1) == 1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-1, -2) == -1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-2, -1) == -1, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(-1, 0) == 0, "fio_ct_max error.");
+  FIO_ASSERT(fio_ct_max(0, -1) == 0, "fio_ct_max error.");
   {
     uint8_t bitmap[1024];
     memset(bitmap, 0, 1024);
@@ -10975,7 +10993,7 @@ struct fio___timer_event_s {
 /*
  * Returns the millisecond at which the next event should occur.
  *
- * If no timer is due (list is empty), returns `(uint64_t)-1`.
+ * If no timer is due (list is empty), returns `-1`.
  *
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
@@ -14403,7 +14421,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *stream);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-/** Destroys the object, reinitializing its container. */
+/** Destroys the object, re-initializing its container. */
 SFUNC void fio_stream_destroy(fio_stream_s *stream);
 
 /* *****************************************************************************
@@ -14462,14 +14480,14 @@ SFUNC void fio_stream_advance(fio_stream_s *stream, size_t len);
 /**
  * Returns true if there's any data in the stream.
  *
- * Note: this isn't truely thread safe.
+ * Note: this isn't truly thread safe.
  */
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
 
 /**
  * Returns the number of packets waiting in the stream.
  *
- * Note: this isn't truely thread safe.
+ * Note: this isn't truly thread safe.
  */
 FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *stream);
 
@@ -14515,18 +14533,10 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
-/**
- * Returns true if there's any data iin the stream.
- *
- * Note: this isn't thread safe.
- */
+/* Returns true if there's any data in the stream */
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
 
-/**
- * Returns the number of packets waiting in the stream.
- *
- * Note: this isn't truely thread safe.
- */
+/* Returns the number of packets waiting in the stream */
 FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *s) { return s->packets; }
 
 /* *****************************************************************************
@@ -23419,7 +23429,7 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
 #endif
 
 /* *****************************************************************************
-Inlined Implementation
+Inline Implementation
 ***************************************************************************** */
 /** Increases the reference count. */
 FIO_IFUNC FIO_REF_TYPE_PTR

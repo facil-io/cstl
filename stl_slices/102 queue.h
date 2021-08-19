@@ -238,7 +238,7 @@ struct fio___timer_event_s {
 /*
  * Returns the millisecond at which the next event should occur.
  *
- * If no timer is due (list is empty), returns `(uint64_t)-1`.
+ * If no timer is due (list is empty), returns `-1`.
  *
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
