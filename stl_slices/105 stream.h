@@ -48,8 +48,8 @@ typedef struct {
   /* do not directly acecss! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
-  uint32_t consumed;
-  uint32_t packets;
+  size_t consumed;
+  size_t length;
 } fio_stream_s;
 
 /* at this point publish (declare only) the public API */
@@ -135,11 +135,11 @@ SFUNC void fio_stream_advance(fio_stream_s *stream, size_t len);
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
 
 /**
- * Returns the number of packets waiting in the stream.
+ * Returns the number of bytes waiting in the stream.
  *
  * Note: this isn't truly thread safe.
  */
-FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *stream);
+FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
 
 /* *****************************************************************************
 
@@ -186,8 +186,8 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 /* Returns true if there's any data in the stream */
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
 
-/* Returns the number of packets waiting in the stream */
-FIO_IFUNC uint32_t fio_stream_packets(fio_stream_s *s) { return s->packets; }
+/* Returns the number of bytes waiting in the stream */
+FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
 
 /* *****************************************************************************
 Stream Implementation - possibly externed functions.
@@ -278,6 +278,30 @@ FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p) {
   }
 }
 
+FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
+  size_t len = 0;
+  if (!p)
+    return len;
+  union {
+    fio_stream_packet_embd_s *em;
+    fio_stream_packet_extrn_s *ext;
+    fio_stream_packet_fd_s *f;
+  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
+
+  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  case FIO_PACKET_TYPE_EMBEDDED:
+    len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
+    return len;
+  case FIO_PACKET_TYPE_EXTERNAL:
+    len = u.ext->length;
+    return len;
+  case FIO_PACKET_TYPE_FILE: /* fallthrough */
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
+    len = u.f->length;
+    return len;
+  }
+  return len;
+}
 /** Packs data into a fio_stream_packet_s container. */
 SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 size_t len,
@@ -380,18 +404,21 @@ no_file:
 /** Adds a packet to the stream. This isn't thread safe.*/
 SFUNC void fio_stream_add(fio_stream_s *s, fio_stream_packet_s *p) {
   fio_stream_packet_s *last = p;
-  uint32_t packets = 1;
+  size_t len = 0;
+
   if (!s || !p)
     goto error;
+  len = fio___stream_p2len(p);
+
   while (last->next) {
     last = last->next;
-    ++packets;
+    len += fio___stream_p2len(last);
   }
   if (!s->pos)
     s->pos = &s->next;
   *s->pos = p;
   s->pos = &last->next;
-  s->packets += packets;
+  s->length += len;
   return;
 error:
   fio_stream_pack_free(p);
@@ -405,31 +432,6 @@ SFUNC void fio_stream_pack_free(fio_stream_packet_s *p) {
 /* *****************************************************************************
 Stream API - Consuming the stream
 ***************************************************************************** */
-
-FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
-  size_t len = 0;
-  if (!p)
-    return len;
-  union {
-    fio_stream_packet_embd_s *em;
-    fio_stream_packet_extrn_s *ext;
-    fio_stream_packet_fd_s *f;
-  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
-
-  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
-  case FIO_PACKET_TYPE_EMBEDDED:
-    len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
-    return len;
-  case FIO_PACKET_TYPE_EXTERNAL:
-    len = u.ext->length;
-    return len;
-  case FIO_PACKET_TYPE_FILE: /* fallthrough */
-  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
-    len = u.f->length;
-    return len;
-  }
-  return len;
-}
 
 FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
                                           char **buf,
@@ -571,19 +573,19 @@ none:
 SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
   if (!s || !s->next)
     return;
+  s->length -= len;
   len += s->consumed;
   while (len) {
     size_t p_len = fio___stream_p2len(s->next);
     if (len >= p_len) {
       fio_stream_packet_s *p = s->next;
       s->next = p->next;
-      --s->packets;
       fio_stream_packet_free(p);
       len -= p_len;
       if (!s->next) {
         s->pos = &s->next;
         s->consumed = 0;
-        s->packets = 0;
+        s->length = 0;
         return;
       }
     } else {
@@ -682,7 +684,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
 
   FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
-  FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error.");
+  FIO_ASSERT(fio_stream_length(&s) == 80, "stream length error.");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
              "adding a stream shouldn't deallocate it.");
 
@@ -717,7 +719,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   fio_stream_advance(&s, 20);
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
              "partial advancing shouldn't deallocate any packets.");
-  FIO_ASSERT(fio_stream_packets(&s) == 2, "packet counut error (2).");
+  FIO_ASSERT(fio_stream_length(&s) == 60, "stream length error (2).");
   buf = mem;
   len = 4000;
   fio_stream_read(&s, &buf, &len);
@@ -732,7 +734,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "reading shouldn't deallocate packets the head packet.");
 
   fio_stream_add(&s, fio_stream_pack_fd(open(__FILE__, O_RDONLY), 20, 0, 0));
-  FIO_ASSERT(fio_stream_packets(&s) == 3, "packet counut error (3).");
+  FIO_ASSERT(fio_stream_length(&s) == 80, "stream length error (3).");
   buf = mem;
   len = 4000;
   fio_stream_read(&s, &buf, &len);
@@ -784,6 +786,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
              "partial advancing shouldn't deallocate any packets.");
   FIO_ASSERT(!fio_stream_any(&s), "stream should be empty at this point.");
+  FIO_ASSERT(!fio_stream_length(&s),
+             "stream length should be zero at this point.");
   fio_stream_destroy(&s);
 }
 

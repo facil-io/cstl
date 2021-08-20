@@ -13,8 +13,8 @@ typedef struct {
   /* do not directly acecss! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
-  uint32_t consumed;
-  uint32_t packets;
+  size_t consumed;
+  size_t length;
 } fio_stream_s;
 ```
 
@@ -71,13 +71,13 @@ Returns true if there's any data in the stream.
 
 **Note**: this isn't thread safe, but it often doesn't matter if it is.
 
-#### `fio_stream_packets`
+#### `fio_stream_length`
 
 ```c
-uint32_t fio_stream_packets(fio_stream_s *stream);
+size_t fio_stream_length(fio_stream_s *stream);
 ````
 
-Returns the number of packets waiting in the stream.
+Returns the number of bytes waiting in the stream.
 
 **Note**: this isn't thread safe, but it often doesn't matter if it is.
 
