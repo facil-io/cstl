@@ -104,10 +104,11 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_NAME ary3____test
 #include __FILE__
 
-#define FIO_UMAP_NAME     umap___test__size_t
-#define FIO_MEMORY_NAME   umap___test__size_t_mem
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
+#define FIO_UMAP_NAME          umap___test__size_t
+#define FIO_MEMORY_NAME        umap___test__size_t_mem
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_MAP_EVICT_LRU      0
 #define FIO_MAP_TEST
 #include __FILE__
 #define FIO_UMAP_NAME     umap___test__size_lru
@@ -117,10 +118,11 @@ static int ary____test_was_destroyed = 0;
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_OMAP_NAME     omap___test__size_t
-#define FIO_MEMORY_NAME   omap___test__size_t_mem
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
+#define FIO_OMAP_NAME          omap___test__size_t
+#define FIO_MEMORY_NAME        omap___test__size_t_mem
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_MAP_EVICT_LRU      0
 #define FIO_MAP_TEST
 #include __FILE__
 #define FIO_OMAP_NAME     omap___test__size_lru
@@ -592,24 +594,18 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                "key destruction error - was the key freed?");
   }
   {
-    set_____test_s s = FIO_MAP_INIT;
     map_____test_s m = FIO_MAP_INIT;
-    fprintf(stderr, "* Testing attack resistance (SHOULD print warnings).\n");
+    fprintf(stderr,
+            "* Testing attack resistance (SHOULD print a single warning).\n");
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buf[64];
       fio_ltoa(buf, i, 16);
-      set_____test_set(&s, 1, i + 1, NULL);
       map_____test_set(&m, 1, buf, i + 1, NULL);
     }
-    FIO_ASSERT(set_____test_count(&s) != TEST_REPEAT,
-               "full collision protection failed (set)?");
     FIO_ASSERT(map_____test_count(&m) != TEST_REPEAT,
                "full collision protection failed (map)?");
-    FIO_ASSERT(set_____test_count(&s) != 1,
-               "full collision test failed to push elements (set)?");
     FIO_ASSERT(map_____test_count(&m) != 1,
                "full collision test failed to push elements (map)?");
-    set_____test_destroy(&s);
     map_____test_destroy(&m);
   }
 }

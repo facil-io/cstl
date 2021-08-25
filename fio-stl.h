@@ -18143,6 +18143,11 @@ The following macros are used to customize the map.
 #ifndef FIO_MAP_TYPE_CMP
 /** Handles a comparison operation for a map's value. */
 #define FIO_MAP_TYPE_CMP(a, b) 1
+/* internal flag - do not set */
+#define FIO_MAP_TYPE_CMP_SIMPLE 1
+#else
+/* internal flag - do not set */
+#define FIO_MAP_TYPE_CMP_SIMPLE 0
 #endif
 
 /**
@@ -19544,7 +19549,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   if (!m)
     return 0;
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  return FIO_MAP_CAPA(m->bits);
+  return (m->bits ? FIO_MAP_CAPA(m->bits) : 0);
 }
 
 /* *****************************************************************************
@@ -20555,6 +20560,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                tmp,
                count);
   }
+#if FIO_MAP_HASH_CACHED && !FIO_MAP_TYPE_CMP_SIMPLE
+  {
+  fprintf(stderr,
+          "\ttesting attack pattern, expecting a SECURITY log message.\n");
+    FIO_NAME(FIO_MAP_NAME, destroy)(&m);
+    for (size_t i = 0; i < MEMBERS; ++i) {
+#ifdef FIO_MAP_KEY
+      FIO_NAME(FIO_MAP_NAME, set)
+      (&m, (FIO_MAP_HASH)1, (FIO_MAP_KEY)i, (FIO_MAP_TYPE)(i + 1), NULL);
+#else
+      FIO_NAME(FIO_MAP_NAME, set)
+      (&m, (FIO_MAP_HASH)1, (FIO_MAP_TYPE)(i + 1), NULL);
+#endif
+    }
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) != MEMBERS,
+               "full collision protection failed (map)?");
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) != 1,
+               "full collision test failed to push elements (map)?");
+  }
+#endif
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }
 #undef FIO_MAP_TEST_KEY
@@ -20618,6 +20643,7 @@ Map - cleanup
 #undef FIO_MAP_SIZE_TYPE
 #undef FIO_MAP_TYPE
 #undef FIO_MAP_TYPE_CMP
+#undef FIO_MAP_TYPE_CMP_SIMPLE
 #undef FIO_MAP_TYPE_COPY
 #undef FIO_MAP_TYPE_COPY_SIMPLE
 #undef FIO_MAP_TYPE_DESTROY
@@ -26485,10 +26511,11 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_NAME ary3____test
 #include __FILE__
 
-#define FIO_UMAP_NAME     umap___test__size_t
-#define FIO_MEMORY_NAME   umap___test__size_t_mem
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
+#define FIO_UMAP_NAME          umap___test__size_t
+#define FIO_MEMORY_NAME        umap___test__size_t_mem
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_MAP_EVICT_LRU      0
 #define FIO_MAP_TEST
 #include __FILE__
 #define FIO_UMAP_NAME     umap___test__size_lru
@@ -26498,10 +26525,11 @@ static int ary____test_was_destroyed = 0;
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_OMAP_NAME     omap___test__size_t
-#define FIO_MEMORY_NAME   omap___test__size_t_mem
-#define FIO_MAP_TYPE      size_t
-#define FIO_MAP_EVICT_LRU 0
+#define FIO_OMAP_NAME          omap___test__size_t
+#define FIO_MEMORY_NAME        omap___test__size_t_mem
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_MAP_EVICT_LRU      0
 #define FIO_MAP_TEST
 #include __FILE__
 #define FIO_OMAP_NAME     omap___test__size_lru
@@ -26973,24 +27001,18 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                "key destruction error - was the key freed?");
   }
   {
-    set_____test_s s = FIO_MAP_INIT;
     map_____test_s m = FIO_MAP_INIT;
-    fprintf(stderr, "* Testing attack resistance (SHOULD print warnings).\n");
+    fprintf(stderr,
+            "* Testing attack resistance (SHOULD print a single warning).\n");
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       char buf[64];
       fio_ltoa(buf, i, 16);
-      set_____test_set(&s, 1, i + 1, NULL);
       map_____test_set(&m, 1, buf, i + 1, NULL);
     }
-    FIO_ASSERT(set_____test_count(&s) != TEST_REPEAT,
-               "full collision protection failed (set)?");
     FIO_ASSERT(map_____test_count(&m) != TEST_REPEAT,
                "full collision protection failed (map)?");
-    FIO_ASSERT(set_____test_count(&s) != 1,
-               "full collision test failed to push elements (set)?");
     FIO_ASSERT(map_____test_count(&m) != 1,
                "full collision test failed to push elements (map)?");
-    set_____test_destroy(&s);
     map_____test_destroy(&m);
   }
 }

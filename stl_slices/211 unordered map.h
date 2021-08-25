@@ -101,7 +101,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   if (!m)
     return 0;
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  return FIO_MAP_CAPA(m->bits);
+  return (m->bits ? FIO_MAP_CAPA(m->bits) : 0);
 }
 
 /* *****************************************************************************

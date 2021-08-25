@@ -219,6 +219,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                tmp,
                count);
   }
+#if FIO_MAP_HASH_CACHED && !FIO_MAP_TYPE_CMP_SIMPLE
+  {
+  fprintf(stderr,
+          "\ttesting attack pattern, expecting a SECURITY log message.\n");
+    FIO_NAME(FIO_MAP_NAME, destroy)(&m);
+    for (size_t i = 0; i < MEMBERS; ++i) {
+#ifdef FIO_MAP_KEY
+      FIO_NAME(FIO_MAP_NAME, set)
+      (&m, (FIO_MAP_HASH)1, (FIO_MAP_KEY)i, (FIO_MAP_TYPE)(i + 1), NULL);
+#else
+      FIO_NAME(FIO_MAP_NAME, set)
+      (&m, (FIO_MAP_HASH)1, (FIO_MAP_TYPE)(i + 1), NULL);
+#endif
+    }
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) != MEMBERS,
+               "full collision protection failed (map)?");
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) != 1,
+               "full collision test failed to push elements (map)?");
+  }
+#endif
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }
 #undef FIO_MAP_TEST_KEY
@@ -282,6 +302,7 @@ Map - cleanup
 #undef FIO_MAP_SIZE_TYPE
 #undef FIO_MAP_TYPE
 #undef FIO_MAP_TYPE_CMP
+#undef FIO_MAP_TYPE_CMP_SIMPLE
 #undef FIO_MAP_TYPE_COPY
 #undef FIO_MAP_TYPE_COPY_SIMPLE
 #undef FIO_MAP_TYPE_DESTROY

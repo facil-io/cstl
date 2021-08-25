@@ -84,6 +84,11 @@ The following macros are used to customize the map.
 #ifndef FIO_MAP_TYPE_CMP
 /** Handles a comparison operation for a map's value. */
 #define FIO_MAP_TYPE_CMP(a, b) 1
+/* internal flag - do not set */
+#define FIO_MAP_TYPE_CMP_SIMPLE 1
+#else
+/* internal flag - do not set */
+#define FIO_MAP_TYPE_CMP_SIMPLE 0
 #endif
 
 /**
