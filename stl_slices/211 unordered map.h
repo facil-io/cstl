@@ -104,64 +104,6 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   return FIO_MAP_CAPA(m->bits);
 }
 
-FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
-    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  if (!m || !first)
-    return NULL;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  if (!m->count || !m->map)
-    return NULL;
-  size_t i;
-#if FIO_MAP_EVICT_LRU
-  FIO_MAP_SIZE_TYPE next;
-  if (!pos) {
-    i = m->last_used;
-    *first = m->map;
-    return m->map + i;
-  }
-  i = pos - *first;
-  *first = m->map; /* was it updated? */
-  next = m->map[i].node.next;
-  if (next == m->last_used)
-    return NULL;
-  return m->map + next;
-
-#else  /*FIO_MAP_EVICT_LRU*/
-  if (!pos || !(*first)) {
-    i = -1;
-  } else {
-    i = pos - *first;
-  }
-  ++i;
-  *first = m->map;
-  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
-  while (i + 8 < FIO_MAP_CAPA(m->bits)) {
-    /* test only groups with valid values (test for all bytes == 0 || 255 */
-    register uint64_t row = fio_buf2u64_local(imap + i);
-    row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
-    if (row != UINT64_C(0x8080808080808080)) {
-      row ^= UINT64_C(0x8080808080808080);
-      for (int j = 0; j < 8; ++j) {
-        if ((row & UINT64_C(0x80))) {
-          return m->map + i + j;
-        }
-        row >>= 8;
-      }
-      i += 8;
-    }
-  }
-  while (i < FIO_MAP_CAPA(m->bits)) {
-    if (imap[i] && imap[i] != 255)
-      return m->map + i;
-    ++i;
-  }
-  return NULL;
-#endif /* FIO_MAP_EVICT_LRU */
-}
 /* *****************************************************************************
 Unordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -883,6 +825,65 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
 #endif /* FIO_MAP_EVICT_LRU */
 finish:
   return (FIO_MAP_SIZE_TYPE)e.index;
+}
+
+FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m || !first)
+    return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
+  if (!m->count || !m->map)
+    return NULL;
+  size_t i;
+#if FIO_MAP_EVICT_LRU
+  FIO_MAP_SIZE_TYPE next;
+  if (!pos) {
+    i = m->last_used;
+    *first = m->map;
+    return m->map + i;
+  }
+  i = pos - *first;
+  *first = m->map; /* was it updated? */
+  next = m->map[i].node.next;
+  if (next == m->last_used)
+    return NULL;
+  return m->map + next;
+
+#else  /* FIO_MAP_EVICT_LRU */
+  if (!pos || !(*first)) {
+    i = -1;
+  } else {
+    i = pos - *first;
+  }
+  ++i;
+  *first = m->map;
+  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
+  while (i + 8 < FIO_MAP_CAPA(m->bits)) {
+    /* test only groups with valid values (test for all bytes == 0 || 255 */
+    register uint64_t row = fio_buf2u64_local(imap + i);
+    row = (fio_has_full_byte64(row) | fio_has_zero_byte64(row));
+    if (row != UINT64_C(0x8080808080808080)) {
+      row ^= UINT64_C(0x8080808080808080);
+      for (int j = 0; j < 8; ++j) {
+        if ((row & UINT64_C(0x80))) {
+          return m->map + i + j;
+        }
+        row >>= 8;
+      }
+      i += 8;
+    }
+  }
+  while (i < FIO_MAP_CAPA(m->bits)) {
+    if (imap[i] && imap[i] != 255)
+      return m->map + i;
+    ++i;
+  }
+  return NULL;
+#endif /* FIO_MAP_EVICT_LRU */
 }
 
 /* *****************************************************************************

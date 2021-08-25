@@ -104,23 +104,27 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_NAME ary3____test
 #include __FILE__
 
-#define FIO_UMAP_NAME     __umap_test__size_t
+#define FIO_UMAP_NAME     umap___test__size_t
+#define FIO_MEMORY_NAME   umap___test__size_t_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_UMAP_NAME     __umap_test__size_lru
+#define FIO_UMAP_NAME     umap___test__size_lru
+#define FIO_MEMORY_NAME   umap___test__size_lru_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_OMAP_NAME     __omap_test__size_t
+#define FIO_OMAP_NAME     omap___test__size_t
+#define FIO_MEMORY_NAME   omap___test__size_t_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_EVICT_LRU 0
 #define FIO_MAP_TEST
 #include __FILE__
-#define FIO_OMAP_NAME     __omap_test__size_lru
+#define FIO_OMAP_NAME     omap___test__size_lru
+#define FIO_MEMORY_NAME   omap___test__size_lru_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
@@ -295,6 +299,15 @@ Hash Map / Set - test
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
 #define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_MAP_TEST
+#include __FILE__
+
+/* a simple set of numbers - no hash caching */
+#define FIO_UMAP_NAME          set_hashless_____test
+#define FIO_MAP_TYPE           size_t
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_MAP_HASH_FN(o)     fio_risky_ptr((void *)(o))
+#define FIO_MAP_TEST
 #include __FILE__
 
 /* a simple set of numbers */
@@ -303,6 +316,7 @@ Hash Map / Set - test
 #define FIO_MAP_TYPE_CMP(a, b) 1
 #define FIO_PTR_TAG(p)         fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)       fio___dynamic_types_test_untag(((uintptr_t)p))
+#define FIO_MAP_TEST
 #include __FILE__
 
 FIO_SFUNC size_t map_____test_key_copy_counter = 0;
@@ -326,6 +340,7 @@ FIO_SFUNC void map_____test_key_destroy(char **dest) {
 #define FIO_MAP_KEY_DESTROY(a) map_____test_key_destroy(&(a))
 #define FIO_MAP_TYPE           size_t
 #define FIO_MAP_NAME           map_____test
+#define FIO_MAP_TEST
 #include __FILE__
 
 #define HASHOFi(i) i /* fio_risky_hash(&(i), sizeof((i)), 0) */
@@ -340,11 +355,11 @@ FIO_SFUNC int set_____test_each_task(set_____test_each_s *e) {
 }
 
 FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
+  fprintf(stderr, "* Testing dynamic hash / set maps.\n");
   {
     set_____test_s m = FIO_MAP_INIT;
-    fprintf(stderr, "* Testing dynamic hash / set maps.\n");
-
     fprintf(stderr, "* Testing set (hash map where value == key).\n");
+    FIO_NAME_TEST(stl, set_____test);
     FIO_ASSERT(set_____test_count(&m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(set_____test_capa(&m) == 0,
@@ -395,10 +410,10 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                "Inserting existing object should keep existing object.");
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == i + 1,
-                 "item retrival error in set - insert failed to update?");
+                 "item retrieval error in set - insert failed to update?");
       FIO_ASSERT(set_____test_get_ptr(&m, HASHOFi(i), i + 1) &&
                      set_____test_get_ptr(&m, HASHOFi(i), i + 1)[0] == i + 1,
-                 "pointer retrival error in set.");
+                 "pointer retrieval error in set.");
     }
 
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
@@ -438,8 +453,37 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
     set_____test_destroy(&m);
   }
   {
+    set_hashless_____test_s m = FIO_MAP_INIT;
+    fprintf(
+        stderr,
+        "* Testing set (hash map where value == key) with no hash caching.\n");
+    size_t data_ary[1024];
+    const size_t members = sizeof(data_ary) / sizeof(data_ary[0]);
+    for (size_t i = 0; i < members; ++i) {
+      data_ary[i] = fio_rand64();
+      set_hashless_____test_set(&m,
+                                fio_risky_ptr((void *)data_ary[i]),
+                                data_ary[i],
+                                NULL);
+    }
+    for (size_t i = 0; i < members; ++i) {
+      FIO_ASSERT(set_hashless_____test_get(&m,
+                                           fio_risky_ptr((void *)data_ary[i]),
+                                           data_ary[i]) == data_ary[i],
+                 "object error (index %zu), expected %zu, got %zu",
+                 i,
+                 data_ary[i],
+                 set_hashless_____test_get(&m,
+                                           fio_risky_ptr((void *)data_ary[i]),
+                                           data_ary[i]));
+    }
+    set_hashless_____test_destroy(&m);
+    FIO_NAME_TEST(stl, set_hashless_____test);
+  }
+  {
     set2_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set map without value comparison.\n");
+    FIO_NAME_TEST(stl, set2_____test);
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       set2_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
@@ -514,6 +558,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
   {
     map_____test_s *m = map_____test_new();
     fprintf(stderr, "* Testing hash map.\n");
+    FIO_NAME_TEST(stl, map_____test);
     FIO_ASSERT(map_____test_count(m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(map_____test_capa(m) == 0,
@@ -887,10 +932,10 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, ary2____test)();
   FIO_NAME_TEST(stl, ary3____test)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, __umap_test__size_t)();
-  FIO_NAME_TEST(stl, __umap_test__size_lru)();
-  FIO_NAME_TEST(stl, __omap_test__size_t)();
-  FIO_NAME_TEST(stl, __omap_test__size_lru)();
+  FIO_NAME_TEST(stl, umap___test__size_t)();
+  FIO_NAME_TEST(stl, umap___test__size_lru)();
+  FIO_NAME_TEST(stl, omap___test__size_t)();
+  FIO_NAME_TEST(stl, omap___test__size_lru)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___map_test();
   fprintf(stderr, "===============\n");

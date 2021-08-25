@@ -103,49 +103,6 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   return FIO_MAP_CAPA(m->bits);
 }
 
-FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
-    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
-                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
-                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
-  if (!m || !first)
-    return NULL;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  if (!m->count || !m->map)
-    return NULL;
-  intptr_t i;
-#if FIO_MAP_EVICT_LRU
-  FIO_MAP_SIZE_TYPE next;
-  if (!pos) {
-    i = m->last_used;
-    *first = m->map;
-    return m->map + i;
-  }
-  i = pos - *first;
-  *first = m->map; /* was it updated? */
-  next = m->map[i].node.next;
-  if (next == m->last_used)
-    return NULL;
-  return m->map + next;
-
-#else  /* FIO_MAP_EVICT_LRU */
-  if (!pos) {
-    i = -1;
-  } else {
-    i = (intptr_t)(pos - *first);
-  }
-  ++i;
-  *first = m->map;
-  while ((uintptr_t)i < (uintptr_t)m->w) {
-    if (m->map[i].hash)
-      return m->map + i;
-    ++i;
-  }
-  return NULL;
-#endif /* FIO_MAP_EVICT_LRU */
-}
-
 /* *****************************************************************************
 Ordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -304,23 +261,28 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
             m->map,
             FIO_MAP_MEMORY_SIZE(m->bits),
             FIO_MAP_MEMORY_SIZE(bits),
-            (m->w * sizeof(*m->map)));
+            ((size_t)m->w * sizeof(*m->map)));
     if (!tmp)
       return -1;
     m->map = tmp;
     m->bits = (uint8_t)bits;
-  }
-  if (!FIO_MEM_REALLOC_IS_SAFE_ || bits == m->bits)
+    if (!FIO_MEM_REALLOC_IS_SAFE_)
+      memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
+             0,
+             sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+  } else if (bits == m->bits) {
     memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
            0,
            sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+  }
+
   /* rehash the map */
   if (m->count) {
     register FIO_MAP_SIZE_TYPE *const imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
     /* scan map for used slots to re-insert data */
     register const FIO_MAP_SIZE_TYPE end = m->w;
     if (m->w == m->count) {
-      /* no holes, we can quickly run through the array and reindex */
+      /* no holes, we can quickly run through the array and re-index */
       FIO_MAP_SIZE_TYPE i = 0;
       do {
         if (m->map[i].hash) {
@@ -335,7 +297,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
         i++;
       } while (i < end);
     } else {
-      /* the array has holes -o compact the array while reindexing */
+      /* the array has holes -o compact the array while re-indexing */
       FIO_MAP_SIZE_TYPE r = 0, w = 0;
       do {
 #if FIO_MAP_EVICT_LRU
@@ -764,6 +726,48 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   return e.index;
 }
 
+FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+    FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * *first,
+                                      FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!m || !first)
+    return NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
+  if (!m->count || !m->map)
+    return NULL;
+  intptr_t i;
+#if FIO_MAP_EVICT_LRU
+  FIO_MAP_SIZE_TYPE next;
+  if (!pos) {
+    i = m->last_used;
+    *first = m->map;
+    return m->map + i;
+  }
+  i = pos - *first;
+  *first = m->map; /* was it updated? */
+  next = m->map[i].node.next;
+  if (next == m->last_used)
+    return NULL;
+  return m->map + next;
+
+#else  /* FIO_MAP_EVICT_LRU */
+  if (!pos) {
+    i = -1;
+  } else {
+    i = (intptr_t)(pos - *first);
+  }
+  ++i;
+  *first = m->map;
+  while ((uintptr_t)i < (uintptr_t)m->w) {
+    if (m->map[i].hash)
+      return m->map + i;
+    ++i;
+  }
+  return NULL;
+#endif /* FIO_MAP_EVICT_LRU */
+}
 /* *****************************************************************************
 Ordered Map Cleanup
 ***************************************************************************** */

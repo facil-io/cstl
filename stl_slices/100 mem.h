@@ -2276,7 +2276,7 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
 #ifdef DEBUG
     FIO_LOG_WARNING(
         "unintended " FIO_MACRO2STR(
-            FIO_NAME(FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu pages",
+            FIO_NAME(FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu bytes",
         FIO_MEM_BYTES2PAGES(size));
 #endif
     return FIO_NAME(FIO_MEMORY_NAME, mmap)(size);
@@ -2400,7 +2400,7 @@ FIO_SFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(
   const size_t new_len = FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_ALIGN_SIZE);
   c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_SYS_REALLOC(
       c,
-      c->marker,
+      (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG,
       new_len,
       FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
   if (!c)
@@ -2505,7 +2505,7 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (!size)
     return FIO_NAME(FIO_MEMORY_NAME, malloc)(0);
   size_t pages = FIO_MEM_BYTES2PAGES(size + FIO_MEMORY_ALIGN_SIZE);
-  if (((uint64_t)pages >> 32))
+  if (((uint64_t)pages >> (31 + FIO_MEM_PAGE_SIZE_LOG)))
     return NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)
