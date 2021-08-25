@@ -8297,7 +8297,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_chunk_count));
     } while (0);
 
 #define FIO_MEMORY_PRINT_STATS()                                               \
-  FIO_LOG_INFO(                                                                \
+  FIO_LOG_DEBUG2(                                                              \
       "(" FIO_MACRO2STR(FIO_NAME(                                              \
           FIO_MEMORY_NAME,                                                     \
           malloc)) "):\n          "                                            \
@@ -8658,8 +8658,9 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
 
   FIO_MEMORY_PRINT_STATS_END();
 #if DEBUG && defined(FIO_LOG_INFO)
-  FIO_LOG_INFO("finished facil.io memory allocator cleanup for " FIO_MACRO2STR(
-      FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
+  FIO_LOG_DEBUG2(
+      "finished facil.io memory allocator cleanup for " FIO_MACRO2STR(
+          FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
 #endif /* DEBUG */
 }
 
