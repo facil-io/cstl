@@ -220,6 +220,17 @@ FIO_IFUNC fio_queue_s *fio_queue_new(void) {
 /** returns the number of tasks in the queue. */
 FIO_IFUNC size_t fio_queue_count(fio_queue_s *q) { return q->count; }
 
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
+  /* do this manually, we don't want to reset a whole page */
+  q->r = &q->mem;
+  q->w = &q->mem;
+  q->count = 0;
+  q->lock = FIO___LOCK_INIT;
+  q->mem.next = NULL;
+  q->mem.r = q->mem.w = q->mem.dir = 0;
+}
+
 /* *****************************************************************************
 Timer Queue Inline Helpers
 ***************************************************************************** */
@@ -265,17 +276,6 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
 
-/** Initializes a fio_queue_s object. */
-FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
-  /* do this manually, we don't want to reset a whole page */
-  q->r = &q->mem;
-  q->w = &q->mem;
-  q->count = 0;
-  q->lock = FIO___LOCK_INIT;
-  q->mem.next = NULL;
-  q->mem.r = q->mem.w = q->mem.dir = 0;
-}
-
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   FIO___LOCK_LOCK(q->lock);
@@ -301,7 +301,7 @@ FIO_IFUNC int fio___task_ring_push(fio___task_ring_s *r,
   if (r->dir && r->r == r->w)
     return -1;
   r->buf[r->w] = task;
-  ++r->w;
+  ++(r->w);
   if (r->w == FIO_QUEUE_TASKS_PER_ALLOC) {
     r->w = 0;
     r->dir = ~r->dir;
@@ -590,7 +590,7 @@ Queue - test
 #ifdef FIO_TEST_CSTL
 
 #ifndef FIO___QUEUE_TEST_PRINT
-#define FIO___QUEUE_TEST_PRINT 0
+#define FIO___QUEUE_TEST_PRINT 1
 #endif
 
 #define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
@@ -598,6 +598,7 @@ Queue - test
 typedef struct {
   fio_queue_s *q;
   uintptr_t count;
+  uintptr_t *counter;
 } fio___queue_test_s;
 
 FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
@@ -605,7 +606,7 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
   fio_atomic_add((uintptr_t *)i_count, 1);
 }
 
-FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
+FIO_SFUNC void fio___queue_test_counter_task(void *i_count1, void *i_count2) {
   static intptr_t counter = 0;
   if (!i_count1 && !i_count2) {
     counter = 0;
@@ -620,10 +621,23 @@ FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
 
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
-  for (size_t i = 0; i < t->count; i++) {
-    FIO_ASSERT(!fio_queue_push(t->q,
-                               .fn = fio___queue_test_sample_task,
-                               .udata1 = i_count),
+  size_t i = (size_t)(uintptr_t)i_count;
+  FIO_ASSERT(!fio_queue_push(t->q,
+                             .fn = fio___queue_test_sample_task,
+                             .udata1 = t->counter),
+             "Couldn't push task!");
+  --i;
+  if (!i)
+    return;
+  if ((i & 1)) {
+    FIO_ASSERT(
+        !fio_queue_push(t->q, fio___queue_test_sched_sample_task, t, (void *)i),
+        "Couldn't push task!");
+  } else {
+    FIO_ASSERT(!fio_queue_push_urgent(t->q,
+                                      fio___queue_test_sched_sample_task,
+                                      t,
+                                      (void *)i),
                "Couldn't push task!");
   }
 }
@@ -635,6 +649,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
+  /* ************** testing queue ************** */
   fio_queue_s *q = fio_queue_new();
   fio_queue_s q2;
 
@@ -647,22 +662,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
 
   /* test task user data integrity. */
-  fio___queue_test_static_task(NULL, NULL);
+  fio___queue_test_counter_task(NULL, NULL);
   for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
     fio_queue_push(q,
-                   .fn = fio___queue_test_static_task,
+                   .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
                    .udata2 = (void *)(i + 2));
   }
+  fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
        i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
        ++i) {
     fio_queue_push(q,
-                   .fn = fio___queue_test_static_task,
+                   .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
                    .udata2 = (void *)(i + 2));
   }
+  fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   FIO_ASSERT(!fio_queue_count(q) && fio_queue_perform(q) == -1,
              "fio_queue_perform_all didn't perform all");
@@ -692,6 +709,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                    .udata1 = (void *)&i_count);
   }
   fio_queue_perform_all(q);
+  fio_queue_perform_all(q);
+  fio_queue_perform_all(q);
   end = clock();
   if (FIO___QUEUE_TEST_PRINT) {
     fprintf(stderr,
@@ -706,9 +725,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
 
   for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
-    fio___queue_test_s info = {.q = q,
-                               .count =
-                                   (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
+    fio___queue_test_s info = {
+        .q = q,
+        .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i),
+        .counter = &i_count,
+    };
     const size_t tasks = 1 << i;
     i_count = 0;
     start = clock();
@@ -716,7 +737,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       fio_queue_push(q,
                      fio___queue_test_sched_sample_task,
                      (void *)&info,
-                     &i_count);
+                     (void *)info.count);
     }
     FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
     {
@@ -742,7 +763,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     end = clock();
     if (FIO___QUEUE_TEST_PRINT) {
       fprintf(stderr,
-              "- queue performed using %zu threads, %zu scheduling loops (%zu "
+              "- queue performed using %zu threads, %zu scheduling tasks (%zu "
               "each):\n"
               "    %lu cycles with i_count = %lu\n",
               ((i % max_threads) + 1),
@@ -785,6 +806,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                "pop overflow after urgent tasks");
     fio_queue_destroy(&q2);
   }
+  /* ************** testing timers ************** */
   {
     fprintf(stderr,
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");

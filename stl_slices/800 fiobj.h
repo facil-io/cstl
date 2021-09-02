@@ -917,7 +917,8 @@ FIOBJ Data / Info
 
 /** Internal: compares two nestable objects. */
 FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b);
+                                                FIOBJ restrict b,
+                                                size_t nesting);
 
 /** Compares two objects. */
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
@@ -933,16 +934,16 @@ FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
   case FIOBJ_T_STRING:
     return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
   case FIOBJ_T_ARRAY:
-    return fiobj___test_eq_nested(a, b);
+    return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_HASH:
-    return fiobj___test_eq_nested(a, b);
+    return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_OTHER:
     if ((*fiobj_object_metadata(a))->count(a) ||
         (*fiobj_object_metadata(b))->count(b)) {
       if ((*fiobj_object_metadata(a))->count(a) !=
           (*fiobj_object_metadata(b))->count(b))
         return 0;
-      return fiobj___test_eq_nested(a, b);
+      return fiobj___test_eq_nested(a, b, 0);
     }
     return (*fiobj_object_metadata(a))->type_id ==
                (*fiobj_object_metadata(b))->type_id &&
@@ -1632,56 +1633,61 @@ FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
 FIOBJ Hash / Array / Other (enumerable) Equality test.
 ***************************************************************************** */
 
-FIO_SFUNC __thread size_t fiobj___test_eq_nested_level = 0;
 /** Internal: compares two nestable objects. */
 FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b) {
+                                                FIOBJ restrict b,
+                                                size_t nesting) {
   if (a == b)
     return 1;
   if (FIOBJ_TYPE_CLASS(a) != FIOBJ_TYPE_CLASS(b))
     return 0;
   if (fiobj____each2_element_count(a) != fiobj____each2_element_count(b))
     return 0;
-  if (!fiobj____each2_element_count(a))
-    return 1;
-  if (fiobj___test_eq_nested_level >= FIOBJ_MAX_NESTING)
+  if (nesting >= FIOBJ_MAX_NESTING)
     return 0;
-  ++fiobj___test_eq_nested_level;
+
+  ++nesting;
 
   switch (FIOBJ_TYPE_CLASS(a)) {
-  case FIOBJ_T_PRIMITIVE:
-  case FIOBJ_T_NUMBER: /* fallthrough */
-  case FIOBJ_T_FLOAT:  /* fallthrough */
-  case FIOBJ_T_STRING: /* fallthrough */
-    /* should never happen... this function is for enumerable objects */
+  case FIOBJ_T_PRIMITIVE: /* fallthrough */
+  case FIOBJ_T_NUMBER:    /* fallthrough */
+  case FIOBJ_T_FLOAT:
     return a == b;
+  case FIOBJ_T_STRING:
+    return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
+
   case FIOBJ_T_ARRAY:
+    if (!fiobj____each2_element_count(a))
+      return 1;
     /* test each array member with matching index */
     {
       const size_t count = fiobj____each2_element_count(a);
       for (size_t i = 0; i < count; ++i) {
-        if (!FIO_NAME_BL(fiobj, eq)(
+        if (!fiobj___test_eq_nested(
                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a, i),
-                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b, i)))
-          goto unequal;
+                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b, i),
+                nesting))
+          return 0;
       }
     }
-    goto equal;
+    return 1;
+
   case FIOBJ_T_HASH:
+    if (!fiobj____each2_element_count(a))
+      return 1;
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
       FIOBJ val = fiobj_hash_get2(b, pos->obj.key);
-      if (!FIO_NAME_BL(fiobj, eq)(val, pos->obj.value))
-        goto equal;
+      if (!fiobj___test_eq_nested(val, pos->obj.value, nesting))
+        return 0;
     }
-    goto equal;
   case FIOBJ_T_OTHER:
+    if (!fiobj____each2_element_count(a) &&
+        (*fiobj_object_metadata(a))->is_eq(a, b))
+      return 1;
+    /* TODO: iterate through objects and test equality within nesting */
     return (*fiobj_object_metadata(a))->is_eq(a, b);
+    return 1;
   }
-equal:
-  --fiobj___test_eq_nested_level;
-  return 1;
-unequal:
-  --fiobj___test_eq_nested_level;
   return 0;
 }
 

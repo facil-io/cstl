@@ -574,7 +574,9 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map) {
       }
     }
   }
-  FIO_ASSERT_DEBUG(!m->count, "logic error @ unordered map clear.");
+  FIO_ASSERT_DEBUG(!m->count,
+                   "logic error @ unordered map clear (count == %zd != 0.",
+                   (ssize_t)m->count);
 }
 
 SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,

@@ -10974,6 +10974,17 @@ FIO_IFUNC fio_queue_s *fio_queue_new(void) {
 /** returns the number of tasks in the queue. */
 FIO_IFUNC size_t fio_queue_count(fio_queue_s *q) { return q->count; }
 
+/** Initializes a fio_queue_s object. */
+FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
+  /* do this manually, we don't want to reset a whole page */
+  q->r = &q->mem;
+  q->w = &q->mem;
+  q->count = 0;
+  q->lock = FIO___LOCK_INIT;
+  q->mem.next = NULL;
+  q->mem.r = q->mem.w = q->mem.dir = 0;
+}
+
 /* *****************************************************************************
 Timer Queue Inline Helpers
 ***************************************************************************** */
@@ -11019,17 +11030,6 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE)
 
-/** Initializes a fio_queue_s object. */
-FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
-  /* do this manually, we don't want to reset a whole page */
-  q->r = &q->mem;
-  q->w = &q->mem;
-  q->count = 0;
-  q->lock = FIO___LOCK_INIT;
-  q->mem.next = NULL;
-  q->mem.r = q->mem.w = q->mem.dir = 0;
-}
-
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   FIO___LOCK_LOCK(q->lock);
@@ -11055,7 +11055,7 @@ FIO_IFUNC int fio___task_ring_push(fio___task_ring_s *r,
   if (r->dir && r->r == r->w)
     return -1;
   r->buf[r->w] = task;
-  ++r->w;
+  ++(r->w);
   if (r->w == FIO_QUEUE_TASKS_PER_ALLOC) {
     r->w = 0;
     r->dir = ~r->dir;
@@ -11344,7 +11344,7 @@ Queue - test
 #ifdef FIO_TEST_CSTL
 
 #ifndef FIO___QUEUE_TEST_PRINT
-#define FIO___QUEUE_TEST_PRINT 0
+#define FIO___QUEUE_TEST_PRINT 1
 #endif
 
 #define FIO___QUEUE_TOTAL_COUNT (512 * 1024)
@@ -11352,6 +11352,7 @@ Queue - test
 typedef struct {
   fio_queue_s *q;
   uintptr_t count;
+  uintptr_t *counter;
 } fio___queue_test_s;
 
 FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
@@ -11359,7 +11360,7 @@ FIO_SFUNC void fio___queue_test_sample_task(void *i_count, void *unused2) {
   fio_atomic_add((uintptr_t *)i_count, 1);
 }
 
-FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
+FIO_SFUNC void fio___queue_test_counter_task(void *i_count1, void *i_count2) {
   static intptr_t counter = 0;
   if (!i_count1 && !i_count2) {
     counter = 0;
@@ -11374,10 +11375,23 @@ FIO_SFUNC void fio___queue_test_static_task(void *i_count1, void *i_count2) {
 
 FIO_SFUNC void fio___queue_test_sched_sample_task(void *t_, void *i_count) {
   fio___queue_test_s *t = (fio___queue_test_s *)t_;
-  for (size_t i = 0; i < t->count; i++) {
-    FIO_ASSERT(!fio_queue_push(t->q,
-                               .fn = fio___queue_test_sample_task,
-                               .udata1 = i_count),
+  size_t i = (size_t)(uintptr_t)i_count;
+  FIO_ASSERT(!fio_queue_push(t->q,
+                             .fn = fio___queue_test_sample_task,
+                             .udata1 = t->counter),
+             "Couldn't push task!");
+  --i;
+  if (!i)
+    return;
+  if ((i & 1)) {
+    FIO_ASSERT(
+        !fio_queue_push(t->q, fio___queue_test_sched_sample_task, t, (void *)i),
+        "Couldn't push task!");
+  } else {
+    FIO_ASSERT(!fio_queue_push_urgent(t->q,
+                                      fio___queue_test_sched_sample_task,
+                                      t,
+                                      (void *)i),
                "Couldn't push task!");
   }
 }
@@ -11389,6 +11403,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fprintf(stderr, "* Testing facil.io task scheduling (fio_queue)\n");
+  /* ************** testing queue ************** */
   fio_queue_s *q = fio_queue_new();
   fio_queue_s q2;
 
@@ -11401,22 +11416,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           (size_t)FIO_QUEUE_TASKS_PER_ALLOC);
 
   /* test task user data integrity. */
-  fio___queue_test_static_task(NULL, NULL);
+  fio___queue_test_counter_task(NULL, NULL);
   for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
     fio_queue_push(q,
-                   .fn = fio___queue_test_static_task,
+                   .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
                    .udata2 = (void *)(i + 2));
   }
+  fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
        i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
        ++i) {
     fio_queue_push(q,
-                   .fn = fio___queue_test_static_task,
+                   .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
                    .udata2 = (void *)(i + 2));
   }
+  fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   FIO_ASSERT(!fio_queue_count(q) && fio_queue_perform(q) == -1,
              "fio_queue_perform_all didn't perform all");
@@ -11446,6 +11463,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                    .udata1 = (void *)&i_count);
   }
   fio_queue_perform_all(q);
+  fio_queue_perform_all(q);
+  fio_queue_perform_all(q);
   end = clock();
   if (FIO___QUEUE_TEST_PRINT) {
     fprintf(stderr,
@@ -11460,9 +11479,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
 
   for (size_t i = 1; i < 32 && FIO___QUEUE_TOTAL_COUNT >> i; ++i) {
-    fio___queue_test_s info = {.q = q,
-                               .count =
-                                   (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i)};
+    fio___queue_test_s info = {
+        .q = q,
+        .count = (uintptr_t)(FIO___QUEUE_TOTAL_COUNT >> i),
+        .counter = &i_count,
+    };
     const size_t tasks = 1 << i;
     i_count = 0;
     start = clock();
@@ -11470,7 +11491,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       fio_queue_push(q,
                      fio___queue_test_sched_sample_task,
                      (void *)&info,
-                     &i_count);
+                     (void *)info.count);
     }
     FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
     {
@@ -11539,6 +11560,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                "pop overflow after urgent tasks");
     fio_queue_destroy(&q2);
   }
+  /* ************** testing timers ************** */
   {
     fprintf(stderr,
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
@@ -13749,27 +13771,15 @@ typedef struct {
 } fio_poll_settings_s;
 
 #if FIO_USE_THREAD_MUTEX_TMP
-#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
-  {                                                                            \
-    .settings =                                                                \
-        {                                                                      \
-            .on_data = on_data_func,                                           \
-            .on_ready = on_ready_func,                                         \
-            .on_close = on_close_func,                                         \
-        },                                                                     \
+#define FIO_POLL_INIT(...)                                                     \
+  { /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */            \
+    .settings = {__VA_ARGS__},                                                 \
     .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
   }
 #else
-#define FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)              \
-  {                                                                            \
-    .settings =                                                                \
-        {                                                                      \
-            .on_data = on_data_func,                                           \
-            .on_ready = on_ready_func,                                         \
-            .on_close = on_close_func,                                         \
-        },                                                                     \
-    .lock = FIO_LOCK_INIT                                                      \
-  }
+#define FIO_POLL_INIT(...)                                                     \
+  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
+  { .settings = {__VA_ARGS__}, .lock = FIO_LOCK_INIT }
 #endif
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -24749,7 +24759,8 @@ FIOBJ Data / Info
 
 /** Internal: compares two nestable objects. */
 FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b);
+                                                FIOBJ restrict b,
+                                                size_t nesting);
 
 /** Compares two objects. */
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
@@ -24765,16 +24776,16 @@ FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
   case FIOBJ_T_STRING:
     return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
   case FIOBJ_T_ARRAY:
-    return fiobj___test_eq_nested(a, b);
+    return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_HASH:
-    return fiobj___test_eq_nested(a, b);
+    return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_OTHER:
     if ((*fiobj_object_metadata(a))->count(a) ||
         (*fiobj_object_metadata(b))->count(b)) {
       if ((*fiobj_object_metadata(a))->count(a) !=
           (*fiobj_object_metadata(b))->count(b))
         return 0;
-      return fiobj___test_eq_nested(a, b);
+      return fiobj___test_eq_nested(a, b, 0);
     }
     return (*fiobj_object_metadata(a))->type_id ==
                (*fiobj_object_metadata(b))->type_id &&
@@ -25464,56 +25475,61 @@ FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
 FIOBJ Hash / Array / Other (enumerable) Equality test.
 ***************************************************************************** */
 
-FIO_SFUNC __thread size_t fiobj___test_eq_nested_level = 0;
 /** Internal: compares two nestable objects. */
 FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b) {
+                                                FIOBJ restrict b,
+                                                size_t nesting) {
   if (a == b)
     return 1;
   if (FIOBJ_TYPE_CLASS(a) != FIOBJ_TYPE_CLASS(b))
     return 0;
   if (fiobj____each2_element_count(a) != fiobj____each2_element_count(b))
     return 0;
-  if (!fiobj____each2_element_count(a))
-    return 1;
-  if (fiobj___test_eq_nested_level >= FIOBJ_MAX_NESTING)
+  if (nesting >= FIOBJ_MAX_NESTING)
     return 0;
-  ++fiobj___test_eq_nested_level;
+
+  ++nesting;
 
   switch (FIOBJ_TYPE_CLASS(a)) {
-  case FIOBJ_T_PRIMITIVE:
-  case FIOBJ_T_NUMBER: /* fallthrough */
-  case FIOBJ_T_FLOAT:  /* fallthrough */
-  case FIOBJ_T_STRING: /* fallthrough */
-    /* should never happen... this function is for enumerable objects */
+  case FIOBJ_T_PRIMITIVE: /* fallthrough */
+  case FIOBJ_T_NUMBER:    /* fallthrough */
+  case FIOBJ_T_FLOAT:
     return a == b;
+  case FIOBJ_T_STRING:
+    return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
+
   case FIOBJ_T_ARRAY:
+    if (!fiobj____each2_element_count(a))
+      return 1;
     /* test each array member with matching index */
     {
       const size_t count = fiobj____each2_element_count(a);
       for (size_t i = 0; i < count; ++i) {
-        if (!FIO_NAME_BL(fiobj, eq)(
+        if (!fiobj___test_eq_nested(
                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a, i),
-                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b, i)))
-          goto unequal;
+                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b, i),
+                nesting))
+          return 0;
       }
     }
-    goto equal;
+    return 1;
+
   case FIOBJ_T_HASH:
+    if (!fiobj____each2_element_count(a))
+      return 1;
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
       FIOBJ val = fiobj_hash_get2(b, pos->obj.key);
-      if (!FIO_NAME_BL(fiobj, eq)(val, pos->obj.value))
-        goto equal;
+      if (!fiobj___test_eq_nested(val, pos->obj.value, nesting))
+        return 0;
     }
-    goto equal;
   case FIOBJ_T_OTHER:
+    if (!fiobj____each2_element_count(a) &&
+        (*fiobj_object_metadata(a))->is_eq(a, b))
+      return 1;
+    /* TODO: iterate through objects and test equality within nesting */
     return (*fiobj_object_metadata(a))->is_eq(a, b);
+    return 1;
   }
-equal:
-  --fiobj___test_eq_nested_level;
-  return 1;
-unequal:
-  --fiobj___test_eq_nested_level;
   return 0;
 }
 
