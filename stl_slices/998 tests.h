@@ -593,21 +593,6 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
     FIO_ASSERT(map_____test_key_copy_counter == 0,
                "key destruction error - was the key freed?");
   }
-  {
-    map_____test_s m = FIO_MAP_INIT;
-    fprintf(stderr,
-            "* Testing attack resistance (SHOULD print a single warning).\n");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
-      char buf[64];
-      fio_ltoa(buf, i, 16);
-      map_____test_set(&m, 1, buf, i + 1, NULL);
-    }
-    FIO_ASSERT(map_____test_count(&m) != TEST_REPEAT,
-               "full collision protection failed (map)?");
-    FIO_ASSERT(map_____test_count(&m) != 1,
-               "full collision test failed to push elements (map)?");
-    map_____test_destroy(&m);
-  }
 }
 
 #undef HASHOFi

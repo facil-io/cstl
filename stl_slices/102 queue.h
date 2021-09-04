@@ -328,6 +328,7 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
     return t;
   }
   t = r->buf[r->r];
+  r->buf[r->r] = (fio_queue_task_s){.fn = NULL};
   ++r->r;
   if (r->r == FIO_QUEUE_TASKS_PER_ALLOC) {
     r->r = 0;
