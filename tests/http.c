@@ -327,7 +327,6 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   if (r > 0) {
     c->active = fio_now;
     c->buf_pos += r;
-    c->buf[c->buf_pos] = 0;
     FIO_LIST_REMOVE(&c->timeouts);
     FIO_LIST_PUSH(&timeouts, &c->timeouts);
     while ((r = http1_parse(&c->parser,
