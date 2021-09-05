@@ -1891,11 +1891,13 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
   size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
+  if (!c)
+    return;
   FIO_ASSERT_DEBUG((uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
                    "block reference count corrupted, possible double free?")
   FIO_ASSERT_DEBUG((uint32_t)c->blocks[b].pos <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
                    "block allocation position corrupted, possible double free?")
-  if (!c || fio_atomic_sub_fetch(&c->blocks[b].ref, 1))
+  if (fio_atomic_sub_fetch(&c->blocks[b].ref, 1))
     return;
 
   /* reset memory */
