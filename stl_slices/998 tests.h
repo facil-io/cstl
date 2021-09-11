@@ -325,7 +325,7 @@ FIO_SFUNC size_t map_____test_key_copy_counter = 0;
 FIO_SFUNC void map_____test_key_copy(char **dest, char *src) {
   *dest =
       (char *)FIO_MEM_REALLOC(NULL, 0, (strlen(src) + 1) * sizeof(*dest), 0);
-  FIO_ASSERT(*dest, "no memory to allocate key in map_test")
+  FIO_ASSERT(*dest, "no memory to allocate key in map_test");
   strcpy(*dest, src);
   ++map_____test_key_copy_counter;
 }
@@ -403,10 +403,10 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
       size_t i = 0;
       FIO_MAP_EACH(set_____test, &m, pos) {
         FIO_ASSERT(pos->obj == pos->hash + 1 || !i,
-                   "FIO_MAP_EACH loop out of order?")
+                   "FIO_MAP_EACH loop out of order?");
         ++i;
       }
-      FIO_ASSERT(i == set_____test_count(&m), "FIO_MAP_EACH loop incomplete?")
+      FIO_ASSERT(i == set_____test_count(&m), "FIO_MAP_EACH loop incomplete?");
     }
     FIO_ASSERT(set_____test_count(&m) == TEST_REPEAT,
                "Inserting existing object should keep existing object.");

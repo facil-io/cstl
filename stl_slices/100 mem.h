@@ -1893,10 +1893,14 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
   if (!c)
     return;
-  FIO_ASSERT_DEBUG((uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
-                   "block reference count corrupted, possible double free?")
-  FIO_ASSERT_DEBUG((uint32_t)c->blocks[b].pos <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
-                   "block allocation position corrupted, possible double free?")
+  FIO_ASSERT_DEBUG(
+      (uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
+      "block reference count corrupted, possible double free? (%zd)",
+      (size_t)c->blocks[b].ref);
+  FIO_ASSERT_DEBUG(
+      (uint32_t)c->blocks[b].pos <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
+      "block allocation position corrupted, possible double free? (%zd)",
+      (size_t)c->blocks[b].pos);
   if (fio_atomic_sub_fetch(&c->blocks[b].ref, 1))
     return;
 
@@ -1972,16 +1976,15 @@ void fio___mem_slice_new___(void);
 FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                            __mem_slice_new)(size_t bytes,
                                                             void *is_realloc) {
-  int32_t last_pos = 0;
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *a =
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)();
 
-  if (!a->block)
+  if (!a->block) {
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
-  else if (is_realloc)
-    last_pos = a->last_pos;
+    a->last_pos = 0;
+  }
   for (;;) {
     if (!a->block)
       goto no_mem;
@@ -1991,42 +1994,43 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
         FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(block);
     const size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, block);
 
-    /* if we are the only thread holding a reference to this block... reset. */
+    /* add allocation reference */
+    /* if we are the only thread holding a reference to this block - reset. */
     if (fio_atomic_add(&c->blocks[b].ref, 1) == 1 && c->blocks[b].pos) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
       FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(c, b);
-    }
-
-    /* a lucky realloc? */
-    if (last_pos && is_realloc == FIO_NAME(FIO_MEMORY_NAME,
-                                           __mem_chunk2ptr)(c, b, last_pos)) {
-      c->blocks[b].pos = bytes + last_pos;
-      fio_atomic_sub(&c->blocks[b].ref, 1);
-      FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
-      return is_realloc;
+      a->last_pos = 0;
     }
 
     /* enough space? allocate */
     if (c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
+      /* a lucky realloc? */
+      if (is_realloc &&
+          is_realloc ==
+              FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, a->last_pos)) {
+        c->blocks[b].pos += bytes;
+        fio_atomic_sub(&c->blocks[b].ref, 1); /* release reference added */
+        FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
+        return is_realloc;
+      }
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, c->blocks[b].pos);
       a->last_pos = c->blocks[b].pos;
       c->blocks[b].pos += bytes;
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return p;
     }
+    is_realloc = NULL;
+
     /* release reference added */
-    if (is_realloc)
-      fio_atomic_sub(&c->blocks[b].ref, 1);
-    else
-      FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(a->block);
+    fio_atomic_sub(&c->blocks[b].ref, 1);
 
     /*
      * allocate a new block before freeing the existing block
      * this prevents the last chunk from de-allocating and reallocating
      */
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
-    last_pos = 0;
-    /* release the reference held by the allocator */
+    a->last_pos = 0;
+    /* release the reference held by the arena (allocator) */
     FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(block);
   }
 
@@ -2154,16 +2158,16 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
 void fio___mem_big_slice_new___(void);
 FIO_SFUNC void *FIO_MEM_ALIGN_NEW
 FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
-  int32_t last_pos = 0;
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
   for (;;) {
     FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
-    if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block)
+    if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block =
           FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_new)();
-    else if (is_realloc)
-      last_pos = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos;
+      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = 0;
+    }
+
     if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block)
       goto done;
     FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_s) *b =
@@ -2174,18 +2178,22 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(b);
       FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(b, 0);
       b->marker = FIO_MEMORY_BIG_BLOCK_MARKER;
-    }
-
-    /* a lucky realloc? */
-    if (last_pos &&
-        is_realloc == FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, last_pos)) {
-      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = bytes + last_pos;
-      FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
-      return is_realloc;
+      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = 0;
     }
 
     /* enough space? */
     if (b->pos + bytes < FIO_MEMORY_UNITS_PER_BIG_BLOCK) {
+      /* a lucky realloc? */
+      if (is_realloc &&
+          is_realloc ==
+              FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
+                  b,
+                  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos)) {
+        b->pos += bytes;
+        FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
+        return is_realloc;
+      }
+
       p = FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, b->pos);
       fio_atomic_add(&b->ref, 1); /* keep inside lock to enable reset */
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = b->pos;
@@ -2194,6 +2202,7 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
       return p;
     }
 
+    is_realloc = NULL;
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_block = NULL;
     FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = 0;
     FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
@@ -2415,8 +2424,10 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) {
   /* big mmap allocation? */
   if (((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE) == (uintptr_t)ptr && c->marker)
     goto mmap_free;
+
   FIO_NAME(FIO_MEMORY_NAME, __mem_slice_free)(ptr);
   return;
+
 mmap_free:
   /* zero out memory before returning it to the system */
   FIO___MEMSET(ptr,
@@ -2819,7 +2830,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
       /* add some fragmentation */
       char *tmp = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(16);
       FIO_NAME(FIO_MEMORY_NAME, free)(tmp);
-      FIO_ASSERT(tmp, "small allocation failed!")
+      FIO_ASSERT(tmp, "small allocation failed!");
       FIO_ASSERT(!((uintptr_t)tmp & alignment_mask),
                  "allocation alignment error!");
     }
@@ -2838,7 +2849,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   for (size_t i = 0; i < limit; ++i) {
     char *tmp = (char *)FIO_NAME(FIO_MEMORY_NAME,
                                  realloc2)(ary[i], (cycles << 1), (cycles));
-    FIO_ASSERT(tmp, "re-allocation failed!")
+    FIO_ASSERT(tmp, "re-allocation failed!");
     ary[i] = tmp;
     FIO_ASSERT(!((uintptr_t)ary[i] & alignment_mask),
                "allocation alignment error!");
@@ -2847,7 +2858,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
     fio___memset_test_aligned(ary[i], marker[i & 1], (cycles), "realloc grow");
     tmp =
         (char *)FIO_NAME(FIO_MEMORY_NAME, realloc2)(ary[i], (cycles), (cycles));
-    FIO_ASSERT(tmp, "re-allocation (shrinking) failed!")
+    FIO_ASSERT(tmp, "re-allocation (shrinking) failed!");
     ary[i] = tmp;
     fio___memset_test_aligned(ary[i],
                               marker[i & 1],

@@ -701,7 +701,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                i2);
   }
   for (unsigned char i = 0; i < 36; ++i) {
-    FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.")
+    FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.");
   }
   fprintf(stderr, "* Testing fio_atol samples.\n");
 #define TEST_ATOL(s_, n)                                                       \

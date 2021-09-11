@@ -1680,6 +1680,7 @@ FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
       if (!fiobj___test_eq_nested(val, pos->obj.value, nesting))
         return 0;
     }
+    return 1;
   case FIOBJ_T_OTHER:
     if (!fiobj____each2_element_count(a) &&
         (*fiobj_object_metadata(a))->is_eq(a, b))

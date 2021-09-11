@@ -713,32 +713,35 @@ Miscellaneous helper macros
 #define FIO_LOG_LENGTH_LIMIT 1024
 #endif
 
-// clang-format off
 /* Asserts a condition is true, or kills the application using SIGINT. */
 #define FIO_ASSERT(cond, ...)                                                  \
-  if (!(cond)) {                                                               \
-    FIO_LOG_FATAL("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);  \
-    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));                                                      \
-    kill(0, SIGINT);                                                           \
-    exit(-1);                                                                  \
-  }
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      FIO_LOG_FATAL("(" FIO__FILE__                                            \
+                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
+      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      kill(0, SIGINT);                                                         \
+      exit(-1);                                                                \
+    }                                                                          \
+  } while (0)
 
 #ifndef FIO_ASSERT_ALLOC
 /** Tests for an allocation failure. The behavior can be overridden. */
-#define FIO_ASSERT_ALLOC(ptr)  FIO_ASSERT((ptr), "memory allocation failed.")
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
 #endif
-// clang-format on
 
 #ifdef DEBUG
 /** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
 #define FIO_ASSERT_DEBUG(cond, ...)                                            \
-  if (!(cond)) {                                                               \
-    FIO_LOG_FATAL("(" FIO__FILE__                                              \
-                  ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);               \
-    fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));           \
-    kill(0, SIGINT);                                                           \
-    exit(-1);                                                                  \
-  }
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      FIO_LOG_FATAL("(" FIO__FILE__                                            \
+                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
+      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      kill(0, SIGINT);                                                         \
+      exit(-1);                                                                \
+    }                                                                          \
+  } while (0)
 #else
 #define FIO_ASSERT_DEBUG(...)
 #endif
