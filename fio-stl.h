@@ -9106,15 +9106,15 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
     }
     is_realloc = NULL;
 
-    /* release reference added */
-    fio_atomic_sub(&c->blocks[b].ref, 1);
-
     /*
      * allocate a new block before freeing the existing block
      * this prevents the last chunk from de-allocating and reallocating
      */
     a->block = FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)();
     a->last_pos = 0;
+
+    /* release allocation reference added */
+    fio_atomic_sub(&c->blocks[b].ref, 1);
     /* release the reference held by the arena (allocator) */
     FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(block);
   }
