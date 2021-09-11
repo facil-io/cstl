@@ -313,7 +313,7 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   if (!arg)
     goto accept_new_connections;
   /* test that a client isn't flooding us with requests */
-  if (!c->throttle && fio_stream_packets(&c->out) >= 8) {
+  if (!c->throttle && fio_stream_length(&c->out) >= 131072) {
     FIO_LOG_SECURITY("Throttling client %p @ fd %d for security concerns",
                      (void *)c,
                      fd);

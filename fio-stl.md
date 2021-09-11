@@ -5563,8 +5563,7 @@ Writes an escaped data into the string after unescaping the data.
 #include "fio-stl.h"
 ```
 
-If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be
-defined for any named type.
+If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be defined for any named type.
 
 **Note**: requires the atomic operations to be defined (`FIO_ATOMIC`).
 
@@ -5593,6 +5592,8 @@ Sets up the default object initializer.
 By default initializes the object's memory to zero.
 
 If `FIO_REF_FLEX_TYPE` is defined, the variable `members` may be used during initialization. It's value is the same as the value passed on to the `REF_new` function.
+
+**Note**:  `FIO_REF_FLEX_TYPE` should **not** be used when `FIO_MEM_FREE` macro only frees the number of bytes specified (rather than freeing the whole pointer, as `free` might do). The reference counter type does not store the data passed to the flex-`REF_new` function and frees the same number of bytes as a flex length of `0`.
 
 #### `FIO_REF_DESTROY`
 
@@ -5654,11 +5655,9 @@ FIO_REF_TYPE * REF_new(size_t members) // for FIO_REF_FLEX_TYPE
 
 ```
 
-Allocates a new reference counted object, initializing it using the
-`FIO_REF_INIT(object)` macro.
+Allocates a new reference counted object, initializing it using the `FIO_REF_INIT(object)` macro.
 
-If `FIO_REF_METADATA` is defined, than the metadata is initialized using the
-`FIO_REF_METADATA_INIT(metadata)` macro.
+If `FIO_REF_METADATA` is defined, than the metadata is initialized using the `FIO_REF_METADATA_INIT(metadata)` macro.
 
 #### `REF_dup`
 
@@ -5676,13 +5675,11 @@ void REF_free2(FIO_REF_TYPE * object)
 void REF_free(FIO_REF_TYPE * object)
 ```
 
-Frees an object or decreases it's reference count (an atomic operation,
-thread-safe).
+Frees an object or decreases it's reference count (an atomic operation, thread-safe).
 
 Before the object is freed, the `FIO_REF_DESTROY(object)` macro will be called.
 
-If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the
-`FIO_REF_METADATA_DESTROY(metadata)` macro.
+If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the `FIO_REF_METADATA_DESTROY(metadata)` macro.
 
 #### `REF_metadata`
 
@@ -5690,8 +5687,7 @@ If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the
 FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * object)
 ```
 
-If `FIO_REF_METADATA` is defined, than the metadata is accessible using this
-inlined function.
+If `FIO_REF_METADATA` is defined, than the metadata is accessible using this inlined function.
 
 -------------------------------------------------------------------------------
 ## FIOBJ Soft Dynamic Types
