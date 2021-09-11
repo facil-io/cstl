@@ -361,7 +361,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
   {
     set_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set (hash map where value == key).\n");
-    FIO_NAME_TEST(stl, set_____test);
+    FIO_NAME_TEST(stl, set_____test)();
     FIO_ASSERT(set_____test_count(&m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(set_____test_capa(&m) == 0,
@@ -480,12 +480,12 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                                            data_ary[i]));
     }
     set_hashless_____test_destroy(&m);
-    FIO_NAME_TEST(stl, set_hashless_____test);
+    FIO_NAME_TEST(stl, set_hashless_____test)();
   }
   {
     set2_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set map without value comparison.\n");
-    FIO_NAME_TEST(stl, set2_____test);
+    FIO_NAME_TEST(stl, set2_____test)();
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       set2_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
@@ -559,8 +559,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
 
   {
     map_____test_s *m = map_____test_new();
-    fprintf(stderr, "* Testing hash map.\n");
-    FIO_NAME_TEST(stl, map_____test);
+    fprintf(stderr, "* Testing hash map with string keys.\n");
     FIO_ASSERT(map_____test_count(m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(map_____test_capa(m) == 0,

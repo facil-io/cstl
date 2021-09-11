@@ -876,8 +876,8 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
         }
         row >>= 8;
       }
-      i += 8;
     }
+    i += 8;
   }
   while (i < FIO_MAP_CAPA(m->bits)) {
     if (imap[i] && imap[i] != 255)

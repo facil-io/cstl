@@ -20409,8 +20409,8 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
         }
         row >>= 8;
       }
-      i += 8;
     }
+    i += 8;
   }
   while (i < FIO_MAP_CAPA(m->bits)) {
     if (imap[i] && imap[i] != 255)
@@ -20445,6 +20445,13 @@ FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_MAP_NAME, task))(
   *(size_t *)e->udata -= (size_t)e->value;
   return 0;
 }
+
+#if FIO_MAP_HASH_CACHED
+#define FIO_MAP_TEST_I2H(i) (FIO_MAP_HASH) i
+#else
+#define FIO_MAP_TEST_I2H(i) FIO_MAP_HASH_FN((FIO_MAP_TYPE)i)
+#endif
+
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   /*
    * test unrodered maps here
@@ -20467,57 +20474,62 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     total += i;
     FIO_MAP_TYPE old = (FIO_MAP_TYPE)i;
 #ifdef FIO_MAP_KEY
-    FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
-                                                              (FIO_MAP_HASH)i,
-                                                              (FIO_MAP_KEY)i,
-                                                              (FIO_MAP_TYPE)i,
-                                                              &old),
+    FIO_ASSERT((FIO_MAP_TYPE)i ==
+                   FIO_NAME(FIO_MAP_NAME, set)(&m,
+                                               FIO_MAP_TEST_I2H(i),
+                                               (FIO_MAP_KEY)i,
+                                               (FIO_MAP_TYPE)i,
+                                               &old),
                "insertion failed at %zu",
                i);
 #else
-    FIO_ASSERT((FIO_MAP_TYPE)i ==
-                   FIO_NAME(FIO_MAP_NAME,
-                            set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, &old),
-               "insertion failed at %zu",
-               i);
+    FIO_ASSERT(
+        (FIO_MAP_TYPE)i ==
+            FIO_NAME(FIO_MAP_NAME,
+                     set)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TYPE)i, &old),
+        "insertion failed at %zu",
+        i);
 #endif
     FIO_ASSERT(old == FIO_MAP_TYPE_INVALID,
                "old value should be set to the invalid value (%zu != %zu @%zu)",
                old,
                (size_t)FIO_MAP_TYPE_INVALID,
                i);
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "set-get roundtrip error for %zu",
-        i);
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "set-get roundtrip error for %zu",
+               i);
     if (1) {
-      FIO_ASSERT(
-          !FIO_NAME(FIO_MAP_NAME,
-                    remove)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i, &old) &&
-              old == (FIO_MAP_TYPE)i,
-          "remove failure after set-get roundtrip for %zu",
-          i);
+      FIO_ASSERT(!FIO_NAME(FIO_MAP_NAME, remove)(&m,
+                                                 FIO_MAP_TEST_I2H(i),
+                                                 (FIO_MAP_TEST_KEY)i,
+                                                 &old) &&
+                     old == (FIO_MAP_TYPE)i,
+                 "remove failure after set-get roundtrip for %zu",
+                 i);
       FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
-                          get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
+                          get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
                      FIO_MAP_TYPE_INVALID,
                  "set-remove-get error for %zu (not removed?)",
                  i);
 
 #ifdef FIO_MAP_KEY
-      FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
-                                                                (FIO_MAP_HASH)i,
-                                                                (FIO_MAP_KEY)i,
-                                                                (FIO_MAP_TYPE)i,
-                                                                &old),
+      FIO_ASSERT((FIO_MAP_TYPE)i ==
+                     FIO_NAME(FIO_MAP_NAME, set)(&m,
+                                                 FIO_MAP_TEST_I2H(i),
+                                                 (FIO_MAP_KEY)i,
+                                                 (FIO_MAP_TYPE)i,
+                                                 &old),
                  "insertion failed at %zu",
                  i);
 #else
-      FIO_ASSERT((FIO_MAP_TYPE)i ==
-                     FIO_NAME(FIO_MAP_NAME,
-                              set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, &old),
-                 "insertion failed at %zu",
-                 i);
+      FIO_ASSERT(
+          (FIO_MAP_TYPE)i ==
+              FIO_NAME(FIO_MAP_NAME,
+                       set)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TYPE)i, &old),
+          "insertion failed at %zu",
+          i);
 #endif
       FIO_ASSERT(
           old == FIO_MAP_TYPE_INVALID,
@@ -20526,7 +20538,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
           (size_t)FIO_MAP_TYPE_INVALID,
           i);
       FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
-                          get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
+                          get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
                      (FIO_MAP_TYPE)i,
                  "set-remove-set-get roundtrip error for %zu",
                  i);
@@ -20535,82 +20547,87 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   size_t old_capa = FIO_NAME(FIO_MAP_NAME, capa)(&m);
 
   for (size_t i = 1; i < MEMBERS; ++i) {
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "get error for %zu (!= %zu)",
-        i,
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i));
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "get error for %zu (!= %zu)",
+               i,
+               FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i));
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
     FIO_MAP_TYPE old = (FIO_MAP_TYPE)i;
 #ifdef FIO_MAP_KEY
-    FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
-                                                              (FIO_MAP_HASH)i,
-                                                              (FIO_MAP_KEY)i,
-                                                              (FIO_MAP_TYPE)i,
-                                                              &old),
+    FIO_ASSERT((FIO_MAP_TYPE)i ==
+                   FIO_NAME(FIO_MAP_NAME, set)(&m,
+                                               FIO_MAP_TEST_I2H(i),
+                                               (FIO_MAP_KEY)i,
+                                               (FIO_MAP_TYPE)i,
+                                               &old),
                "overwrite failed at %zu",
                i);
 #else
-    FIO_ASSERT((FIO_MAP_TYPE)i ==
-                   FIO_NAME(FIO_MAP_NAME,
-                            set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, &old),
-               "overwrite failed at %zu",
-               i);
+    FIO_ASSERT(
+        (FIO_MAP_TYPE)i ==
+            FIO_NAME(FIO_MAP_NAME,
+                     set)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TYPE)i, &old),
+        "overwrite failed at %zu",
+        i);
 #endif
     FIO_ASSERT(
         !memcmp(&old, &i, sizeof(old) > sizeof(i) ? sizeof(i) : sizeof(old)),
         "old value should be set to the replaced value");
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "set-get overwrite roundtrip error for %zu",
-        i);
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "set-get overwrite roundtrip error for %zu",
+               i);
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "get (overwrite) error for %zu",
-        i);
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "get (overwrite) error for %zu",
+               i);
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
 
     FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) == MEMBERS - 1,
                "unexpected member count");
     FIO_NAME(FIO_MAP_NAME, remove)
-    (&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i, NULL);
+    (&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i, NULL);
     FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) == MEMBERS - 2,
                "removing member didn't count removal");
 #ifdef FIO_MAP_KEY
-    FIO_ASSERT((FIO_MAP_TYPE)i == FIO_NAME(FIO_MAP_NAME, set)(&m,
-                                                              (FIO_MAP_HASH)i,
-                                                              (FIO_MAP_KEY)i,
-                                                              (FIO_MAP_TYPE)i,
-                                                              NULL),
+    FIO_ASSERT((FIO_MAP_TYPE)i ==
+                   FIO_NAME(FIO_MAP_NAME, set)(&m,
+                                               FIO_MAP_TEST_I2H(i),
+                                               (FIO_MAP_KEY)i,
+                                               (FIO_MAP_TYPE)i,
+                                               NULL),
                "re-insertion failed at %zu",
                i);
 #else
-    FIO_ASSERT((FIO_MAP_TYPE)i ==
-                   FIO_NAME(FIO_MAP_NAME,
-                            set)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TYPE)i, NULL),
-               "re-insertion failed at %zu",
-               i);
+    FIO_ASSERT(
+        (FIO_MAP_TYPE)i ==
+            FIO_NAME(FIO_MAP_NAME,
+                     set)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TYPE)i, NULL),
+        "re-insertion failed at %zu",
+        i);
 #endif
 
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "remove-set-get roundtrip error for %zu",
-        i);
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "remove-set-get roundtrip error for %zu",
+               i);
   }
   for (size_t i = 1; i < MEMBERS; ++i) {
-    FIO_ASSERT(
-        FIO_NAME(FIO_MAP_NAME, get)(&m, (FIO_MAP_HASH)i, (FIO_MAP_TEST_KEY)i) ==
-            (FIO_MAP_TYPE)i,
-        "get (remove/re-insert) error for %zu",
-        i);
+    FIO_ASSERT(FIO_NAME(FIO_MAP_NAME,
+                        get)(&m, FIO_MAP_TEST_I2H(i), (FIO_MAP_TEST_KEY)i) ==
+                   (FIO_MAP_TYPE)i,
+               "get (remove/re-insert) error for %zu",
+               i);
   }
   if (FIO_NAME(FIO_MAP_NAME, capa)(&m) != old_capa) {
     FIO_LOG_WARNING("capacity shouldn't change when re-inserting the same "
@@ -20648,9 +20665,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                count);
   }
 #if FIO_MAP_HASH_CACHED && !FIO_MAP_TYPE_CMP_SIMPLE
-  {
-  fprintf(stderr,
-          "\ttesting attack pattern, expecting a SECURITY log message.\n");
+  if (!FIO_MAP_TYPE_CMP((FIO_MAP_TYPE)1, (FIO_MAP_TYPE)2)) {
+    fprintf(stderr,
+            "\ttesting attack pattern, expecting a SECURITY log message.\n");
     FIO_NAME(FIO_MAP_NAME, destroy)(&m);
     for (size_t i = 0; i < MEMBERS; ++i) {
 #ifdef FIO_MAP_KEY
@@ -20777,6 +20794,7 @@ Map - cleanup
 
 #undef FIO_MAP___IMAP_FREE
 #undef FIO_MAP___IMAP_DELETED
+#undef FIO_MAP_TEST_I2H
 #undef FIO_MAP_TEST
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
@@ -26873,7 +26891,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
   {
     set_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set (hash map where value == key).\n");
-    FIO_NAME_TEST(stl, set_____test);
+    FIO_NAME_TEST(stl, set_____test)();
     FIO_ASSERT(set_____test_count(&m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(set_____test_capa(&m) == 0,
@@ -26992,12 +27010,12 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                                            data_ary[i]));
     }
     set_hashless_____test_destroy(&m);
-    FIO_NAME_TEST(stl, set_hashless_____test);
+    FIO_NAME_TEST(stl, set_hashless_____test)();
   }
   {
     set2_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set map without value comparison.\n");
-    FIO_NAME_TEST(stl, set2_____test);
+    FIO_NAME_TEST(stl, set2_____test)();
     for (size_t i = 0; i < TEST_REPEAT; ++i) {
       set2_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
@@ -27071,8 +27089,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
 
   {
     map_____test_s *m = map_____test_new();
-    fprintf(stderr, "* Testing hash map.\n");
-    FIO_NAME_TEST(stl, map_____test);
+    fprintf(stderr, "* Testing hash map with string keys.\n");
     FIO_ASSERT(map_____test_count(m) == 0,
                "freshly initialized map should have no objects");
     FIO_ASSERT(map_____test_capa(m) == 0,
