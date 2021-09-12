@@ -2809,6 +2809,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 }
 #endif /* H___FIO_TEST_MEMORY_HELPERS_H */
 
+#ifndef FIO_TEST_MULTI_THREADED
+#define FIO_TEST_MULTI_THREADED 0
+#endif
+
 /* contention testing (multi-threaded) */
 FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
                               mem_tsk)(void *i_) {
@@ -2989,30 +2993,34 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
     FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
   }
 
-  for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
+  if (FIO_TEST_MULTI_THREADED) {
+
+    for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT);
+         cycles *= 2) {
 #if _MSC_VER
-    fio_thread_t threads[(FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2];
-    FIO_ASSERT(((FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2) >= thread_count,
-               "Please use CLang or GCC to test this memory allocator");
+      fio_thread_t threads[(FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2];
+      FIO_ASSERT(((FIO_MEMORY_ARENA_COUNT_MAX + 1) * 2) >= thread_count,
+                 "Please use CLang or GCC to test this memory allocator");
 #else
-    fio_thread_t threads[thread_count];
+      fio_thread_t threads[thread_count];
 #endif
 
-    fprintf(stderr,
-            "* Testing %zu byte allocation blocks, using %zu threads.\n",
-            (size_t)(cycles),
-            (thread_count + 1));
-    for (size_t i = 0; i < thread_count; ++i) {
-      if (fio_thread_create(
-              threads + i,
-              FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk),
-              (void *)cycles)) {
-        abort();
+      fprintf(stderr,
+              "* Testing %zu byte allocation blocks, using %zu threads.\n",
+              (size_t)(cycles),
+              (thread_count + 1));
+      for (size_t i = 0; i < thread_count; ++i) {
+        if (fio_thread_create(
+                threads + i,
+                FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk),
+                (void *)cycles)) {
+          abort();
+        }
       }
-    }
-    FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
-    for (size_t i = 0; i < thread_count; ++i) {
-      fio_thread_join(threads[i]);
+      FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
+      for (size_t i = 0; i < thread_count; ++i) {
+        fio_thread_join(threads[i]);
+      }
     }
   }
   fprintf(stderr,

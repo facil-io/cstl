@@ -952,10 +952,6 @@ FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
   return 0;
 }
 
-#define FIOBJ2CSTR_BUFFER_LIMIT 4096
-__thread char __attribute__((weak))
-fiobj___2cstr___buffer__perthread[FIOBJ2CSTR_BUFFER_LIMIT];
-
 /** Returns a temporary String representation for any FIOBJ object. */
 FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
@@ -976,21 +972,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   case FIOBJ_T_STRING:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(o);
   case FIOBJ_T_ARRAY: /* fallthrough */
+    return (fio_str_info_s){.buf = (char *)"[...]", .len = 5};
   case FIOBJ_T_HASH: {
-    FIOBJ j = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, o, 0);
-    if (!j || FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) >=
-                  FIOBJ2CSTR_BUFFER_LIMIT) {
-      fiobj_free(j);
-      return (fio_str_info_s){.buf = (FIOBJ_TYPE_CLASS(o) == FIOBJ_T_ARRAY
-                                          ? (char *)"[...]"
-                                          : (char *)"{...}"),
-                              .len = 5};
-    }
-    fio_str_info_s i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(j);
-    FIO_MEMCPY(fiobj___2cstr___buffer__perthread, i.buf, i.len + 1);
-    fiobj_free(j);
-    i.buf = fiobj___2cstr___buffer__perthread;
-    return i;
+    return (fio_str_info_s){.buf = (char *)"{...}", .len = 5};
   }
   case FIOBJ_T_OTHER:
     return (*fiobj_object_metadata(o))->to_s(o);
@@ -1093,8 +1077,10 @@ FIOBJ Integers
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 #include __FILE__
 
+/* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
-#define FIO_NUMBER_REVESE(i)                                                   \
+/* Reads a 61 or 29 bit signed integer from the leftmost bits of a word. */
+#define FIO_NUMBER_DECODE(i)                                                   \
   ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
               ((((uintptr_t)(i) >> ((sizeof(uintptr_t) * 8) - 1)) *            \
                 ((uintptr_t)3 << ((sizeof(uintptr_t) * 8) - 3))))))
@@ -1103,7 +1089,7 @@ FIOBJ Integers
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
                          new)(intptr_t i) {
   FIOBJ o = (FIOBJ)FIO_NUMBER_ENCODE(i);
-  if (FIO_NUMBER_REVESE(o) == i)
+  if (FIO_NUMBER_DECODE(o) == i)
     return o;
   o = fiobj___bignum_new2();
 
@@ -1114,7 +1100,7 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
 /** Reads the number from a FIOBJ number. */
 FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(FIOBJ i) {
   if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_NUMBER)
-    return FIO_NUMBER_REVESE(i);
+    return FIO_NUMBER_DECODE(i);
   return FIO_PTR_MATH_RMASK(intptr_t, i, 3)[0];
 }
 
@@ -1130,8 +1116,18 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), free)(FIOBJ i) {
   fiobj___bignum_free2(i);
   return;
 }
+
+FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
+                                                     FIOBJ restrict b) {
+  /* it should be safe to assume that FIOBJ_TYPE_CLASS(i) != FIOBJ_T_NUMBER */
+  return FIO_PTR_MATH_RMASK(intptr_t, a, 3)[0] ==
+         FIO_PTR_MATH_RMASK(intptr_t, b, 3)[0];
+  // return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(a) ==
+  //        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(b);
+}
+
 #undef FIO_NUMBER_ENCODE
-#undef FIO_NUMBER_REVESE
+#undef FIO_NUMBER_DECODE
 
 /* *****************************************************************************
 FIOBJ Floats
@@ -1695,7 +1691,6 @@ FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
 /* *****************************************************************************
 FIOBJ general helpers
 ***************************************************************************** */
-FIO_SFUNC __thread char fiobj___tmp_buffer[256];
 
 FIO_SFUNC uint32_t fiobj___count_noop(FIOBJ o) {
   return 0;
@@ -1706,19 +1701,16 @@ FIO_SFUNC uint32_t fiobj___count_noop(FIOBJ o) {
 FIOBJ Integers (bigger numbers)
 ***************************************************************************** */
 
-FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
-                                                     FIOBJ restrict b) {
-  return FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(a) ==
-         FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(b);
-}
-
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
                                     cstr)(FIOBJ i) {
-  size_t len = fio_ltoa(fiobj___tmp_buffer,
-                        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i),
-                        10);
-  fiobj___tmp_buffer[len] = 0;
-  return (fio_str_info_s){.buf = fiobj___tmp_buffer, .len = len};
+  static char buf[22 * 256];
+  static uint8_t pos = 0;
+  size_t at = fio_atomic_add(&pos, 1);
+  char *tmp = buf + (at * 22);
+  size_t len =
+      fio_ltoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i), 10);
+  tmp[len] = 0;
+  return (fio_str_info_s){.buf = tmp, .len = len};
 }
 
 FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___NUMBER_CLASS_VTBL = {
@@ -1771,11 +1763,14 @@ FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
 
 FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
                                     cstr)(FIOBJ i) {
-  size_t len = fio_ftoa(fiobj___tmp_buffer,
-                        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i),
-                        10);
-  fiobj___tmp_buffer[len] = 0;
-  return (fio_str_info_s){.buf = fiobj___tmp_buffer, .len = len};
+  static char buf[32 * 256];
+  static uint8_t pos = 0;
+  size_t at = fio_atomic_add(&pos, 1);
+  char *tmp = buf + (at << 5);
+  size_t len =
+      fio_ftoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i), 10);
+  tmp[len] = 0;
+  return (fio_str_info_s){.buf = tmp, .len = len};
 }
 
 FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL = {
@@ -1822,15 +1817,29 @@ FIOBJ_FUNC void fiobj___json_format_internal__(
     fiobj___json_format_internal__s *args,
     FIOBJ o) {
   switch (FIOBJ_TYPE(o)) {
-  case FIOBJ_T_TRUE:   /* fallthrough */
-  case FIOBJ_T_FALSE:  /* fallthrough */
-  case FIOBJ_T_NULL:   /* fallthrough */
-  case FIOBJ_T_NUMBER: /* fallthrough */
-  case FIOBJ_T_FLOAT:  /* fallthrough */
-  {
-    fio_str_info_s info = FIO_NAME2(fiobj, cstr)(o);
+  case FIOBJ_T_TRUE:
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-    (args->json, info.buf, info.len);
+    (args->json, "true", 4);
+    return;
+  case FIOBJ_T_FALSE:
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+    (args->json, "false", 5);
+    return;
+  case FIOBJ_T_NULL:
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+    (args->json, "null", 4);
+    return;
+  case FIOBJ_T_NUMBER:
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)
+    (args->json, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(o));
+    return;
+  case FIOBJ_T_FLOAT: {
+    char tmp_buf[256];
+    size_t len = fio_ftoa(tmp_buf,
+                          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(o),
+                          10);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+    (args->json, tmp_buf, len);
     return;
   }
   case FIOBJ_T_STRING: /* fallthrough */
@@ -2261,6 +2270,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                  (int)bit,
                  (ssize_t)FIO_NAME2(fiobj, i)(o),
                  (ssize_t)i);
+      fio_str_info_s str = FIO_NAME2(fiobj, cstr)(o);
+      char *str_buf = str.buf;
+      FIO_ASSERT(fio_atol(&str_buf) == (intptr_t)i,
+                 "Number atol not reversible at bit %d (%s != %zd)!",
+                 (int)bit,
+                 str.buf,
+                 (ssize_t)i);
       allocation_flags |= (FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER) ? 1 : 2;
       fiobj_free(o);
     }
@@ -2283,6 +2299,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                  (int)bit,
                  FIO_NAME2(fiobj, f)(o),
                  punned.d);
+
+      fio_str_info_s str = FIO_NAME2(fiobj, cstr)(o);
+      char buf_tmp[32];
+      FIO_ASSERT(fio_ftoa(buf_tmp, FIO_NAME2(fiobj, f)(o), 10) == str.len,
+                 "fio_atof length didn't match Float's fiobj2cstr length.");
+      FIO_ASSERT(!memcmp(str.buf, buf_tmp, str.len),
+                 "fio_atof string didn't match Float's fiobj2cstr.");
       allocation_flags |= (FIOBJ_TYPE_CLASS(o) == FIOBJ_T_FLOAT) ? 1 : 2;
       fiobj_free(o);
     }
