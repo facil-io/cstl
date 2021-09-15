@@ -22,14 +22,14 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_URL___H
 /** the result returned by `fio_url_parse` */
 typedef struct {
-  fio_str_info_s scheme;
-  fio_str_info_s user;
-  fio_str_info_s password;
-  fio_str_info_s host;
-  fio_str_info_s port;
-  fio_str_info_s path;
-  fio_str_info_s query;
-  fio_str_info_s target;
+  fio_buf_info_s scheme;
+  fio_buf_info_s user;
+  fio_buf_info_s password;
+  fio_buf_info_s host;
+  fio_buf_info_s port;
+  fio_buf_info_s path;
+  fio_buf_info_s query;
+  fio_buf_info_s target;
 } fio_url_s;
 
 /**
@@ -124,27 +124,28 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
   if (pos == end) {
     /* was only host (path starts with '/') */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     goto finish;
   }
+
   switch (pos[0]) {
   case '@':
     /* username@[host] */
-    r.user = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_host;
   case '/':
     /* host[/path] */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     goto start_path;
   case '?':
     /* host?[query] */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_query;
   case '#':
     /* host#[target] */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_target;
   case ':':
@@ -155,7 +156,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     } else {
       /* username:[password] OR */
       /* host:[port] */
-      r.user = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+      r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
       ++pos;
       goto start_password;
     }
@@ -169,24 +170,24 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     ++pos;
 
   if (pos >= end) { /* scheme://host */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     goto finish;
   }
 
   switch (pos[0]) {
   case '/':
     /* scheme://host[/path] */
-    r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     goto start_path;
   case '@':
     /* scheme://username@[host]... */
-    r.user = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_host;
   case ':':
     /* scheme://username:[password]@[host]... OR */
     /* scheme://host:[port][/...] */
-    r.user = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     break;
   }
@@ -198,7 +199,7 @@ start_password:
 
   if (pos >= end) {
     /* was host:port */
-    r.port = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     r.host = r.user;
     r.user.len = 0;
     goto finish;
@@ -207,13 +208,13 @@ start_password:
 
   switch (pos[0]) {
   case '/':
-    r.port = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     r.host = r.user;
     r.user.len = 0;
     goto start_path;
   case '@':
     r.password =
-        (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+        (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     break;
   }
@@ -224,7 +225,7 @@ start_host:
          pos[0] != '?')
     ++pos;
 
-  r.host = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+  r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
   if (pos >= end) {
     goto finish;
   }
@@ -250,7 +251,7 @@ start_host:
   while (pos < end && pos[0] != '/' && pos[0] != '#' && pos[0] != '?')
     ++pos;
 
-  r.port = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+  r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
 
   if (pos >= end) {
     /* scheme://[...@]host:port */
@@ -274,7 +275,7 @@ start_path:
   while (pos < end && pos[0] != '#' && pos[0] != '?')
     ++pos;
 
-  r.path = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+  r.path = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
 
   if (pos >= end) {
     goto finish;
@@ -288,14 +289,14 @@ start_query:
   while (pos < end && pos[0] != '#')
     ++pos;
 
-  r.query = (fio_str_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+  r.query = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
   ++pos;
 
   if (pos >= end)
     goto finish;
 
 start_target:
-  r.target = (fio_str_info_s){.buf = (char *)pos, .len = (size_t)(end - pos)};
+  r.target = (fio_buf_info_s){.buf = (char *)pos, .len = (size_t)(end - pos)};
 
 finish:
 

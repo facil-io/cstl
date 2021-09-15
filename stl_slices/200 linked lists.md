@@ -25,9 +25,9 @@ However, Linked Lists suffer from slow seek/find and iteration operations.
 
 Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
 
-### Linked Lists Macros (always defined):
+### Linked Lists Macros
 
-Linked List Macros (and arch-type) are included by default and can be used to manage linked lists without creating a dedicated type.
+Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
 
 #### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
 

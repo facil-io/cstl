@@ -418,13 +418,20 @@ const char *fio_version_build(void);
 /** If implemented, returns the version number as a string. */
 char *fio_version_string(void);
 
+#if FIO_VERSION_MAJOR
+#define FIO_VERSION_VALIDATE()                                                 \
+  FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
+                 fio_version_minor() == FIO_VERSION_MINOR,                     \
+             "facil.io version mismatch, not %s",                              \
+             fio_version_string())
+#else
 #define FIO_VERSION_VALIDATE()                                                 \
   FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
                  fio_version_minor() == FIO_VERSION_MINOR &&                   \
                  fio_version_patch() == FIO_VERSION_PATCH,                     \
              "facil.io version mismatch, not %s",                              \
              fio_version_string())
-
+#endif
 /**
  * To implement the fio_version_* functions and FIO_VERSION_VALIDATE guard, the
  * `FIO_VERSION_GUARD` must be defined (only) once per application / library.
@@ -511,11 +518,11 @@ typedef struct fio_str_info_s {
   size_t capa;
 } fio_str_info_s;
 
-/** An information type for reporting/storing buffer data. */
+/** An information type for reporting/storing buffer data (no `capa`). */
 typedef struct fio_buf_info_s {
-  /** The string's buffer (pointer to first byte) or NULL on error. */
+  /** The buffer's address (may be NULL if no buffer). */
   char *buf;
-  /** The string's length, if any. */
+  /** The buffer's length, if any. */
   size_t len;
 } fio_buf_info_s;
 
@@ -523,6 +530,24 @@ typedef struct fio_buf_info_s {
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
                             !memcmp((s1).buf, (s2).buf, (s1).len)))
+
+/** Converts a C String into a fio_str_info_s. */
+#define FIO_STR_INFO1(str) ((fio_str_info_s){(str), strlen((str))})
+
+/** Converts a String with a known length into a fio_str_info_s. */
+#define FIO_STR_INFO2(str, length) ((fio_str_info_s){(str), (length)})
+
+/** Converts a String with a known length and capacity into a fio_str_info_s. */
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){(str), (length), (capacity)})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){(buf_info).buf, (buf_info).len})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){(str_info).buf, (str_info).len})
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types

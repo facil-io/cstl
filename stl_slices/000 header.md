@@ -26,7 +26,8 @@ Please note I cannot continually test the windows support as I avoid the OS... h
 
 The core Simple Template Library (STL) is a single file header library (`fio-stl.h`).
 
-The header includes a Simple Template Library for the following common types:
+
+The [testable](#testing-the-library) header library includes a Simple Template Library for the following common types:
 
 * [Linked Lists](#linked-lists) - defined by `FIO_LIST_NAME`
 
@@ -39,6 +40,7 @@ The header includes a Simple Template Library for the following common types:
 * [Reference counting / Type wrapper](#reference-counting-and-type-wrapping) - defined by `FIO_REF_NAME`
 
 * [Soft / Dynamic Types (FIOBJ)](#fiobj-soft-dynamic-types) - defined by `FIO_FIOBJ`
+
 
 In addition, the core Simple Template Library (STL) includes helpers for common tasks, such as:
 
@@ -86,21 +88,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
-## Testing the Library (`FIO_TEST_CSTL`)
-
-To test the library, define the `FIO_TEST_CSTL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
-
-#### `FIO_TEST_CSTL`
-
-Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
-
-#### `FIO_LEAK_COUNTER`
-
-Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
-
-This also prints out some minimal usage information about each allocator when exiting the program. 
-
-## Compilation Modes
+### Compilation Modes
 
 The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
 
@@ -142,7 +130,6 @@ When defined, this macro will force full code generation.
 
 If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
 
-
 #### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
 Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation.
@@ -152,6 +139,22 @@ This default choice can be changed so facil.io uses the OS's native `mutex` type
 The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
 
 The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
+
+-------------------------------------------------------------------------------
+
+## Testing the Library (`FIO_TEST_CSTL`)
+
+To test the library, define the `FIO_TEST_CSTL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
+
+#### `FIO_TEST_CSTL`
+
+Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
+
+#### `FIO_LEAK_COUNTER`
+
+Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
+
+This also prints out some minimal usage information about each allocator when exiting the program. 
 
 -------------------------------------------------------------------------------
 
@@ -181,13 +184,13 @@ Translates to the STL's patch version number.
 
 PATCH versions should be adopted as soon as possible (they contain bug fixes).
 
-#### `FIO_VERSION_BETA`
+#### `FIO_VERSION_BUILD`
 
-Translates to the STL's beta version number.
+Translates to the STL's build version **string** (i.e., `"beta.1"`), if any.
 
 #### `FIO_VERSION_STRING`
 
-Translates to the STL's version as a String (i.e., 0.8.0.beta1.
+Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
 #### `FIO_VERSION_GUARD`
 
@@ -196,6 +199,10 @@ If the `FIO_VERSION_GUARD` macro is defined in **a single** translation unit (C 
 #### `FIO_VERSION_VALIDATE`
 
 By adding the `FIO_VERSION_GUARD` functions, a version test could be performed during runtime (which can be used for static libraries), using the macro `FIO_VERSION_VALIDATE()`.
+
+**Note**: the `FIO_VERSION_VALIDATE()` macro does not test build versions, only API compatibility (Major and Minor and Patch versions during development and Major and Minor versions after a 1.x release).
+
+-------------------------------------------------------------------------------
 
 ### Pointer Arithmetics
 
@@ -244,6 +251,8 @@ Subtract X bytes from pointer's address, updating the pointer's type.
 
 Find the root object (of a `struct`) from a pointer to its field's (the field's address).
 
+-------------------------------------------------------------------------------
+
 ### Default Memory Allocation
 
 By setting these macros, the memory allocator used by facil.io could be changed from the default allocator (either the custom allocator or, if missing, the system's allocator).
@@ -278,7 +287,121 @@ When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the sys
 
 When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will route to the system's `malloc`. Set this when compiling to test the effects of all custom memory allocators working together.
 
-### Naming and Misc. Macros
+-------------------------------------------------------------------------------
+
+## Pointer Tagging Support:
+
+Pointer tagging allows types created using this library to have their pointers "tagged".
+
+This is when creating / managing dynamic types, where some type data could be written to the pointer data itself.
+
+**Note**: pointer tagging can't automatically tag "pointers" to objects placed on the stack.
+
+#### `FIO_PTR_TAG`
+
+Supports embedded pointer tagging / untagging for the included types.
+
+Should resolve to a tagged pointer value. i.e.: `((uintptr_t)(p) | 1)`
+
+#### `FIO_PTR_UNTAG`
+
+Supports embedded pointer tagging / untagging for the included types.
+
+Should resolve to an untagged pointer value. i.e.: `((uintptr_t)(p) | ~1UL)`
+
+**Note**: `FIO_PTR_UNTAG` might be called more then once or on untagged pointers. For this reason, `FIO_PTR_UNTAG` should always return the valid pointer, even if called on an untagged pointer.
+
+#### `FIO_PTR_TAG_TYPE`
+
+If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer will return a pointer of the specified type instead.
+
+-------------------------------------------------------------------------------
+
+## String / Buffer Informational Types and Helpers
+
+Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
+
+#### `fio_str_info_s`
+
+Some functions use the `fio_str_info_s` type to either collect or return string related information. This helper type is defined as:
+
+```c
+typedef struct fio_str_info_s {
+  char *buf;   /* The string's buffer (pointer to first byte) or NULL on error. */
+  size_t len;  /* The string's length, if any. */
+  size_t capa; /* The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+} fio_str_info_s;
+```
+
+Note that it is often the case that the data in the string object could be binary, where NUL is a valid character, so using C string functions isn't advised.
+
+Also, note that `capa` might be `0` or otherwise less than `len`. This would indicate the data might be non-mutable (overwriting the string might break things).
+
+
+#### `fio_buf_info_s`
+
+```c
+typedef struct fio_buf_info_s {
+  char *buf;  /* The buffer's address (may be NULL if no buffer). */
+  size_t len; /* The buffer's length, if any. */
+} fio_buf_info_s;
+```
+
+An information type for reporting/storing buffer data (no `capa`).
+
+#### `FIO_STR_INFO_IS_EQ`
+
+```c
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
+                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+```
+
+This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content content equality.
+
+#### `FIO_STR_INFO1`
+
+```c
+#define FIO_STR_INFO1(str) ((fio_str_info_s){(str), strlen((str))})
+```
+
+Converts a C String into a `fio_str_info_s`.
+
+#### `FIO_STR_INFO2`
+
+```c
+#define FIO_STR_INFO2(str, length) ((fio_str_info_s){(str), (length)})
+```
+
+Converts a String with a known length into a `fio_str_info_s`.
+
+#### `FIO_STR_INFO3`
+
+```c
+#define FIO_STR_INFO3(str, length, capacity) ((fio_str_info_s){(str), (length), (capacity)})
+```
+
+Converts a String with a known length and capacity into a `fio_str_info_s`.
+
+#### `FIO_BUF2STR_INFO`
+
+```c
+#define FIO_BUF2STR_INFO(buf_info) ((fio_str_info_s){(buf_info).buf, (buf_info).len})
+```
+
+Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+
+#### `FIO_STR2BUF_INFO`
+
+```c
+#define FIO_STR2BUF_INFO(str_info) ((fio_buf_info_s){(str_info).buf, (str_info).len})
+```
+
+Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+
+-------------------------------------------------------------------------------
+
+## Naming and Misc. Macros
 
 #### `FIO_IFUNC`
 
@@ -346,19 +469,24 @@ Converts a macro's content to a string literal.
 #define FIO_NAME(prefix, postfix)
 ```
 
-Used for naming functions and variables resulting in: prefix_postfix
+Used for naming functions and variables resulting in: `prefix_postfix`
+
+This allows macros to be used for naming types and functions.
 
 i.e.:
 
 ```c
+// the type's name
+#define NUM number
 // typedef struct { long l; } number_s
-typedef struct { long l; } FIO_NAME(number, s)
+typedef struct { long l; } FIO_NAME(NUM, s)
 
 // number_s number_add(number_s a, number_s b)
-FIO_NAME(number, s) FIO_NAME(number, add)(FIO_NAME(number, s) a, FIO_NAME(number, s) b) {
+FIO_NAME(NUM, s) FIO_NAME(NUM, add)(FIO_NAME(NUM, s) a, FIO_NAME(NUM, s) b) {
   a.l += b.l;
   return a;
 }
+#undef NUM
 ```
 
 #### `FIO_NAME2`
@@ -384,7 +512,7 @@ int64_t FIO_NAME2(a, l)(const char * buf) {
 #define FIO_NAME_BL(prefix, postfix) 
 ```
 
-Sets naming convention for boolean testing functions, i.e.: foo_is_true
+Sets naming convention for boolean functions, i.e.: foo_is_true
 
 i.e.:
 
@@ -398,32 +526,12 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 }
 ```
 
--------------------------------------------------------------------------------
+#### `FIO_NAME_TEST`
 
-## Pointer Tagging Support:
+```c
+#define FIO_NAME_TEST(prefix, postfix) FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
+```
 
-Pointer tagging allows types created using this library to have their pointers "tagged".
-
-This is when creating / managing dynamic types, where some type data could be written to the pointer data itself.
-
-**Note**: pointer tagging can't automatically tag "pointers" to objects placed on the stack.
-
-#### `FIO_PTR_TAG`
-
-Supports embedded pointer tagging / untagging for the included types.
-
-Should resolve to a tagged pointer value. i.e.: `((uintptr_t)(p) | 1)`
-
-#### `FIO_PTR_UNTAG`
-
-Supports embedded pointer tagging / untagging for the included types.
-
-Should resolve to an untagged pointer value. i.e.: `((uintptr_t)(p) | ~1UL)`
-
-**Note**: `FIO_PTR_UNTAG` might be called more then once or on untagged pointers. For this reason, `FIO_PTR_UNTAG` should always return the valid pointer, even if called on an untagged pointer.
-
-#### `FIO_PTR_TAG_TYPE`
-
-If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer will return a pointer of the specified type instead.
+Used internally to name test functions.
 
 -------------------------------------------------------------------------------

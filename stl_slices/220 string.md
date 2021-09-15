@@ -183,11 +183,9 @@ The type's attributes should be accessed ONLY through the accessor functions: `S
 
 This is because: Small strings that fit into the type directly use the type itself for memory (except the first and last bytes). Larger strings use the type fields for the string's meta-data. Depending on the string's data, the type behaves differently.
 
-#### `fio_str_info_s`
+#### `fio_str_info_s` - revisited
 
-Some functions return information about a string's state using the `fio_str_info_s` type.
-
-This helper type is defined like so:
+Some functions return information about a string's state using the [`fio_str_info_s` type detailed above](#fio_str_info_s). As a reminder, it looks like this:
 
 ```c
 typedef struct fio_str_info_s {
@@ -197,21 +195,11 @@ typedef struct fio_str_info_s {
 } fio_str_info_s;
 ```
 
-This information type, accessible using the `STR_info` function, allows direct access and manipulation of the string data.
-
-Changes in string length should be followed by a call to `STR_resize`.
+This information type, accessible using the `STR_info` function, allows direct access and manipulation of the string data. Changes in string length should be followed by a call to `STR_resize`.
 
 The data in the string object is always NUL terminated. However, string data might contain binary data, where NUL is a valid character, so using C string functions isn't advised.
 
-#### `FIO_STR_INFO_IS_EQ`
-
-```c
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
-```
-
-This helper MACRO compares two `fio_str_info_s` objects for content equality.
+Equality can be tested using the [`FIO_STR_INFO_IS_EQ` macro](FIO_STR_INFO_IS_EQ).
 
 #### String allocation alignment / `FIO_STR_NO_ALIGN`
 

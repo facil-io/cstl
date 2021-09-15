@@ -219,11 +219,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, glob_matching)(void) {
   };
   fprintf(stderr, "* testing glob matching.\n");
   for (size_t i = 0; t[i].pat; ++i) {
-    fio_str_info_s p, s;
-    p.buf = t[i].pat;
-    p.len = strlen(t[i].pat);
-    s.buf = t[i].str;
-    s.len = strlen(t[i].str);
+    fio_str_info_s p = FIO_STR_INFO1(t[i].pat);
+    fio_str_info_s s = FIO_STR_INFO1(t[i].str);
     FIO_ASSERT(t[i].expect == fio_glob_match(p, s),
                "glob matching error for:\n\t String: %s\n\t Pattern: %s",
                s.buf,
