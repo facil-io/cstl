@@ -138,27 +138,27 @@ Performs the operation indicated in constant time.
 
 - `fio_has_full_byte32(uint32_t row)`
 
-		Detects a byte where all the bits are set (`255`) within a 4 byte vector.
+	Detects a byte where all the bits are set (`255`) within a 4 byte vector.
 
 - `fio_has_zero_byte32(uint32_t row)`
 
-		Detects a byte where no bits are set (0) within a 4 byte vector.
+	Detects a byte where no bits are set (0) within a 4 byte vector.
 
 - `fio_has_byte32(uint32_t row, uint8_t byte)`
 
-		Detects if `byte` exists within a 4 byte vector.
+	Detects if `byte` exists within a 4 byte vector.
 
 - `fio_has_full_byte64(uint64_t row)`
 
-		Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+	Detects a byte where all the bits are set (`255`) within an 8 byte vector.
 
 - `fio_has_zero_byte64(uint64_t row)`
 
-		Detects a byte where no bits are set (0) within an 8 byte vector.
+	Detects a byte where no bits are set (0) within an 8 byte vector.
 
 - `fio_has_byte64(uint64_t row, uint8_t byte)`
 
-		Detects if `byte` exists within an 8 byte vector.
+	Detects if `byte` exists within an 8 byte vector.
 
 - `fio_has_full_byte128(__uint128_t row)`
 

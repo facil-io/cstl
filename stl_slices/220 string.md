@@ -201,6 +201,8 @@ The data in the string object is always NUL terminated. However, string data mig
 
 Equality can be tested using the [`FIO_STR_INFO_IS_EQ` macro](FIO_STR_INFO_IS_EQ).
 
+See [Binary Data Informational Types and Helpers](#binary-data-informational-types-and-helpers) for more details.
+
 #### String allocation alignment / `FIO_STR_NO_ALIGN`
 
 Memory allocators have allocation alignment concerns that require minimum space to be allocated.

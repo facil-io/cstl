@@ -317,7 +317,7 @@ If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer wi
 
 -------------------------------------------------------------------------------
 
-## String / Buffer Informational Types and Helpers
+## Binary Data Informational Types and Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
 
@@ -347,7 +347,7 @@ typedef struct fio_buf_info_s {
 } fio_buf_info_s;
 ```
 
-An information type for reporting/storing buffer data (no `capa`).
+An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
 
 #### `FIO_STR_INFO_IS_EQ`
 
@@ -1019,27 +1019,27 @@ Performs the operation indicated in constant time.
 
 - `fio_has_full_byte32(uint32_t row)`
 
-		Detects a byte where all the bits are set (`255`) within a 4 byte vector.
+	Detects a byte where all the bits are set (`255`) within a 4 byte vector.
 
 - `fio_has_zero_byte32(uint32_t row)`
 
-		Detects a byte where no bits are set (0) within a 4 byte vector.
+	Detects a byte where no bits are set (0) within a 4 byte vector.
 
 - `fio_has_byte32(uint32_t row, uint8_t byte)`
 
-		Detects if `byte` exists within a 4 byte vector.
+	Detects if `byte` exists within a 4 byte vector.
 
 - `fio_has_full_byte64(uint64_t row)`
 
-		Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+	Detects a byte where all the bits are set (`255`) within an 8 byte vector.
 
 - `fio_has_zero_byte64(uint64_t row)`
 
-		Detects a byte where no bits are set (0) within an 8 byte vector.
+	Detects a byte where no bits are set (0) within an 8 byte vector.
 
 - `fio_has_byte64(uint64_t row, uint8_t byte)`
 
-		Detects if `byte` exists within an 8 byte vector.
+	Detects if `byte` exists within an 8 byte vector.
 
 - `fio_has_full_byte128(__uint128_t row)`
 
@@ -1472,11 +1472,9 @@ The `fio_url_s` contains a information about a URL (or, URI).
 
 When the information is returned from `fio_url_parse`, the strings in the `fio_url_s` (i.e., `url.scheme.buf`) are **not NUL terminated**, since the parser is non-destructive, with zero-copy and zero-allocation.
 
-#### `fio_buf_info_s`
+#### `fio_buf_info_s` - revisited
 
-The `fio_buf_info_s` data structure contains information about buffer / string addresses and their length. Since the `fio_url_s` does not return NUL terminated strings, this returned data structure is used.
-
-This helper type is defined like so:
+The `fio_buf_info_s` is used to return information about the parts of the URL's string bufferas detailed above. Since the `fio_url_s` does not return NUL terminated strings, this returned data structure is used.
 
 ```c
 typedef struct fio_buf_info_s {
@@ -1487,11 +1485,8 @@ typedef struct fio_buf_info_s {
 } fio_buf_info_s;
 ```
 
-This information type, accessible using the `STR_info` function, allows direct access and manipulation of the string data.
+See [Binary Data Informational Types and Helpers](#binary-data-informational-types-and-helpers) for more details.
 
-Changes in string length should be followed by a call to `STR_resize`.
-
-The data in the string object is always NUL terminated. However, string data might contain binary data, where NUL is a valid character, so using C string functions isn't advised.
 #### `fio_url_parse`
 
 ```c
@@ -1891,7 +1886,7 @@ void run_my_json_minifier(char *json, size_t len) {
 -------------------------------------------------------------------------------
 ## Local Memory Allocation
 
-The facil.io Simple Template Library includes a fast, concurrent, local memory allocator designed for shot-medium object life-spans.
+The facil.io Simple Template Library includes a fast, concurrent, local memory allocator designed for grouping together objects with similar lifespans.
 
 Multiple allocators can be defined using `FIO_MEMORY_NAME` and including `fio-stl.h` multiple times.
 
@@ -5215,6 +5210,8 @@ This information type, accessible using the `STR_info` function, allows direct a
 The data in the string object is always NUL terminated. However, string data might contain binary data, where NUL is a valid character, so using C string functions isn't advised.
 
 Equality can be tested using the [`FIO_STR_INFO_IS_EQ` macro](FIO_STR_INFO_IS_EQ).
+
+See [Binary Data Informational Types and Helpers](#binary-data-informational-types-and-helpers) for more details.
 
 #### String allocation alignment / `FIO_STR_NO_ALIGN`
 

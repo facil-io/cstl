@@ -61,7 +61,7 @@ Memory Allocation - fast setup for a global allocator
 #undef FIO_MEM_REALLOC_IS_SAFE
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 
-/* prevent double decleration of FIO_MALLOC */
+/* prevent double declaration of FIO_MALLOC */
 #define H___FIO_MALLOC___H
 #endif
 #undef FIO_MALLOC

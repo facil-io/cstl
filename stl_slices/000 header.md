@@ -317,7 +317,7 @@ If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer wi
 
 -------------------------------------------------------------------------------
 
-## String / Buffer Informational Types and Helpers
+## Binary Data Informational Types and Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
 
@@ -347,7 +347,7 @@ typedef struct fio_buf_info_s {
 } fio_buf_info_s;
 ```
 
-An information type for reporting/storing buffer data (no `capa`).
+An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
 
 #### `FIO_STR_INFO_IS_EQ`
 

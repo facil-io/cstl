@@ -1010,19 +1010,19 @@ Common macros
 #define FIO_FILES
 #endif
 
-/* Modules that require FIO_TIME */
-#if defined(FIO_QUEUE) || defined(FIO_RAND)
-#ifndef FIO_TIME
-#define FIO_TIME
-#endif
-#endif /* FIO_QUEUE */
-
 /* Modules that require randomness */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
 #endif /* FIO_MALLOC */
+
+/* Modules that require FIO_TIME */
+#if defined(FIO_QUEUE) || defined(FIO_RAND)
+#ifndef FIO_TIME
+#define FIO_TIME
+#endif
+#endif /* FIO_QUEUE */
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
