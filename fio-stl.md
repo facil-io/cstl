@@ -1187,7 +1187,7 @@ size_t fio_ftoa(char *dest, double num, uint8_t base);
 
 A helper function that converts between a double to a string.
 
-Currently wraps `sprintf` with some special case handling.
+Currently wraps `snprintf` with some special case handling.
 
 No overflow guard is provided, make sure there's at least 130 bytes available
 (for base 2).
@@ -5907,6 +5907,10 @@ fio_str_info_s fiobj2cstr(FIOBJ o);
 ```
 
 Returns a temporary String representation for any FIOBJ object.
+
+For number objects and floats this is thread safe for up to 256 threads.
+
+For printing Arrays and Hash maps, using a JSON representation will provide more information.
 
 #### `fiobj2i`
 

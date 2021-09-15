@@ -216,6 +216,10 @@ fio_str_info_s fiobj2cstr(FIOBJ o);
 
 Returns a temporary String representation for any FIOBJ object.
 
+For number objects and floats this is thread safe for up to 256 threads.
+
+For printing Arrays and Hash maps, using a JSON representation will provide more information.
+
 #### `fiobj2i`
 
 ```c

@@ -390,15 +390,15 @@ supports macros that will help detect and validate it's version.
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
-/** BETA version: pre-version development marker. Nothing is stable. */
-#define FIO_VERSION_BETA 1
+/** Build version: optional build info (string), i.e. "beta.02" */
+#define FIO_VERSION_BUILD "alpha.1"
 
-#if FIO_VERSION_BETA
+#ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
 #define FIO_VERSION_STRING                                                     \
   FIO_MACRO2STR(FIO_VERSION_MAJOR)                                             \
   "." FIO_MACRO2STR(FIO_VERSION_MINOR) "." FIO_MACRO2STR(                      \
-      FIO_VERSION_PATCH) "-beta" FIO_MACRO2STR(FIO_VERSION_BETA)
+      FIO_VERSION_PATCH) "-" FIO_VERSION_BUILD
 #else
 /** Version as a String literal (MACRO). */
 #define FIO_VERSION_STRING                                                     \
@@ -18623,7 +18623,7 @@ Iteration
 ***************************************************************************** */
 
 /** Takes a previous (or NULL) item's position and returns the next. */
-FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * pos);
@@ -19493,7 +19493,7 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   return e.index;
 }
 
-FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
@@ -20371,7 +20371,7 @@ finish:
   return (FIO_MAP_SIZE_TYPE)e.index;
 }
 
-FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * pos) {

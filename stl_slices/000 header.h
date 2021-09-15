@@ -192,7 +192,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #if _MSC_VER
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
-#define __thread _Thread_value
+#define __thread _Thread_local
 #endif
 
 #if defined(__clang__) || defined(__GNUC__)
@@ -390,15 +390,15 @@ supports macros that will help detect and validate it's version.
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
-/** BETA version: pre-version development marker. Nothing is stable. */
-#define FIO_VERSION_BETA 1
+/** Build version: optional build info (string), i.e. "beta.02" */
+#define FIO_VERSION_BUILD "alpha.1"
 
-#if FIO_VERSION_BETA
+#ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
 #define FIO_VERSION_STRING                                                     \
   FIO_MACRO2STR(FIO_VERSION_MAJOR)                                             \
   "." FIO_MACRO2STR(FIO_VERSION_MINOR) "." FIO_MACRO2STR(                      \
-      FIO_VERSION_PATCH) ".beta" FIO_MACRO2STR(FIO_VERSION_BETA)
+      FIO_VERSION_PATCH) "-" FIO_VERSION_BUILD
 #else
 /** Version as a String literal (MACRO). */
 #define FIO_VERSION_STRING                                                     \

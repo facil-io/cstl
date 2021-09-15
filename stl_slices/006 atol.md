@@ -53,7 +53,7 @@ size_t fio_ftoa(char *dest, double num, uint8_t base);
 
 A helper function that converts between a double to a string.
 
-Currently wraps `sprintf` with some special case handling.
+Currently wraps `snprintf` with some special case handling.
 
 No overflow guard is provided, make sure there's at least 130 bytes available
 (for base 2).

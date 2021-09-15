@@ -514,29 +514,30 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
     return fio_ltoa(dest, p.i, base);
   }
   size_t written = 0;
-  uint8_t need_zero = 1;
-  char *start = dest;
 
   if (isinf(num))
     goto is_inifinity;
   if (isnan(num))
     goto is_nan;
 
-  written = sprintf(dest, "%g", num);
-  while (*start) {
-    if (*start == 'e')
+  written = snprintf(dest, 30, "%g", num);
+  /* test if we need to add a ".0" to the end of the string */
+  for (char *start = dest;;) {
+    switch (*start) {
+    case ',':
+      *start = '.'; // locale issues?
+    /* fallthrough */
+    case 'e': /* fallthrough */
+    case '.': /* fallthrough */
       goto finish;
-    if (*start == ',') // locale issues?
-      *start = '.';
-    if (*start == '.') {
-      need_zero = 0;
+    case 0:
+      goto add_dot_zero;
     }
-    start++;
+    ++start;
   }
-  if (need_zero) {
-    dest[written++] = '.';
-    dest[written++] = '0';
-  }
+add_dot_zero:
+  dest[written++] = '.';
+  dest[written++] = '0';
 
 finish:
   dest[written] = 0;

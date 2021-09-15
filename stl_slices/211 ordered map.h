@@ -726,7 +726,7 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   return e.index;
 }
 
-FIO_SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     FIO_NAME(FIO_MAP_NAME, each_next)(FIO_MAP_PTR map,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * *first,
                                       FIO_NAME(FIO_MAP_NAME, node_s) * pos) {
