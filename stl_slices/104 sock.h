@@ -429,6 +429,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     }
     fio_sock_address_free(addr);
     return fd;
+
   case FIO_SOCK_TCP:
     addr = fio_sock_address_new(address, port, SOCK_STREAM);
     if (!addr) {
@@ -448,6 +449,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     }
     fio_sock_address_free(addr);
     return fd;
+
 #if FIO_OS_POSIX
   case FIO_SOCK_UNIX:
     return fio_sock_open_unix(address,
@@ -455,6 +457,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
                               (flags & FIO_SOCK_NONBLOCK));
 #endif
   }
+
   FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
                 "FIO_SOCK_UNIX flags are exclusive");
   return -1;
@@ -527,12 +530,12 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
       port[u.port.len] = 0;
       if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
         /* TODO? prefer...? TCP? */
-        if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
-            (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
-          flags |= FIO_SOCK_UDP;
-        else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
-                 (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
+        if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
+            (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
           flags |= FIO_SOCK_TCP;
+        else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
+                 (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
+          flags |= FIO_SOCK_UDP;
         else if ((u.scheme.len == 4 || u.scheme.len == 5) &&
                  (u.scheme.buf[0] | 32) == 'h' &&
                  (u.scheme.buf[1] | 32) == 't' &&
@@ -811,7 +814,9 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   if (is_client) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
         errno != EINPROGRESS) {
-      FIO_LOG_DEBUG("couldn't connect unix client: %s", strerror(errno));
+      FIO_LOG_DEBUG("couldn't connect unix client @ %s : %s",
+                    addr.sun_path,
+                    strerror(errno));
       fio_sock_close(fd);
       return -1;
     }

@@ -27,7 +27,7 @@ Please note I cannot continually test the windows support as I avoid the OS... h
 The core Simple Template Library (STL) is a single file header library (`fio-stl.h`).
 
 
-The [testable](#testing-the-library) header library includes a Simple Template Library for the following common types:
+The [testable](#testing-the-library-fio_test_cstl) header library includes a Simple Template Library for the following common types:
 
 * [Linked Lists](#linked-lists) - defined by `FIO_LIST_NAME`
 
@@ -66,7 +66,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 
-* [Task Queue](#task-queue) - defined by `FIO_QUEUE`
+* [Task Queues and Timers](#task-queue) - defined by `FIO_QUEUE`
 
 * [Thread Portability Helpers](#threads-portable) - defined by `FIO_THREADS`
 

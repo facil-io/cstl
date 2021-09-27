@@ -600,7 +600,7 @@ typedef struct fio_list_node_s {
   } while (0)
 
 /** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
+#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head))
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types
@@ -724,16 +724,24 @@ Miscellaneous helper macros
 /** An empty macro, adding white space. Used to avoid function like macros. */
 #define FIO_NOOP
 /* allow logging to quitely fail unless enabled */
-#define FIO_LOG_DEBUG(...)
-#define FIO_LOG_DEBUG2(...)
-#define FIO_LOG_INFO(...)
-#define FIO_LOG_WARNING(...)
-#define FIO_LOG_ERROR(...)
-#define FIO_LOG_SECURITY(...)
-#define FIO_LOG_FATAL(...)
 #define FIO_LOG2STDERR(...)
 #define FIO_LOG2STDERR2(...)
 #define FIO_LOG_PRINT__(...)
+#define FIO_LOG_FATAL(...)
+#define FIO_LOG_ERROR(...)
+#define FIO_LOG_SECURITY(...)
+#define FIO_LOG_WARNING(...)
+#define FIO_LOG_INFO(...)
+#define FIO_LOG_DEBUG(...)
+#define FIO_LOG_DEBUG2(...)
+
+#ifdef DEBUG
+#define FIO_LOG_DDEBUG(...)  FIO_LOG_DEBUG(__VA_ARGS__)
+#define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
+#else
+#define FIO_LOG_DDEBUG(...)
+#define FIO_LOG_DDEBUG2(...)
+#endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
 /** Defines a point at which logging truncates (limited by stack memory) */
