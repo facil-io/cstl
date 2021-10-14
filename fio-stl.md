@@ -564,17 +564,9 @@ The function is defined as `weak`, allowing it to be overridden during the linki
 
 This macro routs to the `FIO_LOG2STDERR` function after prefixing the message with the file name and line number in which the error occurred.
 
-#### `FIO_LOG_DEBUG(msg, ...)`
+#### `FIO_LOG_FATAL(msg, ...)`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_DEBUG`.
-
-#### `FIO_LOG_INFO(msg, ...)`
-
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_INFO`.
-
-#### `FIO_LOG_WARNING(msg, ...)`
-
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_WARNING`.
+Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_FATAL`.
 
 #### `FIO_LOG_ERROR(msg, ...)`
 
@@ -584,9 +576,21 @@ Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LE
 
 Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_ERROR`.
 
-#### `FIO_LOG_FATAL(msg, ...)`
+#### `FIO_LOG_WARNING(msg, ...)`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_FATAL`.
+Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_WARNING`.
+
+#### `FIO_LOG_INFO(msg, ...)`
+
+Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_INFO`.
+
+#### `FIO_LOG_DEBUG(msg, ...)`
+
+Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_DEBUG`.
+
+#### `FIO_LOG_DDEBUG(msg, ...)`
+
+Same as `FIO_LOG_DEBUG` if `DEBUG` was defined. Otherwise a no-op.
 
 #### `FIO_ASSERT(cond, msg, ...)`
 

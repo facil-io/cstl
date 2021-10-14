@@ -385,7 +385,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
 #define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
+  for (FIO_NAME(array_name,                                                    \
                 ____type_t) *first___ = NULL,                                  \
                             *pos =                                             \
                                 FIO_NAME(array_name,                           \

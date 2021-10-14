@@ -38,7 +38,7 @@ Feel free to copy, use and enjoy according to the license provided.
  * increasing the amount of strings that could be embedded within the type
  * without memory allocation.
  *
- * For example, when using a referrence counter wrapper on a 64bit system, it
+ * For example, when using a reference counter wrapper on a 64bit system, it
  * would make sense to set this value to 1 - allowing the type size to fully
  * utilize a 16 byte memory allocation alignment.
  */
@@ -2322,7 +2322,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test (irrelevent for type).\n");
+    fprintf(stderr, "* skipped `compact` test (irrelevant for type).\n");
   }
 
   {

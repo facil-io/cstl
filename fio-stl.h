@@ -11715,7 +11715,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
-    fprintf(stderr, "  Note: no more errors should pront for this test.\n");
+    fprintf(stderr, "  Note: no more errors should print for this test.\n");
 
     /* test endless task */
     tester = 0;
@@ -16750,7 +16750,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
 #define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (FIO_NAME(FIO_ARRAY_NAME,                                                \
+  for (FIO_NAME(array_name,                                                    \
                 ____type_t) *first___ = NULL,                                  \
                             *pos =                                             \
                                 FIO_NAME(array_name,                           \
@@ -20883,7 +20883,7 @@ Feel free to copy, use and enjoy according to the license provided.
  * increasing the amount of strings that could be embedded within the type
  * without memory allocation.
  *
- * For example, when using a referrence counter wrapper on a 64bit system, it
+ * For example, when using a reference counter wrapper on a 64bit system, it
  * would make sense to set this value to 1 - allowing the type size to fully
  * utilize a 16 byte memory allocation alignment.
  */
@@ -23167,7 +23167,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test (irrelevent for type).\n");
+    fprintf(stderr, "* skipped `compact` test (irrelevant for type).\n");
   }
 
   {
@@ -27202,7 +27202,7 @@ Environment printout
 ***************************************************************************** */
 
 #define FIO_PRINT_SIZE_OF(T)                                                   \
-  fprintf(stderr, "\t%-17s%zu Bytes\n", #T, sizeof(T))
+  fprintf(stderr, "\t%-19s%zu Bytes\n", #T, sizeof(T))
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -27236,6 +27236,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 #ifdef __SIZEOF_INT128__
   FIO_PRINT_SIZE_OF(__uint128_t);
 #endif
+  FIO_PRINT_SIZE_OF(fio_thread_t);
+  FIO_PRINT_SIZE_OF(fio_thread_mutex_t);
 #if FIO_OS_POSIX || defined(_SC_PAGESIZE)
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {

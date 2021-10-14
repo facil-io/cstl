@@ -602,7 +602,7 @@ Environment printout
 ***************************************************************************** */
 
 #define FIO_PRINT_SIZE_OF(T)                                                   \
-  fprintf(stderr, "\t%-17s%zu Bytes\n", #T, sizeof(T))
+  fprintf(stderr, "\t%-19s%zu Bytes\n", #T, sizeof(T))
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -636,6 +636,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 #ifdef __SIZEOF_INT128__
   FIO_PRINT_SIZE_OF(__uint128_t);
 #endif
+  FIO_PRINT_SIZE_OF(fio_thread_t);
+  FIO_PRINT_SIZE_OF(fio_thread_mutex_t);
 #if FIO_OS_POSIX || defined(_SC_PAGESIZE)
   long page = sysconf(_SC_PAGESIZE);
   if (page > 0) {

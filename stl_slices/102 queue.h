@@ -842,7 +842,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
-    fprintf(stderr, "  Note: no more errors should pront for this test.\n");
+    fprintf(stderr, "  Note: no more errors should print for this test.\n");
 
     /* test endless task */
     tester = 0;
