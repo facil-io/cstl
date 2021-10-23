@@ -1258,19 +1258,19 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
                                                                malloc)));       \
   } while (0)
 #else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
-#define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)
-#define FIO_MEMORY_ON_CHUNK_FREE(ptr)
-#define FIO_MEMORY_ON_CHUNK_CACHE(ptr)
-#define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)
-#define FIO_MEMORY_ON_CHUNK_DIRTY(ptr)
-#define FIO_MEMORY_ON_CHUNK_UNDIRTY(ptr)
-#define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk)
-#define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)
-#define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)
-#define FIO_MEMORY_PRINT_STATS()
-#define FIO_MEMORY_PRINT_STATS_END()
-#define FIO_MEMORY_ON_ALLOC_FUNC()
-#define FIO_MEMORY_ON_FREE_FUNC()
+#define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
+#define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
+#define FIO_MEMORY_ON_CHUNK_CACHE(ptr)              ((void)0)
+#define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)            ((void)0)
+#define FIO_MEMORY_ON_CHUNK_DIRTY(ptr)              ((void)0)
+#define FIO_MEMORY_ON_CHUNK_UNDIRTY(ptr)            ((void)0)
+#define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk) ((void)0)
+#define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)            ((void)0)
+#define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)          ((void)0)
+#define FIO_MEMORY_PRINT_STATS()                    ((void)0)
+#define FIO_MEMORY_PRINT_STATS_END()                ((void)0)
+#define FIO_MEMORY_ON_ALLOC_FUNC()                  ((void)0)
+#define FIO_MEMORY_ON_FREE_FUNC()                   ((void)0)
 #endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************

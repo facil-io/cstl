@@ -724,23 +724,23 @@ Miscellaneous helper macros
 /** An empty macro, adding white space. Used to avoid function like macros. */
 #define FIO_NOOP
 /* allow logging to quitely fail unless enabled */
-#define FIO_LOG2STDERR(...)
-#define FIO_LOG2STDERR2(...)
-#define FIO_LOG_PRINT__(...)
-#define FIO_LOG_FATAL(...)
-#define FIO_LOG_ERROR(...)
-#define FIO_LOG_SECURITY(...)
-#define FIO_LOG_WARNING(...)
-#define FIO_LOG_INFO(...)
-#define FIO_LOG_DEBUG(...)
-#define FIO_LOG_DEBUG2(...)
+#define FIO_LOG2STDERR(...)   ((void)0)
+#define FIO_LOG2STDERR2(...)  ((void)0)
+#define FIO_LOG_PRINT__(...)  ((void)0)
+#define FIO_LOG_FATAL(...)    ((void)0)
+#define FIO_LOG_ERROR(...)    ((void)0)
+#define FIO_LOG_SECURITY(...) ((void)0)
+#define FIO_LOG_WARNING(...)  ((void)0)
+#define FIO_LOG_INFO(...)     ((void)0)
+#define FIO_LOG_DEBUG(...)    ((void)0)
+#define FIO_LOG_DEBUG2(...)   ((void)0)
 
 #ifdef DEBUG
 #define FIO_LOG_DDEBUG(...)  FIO_LOG_DEBUG(__VA_ARGS__)
 #define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
 #else
-#define FIO_LOG_DDEBUG(...)
-#define FIO_LOG_DDEBUG2(...)
+#define FIO_LOG_DDEBUG(...)  ((void)(0))
+#define FIO_LOG_DDEBUG2(...) ((void)(0))
 #endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
