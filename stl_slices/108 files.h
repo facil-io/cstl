@@ -187,7 +187,7 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
       filename = path;
     }
   }
-  fd = open(filename, flags);
+  fd = open(filename, flags, (S_IWUSR | S_IRUSR));
   if (path) {
     FIO_MEM_FREE_(path, path_len + 1);
   }
@@ -256,7 +256,9 @@ SFUNC int fio_filename_tmp(void) {
     uint64_t r = fio_rand64();
     size_t delta = fio_ltoa(name_template + len, r, 32);
     name_template[delta + len] = 0;
-    fd = open(name_template, O_CREAT | O_TMPFILE | O_EXCL | O_RDWR);
+    fd = open(name_template,
+              O_CREAT | O_TMPFILE | O_EXCL | O_RDWR,
+              (S_IWUSR | S_IRUSR));
 #else
     FIO_MEMCPY(name_template + len, "XXXXXXXXXXXX", 12);
     name_template[12 + len] = 0;
