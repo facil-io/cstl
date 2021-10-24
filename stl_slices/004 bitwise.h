@@ -681,7 +681,7 @@ FIO_IFUNC __uint128_t fio_has_full_byte128(__uint128_t row) {
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
-  return fio_has_full_byte64(~row);
+  return fio_has_full_byte128(~row);
 }
 
 /**
@@ -692,7 +692,7 @@ FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
 FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
   const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
                             (__uint128_t)(0x0101010101010101);
-  return fio_has_full_byte64(~(row ^ (all01 * byte)));
+  return fio_has_full_byte128(~(row ^ (all01 * byte)));
 }
 #endif /* __SIZEOF_INT128__ */
 

@@ -2951,7 +2951,7 @@ FIO_IFUNC __uint128_t fio_has_full_byte128(__uint128_t row) {
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
-  return fio_has_full_byte64(~row);
+  return fio_has_full_byte128(~row);
 }
 
 /**
@@ -2962,7 +2962,7 @@ FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
 FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
   const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
                             (__uint128_t)(0x0101010101010101);
-  return fio_has_full_byte64(~(row ^ (all01 * byte)));
+  return fio_has_full_byte128(~(row ^ (all01 * byte)));
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -7244,6 +7244,12 @@ SFUNC void fio_memset_aligned(void *restrict dest, uint64_t data, size_t bytes);
  */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
 
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
+
 #endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 /* *****************************************************************************
 Memory Allocation - API
@@ -7889,6 +7895,94 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   case 1:
     *(dest++) = data;
   }
+}
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+  if (!buffer || !len)
+    return NULL;
+
+  const char *cbuf = (const char *)buffer;
+  const uint64_t *ubuf = (const uint64_t *)buffer;
+
+  if (len > 32) {
+#if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+    while (((uintptr_t)cbuf & 7)) {
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+    }
+#endif
+    const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
+    ubuf = (const uint64_t *)cbuf;
+    for (; len >= 32; (len -= 32), (ubuf += 4)) {
+      if (fio_has_zero_byte64(umask ^ ubuf[0]) |
+          fio_has_zero_byte64(umask ^ ubuf[1]) |
+          fio_has_zero_byte64(umask ^ ubuf[2]) |
+          fio_has_zero_byte64(umask ^ ubuf[3]))
+        break;
+    }
+    cbuf = (const char *)ubuf;
+  }
+
+  switch (len & 7) {
+    for (;;) {
+    case 0:
+      if (!len)
+        return NULL;
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 7:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 6:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 5:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 4:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 3:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 2:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+      /* fallthrough */
+    case 1:
+      if (cbuf[0] == token)
+        return (void *)cbuf;
+      ++cbuf;
+      --len;
+    }
+  }
+  return NULL;
 }
 
 /* *****************************************************************************
@@ -9831,7 +9925,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           "* Speed testing memset (%d repetitions per test):\n",
           repetitions);
 
-  for (int len_i = 11; len_i < 20; ++len_i) {
+  for (int len_i = 5; len_i < 20; ++len_i) {
     const size_t mem_len = 1ULL << len_i;
     void *mem = malloc(mem_len);
     FIO_ASSERT_ALLOC(mem);
@@ -9873,7 +9967,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           "* Speed testing memcpy (%d repetitions per test):\n",
           repetitions);
 
-  for (int len_i = 11; len_i < 20; ++len_i) {
+  for (int len_i = 5; len_i < 20; ++len_i) {
     const size_t mem_len = 1ULL << len_i;
     void *mem = malloc(mem_len << 1);
     FIO_ASSERT_ALLOC(mem);
@@ -9907,6 +10001,50 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
     fprintf(stderr,
             "\tsystem memcpy\t\t(%zu bytes):\t%zu us\n",
+            mem_len,
+            (size_t)(end - start));
+
+    free(mem);
+  }
+
+  fprintf(stderr,
+          "* Speed testing memchr (%d repetitions per test):\n",
+          repetitions);
+
+  for (int len_i = 5; len_i < 20; ++len_i) {
+    const size_t mem_len = (1ULL << len_i) - 1;
+    void *mem = malloc(mem_len + 1);
+    FIO_ASSERT_ALLOC(mem);
+    fio_memset_aligned(mem,
+                       ((uint64_t)0x0101010101010101ULL * 0x66),
+                       mem_len + 1);
+    ((char *)mem)[mem_len - 9] = 0;
+    FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
+                   fio_memchr((char *)mem + 1, 0, mem_len),
+               "fio_memchr != memchr");
+    start = fio_time_micro();
+    for (int i = 0; i < repetitions; ++i) {
+      FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
+                     ((char *)mem + mem_len - 9),
+                 "fio_memchr failed?");
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+
+    fprintf(stderr,
+            "\tfio_memchr\t\t(%zu bytes):\t%zu us\n",
+            mem_len,
+            (size_t)(end - start));
+    start = fio_time_micro();
+    for (int i = 0; i < repetitions; ++i) {
+      FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
+                     ((char *)mem + mem_len - 9),
+                 "memchr failed?");
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tsystem memchr\t\t(%zu bytes):\t%zu us\n",
             mem_len,
             (size_t)(end - start));
 

@@ -1039,7 +1039,7 @@ Performs the operation indicated in constant time.
 
 - `fio_has_zero_byte64(uint64_t row)`
 
-	Detects a byte where no bits are set (0) within an 8 byte vector.
+	Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
 
 - `fio_has_byte64(uint64_t row, uint8_t byte)`
 
@@ -1975,6 +1975,18 @@ This implementation is probably significantly **slower** than the one included w
 
 On my Intel machine the difference is immediate (this implementation is slower than the compiler's optimized implementation). On my ARM computer, the difference is significant with byte lengths over 65Kb (probably due to CPU caching limits). For smaller buffer sizes, the assumption of a memory aligned address actually minimizes some overhead and allows for competitive performance.
 
+
+#### `fio_memchr`
+
+```c
+void * fio_memchr(const void *mem, char token, size_t bytes);
+```
+
+A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
+
+If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
+
+For most systems and clib implementations, this fallback should be **slower** than the one offered by the compiler.
 
 ### The Memory Allocator's API
 

@@ -154,7 +154,7 @@ Performs the operation indicated in constant time.
 
 - `fio_has_zero_byte64(uint64_t row)`
 
-	Detects a byte where no bits are set (0) within an 8 byte vector.
+	Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
 
 - `fio_has_byte64(uint64_t row, uint8_t byte)`
 
