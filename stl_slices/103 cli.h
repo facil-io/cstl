@@ -353,12 +353,12 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
   char const **pos = parser->names;
   while (*pos) {
     switch ((intptr_t)*pos) {
-    case FIO_CLI_STRING__TYPE_I:       /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:          /* fallthrough */
-    case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
-    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
-    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I:       /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:         /* fall through */
+    case FIO_CLI_INT__TYPE_I:          /* fall through */
+    case FIO_CLI_PRINT__TYPE_I:        /* fall through */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
+    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
       ++pos;
       continue;
     }
@@ -370,12 +370,12 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
   return NULL;
 found:
   switch ((size_t)pos[1]) {
-  case FIO_CLI_STRING__TYPE_I:       /* fallthrough */
-  case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
-  case FIO_CLI_INT__TYPE_I:          /* fallthrough */
-  case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
-  case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
-  case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
+  case FIO_CLI_STRING__TYPE_I:       /* fall through */
+  case FIO_CLI_BOOL__TYPE_I:         /* fall through */
+  case FIO_CLI_INT__TYPE_I:          /* fall through */
+  case FIO_CLI_PRINT__TYPE_I:        /* fall through */
+  case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
+  case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
     return pos[1];
   }
   return NULL;
@@ -471,7 +471,7 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
         goto error;
       }
     }
-    /* fallthrough */
+    /* fall through */
   case FIO_CLI_STRING__TYPE_I:
     if (!value)
       goto error;
@@ -538,11 +538,11 @@ print_help:
   char const **pos = parser->names;
   while (*pos) {
     switch ((intptr_t)*pos) {
-    case FIO_CLI_STRING__TYPE_I:     /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:       /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:        /* fallthrough */
-    case FIO_CLI_PRINT__TYPE_I:      /* fallthrough */
-    case FIO_CLI_PRINT_LINE__TYPE_I: /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I:     /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:       /* fall through */
+    case FIO_CLI_INT__TYPE_I:        /* fall through */
+    case FIO_CLI_PRINT__TYPE_I:      /* fall through */
+    case FIO_CLI_PRINT_LINE__TYPE_I: /* fall through */
     case FIO_CLI_PRINT_HEADER__TYPE_I:
       ++pos;
       continue;
@@ -567,9 +567,9 @@ print_help:
       pos += 2;
       continue;
 
-    case FIO_CLI_STRING__TYPE_I: /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:   /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:    /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I: /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:   /* fall through */
+    case FIO_CLI_INT__TYPE_I:    /* fall through */
       type = pos[1];
     }
     /* print line @ pos, starting with main argument name */
@@ -715,12 +715,12 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
   char const **line = names;
   while (*line) {
     switch ((intptr_t)*line) {
-    case FIO_CLI_STRING__TYPE_I:       /* fallthrough */
-    case FIO_CLI_BOOL__TYPE_I:         /* fallthrough */
-    case FIO_CLI_INT__TYPE_I:          /* fallthrough */
-    case FIO_CLI_PRINT__TYPE_I:        /* fallthrough */
-    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fallthrough */
-    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fallthrough */
+    case FIO_CLI_STRING__TYPE_I:       /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:         /* fall through */
+    case FIO_CLI_INT__TYPE_I:          /* fall through */
+    case FIO_CLI_PRINT__TYPE_I:        /* fall through */
+    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
+    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
       ++line;
       continue;
     }

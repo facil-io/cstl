@@ -524,33 +524,33 @@ Aligned memory copying
       }                                                                        \
       switch (units) {                                                         \
       case 15:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 14:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 13:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 12:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 11:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 10:                                                                 \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 9:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 8:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 7:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 6:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 5:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 4:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 3:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 2:                                                                  \
-        *(dest++) = *(src++); /* fallthrough */                                \
+        *(dest++) = *(src++); /* fall through */                               \
       case 1:                                                                  \
         *(dest++) = *(src++);                                                  \
       }                                                                        \
@@ -559,33 +559,33 @@ Aligned memory copying
       src += units;                                                            \
       switch ((units & 15)) {                                                  \
       case 15:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 14:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 13:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 12:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 11:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 10:                                                                 \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 9:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 8:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 7:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 6:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 5:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 4:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 3:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 2:                                                                  \
-        *(--dest) = *(--src); /* fallthrough */                                \
+        *(--dest) = *(--src); /* fall through */                               \
       case 1:                                                                  \
         *(--dest) = *(--src);                                                  \
       }                                                                        \
@@ -645,26 +645,26 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     src += offset;
     switch ((bytes & 7)) {
     case 7:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     case 6:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     case 5:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     case 4:
-      *(dest++) = *(src++);  /* fallthrough */
+      *(dest++) = *(src++);  /* fall through */
 #elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
     const size_t offset = bytes & ((~0ULL) << 2);
     dest += offset;
     src += offset;
     switch ((bytes & 3)) {
 #endif                       /* 32 bit */
-    /* fallthrough */
+    /* fall through */
     case 3:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     case 2:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     case 1:
-      *(dest++) = *(src++); /* fallthrough */
+      *(dest++) = *(src++); /* fall through */
     }
 #endif /* 32 / 64 bit */
   } else {
@@ -673,30 +673,30 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     uint8_t *src = (uint8_t *)src_ + bytes;
     switch ((bytes & 7)) {
     case 7:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 6:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 5:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 4:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 3:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 2:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 1:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     }
 #elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
     uint8_t *dest = (uint8_t *)dest_ + bytes;
     uint8_t *src = (uint8_t *)src_ + bytes;
     switch ((bytes & 3)) {
     case 3:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 2:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     case 1:
-      *(--dest) = *(--src); /* fallthrough */
+      *(--dest) = *(--src); /* fall through */
     }
 #endif                       /* 64 bit */
 
@@ -743,33 +743,33 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   }
   switch (bytes) {
   case 15:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 14:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 13:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 12:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 11:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 10:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 9:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 8:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 7:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 6:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 5:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 4:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 3:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 2:
-    *(dest++) = data; /* fallthrough */
+    *(dest++) = data; /* fall through */
   case 1:
     *(dest++) = data;
   }
@@ -791,18 +791,19 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
 
     switch (((uintptr_t)cbuf & 7)) {
 #define FIO_MEMCHR___CASE(i)                                                   \
+    /* fall through */                                                         \
   case i:                                                                      \
     if (cbuf[i] == token)                                                      \
       return (void *)cbuf;                                                     \
     ++cbuf;                                                                    \
     --len;
-      FIO_MEMCHR___CASE(1); /* fallthrough */
-      FIO_MEMCHR___CASE(2); /* fallthrough */
-      FIO_MEMCHR___CASE(3); /* fallthrough */
-      FIO_MEMCHR___CASE(4); /* fallthrough */
-      FIO_MEMCHR___CASE(5); /* fallthrough */
-      FIO_MEMCHR___CASE(6); /* fallthrough */
-      FIO_MEMCHR___CASE(7); /* fallthrough */
+      FIO_MEMCHR___CASE(1);
+      FIO_MEMCHR___CASE(2);
+      FIO_MEMCHR___CASE(3);
+      FIO_MEMCHR___CASE(4);
+      FIO_MEMCHR___CASE(5);
+      FIO_MEMCHR___CASE(6);
+      FIO_MEMCHR___CASE(7);
 #undef FIO_MEMCHR___CASE
     }
 #endif
@@ -841,21 +842,29 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     return (void *)cbuf;                                                       \
   ++cbuf;                                                                      \
   --len;
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 7:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 6:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 5:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 4:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 3:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 2:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
     case 1:
-      FIO_MEMCHR___TEST(); /* fallthrough */
+      FIO_MEMCHR___TEST();
+      /* fall through */
 #undef FIO_MEMCHR___TEST
     }
   }
@@ -2732,59 +2741,59 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   case 15:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 14:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 13:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 12:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 11:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 10:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 9:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 8:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 7:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 6:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 5:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 4:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 3:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 2:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten",
-               msg); /* fallthrough */
+               msg); /* fall through */
   case 1:
     FIO_ASSERT(*(dest++) = data,
                "%s memory data was overwritten (last 8 bytes)",

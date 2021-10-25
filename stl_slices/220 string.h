@@ -1576,12 +1576,12 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
       if (fio__str_utf8_map[src[i + 3] >> 3] != 5) {
         break; /* from switch */
       }
-    /* fallthrough */
+    /* fall through */
     case 3:
       if (fio__str_utf8_map[src[i + 2] >> 3] != 5) {
         break; /* from switch */
       }
-    /* fallthrough */
+    /* fall through */
     case 2:
       if (fio__str_utf8_map[src[i + 1] >> 3] != 5) {
         break; /* from switch */
@@ -1595,14 +1595,14 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
 
     /* count extra bytes */
     switch (src[i]) {
-    case '\b': /* fallthrough */
-    case '\f': /* fallthrough */
-    case '\n': /* fallthrough */
-    case '\r': /* fallthrough */
-    case '\t': /* fallthrough */
-    case '"':  /* fallthrough */
-    case '\\': /* fallthrough */
-    case '/':  /* fallthrough */
+    case '\b': /* fall through */
+    case '\f': /* fall through */
+    case '\n': /* fall through */
+    case '\r': /* fall through */
+    case '\t': /* fall through */
+    case '"':  /* fall through */
+    case '\\': /* fall through */
+    case '/':  /* fall through */
       ++extra_len;
       break;
     default:
@@ -1649,21 +1649,21 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
       if (fio__str_utf8_map[src[i + 3] >> 3] != 5) {
         break; /* from switch */
       }
-    /* fallthrough */
+    /* fall through */
     case 3:
       if (fio__str_utf8_map[src[i + 2] >> 3] != 5) {
         break; /* from switch */
       }
-    /* fallthrough */
+    /* fall through */
     case 2:
       if (fio__str_utf8_map[src[i + 1] >> 3] != 5) {
         break; /* from switch */
       }
       switch (fio__str_utf8_map[src[i] >> 3]) {
       case 4:
-        dest.buf[at++] = src[i++]; /* fallthrough */
+        dest.buf[at++] = src[i++]; /* fall through */
       case 3:
-        dest.buf[at++] = src[i++]; /* fallthrough */
+        dest.buf[at++] = src[i++]; /* fall through */
       case 2:
         dest.buf[at++] = src[i++];
         dest.buf[at++] = src[i];
@@ -1859,7 +1859,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
     case '"':
     case '\\':
     case '/':
-    /* fallthrough */
+    /* fall through */
     default:
     invalid_escape:
       dest.buf[at++] = *(src++);

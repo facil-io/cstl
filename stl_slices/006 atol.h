@@ -220,19 +220,19 @@ SFUNC int64_t fio_atol(char **pstr) {
     ++p;
   }
   switch (*p) {
-  case 'x': /* fallthrough */
+  case 'x': /* fall through */
   case 'X':
     goto is_hex;
-  case 'b': /* fallthrough */
+  case 'b': /* fall through */
   case 'B':
     goto is_binary;
   case '0':
     ++p;
     switch (*p) {
-    case 'x': /* fallthrough */
+    case 'x': /* fall through */
     case 'X':
       goto is_hex;
-    case 'b': /* fallthrough */
+    case 'b': /* fall through */
     case 'B':
       goto is_binary;
     }
@@ -337,7 +337,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     goto base_error;
 
   switch (base) {
-  case 1: /* fallthrough */
+  case 1: /* fall through */
   case 2:
     /* Base 2 */
     {
@@ -430,7 +430,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       dest[len] = 0;
       return len;
     }
-  case 0: /* fallthrough */
+  case 0: /* fall through */
   case 10:
     /* Base 10 */
     {
@@ -526,9 +526,9 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
     switch (*start) {
     case ',':
       *start = '.'; // locale issues?
-    /* fallthrough */
-    case 'e': /* fallthrough */
-    case '.': /* fallthrough */
+    /* fall through */
+    case 'e': /* fall through */
+    case '.': /* fall through */
       goto finish;
     case 0:
       goto add_dot_zero;

@@ -132,7 +132,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
     case '\\':
       d = *(uint8_t *)pat.buf++;
       pat.len--;
-    /* fallthrough */
+    /* fall through */
     default: /* Literal character */
       if (c == d)
         break;

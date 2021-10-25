@@ -207,9 +207,9 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
    * Use `continue` to keep separator requirement the same.
    */
   switch (*buffer) {
-  case 0x09: /* fallthrough */
-  case 0x0A: /* fallthrough */
-  case 0x0D: /* fallthrough */
+  case 0x09: /* fall through */
+  case 0x0A: /* fall through */
+  case 0x0D: /* fall through */
   case 0x20:
     /* consume whitespace */
     ++buffer;
@@ -309,7 +309,7 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
      * JSON Primitives (true / false / null (NaN))
      *
      */
-  case 'N': /* NaN or null? - fallthrough */
+  case 'N': /* NaN or null? - fall through */
   case 'n':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
@@ -349,23 +349,23 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
      * JSON Numbers (Integers / Floats)
      *
      */
-  case '+': /* fallthrough */
-  case '-': /* fallthrough */
-  case '0': /* fallthrough */
-  case '1': /* fallthrough */
-  case '2': /* fallthrough */
-  case '3': /* fallthrough */
-  case '4': /* fallthrough */
-  case '5': /* fallthrough */
-  case '6': /* fallthrough */
-  case '7': /* fallthrough */
-  case '8': /* fallthrough */
-  case '9': /* fallthrough */
-  case 'x': /* fallthrough */
-  case '.': /* fallthrough */
-  case 'e': /* fallthrough */
-  case 'E': /* fallthrough */
-  case 'i': /* fallthrough */
+  case '+': /* fall through */
+  case '-': /* fall through */
+  case '0': /* fall through */
+  case '1': /* fall through */
+  case '2': /* fall through */
+  case '3': /* fall through */
+  case '4': /* fall through */
+  case '5': /* fall through */
+  case '6': /* fall through */
+  case '7': /* fall through */
+  case '8': /* fall through */
+  case '9': /* fall through */
+  case 'x': /* fall through */
+  case '.': /* fall through */
+  case 'e': /* fall through */
+  case 'E': /* fall through */
+  case 'i': /* fall through */
   case 'I':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
@@ -378,8 +378,8 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
      * Comments
      *
      */
-  case '#': /* fallthrough */
-  case '/': /* fallthrough */
+  case '#': /* fall through */
+  case '/': /* fall through */
     return fio___json_skip_comments(buffer, stop);
     /*
      *

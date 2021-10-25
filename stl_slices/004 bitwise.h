@@ -848,25 +848,25 @@ FIO_IFUNC uint64_t fio___xmask2_aligned64(uint64_t buf[],
     return mask;
   case 7:
     pn.p8[6] ^= mpn.p8[6];
-  /* fallthrough */
+  /* fall through */
   case 6:
     pn.p8[5] ^= mpn.p8[5];
-  /* fallthrough */
+  /* fall through */
   case 5:
     pn.p8[4] ^= mpn.p8[4];
-  /* fallthrough */
+  /* fall through */
   case 4:
     pn.p8[3] ^= mpn.p8[3];
-  /* fallthrough */
+  /* fall through */
   case 3:
     pn.p8[2] ^= mpn.p8[2];
-  /* fallthrough */
+  /* fall through */
   case 2:
     pn.p8[1] ^= mpn.p8[1];
-  /* fallthrough */
+  /* fall through */
   case 1:
     pn.p8[0] ^= mpn.p8[0];
-    /* fallthrough */
+    /* fall through */
   }
   return mask;
 }
@@ -896,25 +896,25 @@ FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
     return mask;
   case 7:
     buf[6] ^= ((uint8_t *)(&mask))[6];
-  /* fallthrough */
+  /* fall through */
   case 6:
     buf[5] ^= ((uint8_t *)(&mask))[5];
-  /* fallthrough */
+  /* fall through */
   case 5:
     buf[4] ^= ((uint8_t *)(&mask))[4];
-  /* fallthrough */
+  /* fall through */
   case 4:
     buf[3] ^= ((uint8_t *)(&mask))[3];
-  /* fallthrough */
+  /* fall through */
   case 3:
     buf[2] ^= ((uint8_t *)(&mask))[2];
-  /* fallthrough */
+  /* fall through */
   case 2:
     buf[1] ^= ((uint8_t *)(&mask))[1];
-  /* fallthrough */
+  /* fall through */
   case 1:
     buf[0] ^= ((uint8_t *)(&mask))[0];
-    /* fallthrough */
+    /* fall through */
   }
   return mask;
 }
@@ -969,25 +969,25 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   switch ((len & 7)) {
   case 7:
     buf[6] ^= pn.p8[6];
-  /* fallthrough */
+  /* fall through */
   case 6:
     buf[5] ^= pn.p8[5];
-  /* fallthrough */
+  /* fall through */
   case 5:
     buf[4] ^= pn.p8[4];
-  /* fallthrough */
+  /* fall through */
   case 4:
     buf[3] ^= pn.p8[3];
-  /* fallthrough */
+  /* fall through */
   case 3:
     buf[2] ^= pn.p8[2];
-  /* fallthrough */
+  /* fall through */
   case 2:
     buf[1] ^= pn.p8[1];
-  /* fallthrough */
+  /* fall through */
   case 1:
     buf[0] ^= pn.p8[0];
-    /* fallthrough */
+    /* fall through */
   }
 }
 

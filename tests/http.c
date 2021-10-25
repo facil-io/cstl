@@ -155,8 +155,8 @@ int main(int argc, char const *argv[]) {
   /* select signals to be monitored */
   fio_signal_monitor(SIGINT, on_signal, NULL);
   fio_signal_monitor(SIGTERM, on_signal, NULL);
-  fio_signal_monitor(SIGPIPE, NULL, NULL);
 #if FIO_OS_POSIX
+  fio_signal_monitor(SIGPIPE, NULL, NULL);
   fio_signal_monitor(SIGQUIT, on_signal, NULL);
 #endif
 

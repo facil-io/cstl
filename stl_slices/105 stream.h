@@ -263,7 +263,7 @@ FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
     break;
   case FIO_PACKET_TYPE_FILE:
     close(u.f->fd);
-    /* fallthrough */
+    /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.f));
     break;
@@ -295,7 +295,7 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
   case FIO_PACKET_TYPE_EXTERNAL:
     len = u.ext->length;
     return len;
-  case FIO_PACKET_TYPE_FILE: /* fallthrough */
+  case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     len = u.f->length;
     return len;
@@ -494,7 +494,7 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
     len[0] += written;
     return;
     break;
-  case FIO_PACKET_TYPE_FILE: /* fallthrough */
+  case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     if (!buf[0] || !len[0]) {
       buf[0] = NULL;
