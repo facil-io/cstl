@@ -786,10 +786,9 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   const char *cbuf = (const char *)buffer;
   const uint64_t *ubuf = (const uint64_t *)buffer;
 
-  if (len >= 32) {
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-
-    switch (((uintptr_t)cbuf & 7)) {
+  /* align pointer if needed */
+  switch (((uintptr_t)cbuf & 7)) {
 #define FIO_MEMCHR___CASE(i)                                                   \
     /* fall through */                                                         \
   case i:                                                                      \
@@ -797,41 +796,57 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
       return (void *)cbuf;                                                     \
     ++cbuf;                                                                    \
     --len;
-      FIO_MEMCHR___CASE(1);
-      FIO_MEMCHR___CASE(2);
-      FIO_MEMCHR___CASE(3);
-      FIO_MEMCHR___CASE(4);
-      FIO_MEMCHR___CASE(5);
-      FIO_MEMCHR___CASE(6);
-      FIO_MEMCHR___CASE(7);
+    FIO_MEMCHR___CASE(1);
+    FIO_MEMCHR___CASE(2);
+    FIO_MEMCHR___CASE(3);
+    FIO_MEMCHR___CASE(4);
+    FIO_MEMCHR___CASE(5);
+    FIO_MEMCHR___CASE(6);
+    FIO_MEMCHR___CASE(7);
 #undef FIO_MEMCHR___CASE
-    }
+  }
 #endif
-    const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
-    ubuf = (const uint64_t *)cbuf;
-    for (; len >= 32; (len -= 32), (ubuf += 4)) {
-      uint64_t a, b, c, d;
-      if (!((a = fio_has_zero_byte64(umask ^ ubuf[0])) |
-            (b = fio_has_zero_byte64(umask ^ ubuf[1])) |
-            (c = fio_has_zero_byte64(umask ^ ubuf[2])) |
-            (d = fio_has_zero_byte64(umask ^ ubuf[3]))))
-        continue;
-      if (a)
-        return (void *)(((const char *)ubuf) +
-                        fio_bits_lsb_index(fio_has_byte2bitmap(a)));
-      if (b)
-        return (void *)(((const char *)(ubuf + 1)) +
-                        fio_bits_lsb_index(fio_has_byte2bitmap(b)));
-      if (c)
-        return (void *)(((const char *)(ubuf + 2)) +
-                        fio_bits_lsb_index(fio_has_byte2bitmap(c)));
-      if (d)
-        return (void *)(((const char *)(ubuf + 3)) +
-                        fio_bits_lsb_index(fio_has_byte2bitmap(d)));
-    }
-    cbuf = (const char *)ubuf;
+  /* bit-magic SIMD, always portable */
+  const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
+  ubuf = (const uint64_t *)cbuf;
+  register uint64_t r0, r1, r2, r3;
+
+  /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
+  switch ((len & 24)) {
+#define FIO_MEMCHR___CASE(i)                                                   \
+    /* fall through */                                                         \
+  case i:                                                                      \
+    if ((r0 = fio_has_zero_byte64(umask ^ ubuf[0])))                           \
+      return (void *)(((const char *)ubuf) +                                   \
+                      fio_bits_lsb_index(fio_has_byte2bitmap(r0)));            \
+    ++ubuf;                                                                    \
+    len -= 8;
+    FIO_MEMCHR___CASE(24);
+    FIO_MEMCHR___CASE(16);
+    FIO_MEMCHR___CASE(8);
+#undef FIO_MEMCHR___CASE
   }
 
+  /* consume 32 byte groups */
+  for (; len >= 32; (len -= 32), (ubuf += 4)) {
+    if (!((r0 = fio_has_zero_byte64(umask ^ ubuf[0])) |
+          (r1 = fio_has_zero_byte64(umask ^ ubuf[1])) |
+          (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
+          (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
+      continue;
+#define FIO_MEMCHR___TEST(i)                                                   \
+  if (r##i)                                                                    \
+  return (void *)(((const char *)(ubuf + i)) +                                 \
+                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
+    FIO_MEMCHR___TEST(0);
+    FIO_MEMCHR___TEST(1);
+    FIO_MEMCHR___TEST(2);
+    FIO_MEMCHR___TEST(3);
+#undef FIO_MEMCHR___TEST
+  }
+  cbuf = (const char *)ubuf;
+
+  /* All that's left is a maximum of 7 bytes, the loops code is in case of 0 */
   switch (len & 7) {
     for (;;) {
     case 0:
