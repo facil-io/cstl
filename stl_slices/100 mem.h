@@ -786,23 +786,47 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   const char *cbuf = (const char *)buffer;
   const uint64_t *ubuf = (const uint64_t *)buffer;
 
-  if (len > 32) {
+  if (len >= 32) {
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-    while (((uintptr_t)cbuf & 7)) {
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
+
+    switch (((uintptr_t)cbuf & 7)) {
+#define FIO_MEMCHR___CASE(i)                                                   \
+  case i:                                                                      \
+    if (cbuf[i] == token)                                                      \
+      return (void *)cbuf;                                                     \
+    ++cbuf;                                                                    \
+    --len;
+      FIO_MEMCHR___CASE(1); /* fallthrough */
+      FIO_MEMCHR___CASE(2); /* fallthrough */
+      FIO_MEMCHR___CASE(3); /* fallthrough */
+      FIO_MEMCHR___CASE(4); /* fallthrough */
+      FIO_MEMCHR___CASE(5); /* fallthrough */
+      FIO_MEMCHR___CASE(6); /* fallthrough */
+      FIO_MEMCHR___CASE(7); /* fallthrough */
+#undef FIO_MEMCHR___CASE
     }
 #endif
     const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
     ubuf = (const uint64_t *)cbuf;
     for (; len >= 32; (len -= 32), (ubuf += 4)) {
-      if (fio_has_zero_byte64(umask ^ ubuf[0]) |
-          fio_has_zero_byte64(umask ^ ubuf[1]) |
-          fio_has_zero_byte64(umask ^ ubuf[2]) |
-          fio_has_zero_byte64(umask ^ ubuf[3]))
-        break;
+      uint64_t a, b, c, d;
+      if (!((a = fio_has_zero_byte64(umask ^ ubuf[0])) |
+            (b = fio_has_zero_byte64(umask ^ ubuf[1])) |
+            (c = fio_has_zero_byte64(umask ^ ubuf[2])) |
+            (d = fio_has_zero_byte64(umask ^ ubuf[3]))))
+        continue;
+      if (a)
+        return (void *)(((const char *)ubuf) +
+                        fio_bits_lsb_index(fio_has_byte2bitmap(a)));
+      if (b)
+        return (void *)(((const char *)(ubuf + 1)) +
+                        fio_bits_lsb_index(fio_has_byte2bitmap(b)));
+      if (c)
+        return (void *)(((const char *)(ubuf + 2)) +
+                        fio_bits_lsb_index(fio_has_byte2bitmap(c)));
+      if (d)
+        return (void *)(((const char *)(ubuf + 3)) +
+                        fio_bits_lsb_index(fio_has_byte2bitmap(d)));
     }
     cbuf = (const char *)ubuf;
   }
@@ -812,52 +836,27 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     case 0:
       if (!len)
         return NULL;
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+#define FIO_MEMCHR___TEST()                                                    \
+  if (cbuf[0] == token)                                                        \
+    return (void *)cbuf;                                                       \
+  ++cbuf;                                                                      \
+  --len;
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 7:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 6:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 5:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 4:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 3:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 2:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
-      /* fallthrough */
+      FIO_MEMCHR___TEST(); /* fallthrough */
     case 1:
-      if (cbuf[0] == token)
-        return (void *)cbuf;
-      ++cbuf;
-      --len;
+      FIO_MEMCHR___TEST(); /* fallthrough */
+#undef FIO_MEMCHR___TEST
     }
   }
   return NULL;
@@ -2891,19 +2890,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
   for (int len_i = 5; len_i < 20; ++len_i) {
     const size_t mem_len = (1ULL << len_i) - 1;
+    const size_t token_index = (mem_len >> 1) + (mem_len >> 2);
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
     fio_memset_aligned(mem,
                        ((uint64_t)0x0101010101010101ULL * 0x66),
                        mem_len + 1);
-    ((char *)mem)[mem_len - 9] = 0;
+    ((char *)mem)[token_index] = 0;
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + mem_len - 9),
+                     ((char *)mem + token_index),
                  "fio_memchr failed?");
       FIO_COMPILER_GUARD;
     }
@@ -2916,7 +2916,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + mem_len - 9),
+                     ((char *)mem + token_index),
                  "memchr failed?");
       FIO_COMPILER_GUARD;
     }
