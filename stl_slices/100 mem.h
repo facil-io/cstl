@@ -494,224 +494,106 @@ Helpers and System Memory Allocation
 /* *****************************************************************************
 Aligned memory copying
 ***************************************************************************** */
-#define FIO_MEMCOPY_FIO_IFUNC_ALIGNED(type, size)                              \
-  FIO_IFUNC void fio___memcpy_##size##b(void *restrict dest_,                  \
-                                        const void *restrict src_,             \
-                                        size_t units) {                        \
-    type *dest = (type *)dest_;                                                \
-    type *src = (type *)src_;                                                  \
-    if (src > dest || (src + units) <= dest) {                                 \
-      while (units >= 16) {                                                    \
-        dest[0] = src[0];                                                      \
-        dest[1] = src[1];                                                      \
-        dest[2] = src[2];                                                      \
-        dest[3] = src[3];                                                      \
-        dest[4] = src[4];                                                      \
-        dest[5] = src[5];                                                      \
-        dest[6] = src[6];                                                      \
-        dest[7] = src[7];                                                      \
-        dest[8] = src[8];                                                      \
-        dest[9] = src[9];                                                      \
-        dest[10] = src[10];                                                    \
-        dest[11] = src[11];                                                    \
-        dest[12] = src[12];                                                    \
-        dest[13] = src[13];                                                    \
-        dest[14] = src[14];                                                    \
-        dest[15] = src[15];                                                    \
-        dest += 16;                                                            \
-        src += 16;                                                             \
-        units -= 16;                                                           \
-      }                                                                        \
-      switch (units) {                                                         \
-      case 15:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 14:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 13:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 12:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 11:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 10:                                                                 \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 9:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 8:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 7:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 6:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 5:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 4:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 3:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 2:                                                                  \
-        *(dest++) = *(src++); /* fall through */                               \
-      case 1:                                                                  \
-        *(dest++) = *(src++);                                                  \
-      }                                                                        \
-    } else {                                                                   \
-      dest += units;                                                           \
-      src += units;                                                            \
-      switch ((units & 15)) {                                                  \
-      case 15:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 14:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 13:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 12:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 11:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 10:                                                                 \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 9:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 8:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 7:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 6:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 5:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 4:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 3:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 2:                                                                  \
-        *(--dest) = *(--src); /* fall through */                               \
-      case 1:                                                                  \
-        *(--dest) = *(--src);                                                  \
-      }                                                                        \
-      while (units >= 16) {                                                    \
-        dest -= 16;                                                            \
-        src -= 16;                                                             \
-        units -= 16;                                                           \
-        dest[15] = src[15];                                                    \
-        dest[14] = src[14];                                                    \
-        dest[13] = src[13];                                                    \
-        dest[12] = src[12];                                                    \
-        dest[11] = src[11];                                                    \
-        dest[10] = src[10];                                                    \
-        dest[9] = src[9];                                                      \
-        dest[8] = src[8];                                                      \
-        dest[7] = src[7];                                                      \
-        dest[6] = src[6];                                                      \
-        dest[5] = src[5];                                                      \
-        dest[4] = src[4];                                                      \
-        dest[3] = src[3];                                                      \
-        dest[2] = src[2];                                                      \
-        dest[1] = src[1];                                                      \
-        dest[0] = src[0];                                                      \
-      }                                                                        \
-    }                                                                          \
-  }
 
-FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint16_t, 2)
-FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint32_t, 4)
-FIO_MEMCOPY_FIO_IFUNC_ALIGNED(uint64_t, 8)
-
-#undef FIO_MEMCOPY_FIO_IFUNC_ALIGNED
-
-/** Copies 16 byte `units` of size_t aligned memory blocks */
+/** memcpy / memmove alternative that requires `size_t` aligned memory */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
   if (src_ == dest_ || !bytes)
     return;
-  if ((char *)src_ > (char *)dest_ || ((char *)src_ + bytes) <= (char *)dest_) {
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
-    fio___memcpy_8b(dest_, src_, bytes >> 3);
-#elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
-    fio___memcpy_4b(dest_, src_, bytes >> 2);
-#else                        /* unknown... assume 16 bit? */
-    fio___memcpy_2b(dest_, src_, bytes >> 1);
-    if (bytes & 1) {
-      uint8_t *dest = (uint8_t *)dest_;
-      uint8_t *src = (uint8_t *)src_;
-      dest[bytes - 1] = src[bytes - 1];
+  char *d = (char *)dest_;
+  const char *s = (const char *)src_;
+  if (((char *)src_ + bytes) <= (char *)dest_) {
+    /* walk forwards (memcpy) */
+    /* 4 word groups */
+    for (; bytes >= (sizeof(size_t) << 2);) {
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+      ((size_t *)d)[1] = ((size_t *)s)[1];
+      ((size_t *)d)[2] = ((size_t *)s)[2];
+      ((size_t *)d)[3] = ((size_t *)s)[3];
+      (bytes -= (sizeof(size_t) << 2));
+      (d += (sizeof(size_t) << 2));
+      (s += (sizeof(size_t) << 2));
     }
-#endif                       /* SIZE_MAX */
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFF || SIZE_MAX == 0xFFFFFFFF /* 64/32 bit */
-    uint8_t *dest = (uint8_t *)dest_;
-    uint8_t *src = (uint8_t *)src_;
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
-    const size_t offset = bytes & ((~0ULL) << 3);
-    dest += offset;
-    src += offset;
-    switch ((bytes & 7)) {
+    /* 4 word partials */
+    switch (bytes & (sizeof(size_t) | (sizeof(size_t)) << 1)) {
+    case (sizeof(size_t) | (sizeof(size_t)) << 1):
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+      d += sizeof(size_t);
+      s += sizeof(size_t);
+      bytes -= sizeof(size_t); /* fall through */
+    case (sizeof(size_t) << 1):
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+      d += sizeof(size_t);
+      s += sizeof(size_t);
+      bytes -= sizeof(size_t); /* fall through */
+    case sizeof(size_t):
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+      d += sizeof(size_t);
+      s += sizeof(size_t);
+      bytes -= sizeof(size_t);
+    }
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 6:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 5:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 4:
-      *(dest++) = *(src++);  /* fall through */
-#elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
-    const size_t offset = bytes & ((~0ULL) << 2);
-    dest += offset;
-    src += offset;
-    switch ((bytes & 3)) {
-#endif                       /* 32 bit */
-    /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 3:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 2:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     case 1:
-      *(dest++) = *(src++); /* fall through */
+      *(d++) = *(s++); /* fall through */
     }
-#endif /* 32 / 64 bit */
+    return;
   } else {
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit */
-    uint8_t *dest = (uint8_t *)dest_ + bytes;
-    uint8_t *src = (uint8_t *)src_ + bytes;
-    switch ((bytes & 7)) {
+    /* walk backwards (memmove) */
+    d += bytes;
+    s += bytes;
+    for (; bytes >= (sizeof(size_t) << 2);) {
+      (bytes -= (sizeof(size_t) << 2));
+      (d -= (sizeof(size_t) << 2));
+      (s -= (sizeof(size_t) << 2));
+      ((size_t *)d)[3] = ((size_t *)s)[3];
+      ((size_t *)d)[2] = ((size_t *)s)[2];
+      ((size_t *)d)[1] = ((size_t *)s)[1];
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+    }
+    switch (bytes & (sizeof(size_t) | (sizeof(size_t)) << 1)) {
+    case (sizeof(size_t) | (sizeof(size_t)) << 1):
+      d -= sizeof(size_t);
+      s -= sizeof(size_t);
+      bytes -= sizeof(size_t);
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+    case (sizeof(size_t) << 1):
+      d -= sizeof(size_t);
+      s -= sizeof(size_t);
+      bytes -= sizeof(size_t);
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+    case sizeof(size_t):
+      d -= sizeof(size_t);
+      s -= sizeof(size_t);
+      bytes -= sizeof(size_t);
+      ((size_t *)d)[0] = ((size_t *)s)[0];
+    }
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 6:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 5:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 4:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 3:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 2:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     case 1:
-      *(--dest) = *(--src); /* fall through */
+      *(--d) = *(--s); /* fall through */
     }
-#elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
-    uint8_t *dest = (uint8_t *)dest_ + bytes;
-    uint8_t *src = (uint8_t *)src_ + bytes;
-    switch ((bytes & 3)) {
-    case 3:
-      *(--dest) = *(--src); /* fall through */
-    case 2:
-      *(--dest) = *(--src); /* fall through */
-    case 1:
-      *(--dest) = *(--src); /* fall through */
-    }
-#endif                       /* 64 bit */
-
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFF /* 64 bit size_t */
-    fio___memcpy_8b(dest_, src_, bytes >> 3);
-#elif SIZE_MAX == 0xFFFFFFFF /* 32 bit size_t */
-    fio___memcpy_4b(dest_, src_, bytes >> 2);
-#else                        /* unknown... assume 16 bit? */
-    if (bytes & 1) {
-      uint8_t *dest = (uint8_t *)dest_;
-      uint8_t *src = (uint8_t *)src_;
-      dest[bytes - 1] = src[bytes - 1];
-    }
-    fio___memcpy_2b(dest_, src_, bytes >> 1);
-#endif                       /* SIZE_MAX */
   }
 }
 
@@ -784,7 +666,6 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     return NULL;
 
   const char *cbuf = (const char *)buffer;
-  const uint64_t *ubuf = (const uint64_t *)buffer;
 
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
   /* align pointer if needed */
@@ -806,82 +687,76 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
 #undef FIO_MEMCHR___CASE
   }
 #endif
-  /* bit-magic SIMD, always portable */
-  const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
-  ubuf = (const uint64_t *)cbuf;
-  register uint64_t r0, r1, r2, r3;
+  {
+    /* bit-magic SIMD, always portable */
+    const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
+    const uint64_t *ubuf = (const uint64_t *)cbuf;
+    register uint64_t r0, r1, r2, r3;
 
-  /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
-  switch ((len & 24)) {
+    /* consume 32 byte groups */
+    for (; len >= 32; (len -= 32), (ubuf += 4)) {
+      if (!((r0 = fio_has_zero_byte64(umask ^ ubuf[0])) |
+            (r1 = fio_has_zero_byte64(umask ^ ubuf[1])) |
+            (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
+            (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
+        continue;
+#define FIO_MEMCHR___TEST(i)                                                   \
+  if (r##i)                                                                    \
+  return (void *)(((const char *)(ubuf + i)) +                                 \
+                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
+      FIO_MEMCHR___TEST(0);
+      FIO_MEMCHR___TEST(1);
+      FIO_MEMCHR___TEST(2);
+      FIO_MEMCHR___TEST(3);
+#undef FIO_MEMCHR___TEST
+    }
+    /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
+    switch ((len & 24)) {
 #define FIO_MEMCHR___CASE(i)                                                   \
     /* fall through */                                                         \
   case i:                                                                      \
     if ((r0 = fio_has_zero_byte64(umask ^ ubuf[0])))                           \
       return (void *)(((const char *)ubuf) +                                   \
                       fio_bits_lsb_index(fio_has_byte2bitmap(r0)));            \
-    ++ubuf;                                                                    \
-    len -= 8;
-    FIO_MEMCHR___CASE(24);
-    FIO_MEMCHR___CASE(16);
-    FIO_MEMCHR___CASE(8);
+    ++ubuf;
+      FIO_MEMCHR___CASE(24);
+      FIO_MEMCHR___CASE(16);
+      FIO_MEMCHR___CASE(8);
 #undef FIO_MEMCHR___CASE
+    }
+    /* reset char pointer value */
+    cbuf = (const char *)ubuf;
   }
-
-  /* consume 32 byte groups */
-  for (; len >= 32; (len -= 32), (ubuf += 4)) {
-    if (!((r0 = fio_has_zero_byte64(umask ^ ubuf[0])) |
-          (r1 = fio_has_zero_byte64(umask ^ ubuf[1])) |
-          (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
-          (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
-      continue;
-#define FIO_MEMCHR___TEST(i)                                                   \
-  if (r##i)                                                                    \
-  return (void *)(((const char *)(ubuf + i)) +                                 \
-                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
-    FIO_MEMCHR___TEST(0);
-    FIO_MEMCHR___TEST(1);
-    FIO_MEMCHR___TEST(2);
-    FIO_MEMCHR___TEST(3);
-#undef FIO_MEMCHR___TEST
-  }
-  cbuf = (const char *)ubuf;
-
-  /* All that's left is a maximum of 7 bytes, the loops code is in case of 0 */
+  /* All that's left is a maximum of 7 bytes */
   switch (len & 7) {
-    for (;;) {
-    case 0:
-      if (!len)
-        return NULL;
 #define FIO_MEMCHR___TEST()                                                    \
   if (cbuf[0] == token)                                                        \
     return (void *)cbuf;                                                       \
-  ++cbuf;                                                                      \
-  --len;
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 7:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 6:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 5:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 4:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 3:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 2:
-      FIO_MEMCHR___TEST();
-      /* fall through */
-    case 1:
-      FIO_MEMCHR___TEST();
-      /* fall through */
+  ++cbuf;
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 7:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 6:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 5:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 4:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 3:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 2:
+    FIO_MEMCHR___TEST();
+    /* fall through */
+  case 1:
+    FIO_MEMCHR___TEST();
+    /* fall through */
 #undef FIO_MEMCHR___TEST
-    }
   }
   return NULL;
 }
