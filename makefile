@@ -1,11 +1,11 @@
 #############################################################################
 # This makefile was composed for facil.io
 #
-# Copyright (c) 2016-2020 Boaz Segev
-# License MIT or ISC
+# Copyright (c) 2016-2021 Boaz Segev
+# License MIT / ISC (choose whichever you like)
 #
-# This makefile SHOULD be easilty portable and Should work on any POSIX
-# system for any project... under the following assumptions:
+# This makefile SHOULD be easily portable and Should work on any POSIX system
+# for any project... under the following assumptions:
 #
 # * If your code has a `main` function, that code should be placed in the
 #   `MAIN_ROOT` folder and/or `MAIN_SUBFOLDERS` (i.e., `./src`).
@@ -27,7 +27,7 @@
 #############################################################################
 
 #############################################################################
-# Compliation Output Settings
+# Compilation Output Settings
 #############################################################################
 
 # binary name and location
@@ -72,7 +72,7 @@ LIB_PRIVATE_SUBFOLDERS=
 
 # a folder containing code that should be unified into a single file
 #
-# Note: files will be unified in the same order the system provides (usually, file anme)
+# Note: files will be unified in the same order the system provides (usually, file name)
 LIB_CONCAT_FOLDER?=stl_slices
 
 # the path and file name to use when unifying *.c, *.h, and *.md files (without extension).
@@ -85,7 +85,7 @@ LIB_CONCAT_TARGET?=fio-stl
 # Testing folder
 TEST_ROOT=tests
 
-# The default test file to run when running: make test (without the  C extension)
+# The default test file to run when running: make test (without the C extension)
 TEST_DEFAULT=stl
 
 #############################################################################
@@ -103,13 +103,13 @@ CMAKE_REQUIRE_PACKAGE=Threads
 # Compiler / Linker Settings
 #############################################################################
 
-# any libraries required (only names, ommit the "-l" at the begining)
-ifneq ($(OS),Windows_NT)
-  # POSIX libraries
-  LINKER_LIBS=pthread m
-else
+# any libraries required (only names, omit the "-l" at the beginning)
+ifeq ($(OS),Windows_NT)
   # Windows libraries
   LINKER_LIBS=Ws2_32
+else
+  # POSIX libraries
+  LINKER_LIBS=pthread m
 endif
 # optimization level. (-march=native fails with some ARM compilers)
 OPTIMIZATION=-O2 
@@ -117,9 +117,9 @@ OPTIMIZATION=-O2
 OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=thread -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
-# any extra include folders, space seperated list. (i.e. `pg_config --includedir`)
+# any extra include folders, space separated list. (i.e. `pg_config --includedir`)
 INCLUDE=.
-# any preprocessosr defined flags we want, space seperated list (i.e. DEBUG )
+# any preprocessor defined flags we want, space separated list (i.e. DEBUG )
 FLAGS:=
 # C specific compiler options
 C_EXTRA_OPT:=
@@ -131,8 +131,6 @@ CSTD?=gnu11
 CXXSTD?=gnu++11
 # pkg-config
 PKG_CONFIG?=pkg-config
-# for internal use - don't change
-LINKER_LIBS_EXT:=
 
 #############################################################################
 # Debug Settings
@@ -231,6 +229,7 @@ LIB_OBJS=$(foreach source, $(LIBSRC), $(addprefix $(TMP_ROOT)/, $(addsuffix .o, 
 
 OBJS_DEPENDENCY:=$(LIB_OBJS:.o=.d) $(MAIN_OBJS:.o=.d) 
 
+LINKER_LIBS_EXT:=
 
 #############################################################################
 # Combining single-file library
@@ -636,16 +635,17 @@ endif # TEST4ENDIAN
 # Updated flags and final values
 # (don't edit)
 #############################################################################
-ifneq ($(OS),Windows_NT)
 FLAGS_STR=$(foreach flag,$(FLAGS),$(addprefix -D, $(flag)))
-#POSIX
-CFLAGS:=$(CFLAGS) -g -std=$(CSTD) -fpic $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
-CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD) -fpic  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
-else
+
+ifeq ($(OS),Windows_NT)
 # Windows
 INCLUDE_STR:=$(subst /,\,$(INCLUDE_STR))
 CFLAGS:=$(CFLAGS) -g -std=$(CSTD) $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
 CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD)  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
+else
+#POSIX
+CFLAGS:=$(CFLAGS) -g -std=$(CSTD) -fpic $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(C_EXTRA_OPT)
+CXXFLAGS:=$(CXXFLAGS) -std=$(CXXSTD) -fpic  $(FLAGS_STR) $(WARNINGS) $(INCLUDE_STR) $(CXX_EXTRA_OPT)
 endif
 
 LINKER_FLAGS=$(LDFLAGS) $(foreach lib,$(LINKER_LIBS),$(addprefix -l,$(lib))) $(foreach lib,$(LINKER_LIBS_EXT),$(addprefix -l,$(lib)))
@@ -678,7 +678,6 @@ ifeq ($(OS),Windows_NT)
 # Windows libraries
 BUILDTREE:=$(subst /,\,$(BUILDTREE))
 endif
-
 
 
 $(NAME): build

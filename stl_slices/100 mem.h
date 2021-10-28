@@ -497,11 +497,11 @@ Aligned memory copying
 
 /** memcpy / memmove alternative that requires `size_t` aligned memory */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
-  if (src_ == dest_ || !bytes)
-    return;
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
-  if (((char *)src_ + bytes) <= (char *)dest_) {
+  if ((d == s) | !bytes | !d | !s)
+    return;
+  if (((s + bytes) <= d) | ((d + bytes) <= s)) {
     /* walk forwards (memcpy) */
     /* 4 word groups */
     for (; bytes >= (sizeof(size_t) << 2);) {
@@ -518,18 +518,15 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case (sizeof(size_t) | (sizeof(size_t)) << 1):
       ((size_t *)d)[0] = ((size_t *)s)[0];
       d += sizeof(size_t);
-      s += sizeof(size_t);
-      bytes -= sizeof(size_t); /* fall through */
+      s += sizeof(size_t); /* fall through */
     case (sizeof(size_t) << 1):
       ((size_t *)d)[0] = ((size_t *)s)[0];
       d += sizeof(size_t);
-      s += sizeof(size_t);
-      bytes -= sizeof(size_t); /* fall through */
+      s += sizeof(size_t); /* fall through */
     case sizeof(size_t):
       ((size_t *)d)[0] = ((size_t *)s)[0];
       d += sizeof(size_t);
       s += sizeof(size_t);
-      bytes -= sizeof(size_t);
     }
     switch ((bytes & (sizeof(size_t) - 1))) {
     case 7:
@@ -565,17 +562,14 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case (sizeof(size_t) | (sizeof(size_t)) << 1):
       d -= sizeof(size_t);
       s -= sizeof(size_t);
-      bytes -= sizeof(size_t);
-      ((size_t *)d)[0] = ((size_t *)s)[0];
+      ((size_t *)d)[0] = ((size_t *)s)[0]; /* fall through */
     case (sizeof(size_t) << 1):
       d -= sizeof(size_t);
       s -= sizeof(size_t);
-      bytes -= sizeof(size_t);
-      ((size_t *)d)[0] = ((size_t *)s)[0];
+      ((size_t *)d)[0] = ((size_t *)s)[0]; /* fall through */
     case sizeof(size_t):
       d -= sizeof(size_t);
       s -= sizeof(size_t);
-      bytes -= sizeof(size_t);
       ((size_t *)d)[0] = ((size_t *)s)[0];
     }
     switch ((bytes & (sizeof(size_t) - 1))) {
