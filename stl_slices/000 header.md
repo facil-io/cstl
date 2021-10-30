@@ -140,6 +140,14 @@ The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a 
 
 The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
 
+#### `FIO_UNALIGNED_ACCESS`
+
+If set to true (`1`) this MACRO will attempt to detect support of unaligned memory access and if support is detected the `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED` will be set to true (`1`).
+
+#### `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED`
+
+If set to true (`1`) this MACRO will indicate that the facil.io library should allow for unaligned memory access, skipping memory alignment requirements in some cases (such as the in the `fio_buf2uXX` function implementation).
+
 -------------------------------------------------------------------------------
 
 ## Testing the Library (`FIO_TEST_CSTL`)

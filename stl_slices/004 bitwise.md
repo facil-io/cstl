@@ -49,6 +49,8 @@ On big-endian systems, these macros a NOOPs, whereas on little-endian systems th
 
 Reads a number from an unaligned memory buffer. The number or bits read from the buffer is indicated by the name of the function.
 
+Note: The following functions might use `__builtin_memcpy` when available. To use a the facil.io C implementation, define `FIO_BITWISE_USE_MEMCPY` as `0` and consider enabling unaligned memory access if the platform allows for it, by setting `FIO_UNALIGNED_ACCESS` to `1`.
+
 **Big Endian (default)**:
 
 - `fio_buf2u16(buffer)`

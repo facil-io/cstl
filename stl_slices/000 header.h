@@ -265,6 +265,7 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h>
 #endif
 
+#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
 #if FIO_UNALIGNED_ACCESS &&                                                    \
     (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
      __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
@@ -272,6 +273,7 @@ typedef SSIZE_T ssize_t;
 #else
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /* memcpy selectors / overriding */
 #ifndef FIO_MEMCPY

@@ -265,6 +265,7 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h>
 #endif
 
+#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
 #if FIO_UNALIGNED_ACCESS &&                                                    \
     (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
      __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
@@ -272,6 +273,7 @@ typedef SSIZE_T ssize_t;
 #else
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /* memcpy selectors / overriding */
 #ifndef FIO_MEMCPY
@@ -2294,6 +2296,11 @@ More joyful ideas at:       https://graphics.stanford.edu/~seander/bithacks.html
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)
 #define H___BITWISE___H
+
+#ifndef FIO_BITWISE_USE_MEMCPY
+#define FIO_BITWISE_USE_MEMCPY 1
+#endif
+
 /* *****************************************************************************
 Swapping byte's order (`bswap` variations)
 ***************************************************************************** */
@@ -2580,7 +2587,7 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 }
 #endif /* __SIZEOF_INT128__ */
 
-#elif __has_builtin(__builtin_memcpy) /*FIO_UNALIGNED_MEMORY_ACCESS_ENABLED*/
+#elif FIO_BITWISE_USE_MEMCPY && __has_builtin(__builtin_memcpy)
 
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {

@@ -140,6 +140,14 @@ The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a 
 
 The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
 
+#### `FIO_UNALIGNED_ACCESS`
+
+If set to true (`1`) this MACRO will attempt to detect support of unaligned memory access and if support is detected the `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED` will be set to true (`1`).
+
+#### `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED`
+
+If set to true (`1`) this MACRO will indicate that the facil.io library should allow for unaligned memory access, skipping memory alignment requirements in some cases (such as the in the `fio_buf2uXX` function implementation).
+
 -------------------------------------------------------------------------------
 
 ## Testing the Library (`FIO_TEST_CSTL`)
@@ -933,6 +941,8 @@ On big-endian systems, these macros a NOOPs, whereas on little-endian systems th
 #### Bytes to Numbers (native / reversed / network ordered)
 
 Reads a number from an unaligned memory buffer. The number or bits read from the buffer is indicated by the name of the function.
+
+Note: The following functions might use `__builtin_memcpy` when available. To use a the facil.io C implementation, define `FIO_BITWISE_USE_MEMCPY` as `0` and consider enabling unaligned memory access if the platform allows for it, by setting `FIO_UNALIGNED_ACCESS` to `1`.
 
 **Big Endian (default)**:
 
@@ -1958,6 +1968,8 @@ This implementation is probably significantly **slower** than the one included w
 
 On my Intel machine the difference is immediate (this implementation is slower than the compiler's optimized implementation). On my ARM computer, the difference is significant with byte lengths over 65Kb (probably due to CPU caching limits). For smaller buffer sizes, the assumption of a memory aligned address actually minimizes some overhead and allows for competitive performance.
 
+If testing proves (surprisingly) that this implementation is faster than the system's implementation, it is possible to use this implementation for the memory allocator by setting the `FIO_MEMORY_USE_FIO_MEMSET` to `1`.
+
 #### `fio_memcpy_aligned`
 
 ```c
@@ -1972,6 +1984,7 @@ This implementation is probably significantly **slower** than the one included w
 
 On my Intel machine the difference is immediate (this implementation is slower than the compiler's optimized implementation). On my ARM computer, the difference is significant with byte lengths over 65Kb (probably due to CPU caching limits). For smaller buffer sizes, the assumption of a memory aligned address actually minimizes some overhead and allows for competitive performance.
 
+If testing proves (surprisingly) that this implementation is faster than the system's implementation, it is possible to use this implementation for the memory allocator by setting the `FIO_MEMORY_USE_FIO_MEMCOPY` to `1`.
 
 #### `fio_memchr`
 
