@@ -1950,14 +1950,13 @@ It's also possible to prevent facil.io's custom allocator from compiling by defi
 void fio_memset_aligned(void *dest, uint64_t data, size_t bytes);
 ```
 
-A machine native CPU word aligned `memset` alternative using a somewhat naive implementation with loop unrolling.
+An 8 byte aligned `memset` alternative using a somewhat naive implementation with loop unrolling.
 
-Requires BOTH addresses to be aligned on native memory boundary addresses for a "word" (i.e., 8 bytes on 64 bit machines). This implementation should also work (though probably slower) on CPUs that do not require memory alignment.
+Requires BOTH addresses to be aligned on an 8 byte memory boundary addresses. This implementation should also work (though probably slower) on CPUs that do not require memory alignment.
 
 This implementation is probably significantly **slower** than the one included with your compiler's C library, especially for larger memory blocks.
 
 On my Intel machine the difference is immediate (this implementation is slower than the compiler's optimized implementation). On my ARM computer, the difference is significant with byte lengths over 65Kb (probably due to CPU caching limits). For smaller buffer sizes, the assumption of a memory aligned address actually minimizes some overhead and allows for competitive performance.
-
 
 #### `fio_memcpy_aligned`
 

@@ -105,7 +105,7 @@ Memory Helpers - API
 ***************************************************************************** */
 #ifndef H___FIO_MEM_INCLUDE_ONCE___H
 /**
- * A 16 byte aligned memset (almost) naive implementation.
+ * An 8 byte aligned memset (almost) naive implementation.
  *
  * Probably slower than the one included with your compiler's C library.
  *
@@ -114,11 +114,11 @@ Memory Helpers - API
 SFUNC void fio_memset_aligned(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
- * A 16 byte aligned memcpy (almost) naive implementation.
+ * A `size_t` aligned memcpy (almost) naive implementation.
  *
  * Probably slower than the one included with your compiler's C library.
  *
- * Requires a 16 bit aligned memory address.
+ * Requires an 8 bit aligned memory address for both source and destination.
  */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
 
@@ -590,64 +590,50 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     }
   }
 }
-
-/** a 16 byte aligned memset implementation. */
+/** an 8 byte aligned memset implementation. */
 SFUNC void fio_memset_aligned(void *restrict dest_,
                               uint64_t data,
                               size_t bytes) {
   uint64_t *dest = (uint64_t *)dest_;
-  bytes >>= 3;
-  while (bytes >= 16) {
-    dest[0] = data;
-    dest[1] = data;
-    dest[2] = data;
-    dest[3] = data;
-    dest[4] = data;
-    dest[5] = data;
-    dest[6] = data;
-    dest[7] = data;
-    dest[8] = data;
-    dest[9] = data;
-    dest[10] = data;
-    dest[11] = data;
-    dest[12] = data;
-    dest[13] = data;
-    dest[14] = data;
-    dest[15] = data;
+  while (bytes >= 128) {
+    dest[0] = dest[1] = dest[2] = dest[3] = dest[4] = dest[5] = dest[6] =
+        dest[7] = dest[8] = dest[9] = dest[10] = dest[11] = dest[12] =
+            dest[13] = dest[14] = dest[15] = data;
     dest += 16;
-    bytes -= 16;
+    bytes -= 128;
   }
-  switch (bytes) {
-  case 15:
+  if (bytes & 64) {
+    dest[0] = dest[1] = dest[2] = dest[3] = dest[4] = dest[5] = dest[6] =
+        dest[7] = data;
+    dest += 8;
+  }
+  if (bytes & 32) {
+    dest[0] = dest[1] = dest[2] = dest[3] = data;
+    dest += 4;
+  }
+  switch (bytes & 24) {
+  case 24:
     *(dest++) = data; /* fall through */
-  case 14:
-    *(dest++) = data; /* fall through */
-  case 13:
-    *(dest++) = data; /* fall through */
-  case 12:
-    *(dest++) = data; /* fall through */
-  case 11:
-    *(dest++) = data; /* fall through */
-  case 10:
-    *(dest++) = data; /* fall through */
-  case 9:
+  case 16:
     *(dest++) = data; /* fall through */
   case 8:
     *(dest++) = data; /* fall through */
+  }
+  switch (bytes & 7) {
   case 7:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[7] = ((uint8_t *)&data)[7]; /* fall through */
   case 6:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[6] = ((uint8_t *)&data)[6]; /* fall through */
   case 5:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[5] = ((uint8_t *)&data)[5]; /* fall through */
   case 4:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[4] = ((uint8_t *)&data)[4]; /* fall through */
   case 3:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[3] = ((uint8_t *)&data)[3]; /* fall through */
   case 2:
-    *(dest++) = data; /* fall through */
+    ((uint8_t *)dest)[2] = ((uint8_t *)&data)[2]; /* fall through */
   case 1:
-    *(dest++) = data;
+    ((uint8_t *)dest)[1] = ((uint8_t *)&data)[1];
   }
 }
 
