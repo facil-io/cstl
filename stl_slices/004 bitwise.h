@@ -310,8 +310,8 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 }
 #endif /* __SIZEOF_INT128__ */
 
-#elif __has_builtin(__builtin_memcpy) /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED   \
-                                       */
+#elif 0 &&                                                                     \
+    __has_builtin(__builtin_memcpy) /*FIO_UNALIGNED_MEMORY_ACCESS_ENABLED*/
 
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
@@ -359,103 +359,187 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 }
 #endif /* __SIZEOF_INT128__ */
 
-#else /* !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#elif __LITTLE_ENDIAN__ /* !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
-  uint16_t tmp; /* fio_buf2u16 */
-  ((char *)&tmp)[0] = ((char *)c)[0];
-  ((char *)&tmp)[1] = ((char *)c)[1];
-  return tmp;
+  return (((uint16_t)((const uint8_t *)c)[1]) << 8) |
+         (((uint16_t)((const uint8_t *)c)[0]));
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
-  uint32_t tmp; /* fio_buf2u32 */
-  ((char *)&tmp)[0] = ((char *)c)[0];
-  ((char *)&tmp)[1] = ((char *)c)[1];
-  ((char *)&tmp)[2] = ((char *)c)[2];
-  ((char *)&tmp)[3] = ((char *)c)[3];
-  return tmp;
+  return (((uint32_t)((const uint8_t *)c)[3]) << 24) |
+         (((uint32_t)((const uint8_t *)c)[2]) << 16) |
+         (((uint32_t)((const uint8_t *)c)[1]) << 8) |
+         (((uint32_t)((const uint8_t *)c)[0]));
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
-  uint64_t tmp; /* fio_buf2u64 */
-  ((char *)&tmp)[0] = ((char *)c)[0];
-  ((char *)&tmp)[1] = ((char *)c)[1];
-  ((char *)&tmp)[2] = ((char *)c)[2];
-  ((char *)&tmp)[3] = ((char *)c)[3];
-  ((char *)&tmp)[4] = ((char *)c)[4];
-  ((char *)&tmp)[5] = ((char *)c)[5];
-  ((char *)&tmp)[6] = ((char *)c)[6];
-  ((char *)&tmp)[7] = ((char *)c)[7];
-  return tmp;
+  return (((uint64_t)((const uint8_t *)c)[7]) << 56) |
+         (((uint64_t)((const uint8_t *)c)[6]) << 48) |
+         (((uint64_t)((const uint8_t *)c)[5]) << 40) |
+         (((uint64_t)((const uint8_t *)c)[4]) << 32) |
+         (((uint64_t)((const uint8_t *)c)[3]) << 24) |
+         (((uint64_t)((const uint8_t *)c)[2]) << 16) |
+         (((uint64_t)((const uint8_t *)c)[1]) << 8) |
+         (((uint64_t)((const uint8_t *)c)[0]));
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  ((char *)buf)[0] = ((char *)&i)[0];
-  ((char *)buf)[1] = ((char *)&i)[1];
+  ((uint8_t *)buf)[0] = (i & 0xFF);
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFF;
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  ((char *)buf)[0] = ((char *)&i)[0];
-  ((char *)buf)[1] = ((char *)&i)[1];
-  ((char *)buf)[2] = ((char *)&i)[2];
-  ((char *)buf)[3] = ((char *)&i)[3];
+  ((uint8_t *)buf)[0] = (i & 0xFF);
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[3] = (i >> 24) & 0xFF;
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  ((char *)buf)[0] = ((char *)&i)[0];
-  ((char *)buf)[1] = ((char *)&i)[1];
-  ((char *)buf)[2] = ((char *)&i)[2];
-  ((char *)buf)[3] = ((char *)&i)[3];
-  ((char *)buf)[4] = ((char *)&i)[4];
-  ((char *)buf)[5] = ((char *)&i)[5];
-  ((char *)buf)[6] = ((char *)&i)[6];
-  ((char *)buf)[7] = ((char *)&i)[7];
+  ((uint8_t *)buf)[0] = (i & 0xFF);
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[3] = (i >> 24) & 0xFF;
+  ((uint8_t *)buf)[4] = (i >> 32) & 0xFF;
+  ((uint8_t *)buf)[5] = (i >> 40) & 0xFF;
+  ((uint8_t *)buf)[6] = (i >> 48) & 0xFF;
+  ((uint8_t *)buf)[7] = (i >> 56) & 0xFF;
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
-  __uint128_t tmp; /* fio_buf2u1128 */
-  ((char *)&tmp)[0] = ((char *)c)[0];
-  ((char *)&tmp)[1] = ((char *)c)[1];
-  ((char *)&tmp)[2] = ((char *)c)[2];
-  ((char *)&tmp)[3] = ((char *)c)[3];
-  ((char *)&tmp)[4] = ((char *)c)[4];
-  ((char *)&tmp)[5] = ((char *)c)[5];
-  ((char *)&tmp)[6] = ((char *)c)[6];
-  ((char *)&tmp)[7] = ((char *)c)[7];
-  ((char *)&tmp)[8 + 0] = ((char *)c)[8 + 0];
-  ((char *)&tmp)[8 + 1] = ((char *)c)[8 + 1];
-  ((char *)&tmp)[8 + 2] = ((char *)c)[8 + 2];
-  ((char *)&tmp)[8 + 3] = ((char *)c)[8 + 3];
-  ((char *)&tmp)[8 + 4] = ((char *)c)[8 + 4];
-  ((char *)&tmp)[8 + 5] = ((char *)c)[8 + 5];
-  ((char *)&tmp)[8 + 6] = ((char *)c)[8 + 6];
-  ((char *)&tmp)[8 + 7] = ((char *)c)[8 + 7];
-  return tmp;
+  return (((__uint128_t)((const uint8_t *)c)[15]) << 120) |
+         (((__uint128_t)((const uint8_t *)c)[14]) << 112) |
+         (((__uint128_t)((const uint8_t *)c)[13]) << 104) |
+         (((__uint128_t)((const uint8_t *)c)[12]) << 96) |
+         (((__uint128_t)((const uint8_t *)c)[11]) << 88) |
+         (((__uint128_t)((const uint8_t *)c)[10]) << 80) |
+         (((__uint128_t)((const uint8_t *)c)[9]) << 72) |
+         (((__uint128_t)((const uint8_t *)c)[8]) << 64) |
+         (((__uint128_t)((const uint8_t *)c)[7]) << 56) |
+         (((__uint128_t)((const uint8_t *)c)[6]) << 48) |
+         (((__uint128_t)((const uint8_t *)c)[5]) << 40) |
+         (((__uint128_t)((const uint8_t *)c)[4]) << 32) |
+         (((__uint128_t)((const uint8_t *)c)[3]) << 24) |
+         (((__uint128_t)((const uint8_t *)c)[2]) << 16) |
+         (((__uint128_t)((const uint8_t *)c)[1]) << 8) |
+         (((__uint128_t)((const uint8_t *)c)[0]));
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  ((char *)buf)[0] = ((char *)&i)[0];
-  ((char *)buf)[1] = ((char *)&i)[1];
-  ((char *)buf)[2] = ((char *)&i)[2];
-  ((char *)buf)[3] = ((char *)&i)[3];
-  ((char *)buf)[4] = ((char *)&i)[4];
-  ((char *)buf)[5] = ((char *)&i)[5];
-  ((char *)buf)[6] = ((char *)&i)[6];
-  ((char *)buf)[7] = ((char *)&i)[7];
-  ((char *)buf)[8 + 0] = ((char *)&i)[8 + 0];
-  ((char *)buf)[8 + 1] = ((char *)&i)[8 + 1];
-  ((char *)buf)[8 + 2] = ((char *)&i)[8 + 2];
-  ((char *)buf)[8 + 3] = ((char *)&i)[8 + 3];
-  ((char *)buf)[8 + 4] = ((char *)&i)[8 + 4];
-  ((char *)buf)[8 + 5] = ((char *)&i)[8 + 5];
-  ((char *)buf)[8 + 6] = ((char *)&i)[8 + 6];
-  ((char *)buf)[8 + 7] = ((char *)&i)[8 + 7];
+  ((uint8_t *)buf)[0] = (i & 0xFF);
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[3] = (i >> 24) & 0xFF;
+  ((uint8_t *)buf)[4] = (i >> 32) & 0xFF;
+  ((uint8_t *)buf)[5] = (i >> 40) & 0xFF;
+  ((uint8_t *)buf)[6] = (i >> 48) & 0xFF;
+  ((uint8_t *)buf)[7] = (i >> 56) & 0xFF;
+  ((uint8_t *)buf)[8] = (i >> 64) & 0xFF;
+  ((uint8_t *)buf)[9] = (i >> 72) & 0xFF;
+  ((uint8_t *)buf)[10] = (i >> 80) & 0xFF;
+  ((uint8_t *)buf)[11] = (i >> 88) & 0xFF;
+  ((uint8_t *)buf)[12] = (i >> 96) & 0xFF;
+  ((uint8_t *)buf)[13] = (i >> 104) & 0xFF;
+  ((uint8_t *)buf)[14] = (i >> 112) & 0xFF;
+  ((uint8_t *)buf)[15] = (i >> 120) & 0xFF;
+}
+#endif /* __SIZEOF_INT128__ */
+
+#else /* Little Endien !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+
+/** Converts an unaligned byte stream to a 16 bit number (local byte order). */
+FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
+  return (((uint16_t)((const uint8_t *)c)[0]) << 8) |
+         (((uint16_t)((const uint8_t *)c)[1]));
+}
+/** Converts an unaligned byte stream to a 32 bit number (local byte order). */
+FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
+  return (((uint32_t)((const uint8_t *)c)[0]) << 24) |
+         (((uint32_t)((const uint8_t *)c)[1]) << 16) |
+         (((uint32_t)((const uint8_t *)c)[2]) << 8) |
+         (((uint32_t)((const uint8_t *)c)[3]));
+}
+/** Converts an unaligned byte stream to a 64 bit number (local byte order). */
+FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
+  return (((uint64_t)((const uint8_t *)c)[0]) << 56) |
+         (((uint64_t)((const uint8_t *)c)[1]) << 48) |
+         (((uint64_t)((const uint8_t *)c)[2]) << 40) |
+         (((uint64_t)((const uint8_t *)c)[3]) << 32) |
+         (((uint64_t)((const uint8_t *)c)[4]) << 24) |
+         (((uint64_t)((const uint8_t *)c)[5]) << 16) |
+         (((uint64_t)((const uint8_t *)c)[6]) << 8) |
+         (((uint64_t)((const uint8_t *)c)[7]));
+}
+
+/** Writes a local 16 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
+  ((uint8_t *)buf)[0] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[1] = (i & 0xFF);
+}
+/** Writes a local 32 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
+  ((uint8_t *)buf)[0] = (i >> 24) & 0xFF;
+  ((uint8_t *)buf)[1] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[3] = (i & 0xFF);
+}
+/** Writes a local 64 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
+  ((uint8_t *)buf)[0] = (i >> 56) & 0xFF;
+  ((uint8_t *)buf)[1] = (i >> 48) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 40) & 0xFF;
+  ((uint8_t *)buf)[3] = (i >> 32) & 0xFF;
+  ((uint8_t *)buf)[4] = (i >> 24) & 0xFF;
+  ((uint8_t *)buf)[5] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[6] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[7] = (i & 0xFF);
+}
+
+#ifdef __SIZEOF_INT128__
+/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
+FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
+  return (((__uint128_t)((const uint8_t *)c)[0]) << 120) |
+         (((__uint128_t)((const uint8_t *)c)[1]) << 112) |
+         (((__uint128_t)((const uint8_t *)c)[2]) << 104) |
+         (((__uint128_t)((const uint8_t *)c)[3]) << 96) |
+         (((__uint128_t)((const uint8_t *)c)[4]) << 88) |
+         (((__uint128_t)((const uint8_t *)c)[5]) << 80) |
+         (((__uint128_t)((const uint8_t *)c)[6]) << 72) |
+         (((__uint128_t)((const uint8_t *)c)[7]) << 64) |
+         (((__uint128_t)((const uint8_t *)c)[8]) << 56) |
+         (((__uint128_t)((const uint8_t *)c)[9]) << 48) |
+         (((__uint128_t)((const uint8_t *)c)[10]) << 40) |
+         (((__uint128_t)((const uint8_t *)c)[11]) << 32) |
+         (((__uint128_t)((const uint8_t *)c)[12]) << 24) |
+         (((__uint128_t)((const uint8_t *)c)[13]) << 16) |
+         (((__uint128_t)((const uint8_t *)c)[14]) << 8) |
+         (((__uint128_t)((const uint8_t *)c)[15]));
+}
+
+/** Writes a local 128 bit number to an unaligned buffer. */
+FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
+  ((uint8_t *)buf)[0] = (i >> 120) & 0xFF;
+  ((uint8_t *)buf)[1] = (i >> 112) & 0xFF;
+  ((uint8_t *)buf)[2] = (i >> 104) & 0xFF;
+  ((uint8_t *)buf)[3] = (i >> 96) & 0xFF;
+  ((uint8_t *)buf)[4] = (i >> 88) & 0xFF;
+  ((uint8_t *)buf)[5] = (i >> 80) & 0xFF;
+  ((uint8_t *)buf)[6] = (i >> 72) & 0xFF;
+  ((uint8_t *)buf)[7] = (i >> 64) & 0xFF;
+  ((uint8_t *)buf)[8] = (i >> 56) & 0xFF;
+  ((uint8_t *)buf)[9] = (i >> 48) & 0xFF;
+  ((uint8_t *)buf)[10] = (i >> 40) & 0xFF;
+  ((uint8_t *)buf)[11] = (i >> 32) & 0xFF;
+  ((uint8_t *)buf)[12] = (i >> 24) & 0xFF;
+  ((uint8_t *)buf)[13] = (i >> 16) & 0xFF;
+  ((uint8_t *)buf)[14] = (i >> 8) & 0xFF;
+  ((uint8_t *)buf)[15] = (i & 0xFF);
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -616,7 +700,7 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_little)(void *buf, __uint128_t i) {
 
 #endif /* __LITTLE_ENDIAN__ */
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
@@ -916,67 +1000,15 @@ Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
 
 /**
- * Masks 64 bit memory aligned data using a 64 bit mask and a counter mode
- * nonce.
+ * Masks data using a 64 bit mask and a counter mode nonce. When the buffer's
+ * memory is aligned, the function may perform significantly better.
  *
  * Returns the end state of the mask.
  */
-FIO_IFUNC uint64_t fio___xmask2_aligned64(uint64_t buf[],
-                                          size_t byte_len,
-                                          uint64_t mask,
-                                          uint64_t nonce) {
-
-  register uint64_t m = mask;
-  for (size_t i = 7; i < byte_len; i += 8) {
-    *buf ^= m;
-    m += nonce;
-    ++buf;
-  }
-  mask = m;
-  union { /* type punning */
-    char *p8;
-    uint64_t *p64;
-  } pn, mpn;
-  pn.p64 = buf;
-  mpn.p64 = &mask;
-
-  switch ((byte_len & 7)) {
-  case 0:
-    return mask;
-  case 7:
-    pn.p8[6] ^= mpn.p8[6];
-  /* fall through */
-  case 6:
-    pn.p8[5] ^= mpn.p8[5];
-  /* fall through */
-  case 5:
-    pn.p8[4] ^= mpn.p8[4];
-  /* fall through */
-  case 4:
-    pn.p8[3] ^= mpn.p8[3];
-  /* fall through */
-  case 3:
-    pn.p8[2] ^= mpn.p8[2];
-  /* fall through */
-  case 2:
-    pn.p8[1] ^= mpn.p8[1];
-  /* fall through */
-  case 1:
-    pn.p8[0] ^= mpn.p8[0];
-    /* fall through */
-  }
-  return mask;
-}
-
-/**
- * Masks unaligned memory data using a 64 bit mask and a counter mode nonce.
- *
- * Returns the end state of the mask.
- */
-FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
-                                                size_t len,
-                                                uint64_t mask,
-                                                const uint64_t nonce) {
+FIO_IFUNC uint64_t fio_xmask2(char *buf_,
+                              size_t len,
+                              uint64_t mask,
+                              uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
   register uint64_t m = mask;
   for (size_t i = 7; i < len; i += 8) {
@@ -988,6 +1020,7 @@ FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
     buf += 8;
   }
   mask = m;
+#if __BIG_ENDIAN__
   switch ((len & 7)) {
   case 0:
     return mask;
@@ -1013,28 +1046,41 @@ FIO_IFUNC uint64_t fio___xmask2_unaligned_words(void *buf_,
     buf[0] ^= ((uint8_t *)(&mask))[0];
     /* fall through */
   }
-  return mask;
-}
-
-/**
- * Masks data using a 64 bit mask and a counter mode nonce. When the buffer's
- * memory is aligned, the function may perform significantly better.
- *
- * Returns the end state of the mask.
- */
-FIO_IFUNC uint64_t fio_xmask2(char *buf,
-                              size_t len,
-                              uint64_t mask,
-                              uint64_t nonce) {
-  if (!((uintptr_t)buf & 7)) {
-    union {
-      char *p8;
-      uint64_t *p64;
-    } pn;
-    pn.p8 = buf;
-    return fio___xmask2_aligned64(pn.p64, len, mask, nonce);
+#else
+  switch ((len & 7)) {
+  case 0:
+    return mask;
+  case 7:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 6:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 5:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 4:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 3:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 2:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+  /* fall through */
+  case 1:
+    (buf++)[0] ^= m & 0xFF;
+    m >>= 8;
+    /* fall through */
   }
-  return fio___xmask2_unaligned_words(buf, len, mask, nonce);
+#endif
+  return mask;
 }
 
 /* *****************************************************************************
@@ -1198,22 +1244,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   }
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
-#define FIO___BITMAP_TEST_BITS(bits)                                           \
+#define FIO___BITMAP_TEST_BITS(itype, utype, bits)                             \
   for (size_t i = 0; i <= (bits); ++i) {                                       \
     char tmp_buf[16];                                                          \
-    int##bits##_t n = ((uint##bits##_t)1 << i);                                \
-    FIO_NAME2(fio_u, buf##bits)(tmp_buf, n);                                   \
-    int##bits##_t r = FIO_NAME2(fio_buf, u##bits)(tmp_buf);                    \
+    itype n = ((utype)1 << i);                                                 \
+    FIO_NAME2(fio_u, buf##bits##_local)(tmp_buf, n);                           \
+    itype r = FIO_NAME2(fio_buf, u##bits##_local)(tmp_buf);                    \
     FIO_ASSERT(r == n,                                                         \
                "roundtrip failed for U" #bits " at bit %zu\n\t%zu != %zu",     \
                i,                                                              \
                (size_t)n,                                                      \
                (size_t)r);                                                     \
+    FIO_ASSERT(!memcmp(tmp_buf, &n, (bits) >> 3),                              \
+               "memory ordering implementation error for U" #bits "!");        \
   }
-  FIO___BITMAP_TEST_BITS(8);
-  FIO___BITMAP_TEST_BITS(16);
-  FIO___BITMAP_TEST_BITS(32);
-  FIO___BITMAP_TEST_BITS(64);
+  FIO___BITMAP_TEST_BITS(int8_t, uint8_t, 8);
+  FIO___BITMAP_TEST_BITS(int16_t, uint16_t, 16);
+  FIO___BITMAP_TEST_BITS(int32_t, uint32_t, 32);
+  FIO___BITMAP_TEST_BITS(int64_t, uint64_t, 64);
+#ifdef __SIZEOF_INT128__
+  FIO___BITMAP_TEST_BITS(__int128_t, __uint128_t, 128);
+#endif
 #undef FIO___BITMAP_TEST_BITS
 
   fprintf(stderr, "* Testing constant-time helpers.\n");

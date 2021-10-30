@@ -727,8 +727,6 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (cbuf[0] == token)                                                        \
     return (void *)cbuf;                                                       \
   ++cbuf;
-    FIO_MEMCHR___TEST();
-    /* fall through */
   case 7:
     FIO_MEMCHR___TEST();
     /* fall through */

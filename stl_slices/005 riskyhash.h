@@ -241,7 +241,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   }
 
   for (size_t i = 31; i < len; i += 32) {
-    /* vectorized 32 bytes / 256 bit access */
+    /* 32 bytes / 256 bit access */
     FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
                         FIO_RISKY_BUF2U64(data + 8),
                         FIO_RISKY_BUF2U64(data + 16),
@@ -557,14 +557,14 @@ typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
 FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
                                       char *name,
                                       uint8_t size_log,
-                                      uint8_t mem_alignment_ofset,
+                                      uint8_t mem_alignment_offset,
                                       uint8_t fast) {
   /* test based on code from BearSSL with credit to Thomas Pornin */
   if (size_log >= 21 || ((sizeof(uint64_t) - 1) >> size_log)) {
     FIO_LOG_ERROR("fio_test_hash_function called with a log size too big.");
     return;
   }
-  mem_alignment_ofset &= 7;
+  mem_alignment_offset &= 7;
   size_t const buffer_len = (1ULL << size_log);
   uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
   if (size_log < 13)
@@ -586,8 +586,8 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
 #endif
 
   uint8_t *buffer_mem = (uint8_t *)
-      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_ofset) + 64, 0);
-  uint8_t *buffer = buffer_mem + mem_alignment_ofset;
+      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_offset) + 64, 0);
+  uint8_t *buffer = buffer_mem + mem_alignment_offset;
 
   memset(buffer, 'T', buffer_len);
   /* warmup */
@@ -617,7 +617,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     cycles <<= 1;
   }
-  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_ofset) + 64);
+  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_offset) + 64);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
