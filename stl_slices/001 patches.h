@@ -124,6 +124,15 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #define O_U16TEXT     _O_U16TEXT
 #define O_U8TEXT      _O_U8TEXT
 #define O_WTEXT       _O_WTEXT
+#define S_IREAD       _S_IREAD
+#define S_IWRITE      _S_IWRITE
+#define S_IRUSR       _S_IREAD
+#define S_IWUSR       _S_IWRITE
+
+#ifndef O_TMPFILE
+#define O_TMPFILE O_TEMPORARY
+#endif
+
 #if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
     CLOCK_REALTIME == CLOCK_MONOTONIC
 #undef CLOCK_MONOTONIC

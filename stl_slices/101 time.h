@@ -479,7 +479,7 @@ Time - test
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
-  struct tm tm1, tm2;
+  struct tm tm1 = {0}, tm2 = {0};
   const time_t now = fio_time_real().tv_sec;
 #if FIO_OS_WIN
   const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);

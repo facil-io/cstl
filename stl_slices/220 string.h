@@ -353,22 +353,16 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
 String API - Content Manipulation and Review
 ***************************************************************************** */
 
-/**
- * Writes data at the end of the String.
- */
+/** Writes data at the end of the String. */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s,
                                                        const void *src,
                                                        size_t src_len);
 
-/**
- * Writes a number at the end of the String using normal base 10 notation.
- */
+/** Writes a number at the end of the String using normal base 10 notation. */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s,
                                                      int64_t num);
 
-/**
- * Writes a number at the end of the String using Hex (base 16) notation.
- */
+/** Writes a number at the end of the String using Hex (base 16) notation. */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s,
                                                        int64_t num);
 /**
@@ -1001,10 +995,7 @@ FIO_IFUNC uint64_t FIO_NAME(FIO_STR_NAME, hash)(const FIO_STR_PTR s_,
 String API - Content Manipulation and Review (inline)
 ***************************************************************************** */
 
-/**
- * Writes data at the end of the String (similar to `fio_str_insert` with the
- * argument `pos == -1`).
- */
+/** Writes data at the end of the String. */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
                                                        const void *src,
                                                        size_t src_len) {

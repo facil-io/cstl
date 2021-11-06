@@ -190,6 +190,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if _MSC_VER
+#define inline __inline
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_local
@@ -1203,6 +1204,15 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #define O_U16TEXT     _O_U16TEXT
 #define O_U8TEXT      _O_U8TEXT
 #define O_WTEXT       _O_WTEXT
+#define S_IREAD       _S_IREAD
+#define S_IWRITE      _S_IWRITE
+#define S_IRUSR       _S_IREAD
+#define S_IWUSR       _S_IWRITE
+
+#ifndef O_TMPFILE
+#define O_TMPFILE O_TEMPORARY
+#endif
+
 #if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
     CLOCK_REALTIME == CLOCK_MONOTONIC
 #undef CLOCK_MONOTONIC
@@ -6077,8 +6087,8 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
     return -1;
   return (WaitForSingleObject((*m), 0) == WAIT_OBJECT_0) - 1;
 }
-#endif
 #endif /* FIO_THREADS_MUTEX_BYO */
+#endif /* FIO_OS_WIN */
 
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
@@ -6104,9 +6114,7 @@ Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
-  /*
-   * TODO? test module here
-   */
+  /* TODO? test module here */
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -6115,7 +6123,6 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_MODULE_PTR
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
 /* *****************************************************************************
@@ -10892,7 +10899,7 @@ Time - test
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
-  struct tm tm1, tm2;
+  struct tm tm1 = {0}, tm2 = {0};
   const time_t now = fio_time_real().tv_sec;
 #if FIO_OS_WIN
   const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
@@ -13443,7 +13450,7 @@ SFUNC int fio_sock_set_non_block(int fd) {
   /* Otherwise, use the old way of doing it */
 #if FIO_OS_WIN
   unsigned long flags = 1;
-  if (ioctlsocket(fd, FIONBIO, &flags)) {
+  if (ioctlsocket(fd, FIONBIO, &flags) == SOCKET_ERROR) {
     switch (WSAGetLastError()) {
     case WSANOTINITIALISED:
       FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
@@ -13624,7 +13631,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   rlim_t original = rlim.rlim_cur;
   rlim.rlim_cur = rlim.rlim_max;
   while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
-    rlim.rlim_cur -= 32;
+    rlim.rlim_cur >>= 1;
 
   FIO_LOG_DEBUG2("new open file limit: %zd", (ssize_t)rlim.rlim_cur);
 
@@ -14678,12 +14685,11 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if !FIO_HAVE_UNIX_TOOLS
 #if _MSC_VER
-#pragma message(                                                               \
-    "POSIX is required for the fio_stream API, or issues may occure.")
+#pragma message("POSIX behavior is expected by the fio_stream API.")
 #else
 #warning "POSIX behavior is expected by the fio_stream API."
 #endif
-#endif
+#endif /* FIO_HAVE_UNIX_TOOLS */
 #include <sys/stat.h>
 
 #ifndef FIO_STREAM_COPY_PER_PACKET
@@ -21369,22 +21375,16 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
 String API - Content Manipulation and Review
 ***************************************************************************** */
 
-/**
- * Writes data at the end of the String.
- */
+/** Writes data at the end of the String. */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s,
                                                        const void *src,
                                                        size_t src_len);
 
-/**
- * Writes a number at the end of the String using normal base 10 notation.
- */
+/** Writes a number at the end of the String using normal base 10 notation. */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s,
                                                      int64_t num);
 
-/**
- * Writes a number at the end of the String using Hex (base 16) notation.
- */
+/** Writes a number at the end of the String using Hex (base 16) notation. */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s,
                                                        int64_t num);
 /**
@@ -22017,10 +22017,7 @@ FIO_IFUNC uint64_t FIO_NAME(FIO_STR_NAME, hash)(const FIO_STR_PTR s_,
 String API - Content Manipulation and Review (inline)
 ***************************************************************************** */
 
-/**
- * Writes data at the end of the String (similar to `fio_str_insert` with the
- * argument `pos == -1`).
- */
+/** Writes data at the end of the String. */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
                                                        const void *src,
                                                        size_t src_len) {

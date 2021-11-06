@@ -190,6 +190,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if _MSC_VER
+#define inline __inline
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_local

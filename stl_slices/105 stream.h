@@ -25,12 +25,11 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #if !FIO_HAVE_UNIX_TOOLS
 #if _MSC_VER
-#pragma message(                                                               \
-    "POSIX is required for the fio_stream API, or issues may occure.")
+#pragma message("POSIX behavior is expected by the fio_stream API.")
 #else
 #warning "POSIX behavior is expected by the fio_stream API."
 #endif
-#endif
+#endif /* FIO_HAVE_UNIX_TOOLS */
 #include <sys/stat.h>
 
 #ifndef FIO_STREAM_COPY_PER_PACKET

@@ -578,7 +578,7 @@ SFUNC int fio_sock_set_non_block(int fd) {
   /* Otherwise, use the old way of doing it */
 #if FIO_OS_WIN
   unsigned long flags = 1;
-  if (ioctlsocket(fd, FIONBIO, &flags)) {
+  if (ioctlsocket(fd, FIONBIO, &flags) == SOCKET_ERROR) {
     switch (WSAGetLastError()) {
     case WSANOTINITIALISED:
       FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
@@ -759,7 +759,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   rlim_t original = rlim.rlim_cur;
   rlim.rlim_cur = rlim.rlim_max;
   while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
-    rlim.rlim_cur -= 32;
+    rlim.rlim_cur >>= 1;
 
   FIO_LOG_DEBUG2("new open file limit: %zd", (ssize_t)rlim.rlim_cur);
 

@@ -216,8 +216,8 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
     return -1;
   return (WaitForSingleObject((*m), 0) == WAIT_OBJECT_0) - 1;
 }
-#endif
 #endif /* FIO_THREADS_MUTEX_BYO */
+#endif /* FIO_OS_WIN */
 
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
@@ -243,9 +243,7 @@ Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
-  /*
-   * TODO? test module here
-   */
+  /* TODO? test module here */
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -254,6 +252,5 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_MODULE_PTR
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
