@@ -97,13 +97,18 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   return result;
 }
 
-#define strcasecmp    _stricmp
-#define stat          _stat64
-#define fstat         _fstat64
-#define open          _open
-#define close         _close
-#define write         _write
-#define read          _read
+FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
+  return _stricmp(s1, s2);
+}
+
+FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
+  return _write(fd, b, l);
+}
+
+FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
+  return _read(fd, b, l);
+}
+
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT

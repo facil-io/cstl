@@ -164,6 +164,11 @@ FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
 Stream Implementation - inlined static functions
 ***************************************************************************** */
 
+#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
+#define fstat           _fstat64
+#define FIO_FSTAT_UNDEF 1
+#endif /* FIO_OS_WIN && _MSC_VER */
+
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 /* Allocates a new object on the heap and initializes it's memory. */
@@ -794,6 +799,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
+#ifdef FIO_FSTAT_UNDEF
+#undef FIO_FSTAT_UNDEF
+#undef fstat
+#endif
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STREAM___EMBD_BIT_OFFSET

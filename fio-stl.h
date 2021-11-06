@@ -1177,13 +1177,18 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   return result;
 }
 
-#define strcasecmp    _stricmp
-#define stat          _stat64
-#define fstat         _fstat64
-#define open          _open
-#define close         _close
-#define write         _write
-#define read          _read
+FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
+  return _stricmp(s1, s2);
+}
+
+FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
+  return _write(fd, b, l);
+}
+
+FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
+  return _read(fd, b, l);
+}
+
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
@@ -14824,6 +14829,11 @@ FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
 Stream Implementation - inlined static functions
 ***************************************************************************** */
 
+#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
+#define fstat           _fstat64
+#define FIO_FSTAT_UNDEF 1
+#endif /* FIO_OS_WIN && _MSC_VER */
+
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 /* Allocates a new object on the heap and initializes it's memory. */
@@ -15454,6 +15464,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
+#ifdef FIO_FSTAT_UNDEF
+#undef FIO_FSTAT_UNDEF
+#undef fstat
+#endif
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STREAM___EMBD_BIT_OFFSET
@@ -23112,6 +23126,11 @@ s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
 String - read file
 ***************************************************************************** */
 
+#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
+#define fstat           _fstat64
+#define FIO_FSTAT_UNDEF 1
+#endif /* FIO_OS_WIN && _MSC_VER */
+
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -23194,6 +23213,11 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
   close(fd);
   return state;
 }
+
+#ifdef FIO_FSTAT_UNDEF
+#undef FIO_FSTAT_UNDEF
+#undef fstat
+#endif
 
 /* *****************************************************************************
 

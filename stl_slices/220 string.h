@@ -2090,6 +2090,11 @@ s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
 String - read file
 ***************************************************************************** */
 
+#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
+#define fstat           _fstat64
+#define FIO_FSTAT_UNDEF 1
+#endif /* FIO_OS_WIN && _MSC_VER */
+
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -2172,6 +2177,11 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
   close(fd);
   return state;
 }
+
+#ifdef FIO_FSTAT_UNDEF
+#undef FIO_FSTAT_UNDEF
+#undef fstat
+#endif
 
 /* *****************************************************************************
 
