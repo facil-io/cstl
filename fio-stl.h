@@ -1037,7 +1037,8 @@ Common macros
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
-    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
@@ -14022,16 +14023,16 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_ATOMIC                  /* Development inclusion - ignore line */
 #define FIO_POLL                    /* Development inclusion - ignore line */
 #define FIO_POLL_DEV                /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
+#include "104 sock.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 #ifdef FIO_POLL_DEV                 /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
-#include "210 hashmap.h"            /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 
 /* *****************************************************************************
@@ -14049,17 +14050,15 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_POLL___H
 
 #ifndef FIO_POLL_HAS_UDATA_COLLECTION
-/* A unique `udata` per fd (true)? or a global `udata` (false)?*/
+/** A unique `udata` per fd (true)? or a global `udata` (false)?*/
 #define FIO_POLL_HAS_UDATA_COLLECTION 1
 #endif
 
-#ifndef FIO_POLL_FRAGMENTATION_LIMIT
-/**
- * * When the polling array is fragmented by more than the set value, it will be
- * de-fragmented on the idle cycle (if no events occur).
- * */
-#define FIO_POLL_FRAGMENTATION_LIMIT 63
+#ifndef FIO_POLL_POSSIBLE_FLAGS
+/** The user flags IO events recognize */
+#define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
 #endif
+
 /* *****************************************************************************
 Polling API
 ***************************************************************************** */
@@ -14127,7 +14126,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Polling is thread safe, but has different effects on different threads.
  *
  * Adding a new file descriptor from one thread while polling in a different
- * thread will not poll that IO untill `fio_poll_review` is called again.
+ * thread will not poll that IO until `fio_poll_review` is called again.
  */
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
 
@@ -14148,27 +14147,34 @@ SFUNC void fio_poll_close_all(fio_poll_s *p);
 
 
 ***************************************************************************** */
+#ifdef POLLRDHUP
+#define FIO_POLL_EX_FLAGS POLLRDHUP
+#else
+#define FIO_POLL_EX_FLAGS 0
+#endif
 
-/* *****************************************************************************
-Poll Monitoring Implementation - The polling type(s)
-***************************************************************************** */
+typedef struct {
+  void *udata;
+  int fd;
+  unsigned short flags;
+} fio___poll_i_s;
+
+FIO_IFUNC uint64_t fio___poll_i_hash(fio___poll_i_s o) {
+  return fio_risky_ptr((void *)(uintptr_t)(o.fd));
+}
 #define FIO_STL_KEEP__
-
 #define FIO_RISKY_HASH
-#define FIO_MAP_TYPE         int32_t
-#define FIO_MAP_HASH         uint32_t
-#define FIO_MAP_TYPE_INVALID (-1) /* allow monitoring of fd == 0*/
-#define FIO_UMAP_NAME        fio___poll_index
+#define FIO_UMAP_NAME          fio___poll_map
+#define FIO_MAP_TYPE           fio___poll_i_s
+#define FIO_MAP_TYPE_CMP(a, b) ((a).fd == (b).fd)
+#define FIO_MAP_TYPE_COPY(d, s)                                                \
+  do {                                                                         \
+    (d).udata = (s).udata;                                                     \
+    (d).flags = ((d).flags * ((d).fd == (s).fd)) | (s).flags;                  \
+    (d).fd = (s).fd;                                                           \
+  } while (0)
+#define FIO_MAP_HASH_FN(o) fio___poll_i_hash(o)
 #include __FILE__
-#define FIO_ARRAY_TYPE           struct pollfd
-#define FIO_ARRAY_NAME           fio___poll_fds
-#define FIO_ARRAY_TYPE_CMP(a, b) (a.fd == b.fd)
-#include __FILE__
-#if FIO_POLL_HAS_UDATA_COLLECTION
-#define FIO_ARRAY_TYPE void *
-#define FIO_ARRAY_NAME fio___poll_udata
-#include __FILE__
-#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
 
 #ifdef FIO_STL_KEEP__
 #undef FIO_STL_KEEP__
@@ -14176,47 +14182,29 @@ Poll Monitoring Implementation - The polling type(s)
 
 struct fio_poll_s {
   fio_poll_settings_s settings;
-  fio___poll_index_s index;
-  fio___poll_fds_s fds;
-#if FIO_POLL_HAS_UDATA_COLLECTION
-  fio___poll_udata_s udata;
-#else
-  void *udata;
-#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
+  fio___poll_map_s map;
   FIO___LOCK_TYPE lock;
-  size_t forgotten;
 };
 
-/* *****************************************************************************
-When avoiding the `udata` array
-***************************************************************************** */
-#if !FIO_POLL_HAS_UDATA_COLLECTION
-FIO_IFUNC void fio___poll_udata_destroy(void **pu) { *pu = NULL; }
-FIO_IFUNC void **fio___poll_udata_push(void **pu, void *udata) {
-  if (udata)
-    *pu = udata;
-  return pu;
+FIO_IFUNC void fio___poll_map_set2(fio___poll_map_s *m, fio___poll_i_s o) {
+  fio___poll_map_set(m, fio___poll_i_hash(o), o, NULL);
 }
-FIO_IFUNC void **fio___poll_udata_pop(void **pu, void *ignr) {
-  return pu;
-  (void)ignr;
+
+FIO_IFUNC fio___poll_i_s *fio___poll_map_get2(fio___poll_map_s *m, int fd) {
+  fio___poll_i_s o = {.fd = fd};
+  return fio___poll_map_get_ptr(m, fio___poll_i_hash(o), o);
 }
-FIO_IFUNC void **fio___poll_udata_set(void **pu,
-                                      int32_t pos,
-                                      void *udata,
-                                      void **ignr) {
-  if (udata)
-    *pu = udata;
-  return pu;
-  (void)ignr;
-  (void)pos;
+
+FIO_IFUNC void fio___poll_map_remove2(fio___poll_map_s *m, int fd) {
+  fio___poll_i_s *i = fio___poll_map_get2(m, fd);
+  if (i) {
+    i->flags = 0;
+    i->udata = NULL;
+    return;
+  }
+  fio___poll_map_set2(m, (fio___poll_i_s){.fd = fd});
 }
-FIO_IFUNC void **fio___poll_udata2ptr(void **pu) { return pu; }
-FIO_IFUNC void *fio___poll_udata_get(void **pu, int32_t pos) {
-  return *pu;
-  (void)pos;
-}
-#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
+
 /* *****************************************************************************
 Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
@@ -14227,12 +14215,10 @@ Poll Monitoring Implementation - inline static functions
 FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
   fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   if (p) {
-    *p = (fio_poll_s) {
-      .settings = settings, .index = FIO_MAP_INIT, .fds = FIO_ARRAY_INIT,
-#if FIO_POLL_HAS_UDATA_COLLECTION
-      .udata = FIO_ARRAY_INIT,
-#endif
-      .lock = FIO___LOCK_INIT, .forgotten = 0,
+    *p = (fio_poll_s){
+        .settings = settings,
+        .map = FIO_MAP_INIT,
+        .lock = FIO___LOCK_INIT,
     };
   }
   return p;
@@ -14247,12 +14233,10 @@ FIO_IFUNC int fio_poll_free(fio_poll_s *p) {
 
 /** Destroys the polling object, freeing its resources. */
 FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
-  if (p) {
-    fio___poll_index_destroy(&p->index);
-    fio___poll_fds_destroy(&p->fds);
-    fio___poll_udata_destroy(&p->udata);
-    FIO___LOCK_DESTROY(p->lock);
-  }
+  if (!p)
+    return;
+  fio___poll_map_destroy(&p->map);
+  FIO___LOCK_DESTROY(p->lock);
 }
 
 /* *****************************************************************************
@@ -14272,47 +14256,36 @@ FIO_SFUNC void fio___poll_ev_mock(int fd, void *udata) {
   (void)udata;
 }
 
-FIO_IFUNC int fio___poll_monitor(fio_poll_s *p,
-                                 int fd,
-                                 void *udata,
-                                 unsigned short flags) {
-  if (fd == -1)
-    return -1;
-  int32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  struct pollfd *i = fio___poll_fds2ptr(&p->fds);
-  if (i && pos != -1 && (int)i[pos].fd == fd)
-    goto edit_existing;
-  if (i && pos != -1 && (int)i[pos].fd == -1)
-    goto renew_monitoring;
-  /* insert new entry */
-  i = fio___poll_fds_push(&p->fds,
-                          (struct pollfd){.fd = fd, .events = (short)flags});
-  if (!i) {
-    FIO_LOG_ERROR("fio___poll_monitor failed to push fd %d", fd);
-    return -1;
-  }
-  pos = (uint32_t)(i - fio___poll_fds2ptr(&p->fds));
-  if (!fio___poll_udata_push(&p->udata, udata)) {
-    FIO_LOG_ERROR("fio___poll_monitor failed to push udata for fd %d", fd);
-    fio___poll_fds_pop(&p->fds, NULL);
-    return -1;
-  }
-  fio___poll_index_set(&p->index, fd, pos, NULL);
-  return 0;
+/* validate settings */
+FIO_SFUNC void fio___poll_validate(fio_poll_s *p) {
+  if (!p->settings.on_data)
+    p->settings.on_data = fio___poll_ev_mock;
+  if (!p->settings.on_ready)
+    p->settings.on_ready = fio___poll_ev_mock;
+  if (!p->settings.on_close)
+    p->settings.on_close = fio___poll_ev_mock;
+}
 
-edit_existing:
-  /* pos is correct, we are updating a value */
-  i[pos].events |= flags;
-  if (udata)
-    fio___poll_udata_set(&p->udata, (int32_t)pos, udata, NULL);
-  return 0;
+FIO_IFUNC void fio___poll_validate_test(fio_poll_s *p) {
+  if (!(((uintptr_t)p->settings.on_data) & ((uintptr_t)p->settings.on_ready) &
+        ((uintptr_t)p->settings.on_close)))
+    fio___poll_validate(p);
+}
 
-renew_monitoring:
-  i[pos].fd = fd;
-  i[pos].events = flags;
-  i[pos].revents = 0;
-  fio___poll_udata_set(&p->udata, (int32_t)pos, udata, NULL);
-  return 0;
+/* handle events, return a mask for possible remaining flags. */
+FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
+                                                  int fd,
+                                                  void *udata,
+                                                  unsigned short flags) {
+  if ((flags & POLLOUT))
+    p->settings.on_ready(fd, udata);
+  if ((flags & (POLLIN | POLLPRI)))
+    p->settings.on_data(fd, udata);
+  if ((flags & (POLLHUP | POLLERR | POLLNVAL | FIO_POLL_EX_FLAGS))) {
+    p->settings.on_close(fd, udata);
+    return 0;
+  }
+  return ~flags;
 }
 
 /**
@@ -14321,6 +14294,9 @@ renew_monitoring:
  *
  * Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might
  * be ignored.
+ *
+ * Monitoring mode is always one-shot. If an event if fired, it is removed from
+ * the monitoring state.
  *
  * Returns -1 on error.
  */
@@ -14331,18 +14307,20 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   int r = -1;
   if (!p || fd == -1)
     return r;
-  flags &= POLLIN | POLLOUT | POLLPRI;
-#ifdef POLLRDHUP
-  flags |= POLLRDHUP;
-#endif
+  r = 0;
+  flags &= FIO_POLL_POSSIBLE_FLAGS;
+  flags |= FIO_POLL_EX_FLAGS;
+  fio___poll_i_s i = {.udata = udata, .fd = fd, .flags = flags};
   FIO___LOCK_LOCK(p->lock);
-  r = fio___poll_monitor(p, fd, udata, flags);
+  fio___poll_map_set2(&p->map, i);
   FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
 
 /**
  * Reviews if any of the monitored file descriptors has any events.
+ *
+ * `timeout` is in milliseconds.
  *
  * Returns the number of events called.
  *
@@ -14352,254 +14330,133 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * thread will not poll that IO until `fio_poll_review` is called again.
  */
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
-  int r = -1;
-  int to_copy = 0;
-  fio_poll_s cpy;
-  if (!p)
-    return r;
+  int events = -1;
+  int handled = -1;
+  if (!p || !fio___poll_map_count(&p->map))
+    goto simply_sleep;
+  fio___poll_validate_test(p);
 
-  /* move all data to a copy (thread safety) */
+  /* handle events in a copy, allowing events / threads to mutate it */
   FIO___LOCK_LOCK(p->lock);
-  cpy = *p;
-  p->index = (fio___poll_index_s)FIO_MAP_INIT;
-  p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
-#if FIO_POLL_HAS_UDATA_COLLECTION
-  p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
-#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
-
+  fio_poll_s cpy = *p;
+  p->map = (fio___poll_map_s)FIO_MAP_INIT;
   FIO___LOCK_UNLOCK(p->lock);
 
-  /* move if conditions out of the loop */
-  if (!cpy.settings.on_data)
-    cpy.settings.on_data = fio___poll_ev_mock;
-  if (!cpy.settings.on_ready)
-    cpy.settings.on_ready = fio___poll_ev_mock;
-  if (!cpy.settings.on_close)
-    cpy.settings.on_close = fio___poll_ev_mock;
+  const size_t max = fio___poll_map_count(&cpy.map);
+  const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
 
-  /* poll the array */
-  struct pollfd *const fds_ary = fio___poll_fds2ptr(&cpy.fds);
-  int const len = (int)fio___poll_fds_count(&cpy.fds);
-  void **const ud_ary = fio___poll_udata2ptr(&cpy.udata);
-  FIO_POLL_DEBUG_LOG("fio_poll_review reviewing %zu file descriptors.", len);
-#if FIO_POLL_HAS_UDATA_COLLECTION
-#define FIO___POLL_UDATA_GET(index) ud_ary[(index)]
-#else
-#define FIO___POLL_UDATA_GET(index) ud_ary[0]
-#endif
+  int w = 0, r = 0, i = 0;
+  struct pollfd *pfd = (struct pollfd *)FIO_MEM_REALLOC_(
+      NULL,
+      0,
+      ((max * sizeof(void *)) + (max * sizeof(struct pollfd))),
+      0);
+  void **uary = (void **)(pfd + max);
+
+  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if (!(pos->obj.flags & flag_mask))
+      continue;
+    pfd[r] = (struct pollfd){.fd = pos->obj.fd, .events = pos->obj.flags};
+    uary[r] = pos->obj.udata;
+    ++r;
+  }
+
 #if FIO_OS_WIN
-  r = WSAPoll(fds_ary, len, timeout);
+  events = WSAPoll(pfd, r, timeout);
 #else
-  r = poll(fds_ary, len, timeout);
+  events = poll(pfd, r, timeout);
 #endif
 
-  /* process events */
-  if (r > 0) {
-    int i = 0; /* index in fds_ary array. */
-    int c = 0; /* count events handled, to stop loop if no more events. */
-    do {
-      if ((int)fds_ary[i].fd != -1) {
-        if ((fds_ary[i].revents & (POLLIN /* | POLLPRI */))) {
-          cpy.settings.on_data(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_data` for %d.",
-                             fds_ary[i].fd);
-        }
-        if ((fds_ary[i].revents & POLLOUT)) {
-          cpy.settings.on_ready(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_ready` for %d.",
-                             fds_ary[i].fd);
-        }
-        if ((fds_ary[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
-          cpy.settings.on_close(fds_ary[i].fd, FIO___POLL_UDATA_GET(i));
-          FIO_POLL_DEBUG_LOG("fio_poll_review calling `on_close` for %d.",
-                             fds_ary[i].fd);
-          /* handle possible re-insertion after events */
-          fio_poll_forget(p, fds_ary[i].fd);
-          /* never retain event monitoring after closure / error */
-          fds_ary[i].events = 0;
-        }
-        /* did we perform any events? */
-        c += !!fds_ary[i].revents;
-        /* any unfired events for the fd? */
-        fds_ary[i].events &= ~(fds_ary[i].revents);
-#ifdef POLLRDHUP
-        fds_ary[i].events &= ~POLLRDHUP;
-#endif
-        if (fds_ary[i].events) {
-          /* unfired events await */
-          fds_ary[to_copy].fd = fds_ary[i].fd;
-          fds_ary[to_copy].events = fds_ary[i].events;
-#ifdef POLLRDHUP
-          fds_ary[to_copy].events |= POLLRDHUP;
-#endif
-          fds_ary[to_copy].revents = 0;
-          FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
-          ++to_copy;
-          FIO_POLL_DEBUG_LOG("fio_poll_review %d still has pending events",
-                             fds_ary[i].fd);
-        } else {
-          FIO_POLL_DEBUG_LOG("fio_poll_review no more events for %d",
-                             fds_ary[i].fd);
-        }
+  if (events > 0) {
+    /* handle events and remove consumed entries */
+    for (i = 0; i < r && handled < events; ++i) {
+      if (pfd[i].revents) {
+        ++handled;
+        pfd[i].events &=
+            fio___poll_handle_events(&cpy, pfd[i].fd, uary[i], pfd[i].revents);
       }
-      ++i;
-      if (i < len && c < r)
-        continue;
-      if (to_copy != i) {
-        /* copy remaining events in incomplete loop, if any. */
-        while (i < len) {
-          FIO_POLL_DEBUG_LOG("fio_poll_review %d no-events-left mark copy",
-                             fds_ary[i].fd);
-          FIO_ASSERT_DEBUG(!fds_ary[i].revents,
-                           "Event unhandled for %d",
-                           fds_ary[i].fd);
-          fds_ary[to_copy].fd = fds_ary[i].fd;
-          fds_ary[to_copy].events = fds_ary[i].events;
-          fds_ary[to_copy].revents = 0;
-          FIO___POLL_UDATA_GET(to_copy) = FIO___POLL_UDATA_GET(i);
-          ++to_copy;
-          ++i;
+      if ((pfd[i].events & (~(FIO_POLL_EX_FLAGS)))) {
+        if (i != w) {
+          pfd[w] = pfd[i];
+          uary[w] = uary[i];
         }
-      } else {
-        if (to_copy != len) {
-          FIO_POLL_DEBUG_LOG("fio_poll_review no events left, quick mark");
-        }
-        to_copy = len;
+        ++w;
       }
-      break;
-    } while (1);
-  } else {
-    to_copy = len;
+    }
+    if (i < r && i != w) {
+      memmove(pfd + w, pfd + i, ((r - i) * sizeof(*pfd)));
+      memmove(uary + w, uary + i, ((r - i) * sizeof(*uary)));
+    }
   }
+  w += r - i;
+  i = 0;
 
-  /* insert all un-fired events back to the (thread safe) queue */
   FIO___LOCK_LOCK(p->lock);
-  if ((FIO_POLL_FRAGMENTATION_LIMIT > 0) && !r &&
-      (p->forgotten >= (FIO_POLL_FRAGMENTATION_LIMIT))) {
-    /* de-fragment list */
-    FIO_POLL_DEBUG_LOG("fio_poll_review de-fragmentation cycle");
-    fio_poll_s cpy2;
-    cpy2 = *p;
-    p->forgotten = 0;
-    p->index = (fio___poll_index_s)FIO_MAP_INIT;
-    p->fds = (fio___poll_fds_s)FIO_ARRAY_INIT;
-#if FIO_POLL_HAS_UDATA_COLLECTION
-    p->udata = (fio___poll_udata_s)FIO_ARRAY_INIT;
-#endif /* FIO_POLL_HAS_UDATA_COLLECTION */
-
-    for (size_t i = 0; i < fio___poll_fds_count(&cpy2.fds); ++i) {
-      if ((int)fio___poll_fds_get(&cpy2.fds, i).fd == -1 ||
-          !fio___poll_fds_get(&cpy2.fds, i).events)
-        continue;
-      fio___poll_monitor(p,
-                         fio___poll_fds_get(&cpy2.fds, i).fd,
-                         fio___poll_udata_get(&cpy2.udata, i),
-                         fio___poll_fds_get(&cpy2.fds, i).events);
-    }
-
-    fio___poll_fds_destroy(&cpy2.fds);
-    fio___poll_udata_destroy(&cpy2.udata);
-    fio___poll_index_destroy(&cpy2.index);
-    to_copy = 0;
-    for (int i = 0; i < len; ++i) {
-      if ((int)fds_ary[i].fd == -1 || !fds_ary[i].events)
-        continue;
-      ++to_copy;
-      fio___poll_monitor(p,
-                         fds_ary[i].fd,
-                         FIO___POLL_UDATA_GET(i),
-                         fds_ary[i].events);
-    }
-    FIO_POLL_DEBUG_LOG(
-        "fio_poll_review resubmitted %zu items for pending events",
-        to_copy);
-
-  } else if (to_copy == len && !fio___poll_index_count(&p->index)) {
-    /* it's possible to move the data set as is */
-    FIO_POLL_DEBUG_LOG(
-        "fio_poll_review overwriting %zu items for pending events",
-        to_copy);
-    *p = cpy;
-    cpy = (fio_poll_s)FIO_POLL_INIT(NULL, NULL, NULL);
-  } else {
-    FIO_POLL_DEBUG_LOG("fio_poll_review copying %zu items with pending events",
-                       to_copy);
-    for (int i = 0; i < to_copy; ++i) {
-      fio___poll_monitor(p,
-                         fds_ary[i].fd,
-                         FIO___POLL_UDATA_GET(i),
-                         fds_ary[i].events);
-    }
+  if (!fio___poll_map_count(&p->map) && events <= 0) {
+    p->map = cpy.map;
+    i = 1;
+    goto finish;
   }
-  FIO___LOCK_UNLOCK(p->lock);
+  for (i = 0; i < w; ++i) {
+    fio___poll_i_s *existing = fio___poll_map_get2(&p->map, pfd[i].fd);
+    if (existing && existing->fd == pfd[i].fd) {
+      existing->flags |= (!!existing->flags) * (pfd[i].events);
+      continue;
+    }
+    fio___poll_map_set2(&p->map,
+                        (fio___poll_i_s){
+                            .fd = pfd[i].fd,
+                            .flags = pfd[i].events,
+                            .udata = uary[i],
+                        });
+  }
+  i = 0;
 
-  /* cleanup memory */
-  fio___poll_index_destroy(&cpy.index);
-  fio___poll_fds_destroy(&cpy.fds);
-  fio___poll_udata_destroy(&cpy.udata);
-  return r;
-#undef FIO___POLL_UDATA_GET
+finish:
+  FIO___LOCK_UNLOCK(p->lock);
+  FIO_MEM_FREE(pfd, ((max * sizeof(void *)) + (max * sizeof(struct pollfd))));
+  if (!i)
+    fio___poll_map_destroy(&cpy.map);
+  return events;
+simply_sleep:
+  if (timeout) {
+    FIO_THREAD_WAIT((timeout * 1000000));
+  }
+  return 0;
 }
 
 /**
  * Stops monitoring the specified file descriptor, returning its udata (if any).
  */
 SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
-  void *old = NULL;
-  FIO_POLL_DEBUG_LOG("fio_poll_forget called for %d", fd);
-  if (!p || fd == -1 || !fio___poll_fds_count(&p->fds))
-    return old;
+  fio___poll_i_s *i = NULL;
+  void *udata = NULL;
   FIO___LOCK_LOCK(p->lock);
-  int32_t pos = fio___poll_index_get(&p->index, fd, 0);
-  if (pos != -1 && (int)fio___poll_fds_get(&p->fds, pos).fd == fd) {
-    FIO_POLL_DEBUG_LOG("fio_poll_forget evicting %d at position [%d]",
-                       fd,
-                       (int)pos);
-    fio___poll_index_remove(&p->index, fd, 0, NULL);
-    old = fio___poll_udata_get(&p->udata, (int32_t)pos);
-    fio___poll_fds2ptr(&p->fds)[(int32_t)pos].fd = -1;
-    fio___poll_fds2ptr(&p->fds)[(int32_t)pos].events = 0;
-    fio___poll_udata_set(&p->udata, (int32_t)pos, NULL, NULL);
-    ++p->forgotten;
-    while (p->forgotten && (pos = fio___poll_fds_count(&p->fds) - 1) >= 0 &&
-           ((int)fio___poll_fds_get(&p->fds, pos).fd == -1 ||
-            !fio___poll_fds_get(&p->fds, pos).events)) {
-      fio___poll_fds_pop(&p->fds, NULL);
-      fio___poll_udata_pop(&p->udata, NULL);
-      --p->forgotten;
-    }
+  i = fio___poll_map_get2(&p->map, fd);
+  if (i) {
+    udata = i->udata;
+    i->flags = 0;
+    i->udata = NULL;
   }
   FIO___LOCK_UNLOCK(p->lock);
-  return old;
+  return udata;
 }
 
 /** Closes all sockets, calling the `on_close`. */
 SFUNC void fio_poll_close_all(fio_poll_s *p) {
-  fio_poll_s tmp;
   FIO___LOCK_LOCK(p->lock);
-  tmp = *p;
-  *p = (fio_poll_s)FIO_POLL_INIT(p->settings.on_data,
-                                 p->settings.on_ready,
-                                 p->settings.on_close);
-  p->lock = tmp.lock;
-  FIO___LOCK_UNLOCK(tmp.lock);
-  for (size_t i = 0; i < fio___poll_fds_count(&tmp.fds); ++i) {
-    if ((int)fio___poll_fds_get(&tmp.fds, i).fd == -1)
-      continue;
-    close(fio___poll_fds_get(&tmp.fds, i).fd);
-#if FIO_POLL_HAS_UDATA_COLLECTION
-    tmp.settings.on_close(fio___poll_fds_get(&tmp.fds, i).fd,
-                          fio___poll_udata2ptr(&tmp.udata)[i]);
-#else
-    tmp.settings.on_close(fio___poll_fds_get(&tmp.fds, i).fd,
-                          fio___poll_udata2ptr(&tmp.udata)[0]);
-#endif
+  fio_poll_s cpy = *p;
+  p->map = (fio___poll_map_s)FIO_MAP_INIT;
+  FIO___LOCK_UNLOCK(p->lock);
+  const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
+  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if ((pos->obj.flags & flag_mask)) {
+      cpy.settings.on_close(pos->obj.fd, pos->obj.udata);
+      fio_sock_close(pos->obj.fd);
+    }
   }
-  fio___poll_index_destroy(&tmp.index);
-  fio___poll_fds_destroy(&tmp.fds);
-  fio___poll_udata_destroy(&tmp.udata);
+  fio___poll_map_destroy(&cpy.map);
 }
-
 /* *****************************************************************************
 Poll Monitoring Testing?
 ***************************************************************************** */
@@ -14609,17 +14466,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
   fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
-#ifdef POLLRDHUP
-  /* if defined, the event is automatically monitored, so test for it. */
-  short events[4] = {
-      POLLRDHUP | POLLOUT,
-      POLLRDHUP | POLLIN,
-      POLLRDHUP | POLLOUT | POLLIN,
-      POLLRDHUP | POLLOUT | POLLIN,
-  };
-#else
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
-#endif
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
                "fio_poll_monitor failed for fd %d",
@@ -14630,38 +14477,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
       FIO_ASSERT(fio_poll_forget(&p, i) == (void *)(uintptr_t)i,
                  "fio_poll_forget didn't return correct udata at %d",
                  i);
+      FIO_ASSERT(fio_poll_forget(&p, i) == NULL,
+                 "fio_poll_forget didn't forget udata at %d",
+                 i);
     }
-  }
-  for (int i = 128; i--;) {
-    size_t pos = fio___poll_index_get(&p.index, i, 0);
-    if ((i & 3) == 3) {
-      FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd != i,
-                 "fd wasn't removed?");
-      FIO_ASSERT((int)(uintptr_t)fio___poll_udata_get(&p.udata, pos) != i,
-                 "udata value wasn't removed?");
-      continue;
-    }
-    FIO_ASSERT((int)fio___poll_fds_get(&p.fds, pos).fd == i,
-               "index value [%zu] doesn't match fd (%d != %d)",
-               pos,
-               fio___poll_fds_get(&p.fds, pos).fd,
-               i);
-    FIO_ASSERT(fio___poll_fds_get(&p.fds, pos).events == events[(i & 3)],
-               "events value isn't setup correctly");
-    FIO_ASSERT((int)(uintptr_t)fio___poll_udata_get(&p.udata, pos) == i,
-               "udata value isn't setup correctly");
   }
   fio_poll_destroy(&p);
 }
 
 #endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
-Module Cleanup
+Cleanup
 ***************************************************************************** */
-
+#undef FIO_POLL_EX_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_POLL_HAS_UDATA_COLLECTION
-#undef FIO_POLL
 #endif /* FIO_POLL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021

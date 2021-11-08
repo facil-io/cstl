@@ -11,7 +11,7 @@ This is a simple HTTP "Hello World" / echo server example using `poll`.
 Benchmark with keep-alive:
 
     ab -c 200 -t 4 -n 1000000 -k http://127.0.0.1:3000/
-    wrk -c200 -d4 -t1 http://localhost:3000/
+    wrk -c200 -d4 -t2 http://localhost:3000/
 
 Note: This is a **TOY** example, with only minimal security.
 ***************************************************************************** */
@@ -81,7 +81,6 @@ Starting the program - main()
 int main(int argc, char const *argv[]) {
   fio_sock_maximize_limits();
   timeouts = FIO_LIST_INIT(timeouts);
-  int64_t tick = fio_time_milli();
   int srv_fd;
   /* initialize the CLI options */
   fio_cli_start(argc,
@@ -146,9 +145,6 @@ int main(int argc, char const *argv[]) {
     FIO_ASSERT(0, "This example doesn't support UDP sockets.");
   }
 
-  /* we're dome with the CLI, release resources */
-  fio_cli_end();
-
   /* test socket / connection success */
   FIO_ASSERT(srv_fd != -1, "Couldn't open connection");
 
@@ -168,6 +164,8 @@ int main(int argc, char const *argv[]) {
   FIO_LOG_INFO("Listening for HTTP echo @ %s", url);
 
   /* loop until the stop flag is raised */
+  int64_t last_timeout_review = fio_time_milli();
+  /* loop until the stop flag is raised */
   while (!server_stop_flag) {
     /* review IO events (calls the registered callbacks) */
     fio_poll_review(monitor, 1000);
@@ -175,8 +173,8 @@ int main(int argc, char const *argv[]) {
     fio_signal_review();
     /* review timeouts */
     fio_now = fio_time_milli();
-    if (tick + 1000 <= fio_now) {
-      tick = fio_now;
+    if (last_timeout_review + 1000 <= fio_now) {
+      last_timeout_review = fio_now;
       review_timeouts();
     }
   }
@@ -186,6 +184,7 @@ int main(int argc, char const *argv[]) {
   clear_timeouts();
   fio_poll_free(monitor);
   FIO_LOG_INFO("Shutdown complete.");
+  fio_cli_end();
   return 0;
 }
 

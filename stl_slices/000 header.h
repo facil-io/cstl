@@ -1037,7 +1037,8 @@ Common macros
 
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
-    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif

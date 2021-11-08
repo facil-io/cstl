@@ -12,6 +12,14 @@ This is a non-streaming implementation of the RiskyHash v.3 algorithm.
 
 This function will produce a 64 bit hash for X bytes of data.
 
+#### `fio_risky_ptr`
+
+```c
+uint64_t fio_risky_ptr(void *ptr);
+```
+
+Adds a bit of entropy to pointer values. Designed to be unsafe enough for use with hash maps.
+
 #### `fio_risky_mask`
 
 ```c
