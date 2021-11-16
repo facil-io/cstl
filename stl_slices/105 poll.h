@@ -379,18 +379,21 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     i = 1;
     goto finish;
   }
-  for (i = 0; i < w; ++i) {
-    fio___poll_i_s *existing = fio___poll_map_get2(&p->map, pfd[i].fd);
-    if (existing && existing->fd == pfd[i].fd) {
-      existing->flags |= (!!existing->flags) * (pfd[i].events);
-      continue;
+  if (w) {
+    fio___poll_map_reserve(&p->map, w);
+    for (i = 0; i < w; ++i) {
+      fio___poll_i_s *existing = fio___poll_map_get2(&p->map, pfd[i].fd);
+      if (existing && existing->fd == pfd[i].fd) {
+        existing->flags |= (!!existing->flags) * (pfd[i].events);
+        continue;
+      }
+      fio___poll_map_set2(&p->map,
+                          (fio___poll_i_s){
+                              .fd = pfd[i].fd,
+                              .flags = (unsigned short)pfd[i].events,
+                              .udata = uary[i],
+                          });
     }
-    fio___poll_map_set2(&p->map,
-                        (fio___poll_i_s){
-                            .fd = pfd[i].fd,
-                            .flags = pfd[i].events,
-                            .udata = uary[i],
-                        });
   }
   i = 0;
 
