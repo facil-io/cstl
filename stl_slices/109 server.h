@@ -1,52 +1,52 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2021
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___SERVER___H
-/**
- * An Evented, Single-Threaded Server
- *
- * This example code can be used as a single header library for a portable
- * evented server that uses a single thread to manage all events.
- *
- * The server is NOT thread safe (cannot use multiple threads).
- *
- * Only the `fio_defer`, `fio_dup`, `fio_undup` functions are thread-safe,
- * allowing non-IO bound tasks to run in other threads before submitting the
- * result to an IO bound task using `fio_defer`.
- *
- * The server uses the `poll` system call.
- *
- * The server was NOT thoroughly tested and might not be production ready.
- *
- * The server depends on the facil.io CSTL single header library.
- *
- * To make the functions non-static, define the `FIO_SERVER_EXTERN` macro.
- *
- * To emit non-static function implementation, define `FIO_SERVER_EXTERN_IMP`
- */
-#define H___SERVER___H
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_SERVER                  /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "101 time.h"               /* Development inclusion - ignore line */
+#include "102 queue.h"              /* Development inclusion - ignore line */
+#include "104 sock.h"               /* Development inclusion - ignore line */
+#include "105 poll.h"               /* Development inclusion - ignore line */
+#include "105 stream.h"             /* Development inclusion - ignore line */
+#include "106 signals.h"            /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+            A Simple Server - Evented, Reactor based, Single-Threaded
+
+
+
+
+***************************************************************************** */
+#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__)
 
 /* *****************************************************************************
-Modules from the facil.io CSTL
+Server Settings
+
+At this point, define any MACROs and customizable settings available to the
+developer.
 ***************************************************************************** */
 
-#define FIO_ATOL
-#define FIO_ATOMIC
-#define FIO_QUEUE
-#define FIO_SIGNAL
-#define FIO_SOCK
-#define FIO_TIME
-#include "fio-stl.h"
+#ifndef FIO_SRV_BUFFER_PER_WRITE
+/** Control the size of the on-stack buffer used for `write` events. */
+#define FIO_SRV_BUFFER_PER_WRITE 65536U
+#endif
 
-#ifdef FIO_SERVER_EXTERN
-#define SRV_FUNC
-#else
-#define SRV_FUNC FIO_SFUNC
-#undef FIO_SERVER_EXTERN_IMP
-#define FIO_SERVER_EXTERN_IMP 1
+#ifndef FIO_SRV_THROTTLE_LIMIT
+/** IO will be throttled (no `on_data` events) if outgoing buffer is large. */
+#define FIO_SRV_THROTTLE_LIMIT 2097152U
+#endif
+
+#ifndef FIO_SRV_TIMEOUT_MAX
+/** Controls the maximum timeout in seconds (i.e., when timeout is not set). */
+#define FIO_SRV_TIMEOUT_MAX 300
 #endif
 
 /* *****************************************************************************
@@ -90,7 +90,7 @@ struct fio_listen_args {
  *
  * See the `fio_listen` Macro for details.
  */
-SRV_FUNC int fio_listen(struct fio_listen_args args);
+SFUNC int fio_listen(struct fio_listen_args args);
 #define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
 
 /* *****************************************************************************
@@ -112,38 +112,38 @@ IO Operations
  * Returns NULL on error. the `fio_s` pointer must NOT be used except within
  * proper callbacks.
  */
-SRV_FUNC fio_s *fio_attach_fd(int fd,
-                              fio_protocol_s *protocol,
-                              void *udata,
-                              void *tls);
+SFUNC fio_s *fio_attach_fd(int fd,
+                           fio_protocol_s *protocol,
+                           void *udata,
+                           void *tls);
 
 /** Sets a new protocol object. `NULL` is a valid "only-write" protocol. */
-SRV_FUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
+SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
 
 /**
  * Returns a pointer to the current protocol object.
  *
  * If `protocol` wasn't properly set, the pointer might be invalid.
  */
-SRV_FUNC fio_protocol_s *fio_protocol_get(fio_s *io);
+SFUNC fio_protocol_s *fio_protocol_get(fio_s *io);
 
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
-SRV_FUNC void *fio_udata_set(fio_s *io, void *udata);
+FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata);
 
 /** Returns the `udata` pointer associated with the IO. */
-SRV_FUNC void *fio_udata_get(fio_s *io);
+FIO_IFUNC void *fio_udata_get(fio_s *io);
 
 /** Associates a new `tls` pointer with the IO, returning the old `tls` */
-SRV_FUNC void *fio_tls_set(fio_s *io, void *tls);
+FIO_IFUNC void *fio_tls_set(fio_s *io, void *tls);
 
 /** Returns the `tls` pointer associated with the IO. */
-SRV_FUNC void *fio_tls_get(fio_s *io);
+FIO_IFUNC void *fio_tls_get(fio_s *io);
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SRV_FUNC int fio_fd_get(fio_s *io);
+SFUNC int fio_fd_get(fio_s *io);
 
 /* Resets a socket's timeout counter. */
-SRV_FUNC void fio_touch(fio_s *io);
+SFUNC void fio_touch(fio_s *io);
 
 /**
  * Reads data to the buffer, if any data exists. Returns the number of bytes
@@ -151,7 +151,7 @@ SRV_FUNC void fio_touch(fio_s *io);
  *
  * NOTE: zero (`0`) is a valid return value meaning no data was available.
  */
-SRV_FUNC size_t fio_read(fio_s *io, void *buf, size_t len);
+SFUNC size_t fio_read(fio_s *io, void *buf, size_t len);
 
 typedef struct {
   /** The buffer with the data to send (if no file descriptor) */
@@ -175,7 +175,7 @@ typedef struct {
 /**
  * Writes data to the outgoing buffer and schedules the buffer to be sent.
  */
-SRV_FUNC void fio_write2(fio_s *io, fio_write_args_s args);
+SFUNC void fio_write2(fio_s *io, fio_write_args_s args);
 #define fio_write2(io, ...) fio_write2(io, (fio_write_args_s){__VA_ARGS__})
 
 /** Helper macro for a common fio_write2 (copies the buffer). */
@@ -203,37 +203,41 @@ SRV_FUNC void fio_write2(fio_s *io, fio_write_args_s args);
              .len = (bytes))
 
 /** Marks the IO for closure as soon as scheduled data was sent. */
-SRV_FUNC void fio_close(fio_s *io);
+SFUNC void fio_close(fio_s *io);
 
 /** Marks the IO for immediate closure. */
-SRV_FUNC void fio_close_now(fio_s *io);
+SFUNC void fio_close_now(fio_s *io);
 
 /**
  * Increases a IO's reference count, so it won't be automatically destroyed
  * when all tasks have completed.
  *
  * Use this function in order to use the IO outside of a scheduled task.
+ *
+ * This function is thread-safe.
  */
-SRV_FUNC fio_s *fio_dup(fio_s *io);
+SFUNC fio_s *fio_dup(fio_s *io);
 
 /**
  * Decreases a IO's reference count, so it could be automatically destroyed
  * when all other tasks have completed.
  *
  * Use this function once finished with a IO that was `dup`-ed.
+ *
+ * This function is thread-safe.
  */
-SRV_FUNC void fio_undup(fio_s *io);
+SFUNC void fio_undup(fio_s *io);
 
 /** Suspends future "on_data" events for the IO. */
-SRV_FUNC void fio_suspend(fio_s *io);
+SFUNC void fio_suspend(fio_s *io);
 /** Listens for future "on_data" events related to the IO. */
-SRV_FUNC void fio_unsuspend(fio_s *io);
+SFUNC void fio_unsuspend(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
 ***************************************************************************** */
 
-/** Schedules a task for delayed execution. */
+/** Schedules a task for delayed execution. This function is thread-safe. */
 void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
 
 /**************************************************************************/ /**
@@ -253,25 +257,19 @@ incorrect clients (possible `fd` "recycling").
 struct fio_protocol_s {
   /**
    * Reserved / private data - used by facil.io internally.
-   * MUST be initialized to zero
+   * MUST be initialized to zero.
    */
   struct {
-    /* A linked list of currently attached IOs - do NOT alter. */
+    /* A linked list of currently attached IOs (ordered) - do NOT alter. */
     FIO_LIST_HEAD ios;
     /* A linked list of other protocols used by IO core - do NOT alter. */
     FIO_LIST_NODE protocols;
     /* internal flags - do NOT alter after initial initialization to zero. */
     uintptr_t flags;
   } reserved;
-  /**
-   * Called when an IO was attached. Locks the IO's task lock.
-   *
-   * Note: this is scheduled when setting the protocol, but depending on race
-   * conditions, the previous protocol, and the socket's state, it may run after
-   * the `on_ready` or `on_data` are called.
-   * */
+  /** Called when an IO is attached to a protocol. */
   void (*on_attach)(fio_s *io);
-  /** Called when a data is available. Locks the IO's task lock. */
+  /** Called when a data is available. */
   void (*on_data)(fio_s *io);
   /** called once all pending `fio_write` calls are finished. */
   void (*on_ready)(fio_s *io);
@@ -283,8 +281,6 @@ struct fio_protocol_s {
    * Called when the server is shutting down, immediately before closing the
    * connection.
    *
-   * Performed within the IO's task lock.
-   *
    * After the `on_shutdown` callback returns, the socket is marked for closure.
    *
    * Once the socket was marked for closure, facil.io will allow a limited
@@ -295,7 +291,7 @@ struct fio_protocol_s {
   /** Called when a connection's timeout was reached */
   void (*on_timeout)(fio_s *io);
   /**
-   * Defines Transport Later callbacks that facil.io will treat as non-blocking
+   * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls
    * */
   struct {
@@ -317,66 +313,43 @@ struct fio_protocol_s {
   uint32_t timeout;
 };
 /* *****************************************************************************
-
-
-
-
-
-
-
-
-
-
-
-                                                                Implementation
-
-
-
-
-
-
-
-
-
-
-
+Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
-#if defined(FIO_SERVER_EXTERN_IMP) && FIO_SERVER_EXTERN_IMP
+/** Associates a new `udata` pointer with the IO, returning the old `udata` */
+FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata) {
+  void *old = ((void **)io)[0];
+  ((void **)io)[0] = udata;
+  return old;
+}
 
-#define FIO_MEMORY_NAME srvmem
-#include "fio-stl.h"
-#undef FIO_MEM_REALLOC
-#undef FIO_MEM_FREE
-#undef FIO_MEM_REALLOC_IS_SAFE
-#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
-  srvmem_realloc2((ptr), (new_size), (copy_len))
-#define FIO_MEM_FREE(ptr, size) srvmem_free((ptr))
-#define FIO_MEM_REALLOC_IS_SAFE srvmem_realloc_is_safe()
+/** Returns the `udata` pointer associated with the IO. */
+FIO_IFUNC void *fio_udata_get(fio_s *io) { return ((void **)io)[0]; }
 
-#define FIO_STREAM
-#define FIO_POLL
-#include "fio-stl.h"
+/** Associates a new `tls` pointer with the IO, returning the old `tls` */
+FIO_IFUNC void *fio_tls_set(fio_s *io, void *tls) {
+  void *old = ((void **)io)[1];
+  ((void **)io)[1] = tls;
+  return old;
+}
+
+/** Returns the `tls` pointer associated with the IO. */
+FIO_IFUNC void *fio_tls_get(fio_s *io) { return ((void **)io)[1]; }
 
 /* *****************************************************************************
-IO Registry - NOT thread safe (access from IO core thread only)
+Simple Server Implementation - possibly externed functions.
 ***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
 
-#ifndef FIO_SRV_VALIDATE_IO
-#define FIO_SRV_VALIDATE_IO 0
-#endif
+/*
+REMEMBER:
+========
 
-#ifndef FIO_SRV_BUFFER_PER_WRITE
-#define FIO_SRV_BUFFER_PER_WRITE 65536U
-#endif
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
 
-#ifndef FIO_SRV_THROTTLE_LIMIT
-#define FIO_SRV_THROTTLE_LIMIT 2097152U
-#endif
-
-#ifndef FIO_SRV_TIMEOUT_MAX
-#define FIO_SRV_TIMEOUT_MAX 300
-#endif
+*/
 
 /* *****************************************************************************
 Protocol validation
@@ -519,11 +492,12 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE(&io->pr->reserved.protocols);
 }
-
+#define FIO_STL_KEEP__     1
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#include "fio-stl.h"
+#include __FILE__
+#undef FIO_STL_KEEP__
 
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
@@ -540,7 +514,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
 }
 
 /** Sets a new protocol object, returning the old protocol. */
-SRV_FUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
+SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   if (!pr)
     pr = &MOCK_PROTOCOL;
   fio_protocol_s *old = io->pr;
@@ -548,18 +522,19 @@ SRV_FUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
     return NULL;
   fio___srv_init_protocol_test(pr);
   io->pr = pr;
+  // fio_queue_push(fio___srv_tasks, fio___protocol_set_task, io, old);
   fio___protocol_set_task((void *)io, (void *)old);
   return old;
 }
 
 /** Returns a pointer to the current protocol object. */
-SRV_FUNC fio_protocol_s *fio_protocol_get(fio_s *io) { return io->pr; }
+SFUNC fio_protocol_s *fio_protocol_get(fio_s *io) { return io->pr; }
 
 /* Attaches the socket in `fd` to the facio.io engine (reactor). */
-SRV_FUNC fio_s *fio_attach_fd(int fd,
-                              fio_protocol_s *protocol,
-                              void *udata,
-                              void *tls) {
+SFUNC fio_s *fio_attach_fd(int fd,
+                           fio_protocol_s *protocol,
+                           void *udata,
+                           void *tls) {
   if (fd == -1)
     return NULL;
   if (!protocol)
@@ -582,7 +557,7 @@ SRV_FUNC fio_s *fio_attach_fd(int fd,
  * Increases a IO's reference count, so it won't be automatically destroyed
  * when all tasks have completed.
  */
-SRV_FUNC fio_s *fio_dup(fio_s *io) { return fio_dup2(io); }
+SFUNC fio_s *fio_dup(fio_s *io) { return fio_dup2(io); }
 
 static void fio_undup_task(void *io, void *ignr_) {
   (void)ignr_;
@@ -592,7 +567,7 @@ static void fio_undup_task(void *io, void *ignr_) {
  * Decreases a IO's reference count, so it could be automatically destroyed
  * when all other tasks have completed.
  */
-SRV_FUNC void fio_undup(fio_s *io) {
+SFUNC void fio_undup(fio_s *io) {
   fio_queue_push(fio___srv_tasks, fio_undup_task, io);
 }
 
@@ -746,7 +721,7 @@ static void fio___srv_signal_handle(int sig, void *flg) {
   (void)sig;
 }
 
-SRV_FUNC void fio_srv_tick(int timeout) {
+SFUNC void fio_srv_tick(int timeout) {
   fio_poll_review(&fio___srvdata.fds, timeout);
   fio___srvdata.tick = fio_time_milli();
   fio_queue_perform_all(fio___srv_tasks);
@@ -754,7 +729,7 @@ SRV_FUNC void fio_srv_tick(int timeout) {
     fio_queue_perform_all(fio___srv_tasks);
 }
 
-SRV_FUNC void fio_srv_shutdown(void) {
+SFUNC void fio_srv_shutdown(void) {
   int64_t shutting_down = fio___srvdata.tick = fio_time_milli();
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
@@ -780,7 +755,7 @@ SRV_FUNC void fio_srv_shutdown(void) {
   fio_queue_destroy(fio___srv_tasks);
 }
 
-SRV_FUNC void fio_srv_run(void) {
+SFUNC void fio_srv_run(void) {
   volatile uint8_t stop = 0;
   fio_sock_maximize_limits();
   fio_signal_monitor(SIGINT, fio___srv_signal_handle, (void *)&stop);
@@ -806,31 +781,11 @@ SRV_FUNC void fio_srv_run(void) {
 IO API
 ***************************************************************************** */
 
-/** Associates a new `udata` pointer with the IO, returning the old `udata` */
-SRV_FUNC void *fio_udata_set(fio_s *io, void *udata) {
-  void *old = io->udata;
-  io->udata = udata;
-  return old;
-}
-
-/** Returns the `udata` pointer associated with the IO. */
-SRV_FUNC void *fio_udata_get(fio_s *io) { return io->udata; }
-
-/** Associates a new `tls` pointer with the IO, returning the old `tls` */
-SRV_FUNC void *fio_tls_set(fio_s *io, void *tls) {
-  void *old = io->tls;
-  io->tls = tls;
-  return old;
-}
-
-/** Returns the `tls` pointer associated with the IO. */
-SRV_FUNC void *fio_tls_get(fio_s *io) { return io->tls; }
-
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SRV_FUNC int fio_fd_get(fio_s *io) { return io->fd; }
+SFUNC int fio_fd_get(fio_s *io) { return io->fd; }
 
 /* Resets a socket's timeout counter. */
-SRV_FUNC void fio_touch(fio_s *io) {
+SFUNC void fio_touch(fio_s *io) {
   io->active = fio___srvdata.tick;
   FIO_LIST_REMOVE(&io->node);
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
@@ -842,7 +797,7 @@ SRV_FUNC void fio_touch(fio_s *io) {
  *
  * NOTE: zero (`0`) is a valid return value meaning no data was available.
  */
-SRV_FUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
+SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
   ssize_t r = io->pr->io_functions.read(io->fd, buf, len, io->tls);
   if (r > 0) {
     fio_touch(io);
@@ -858,7 +813,7 @@ SRV_FUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
 /**
  * Writes data to the outgoing buffer and schedules the buffer to be sent.
  */
-SRV_FUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
+SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   fio_stream_packet_s *packet = NULL;
   if (args.buf) {
     packet = fio_stream_pack_data(args.buf,
@@ -892,7 +847,7 @@ io_error:
 }
 
 /** Marks the IO for closure as soon as scheduled data was sent. */
-SRV_FUNC void fio_close(fio_s *io) {
+SFUNC void fio_close(fio_s *io) {
   if (io && (io->state & FIO_STATE_OPEN) &&
       !(fio_atomic_or(&io->state, FIO_STATE_CLOSING) & FIO_STATE_CLOSING)) {
     FIO_LOG_DDEBUG2("scheduling IO %p (fd %d) for closure", (void *)io, io->fd);
@@ -903,7 +858,7 @@ SRV_FUNC void fio_close(fio_s *io) {
 }
 
 /** Marks the IO for immediate closure. */
-SRV_FUNC void fio_close_now(fio_s *io) {
+SFUNC void fio_close_now(fio_s *io) {
   io->state |= FIO_STATE_CLOSING;
   fio_stream_destroy(&io->stream);
   fio_queue_push(fio___srv_tasks,
@@ -914,9 +869,9 @@ SRV_FUNC void fio_close_now(fio_s *io) {
 }
 
 /** Suspends future "on_data" events for the IO. */
-SRV_FUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
 /** Listens for future "on_data" events related to the IO. */
-SRV_FUNC void fio_unsuspend(fio_s *io) {
+SFUNC void fio_unsuspend(fio_s *io) {
   if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) & FIO_STATE_SUSPENDED))
     fio_poll_monitor(&fio___srvdata.fds, io->fd, (void *)io, POLLIN);
 }
@@ -937,7 +892,7 @@ static void fio___srv_listen_on_close(void *settings_) {
   if (s->on_finish)
     s->on_finish(s->udata);
   FIO_LOG_DEBUG2("Stopped listening on %s", s->url);
-  free(s);
+  FIO_MEM_FREE_(s, sizeof(*s) + strlen(s->url) + 1);
 }
 static void fio___srv_listen_on_timeout(fio_s *io) { fio_touch(io); }
 
@@ -947,21 +902,21 @@ static fio_protocol_s FIO___LISTEN_PROTOCOL = {
     .on_timeout = fio___srv_listen_on_timeout,
 };
 
-SRV_FUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
+SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   static int64_t port = 3000;
   if (!args.on_open) {
     FIO_LOG_ERROR("fio_listen missing `on_open` callback.");
     return -1;
   }
-  size_t len = args.url ? strlen(args.url) : 0;
+  size_t len = args.url ? strlen(args.url) + 1 : 0;
   len += (!len) << 4;
-  struct fio_listen_args *cpy =
-      (struct fio_listen_args *)malloc(sizeof(*cpy) + len);
+  struct fio_listen_args *cpy = (struct fio_listen_args *)
+      FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + len), 0);
   FIO_ASSERT_ALLOC(cpy);
   *cpy = args;
   cpy->url = (char *)(cpy + 1);
   if (args.url) {
-    FIO_MEMCPY((void *)(cpy->url), args.url, len + 1);
+    FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
     FIO_MEMCPY((void *)(cpy->url), "0.0.0.0:", 8);
     ((char *)(cpy->url))[fio_ltoa((char *)(cpy->url) + 8, (port++), 10) + 8] =
@@ -972,9 +927,9 @@ SRV_FUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (fd == -1)
     goto fd_error;
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
-fd_error:
   return 0;
-  free(cpy);
+fd_error:
+  FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
   return -1;
 }
 
@@ -989,5 +944,21 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srvdata.tick = fio_time_milli();
 }
 
-#endif /* FIO_SERVER_EXTERN_IMP */
-#endif /* H___SERVER___H */
+/* *****************************************************************************
+Simple Server Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
+  /*
+   * test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Simple Server Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_SERVER
+#endif /* FIO_SERVER */

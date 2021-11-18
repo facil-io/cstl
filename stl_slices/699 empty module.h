@@ -25,7 +25,7 @@ Feel free to copy, use and enjoy according to the license provided.
 /* *****************************************************************************
 Module Settings
 
-At this point, define any MACROs and customaizable settings avsailable to the
+At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
@@ -79,7 +79,7 @@ REMEMBER:
 
 All memory allocations should use:
 * FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+* FIO_MEM_FREE_(ptr, size)
 
 */
 
@@ -116,7 +116,7 @@ REMEMBER:
 
 All memory allocations should use:
 * FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size) fio_free((ptr))
+* FIO_MEM_FREE_(ptr, size)
 
 */
 
@@ -150,5 +150,5 @@ Module Cleanup
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_MODULE_PTR
-#endif /* FIO_MODULE_NAME */
 #undef FIO_MODULE_NAME
+#endif /* FIO_MODULE_NAME */

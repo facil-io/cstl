@@ -999,6 +999,14 @@ Common macros
 #endif
 #endif /* FIO_MALLOC */
 
+/* Modules required by FIO_SERVER */
+#if defined(FIO_SERVER)
+#define FIO_POLL
+#define FIO_STREAM
+#define FIO_QUEUE
+#define FIO_SIGNAL
+#endif
+
 /* Modules that require FIO_SOCK */
 #if defined(FIO_POLL)
 #define FIO_SOCK

@@ -63,13 +63,13 @@ Memory Allocation - fast setup for a global allocator
 
 /* prevent double declaration of FIO_MALLOC */
 #define H___FIO_MALLOC___H
-#endif
 #undef FIO_MALLOC
+#endif
 
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
-#ifdef FIO_MEMORY_NAME
+#if defined(FIO_MEMORY_NAME) && !defined(FIO_STL_KEEP__)
 
 #undef FIO_MEM_ALIGN
 #undef FIO_MEM_ALIGN_NEW
