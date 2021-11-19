@@ -3770,7 +3770,13 @@ If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK
 
 A simple server - `poll` based, evented and single-threaded - is included when `FIO_SERVER` is defined.
 
-This will automatically include the API and features provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
+All API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for `fio_defer`, `fio_dup`, `fio_undup`, and `fio_udata_get`.
+
+These few thread-safe functions allow IO event handling to be handled by external threads before `fio_defer` is used to return the control flow to the server's thread.
+
+i.e., `fio_dup` the IO handle, forward the info to an external thread (possibly using a queue), then call `fio_defer` to schedule a task where all of the server's API is available. Remember to `fio_undup` when done with the IO handle.
+
+Note: this will automatically include the API and features provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
 ### `FIO_SERVER` API
 
@@ -4022,18 +4028,14 @@ Schedules a task for delayed execution. This function is thread-safe.
 
 ### `fio_protocol_s`
 
+The Protocol struct defines the callbacks used for a family of connections and sets their behavior. The Protocol struct is part of facil.io's core design both for the Simple Server and the fully featured IO library.
+
+Protocols are usually global objects and the same protocol can be assigned to multiple IO handles.
+
+All the callbacks receive an IO handle (except `on_close`), which is used instead of the system's file descriptor and protects callbacks and IO operations from sending data to incorrect clients (possible `fd` "recycling").
+
+
 ```c
-
-The Protocol struct defines the callbacks used for a family of connections and
-sets their behavior. The Protocol struct is part of facil.io's core design.
-
-Protocols are usually global objects and the same protocol can be assigned to
-multiple IO handles.
-
-All the callbacks receive a IO handle, which is used instead of the system's
-file descriptor and protects callbacks and IO operations from sending data to
-incorrect clients (possible `fd` "recycling").
-*/
 struct fio_protocol_s {
   /**
    * Reserved / private data - used by facil.io internally.
