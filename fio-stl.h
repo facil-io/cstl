@@ -16423,7 +16423,10 @@ Task Scheduling
 ***************************************************************************** */
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
-void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
+SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
+
+/** Returns the last millisecond when the server reviewed pending IO events. */
+SFUNC int64_t fio_last_tick(void);
 
 /**************************************************************************/ /**
 The Protocol
@@ -16617,6 +16620,14 @@ static struct {
 };
 
 static fio_queue_s fio___srv_tasks[1];
+
+/** Returns the last millisecond when the server reviewed pending IO events. */
+SFUNC int64_t fio_last_tick(void) { return fio___srvdata.tick; }
+
+/** Schedules a task for delayed execution. This function is thread-safe. */
+SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2) {
+  fio_queue_push(fio___srv_tasks, task, udata1, udata2);
+}
 
 /* *****************************************************************************
 IO objects

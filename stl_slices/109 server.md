@@ -4,11 +4,11 @@ A simple server - `poll` based, evented and single-threaded - is included when `
 
 All API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for `fio_defer`, `fio_dup`, `fio_undup`, and `fio_udata_get`.
 
-These few thread-safe functions allow IO event handling to be handled by external threads before `fio_defer` is used to return the control flow to the server's thread.
+To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any information to an external thread (possibly using a queue), then call `fio_defer` to schedule a task where a response can be written to the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new events from occurring.
 
-i.e., `fio_dup` the IO handle, forward the info to an external thread (possibly using a queue), then call `fio_defer` to schedule a task where all of the server's API is available. Remember to `fio_undup` when done with the IO handle.
+**Note**: the `poll` system call becomes slow with only a few thousand sockets... if you expect thousands or more concurrent connections, please use the facil.io IO library (that uses `epoll` / `kqueue`).
 
-Note: this will automatically include the API and features provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
+**Note**: this will automatically include the API and features provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
 ### `FIO_SERVER` API
 
