@@ -14,11 +14,11 @@ Helper types
 #include "fio-stl.h"
 #define FIO_STR_NAME lstr
 #include "fio-stl.h"
-#define FIO_ARRAY_NAME sary
-#define FIO_ARRAY_TYPE lstr_s
-#define FIO_ARRAY_TYPE_CMP(a, b) lstr_is_eq(&(a), &(b))
-#define FIO_ARRAY_TYPE_COPY(a, b) lstr_init_copy2(&(a), &(b))
-#define FIO_ARRAY_TYPE_DESTROY(s) lstr_destroy(&(s))
+#define FIO_ARRAY_NAME                sary
+#define FIO_ARRAY_TYPE                lstr_s
+#define FIO_ARRAY_TYPE_CMP(a, b)      lstr_is_eq(&(a), &(b))
+#define FIO_ARRAY_TYPE_COPY(a, b)     lstr_init_copy2(&(a), &(b))
+#define FIO_ARRAY_TYPE_DESTROY(s)     lstr_destroy(&(s))
 #define FIO_ARRAY_TYPE_INVALID_SIMPLE 1
 #include "fio-stl.h"
 
@@ -75,14 +75,14 @@ FIO_IFUNC void arystr_destroy(arystr_s *a) {
   }
 }
 
-#define FIO_MAP_NAME smap
-#define FIO_MAP_TYPE lstr_s
+#define FIO_MAP_NAME            smap
+#define FIO_MAP_TYPE            lstr_s
 #define FIO_MAP_TYPE_COPY(a, b) lstr_init_copy2(&(a), &(b))
-#define FIO_MAP_TYPE_DESTROY(o) lstr_destroy(&(s))
-#define FIO_MAP_KEY sstr_s
-#define FIO_MAP_KEY_CMP(a, b) sstr_is_eq(&(a), &(b))
-#define FIO_MAP_KEY_COPY(a, b) sstr_init_copy2(&(a), &(b))
-#define FIO_MAP_KEY_DESTROY(s) sstr_destroy(&(s))
+#define FIO_MAP_TYPE_DESTROY(o) lstr_destroy(&(o))
+#define FIO_MAP_KEY             sstr_s
+#define FIO_MAP_KEY_CMP(a, b)   sstr_is_eq(&(a), &(b))
+#define FIO_MAP_KEY_COPY(a, b)  sstr_init_copy2(&(a), &(b))
+#define FIO_MAP_KEY_DESTROY(s)  sstr_destroy(&(s))
 #include "fio-stl.h"
 
 FIO_IFUNC lstr_s *smap_set2(smap_s *map,
@@ -104,23 +104,23 @@ FIO_IFUNC fio_str_info_s smap_get2(smap_s *map, fio_str_info_s key) {
   return lstr_info(smap_get_ptr(map, h, k));
 }
 
-#define FIO_MAP_NAME hmap
-#define FIO_MAP_TYPE arystr_s
+#define FIO_MAP_NAME            hmap
+#define FIO_MAP_TYPE            arystr_s
 #define FIO_MAP_TYPE_COPY(a, b) arystr_copy(&(a), &(b))
 #define FIO_MAP_TYPE_DESTROY(o) arystr_destroy(&(o))
-#define FIO_MAP_KEY sstr_s
-#define FIO_MAP_KEY_CMP(a, b) sstr_is_eq(&(a), &(b))
-#define FIO_MAP_KEY_COPY(a, b) sstr_init_copy2(&(a), &(b))
-#define FIO_MAP_KEY_DESTROY(s) sstr_destroy(&(s))
+#define FIO_MAP_KEY             sstr_s
+#define FIO_MAP_KEY_CMP(a, b)   sstr_is_eq(&(a), &(b))
+#define FIO_MAP_KEY_COPY(a, b)  sstr_init_copy2(&(a), &(b))
+#define FIO_MAP_KEY_DESTROY(o)  sstr_destroy(&(o))
 #include "fio-stl.h"
 
-FIO_IFUNC lstr_s *
-hmap_set2(hmap_s *map, fio_str_info_s key, fio_str_info_s val) {
+FIO_IFUNC lstr_s *hmap_set2(hmap_s *map,
+                            fio_str_info_s key,
+                            fio_str_info_s val) {
   lstr_s *r = NULL;
   arystr_s v = {0};
   arystr_s *o = NULL;
   sstr_s k = {0};
-  lstr_s *tmp;
   sstr_init_const(&k, key.buf, key.len);
   lstr_init_const(&v.u.str, val.buf, val.len);
   if (!key.buf || !key.len)
@@ -183,11 +183,11 @@ struct http_s {
   } body;
 };
 
-#define HTTP_STATE_FINISHED 1
-#define HTTP_STATE_STREAMING 2
+#define HTTP_STATE_FINISHED       1
+#define HTTP_STATE_STREAMING      2
 #define HTTP_STATE_COOKIES_PARSED 4
 
-#define HTTP_HDR_REQUEST(h) (h->headers + 0)
+#define HTTP_HDR_REQUEST(h)  (h->headers + 0)
 #define HTTP_HDR_RESPONSE(h) (h->headers + 1)
 
 #ifndef HTTP_BODY_RAM_LIMIT
@@ -199,31 +199,36 @@ FIO_IFUNC int64_t http_get_timestump(void) { return fio_time_milli(); }
 #else
 int64_t fio_last_tick(void);
 FIO_IFUNC uint64_t http_get_timestump(void) { return (int64_t)fio_last_tick(); }
-
 #endif
+
+void http_destroy(http_s *h) {
+  if (h->controller)
+    h->controller->on_unlinked(h, h->cdata);
+  sstr_destroy(&h->method);
+  sstr_destroy(&h->path);
+  sstr_destroy(&h->query);
+  sstr_destroy(&h->version);
+  hmap_destroy(h->headers);
+  hmap_destroy(h->headers + 1);
+  smap_destroy(h->cookies);
+  smap_destroy(h->cookies + 1);
+  FIO_MEM_FREE(h->body.buf, h->body.capa);
+  if (h->body.fd != -1)
+    close(h->body.fd);
+  *h = (http_s){.received_at = http_get_timestump(), .body.fd = -1};
+}
 
 #define FIO_REF_NAME http
 #define FIO_REF_INIT(h)                                                        \
   h = (http_s) { .received_at = http_get_timestump(), .body.fd = -1 }
-#define FIO_REF_DESTROY(h)                                                     \
-  do {                                                                         \
-    if (h->controller)                                                         \
-      h->controller->on_unlinked(h, h->cdata);                                 \
-    sstr_destroy(&h.method);                                                   \
-    sstr_destroy(&h.path);                                                     \
-    sstr_destroy(&h.query);                                                    \
-    sstr_destroy(&h.version);                                                  \
-    fio_free(h.body.buf);                                                      \
-    if (h.body.fd != -1)                                                       \
-      close(h.body.fd);                                                        \
-  } while (0);
+#define FIO_REF_DESTROY(h) http_destroy(&(h))
 #include "fio-stl.h"
 
 /** Create a new http_s handle. */
 http_s *http_new(void) { return http_new2(); }
 
 /** Reduces an http_s handle's reference count or frees it. */
-void http_free(http_s *h) { return http_free2(h); }
+void http_free(http_s *h) { http_free2(h); }
 
 /** Increases an http_s handle's reference count. */
 http_s *http_dup(http_s *h) { return http_dup2(h); }
@@ -247,8 +252,9 @@ FIO_SFUNC int mock_c_start_request(http_s *h, int streaming) {
   (void)h;
   (void)streaming;
 }
-FIO_SFUNC void
-mock_c_write_header(http_s *h, fio_str_info_s name, fio_str_info_s value) {
+FIO_SFUNC void mock_c_write_header(http_s *h,
+                                   fio_str_info_s name,
+                                   fio_str_info_s value) {
   (void)h;
   (void)name;
   (void)value;
@@ -331,16 +337,19 @@ Header data management
  * An empty value is returned if no header value is available (or index is
  * exceeded).
  */
-fio_str_info_s
-http_request_header_get(http_s *h, fio_str_info_s name, size_t index);
+fio_str_info_s http_request_header_get(http_s *h,
+                                       fio_str_info_s name,
+                                       size_t index);
 
 /** Sets the header information associated with the HTTP handle. */
-fio_str_info_s
-http_request_header_set(http_s *h, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_request_header_set(http_s *h,
+                                       fio_str_info_s name,
+                                       fio_str_info_s value);
 
 /** Adds to the header information associated with the HTTP handle. */
-fio_str_info_s
-http_request_header_add(http_s *h, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_request_header_add(http_s *h,
+                                       fio_str_info_s name,
+                                       fio_str_info_s value);
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
 size_t http_request_header_each(http_s *h,
@@ -362,8 +371,9 @@ size_t http_request_header_each(http_s *h,
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_get(http_s *, fio_str_info_s name, size_t index);
+fio_str_info_s http_response_header_get(http_s *,
+                                        fio_str_info_s name,
+                                        size_t index);
 
 /**
  * Sets the header information associated with the HTTP handle.
@@ -371,8 +381,9 @@ http_response_header_get(http_s *, fio_str_info_s name, size_t index);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_set(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_response_header_set(http_s *,
+                                        fio_str_info_s name,
+                                        fio_str_info_s value);
 
 /**
  * Adds to the header information associated with the HTTP handle.
@@ -380,8 +391,9 @@ http_response_header_set(http_s *, fio_str_info_s name, fio_str_info_s value);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_add(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_response_header_add(http_s *,
+                                        fio_str_info_s name,
+                                        fio_str_info_s value);
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
 size_t http_response_header_each(http_s *,
@@ -428,10 +440,12 @@ fio_str_info_s http_body_read(http_s *h, size_t length) {
 
 body_is_a_file:
   if (h->body.capa <= length) {
+    size_t __attribute__((unused)) old_capa = h->body.capa;
     h->body.capa = (length + (!(length & 15)) + 15) & (~(size_t)15);
-    void *tmp = fio_realloc2(h->body.buf, h->body.capa, 0);
+    void *tmp = FIO_MEM_REALLOC(h->body.buf, old_capa, h->body.capa, 0);
     FIO_ASSERT_ALLOC(tmp);
     h->body.buf = tmp;
+    (void)old_capa;
   }
   ssize_t actual = read(h->body.fd, h->body.buf, length);
   if (actual <= 0)
@@ -477,7 +491,7 @@ void http_body_expect(http_s *h, size_t expect) {
     return;
   h->body.capa = (expect + (!(expect & 15)) + 15) & (~(size_t)15);
   if (expect <= HTTP_BODY_RAM_LIMIT) {
-    h->body.buf = fio_malloc(h->body.capa);
+    h->body.buf = FIO_MEM_REALLOC(NULL, 0, h->body.capa, 0);
     FIO_ASSERT_ALLOC(h->body.buf);
     return;
   }
@@ -498,7 +512,8 @@ void http_body_write(http_s *h, const void *data, size_t len) {
     if (required > HTTP_BODY_RAM_LIMIT)
       goto move2file;
     if (h->body.capa <= required) {
-      void *tmp = fio_realloc2(h->body.buf, required, h->body.len);
+      void *tmp =
+          FIO_MEM_REALLOC(h->body.buf, h->body.capa, required, h->body.len);
       FIO_ASSERT_ALLOC(tmp);
       h->body.buf = tmp;
       h->body.capa = required;
@@ -523,7 +538,7 @@ move2file:
   h->body.len = 0;
   http_body_write(h, h->body.buf, h->body.capa);
   http_body_write(h, data, len);
-  fio_free(h->body.buf);
+  FIO_MEM_FREE(h->body.buf, h->body.capa);
   h->body.buf = NULL;
   h->body.capa = 0;
   return;
@@ -750,8 +765,10 @@ size_t http_cookie_each(http_s *h,
   size_t i = 0;
   FIO_MAP_EACH(smap, h->cookies, pos) {
     ++i;
-    if (callback(
-            h, sstr_info(&pos->obj.key), lstr_info(&pos->obj.value), udata))
+    if (callback(h,
+                 sstr_info(&pos->obj.key),
+                 lstr_info(&pos->obj.value),
+                 udata))
       return i;
   }
   return i;
@@ -898,7 +915,7 @@ void http_test FIO_NOOP(void) {
   http_s *h = http_new();
   FIO_ASSERT_ALLOC(h);
   { /* test status */
-    int old_status = http_status_get(h);
+    size_t old_status = http_status_get(h);
     http_status_set(h, ++old_status);
     FIO_ASSERT(http_status_get(h) == old_status, "status set round-trip error");
   }
@@ -920,8 +937,9 @@ void http_test FIO_NOOP(void) {
                "query set round-trip error");
     FIO_ASSERT(http_query_get(h).buf != url.query.buf, "query copy error");
     /* host header */
-    http_request_header_add(
-        h, (fio_str_info_s){"host", 4}, FIO_BUF2STR_INFO(url.host));
+    http_request_header_add(h,
+                            (fio_str_info_s){"host", 4},
+                            FIO_BUF2STR_INFO(url.host));
     FIO_ASSERT(
         http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).len ==
                 url.host.len &&

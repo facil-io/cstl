@@ -54,17 +54,17 @@ typedef struct http_controller_s {
   /* MUST be initialized to zero, used internally by the HTTP Handle. */
   uintptr_t private_flags;
   /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-  void(on_unlinked)(http_s *h, void *cdata);
+  void (*on_unlinked)(http_s *h, void *cdata);
   /** Informs the controller that a response is starting. */
-  int(start_response)(http_s *h, int status, int streaming);
+  int (*start_response)(http_s *h, int status, int streaming);
   /** Informs the controller that a request is starting. */
-  int(start_request)(http_s *h, int streaming);
+  int (*start_request)(http_s *h, int streaming);
   /** called by the HTTP handle for each header. */
-  void(write_header)(http_s *h, fio_str_info_s name, fio_str_info_s value);
+  void (*write_header)(http_s *h, fio_str_info_s name, fio_str_info_s value);
   /** Informs the controller that all headers were provided. */
-  void(finish_headers)(http_s *h);
+  void (*finish_headers)(http_s *h);
   /** called by the HTTP handle for each body chunk (or to finish a response. */
-  void(write_body)(http_s *h, http_write_args_s args);
+  void (*write_body)(http_s *h, http_write_args_s args);
 } http_controller_s;
 
 /* *****************************************************************************
@@ -147,16 +147,19 @@ fio_str_info_s http_version_set(http_s *, fio_str_info_s);
  * An empty value is returned if no header value is available (or index is
  * exceeded).
  */
-fio_str_info_s
-http_request_header_get(http_s *, fio_str_info_s name, size_t index);
+fio_str_info_s http_request_header_get(http_s *,
+                                       fio_str_info_s name,
+                                       size_t index);
 
 /** Sets the header information associated with the HTTP handle. */
-fio_str_info_s
-http_request_header_set(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_request_header_set(http_s *,
+                                       fio_str_info_s name,
+                                       fio_str_info_s value);
 
 /** Adds to the header information associated with the HTTP handle. */
-fio_str_info_s
-http_request_header_add(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_request_header_add(http_s *,
+                                       fio_str_info_s name,
+                                       fio_str_info_s value);
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
 size_t http_request_header_each(http_s *,
@@ -300,8 +303,9 @@ size_t http_status_set(http_s *, size_t status);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_get(http_s *, fio_str_info_s name, size_t index);
+fio_str_info_s http_response_header_get(http_s *,
+                                        fio_str_info_s name,
+                                        size_t index);
 
 /**
  * Sets the header information associated with the HTTP handle.
@@ -309,8 +313,9 @@ http_response_header_get(http_s *, fio_str_info_s name, size_t index);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_set(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_response_header_set(http_s *,
+                                        fio_str_info_s name,
+                                        fio_str_info_s value);
 
 /**
  * Adds to the header information associated with the HTTP handle.
@@ -318,8 +323,9 @@ http_response_header_set(http_s *, fio_str_info_s name, fio_str_info_s value);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s
-http_response_header_add(http_s *, fio_str_info_s name, fio_str_info_s value);
+fio_str_info_s http_response_header_add(http_s *,
+                                        fio_str_info_s name,
+                                        fio_str_info_s value);
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
 size_t http_response_header_each(http_s *,

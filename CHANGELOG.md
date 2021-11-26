@@ -41,6 +41,8 @@ This approach will make it easier for contributors to edit the code for these am
 
 - Risky Hash algorithm was updated.
 
+**Security**: Fixes a number of issues with the HTTP parser that could have been leveraged in potential exploit attempts such as request smuggling. Credit to @dcepelik (David Čepelík).
+
 **Compatibility**: (2021-07-14) The CSTL library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
 
 **Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( GitHub: @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).

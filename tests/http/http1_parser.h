@@ -39,19 +39,19 @@ Parser Settings
 #endif
 
 #ifndef FIO_MEMCHAR
-/** Prefer a custom memchr implementation. Usualy memchr is better. */
+/** Prefer a custom memchr implementation. Usually memchr is better. */
 #define FIO_MEMCHAR 0
 #endif
 
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 1
-#endif
-
 #ifndef HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED
-/** Peforms some optimizations assuming unaligned memory access is okay. */
+/** Preforms some optimizations assuming unaligned memory access is okay. */
 #define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
 
+#ifndef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
+/** The RFC doesn't allow this, but this parser can manage... probably... */
+#define HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER 0
+#endif
 /* *****************************************************************************
 Parser API
 ***************************************************************************** */
@@ -177,6 +177,9 @@ static int http1_on_error(http1_parser_s *parser);
 #define HTTP1_P_FLAG_CHUNKED         64
 #define HTTP1_P_FLAG_RESPONSE        128
 
+#ifdef __cplusplus
+#define _Bool bool
+#endif
 /* *****************************************************************************
 Seeking for characters in a string
 ***************************************************************************** */
@@ -279,7 +282,7 @@ Change a letter to lower case (latin only)
 ***************************************************************************** */
 
 static uint8_t http_tolower(uint8_t c) {
-  if (c >= 'A' && c <= 'Z')
+  if (((c >= 'A') & (c <= 'Z')))
     c |= 32;
   return c;
 }
@@ -435,8 +438,8 @@ start_version:
   return 0;
 }
 
-#ifndef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
-inline /* inline the function of it's short enough */
+#if !HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
+inline /* inline the function if it's short enough */
 #endif
     static int
     http1_consume_header_transfer_encoding(http1_parser_s *parser,
@@ -454,9 +457,9 @@ inline /* inline the function of it's short enough */
       (((uint32_t *)(start_value + 3))[0] | 0x20202020) ==
           ((uint32_t *)"nked")[0]
 #else
-      ((start_value[0] | 32) == 'c' && (start_value[1] | 32) == 'h' &&
-       (start_value[2] | 32) == 'u' && (start_value[3] | 32) == 'n' &&
-       (start_value[4] | 32) == 'k' && (start_value[5] | 32) == 'e' &&
+      ((start_value[0] | 32) == 'c' & (start_value[1] | 32) == 'h' &
+       (start_value[2] | 32) == 'u' & (start_value[3] | 32) == 'n' &
+       (start_value[4] | 32) == 'k' & (start_value[5] | 32) == 'e' &
        (start_value[6] | 32) == 'd')
 #endif
   ) {
@@ -469,9 +472,9 @@ inline /* inline the function of it's short enough */
     if (!(end - start_value))
       return 0;
   } else if ((end - start_value) > 7 &&
-             ((end[(-7 + 0)] | 32) == 'c' && (end[(-7 + 1)] | 32) == 'h' &&
-              (end[(-7 + 2)] | 32) == 'u' && (end[(-7 + 3)] | 32) == 'n' &&
-              (end[(-7 + 4)] | 32) == 'k' && (end[(-7 + 5)] | 32) == 'e' &&
+             ((end[(-7 + 0)] | 32) == 'c' & (end[(-7 + 1)] | 32) == 'h' &
+              (end[(-7 + 2)] | 32) == 'u' & (end[(-7 + 3)] | 32) == 'n' &
+              (end[(-7 + 4)] | 32) == 'k' & (end[(-7 + 5)] | 32) == 'e' &
               (end[(-7 + 6)] | 32) == 'd')) {
     /* simple case,`chunked` at the end of list (RFC required) */
     parser->state.reserved |= HTTP1_P_FLAG_CHUNKED;
@@ -482,7 +485,7 @@ inline /* inline the function of it's short enough */
     if (!(end - start_value))
       return 0;
   }
-#ifdef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER /* RFC diisallows this */
+#if HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER /* RFC disallows this */
   else if ((end - start_value) > 7 && (end - start_value) < 256) {
     /* complex case, `the, chunked, marker, is in the middle of list */
     uint8_t val[256];
@@ -582,8 +585,9 @@ inline static int http1_consume_header_top(http1_parser_s *parser,
   } else if ((end_name - start) == 17 && (end - start_value) >= 7 &&
              !parser->state.content_length &&
 #if HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED && HTTP_HEADERS_LOWERCASE
-             *((uint64_t *)start) == *((uint64_t *)"transfer") &&
-             *((uint64_t *)(start + 8)) == *((uint64_t *)"-encodin")
+             ((*((uint64_t *)start) == *((uint64_t *)"transfer")) &
+              ((*((uint64_t *)(start + 8)) == *((uint64_t *)"-encodin")) &
+               (start[16] == 'g')))
 #else
              HEADER_NAME_IS_EQ((char *)start, "transfer-encoding", 17)
 #endif
@@ -610,30 +614,29 @@ inline static int http1_consume_header_trailer(http1_parser_s *parser,
                                                uint8_t *end_name,
                                                uint8_t *start_value,
                                                uint8_t *end) {
-  if ((end_name - start) > 1 && start[0] == 'x') {
-    /* X- headers are allowed */
-    goto white_listed;
-  }
-
   /* white listed trailer names */
   const struct {
     char *name;
     long len;
-  } http1_trailer_white_list[] = {
-      {"server-timing", 13}, /* specific for client data... */
-      {NULL, 0},             /* end of list marker */
+  } http1_trailer_allowed_list[] = {
+      {(char *)"server-timing", 13}, /* specific for client data... */
+      {NULL, 0},                     /* end of list marker */
   };
-  for (size_t i = 0; http1_trailer_white_list[i].name; ++i) {
-    if ((long)(end_name - start) == http1_trailer_white_list[i].len &&
+  if ((end_name - start) > 1 && start[0] == 'x') {
+    /* X- headers are allowed */
+    goto allowed_list;
+  }
+  for (size_t i = 0; http1_trailer_allowed_list[i].name; ++i) {
+    if ((long)(end_name - start) == http1_trailer_allowed_list[i].len &&
         HEADER_NAME_IS_EQ((char *)start,
-                          http1_trailer_white_list[i].name,
-                          http1_trailer_white_list[i].len)) {
+                          http1_trailer_allowed_list[i].name,
+                          http1_trailer_allowed_list[i].len)) {
       /* header disallowed here */
-      goto white_listed;
+      goto allowed_list;
     }
   }
   return 0;
-white_listed:
+allowed_list:
   /* perform callback */
   if (http1_on_header(parser,
                       (char *)start,
@@ -647,22 +650,39 @@ white_listed:
 inline static int http1_consume_header(http1_parser_s *parser,
                                        uint8_t *start,
                                        uint8_t *end) {
+  static const _Bool forbidden_name_chars[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   uint8_t *end_name = start;
   /* divide header name from data */
   if (!seek2ch(&end_name, end, ':'))
     return -1;
   if (end_name[-1] == ' ' || end_name[-1] == '\t')
     return -1;
+  if (forbidden_name_chars[start[0] & 0xFF])
+    return -1;
 #if HTTP_HEADERS_LOWERCASE
-  for (uint8_t *t = start; t < end_name; t++) {
+  for (uint8_t *t = start; t < end_name; t++)
     *t = http_tolower(*t);
-  }
 #endif
   uint8_t *start_value = end_name + 1;
   // clear away leading white space from value.
   while (start_value < end &&
-         (start_value[0] == ' ' || start_value[0] == '\t')) {
+         ((start_value[0] == ' ') | (start_value[0] == '\t'))) {
     start_value++;
+  };
+  // clear away added white space from value.
+  while (start_value < end && ((end[0] == ' ') | (end[0] == '\t'))) {
+    end++;
   };
   return (parser->state.read ? http1_consume_header_trailer
                              : http1_consume_header_top)(parser,
@@ -714,7 +734,7 @@ inline static int http1_consume_body_chunked(http1_parser_s *parser,
       long long chunk_len = http1_atol16(end, (const uint8_t **)&end);
       if (end + 2 > stop) /* overflowed? */
         return 0;
-      if ((end[0] != '\r' || end[1] != '\n'))
+      if ((end[0] != '\r') | (end[1] != '\n') | (chunk_len < 0))
         return -1; /* required EOL after content length */
       end += 2;
 
@@ -724,16 +744,20 @@ inline static int http1_consume_body_chunked(http1_parser_s *parser,
         /* all chunked data was parsed */
         /* update content-length */
         parser->state.content_length = parser->state.read;
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
         { /* add virtual header ... ? */
           char buf[512];
           size_t buf_len = 512;
           size_t tmp_len = parser->state.read;
           buf[--buf_len] = 0;
-          while (tmp_len) {
-            size_t mod = tmp_len / 10;
-            buf[--buf_len] = '0' + (tmp_len - (mod * 10));
-            tmp_len = mod;
+          if (tmp_len) {
+            while (tmp_len) {
+              size_t mod = tmp_len / 10;
+              buf[--buf_len] = '0' + (tmp_len - (mod * 10));
+              tmp_len = mod;
+            }
+          } else {
+            buf[--buf_len] = '0';
           }
           if (!(parser->state.reserved & HTTP1_P_FLAG_CLENGTH) &&
               http1_on_header(parser,
@@ -861,7 +885,8 @@ re_eval:
     do {
       if (start >= stop)
         return HTTP1_CONSUMED; /* buffer ended on header line */
-      if (*start == '\r' || *start == '\n') {
+      if ((*start == '\n') |
+          (start + 1 < stop && ((start[0] == '\r') & (start[1] == '\n')))) {
         goto finished_headers; /* empty line, end of headers */
       }
       end = start;
@@ -877,7 +902,7 @@ re_eval:
       ++start;
     end = start;
     parser->state.reserved |= HTTP1_P_FLAG_HEADER_COMPLETE;
-  /* fallthrough */
+  /* fall through */
   case (HTTP1_P_FLAG_HEADER_COMPLETE | HTTP1_P_FLAG_STATUS_LINE):
     /* request body */
     {
@@ -1172,11 +1197,43 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
                             .val = "5",
+                            .val_len = 1,
+                        },
+#endif
+                    },
+            },
+    },
+    {
+        .test_name = "chunked body (empty)",
+        .request = {"POST / HTTP/1.1\r\nHost:with body\r\n"
+                    "Transfer-Encoding: chunked\r\n"
+                    "\r\n0\r\n\r\n"},
+        .expect =
+            {
+                .body = "",
+                .body_len = 0,
+                .method = "POST",
+                .path = "/",
+                .query = NULL,
+                .version = "HTTP/1.1",
+                .headers =
+                    {
+                        {
+                            .name = "host",
+                            .name_len = 4,
+                            .val = "with body",
+                            .val_len = 9,
+                        },
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+                        {
+                            .name = "content-length",
+                            .name_len = 14,
+                            .val = "0",
                             .val_len = 1,
                         },
 #endif
@@ -1213,7 +1270,7 @@ static struct {
                             .val = "gzip, foo",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1224,9 +1281,9 @@ static struct {
                     },
             },
     },
-#ifdef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
+#if HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
     {
-        .test_name = "chunked body (middle of list)",
+        .test_name = "chunked body (middle of list - RFC violation)",
         .request = {"POST / HTTP/1.1\r\nHost:with body\r\n"
                     "Transfer-Encoding: gzip, chunked, foo\r\n"
                     "\r\n",
@@ -1255,7 +1312,7 @@ static struct {
                             .val = "gzip,foo",
                             .val_len = 8,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1295,7 +1352,7 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1335,7 +1392,7 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1377,7 +1434,7 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1424,7 +1481,7 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1475,7 +1532,7 @@ static struct {
                             .val = "with body",
                             .val_len = 9,
                         },
-#ifdef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
+#if HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
                         {
                             .name = "content-length",
                             .name_len = 14,
@@ -1631,7 +1688,7 @@ static int http1_on_error(http1_parser_s *parser) {
                             !memcmp(http1_test_data[i].expect.field,           \
                                     http1_test_data[i].result.field,           \
                                     strlen(http1_test_data[i].expect.field)),  \
-                    "string field error for %s\n%s\n%s",                       \
+                    "string field error for %s - " #field " \n%s\n%s",         \
                     http1_test_data[i].test_name,                              \
                     http1_test_data[i].expect.field,                           \
                     http1_test_data[i].result.field);
