@@ -353,6 +353,8 @@ typedef struct FIO_NAME(FIO_ARRAY_NAME, each_s) {
   void *udata;
   /** The object / value at the current index. */
   FIO_ARRAY_TYPE value;
+  /* memory padding used for FIOBJ */
+  uint64_t padding;
 } FIO_NAME(FIO_ARRAY_NAME, each_s);
 
 /**

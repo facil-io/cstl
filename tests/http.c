@@ -207,7 +207,7 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
 /* *****************************************************************************
 IO "Objects"and helpers
 ***************************************************************************** */
-#include "http1_parser.h"
+#include "http/http1_parser.h"
 
 typedef struct {
   http1_parser_s parser;
@@ -521,6 +521,7 @@ static int http1_on_body_chunk(http1_parser_s *parser,
 /** called when a protocol error occurred. */
 static int http1_on_error(http1_parser_s *parser) {
   client_s *c = (client_s *)parser;
+  fio_sock_write(c->fd, "HTTP/1.1 400 Bad Request\r\n\r\n", 28);
   fio_sock_close(c->fd);
   c->fd = -1;
   return -1;

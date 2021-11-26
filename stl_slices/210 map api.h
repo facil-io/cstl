@@ -156,8 +156,8 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, __couplet_copy)(
 FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
                         __couplet_destroy)(FIO_NAME(FIO_MAP_NAME, couplet_s) *
                                            c) {
-  FIO_MAP_KEY_DESTROY(c->key);
-  FIO_MAP_TYPE_DESTROY(c->value);
+  FIO_MAP_KEY_DESTROY((c->key));
+  FIO_MAP_TYPE_DESTROY((c->value));
   (void)c; /* in case where macros do nothing */
 }
 
@@ -191,7 +191,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
 #if FIO_MAP_DESTROY_AFTER_COPY
 #define FIO_MAP_OBJ_DESTROY_AFTER FIO_MAP_OBJ_DESTROY
 #else
-#define FIO_MAP_OBJ_DESTROY_AFTER(obj) FIO_MAP_KEY_DESTROY((obj).key);
+#define FIO_MAP_OBJ_DESTROY_AFTER(obj) FIO_MAP_KEY_DESTROY(((obj).key));
 #endif /* FIO_MAP_DESTROY_AFTER_COPY */
 
 /* *****************************************************************************

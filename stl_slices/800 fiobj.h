@@ -316,12 +316,10 @@ typedef struct fiobj_each_s {
   int (*task)(struct fiobj_each_s *info);
   /** The argument passed along to the task. */
   void *udata;
-  /**
-   * The objects at the current index.
-   *
-   * For Hash Maps, `obj[0]` is the value and `obj[1]` is the key.
-   * */
-  FIOBJ obj[];
+  /** The value of the current object in the Array or Hash Map */
+  FIOBJ value;
+  /* The key, if a Hash Map */
+  FIOBJ key;
 } fiobj_each_s;
 
 /**
@@ -1555,9 +1553,9 @@ FIO_SFUNC int fiobj____each2_wrapper_task(fiobj_each_s *e) {
   ++d->count;
   if (d->stop)
     return -1;
-  uint32_t c = fiobj____each2_element_count(e->obj[0]);
+  uint32_t c = fiobj____each2_element_count(e->value);
   if (c) {
-    d->next = e->obj[0];
+    d->next = e->value;
     d->end = c;
     return -1;
   }
@@ -1585,10 +1583,10 @@ FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
       .next = FIOBJ_INVALID,
       .stack = FIO_ARRAY_INIT,
   };
-  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each_s) e_tmp = {
+  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each_s) e_tmp = {
 
       .parent = FIOBJ_INVALID,
-      .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
+      .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 each_s) *))fiobj____each2_wrapper_task,
       .udata = &d,
       .items_at_index = 1,
@@ -2202,18 +2200,19 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
     return -1;
   }
   int *expect = (int *)e->udata;
+  FIO_ASSERT(e->key == FIOBJ_INVALID, "key is set in an Array loop?");
   if (expect[index] == -1) {
-    FIO_ASSERT(FIOBJ_TYPE(e->obj[0]) == FIOBJ_T_ARRAY,
+    FIO_ASSERT(FIOBJ_TYPE(e->value) == FIOBJ_T_ARRAY,
                "each2 ordering issue [%zu] (array).",
                index);
     FIO_ASSERT(e->items_at_index == 1,
                "each2 items_at_index value error issue [%zu] (array).",
                index);
   } else {
-    FIO_ASSERT(FIO_NAME2(fiobj, i)(e->obj[0]) == expect[index],
+    FIO_ASSERT(FIO_NAME2(fiobj, i)(e->value) == expect[index],
                "each2 ordering issue [%zu] (number) %ld != %d",
                index,
-               FIO_NAME2(fiobj, i)(e->obj[0]),
+               FIO_NAME2(fiobj, i)(e->value),
                expect[index]);
   }
   ++index;
