@@ -9,7 +9,16 @@ Feel free to copy, use and enjoy according to the license provided.
 /* *****************************************************************************
 Helper types
 ***************************************************************************** */
-
+#if DEBUG
+#define FIO_MEMORY_NAME http_mem
+#include "fio-stl.h"
+#undef FIO_MEM_REALLOC
+#undef FIO_MEM_FREE
+#undef FIO_MEM_REALLOC_IS_SAFE
+#define FIO_MEM_REALLOC(p, ol, nl, cl) http_mem_realloc2((p), (nl), (cl))
+#define FIO_MEM_FREE(ptr, size)        http_mem_free((ptr))
+#define FIO_MEM_REALLOC_IS_SAFE        http_mem_realloc_is_safe()
+#endif
 #define FIO_STR_SMALL sstr
 #include "fio-stl.h"
 #define FIO_STR_NAME lstr
@@ -66,7 +75,7 @@ FIO_IFUNC void arystr_copy(arystr_s *a, arystr_s *b) {
 
 FIO_IFUNC void arystr_destroy(arystr_s *a) {
   switch (a->is_ary) {
-  case 0:
+  case 1:
     sary_destroy(&a->u.ary);
     return;
   default:
@@ -202,6 +211,8 @@ FIO_IFUNC uint64_t http_get_timestump(void) { return (int64_t)fio_last_tick(); }
 #endif
 
 void http_destroy(http_s *h) {
+  if (!h)
+    return;
   if (h->controller)
     h->controller->on_unlinked(h, h->cdata);
   sstr_destroy(&h->method);
@@ -286,13 +297,20 @@ FIO_SFUNC void http_controller_validate(http_controller_s *c) {
 }
 
 /** Gets the HTTP Controller associated with the HTTP handle. */
-http_controller_s *http_controller_get(http_s *h) { return h->controller; }
+http_controller_s *http_controller_get(http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return h->controller;
+}
 
 /** Returns the `void *` pointer returned by the HTTP Controller `on_link`. */
-void *http_controller_data(http_s *h) { return h->cdata; }
+void *http_controller_data(http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return h->cdata;
+}
 
 /** Sets the HTTP Controller, calling the `on_link` callback as required. */
 void http_controller_set(http_s *h, http_controller_s *c, void *cdata) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   if (h->controller)
     h->controller->on_unlinked(h, h->cdata);
   h->controller = c;
@@ -310,10 +328,12 @@ Short String Property Set / Get
 
 #define HTTP___MAKE_GET_SET(property)                                          \
   fio_str_info_s http_##property##_get(http_s *h) {                            \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return sstr_info(&h->property);                                            \
   }                                                                            \
                                                                                \
   fio_str_info_s http_##property##_set(http_s *h, fio_str_info_s value) {      \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     sstr_destroy(&h->property);                                                \
     return sstr_init_copy(&h->property, value.buf, value.len);                 \
   }
@@ -339,17 +359,27 @@ Header data management
  */
 fio_str_info_s http_request_header_get(http_s *h,
                                        fio_str_info_s name,
-                                       size_t index);
+                                       size_t index) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return hmap_get2(HTTP_HDR_REQUEST(h), name, index);
+}
 
 /** Sets the header information associated with the HTTP handle. */
 fio_str_info_s http_request_header_set(http_s *h,
                                        fio_str_info_s name,
-                                       fio_str_info_s value);
+                                       fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  hmap_set2(HTTP_HDR_REQUEST(h), name, (fio_str_info_s){0});
+  return lstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value));
+}
 
 /** Adds to the header information associated with the HTTP handle. */
 fio_str_info_s http_request_header_add(http_s *h,
                                        fio_str_info_s name,
-                                       fio_str_info_s value);
+                                       fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return lstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value));
+}
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
 size_t http_request_header_each(http_s *h,
@@ -371,9 +401,12 @@ size_t http_request_header_each(http_s *h,
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s http_response_header_get(http_s *,
+fio_str_info_s http_response_header_get(http_s *h,
                                         fio_str_info_s name,
-                                        size_t index);
+                                        size_t index) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return hmap_get2(HTTP_HDR_RESPONSE(h), name, index);
+}
 
 /**
  * Sets the header information associated with the HTTP handle.
@@ -381,9 +414,13 @@ fio_str_info_s http_response_header_get(http_s *,
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s http_response_header_set(http_s *,
+fio_str_info_s http_response_header_set(http_s *h,
                                         fio_str_info_s name,
-                                        fio_str_info_s value);
+                                        fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  hmap_set2(HTTP_HDR_RESPONSE(h), name, (fio_str_info_s){0});
+  return lstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value));
+}
 
 /**
  * Adds to the header information associated with the HTTP handle.
@@ -391,26 +428,37 @@ fio_str_info_s http_response_header_set(http_s *,
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-fio_str_info_s http_response_header_add(http_s *,
+fio_str_info_s http_response_header_add(http_s *h,
                                         fio_str_info_s name,
-                                        fio_str_info_s value);
+                                        fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return lstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value));
+}
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
-size_t http_response_header_each(http_s *,
+size_t http_response_header_each(http_s *h,
                                  int (*callback)(http_s *,
                                                  fio_str_info_s name,
                                                  fio_str_info_s value,
                                                  void *udata),
-                                 void *udata);
+                                 void *udata) {
+  // return hmap_each(HTTP_HDR_RESPONSE(h), int (*task)(hmap_each_s *), void
+  // *udata, 0);
+  return 0;
+}
 /* *****************************************************************************
 Body / Payload handling
 ***************************************************************************** */
 
 /** Gets the body (payload) length associated with the HTTP handle. */
-size_t http_body_length(http_s *h) { return h->body.len; }
+size_t http_body_length(http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return h->body.len;
+}
 
 /** Adjusts the body's reading position. Negative values start at the end. */
 size_t http_body_seek(http_s *h, ssize_t pos) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   if (pos < 0)
     pos += h->body.len;
   if (pos < 0)
@@ -549,7 +597,36 @@ Cookies
 ***************************************************************************** */
 
 FIO_IFUNC void http_cookie___parse_cookie(http_s *h, lstr_s *c) {
+  /* loop and read Cookie: name=value; name2=value2; name3=value3 */
   fio_str_info_s s = lstr_info(c);
+  while (s.len) {
+    fio_str_info_s k = {0}, v = {0};
+    /* remove white-space */
+    while ((s.buf[0] == ' ' || s.buf[0] == '\t') && s.len) {
+      ++s.buf;
+      --s.len;
+    }
+    if (!s.len)
+      return;
+    char *div = memchr(s.buf, '=', s.len);
+    char *end = memchr(s.buf, ';', s.len);
+    if (!end)
+      end = s.buf + s.len;
+    v.buf = s.buf;
+    if (div) {
+      /* cookie name may be an empty string */
+      k.buf = s.buf;
+      k.len = div - s.buf;
+      v.buf = div + 1;
+    }
+    v.len = end - v.buf;
+    s.len = (s.buf + s.len) - end;
+    s.buf = end;
+    /* skip the ';' if exists (if len is not zero, !!s.len == 1). */
+    s.buf += !!s.len;
+    s.len -= !!s.len;
+    smap_set2(h->cookies, k, v, 0);
+  }
 }
 
 FIO_SFUNC void http_cookie___collect(http_s *h) {
@@ -567,7 +644,6 @@ FIO_SFUNC void http_cookie___collect(http_s *h) {
     FIO_ARRAY_EACH(sary, (&header->u.ary), pos) {
       http_cookie___parse_cookie(h, pos);
     }
-
     return;
   }
   http_cookie___parse_cookie(h, &header->u.str);
@@ -576,6 +652,7 @@ FIO_SFUNC void http_cookie___collect(http_s *h) {
 void http_cookie_set___(void); /* sublime text marker */
 /** Sets a response cookie. Returns -1 on error and 0 on success. */
 int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
+  FIO_ASSERT_DEBUG(h, "Can't set cookie for NULL HTTP handler!");
   if ((!h | ((cookie.name_len + cookie.value_len) >= HTTP_MAX_HEADER_LENGTH)) ||
       (h->state & (HTTP_STATE_FINISHED | HTTP_STATE_STREAMING)))
     return -1;
@@ -618,7 +695,6 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-  FIO_ASSERT_DEBUG(h, "Can't set cookie for NULL HTTP handler!");
   /* write name and value while auto-correcting encoding issues */
   size_t len = 0;
   lstr_s c = FIO_STR_INIT;
@@ -779,10 +855,14 @@ Responding to an HTTP event.
 ***************************************************************************** */
 
 /** Returns true if the HTTP handle's response was sent. */
-int http_is_finished(http_s *h) { return h->state & HTTP_STATE_FINISHED; }
+int http_is_finished(http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return h->state & HTTP_STATE_FINISHED;
+}
 
 /** Returns true if the HTTP handle's response is streaming. */
 int http_is_streaming(http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   return (HTTP_STATE_STREAMING == (h->state & HTTP_STATE_STREAMING));
 }
 
@@ -791,6 +871,7 @@ size_t http_status_get(http_s *h) { return h->status; }
 
 /** Sets the status associated with the HTTP handle (response). */
 size_t http_status_set(http_s *h, size_t status) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   return (h->status = status);
 }
 
@@ -821,7 +902,7 @@ fio_str_info_s http_status2str(size_t status) {
   case 102: HTTP_RETURN_STATUS("Processing");
   case 103: HTTP_RETURN_STATUS("Early Hints");
   case 110: HTTP_RETURN_STATUS("Response is Stale"); /* caching code*/
-  case 111: HTTP_RETURN_STATUS("Revalidation Failed"); /* caching code*/
+  case 111: HTTP_RETURN_STATUS("Re-validation Failed"); /* caching code*/
   case 112: HTTP_RETURN_STATUS("Disconnected Operation"); /* caching code*/
   case 113: HTTP_RETURN_STATUS("Heuristic Expiration"); /* caching code*/
   case 199: HTTP_RETURN_STATUS("Miscellaneous Warning"); /* caching code*/
@@ -911,6 +992,10 @@ fio_str_info_s http_status2str(size_t status) {
 Testing the Handle.
 ***************************************************************************** */
 #if 1 || defined(TEST)
+#ifndef FIO_URL
+#define FIO_URL
+#include "fio-stl.h"
+#endif
 void http_test FIO_NOOP(void) {
   http_s *h = http_new();
   FIO_ASSERT_ALLOC(h);
@@ -952,5 +1037,6 @@ void http_test FIO_NOOP(void) {
                    url.host.buf,
                "host copy error");
   }
+  http_free(h);
 }
 #endif

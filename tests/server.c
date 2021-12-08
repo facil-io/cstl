@@ -43,6 +43,7 @@ Note: This is a **TOY** example, with only minimal security.
 /* *****************************************************************************
 Callbacks and object used by main()
 ***************************************************************************** */
+#include "http/http-handle.h"
 
 /** Called when a new connection is created. */
 FIO_SFUNC void on_open(int fd, void *udata);
@@ -60,6 +61,10 @@ Starting the program - main()
 ***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
+#ifdef TEST
+  FIO_LOG_INFO("Testing HTTP Handle.");
+  http_test();
+#endif
   /* initialize the CLI options */
   fio_cli_start(argc,
                 argv,
@@ -95,7 +100,6 @@ int main(int argc, char const *argv[]) {
 /* *****************************************************************************
 IO "Objects"and helpers
 ***************************************************************************** */
-#include "http/http-handle.h"
 #include "http/http1_parser.h"
 
 #include "http/http-handle.c"
