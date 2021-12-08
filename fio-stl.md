@@ -2112,6 +2112,14 @@ However, if a multi-threaded process, calling this function from the child proce
 **Note**: the prefix `fio` will be different according to the `FIO_MEMORY_NAME` macro, it is used here because this is the prefix defined when using the `FIO_MALLOC` shortcut macro.
 
 
+#### `fio_realloc_is_safe`
+
+```c
+size_t fio_realloc_is_safe(void);
+```
+
+Returns a non-zero value (1) if the allocator will zero out memory before passing the allocated memory to the user.
+
 ### Memory Allocator Creation MACROS
 
 #### `FIO_MALLOC` (shortcut)
