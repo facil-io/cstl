@@ -4208,6 +4208,30 @@ UNSAFE macro for pushing a node to a list.
 
 Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
+#### `FIO_LIST_POP`
+
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+```
+
+UNSAFE macro for popping a node from a list.
+
+* `type` is the underlying `struct` type of the next list member.
+
+* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
+
+* `dest_prt` is the pointer that will accept the next list member.
+
+* `head` is the head of the list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+Note that using this macro with an empty list will produce **undefined behavior**.
+
 #### `FIO_LIST_REMOVE`
 
 ```c
@@ -4246,14 +4270,16 @@ This macro allows `pos` to point to the type that the linked list contains (rath
 i.e.,
 
 ```c
-typedef strcut {
+typedef struct {
   void * data;
   FIO_LIST_HEAD node;
 } ptr_list_s;
 
+FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
+
 /* ... */
 
-FIO_LIST_EACH(ptr_list_s, node, pos) {
+FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
   do_something_with(pos->data);
 }
 ```

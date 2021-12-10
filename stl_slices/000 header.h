@@ -713,7 +713,7 @@ Sleep / Thread Scheduling Macros
 
 #ifndef FIO_THREAD_RESCHEDULE
 /**
- * Reschedules the thread by calling nanosleeps for a sinlge nano-second.
+ * Reschedules the thread by calling nanosleeps for a single nano-second.
  *
  * In practice, the thread will probably sleep for 60ns or more.
  */
