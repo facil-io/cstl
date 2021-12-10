@@ -5,6 +5,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_CLI                     /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "005 riskyhash.h"          /* Development inclusion - ignore line */
@@ -13,7 +14,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "210 map api.h"            /* Development inclusion - ignore line */
 #include "211 ordered map.h"        /* Development inclusion - ignore line */
 #include "211 unordered map.h"      /* Development inclusion - ignore line */
-#define FIO_CLI                     /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -238,7 +238,14 @@ typedef struct {
 Default parameter storage
 ***************************************************************************** */
 
-static fio___cli_cstr_s fio___cli_default_values;
+typedef struct {
+  FIO_LIST_NODE node;
+  size_t len;
+  char buf[];
+} fio___cli_def_str_s;
+
+/* A linked list linking default values */
+static FIO_LIST_HEAD fio___cli_default_values;
 
 /** extracts the "default" marker from a string's line */
 FIO_SFUNC fio___cli_cstr_s fio___cli_map_line2default(char const *line) {
@@ -253,7 +260,7 @@ FIO_SFUNC fio___cli_cstr_s fio___cli_map_line2default(char const *line) {
     n.buf += n.len;
     n.len = 0;
   }
-  /* a default is maked with (value) or ("value"), both escapable with '\\' */
+  /* a default is made with (value) or ("value"), both escapable with '\\' */
   if (n.buf[0] != '(')
     goto no_default;
   ++n.buf;
@@ -283,22 +290,15 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
   fio___cli_cstr_s val = {.buf = NULL, .len = 0};
   if (!d.len || !d.buf)
     return val;
-  {
-    void *tmp = FIO_MEM_REALLOC_((void *)fio___cli_default_values.buf,
-                                 fio___cli_default_values.len,
-                                 fio___cli_default_values.len + d.len + 1,
-                                 fio___cli_default_values.len);
-    if (!tmp)
-      return val;
-    fio___cli_default_values.buf = (const char *)tmp;
-  }
-  val.buf = fio___cli_default_values.buf + fio___cli_default_values.len;
-  val.len = d.len;
-  fio___cli_default_values.len += d.len + 1;
-
-  ((char *)val.buf)[val.len] = 0;
+  fio___cli_def_str_s *str =
+      FIO_MEM_REALLOC_(NULL, 0, (sizeof(*str) + d.len + 1), 0);
+  FIO_ASSERT_ALLOC(str);
+  FIO_LIST_PUSH(&fio___cli_default_values, &str->node);
+  val.buf = str->buf;
+  str->len = val.len = d.len;
+  str->buf[str->len] = 0;
   FIO_MEMCPY((char *)val.buf, d.buf, val.len);
-  FIO_LOG_DEBUG("CLI stored a string: %s", val.buf);
+  FIO_LOG_DEBUG("CLI stored a string: %s (%zu bytes)", str->buf, str->len);
   return val;
 }
 
@@ -710,6 +710,9 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
     fio_cli_end();
   }
 
+  /* initialize the default value linked list */
+  fio___cli_default_values = FIO_LIST_INIT(fio___cli_default_values);
+
   /* prepare aliases hash map */
 
   char const **line = names;
@@ -770,11 +773,12 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_hash_destroy(&fio___cli_values);
   fio___cli_hash_destroy(&fio___cli_aliases);
   fio___cli_unnamed_count = 0;
-  if (fio___cli_default_values.buf) {
-    FIO_MEM_FREE_((void *)fio___cli_default_values.buf,
-                  fio___cli_default_values.len);
-    fio___cli_default_values.buf = NULL;
-    fio___cli_default_values.len = 0;
+  if (fio___cli_default_values.next) {
+    while (!FIO_LIST_IS_EMPTY(&fio___cli_default_values)) {
+      fio___cli_def_str_s *node;
+      FIO_LIST_POP(fio___cli_def_str_s, node, node, &fio___cli_default_values);
+      FIO_MEM_FREE_(node, sizeof(*node) + node->len + 1);
+    }
   }
 }
 /* *****************************************************************************

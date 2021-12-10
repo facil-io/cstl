@@ -602,6 +602,13 @@ typedef struct fio_list_node_s {
     (n)->next = (n)->prev = (n);                                               \
   } while (0)
 
+/** UNSAFE macro for popping a node to a list. */
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+
 /** UNSAFE macro for testing if a list is empty. */
 #define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head))
 
