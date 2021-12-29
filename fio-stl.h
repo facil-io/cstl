@@ -17717,7 +17717,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
 
 /** Iteration information structure passed to the callback. */
 typedef struct FIO_NAME(FIO_ARRAY_NAME, each_s) {
-  /** The being iterated. Once set, cannot be safely changed. */
+  /** The array iterated. Once set, cannot be safely changed. */
   FIO_ARRAY_PTR const parent;
   /** The current object's index */
   uint64_t index;
@@ -27973,7 +27973,6 @@ FIO_SFUNC void map_____test_key_destroy(char **dest) {
 
 FIO_SFUNC int set_____test_each_task(set_____test_each_s *e) {
   uintptr_t *i_p = (uintptr_t *)e->udata;
-  FIO_ASSERT(e->items_at_index == 1, "set_each items_at_index is not 1!");
   FIO_ASSERT(e->value == ++(*i_p), "set_each started at a bad offset!");
 
   return 0;

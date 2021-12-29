@@ -350,7 +350,6 @@ FIO_SFUNC void map_____test_key_destroy(char **dest) {
 
 FIO_SFUNC int set_____test_each_task(set_____test_each_s *e) {
   uintptr_t *i_p = (uintptr_t *)e->udata;
-  FIO_ASSERT(e->items_at_index == 1, "set_each items_at_index is not 1!");
   FIO_ASSERT(e->value == ++(*i_p), "set_each started at a bad offset!");
 
   return 0;
