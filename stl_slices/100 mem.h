@@ -307,15 +307,19 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_USE_THREAD_MUTEX
 #if FIO_USE_THREAD_MUTEX_TMP
-/*
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
+#else
+#if FIO_MEMORY_ARENA_COUNT > 0
+/**
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
 #define FIO_MEMORY_USE_THREAD_MUTEX 1
 #else
-/** defaults to use a spinlock. */
+/* defaults to use a spinlock when no contention is expected. */
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
+#endif
 #endif
 #endif
 
@@ -1136,7 +1140,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
     if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] >    \
         FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[1])     \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))           \
-      [1] = FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]; \
+    [1] = FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0];   \
   } while (0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
@@ -2471,13 +2475,13 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
           ((uintptr_t)c + FIO_MEMORY_SYS_ALLOCATION_SIZE) - ((uintptr_t)ptr);
     } else
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
-        if ((uintptr_t)(c) + FIO_MEMORY_ALIGN_SIZE == (uintptr_t)ptr &&
-            c->marker) {
-      if (new_size > FIO_MEMORY_ALLOC_LIMIT)
-        return (mem =
-                    FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(c, new_size));
-      max_len = new_size; /* shrinking from mmap to allocator */
-    }
+      if ((uintptr_t)(c) + FIO_MEMORY_ALIGN_SIZE == (uintptr_t)ptr &&
+          c->marker) {
+        if (new_size > FIO_MEMORY_ALLOC_LIMIT)
+          return (
+              mem = FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(c, new_size));
+        max_len = new_size; /* shrinking from mmap to allocator */
+      }
 
     if (copy_len > max_len)
       copy_len = max_len;

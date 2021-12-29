@@ -481,8 +481,6 @@ typedef struct FIO_NAME(FIO_MAP_NAME, each_s) {
   FIO_MAP_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct FIO_NAME(FIO_MAP_NAME, each_s) * info);
   /** Opaque user data. */
@@ -492,6 +490,8 @@ typedef struct FIO_NAME(FIO_MAP_NAME, each_s) {
 #ifdef FIO_MAP_KEY
   /** The key used to access the specific value. */
   FIO_MAP_KEY key;
+#else
+  uint64_t padding; /* protects the FIOBJ implementation from overflowing */
 #endif
 } FIO_NAME(FIO_MAP_NAME, each_s);
 

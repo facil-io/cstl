@@ -8,11 +8,11 @@ Thank you for inquiring `facil.io`'s contribution guide. It's people like you an
 
 * Use `clang-format`.
 
-* PRs to the `fio_stl.h` (the facil.io C STL - Simple Type Library) should go to the [facil.io C STL repository](https://github.com/facil-io/cstl).
+* PRs to the `fio_stl.h` (the facil.io C STL - Simple Type Library) @ the [facil.io C STL repository](https://github.com/facil-io/cstl).
 
-* PRs to the `fio.h` or `fio.c` files (the facil.io IO Core) should go to the [facil.io IO Core repository](https://github.com/facil-io/io-core).
+* PRs to the `fio.h` or `fio.c` files (the facil.io IO Core) @ the [facil.io IO Core repository](https://github.com/facil-io/io-core).
 
-* All other PRs should go to **the correct version branch** in the [facil.io main framework repository](https://github.com/boazsegev/facil.io).
+* All other PRs should go to **the correct version branch** @ the [facil.io main framework repository](https://github.com/boazsegev/facil.io).
 
 * Always add a comment in the CHANGELOG to say what you did and credit yourself.
 
@@ -60,7 +60,7 @@ Thank you for inquiring `facil.io`'s contribution guide. It's people like you an
 
 * **Easy to manage**:
 
-    See the License section below. Contributions must relinquish ownership of contributed code, so licensing and copyright can be managed without the need to reach out to every contributer.
+    See the License section below. Contributions must relinquish ownership of contributed code, so licensing and copyright can be managed without the need to reach out to every past contributer.
 
 
 ### Community Guideline - Play Nice

@@ -999,13 +999,6 @@ Common macros
 
 ***************************************************************************** */
 
-/* Modules that require logging */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
-#ifndef FIO_LOG
-#define FIO_LOG
-#endif
-#endif /* FIO_MALLOC */
-
 /* Modules required by FIO_SERVER */
 #if defined(FIO_SERVER)
 #define FIO_POLL
@@ -7611,15 +7604,19 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_USE_THREAD_MUTEX
 #if FIO_USE_THREAD_MUTEX_TMP
-/*
+#define FIO_MEMORY_USE_THREAD_MUTEX 1
+#else
+#if FIO_MEMORY_ARENA_COUNT > 0
+/**
  * If arena count isn't linked to the CPU count, threads might busy-spin.
  * It is better to slow wait than fast busy spin when the work in the lock is
  * longer... and system allocations are performed inside arena locks.
  */
 #define FIO_MEMORY_USE_THREAD_MUTEX 1
 #else
-/** defaults to use a spinlock. */
+/* defaults to use a spinlock when no contention is expected. */
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
+#endif
 #endif
 #endif
 
@@ -8440,7 +8437,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
     if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] >    \
         FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[1])     \
       FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))           \
-      [1] = FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]; \
+    [1] = FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0];   \
   } while (0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
@@ -9775,13 +9772,13 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
           ((uintptr_t)c + FIO_MEMORY_SYS_ALLOCATION_SIZE) - ((uintptr_t)ptr);
     } else
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
-        if ((uintptr_t)(c) + FIO_MEMORY_ALIGN_SIZE == (uintptr_t)ptr &&
-            c->marker) {
-      if (new_size > FIO_MEMORY_ALLOC_LIMIT)
-        return (mem =
-                    FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(c, new_size));
-      max_len = new_size; /* shrinking from mmap to allocator */
-    }
+      if ((uintptr_t)(c) + FIO_MEMORY_ALIGN_SIZE == (uintptr_t)ptr &&
+          c->marker) {
+        if (new_size > FIO_MEMORY_ALLOC_LIMIT)
+          return (
+              mem = FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(c, new_size));
+        max_len = new_size; /* shrinking from mmap to allocator */
+      }
 
     if (copy_len > max_len)
       copy_len = max_len;
@@ -17517,14 +17514,11 @@ void example(void) {
 
 #undef FIO_ARRAY_SIZE2WORDS
 #define FIO_ARRAY_SIZE2WORDS(size)                                             \
-  ((sizeof(FIO_ARRAY_TYPE) & 1)                                                \
-       ? (((size) & (~15)) + 16)                                               \
-       : (sizeof(FIO_ARRAY_TYPE) & 2)                                          \
-             ? (((size) & (~7)) + 8)                                           \
-             : (sizeof(FIO_ARRAY_TYPE) & 4)                                    \
-                   ? (((size) & (~3)) + 4)                                     \
-                   : (sizeof(FIO_ARRAY_TYPE) & 8) ? (((size) & (~1)) + 2)      \
-                                                  : (size))
+  ((sizeof(FIO_ARRAY_TYPE) & 1)   ? (((size) & (~15)) + 16)                    \
+   : (sizeof(FIO_ARRAY_TYPE) & 2) ? (((size) & (~7)) + 8)                      \
+   : (sizeof(FIO_ARRAY_TYPE) & 4) ? (((size) & (~3)) + 4)                      \
+   : (sizeof(FIO_ARRAY_TYPE) & 8) ? (((size) & (~1)) + 2)                      \
+                                  : (size))
 
 /* *****************************************************************************
 Dynamic Arrays - type
@@ -17727,8 +17721,6 @@ typedef struct FIO_NAME(FIO_ARRAY_NAME, each_s) {
   FIO_ARRAY_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Always 1, but may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct FIO_NAME(FIO_ARRAY_NAME, each_s) * info);
   /** Opaque user data. */
@@ -18787,7 +18779,6 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
   e = {
       .parent = ary_,
       .index = (uint64_t)start_at,
-      .items_at_index = 1,
       .task = task,
       .udata = udata,
   };
@@ -19691,8 +19682,6 @@ typedef struct FIO_NAME(FIO_MAP_NAME, each_s) {
   FIO_MAP_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct FIO_NAME(FIO_MAP_NAME, each_s) * info);
   /** Opaque user data. */
@@ -19702,6 +19691,8 @@ typedef struct FIO_NAME(FIO_MAP_NAME, each_s) {
 #ifdef FIO_MAP_KEY
   /** The key used to access the specific value. */
   FIO_MAP_KEY key;
+#else
+  uint64_t padding; /* protects the FIOBJ implementation from overflowing */
 #endif
 } FIO_NAME(FIO_MAP_NAME, each_s);
 
@@ -20500,11 +20491,6 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   e = {
       .parent = map,
       .index = (uint64_t)start_at,
-#ifdef FIO_MAP_KEY
-      .items_at_index = 2,
-#else
-      .items_at_index = 1,
-#endif
       .task = task,
       .udata = udata,
   };
@@ -21325,11 +21311,6 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   e = {
       .parent = map,
       .index = (uint64_t)start_at,
-#ifdef FIO_MAP_KEY
-      .items_at_index = 2,
-#else
-      .items_at_index = 1,
-#endif
       .task = task,
       .udata = udata,
   };
@@ -25325,8 +25306,6 @@ typedef struct fiobj_each_s {
   FIOBJ const parent;
   /** The index to start at / the current object's index */
   uint64_t index;
-  /** Always 1, but may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct fiobj_each_s *info);
   /** The argument passed along to the task. */
@@ -26604,7 +26583,6 @@ FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
       .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 each_s) *))fiobj____each2_wrapper_task,
       .udata = &d,
-      .items_at_index = 1,
       .value = o,
   };
   fiobj____stack_element_s i = {.obj = o, .pos = 0};
@@ -26865,25 +26843,38 @@ FIOBJ_FUNC void fiobj___json_format_internal__(
     return;
   }
   case FIOBJ_T_ARRAY:
-    if (args->level == FIOBJ_MAX_NESTING) {
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "[ ]", 3);
-      return;
-    }
+    if (!FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o))
+      goto empty_array;
+    if (args->level == FIOBJ_MAX_NESTING)
+      goto err_array_nesting;
     {
       ++args->level;
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "[", 1);
       const uint32_t len =
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-      for (size_t i = 0; i < len; ++i) {
-        if (args->beautify) {
-          fiobj___json_format_internal_beauty_pad(args->json, args->level);
-        }
-        FIOBJ child = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
-        fiobj___json_format_internal__(args, child);
-        if (i + 1 < len)
+      if (args->beautify) {
+        fiobj___json_format_internal_beauty_pad(args->json, args->level);
+      }
+      fiobj___json_format_internal__(
+          args,
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, 0));
+      if (args->beautify) {
+        for (size_t i = 1; i < len; ++i) {
+          FIOBJ child =
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-        (args->json, ",", 1);
+          (args->json, ",", 1);
+          fiobj___json_format_internal_beauty_pad(args->json, args->level);
+          fiobj___json_format_internal__(args, child);
+        }
+      } else {
+        for (size_t i = 1; i < len; ++i) {
+          FIOBJ child =
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+          (args->json, ",", 1);
+          fiobj___json_format_internal__(args, child);
+        }
       }
       --args->level;
       if (args->beautify) {
@@ -26893,41 +26884,57 @@ FIOBJ_FUNC void fiobj___json_format_internal__(
     }
     return;
   case FIOBJ_T_HASH:
-    if (args->level == FIOBJ_MAX_NESTING) {
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "{ }", 3);
-      return;
-    }
+    if (!FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o))
+      goto empty_hash;
+    if (args->level == FIOBJ_MAX_NESTING)
+      goto err_hash_nesting;
     {
-      ++args->level;
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "{", 1);
       size_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-      if (i) {
-        FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
-          if (args->beautify) {
-            fiobj___json_format_internal_beauty_pad(args->json, args->level);
-          }
-          fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, "\"", 1);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
-          (args->json, info.buf, info.len);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, "\":", 2);
-          fiobj___json_format_internal__(args, couplet->obj.value);
-          if (--i)
-            FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, ",", 1);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      (args->json, "{", 1);
+      ++args->level;
+      FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
+        if (args->beautify) {
+          fiobj___json_format_internal_beauty_pad(args->json, args->level);
         }
+        fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, "\"", 1);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
+        (args->json, info.buf, info.len);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, "\":", 2);
+        fiobj___json_format_internal__(args, couplet->obj.value);
+        if (--i)
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, ",", 1);
       }
       --args->level;
       if (args->beautify) {
         fiobj___json_format_internal_beauty_pad(args->json, args->level);
       }
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "}", 1);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      (args->json, "}", 1);
     }
     return;
   }
+empty_hash:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "{}", 2);
+  return;
+empty_array:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "[]", 2);
+  return;
+err_array_nesting:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "[ ]", 3);
+  goto log_nesting_error;
+err_hash_nesting:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "{ }", 3);
+log_nesting_error:
+  FIO_LOG_ERROR("JSON formatting truncated - nesting level too deep.");
 }
 
 /* *****************************************************************************
@@ -27219,9 +27226,6 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   if (expect[index] == -1) {
     FIO_ASSERT(FIOBJ_TYPE(e->value) == FIOBJ_T_ARRAY,
                "each2 ordering issue [%zu] (array).",
-               index);
-    FIO_ASSERT(e->items_at_index == 1,
-               "each2 items_at_index value error issue [%zu] (array).",
                index);
   } else {
     FIO_ASSERT(FIO_NAME2(fiobj, i)(e->value) == expect[index],

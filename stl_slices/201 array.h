@@ -135,14 +135,11 @@ void example(void) {
 
 #undef FIO_ARRAY_SIZE2WORDS
 #define FIO_ARRAY_SIZE2WORDS(size)                                             \
-  ((sizeof(FIO_ARRAY_TYPE) & 1)                                                \
-       ? (((size) & (~15)) + 16)                                               \
-       : (sizeof(FIO_ARRAY_TYPE) & 2)                                          \
-             ? (((size) & (~7)) + 8)                                           \
-             : (sizeof(FIO_ARRAY_TYPE) & 4)                                    \
-                   ? (((size) & (~3)) + 4)                                     \
-                   : (sizeof(FIO_ARRAY_TYPE) & 8) ? (((size) & (~1)) + 2)      \
-                                                  : (size))
+  ((sizeof(FIO_ARRAY_TYPE) & 1)   ? (((size) & (~15)) + 16)                    \
+   : (sizeof(FIO_ARRAY_TYPE) & 2) ? (((size) & (~7)) + 8)                      \
+   : (sizeof(FIO_ARRAY_TYPE) & 4) ? (((size) & (~3)) + 4)                      \
+   : (sizeof(FIO_ARRAY_TYPE) & 8) ? (((size) & (~1)) + 2)                      \
+                                  : (size))
 
 /* *****************************************************************************
 Dynamic Arrays - type
@@ -341,12 +338,10 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary,
 
 /** Iteration information structure passed to the callback. */
 typedef struct FIO_NAME(FIO_ARRAY_NAME, each_s) {
-  /** The being iterated. Once set, cannot be safely changed. */
+  /** The array iterated. Once set, cannot be safely changed. */
   FIO_ARRAY_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Always 1, but may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct FIO_NAME(FIO_ARRAY_NAME, each_s) * info);
   /** Opaque user data. */
@@ -1405,7 +1400,6 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
   e = {
       .parent = ary_,
       .index = (uint64_t)start_at,
-      .items_at_index = 1,
       .task = task,
       .udata = udata,
   };

@@ -310,8 +310,6 @@ typedef struct fiobj_each_s {
   FIOBJ const parent;
   /** The index to start at / the current object's index */
   uint64_t index;
-  /** Always 1, but may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
   int (*task)(struct fiobj_each_s *info);
   /** The argument passed along to the task. */
@@ -1589,7 +1587,6 @@ FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
       .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                 each_s) *))fiobj____each2_wrapper_task,
       .udata = &d,
-      .items_at_index = 1,
       .value = o,
   };
   fiobj____stack_element_s i = {.obj = o, .pos = 0};
@@ -1850,25 +1847,38 @@ FIOBJ_FUNC void fiobj___json_format_internal__(
     return;
   }
   case FIOBJ_T_ARRAY:
-    if (args->level == FIOBJ_MAX_NESTING) {
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "[ ]", 3);
-      return;
-    }
+    if (!FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o))
+      goto empty_array;
+    if (args->level == FIOBJ_MAX_NESTING)
+      goto err_array_nesting;
     {
       ++args->level;
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "[", 1);
       const uint32_t len =
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-      for (size_t i = 0; i < len; ++i) {
-        if (args->beautify) {
-          fiobj___json_format_internal_beauty_pad(args->json, args->level);
-        }
-        FIOBJ child = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
-        fiobj___json_format_internal__(args, child);
-        if (i + 1 < len)
+      if (args->beautify) {
+        fiobj___json_format_internal_beauty_pad(args->json, args->level);
+      }
+      fiobj___json_format_internal__(
+          args,
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, 0));
+      if (args->beautify) {
+        for (size_t i = 1; i < len; ++i) {
+          FIOBJ child =
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-        (args->json, ",", 1);
+          (args->json, ",", 1);
+          fiobj___json_format_internal_beauty_pad(args->json, args->level);
+          fiobj___json_format_internal__(args, child);
+        }
+      } else {
+        for (size_t i = 1; i < len; ++i) {
+          FIOBJ child =
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+          (args->json, ",", 1);
+          fiobj___json_format_internal__(args, child);
+        }
       }
       --args->level;
       if (args->beautify) {
@@ -1878,41 +1888,57 @@ FIOBJ_FUNC void fiobj___json_format_internal__(
     }
     return;
   case FIOBJ_T_HASH:
-    if (args->level == FIOBJ_MAX_NESTING) {
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "{ }", 3);
-      return;
-    }
+    if (!FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o))
+      goto empty_hash;
+    if (args->level == FIOBJ_MAX_NESTING)
+      goto err_hash_nesting;
     {
-      ++args->level;
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "{", 1);
       size_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-      if (i) {
-        FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
-          if (args->beautify) {
-            fiobj___json_format_internal_beauty_pad(args->json, args->level);
-          }
-          fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, "\"", 1);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
-          (args->json, info.buf, info.len);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, "\":", 2);
-          fiobj___json_format_internal__(args, couplet->obj.value);
-          if (--i)
-            FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, ",", 1);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      (args->json, "{", 1);
+      ++args->level;
+      FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
+        if (args->beautify) {
+          fiobj___json_format_internal_beauty_pad(args->json, args->level);
         }
+        fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, "\"", 1);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
+        (args->json, info.buf, info.len);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, "\":", 2);
+        fiobj___json_format_internal__(args, couplet->obj.value);
+        if (--i)
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+        (args->json, ",", 1);
       }
       --args->level;
       if (args->beautify) {
         fiobj___json_format_internal_beauty_pad(args->json, args->level);
       }
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "}", 1);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      (args->json, "}", 1);
     }
     return;
   }
+empty_hash:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "{}", 2);
+  return;
+empty_array:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "[]", 2);
+  return;
+err_array_nesting:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "[ ]", 3);
+  goto log_nesting_error;
+err_hash_nesting:
+  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+  (args->json, "{ }", 3);
+log_nesting_error:
+  FIO_LOG_ERROR("JSON formatting truncated - nesting level too deep.");
 }
 
 /* *****************************************************************************
@@ -2204,9 +2230,6 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   if (expect[index] == -1) {
     FIO_ASSERT(FIOBJ_TYPE(e->value) == FIOBJ_T_ARRAY,
                "each2 ordering issue [%zu] (array).",
-               index);
-    FIO_ASSERT(e->items_at_index == 1,
-               "each2 items_at_index value error issue [%zu] (array).",
                index);
   } else {
     FIO_ASSERT(FIO_NAME2(fiobj, i)(e->value) == expect[index],

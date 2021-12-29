@@ -6,9 +6,9 @@ At the core of the [facil.io library](https://facil.io) is its powerful Simple T
 
 The Simple Template Library is a single file library ([`fio-stl.h`](./fio-stl.h)), that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
 
-In addition, the Simple Template Library offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, and a custom memory allocator.
+In addition, the Simple Template Library offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, and custom memory allocators.
 
-In other words, all the common building blocks one could need in a C project are placed in this single header file.
+In other words, some of the most common building blocks one would need in any C project are placed in this single header file.
 
 The header could be included multiple times with different results, creating different types or exposing different functionality.
 
@@ -64,7 +64,7 @@ void hello(void){
 
 ### Dynamic Arrays
 
-Easily construct dynamic Array types for any type of collection.
+Easily construct dynamic Array types for any type.
 
 ```c
 typedef struct {
@@ -90,9 +90,11 @@ void example(void) {
 ### Reference Counting
 
 ```c
-/* Create a binary safe String type called `my_str_s` with reference counting */
+/* Create a binary safe String type called `my_str_s` */
 #define FIO_STR_NAME my_str
+/* Use a reference counting for `my_str_s` (using the same name convention) */
 #define FIO_REF_NAME my_str
+/* Make the reference counter the only constructor */
 #define FIO_REF_CONSTRUCTOR_ONLY
 #include "fio-stl.h"
 

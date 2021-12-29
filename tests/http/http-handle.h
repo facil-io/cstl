@@ -344,7 +344,7 @@ struct http_write_args_s {
   /** If streaming a file, set this value. The file is always closed. */
   int fd;
   /** If the data is a buffer, this callback may be set to free it once sent. */
-  void (*free_func)(void *);
+  void (*dealloc)(void *);
   /** If the data is a buffer / a file - should it be copied? */
   int copy;
   /**

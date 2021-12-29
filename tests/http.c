@@ -207,7 +207,7 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
 /* *****************************************************************************
 IO "Objects"and helpers
 ***************************************************************************** */
-#include "http/http1_parser.h"
+#include "../parsers/http1_parser.h"
 
 typedef struct {
   http1_parser_s parser;

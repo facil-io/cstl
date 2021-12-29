@@ -35,10 +35,8 @@ Note: This is a **TOY** example, with only minimal security.
 #define HTTP_MAX_HEADERS   16
 #define HTTP_TIMEOUTS      5000
 
-/* an echo response is always dynamic (allocated on the heap). */
-#define HTTP_RESPONSE_ECHO 1
-/* if not echoing, the response is "Hello World" - but is it allocated? */
-#define HTTP_RESPONSE_DYNAMIC 1
+/* an echo response (vs. Hello World). */
+#define HTTP_RESPONSE_ECHO 0
 
 /* *****************************************************************************
 Callbacks and object used by main()
@@ -107,35 +105,19 @@ IO "Objects"and helpers
 typedef struct {
   http1_parser_s parser;
   fio_s *io;
-  struct {
-    char *name;
-    char *value;
-    int32_t name_len;
-    int32_t value_len;
-  } headers[HTTP_MAX_HEADERS];
-  char *method;
-  char *path;
-  char *body;
-  int method_len;
-  int path_len;
-  int headers_len;
-  int body_len;
+  http_s *h;
   int buf_pos;
-  int buf_consumed;
+  int buf_con;
   char buf[]; /* header and data buffer */
 } client_s;
 
-/** Sends a "dynamic" HTTP response. */
-static void http_send_response(client_s *c,
-                               int status,
-                               fio_str_info_s status_str,
-                               size_t header_count,
-                               fio_str_info_s headers[][2],
-                               fio_str_info_s body);
-
-#define FIO_MEMORY_NAME fio_client_memory_allocator
-#define FIO_REF_NAME    client
+#define FIO_REF_NAME client
 #define FIO_REF_CONSTRUCTOR_ONLY
+#define FIO_REF_DESTROY(c)                                                     \
+  do {                                                                         \
+    http_free((c).h);                                                          \
+    (c).h = NULL;                                                              \
+  } while (0)
 #define FIO_REF_FLEX_TYPE char
 #include "fio-stl.h"
 
@@ -158,17 +140,17 @@ FIO_SFUNC void on_data(fio_s *io) {
   if (r > 0) {
     c->buf_pos += r;
     while ((r = http1_parse(&c->parser,
-                            c->buf + c->buf_consumed,
-                            (size_t)(c->buf_pos - c->buf_consumed)))) {
-      c->buf_consumed += r;
+                            c->buf + c->buf_con,
+                            (size_t)(c->buf_pos - c->buf_con)))) {
+      c->buf_con += r;
       if (!http1_complete(&c->parser))
         break;
-      if (c->buf_consumed == c->buf_pos)
-        c->buf_pos = c->buf_consumed = 0;
+      if (c->buf_con == c->buf_pos)
+        c->buf_pos = c->buf_con = 0;
       else {
-        c->buf_pos = c->buf_pos - c->buf_consumed;
-        memmove(c->buf, c->buf + c->buf_consumed, c->buf_pos);
-        c->buf_consumed = 0;
+        c->buf_pos = c->buf_pos - c->buf_con;
+        memmove(c->buf, c->buf + c->buf_con, c->buf_pos);
+        c->buf_con = 0;
       }
     }
   }
@@ -185,36 +167,17 @@ HTTP/1.1 callback(s)
 static int http1_on_request(http1_parser_s *parser) {
   client_s *c = (client_s *)parser;
 #if HTTP_RESPONSE_ECHO
-  http_send_response(c,
-                     200,
-                     (fio_str_info_s){"OK", 2},
-                     0,
-                     NULL,
-                     (fio_str_info_s){c->method, strlen(c->method)});
-
-#elif HTTP_RESPONSE_DYNAMIC
-  http_send_response(c,
-                     200,
-                     (fio_str_info_s){"OK", 2},
-                     0,
-                     NULL,
-                     (fio_str_info_s){"Hello World!", 12});
+  /* TODO */
 #else
-  char *response =
-      "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!\n";
-  fio_write2(c->io, .buf = response, .len = strlen(response), .dealloc = NULL);
-  (void)http_send_response; /* unused in this branch */
+  http_response_header_set(c->h,
+                           FIO_STR_INFO1("server"),
+                           FIO_STR_INFO1("fio-stl"));
+  http_write(c->h, .data = "Hello World", .len = 11, .finish = 1);
 #endif
 
   /* reset client request data */
-  c->method = NULL;
-  c->path = NULL;
-  c->body = NULL;
-  c->method_len = 0;
-  c->path_len = 0;
-  c->headers_len = 0;
-  c->body_len = 0;
-
+  http_free(c->h);
+  c->h = NULL;
   return 0;
 }
 

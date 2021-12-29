@@ -676,11 +676,6 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
   e = {
       .parent = map,
       .index = (uint64_t)start_at,
-#ifdef FIO_MAP_KEY
-      .items_at_index = 2,
-#else
-      .items_at_index = 1,
-#endif
       .task = task,
       .udata = udata,
   };

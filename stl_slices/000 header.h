@@ -999,13 +999,6 @@ Common macros
 
 ***************************************************************************** */
 
-/* Modules that require logging */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)
-#ifndef FIO_LOG
-#define FIO_LOG
-#endif
-#endif /* FIO_MALLOC */
-
 /* Modules required by FIO_SERVER */
 #if defined(FIO_SERVER)
 #define FIO_POLL
