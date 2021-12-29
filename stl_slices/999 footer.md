@@ -1,4 +1,6 @@
+
 <script language='javascript' id='header_folder'>
+
 var folding_containers = [];
 function unfold(e) {
   for (var i = 0; i < folding_containers.length; i++) {
@@ -44,5 +46,5 @@ function move2containers() {
 }
 
 // move2containers();
-</script>
 
+</script>
