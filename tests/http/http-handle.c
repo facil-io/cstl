@@ -6,6 +6,11 @@ Feel free to copy, use and enjoy according to the license provided.
 */
 #include "http-handle.h"
 
+#define FIO_TIME
+#define FIO_SOCK
+#define FIO_FILES
+#include "fio-stl.h"
+
 /* *****************************************************************************
 Helper types
 ***************************************************************************** */
@@ -43,6 +48,7 @@ typedef struct arystr_u {
 } arystr_s;
 
 FIO_IFUNC void arystr_copy(arystr_s *a, arystr_s *b) {
+  FIO_ASSERT_DEBUG(!b->is_ary, "cannot copy from an array of headers!");
   fio_str_info_s i = lstr_info(&b->u.str);
   switch (a->is_ary) {
   case 0:
@@ -260,11 +266,6 @@ FIO_SFUNC int mock_c_start_response(http_s *h, int status, int streaming) {
   (void)status;
   (void)streaming;
 }
-FIO_SFUNC int mock_c_start_request(http_s *h, int streaming) {
-  return -1;
-  (void)h;
-  (void)streaming;
-}
 FIO_SFUNC void mock_c_write_header(http_s *h,
                                    fio_str_info_s name,
                                    fio_str_info_s value) {
@@ -289,7 +290,7 @@ FIO_SFUNC void http_controller_validate(http_controller_s *c) {
   if (!c->start_response)
     c->start_response = mock_c_start_response;
   if (!c->start_request)
-    c->start_request = mock_c_start_request;
+    c->start_request = mock_c_start_response;
   if (!c->write_header)
     c->write_header = mock_c_write_header;
   if (!c->finish_headers)
@@ -347,6 +348,29 @@ HTTP___MAKE_GET_SET(version)
 #undef HTTP___MAKE_GET_SET
 
 /* *****************************************************************************
+Header iteration Task
+***************************************************************************** */
+
+typedef struct {
+  http_s *h;
+  int (*callback)(http_s *, fio_str_info_s, fio_str_info_s, void *);
+  void *udata;
+} http___h_each_data_s;
+
+FIO_SFUNC int http___h_each_task_wrapper(hmap_each_s *e) {
+  http___h_each_data_s *data = e->udata;
+  fio_str_info_s k = sstr_info(&e->key);
+  if (!e->value.is_ary) {
+    return data->callback(data->h, k, lstr_info(&e->value.u.str), data->udata);
+  }
+  FIO_ARRAY_EACH(sary, &e->value.u.ary, pos) {
+    if (data->callback(data->h, k, lstr_info(pos), data->udata) == -1)
+      return -1;
+  }
+  return 0;
+}
+
+/* *****************************************************************************
 Header data management
 ***************************************************************************** */
 
@@ -389,7 +413,13 @@ size_t http_request_header_each(http_s *h,
                                                 fio_str_info_s name,
                                                 fio_str_info_s value,
                                                 void *udata),
-                                void *udata);
+                                void *udata) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  if (!callback)
+    return hmap_count(HTTP_HDR_REQUEST(h));
+  http___h_each_data_s d = {.h = h, .callback = callback, .udata = udata};
+  return hmap_each(HTTP_HDR_REQUEST(h), http___h_each_task_wrapper, &d, 0);
+}
 
 /**
  * Gets the header information associated with the HTTP handle.
@@ -445,11 +475,10 @@ size_t http_response_header_each(
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   if (!callback)
     return hmap_count(HTTP_HDR_RESPONSE(h));
-  /* TODO */
-  // return hmap_each(HTTP_HDR_RESPONSE(h), int (*task)(hmap_each_s *), void
-  // *udata, 0);
-  return 0;
+  http___h_each_data_s d = {.h = h, .callback = callback, .udata = udata};
+  return hmap_each(HTTP_HDR_RESPONSE(h), http___h_each_task_wrapper, &d, 0);
 }
+
 /* *****************************************************************************
 Body / Payload handling
 ***************************************************************************** */
@@ -540,7 +569,7 @@ body_is_a_file:
 
 /** Allocates a body (payload) of (at least) the `expected_length`. */
 void http_body_expect(http_s *h, size_t expect) {
-  if ((!h | !expect) || h->body.buf)
+  if ((!h | !expect) || h->body.buf || h->body.fd != -1)
     return;
   h->body.capa = (expect + (!(expect & 15)) + 15) & (~(size_t)15);
   if (expect <= HTTP_BODY_RAM_LIMIT) {
@@ -898,7 +927,50 @@ void http_write___(void); /* sublime text marker */
  * Writes `data` to the response body associated with the HTTP handle after
  * sending all headers (no further headers may be sent).
  */
-void http_write FIO_NOOP(http_s *, http_write_args_s args); /* TODO */
+void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
+  if (!h || (http_is_finished(h) | (!h->controller)))
+    goto handle_error;
+  const http_controller_s *const c = h->controller;
+  hmap_s *const hdrs = h->headers + (!!h->status);
+  if (!(h->state & HTTP_STATE_STREAMING)) {
+    h->state |= HTTP_STATE_STREAMING;
+    /* test if streaming / single body response */
+    if (args.finish) {
+      /* validate / set Content-Length (not streaming) */
+      sstr_s k = {0};
+      arystr_s v = {0};
+      sstr_init_const(&k, "content-length", 14);
+      lstr_write_i(&v.u.str, args.len);
+      const uint64_t hash =
+          fio_risky_hash("content-length", 14, (uint64_t)(uintptr_t)(hdrs));
+      hmap_remove(hdrs, hash, k, NULL);
+      hmap_set_ptr(hdrs, hash, k, v, NULL, 1);
+    }
+    /* start a response, unless status == 0 (which starts a request). */
+    (c->start_response + (h->status == 0))(h, h->status, !args.finish);
+    /* loop and write headers */
+    FIO_MAP_EACH(hmap, hdrs, pos) {
+      fio_str_info_s name = sstr_info(&pos->obj.key);
+      if (!pos->obj.value.is_ary) {
+        c->write_header(h, name, lstr_info(&pos->obj.value.u.str));
+        continue;
+      }
+      FIO_ARRAY_EACH(sary, (&pos->obj.value.u.ary), i) {
+        c->write_header(h, name, lstr_info(i));
+      }
+    }
+    c->finish_headers(h);
+  }
+  c->write_body(h, args);
+  h->state |= HTTP_STATE_FINISHED * (!!args.finish);
+  return;
+
+handle_error:
+  if (args.fd)
+    close(args.fd);
+  if (args.dealloc && args.data)
+    args.dealloc((void *)args.data);
+}
 
 /* *****************************************************************************
 HTTP Status as String.
@@ -1015,6 +1087,7 @@ Testing the Handle.
 #include "fio-stl.h"
 #endif
 void http_test FIO_NOOP(void) {
+  fprintf(stderr, "* Testing HTTP handle.\r\n");
   http_s *h = http_new();
   FIO_ASSERT_ALLOC(h);
   { /* test status */
@@ -1043,6 +1116,9 @@ void http_test FIO_NOOP(void) {
     http_request_header_add(h,
                             (fio_str_info_s){"host", 4},
                             FIO_BUF2STR_INFO(url.host));
+    http_request_header_add(h,
+                            (fio_str_info_s){"host", 4},
+                            FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(
         http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).len ==
                 url.host.len &&
@@ -1054,6 +1130,25 @@ void http_test FIO_NOOP(void) {
     FIO_ASSERT(http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).buf !=
                    url.host.buf,
                "host copy error");
+    http_request_header_add(h,
+                            (fio_str_info_s){"host", 4},
+                            FIO_BUF2STR_INFO(url.path));
+    FIO_ASSERT(
+        http_request_header_get(h, (fio_str_info_s){"host", 4}, 1).len ==
+                url.path.len &&
+            !memcmp(
+                http_request_header_get(h, (fio_str_info_s){"host", 4}, 1).buf,
+                url.path.buf,
+                url.path.len),
+        "host header[1] set round-trip error");
+    FIO_ASSERT(
+        http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).len ==
+                url.host.len &&
+            !memcmp(
+                http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).buf,
+                url.host.buf,
+                url.host.len),
+        "host header[0] data lost!");
   }
   http_free(h);
 }

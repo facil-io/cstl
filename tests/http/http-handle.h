@@ -58,7 +58,7 @@ typedef struct http_controller_s {
   /** Informs the controller that a response is starting. */
   int (*start_response)(http_s *h, int status, int streaming);
   /** Informs the controller that a request is starting. */
-  int (*start_request)(http_s *h, int streaming);
+  int (*start_request)(http_s *h, int reserved, int streaming);
   /** called by the HTTP handle for each header. */
   void (*write_header)(http_s *h, fio_str_info_s name, fio_str_info_s value);
   /** Informs the controller that all headers were provided. */
@@ -365,6 +365,8 @@ void http_write(http_s *, http_write_args_s args);
 /** Named arguments helper. See http_write and http_write_args_s for details. */
 #define http_write(http_handle, ...)                                           \
   http_write(http_handle, (http_write_args_s){__VA_ARGS__})
+#define http_finish(http_handle)                                               \
+  http_write(http_handle, (http_write_args_s){.finish = 1})
 #endif
 
 #ifdef TEST
