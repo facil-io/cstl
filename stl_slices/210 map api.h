@@ -601,11 +601,11 @@ Iteration Macro
  */
 #define FIO_MAP_EACH(map_name, map_p, pos)                                     \
   for (FIO_NAME(map_name,                                                      \
-                node_s) *first___ = NULL,                                      \
+                node_s) *first___mi_ = NULL,                                   \
                         *pos = FIO_NAME(map_name,                              \
-                                        each_next)(map_p, &first___, NULL);    \
+                                        each_next)(map_p, &first___mi_, NULL); \
        pos;                                                                    \
-       pos = FIO_NAME(map_name, each_next)(map_p, &first___, pos))
+       pos = FIO_NAME(map_name, each_next)(map_p, &first___mi_, pos))
 #endif
 
 /* *****************************************************************************

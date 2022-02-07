@@ -947,7 +947,7 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
       hmap_set_ptr(hdrs, hash, k, v, NULL, 1);
     }
     /* start a response, unless status == 0 (which starts a request). */
-    (c->start_response + (h->status == 0))(h, h->status, !args.finish);
+    (&c->start_response)[h->status == 0](h, h->status, !args.finish);
     /* loop and write headers */
     FIO_MAP_EACH(hmap, hdrs, pos) {
       fio_str_info_s name = sstr_info(&pos->obj.key);

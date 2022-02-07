@@ -17761,13 +17761,11 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
  * **Note**: this variant supports automatic pointer tagging / untagging.
  */
 #define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (FIO_NAME(array_name,                                                    \
-                ____type_t) *first___ = NULL,                                  \
-                            *pos =                                             \
-                                FIO_NAME(array_name,                           \
-                                         each_next)((array), &first___, NULL); \
+  for (FIO_NAME(array_name, ____type_t)                                        \
+           *first___ai = NULL,                                                 \
+           *pos = FIO_NAME(array_name, each_next)((array), &first___ai, NULL); \
        pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
+       pos = FIO_NAME(array_name, each_next)((array), &first___ai, pos))
 #endif
 
 /**
@@ -19802,11 +19800,11 @@ Iteration Macro
  */
 #define FIO_MAP_EACH(map_name, map_p, pos)                                     \
   for (FIO_NAME(map_name,                                                      \
-                node_s) *first___ = NULL,                                      \
+                node_s) *first___mi_ = NULL,                                   \
                         *pos = FIO_NAME(map_name,                              \
-                                        each_next)(map_p, &first___, NULL);    \
+                                        each_next)(map_p, &first___mi_, NULL); \
        pos;                                                                    \
-       pos = FIO_NAME(map_name, each_next)(map_p, &first___, pos))
+       pos = FIO_NAME(map_name, each_next)(map_p, &first___mi_, pos))
 #endif
 
 /* *****************************************************************************
