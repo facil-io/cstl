@@ -2418,6 +2418,13 @@ Big Endian / Small Endian
 /** Local byte order to Network byte order, 62 bit integer */
 #define fio_lton64(i) (i)
 
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) fio_bswap16((i))
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) fio_bswap32((i))
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) fio_bswap64((i))
+
 /** Network byte order to Local byte order, 16 bit integer */
 #define fio_ntol16(i) (i)
 /** Network byte order to Local byte order, 32 bit integer */
@@ -2428,29 +2435,41 @@ Big Endian / Small Endian
 #ifdef __SIZEOF_INT128__
 /** Network byte order to Local byte order, 128 bit integer */
 #define fio_ntol128(i) (i)
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) fio_bswap128((i))
+
 #endif /* __SIZEOF_INT128__ */
 
 #else /* Little Endian */
 
 /** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i) fio_bswap16((i))
+#define fio_lton16(i)  fio_bswap16((i))
 /** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i) fio_bswap32((i))
+#define fio_lton32(i)  fio_bswap32((i))
 /** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i) fio_bswap64((i))
+#define fio_lton64(i)  fio_bswap64((i))
+
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) (i)
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) (i)
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) (i)
 
 /** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i) fio_bswap16((i))
+#define fio_ntol16(i)  fio_bswap16((i))
 /** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i) fio_bswap32((i))
+#define fio_ntol32(i)  fio_bswap32((i))
 /** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i) fio_bswap64((i))
+#define fio_ntol64(i)  fio_bswap64((i))
 
 #ifdef __SIZEOF_INT128__
 /** Local byte order to Network byte order, 128 bit integer */
-#define fio_lton128(i) fio_bswap128((i))
+#define fio_lton128(i)  fio_bswap128((i))
 /** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i) fio_bswap128((i))
+#define fio_ntol128(i)  fio_bswap128((i))
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) (i)
 #endif /* __SIZEOF_INT128__ */
 
 #endif /* __BIG_ENDIAN__ */
@@ -3295,6 +3314,7 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   return -1;
 #endif /* __builtin vs. math vs. map */
 }
+
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
@@ -12283,7 +12303,7 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
   fio___cli_cstr_s val = {.buf = NULL, .len = 0};
   if (!d.len || !d.buf)
     return val;
-  fio___cli_def_str_s *str =
+  fio___cli_def_str_s *str = (fio___cli_def_str_s *)
       FIO_MEM_REALLOC_(NULL, 0, (sizeof(*str) + d.len + 1), 0);
   FIO_ASSERT_ALLOC(str);
   FIO_LIST_PUSH(&fio___cli_default_values, &str->node);
@@ -14348,8 +14368,12 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   int events = -1;
   int handled = -1;
-  if (!p || !fio___poll_map_count(&p->map))
-    goto simply_sleep;
+  if (!p || !fio___poll_map_count(&p->map)) {
+    if (timeout) {
+      FIO_THREAD_WAIT((timeout * 1000000));
+    }
+    return 0;
+  }
   fio___poll_validate_test(p);
 
   /* handle events in a copy, allowing events / threads to mutate it */
@@ -14372,7 +14396,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
     if (!(pos->obj.flags & flag_mask))
       continue;
-    pfd[r] = (struct pollfd){.fd = pos->obj.fd, .events = pos->obj.flags};
+    pfd[r] =
+        (struct pollfd){.fd = pos->obj.fd, .events = (short)pos->obj.flags};
     uary[r] = pos->obj.udata;
     ++r;
   }
@@ -14437,11 +14462,6 @@ finish:
   if (!i)
     fio___poll_map_destroy(&cpy.map);
   return events;
-simply_sleep:
-  if (timeout) {
-    FIO_THREAD_WAIT((timeout * 1000000));
-  }
-  return 0;
 }
 
 /**
@@ -24910,7 +24930,7 @@ SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
   if (!o)
     return;
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
-  /* add destruction logic */
+  /* TODO: add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
   return;
@@ -24922,7 +24942,7 @@ Module Testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
   /*
-   * test module here
+   * TODO: test module here
    */
 }
 
@@ -25261,6 +25281,7 @@ typedef enum {
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o)          (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
 #define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 #define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
 #define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))

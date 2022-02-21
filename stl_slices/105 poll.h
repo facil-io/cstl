@@ -314,8 +314,12 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   int events = -1;
   int handled = -1;
-  if (!p || !fio___poll_map_count(&p->map))
-    goto simply_sleep;
+  if (!p || !fio___poll_map_count(&p->map)) {
+    if (timeout) {
+      FIO_THREAD_WAIT((timeout * 1000000));
+    }
+    return 0;
+  }
   fio___poll_validate_test(p);
 
   /* handle events in a copy, allowing events / threads to mutate it */
@@ -338,7 +342,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
     if (!(pos->obj.flags & flag_mask))
       continue;
-    pfd[r] = (struct pollfd){.fd = pos->obj.fd, .events = pos->obj.flags};
+    pfd[r] =
+        (struct pollfd){.fd = pos->obj.fd, .events = (short)pos->obj.flags};
     uary[r] = pos->obj.udata;
     ++r;
   }
@@ -403,11 +408,6 @@ finish:
   if (!i)
     fio___poll_map_destroy(&cpy.map);
   return events;
-simply_sleep:
-  if (timeout) {
-    FIO_THREAD_WAIT((timeout * 1000000));
-  }
-  return 0;
 }
 
 /**

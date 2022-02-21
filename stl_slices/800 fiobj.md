@@ -134,11 +134,13 @@ Returns the object's type class. This is limited to one of the core types. `FIOB
 
 Tests if the object is (probably) a valid FIOBJ
 
-#### `FIOBJ_IS_INVALID(o)`
+#### `FIOBJ_IS_NULL(o)`
 
 ```c
-#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o) (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
 ```
+
+Tests if the object is either a `NULL` `FIOBJ` object or an invalid object.
 
 #### `FIOBJ_PTR_UNTAG(o)`
 

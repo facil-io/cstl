@@ -122,6 +122,13 @@ Big Endian / Small Endian
 /** Local byte order to Network byte order, 62 bit integer */
 #define fio_lton64(i) (i)
 
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) fio_bswap16((i))
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) fio_bswap32((i))
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) fio_bswap64((i))
+
 /** Network byte order to Local byte order, 16 bit integer */
 #define fio_ntol16(i) (i)
 /** Network byte order to Local byte order, 32 bit integer */
@@ -132,29 +139,41 @@ Big Endian / Small Endian
 #ifdef __SIZEOF_INT128__
 /** Network byte order to Local byte order, 128 bit integer */
 #define fio_ntol128(i) (i)
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) fio_bswap128((i))
+
 #endif /* __SIZEOF_INT128__ */
 
 #else /* Little Endian */
 
 /** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i) fio_bswap16((i))
+#define fio_lton16(i)  fio_bswap16((i))
 /** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i) fio_bswap32((i))
+#define fio_lton32(i)  fio_bswap32((i))
 /** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i) fio_bswap64((i))
+#define fio_lton64(i)  fio_bswap64((i))
+
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) (i)
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) (i)
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) (i)
 
 /** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i) fio_bswap16((i))
+#define fio_ntol16(i)  fio_bswap16((i))
 /** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i) fio_bswap32((i))
+#define fio_ntol32(i)  fio_bswap32((i))
 /** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i) fio_bswap64((i))
+#define fio_ntol64(i)  fio_bswap64((i))
 
 #ifdef __SIZEOF_INT128__
 /** Local byte order to Network byte order, 128 bit integer */
-#define fio_lton128(i) fio_bswap128((i))
+#define fio_lton128(i)  fio_bswap128((i))
 /** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i) fio_bswap128((i))
+#define fio_ntol128(i)  fio_bswap128((i))
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) (i)
 #endif /* __SIZEOF_INT128__ */
 
 #endif /* __BIG_ENDIAN__ */
@@ -999,6 +1018,7 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   return -1;
 #endif /* __builtin vs. math vs. map */
 }
+
 /* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */

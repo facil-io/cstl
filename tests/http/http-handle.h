@@ -178,8 +178,12 @@ size_t http_body_seek(http_s *, ssize_t pos);
 /** Reads up to `length` of data from the body, returns nothing on EOF. */
 fio_str_info_s http_body_read(http_s *, size_t length);
 
-/** Reads from the body until finding `token` or the end of the body. */
-fio_str_info_s http_body_read_until(http_s *, char token);
+/**
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
+ *
+ * Note: `limit` is ignored if the
+ */
+fio_str_info_s http_body_read_until(http_s *, char token, size_t limit);
 
 /** Allocates a body (payload) of (at least) the `expected_length`. */
 void http_body_expect(http_s *, size_t expected_length);

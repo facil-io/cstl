@@ -127,7 +127,7 @@ SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
   if (!o)
     return;
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
-  /* add destruction logic */
+  /* TODO: add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
   return;
@@ -139,7 +139,7 @@ Module Testing
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
   /*
-   * test module here
+   * TODO: test module here
    */
 }
 

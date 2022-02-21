@@ -540,11 +540,12 @@ body_is_a_file:
 }
 
 /** Reads from the body until finding `token` or the end of the body. */
-fio_str_info_s http_body_read_until(http_s *h, char token) {
+fio_str_info_s http_body_read_until(http_s *h, char token, size_t limit) {
   fio_str_info_s r = {0};
   if (!h || h->body.pos >= h->body.len)
     return r;
-  const size_t limit = h->body.len - h->body.pos;
+  const size_t limit_map[2] = {limit, h->body.len - h->body.pos};
+  limit = limit_map[(limit_map[1] < limit_map[0]) | (!limit_map[0])];
   if (h->body.fd != -1)
     goto body_is_a_file;
   /* for mem buffer */

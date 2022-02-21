@@ -45,6 +45,15 @@ On big-endian systems, these macros a NOOPs, whereas on little-endian systems th
 - `fio_lton128(i)`
 - `fio_ntol128(i)`
 
+#### Numbers to Numbers (Little Endian)
+
+Converts a local number to little-endian. On big-endian systems, these macros flip the byte order, whereas on little-endian systems these macros are a NOOP.
+
+- `fio_ltole16(i)`
+- `fio_ltole32(i)`
+- `fio_ltole64(i)`
+- `fio_ltole128(i)`
+
 #### Bytes to Numbers (native / reversed / network ordered)
 
 Reads a number from an unaligned memory buffer. The number or bits read from the buffer is indicated by the name of the function.

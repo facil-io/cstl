@@ -940,6 +940,15 @@ On big-endian systems, these macros a NOOPs, whereas on little-endian systems th
 - `fio_lton128(i)`
 - `fio_ntol128(i)`
 
+#### Numbers to Numbers (Little Endian)
+
+Converts a local number to little-endian. On big-endian systems, these macros flip the byte order, whereas on little-endian systems these macros are a NOOP.
+
+- `fio_ltole16(i)`
+- `fio_ltole32(i)`
+- `fio_ltole64(i)`
+- `fio_ltole128(i)`
+
 #### Bytes to Numbers (native / reversed / network ordered)
 
 Reads a number from an unaligned memory buffer. The number or bits read from the buffer is indicated by the name of the function.
@@ -6368,11 +6377,13 @@ Returns the object's type class. This is limited to one of the core types. `FIOB
 
 Tests if the object is (probably) a valid FIOBJ
 
-#### `FIOBJ_IS_INVALID(o)`
+#### `FIOBJ_IS_NULL(o)`
 
 ```c
-#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o) (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
 ```
+
+Tests if the object is either a `NULL` `FIOBJ` object or an invalid object.
 
 #### `FIOBJ_PTR_UNTAG(o)`
 

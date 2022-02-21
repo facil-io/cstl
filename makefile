@@ -156,7 +156,7 @@ endif
 
 TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
 TEST4SOCKET:=     # --- tests for socket library linker flags
-TEST4CRYPTO:=     # HAVE_OPENSSL / HAVE_BEARSSL + HAVE_SODIUM
+TEST4CRYPTO:=     # HAVE_OPENSSL / HAVE_SODIUM
 TEST4SENDFILE:=   # HAVE_SENDFILE
 TEST4TM_ZONE:=    # HAVE_TM_TM_ZONE
 TEST4ZLIB:=       # HAVE_ZLIB
@@ -488,26 +488,6 @@ endif # TEST4SOCKET
 #############################################################################
 ifdef TEST4CRYPTO
 
-# BearSSL requirement C application code
-# (source code variation)
-FIO_TLS_TEST_BEARSSL_SOURCE:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <stdlib.h>\\n\
-\#include <bearssl.h>\\n\
-int main(void) {\\n\
-}\\n\
-"
-
-# BearSSL requirement C application code
-# (linked library variation)
-FIO_TLS_TEST_BEARSSL_EXT:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <stdlib.h>\\n\
-\#include <bearssl.h>\\n\
-int main(void) {\\n\
-}\\n\
-"
-
 # OpenSSL requirement C application code
 FIO_TLS_TEST_OPENSSL:="\\n\
 \#define _GNU_SOURCE\\n\
@@ -529,9 +509,6 @@ int main(void) { \\n\
 }\\n\
 "
 
-# automatic library adjustments for possible BearSSL library
-LIB_PRIVATE_SUBFOLDERS:=$(LIB_PRIVATE_SUBFOLDERS) $(if $(wildcard lib/bearssl),bearssl)
-
 # default OpenSSL flags
 OPENSSL_CFLAGS:=
 OPENSSL_LIBS:=
@@ -550,18 +527,9 @@ else
 endif
 
 
-# add BearSSL/OpenSSL library flags (exclusive)
+# add TLS library flags (TODO: non-exclusive?)
 ifdef FIO_NO_TLS
   $(info * Skipping crypto library detection.)
-else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_BEARSSL_SOURCE), $(EMPTY)), 0)
-  $(info * Detected the BearSSL source code library, setting HAVE_BEARSSL)
-  # TODO: when BearSSL support arrived, set the FIO_TLS_FOUND flag as well
-  FLAGS+=HAVE_BEARSSL
-else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_BEARSSL_EXT), "-lbearssl"), 0)
-  $(info * Detected the BearSSL library, setting HAVE_BEARSSL)
-  # TODO: when BearSSL support arrived, set the FIO_TLS_FOUND flag as well
-  FLAGS+=HAVE_BEARSSL
-  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) bearssl
 else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPENSSL_LDFLAGS)), 0)
   $(info * Detected the OpenSSL library, setting HAVE_OPENSSL)
   FLAGS+=HAVE_OPENSSL FIO_TLS_FOUND

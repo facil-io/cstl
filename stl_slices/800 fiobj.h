@@ -267,6 +267,7 @@ typedef enum {
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
 #define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o)          (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
 #define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 #define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
 #define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))

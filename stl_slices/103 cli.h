@@ -290,7 +290,7 @@ FIO_IFUNC fio___cli_cstr_s fio___cli_map_store_default(fio___cli_cstr_s d) {
   fio___cli_cstr_s val = {.buf = NULL, .len = 0};
   if (!d.len || !d.buf)
     return val;
-  fio___cli_def_str_s *str =
+  fio___cli_def_str_s *str = (fio___cli_def_str_s *)
       FIO_MEM_REALLOC_(NULL, 0, (sizeof(*str) + d.len + 1), 0);
   FIO_ASSERT_ALLOC(str);
   FIO_LIST_PUSH(&fio___cli_default_values, &str->node);
