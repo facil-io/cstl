@@ -912,43 +912,8 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
 /** Isolated the least significant (lowest) bit. */
 FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
 
-/** Returns the index of the most significant (highest) bit. */
-FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
-  uint64_t r = 0;
-  if (!i)
-    goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return __builtin_clzll(i);
-#else
-#define fio___bits_msb_index_step(x)                                           \
-  if (i >= ((uint64_t)1) << x)                                                 \
-    r += x, i >>= x;
-  fio___bits_msb_index_step(32);
-  fio___bits_msb_index_step(16);
-  fio___bits_msb_index_step(8);
-  fio___bits_msb_index_step(4);
-  fio___bits_msb_index_step(2);
-  fio___bits_msb_index_step(1);
-#undef fio___bits_msb_index_step
-  return r;
-#endif
-zero:
-  r = (size_t)-1;
-  return r;
-}
-
-/** Returns the index of the least significant (lowest) bit. */
-FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  if (!i)
-    return (size_t)-1;
-  return __builtin_ctzll(i);
-#elif 0
-  return fio_bits_msb_index(fio_bits_lsb(i));
-#else
-  // clang-format off
-  switch (fio_bits_lsb(i)) {
-    case UINT64_C(0x0): return (size_t)-1;
+FIO_IFUNC size_t fio_bits___map_bit2index(uint64_t i) {
+  switch (i) { // clang-format off
     case UINT64_C(0x1): return 0;
     case UINT64_C(0x2): return 1;
     case UINT64_C(0x4): return 2;
@@ -1013,10 +978,54 @@ FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
     case UINT64_C(0x2000000000000000): return 61;
     case UINT64_C(0x4000000000000000): return 62;
     case UINT64_C(0x8000000000000000): return 63;
-  }
-  // clang-format on
-  return -1;
-#endif /* __builtin vs. math vs. map */
+  } // clang-format on
+  return (size_t)-1;
+}
+
+/** Returns the index of the most significant (highest) bit. */
+FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
+  uint64_t r = 0;
+  if (!i)
+    goto zero;
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll) && 0
+  return __builtin_clzll(i);
+#elif 1
+  i |= i >> 1;
+  i |= i >> 2;
+  i |= i >> 4;
+  i |= i >> 8;
+  i |= i >> 16;
+  i |= i >> 32;
+  i += 1;
+  i >>= 1;
+  return fio_bits___map_bit2index(i);
+#else
+#define fio___bits_msb_index_step(x)                                           \
+  r += (((0ULL - 1) + (!(i & ((0ULL - 1) << x)))) & x);                        \
+  i >> (((0ULL - 1) + (!(i & ((0ULL - 1) << x)))) & x);
+  fio___bits_msb_index_step(32);
+  fio___bits_msb_index_step(16);
+  fio___bits_msb_index_step(8);
+  fio___bits_msb_index_step(4);
+  fio___bits_msb_index_step(2);
+  fio___bits_msb_index_step(1);
+#undef fio___bits_msb_index_step
+  return r;
+#endif
+zero:
+  r = (size_t)-1;
+  return r;
+}
+
+/** Returns the index of the least significant (lowest) bit. */
+FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  if (!i)
+    return (size_t)-1;
+  return __builtin_ctzll(i);
+#else
+  return fio_bits___map_bit2index(fio_bits_lsb(i));
+#endif /* __builtin vs. map */
 }
 
 /* *****************************************************************************
