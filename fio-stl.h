@@ -3205,8 +3205,20 @@ FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
   return (((uint8_t)result) & 0xFF);
 }
 
-/** Isolated the least significant (lowest) bit. */
+/** Isolates the least significant (lowest) bit. */
 FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+
+/** Isolates the most significant (highest) bit. */
+FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
+  i |= i >> 1;
+  i |= i >> 2;
+  i |= i >> 4;
+  i |= i >> 8;
+  i |= i >> 16;
+  i |= i >> 32;
+  i = ((i + 1) >> 1) | (i & ((uint64_t)1ULL << 63));
+  return i;
+}
 
 FIO_IFUNC size_t fio_bits___map_bit2index(uint64_t i) {
   switch (i) { // clang-format off
@@ -3283,30 +3295,10 @@ FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   uint64_t r = 0;
   if (!i)
     goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll) && 0
-  return __builtin_clzll(i);
-#elif 1
-  i |= i >> 1;
-  i |= i >> 2;
-  i |= i >> 4;
-  i |= i >> 8;
-  i |= i >> 16;
-  i |= i >> 32;
-  i += 1;
-  i >>= 1;
-  return fio_bits___map_bit2index(i);
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(fio_bits_msb(i));
 #else
-#define fio___bits_msb_index_step(x)                                           \
-  r += (((0ULL - 1) + (!(i & ((0ULL - 1) << x)))) & x);                        \
-  i >> (((0ULL - 1) + (!(i & ((0ULL - 1) << x)))) & x);
-  fio___bits_msb_index_step(32);
-  fio___bits_msb_index_step(16);
-  fio___bits_msb_index_step(8);
-  fio___bits_msb_index_step(4);
-  fio___bits_msb_index_step(2);
-  fio___bits_msb_index_step(1);
-#undef fio___bits_msb_index_step
-  return r;
+  return fio_bits___map_bit2index(fio_bits_msb(i));
 #endif
 zero:
   r = (size_t)-1;
@@ -3315,10 +3307,10 @@ zero:
 
 /** Returns the index of the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   if (!i)
     return (size_t)-1;
-  return __builtin_ctzll(i);
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 63 - __builtin_clzll(fio_bits_lsb(i));
 #else
   return fio_bits___map_bit2index(fio_bits_lsb(i));
 #endif /* __builtin vs. map */
@@ -3570,6 +3562,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     tmp = fio_lrot64(tmp, 3);
     FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
+  }
+  for (size_t i = 0; i < 63; ++i) {
+    FIO_ASSERT(fio_bits___map_bit2index((1ULL << i)) == i,
+               "bit index map[%zu] error != %zu",
+               (size_t)(1ULL << i),
+               i);
+    FIO_ASSERT(fio_bits_msb_index((1ULL << i)) == i,
+               "fio_bits_msb_index(%zu) != %zu",
+               1,
+               (size_t)fio_bits_msb_index((1ULL << i)));
+    FIO_ASSERT(fio_bits_lsb_index((1ULL << i)) == i,
+               "fio_bits_lsb_index(%zu) != %zu",
+               1,
+               (size_t)fio_bits_lsb_index((1ULL << i)));
   }
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
