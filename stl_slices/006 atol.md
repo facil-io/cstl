@@ -33,11 +33,11 @@ Currently wraps `strtod` with some special case handling.
 size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
 ```
 
-A helper function that writes a signed int64_t to a string.
+A helper function that writes a signed int64_t to a `NUL` terminated string.
 
-No overflow guard is provided, make sure there's at least 68 bytes available (for base 2).
+No overflow guard is provided, make sure there's at least 66 bytes available (i.e., for base 2).
 
-Offers special support for base 2 (binary), base 8 (octal), base 10 and base 16 (hex) where prefixes are automatically added if required (i.e.,`"0x"` for hex and `"0b"` for base 2, and `"0"` for octal).
+**Note**: special base prefixes for base 2 (binary) and base 16 (hex) ar **NOT** added automatically. Consider adding any required prefix when possible (i.e.,`"0x"` for hex and `"0b"` for base 2).
 
 Supports any base up to base 36 (using 0-9,A-Z).
 

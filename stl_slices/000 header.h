@@ -394,7 +394,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.1"
+#define FIO_VERSION_BUILD "alpha.2"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -411,11 +411,11 @@ supports macros that will help detect and validate it's version.
 #endif
 
 /** If implemented, returns the major version number. */
-size_t fio_version_major(void);
+int fio_version_major(void);
 /** If implemented, returns the minor version number. */
-size_t fio_version_minor(void);
+int fio_version_minor(void);
 /** If implemented, returns the patch version number. */
-size_t fio_version_patch(void);
+int fio_version_patch(void);
 /** If implemented, returns the build version string. */
 const char *fio_version_build(void);
 /** If implemented, returns the version number as a string. */
@@ -440,15 +440,9 @@ char *fio_version_string(void);
  * `FIO_VERSION_GUARD` must be defined (only) once per application / library.
  */
 #ifdef FIO_VERSION_GUARD
-size_t __attribute__((weak)) fio_version_major(void) {
-  return FIO_VERSION_MAJOR;
-}
-size_t __attribute__((weak)) fio_version_minor(void) {
-  return FIO_VERSION_MINOR;
-}
-size_t __attribute__((weak)) fio_version_patch(void) {
-  return FIO_VERSION_PATCH;
-}
+int __attribute__((weak)) fio_version_major(void) { return FIO_VERSION_MAJOR; }
+int __attribute__((weak)) fio_version_minor(void) { return FIO_VERSION_MINOR; }
+int __attribute__((weak)) fio_version_patch(void) { return FIO_VERSION_PATCH; }
 const char *__attribute__((weak)) fio_version_build(void) {
   return FIO_VERSION_BUILD;
 }
@@ -998,6 +992,10 @@ Common macros
 
 
 ***************************************************************************** */
+/* Common testing values / Macros */
+#if defined(FIO_TEST_CSTL) && !defined(FIO_TEST_REPEAT)
+#define FIO_TEST_REPEAT 4096
+#endif
 
 /* Modules required by FIO_SERVER */
 #if defined(FIO_SERVER)
@@ -1052,6 +1050,11 @@ Common macros
 #endif
 #endif /* FIO_RISKY_HASH */
 
+/* Modules that require FIO_MATH */
+#if defined(FIO_TEST_CSTL)
+#define FIO_MATH
+#endif
+
 /* Modules that require FIO_BITMAP */
 #if defined(FIO_JSON)
 #ifndef FIO_BITMAP
@@ -1061,7 +1064,7 @@ Common macros
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME) || defined(FIO_SHA1)
+    defined(FIO_UMAP_NAME) || defined(FIO_SHA1) || defined(FIO_MATH)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif

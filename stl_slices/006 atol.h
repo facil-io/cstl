@@ -343,8 +343,10 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
       uint8_t i = 0;    /* counting bits */
-      dest[len++] = '0';
-      dest[len++] = 'b';
+
+      /* dest[len++] = '0'; */
+      /* dest[len++] = 'b'; */
+
 #if __has_builtin(__builtin_clzll)
       i = __builtin_clzll(n);
       /* make sure the Binary representation doesn't appear signed */
@@ -407,8 +409,8 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
       uint8_t i = 0;    /* counting bits */
-      dest[len++] = '0';
-      dest[len++] = 'x';
+      /* dest[len++] = '0'; */
+      /* dest[len++] = 'x'; */
       while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
         n = n << 8;
         i++;
@@ -724,7 +726,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (void *)p,                                                      \
                (void *)s);                                                     \
     char buf[72];                                                              \
-    buf[fio_ltoa(buf, n, 2)] = 0;                                              \
+    buf[0] = '0';                                                              \
+    buf[1] = 'b';                                                              \
+    buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                      \
     p = buf;                                                                   \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 2 test error! "                                  \
@@ -748,7 +752,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                buf,                                                            \
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
-    buf[fio_ltoa(buf, n, 16)] = 0;                                             \
+    buf[0] = '0';                                                              \
+    buf[1] = 'x';                                                              \
+    buf[fio_ltoa(buf + 2, n, 16) + 2] = 0;                                     \
     p = buf;                                                                   \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 16 test error! "                                 \

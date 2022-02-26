@@ -2423,7 +2423,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ array ownership.\n");
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
-    for (int i = 1; i <= TEST_REPEAT; ++i) {
+    for (int i = 1; i <= FIO_TEST_REPEAT; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                            new_cstr)("number: ", 8);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
@@ -2442,9 +2442,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     if (1) {
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped) ==
-                  strlen("number: " FIO_MACRO2STR(TEST_REPEAT)) &&
+                  strlen("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
               !memcmp(
-                  "number: " FIO_MACRO2STR(TEST_REPEAT),
+                  "number: " FIO_MACRO2STR(FIO_TEST_REPEAT),
                   FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped)),
           "Object popped from Array lost it's value %s",
@@ -2485,14 +2485,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIOBJ a1, a2;
     a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     a2 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
-    for (int i = 0; i < TEST_REPEAT; ++i) {
+    for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIOBJ str = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(str, i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(a1, str);
     }
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)(a2, a1);
     fiobj_free(a1);
-    for (int i = 0; i < TEST_REPEAT; ++i) {
+    for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIOBJ_STR_TEMP_VAR(tmp);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
       FIO_ASSERT(
@@ -2514,7 +2514,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ hash ownership.\n");
     o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
-    for (int i = 1; i <= TEST_REPEAT; ++i) {
+    for (int i = 1; i <= FIO_TEST_REPEAT; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                            new_cstr)("number: ", 8);
       FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i);

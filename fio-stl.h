@@ -394,7 +394,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.1"
+#define FIO_VERSION_BUILD "alpha.2"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -411,11 +411,11 @@ supports macros that will help detect and validate it's version.
 #endif
 
 /** If implemented, returns the major version number. */
-size_t fio_version_major(void);
+int fio_version_major(void);
 /** If implemented, returns the minor version number. */
-size_t fio_version_minor(void);
+int fio_version_minor(void);
 /** If implemented, returns the patch version number. */
-size_t fio_version_patch(void);
+int fio_version_patch(void);
 /** If implemented, returns the build version string. */
 const char *fio_version_build(void);
 /** If implemented, returns the version number as a string. */
@@ -440,15 +440,9 @@ char *fio_version_string(void);
  * `FIO_VERSION_GUARD` must be defined (only) once per application / library.
  */
 #ifdef FIO_VERSION_GUARD
-size_t __attribute__((weak)) fio_version_major(void) {
-  return FIO_VERSION_MAJOR;
-}
-size_t __attribute__((weak)) fio_version_minor(void) {
-  return FIO_VERSION_MINOR;
-}
-size_t __attribute__((weak)) fio_version_patch(void) {
-  return FIO_VERSION_PATCH;
-}
+int __attribute__((weak)) fio_version_major(void) { return FIO_VERSION_MAJOR; }
+int __attribute__((weak)) fio_version_minor(void) { return FIO_VERSION_MINOR; }
+int __attribute__((weak)) fio_version_patch(void) { return FIO_VERSION_PATCH; }
 const char *__attribute__((weak)) fio_version_build(void) {
   return FIO_VERSION_BUILD;
 }
@@ -998,6 +992,10 @@ Common macros
 
 
 ***************************************************************************** */
+/* Common testing values / Macros */
+#if defined(FIO_TEST_CSTL) && !defined(FIO_TEST_REPEAT)
+#define FIO_TEST_REPEAT 4096
+#endif
 
 /* Modules required by FIO_SERVER */
 #if defined(FIO_SERVER)
@@ -1052,6 +1050,11 @@ Common macros
 #endif
 #endif /* FIO_RISKY_HASH */
 
+/* Modules that require FIO_MATH */
+#if defined(FIO_TEST_CSTL)
+#define FIO_MATH
+#endif
+
 /* Modules that require FIO_BITMAP */
 #if defined(FIO_JSON)
 #ifndef FIO_BITMAP
@@ -1061,7 +1064,7 @@ Common macros
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME) || defined(FIO_SHA1)
+    defined(FIO_UMAP_NAME) || defined(FIO_SHA1) || defined(FIO_MATH)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -4518,7 +4521,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   fprintf(stderr,
           "* Testing randomness "
           "- bit frequency / hemming distance / chi-square.\n");
-  const size_t test_len = (TEST_REPEAT << 7);
+  const size_t test_len = (FIO_TEST_REPEAT << 7);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
   clock_t start, end;
@@ -5248,8 +5251,10 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
       uint8_t i = 0;    /* counting bits */
-      dest[len++] = '0';
-      dest[len++] = 'b';
+
+      /* dest[len++] = '0'; */
+      /* dest[len++] = 'b'; */
+
 #if __has_builtin(__builtin_clzll)
       i = __builtin_clzll(n);
       /* make sure the Binary representation doesn't appear signed */
@@ -5312,8 +5317,8 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
       uint8_t i = 0;    /* counting bits */
-      dest[len++] = '0';
-      dest[len++] = 'x';
+      /* dest[len++] = '0'; */
+      /* dest[len++] = 'x'; */
       while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
         n = n << 8;
         i++;
@@ -5629,7 +5634,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (void *)p,                                                      \
                (void *)s);                                                     \
     char buf[72];                                                              \
-    buf[fio_ltoa(buf, n, 2)] = 0;                                              \
+    buf[0] = '0';                                                              \
+    buf[1] = 'b';                                                              \
+    buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                      \
     p = buf;                                                                   \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 2 test error! "                                  \
@@ -5653,7 +5660,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                buf,                                                            \
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
-    buf[fio_ltoa(buf, n, 16)] = 0;                                             \
+    buf[0] = '0';                                                              \
+    buf[1] = 'x';                                                              \
+    buf[fio_ltoa(buf + 2, n, 16) + 2] = 0;                                     \
     p = buf;                                                                   \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \
                "fio_ltoa base 16 test error! "                                 \
@@ -6174,6 +6183,710 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
+/* *****************************************************************************
+Copyright: Boaz Segev, 2022
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_MATH                    /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                    Basic Math Operations and Multi-Precision
+                        Constant Time (when possible)
+
+
+
+
+***************************************************************************** */
+#if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
+#define H___FIO_MATH___H 1
+
+/* *****************************************************************************
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out);
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out);
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
+
+/* *****************************************************************************
+Multi-precision, little endian helpers.
+
+Works with little endian uint64_t arrays or 64 bit numbers.
+***************************************************************************** */
+
+/** Multi-precision ADD for `len*64` bit long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_add(uint64_t *restrict dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t number_array_length);
+
+/** Multi-precision SUB for `len*64` bit long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *restrict dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t number_array_length);
+
+/** Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` .*/
+FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t number_array_length);
+
+/**
+ * Multi-precision DIV for `len*64` bit long a, b.
+ *
+ * This is NOT constant time.
+ *
+ * The algorithm might be slow, as my math isn't that good and I couldn't
+ * understand faster division algorithms (such as Newton–Raphson division)... so
+ * this is sort of a factorized variation on long division.
+ */
+FIO_IFUNC void fio_math_div(uint64_t *restrict dest,
+                            uint64_t *restrict reminder,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t number_array_length);
+
+/** Multi-precision shift right for `len` word number `n`. */
+FIO_IFUNC void fio_math_shr(uint64_t *dest,
+                            uint64_t *n,
+                            const size_t right_shift_bits,
+                            size_t number_array_length);
+
+/** Multi-precision shift left for `len*64` bit number `n`. */
+FIO_IFUNC void fio_math_shl(uint64_t *dest,
+                            uint64_t *n,
+                            const size_t left_shift_bits,
+                            const size_t number_array_length);
+
+/** Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`). */
+FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
+
+/** Multi-precision - returns the index for the most significant bit or -1. */
+FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
+
+/** Multi-precision - returns the index for the least significant bit or -1. */
+FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
+
+#if 0  /* TODO: not yet implemented */
+/** Multi-precision - returns the most significant 64 bits. */
+FIO_IFUNC uint64_t fio_math_top64(uint64_t *n, size_t len);
+
+/** Multi-precision MOD for `len*64` bit long `num`.*/
+FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
+                            const uint64_t *num,
+                            size_t number_array_length,
+                            const uint64_t *mod,
+                            size_t mod_bit_length);
+#endif /* TODO */
+
+/* *****************************************************************************
+128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+// clang-format off
+#if defined(__SIZEOF_INT128__)
+typedef __uint128_t fio_u128_i;
+#else
+typedef struct { uint64_t u64[2]; } fio_u128_i;
+#endif
+
+/** Initializes a u128 number using high and low bits. */
+FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo);
+
+/** 64bit multiplication into a 128bit result. */
+FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b);
+
+/** Add 64bit to a 128bit number. */
+FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b);
+
+/** Add two 128bit numbers. */
+FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b);
+
+/** Subtract two 128bit numbers. */
+FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b);
+
+/** Multiply two 128bit numbers. */
+FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b);
+
+/** Shift right a 128 bit number. */
+FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits);
+
+/** Get the lower 64 bits of a 128 bit number. */
+FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a);
+
+/** Get the higher 64 bits of a 128 bit number. */
+FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a);
+
+/** Add two 128bit numbers with carry (up to 1 bit). */
+FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a, fio_u128_i b, uint64_t carry_in, uint64_t *carry_out);
+
+/** Multiply two 128bit numbers with carry (up to additional 128 bit). */
+FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a, fio_u128_i b, fio_u128_i *carry_out);
+
+// clang-format on
+/* *****************************************************************************
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u = (__uint128_t)a + b + carry_in;
+  if (carry_out)
+    *carry_out = (uint64_t)(u >> 64U);
+#else
+  uint64_t u = a + b + carry_in;
+  if (carry_out)
+    *carry_out = (u - carry_in) < a;
+#endif
+  return (uint64_t)u;
+}
+
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u = (__uint128_t)a - (b + carry_in);
+  if (carry_out)
+    *carry_out = (uint64_t)(u >> 127U);
+#else
+  uint64_t u = a - (b + carry_in);
+  if (carry_out)
+    *carry_out = (u + carry_in) > a;
+#endif
+  return (uint64_t)u;
+}
+
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t *carry_out) {
+#if defined(__SIZEOF_INT128__)
+  __uint128_t r = (__uint128_t)a * b;
+  *carry_out = (uint64_t)(r >> 64U);
+#elif 1 /* At this point long multiplication makes sense... */
+  uint64_t r, midc = 0, lowc = 0;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
+#else   /* Using Karatsuba Multiplication might not improve performance */
+  uint64_t r, c;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t asum = al + ah;
+  const uint64_t bsum = bl + bh;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  /* asum * bsum might overflow, but we know each value is <= 0x100000000 */
+  uint64_t midlo = (asum & 0xFFFFFFFF) * (bsum & 0xFFFFFFFF);
+  uint64_t midhi = (asum & bsum) >> 32;
+  uint64_t midmid = (bsum & (((uint64_t)0ULL - (asum >> 32)) >> 32)) +
+                    (asum & (((uint64_t)0ULL - (bsum >> 32)) >> 32));
+  midlo = fio_math_addc64(midlo, (midmid << 32), 0, &c);
+  midhi += c + (midmid >> 32);
+  midlo = fio_math_subc64(midlo, lo, 0, &c);
+  midhi -= c;
+  midlo = fio_math_subc64(midlo, hi, 0, &c);
+  midhi -= c;
+  r = fio_math_addc64(lo, midlo << 32, 0, &c);
+  *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
+#endif
+  return (uint64_t)r;
+}
+
+/* *****************************************************************************
+Multi-precision, little endian helpers. Works with full uint64_t arrays.
+***************************************************************************** */
+
+/** Multi-precision ADD for `bits` long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_add(uint64_t *restrict dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i) {
+    dest[i] = fio_math_addc64(a[i], b[i], c, &c);
+  }
+  return c;
+}
+
+/** Multi-precision SUB for `bits` long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *restrict dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i) {
+    dest[i] = fio_math_subc64(a[i], b[i], c, &c);
+  }
+  return c;
+}
+
+/** Multi-precision Inverse for `bits` number `n`. */
+FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, const size_t len) {
+  uint64_t c = 1;
+  for (size_t i = 0; i < len; ++i) {
+    uint64_t tmp = ~n[i] + c;
+    c = (tmp ^ n[i]) >> 63;
+    dest[i] = tmp;
+  }
+}
+
+/** Multi-precision shift right for `bits` number `n`. */
+FIO_IFUNC void fio_math_shr(uint64_t *dest,
+                            uint64_t *n,
+                            size_t bits,
+                            size_t len) {
+  size_t s = bits >> 63;
+  bits &= 63;
+  uint64_t c = 0;
+  while (len--) {
+    const uint64_t mask = (uint64_t)0ULL - (!s);
+    s -= (!!s);
+    uint64_t tmp = ((n[len] & mask) << ((64 - bits) & 63));
+    dest[len] = ((n[len] & mask) >> bits) | c;
+    c = tmp;
+  }
+}
+
+/** Multi-precision shift left for `bits` number `n`. */
+FIO_IFUNC void fio_math_shl(uint64_t *dest,
+                            uint64_t *n,
+                            size_t bits,
+                            const size_t len) {
+  size_t s = bits >> 63;
+  bits &= 63;
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i) {
+    const uint64_t mask = (uint64_t)0ULL - (!s);
+    s -= (!!s);
+    uint64_t tmp = ((n[i] & mask) >> ((64 - bits) & 63));
+    dest[i] = (((n[i] & mask) << bits) | c);
+    c = tmp;
+  }
+}
+
+/** Multi-precision - returns the index for the most significant bit. */
+FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, size_t len) {
+  size_t r[2] = {0, (size_t)-1};
+  uint64_t a = 0;
+  while (len--) {
+    const uint64_t mask = ((uint64_t)0ULL - (!a));
+    a |= (mask & n[len]);
+    r[0] += (64 & (~mask));
+  }
+  r[0] += fio_bits_msb_index(a);
+  return r[!a];
+}
+
+/** Multi-precision - returns the index for the least significant bit. */
+FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len) {
+  size_t r[2] = {0, (size_t)-1};
+  uint64_t a = 0;
+  uint64_t mask = (~(uint64_t)0ULL);
+  for (size_t i = 0; i < len; ++i) {
+    a |= mask & n[i];
+    mask = ((uint64_t)0ULL - (!a));
+    r[0] += (64 & mask);
+  }
+  r[0] += fio_bits_lsb_index(a);
+  return r[!a];
+}
+
+/** Multi-precision MUL for `bits` long a + b. `dest` must be `len * 2`. */
+FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t len) {
+  uint64_t c = 0;
+#if !defined(__cplusplus) || __cplusplus > 201402L
+  uint64_t abwmul[len * 2];
+#else
+  uint64_t abwmul[512];
+  FIO_ASSERT(
+      len <= 256,
+      "Multi Precision MUL (fio_math_mul) overflows at 16384 bit numbers");
+#endif
+  for (size_t i = 0; i < len; ++i) { // clang-format off
+    dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
+    dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
+  } // clang-format on
+  c = 0;
+  for (size_t i = 0; i < len - 1; ++i) {
+    dest[(i + 1) << 1] = fio_math_addc64(dest[(i + 1) << 1], c, 0, NULL);
+    for (size_t j = i + 1; j < len; ++j) {
+      /* calculate the "middle" word sum */
+      uint64_t mid0, mid1, mid2, ac, bc;
+      uint64_t asum = fio_math_addc64(a[i], a[j], 0, &ac);
+      uint64_t bsum = fio_math_addc64(b[i], b[j], 0, &bc);
+      mid0 = fio_math_mulc64(asum, bsum, &mid1);
+      mid2 = ac & bc;
+      mid1 = fio_math_addc64(mid1, (asum & ((uint64_t)0ULL - bc)), 0, &c);
+      mid2 += c;
+      mid1 = fio_math_addc64(mid1, (bsum & ((uint64_t)0ULL - ac)), 0, &c);
+      mid2 += c;
+      mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
+      mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
+      mid2 = fio_math_subc64(mid2, c, 0, NULL);
+      mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
+      mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
+      mid2 = fio_math_subc64(mid2, c, 0, NULL);
+      dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
+      dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
+      c += mid2;
+    }
+  }
+}
+
+/** Multi-precision DIV for `len*64` bit long a, b. NOT constant time. */
+FIO_IFUNC void fio_math_div(uint64_t *restrict dest,
+                            uint64_t *restrict reminder,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t len) {
+#if !defined(__cplusplus) || __cplusplus > 201402L
+  uint64_t t[len];
+  uint64_t r[len];
+  uint64_t q[len];
+#else
+  uint64_t t[256];
+  uint64_t r[256];
+  uint64_t q[256];
+  FIO_ASSERT(
+      len <= 256,
+      "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
+#endif
+  memcpy(r, a, sizeof(uint64_t) * len);
+  memset(q, 0, sizeof(uint64_t) * len);
+  size_t rlen;
+  uint64_t c;
+  const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
+  while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
+    const size_t delta = rlen - blen;
+    fio_math_shl(t, (uint64_t *)b, delta, len);
+    fio_math_sub(r, (uint64_t *)r, t, len);
+    q[delta >> 6] =
+        fio_math_addc64(q[delta >> 6], (1ULL << (delta & 63)), 0, &c);
+    for (size_t i = ((delta >> 6) + 1); i < len; ++i) {
+      q[i] = fio_math_addc64(q[i], 0, c, &c);
+    }
+  }
+  fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
+  const uint64_t mask =
+      (uint64_t)0ULL -
+      ((t[len - 1] ^ (b[len - 1] ^ a[len - 1])) >> 63); /* SUB overflowed */
+  const uint64_t imask = ~mask;                         /* r was >= b */
+  q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
+  for (size_t i = 1; i < len; ++i) {
+    q[i] = fio_math_addc64(q[i], 0, c, &c);
+  }
+  if (dest) {
+    memcpy(dest, q, len * sizeof(uint64_t));
+  }
+  if (reminder) {
+    for (size_t i = 0; i < len; ++i) {
+      reminder[i] = (t[i] & imask) | (r[i] & mask);
+    }
+  }
+}
+
+/** Multi-precision - returns the most significant 64 bits. */
+FIO_IFUNC uint64_t fio_math_top64(uint64_t *n, size_t len) {
+  size_t r[2] = {0, 0};
+  while (len--) {
+    size_t i = !r[0];
+    const uint64_t mask = ((uint64_t)0ULL - (!r[i]));
+    r[i] |= mask & n[len];
+  }
+  const size_t offset = 63 & (fio_bits_msb_index(r[0]) + 1);
+  r[0] = (r[0] << (64 - offset)) | (r[1] >> (offset));
+  return r[0];
+}
+
+/** Multi-precision MOD for `len*64` bit long `num`.*/
+FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
+                            const uint64_t *num,
+                            size_t number_array_length,
+                            const uint64_t *mod,
+                            size_t mod_bit_length);
+
+/* *****************************************************************************
+128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+#if defined(__SIZEOF_INT128__)
+// clang-format off
+typedef __uint128_t fio_u128_i;
+FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo) { return ((fio_u128_i)hi << 64) | lo; }
+FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b) { return (fio_u128_i)a * b; }
+FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b) { return a + b; }
+FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b) { return a + b; }
+FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b) { return a - b; }
+FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b) { return a * b; }
+FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits) { return (a >> (bits & 127)); }
+FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a) { return (uint64_t)a; }
+FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a) { return (uint64_t)(a >> 64); }
+// clang-format on
+FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a,
+                                   fio_u128_i b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  a += b + carry_in;
+  if (carry_out)
+    *carry_out = ((a - carry_in) < b);
+  return a;
+}
+
+FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a,
+                                   fio_u128_i b,
+                                   fio_u128_i *carry) {
+  fio_u128_i abl = (a & 0xFFFFFFFFFFFFFFFF) * (b & 0xFFFFFFFFFFFFFFFF);
+  fio_u128_i abh = (a >> 64) * (b >> 64);
+  fio_u128_i mid1 = (a & 0xFFFFFFFFFFFFFFFF) * (b >> 64);
+  fio_u128_i mid2 = (b & 0xFFFFFFFFFFFFFFFF) * (a >> 64);
+  mid1 += mid2;
+  mid2 = mid1 < mid2; /* carry */
+  a = abl + (mid1 << 64);
+  *carry = abh + (mid1 >> 64) + (mid2 << 64);
+  return a;
+}
+#else
+// clang-format off
+typedef struct { uint64_t u64[2]; } fio_u128_i;
+FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo) { fio_u128_i r = {{lo, hi}}; return r; }
+FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b) { fio_u128_i r; r.u64[0] = fio_math_mulc64(a, b, &r.u64[1]); return r; }
+FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b) { r.u64[0] += a; r.u64[1] += r.u64[0] < a; return a; }
+FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b) { r.u64[0] += b.u64[0]; r.u64[1] += (r.u64[0] < b.u64[0]) + b.u64[1]; return a; }
+FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a) { return a.u64[0]; }
+FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a) { return a.u64[1]; }
+// clang-format on
+
+FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b) {
+  uint64_t c;
+  a.u64[0] = fio_math_subc64(a.u64[0], b.u64[0], 0, &c);
+  a.u64[1] = fio_math_subc64(a.u64[1], b.u64[1], c, &c);
+  return a;
+}
+
+FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b) {
+  fio_u128_i ab;
+  ab.u64[0] = fio_math_mulc64(a.u64[0], b.u64[0], &ab.u64[1]);
+  ab.u64[1] += a.u64[0] * b.u64[1];
+  ab.u64[1] += a.u64[1] * b.u64[0];
+  return abl;
+}
+FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits) {
+  fio_math_shr(a.u64, a.u64, bits, 2);
+  return a;
+}
+FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a,
+                                   fio_u128_i b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  a.u64[0] = fio_math_addc64(a.u64[0], a.u64[0], carry_in, &carry_in);
+  a.u64[1] = fio_math_addc64(a.u64[1], a.u64[1], carry_in, &carry_in);
+  if (carry_out)
+    *carry_out = carry_in;
+  return a;
+}
+
+FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a,
+                                   fio_u128_i b,
+                                   fio_u128_i *carry) {
+  fio_u128_i r[2];
+  fio_math_mul(r a.u64, b.u64, 2);
+  *carry = r[1];
+  return r[0];
+}
+
+#endif
+/* *****************************************************************************
+Common Math operations - test
+***************************************************************************** */
+#if defined(FIO_TEST_CSTL)
+
+FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
+  fprintf(stderr, "* Testing multi-precision math operations (partial).\n");
+
+  for (size_t k = 0; k < 16; ++k) { /* Test multiplication */
+    for (size_t j = 0; j < 16; ++j) {
+      uint64_t a = (j << (k << 1)), b = (j << k);
+      {
+        for (int i = 0; i < 16; ++i) {
+          uint64_t r0, r1, c0, c1;
+          FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
+          r0 = fio_math_mulc64(a, b, &c0); /* implementation for the system. */
+          FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
+                        (void *)r0,
+                        (void *)c0);
+
+          { /* long multiplication (school algorithm). */
+            uint64_t midc = 0, lowc = 0;
+            const uint64_t al = a & 0xFFFFFFFF;
+            const uint64_t ah = a >> 32;
+            const uint64_t bl = b & 0xFFFFFFFF;
+            const uint64_t bh = b >> 32;
+            const uint64_t lo = al * bl;
+            const uint64_t hi = ah * bh;
+            const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+            const uint64_t r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+            const uint64_t c = hi + (mid >> 32) + (midc << 32) + lowc;
+            FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
+                          (void *)r,
+                          (void *)c);
+            r1 = r;
+            c1 = c;
+          }
+          FIO_ASSERT((r0 == r1) && (c0 == c1), "fail");
+          {
+            uint64_t r2[2];
+            fio_math_mul(r2, &a, &b, 1);
+            FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
+                          (void *)r2[0],
+                          (void *)r2[1]);
+            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
+                       "fail Xlen MUL with len == 1");
+          }
+          {
+            uint64_t a2[4] = {a, 0, 0, a};
+            uint64_t b2[4] = {b, 0, 0, 0};
+            uint64_t r2[8];
+            fio_math_mul(r2, a2, b2, 4);
+            FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
+                          (void *)r2[3],
+                          (void *)r2[4]);
+            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
+                       "fail Xlen MUL (1) with len == 4");
+            FIO_ASSERT((r0 == r2[3]) && (c0 == r2[4]),
+                       "fail Xlen MUL (2) with len == 4");
+          }
+
+          a <<= 8;
+          b <<= 8;
+          a += 0xFAFA;
+          b += 0xAFAF;
+        }
+      }
+    }
+  }
+  { /* Test division */
+    inline int64_t fio_time_nano();
+    uint64_t n = 0, d = 1;
+    uint64_t start[2], end[2];
+    for (size_t i = 0; i < 64; ++i) {
+      n = (n << 7) ^ 0xAA;
+      for (size_t j = 0; j < 64; ++j) {
+        d = (d << 3) ^ 0xAA;
+        uint64_t q, r;
+        FIO_COMPILER_GUARD;
+        fio_math_div(&q, &r, &n, &d, 1);
+        FIO_ASSERT(q == (n / d),
+                   "fio_math_div failed quotient for 0x%llX / 0x%llX (Q=0x%llX "
+                   "R=0x%llX)",
+                   (long long)n,
+                   (long long)d,
+                   (long long)q,
+                   (long long)r);
+        FIO_ASSERT(
+            (q * d) + r == n,
+            "fio_math_div failed remainder for 0x%llX / 0x%llX (Q=0x%llX "
+            "R=0x%llX)",
+            (long long)n,
+            (long long)d,
+            (long long)q,
+            (long long)r);
+      }
+    }
+    n = 0, d = 1;
+    start[0] = fio_time_nano();
+    for (size_t i = 0; i < 64; ++i) {
+      n = (n << 7) ^ 0xAA;
+      uint64_t q = 0, r = 0;
+      for (size_t j = 0; j < 64; ++j) {
+        d = (d << 3) ^ 0xAA;
+        FIO_COMPILER_GUARD;
+        fio_math_div(&q, &r, &n, &d, 1);
+      }
+    }
+    end[0] = fio_time_nano();
+    n = 0, d = 1;
+    start[1] = fio_time_nano();
+    for (size_t i = 0; i < 64; ++i) {
+      n = (n << 7) ^ 0xAA;
+      uint64_t q = 0;
+      for (size_t j = 0; j < 64; ++j) {
+        d = (d << 3) ^ 0xAA;
+        FIO_COMPILER_GUARD;
+        q = n / d;
+      }
+    }
+    end[1] = fio_time_nano();
+    FIO_LOG_INFO("\t fio_math_div test took %zu us (vs. %zu us) for a single "
+                 "64 bit word.",
+                 (size_t)(end[0] - start[0]),
+                 (size_t)(end[1] - start[1]));
+  }
+  { /* Test bit shifting */
+    uint64_t a[] = {0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0};
+    uint64_t b[] = {0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 1};
+    uint64_t c[3];
+    fio_math_shl(c, a, 1, 3);
+    FIO_ASSERT(!memcmp(b, c, sizeof(c)), "left shift failed, %llX:%llX:%llX");
+    fio_math_shr(c, c, 1, 3);
+    FIO_ASSERT(!memcmp(a, c, sizeof(c)), "right shift failed, %llX:%llX:%llX");
+    FIO_ASSERT(fio_math_msb_index(a, 3) == 127,
+               "fio_math_msb_index(a) failed %zu",
+               fio_math_msb_index(a, 3));
+    FIO_ASSERT(fio_math_lsb_index(a, 3) == 0,
+               "fio_math_lsb_index(a) failed %zu",
+               fio_math_lsb_index(a, 3));
+    FIO_ASSERT(fio_math_msb_index(b, 3) == 128,
+               "fio_math_msb_index(b) failed %zu",
+               fio_math_msb_index(b, 3));
+    FIO_ASSERT(fio_math_lsb_index(b, 3) == 1,
+               "fio_math_lsb_index(b) failed %zu",
+               fio_math_lsb_index(b, 3));
+  }
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Math - cleanup
+***************************************************************************** */
+#endif /* FIO_MATH */
+#undef FIO_MATH
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -27452,7 +28165,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ array ownership.\n");
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
-    for (int i = 1; i <= TEST_REPEAT; ++i) {
+    for (int i = 1; i <= FIO_TEST_REPEAT; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                            new_cstr)("number: ", 8);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
@@ -27471,9 +28184,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     if (1) {
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped) ==
-                  strlen("number: " FIO_MACRO2STR(TEST_REPEAT)) &&
+                  strlen("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
               !memcmp(
-                  "number: " FIO_MACRO2STR(TEST_REPEAT),
+                  "number: " FIO_MACRO2STR(FIO_TEST_REPEAT),
                   FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped)),
           "Object popped from Array lost it's value %s",
@@ -27514,14 +28227,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIOBJ a1, a2;
     a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     a2 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
-    for (int i = 0; i < TEST_REPEAT; ++i) {
+    for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIOBJ str = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(str, i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(a1, str);
     }
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)(a2, a1);
     fiobj_free(a1);
-    for (int i = 0; i < TEST_REPEAT; ++i) {
+    for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIOBJ_STR_TEMP_VAR(tmp);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
       FIO_ASSERT(
@@ -27543,7 +28256,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ hash ownership.\n");
     o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
-    for (int i = 1; i <= TEST_REPEAT; ++i) {
+    for (int i = 1; i <= FIO_TEST_REPEAT; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                            new_cstr)("number: ", 8);
       FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i);
@@ -27683,9 +28396,6 @@ void fio_test_dynamic_types(void);
 FIO_SFUNC void fio_test_dynamic_types(void);
 #endif
 #if !defined(FIO_EXTERN_TEST) || defined(FIO_EXTERN_COMPLETE)
-
-/* Common testing values / Macros */
-#define TEST_REPEAT 4096
 
 /* Make sure logging and memory leak counters are set. */
 #define FIO_LOG
@@ -27833,7 +28543,7 @@ typedef struct {
 FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
   FIO_LIST_HEAD ls = FIO_LIST_INIT(ls);
-  for (int i = 0; i < TEST_REPEAT; ++i) {
+  for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
         &ls,
         (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
@@ -27846,7 +28556,7 @@ FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
     FIO_ASSERT(ls____test_root(&pos->node) == pos,
                "Linked List root offset error");
   }
-  FIO_ASSERT(tester == TEST_REPEAT,
+  FIO_ASSERT(tester == FIO_TEST_REPEAT,
              "linked list EACH didn't loop through all the list");
   while (ls____test_any(&ls)) {
     ls____test_s *node = ls____test_pop(&ls);
@@ -27855,8 +28565,8 @@ FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
     FIO_ASSERT(node->data == --tester, "Linked list ordering error for pop");
     FIO_MEM_FREE(node, sizeof(*node));
   }
-  tester = TEST_REPEAT;
-  for (int i = 0; i < TEST_REPEAT; ++i) {
+  tester = FIO_TEST_REPEAT;
+  for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_unshift(
         &ls,
         (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
@@ -27868,7 +28578,7 @@ FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   }
   FIO_ASSERT(tester == 0,
              "linked list EACH didn't loop through all the list after unshift");
-  tester = TEST_REPEAT;
+  tester = FIO_TEST_REPEAT;
   while (ls____test_any(&ls)) {
     ls____test_s *node = ls____test_shift(&ls);
     node = (ls____test_s *)fio___dynamic_types_test_untag((uintptr_t)(node));
@@ -27878,7 +28588,7 @@ FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   }
   FIO_ASSERT(FIO_NAME_BL(ls____test, empty)(&ls),
              "Linked list empty should have been true");
-  for (int i = 0; i < TEST_REPEAT; ++i) {
+  for (int i = 0; i < FIO_TEST_REPEAT; ++i) {
     ls____test_s *node = ls____test_push(
         &ls,
         (ls____test_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*node), 0));
@@ -28022,14 +28732,14 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                "freshly initialized map should have no objects");
     FIO_ASSERT(set_____test_capa(&m) == 0,
                "freshly initialized map should have no capacity");
-    FIO_ASSERT(set_____test_reserve(&m, (TEST_REPEAT >> 1)) >=
-                   (TEST_REPEAT >> 1),
+    FIO_ASSERT(set_____test_reserve(&m, (FIO_TEST_REPEAT >> 1)) >=
+                   (FIO_TEST_REPEAT >> 1),
                "reserve should increase capacity.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       set_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
     {
-      uintptr_t pos_test = (TEST_REPEAT >> 1);
+      uintptr_t pos_test = (FIO_TEST_REPEAT >> 1);
       size_t count =
           set_____test_each(&m, set_____test_each_task, &pos_test, pos_test);
       FIO_ASSERT(count == set_____test_count(&m),
@@ -28037,22 +28747,22 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
       FIO_ASSERT(count == pos_test, "set_each position testing error");
     }
 
-    FIO_ASSERT(set_____test_count(&m) == TEST_REPEAT,
+    FIO_ASSERT(set_____test_count(&m) == FIO_TEST_REPEAT,
                "After inserting %zu items to set, got %zu items",
-               (size_t)TEST_REPEAT,
+               (size_t)FIO_TEST_REPEAT,
                (size_t)set_____test_count(&m));
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == i + 1,
                  "item retrival error in set (%zu != %zu).",
                  set_____test_get(&m, HASHOFi(i), i + 1),
                  i + 1);
     }
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 2) == 0,
                  "item retrival error in set - object comparisson error?");
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       set_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
     {
@@ -28064,9 +28774,9 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
       }
       FIO_ASSERT(i == set_____test_count(&m), "FIO_MAP_EACH loop incomplete?");
     }
-    FIO_ASSERT(set_____test_count(&m) == TEST_REPEAT,
+    FIO_ASSERT(set_____test_count(&m) == FIO_TEST_REPEAT,
                "Inserting existing object should keep existing object.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == i + 1,
                  "item retrieval error in set - insert failed to update?");
       FIO_ASSERT(set_____test_get_ptr(&m, HASHOFi(i), i + 1) &&
@@ -28074,37 +28784,37 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                  "pointer retrieval error in set.");
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       size_t old = 5;
       set_____test_set(&m, HASHOFi(i), i + 2, &old);
       FIO_ASSERT(old == 0,
                  "old pointer not initialized with old (or missing) data");
     }
 
-    FIO_ASSERT(set_____test_count(&m) == (TEST_REPEAT * 2),
+    FIO_ASSERT(set_____test_count(&m) == (FIO_TEST_REPEAT * 2),
                "full hash collision shoudn't break map until attack limit.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 2) == i + 2,
                  "item retrival error in set - overwrite failed to update?");
     }
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == i + 1,
                  "item retrival error in set - collision resolution error?");
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       size_t old = 5;
       set_____test_remove(&m, HASHOFi(i), i + 1, &old);
       FIO_ASSERT(old == i + 1,
                  "removed item not initialized with old (or missing) data");
     }
-    FIO_ASSERT(set_____test_count(&m) == TEST_REPEAT,
+    FIO_ASSERT(set_____test_count(&m) == FIO_TEST_REPEAT,
                "removal should update object count.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 1) == 0,
                  "removed items should be unavailable");
     }
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set_____test_get(&m, HASHOFi(i), i + 2) == i + 2,
                  "previous items should be accessible after removal");
     }
@@ -28142,45 +28852,45 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
     set2_____test_s m = FIO_MAP_INIT;
     fprintf(stderr, "* Testing set map without value comparison.\n");
     FIO_NAME_TEST(stl, set2_____test)();
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       set2_____test_set_if_missing(&m, HASHOFi(i), i + 1);
     }
 
-    FIO_ASSERT(set2_____test_count(&m) == TEST_REPEAT,
+    FIO_ASSERT(set2_____test_count(&m) == FIO_TEST_REPEAT,
                "After inserting %zu items to set, got %zu items",
-               (size_t)TEST_REPEAT,
+               (size_t)FIO_TEST_REPEAT,
                (size_t)set2_____test_count(&m));
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == i + 1,
                  "item retrival error in set (%zu != %zu).",
                  set2_____test_get(&m, HASHOFi(i), 0),
                  i + 1);
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       set2_____test_set_if_missing(&m, HASHOFi(i), i + 2);
     }
-    FIO_ASSERT(set2_____test_count(&m) == TEST_REPEAT,
+    FIO_ASSERT(set2_____test_count(&m) == FIO_TEST_REPEAT,
                "Inserting existing object should keep existing object.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == i + 1,
                  "item retrival error in set - insert failed to update?");
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       size_t old = 5;
       set2_____test_set(&m, HASHOFi(i), i + 2, &old);
       FIO_ASSERT(old == i + 1,
                  "old pointer not initialized with old (or missing) data");
     }
 
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == i + 2,
                  "item retrival error in set - overwrite failed to update?");
     }
     {
       /* test partial removal */
-      for (size_t i = 1; i < TEST_REPEAT; i += 2) {
+      for (size_t i = 1; i < FIO_TEST_REPEAT; i += 2) {
         size_t old = 5;
         set2_____test_remove(&m, HASHOFi(i), 0, &old);
         FIO_ASSERT(old == i + 2,
@@ -28189,13 +28899,13 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                    old,
                    i + 2);
       }
-      for (size_t i = 1; i < TEST_REPEAT; i += 2) {
+      for (size_t i = 1; i < FIO_TEST_REPEAT; i += 2) {
         FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == 0,
                    "previous items should NOT be accessible after removal");
         set2_____test_set_if_missing(&m, HASHOFi(i), i + 2);
       }
     }
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       size_t old = 5;
       set2_____test_remove(&m, HASHOFi(i), 0, &old);
       FIO_ASSERT(old == i + 2,
@@ -28206,7 +28916,7 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
     }
     FIO_ASSERT(set2_____test_count(&m) == 0,
                "removal should update object count.");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       FIO_ASSERT(set2_____test_get(&m, HASHOFi(i), 0) == 0,
                  "previous items should NOT be accessible after removal");
     }
@@ -28220,19 +28930,19 @@ FIO_SFUNC void fio___dynamic_types_test___map_test(void) {
                "freshly initialized map should have no objects");
     FIO_ASSERT(map_____test_capa(m) == 0,
                "freshly initialized map should have no capacity");
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       char buffer[64];
       int l = snprintf(buffer, 63, "%zu", i);
       buffer[l] = 0;
       map_____test_set(m, HASHOFs(buffer), buffer, i + 1, NULL);
     }
-    FIO_ASSERT(map_____test_key_copy_counter == TEST_REPEAT,
+    FIO_ASSERT(map_____test_key_copy_counter == FIO_TEST_REPEAT,
                "key copying error - was the key copied?");
-    FIO_ASSERT(map_____test_count(m) == TEST_REPEAT,
+    FIO_ASSERT(map_____test_count(m) == FIO_TEST_REPEAT,
                "After inserting %zu items to map, got %zu items",
-               (size_t)TEST_REPEAT,
+               (size_t)FIO_TEST_REPEAT,
                (size_t)map_____test_count(m));
-    for (size_t i = 0; i < TEST_REPEAT; ++i) {
+    for (size_t i = 0; i < FIO_TEST_REPEAT; ++i) {
       char buffer[64];
       int l = snprintf(buffer + 1, 61, "%zu", i);
       buffer[l + 1] = 0;
@@ -28556,6 +29266,8 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, atol)();
   fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, math)();
+  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
@@ -28637,11 +29349,15 @@ void fio_test_dynamic_types(void) {
 /* *****************************************************************************
 Testing cleanup
 ***************************************************************************** */
-
 #undef FIO_TEST_CSTL
-#undef TEST_REPEAT
+#undef FIO_TEST_REPEAT
 
 #endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_TEST_CSTL */
+
+/* do not build test if fio-stl.h was already included once */
+#ifndef FIO_FIO_TEST_CSTL_ONLY_ONCE
+#define FIO_FIO_TEST_CSTL_ONLY_ONCE 1
 #endif
 /* *****************************************************************************
 
