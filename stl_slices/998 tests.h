@@ -664,6 +664,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
       FIO_COMPILER_GUARD;
       fio_math_div(&q, &r, &n, &d, 1);
     }
+    (void)q;
   }
   end[0] = fio_time_nano();
   n = 0, d = 1;
@@ -675,6 +676,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
       q = n / d;
+      (void)q;
     }
   }
   end[1] = fio_time_nano();

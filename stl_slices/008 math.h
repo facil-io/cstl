@@ -48,13 +48,13 @@ Works with little endian uint64_t arrays or 64 bit numbers.
 ***************************************************************************** */
 
 /** Multi-precision ADD for `len*64` bit long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_add(uint64_t *restrict dest,
+FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
                                 const uint64_t *a,
                                 const uint64_t *b,
                                 const size_t number_array_length);
 
 /** Multi-precision SUB for `len*64` bit long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_sub(uint64_t *restrict dest,
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
                                 const uint64_t *a,
                                 const uint64_t *b,
                                 const size_t number_array_length);
@@ -74,8 +74,8 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
  * understand faster division algorithms (such as Newton–Raphson division)... so
  * this is sort of a factorized variation on long division.
  */
-FIO_IFUNC void fio_math_div(uint64_t *restrict dest,
-                            uint64_t *restrict reminder,
+FIO_IFUNC void fio_math_div(uint64_t *dest,
+                            uint64_t *reminder,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t number_array_length);
@@ -116,7 +116,7 @@ FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
 /* *****************************************************************************
 128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
-
+#if 0
 // clang-format off
 #if defined(__SIZEOF_INT128__)
 typedef __uint128_t fio_u128_i;
@@ -157,6 +157,7 @@ FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a, fio_u128_i b, uint64_t carry_in
 /** Multiply two 128bit numbers with carry (up to additional 128 bit). */
 FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a, fio_u128_i b, fio_u128_i *carry_out);
 
+#endif
 // clang-format on
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -246,7 +247,7 @@ Multi-precision, little endian helpers. Works with full uint64_t arrays.
 ***************************************************************************** */
 
 /** Multi-precision ADD for `bits` long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_add(uint64_t *restrict dest,
+FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
                                 const uint64_t *a,
                                 const uint64_t *b,
                                 const size_t len) {
@@ -258,7 +259,7 @@ FIO_IFUNC uint64_t fio_math_add(uint64_t *restrict dest,
 }
 
 /** Multi-precision SUB for `bits` long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_sub(uint64_t *restrict dest,
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
                                 const uint64_t *a,
                                 const uint64_t *b,
                                 const size_t len) {
@@ -310,7 +311,8 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
   uint64_t *p_select[] = {dest + offset, &trash};
   for (size_t i = 0; i < len; (++i), ++p_select[0]) {
     uint64_t ntmp = n[i];
-    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));;
+    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+    ;
     dest[i] &= (uint64_t)0ULL - (i >= offset);
     p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
     c = ctmp;
@@ -390,8 +392,8 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
 }
 
 /** Multi-precision DIV for `len*64` bit long a, b. NOT constant time. */
-FIO_IFUNC void fio_math_div(uint64_t *restrict dest,
-                            uint64_t *restrict reminder,
+FIO_IFUNC void fio_math_div(uint64_t *dest,
+                            uint64_t *reminder,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
