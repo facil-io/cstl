@@ -651,6 +651,42 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
 /* *****************************************************************************
 Locking - Speed Test
 ***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
+  uint64_t n = 0, d = 1;
+  uint64_t start[2], end[2];
+  start[0] = fio_time_nano();
+  for (size_t i = 0; i < 64; ++i) {
+    n = (n << 7) ^ 0xAA;
+    uint64_t q = 0, r = 0;
+    for (size_t j = 0; j < 64; ++j) {
+      d = (d << 3) ^ 0xAA;
+      FIO_COMPILER_GUARD;
+      fio_math_div(&q, &r, &n, &d, 1);
+    }
+  }
+  end[0] = fio_time_nano();
+  n = 0, d = 1;
+  start[1] = fio_time_nano();
+  for (size_t i = 0; i < 64; ++i) {
+    n = (n << 7) ^ 0xAA;
+    uint64_t q = 0;
+    for (size_t j = 0; j < 64; ++j) {
+      d = (d << 3) ^ 0xAA;
+      FIO_COMPILER_GUARD;
+      q = n / d;
+    }
+  }
+  end[1] = fio_time_nano();
+  FIO_LOG_INFO("\t fio_math_div test took %zu us (vs. %zu us) for a single "
+               "64 bit word.",
+               (size_t)(end[0] - start[0]),
+               (size_t)(end[1] - start[1]));
+}
+
+/* *****************************************************************************
+Locking - Speed Test
+***************************************************************************** */
 #define FIO___LOCK2_TEST_TASK    (1LU << 25)
 #define FIO___LOCK2_TEST_THREADS 32U
 #define FIO___LOCK2_TEST_REPEAT  1
@@ -897,6 +933,7 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, atol)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, math)();
+  FIO_NAME_TEST(stl, math_speed)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");

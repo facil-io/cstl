@@ -172,9 +172,9 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
   if (carry_out)
     *carry_out = (uint64_t)(u >> 64U);
 #else
-  uint64_t u = a + b + carry_in;
+  uint64_t u = a + (b += carry_in);
   if (carry_out)
-    *carry_out = (u - carry_in) < a;
+    *carry_out = (b < carry_in) | (u < a);
 #endif
   return (uint64_t)u;
 }
@@ -185,13 +185,13 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
 #if defined(__SIZEOF_INT128__)
-  __uint128_t u = (__uint128_t)a - (b + carry_in);
+  __uint128_t u = (__uint128_t)a - b - carry_in;
   if (carry_out)
     *carry_out = (uint64_t)(u >> 127U);
 #else
-  uint64_t u = a - (b + carry_in);
+  uint64_t u = a - (b += carry_in);
   if (carry_out)
-    *carry_out = (u + carry_in) > a;
+    *carry_out = (u > a) | (b < carry_in);
 #endif
   return (uint64_t)u;
 }
@@ -284,15 +284,18 @@ FIO_IFUNC void fio_math_shr(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
                             size_t len) {
-  size_t s = bits >> 63;
+  const size_t offset = len - (bits >> 6);
   bits &= 63;
-  uint64_t c = 0;
+  // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu bits", len - offset, bits);
+  uint64_t c = 0, trash;
+  uint64_t *p_select[] = {dest + offset, &trash};
   while (len--) {
-    const uint64_t mask = (uint64_t)0ULL - (!s);
-    s -= (!!s);
-    uint64_t tmp = ((n[len] & mask) << ((64 - bits) & 63));
-    dest[len] = ((n[len] & mask) >> bits) | c;
-    c = tmp;
+    --p_select[0];
+    uint64_t ntmp = n[len];
+    uint64_t ctmp = (ntmp << (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+    dest[len] &= (uint64_t)0ULL - (len < offset);
+    p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
+    c = ctmp;
   }
 }
 
@@ -301,15 +304,16 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
                             const size_t len) {
-  size_t s = bits >> 63;
+  const size_t offset = bits >> 6;
   bits &= 63;
-  uint64_t c = 0;
-  for (size_t i = 0; i < len; ++i) {
-    const uint64_t mask = (uint64_t)0ULL - (!s);
-    s -= (!!s);
-    uint64_t tmp = ((n[i] & mask) >> ((64 - bits) & 63));
-    dest[i] = (((n[i] & mask) << bits) | c);
-    c = tmp;
+  uint64_t c = 0, trash;
+  uint64_t *p_select[] = {dest + offset, &trash};
+  for (size_t i = 0; i < len; (++i), ++p_select[0]) {
+    uint64_t ntmp = n[i];
+    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));;
+    dest[i] &= (uint64_t)0ULL - (i >= offset);
+    p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
+    c = ctmp;
   }
 }
 
@@ -408,6 +412,14 @@ FIO_IFUNC void fio_math_div(uint64_t *restrict dest,
   size_t rlen;
   uint64_t c;
   const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
+  if (!blen) { /* divide by zero! */
+    FIO_LOG_ERROR("divide by zero!");
+    if (dest)
+      memset(dest, 0xFFFFFFFF, sizeof(*dest) * len);
+    if (reminder)
+      memset(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
+    return;
+  }
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
     const size_t delta = rlen - blen;
     fio_math_shl(t, (uint64_t *)b, delta, len);
@@ -460,7 +472,7 @@ FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
 /* *****************************************************************************
 128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
-
+#if 0
 #if defined(__SIZEOF_INT128__)
 // clang-format off
 typedef __uint128_t fio_u128_i;
@@ -547,6 +559,7 @@ FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a,
 }
 
 #endif
+#endif
 /* *****************************************************************************
 Common Math operations - test
 ***************************************************************************** */
@@ -554,6 +567,38 @@ Common Math operations - test
 
 FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
   fprintf(stderr, "* Testing multi-precision math operations (partial).\n");
+
+  { /* Test add/sub carry */
+    uint64_t a, c;
+    a = fio_math_addc64(1ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 3 && c == 0,
+               "fio_math_addc64(1ULL, 1ULL, 1ULL, &c) failed");
+    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
+    c = 0;
+    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 1 && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c) failed");
+    c = 0;
+    a = fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c) failed");
+    a = fio_math_subc64(3ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 1 && c == 0, "fio_math_subc64 failed");
+    a = fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(c == 0,
+               "fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
+    a = fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c);
+    FIO_ASSERT(
+        !a && c == 1,
+        "fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c) failed (%llu, %llu)",
+        a,
+        c);
+    a = fio_math_subc64(0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(a == ~(uint64_t)0ULL && c == 1,
+               "fio_math_subc64(0ULL, 1ULL, 0ULL, &c) failed");
+  }
 
   for (size_t k = 0; k < 16; ++k) { /* Test multiplication */
     for (size_t j = 0; j < 16; ++j) {
@@ -617,9 +662,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
     }
   }
   { /* Test division */
-    inline int64_t fio_time_nano();
     uint64_t n = 0, d = 1;
-    uint64_t start[2], end[2];
     for (size_t i = 0; i < 64; ++i) {
       n = (n << 7) ^ 0xAA;
       for (size_t j = 0; j < 64; ++j) {
@@ -644,43 +687,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
             (long long)r);
       }
     }
-    n = 0, d = 1;
-    start[0] = fio_time_nano();
-    for (size_t i = 0; i < 64; ++i) {
-      n = (n << 7) ^ 0xAA;
-      uint64_t q = 0, r = 0;
-      for (size_t j = 0; j < 64; ++j) {
-        d = (d << 3) ^ 0xAA;
-        FIO_COMPILER_GUARD;
-        fio_math_div(&q, &r, &n, &d, 1);
-      }
-    }
-    end[0] = fio_time_nano();
-    n = 0, d = 1;
-    start[1] = fio_time_nano();
-    for (size_t i = 0; i < 64; ++i) {
-      n = (n << 7) ^ 0xAA;
-      uint64_t q = 0;
-      for (size_t j = 0; j < 64; ++j) {
-        d = (d << 3) ^ 0xAA;
-        FIO_COMPILER_GUARD;
-        q = n / d;
-      }
-    }
-    end[1] = fio_time_nano();
-    FIO_LOG_INFO("\t fio_math_div test took %zu us (vs. %zu us) for a single "
-                 "64 bit word.",
-                 (size_t)(end[0] - start[0]),
-                 (size_t)(end[1] - start[1]));
   }
   { /* Test bit shifting */
     uint64_t a[] = {0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0};
     uint64_t b[] = {0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 1};
     uint64_t c[3];
     fio_math_shl(c, a, 1, 3);
-    FIO_ASSERT(!memcmp(b, c, sizeof(c)), "left shift failed, %llX:%llX:%llX");
+    FIO_ASSERT(!memcmp(b, c, sizeof(c)),
+               "left shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
     fio_math_shr(c, c, 1, 3);
-    FIO_ASSERT(!memcmp(a, c, sizeof(c)), "right shift failed, %llX:%llX:%llX");
+    FIO_ASSERT(!memcmp(a, c, sizeof(c)),
+               "right shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
+    fio_math_shl(c, a, 128, 3);
+    FIO_ASSERT(!c[0] && !c[1] && !(~c[2]),
+               "left shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
     FIO_ASSERT(fio_math_msb_index(a, 3) == 127,
                "fio_math_msb_index(a) failed %zu",
                fio_math_msb_index(a, 3));
