@@ -101,63 +101,6 @@ FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
 /** Multi-precision - returns the index for the least significant bit or -1. */
 FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 
-#if 0  /* TODO: not yet implemented */
-/** Multi-precision - returns the most significant 64 bits. */
-FIO_IFUNC uint64_t fio_math_top64(uint64_t *n, size_t len);
-
-/** Multi-precision MOD for `len*64` bit long `num`.*/
-FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
-                            const uint64_t *num,
-                            size_t number_array_length,
-                            const uint64_t *mod,
-                            size_t mod_bit_length);
-#endif /* TODO */
-
-/* *****************************************************************************
-128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-#if 0
-// clang-format off
-#if defined(__SIZEOF_INT128__)
-typedef __uint128_t fio_u128_i;
-#else
-typedef struct { uint64_t u64[2]; } fio_u128_i;
-#endif
-
-/** Initializes a u128 number using high and low bits. */
-FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo);
-
-/** 64bit multiplication into a 128bit result. */
-FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b);
-
-/** Add 64bit to a 128bit number. */
-FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b);
-
-/** Add two 128bit numbers. */
-FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b);
-
-/** Subtract two 128bit numbers. */
-FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b);
-
-/** Multiply two 128bit numbers. */
-FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b);
-
-/** Shift right a 128 bit number. */
-FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits);
-
-/** Get the lower 64 bits of a 128 bit number. */
-FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a);
-
-/** Get the higher 64 bits of a 128 bit number. */
-FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a);
-
-/** Add two 128bit numbers with carry (up to 1 bit). */
-FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a, fio_u128_i b, uint64_t carry_in, uint64_t *carry_out);
-
-/** Multiply two 128bit numbers with carry (up to additional 128 bit). */
-FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a, fio_u128_i b, fio_u128_i *carry_out);
-
-#endif
 // clang-format on
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -168,14 +111,15 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
                                    uint64_t b,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__) && 0
+  /* This is actually slower as it occupies more CPU registers */
   __uint128_t u = (__uint128_t)a + b + carry_in;
   if (carry_out)
     *carry_out = (uint64_t)(u >> 64U);
 #else
   uint64_t u = a + (b += carry_in);
   if (carry_out)
-    *carry_out = (b < carry_in) | (u < a);
+    *carry_out = (b < carry_in) + (u < a);
 #endif
   return (uint64_t)u;
 }
@@ -185,14 +129,17 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
                                    uint64_t b,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__) && 0
   __uint128_t u = (__uint128_t)a - b - carry_in;
   if (carry_out)
     *carry_out = (uint64_t)(u >> 127U);
 #else
-  uint64_t u = a - (b += carry_in);
+  uint64_t u = a - b;
+  a = u > a;
+  b = u < carry_in;
+  u -= carry_in;
   if (carry_out)
-    *carry_out = (u > a) | (b < carry_in);
+    *carry_out = a + b;
 #endif
   return (uint64_t)u;
 }
@@ -215,7 +162,7 @@ FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
   const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
   r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
   *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
-#else   /* Using Karatsuba Multiplication might not improve performance */
+#else   /* Using Karatsuba Multiplication will degrade performance */
   uint64_t r, c;
   const uint64_t al = a & 0xFFFFFFFF;
   const uint64_t ah = a >> 32;
@@ -351,42 +298,97 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
-  uint64_t c = 0;
+  if (len == 1) { /* route to the correct function */
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    return;
+  } else if (len == 2) { /* long MUL is faster */
+    uint64_t tmp[2], c;
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] += c;
+
+    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
+    dest[3] = c;
+    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] += tmp[1] + c;
+    return;
+  } else if (len == 3) { /* long MUL is still faster */
+    uint64_t tmp[2], c;
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] += c;
+    tmp[0] = fio_math_mulc64(a[0], b[2], dest + 3);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] += c;
+
+    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
+    dest[3] += c;
+    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
+    dest[4] = c;
+    tmp[0] = fio_math_mulc64(a[1], b[2], tmp + 1);
+    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
+    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
+    dest[5] = c;
+
+    tmp[0] = fio_math_mulc64(a[2], b[0], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
+    dest[4] = fio_math_addc64(dest[4], c, 0, &c);
+    dest[5] += c;
+    tmp[0] = fio_math_mulc64(a[2], b[1], tmp + 1);
+    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
+    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
+    dest[5] += c;
+    tmp[0] = fio_math_mulc64(a[2], b[2], tmp + 1);
+    dest[4] = fio_math_addc64(dest[4], tmp[0], 0, &c);
+    dest[5] += tmp[1] + c;
+  } else { /* long MUL is just too long to write */
+    uint64_t c = 0;
 #if !defined(__cplusplus) || __cplusplus > 201402L
-  uint64_t abwmul[len * 2];
+    uint64_t abwmul[len * 2];
 #else
-  uint64_t abwmul[512];
-  FIO_ASSERT(
-      len <= 256,
-      "Multi Precision MUL (fio_math_mul) overflows at 16384 bit numbers");
+    uint64_t abwmul[512];
+    FIO_ASSERT(
+        len <= 256,
+        "Multi Precision MUL (fio_math_mul) overflows at 16384 bit numbers");
 #endif
-  for (size_t i = 0; i < len; ++i) { // clang-format off
-    dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
-    dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
-  } // clang-format on
-  c = 0;
-  for (size_t i = 0; i < len - 1; ++i) {
-    dest[(i + 1) << 1] = fio_math_addc64(dest[(i + 1) << 1], c, 0, NULL);
-    for (size_t j = i + 1; j < len; ++j) {
-      /* calculate the "middle" word sum */
-      uint64_t mid0, mid1, mid2, ac, bc;
-      uint64_t asum = fio_math_addc64(a[i], a[j], 0, &ac);
-      uint64_t bsum = fio_math_addc64(b[i], b[j], 0, &bc);
-      mid0 = fio_math_mulc64(asum, bsum, &mid1);
-      mid2 = ac & bc;
-      mid1 = fio_math_addc64(mid1, (asum & ((uint64_t)0ULL - bc)), 0, &c);
-      mid2 += c;
-      mid1 = fio_math_addc64(mid1, (bsum & ((uint64_t)0ULL - ac)), 0, &c);
-      mid2 += c;
-      mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
-      mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
-      mid2 = fio_math_subc64(mid2, c, 0, NULL);
-      mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
-      mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
-      mid2 = fio_math_subc64(mid2, c, 0, NULL);
-      dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
-      dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
-      c += mid2;
+    for (size_t i = 0; i < len; ++i) { // clang-format off
+     dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
+     dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
+   } // clang-format on
+    c = 0;
+    for (size_t i = 0; i < len - 1; ++i) {
+      dest[(i + 1) << 1] = fio_math_addc64(dest[(i + 1) << 1], c, 0, NULL);
+      for (size_t j = i + 1; j < len; ++j) {
+        /* calculate the "middle" word sum */
+        uint64_t mid0, mid1, mid2, ac, bc;
+        uint64_t asum = fio_math_addc64(a[i], a[j], 0, &ac);
+        uint64_t bsum = fio_math_addc64(b[i], b[j], 0, &bc);
+        mid0 = fio_math_mulc64(asum, bsum, &mid1);
+        mid2 = ac & bc;
+        mid1 = fio_math_addc64(mid1, (asum & ((uint64_t)0ULL - bc)), 0, &c);
+        mid2 += c;
+        mid1 = fio_math_addc64(mid1, (bsum & ((uint64_t)0ULL - ac)), 0, &c);
+        mid2 += c;
+        mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
+        mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
+        mid2 = fio_math_subc64(mid2, c, 0, NULL);
+        mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
+        mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
+        mid2 = fio_math_subc64(mid2, c, 0, NULL);
+        dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
+        dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
+        c += mid2;
+      }
     }
   }
 }
@@ -451,117 +453,6 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   }
 }
 
-/** Multi-precision - returns the most significant 64 bits. */
-FIO_IFUNC uint64_t fio_math_top64(uint64_t *n, size_t len) {
-  size_t r[2] = {0, 0};
-  while (len--) {
-    size_t i = !r[0];
-    const uint64_t mask = ((uint64_t)0ULL - (!r[i]));
-    r[i] |= mask & n[len];
-  }
-  const size_t offset = 63 & (fio_bits_msb_index(r[0]) + 1);
-  r[0] = (r[0] << (64 - offset)) | (r[1] >> (offset));
-  return r[0];
-}
-
-/** Multi-precision MOD for `len*64` bit long `num`.*/
-FIO_IFUNC void fio_math_mod(uint64_t *restrict dest,
-                            const uint64_t *num,
-                            size_t number_array_length,
-                            const uint64_t *mod,
-                            size_t mod_bit_length);
-
-/* *****************************************************************************
-128bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-#if 0
-#if defined(__SIZEOF_INT128__)
-// clang-format off
-typedef __uint128_t fio_u128_i;
-FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo) { return ((fio_u128_i)hi << 64) | lo; }
-FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b) { return (fio_u128_i)a * b; }
-FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b) { return a + b; }
-FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b) { return a + b; }
-FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b) { return a - b; }
-FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b) { return a * b; }
-FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits) { return (a >> (bits & 127)); }
-FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a) { return (uint64_t)a; }
-FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a) { return (uint64_t)(a >> 64); }
-// clang-format on
-FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a,
-                                   fio_u128_i b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  a += b + carry_in;
-  if (carry_out)
-    *carry_out = ((a - carry_in) < b);
-  return a;
-}
-
-FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a,
-                                   fio_u128_i b,
-                                   fio_u128_i *carry) {
-  fio_u128_i abl = (a & 0xFFFFFFFFFFFFFFFF) * (b & 0xFFFFFFFFFFFFFFFF);
-  fio_u128_i abh = (a >> 64) * (b >> 64);
-  fio_u128_i mid1 = (a & 0xFFFFFFFFFFFFFFFF) * (b >> 64);
-  fio_u128_i mid2 = (b & 0xFFFFFFFFFFFFFFFF) * (a >> 64);
-  mid1 += mid2;
-  mid2 = mid1 < mid2; /* carry */
-  a = abl + (mid1 << 64);
-  *carry = abh + (mid1 >> 64) + (mid2 << 64);
-  return a;
-}
-#else
-// clang-format off
-typedef struct { uint64_t u64[2]; } fio_u128_i;
-FIO_IFUNC fio_u128_i fio_u128_init(uint64_t hi, uint64_t lo) { fio_u128_i r = {{lo, hi}}; return r; }
-FIO_IFUNC fio_u128_i fio_u128_mul64(uint64_t a, uint64_t b) { fio_u128_i r; r.u64[0] = fio_math_mulc64(a, b, &r.u64[1]); return r; }
-FIO_IFUNC fio_u128_i fio_u128_add64(fio_u128_i a, uint64_t b) { r.u64[0] += a; r.u64[1] += r.u64[0] < a; return a; }
-FIO_IFUNC fio_u128_i fio_u128_add(fio_u128_i a, fio_u128_i b) { r.u64[0] += b.u64[0]; r.u64[1] += (r.u64[0] < b.u64[0]) + b.u64[1]; return a; }
-FIO_IFUNC uint64_t fio_u128_lo(fio_u128_i a) { return a.u64[0]; }
-FIO_IFUNC uint64_t fio_u128_hi(fio_u128_i a) { return a.u64[1]; }
-// clang-format on
-
-FIO_IFUNC fio_u128_i fio_u128_sub(fio_u128_i a, fio_u128_i b) {
-  uint64_t c;
-  a.u64[0] = fio_math_subc64(a.u64[0], b.u64[0], 0, &c);
-  a.u64[1] = fio_math_subc64(a.u64[1], b.u64[1], c, &c);
-  return a;
-}
-
-FIO_IFUNC fio_u128_i fio_u128_mul(fio_u128_i a, fio_u128_i b) {
-  fio_u128_i ab;
-  ab.u64[0] = fio_math_mulc64(a.u64[0], b.u64[0], &ab.u64[1]);
-  ab.u64[1] += a.u64[0] * b.u64[1];
-  ab.u64[1] += a.u64[1] * b.u64[0];
-  return abl;
-}
-FIO_IFUNC fio_u128_i fio_u128_shr(fio_u128_i a, size_t bits) {
-  fio_math_shr(a.u64, a.u64, bits, 2);
-  return a;
-}
-FIO_IFUNC fio_u128_i fio_u128_addc(fio_u128_i a,
-                                   fio_u128_i b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  a.u64[0] = fio_math_addc64(a.u64[0], a.u64[0], carry_in, &carry_in);
-  a.u64[1] = fio_math_addc64(a.u64[1], a.u64[1], carry_in, &carry_in);
-  if (carry_out)
-    *carry_out = carry_in;
-  return a;
-}
-
-FIO_IFUNC fio_u128_i fio_u128_mulc(fio_u128_i a,
-                                   fio_u128_i b,
-                                   fio_u128_i *carry) {
-  fio_u128_i r[2];
-  fio_math_mul(r a.u64, b.u64, 2);
-  *carry = r[1];
-  return r[0];
-}
-
-#endif
-#endif
 /* *****************************************************************************
 Common Math operations - test
 ***************************************************************************** */
@@ -592,11 +483,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
     FIO_ASSERT(c == 0,
                "fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
     a = fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c);
-    FIO_ASSERT(
-        !a && c == 1,
-        "fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c) failed (%llu, %llu)",
-        a,
-        c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c) failed "
+               "(%llu, %llu)",
+               a,
+               c);
     a = fio_math_subc64(0ULL, 1ULL, 0ULL, &c);
     FIO_ASSERT(a == ~(uint64_t)0ULL && c == 1,
                "fio_math_subc64(0ULL, 1ULL, 0ULL, &c) failed");
