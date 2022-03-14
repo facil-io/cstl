@@ -715,6 +715,31 @@ Sleep / Thread Scheduling Macros
 #endif
 
 /* *****************************************************************************
+Assertions
+***************************************************************************** */
+#ifdef static_assert
+static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
+static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
+static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
+static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
+#endif
+
+/* *****************************************************************************
+Dynamic Endian Test
+***************************************************************************** */
+
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(size_t)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
+}
+
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+
+/* *****************************************************************************
 Miscellaneous helper macros
 ***************************************************************************** */
 
@@ -1051,8 +1076,10 @@ Common macros
 #endif /* FIO_RISKY_HASH */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_TEST_CSTL)
+#if defined(FIO_RISKY_HASH) || defined(FIO_TEST_CSTL)
+#ifndef FIO_MATH
 #define FIO_MATH
+#endif
 #endif
 
 /* Modules that require FIO_BITMAP */

@@ -202,7 +202,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
                                                                 size_t len) {
-  /* test based on code from BearSSL with credit to Thomas Pornin */
   uintptr_t result[6];
   SHA_CTX o_sh1;
   SHA1_Init(&o_sh1);

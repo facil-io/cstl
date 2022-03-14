@@ -1,6 +1,32 @@
-## Risky Hash (data hashing):
+## Risky Hash / Stable Hash (data hashing):
 
-[Risky Hash](./riskyhash) is facil.io's fast hashing solution that balances non-cryptographic security consideration and speed. If the `FIO_RISKY_HASH` macro is defined than the following static function will be defined:
+Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
+
+Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
+
+Both algorithms are **non-cryptographic** and produce 64 bit hashes by default (though internally both use a 256 block that could be used to produce 128bit hashes). Both pass the SMHasher test suite for hashing functions.
+
+If the `FIO_RISKY_HASH` macro is defined than the following static function will be defined:
+
+
+#### `fio_stable_hash`
+
+```c
+uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
+```
+
+Computes a 64 bit facil.io Stable Hash (will not be updated, even if broken).
+
+#### `fio_stable_hash128`
+
+```c
+void fio_stable_hash128(void *restrict dest,
+                        const void *restrict data,
+                        size_t len,
+                        uint64_t seed);
+```
+
+Computes a 128 bit facil.io Stable Hash (will not be updated, even if broken).
 
 #### `fio_risky_hash`
 

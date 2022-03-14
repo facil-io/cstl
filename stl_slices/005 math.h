@@ -111,17 +111,19 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
                                    uint64_t b,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__) && 0
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
+#if __has_builtin(__builtin_addcll) && 0
+  return __builtin_addcll(a, b, carry_in, carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
   /* This is actually slower as it occupies more CPU registers */
   __uint128_t u = (__uint128_t)a + b + carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 64U);
+  *carry_out = (uint64_t)(u >> 64U);
+  return (uint64_t)u;
 #else
   uint64_t u = a + (b += carry_in);
-  if (carry_out)
-    *carry_out = (b < carry_in) + (u < a);
+  *carry_out = (b < carry_in) + (u < a);
+  return u;
 #endif
-  return (uint64_t)u;
 }
 
 /** Subtract with carry. */
@@ -129,7 +131,10 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
                                    uint64_t b,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__) && 0
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
+#if __has_builtin(__builtin_subcll) && 0
+  uint64_t u = __builtin_subcll(a, b, carry_in, carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
   __uint128_t u = (__uint128_t)a - b - carry_in;
   if (carry_out)
     *carry_out = (uint64_t)(u >> 127U);
@@ -162,7 +167,7 @@ FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
   const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
   r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
   *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
-#else   /* Using Karatsuba Multiplication will degrade performance */
+#elif 1 /* Using Karatsuba Multiplication will degrade performance */
   uint64_t r, c;
   const uint64_t al = a & 0xFFFFFFFF;
   const uint64_t ah = a >> 32;
@@ -185,6 +190,18 @@ FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
   midhi -= c;
   r = fio_math_addc64(lo, midlo << 32, 0, &c);
   *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
+#else   /* never use binary for MUL... so slow... */
+  uint64_t r, c = 0;
+  r = a & ((uint64_t)0ULL - (b & 1));
+  for (uint_fast8_t i = 1; i < 64; ++i) {
+    uint64_t mask = ((uint64_t)0ULL - ((b >> i) & 1));
+    uint64_t tmp = a & mask;
+    uint64_t al = (tmp << i);
+    uint64_t ah = (tmp >> (64 - i));
+    r = fio_math_addc64(r, al, 0, &tmp);
+    c += ah + tmp;
+  }
+  *carry_out = c;
 #endif
   return (uint64_t)r;
 }
@@ -367,7 +384,7 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
    } // clang-format on
     c = 0;
     for (size_t i = 0; i < len - 1; ++i) {
-      dest[(i + 1) << 1] = fio_math_addc64(dest[(i + 1) << 1], c, 0, NULL);
+      dest[(i + 1) << 1] += c;
       for (size_t j = i + 1; j < len; ++j) {
         /* calculate the "middle" word sum */
         uint64_t mid0, mid1, mid2, ac, bc;
@@ -381,10 +398,10 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
         mid2 += c;
         mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
         mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
-        mid2 = fio_math_subc64(mid2, c, 0, NULL);
+        mid2 -= c;
         mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
         mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
-        mid2 = fio_math_subc64(mid2, c, 0, NULL);
+        mid2 -= c;
         dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
         dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
         c += mid2;

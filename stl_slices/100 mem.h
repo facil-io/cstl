@@ -8,8 +8,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "007 threads.h"            /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 

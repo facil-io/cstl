@@ -715,6 +715,31 @@ Sleep / Thread Scheduling Macros
 #endif
 
 /* *****************************************************************************
+Assertions
+***************************************************************************** */
+#ifdef static_assert
+static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
+static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
+static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
+static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
+#endif
+
+/* *****************************************************************************
+Dynamic Endian Test
+***************************************************************************** */
+
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(size_t)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
+}
+
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+
+/* *****************************************************************************
 Miscellaneous helper macros
 ***************************************************************************** */
 
@@ -1051,8 +1076,10 @@ Common macros
 #endif /* FIO_RISKY_HASH */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_TEST_CSTL)
+#if defined(FIO_RISKY_HASH) || defined(FIO_TEST_CSTL)
+#ifndef FIO_MATH
 #define FIO_MATH
+#endif
 #endif
 
 /* Modules that require FIO_BITMAP */
@@ -3754,1158 +3781,648 @@ Bit-Byte operations - cleanup
 #endif /* FIO_BITMAP */
 #undef FIO_BITMAP
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
+Copyright: Boaz Segev, 2022
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#include "004 bitwise.h"            /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
-/* *****************************************************************************
-
-
-
-
-                        Risky Hash - a fast and simple hash
-
-
-
-
-***************************************************************************** */
-
-#if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
-#define H___FIO_RISKY_HASH_H
-
-/* *****************************************************************************
-Risky Hash - API
-***************************************************************************** */
-
-/** Computes a facil.io Risky Hash (Risky v.3). */
-SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
-
-/** Adds bit of entropy to pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
-
-/**
- * Masks data using a Risky Hash and a counter mode nonce.
- *
- * Used for mitigating memory access attacks when storing "secret" information
- * in memory.
- *
- * Keep the nonce information in a different memory address then the secret. For
- * example, if the secret is on the stack, store the nonce on the heap or using
- * a static variable.
- *
- * Don't use the same nonce-secret combination for other data.
- *
- * This is NOT a cryptographically secure encryption. Even if the algorithm was
- * secure, it would provide no more then a 32bit level encryption, which isn't
- * strong enough for any cryptographic use-case.
- *
- * However, this could be used to mitigate memory probing attacks. Secrets
- * stored in the memory might remain accessible after the program exists or
- * through core dump information. By storing "secret" information masked in this
- * way, it mitigates the risk of secret information being recognized or
- * deciphered.
- */
-IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
-
-/* *****************************************************************************
-Risky Hash - Implementation
-
-Note: I don't remember what information I used when designing this, but Risky
-Hash is probably NOT cryptographically safe (though I wanted it to be).
-
-Here's a few resources about hashes that might explain more:
-- https://komodoplatform.com/cryptographic-hash-function/
-- https://en.wikipedia.org/wiki/Avalanche_effect
-- http://ticki.github.io/blog/designing-a-good-non-cryptographic-hash-function/
-
-***************************************************************************** */
-
-/* Risky Hash primes */
-#define FIO_RISKY3_PRIME0 0xCAEF89D1E9A5EB21ULL
-#define FIO_RISKY3_PRIME1 0xAB137439982B86C9ULL
-#define FIO_RISKY3_PRIME2 0xD9FDC73ABE9EDECDULL
-#define FIO_RISKY3_PRIME3 0x3532D520F9511B13ULL
-#define FIO_RISKY3_PRIME4 0x038720DDEB5A8415ULL
-
-/** Adds bit entropy to a pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
-  uint64_t n = (uint64_t)(uintptr_t)ptr;
-  n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
-  n ^= fio_rrot64(n, 7);
-  n ^= fio_rrot64(n, 13);
-  n ^= fio_rrot64(n, 17);
-  n ^= fio_rrot64(n, 31);
-  return n;
-}
-
-#ifdef FIO_EXTERN_COMPLETE
-
-/* Risky Hash initialization constants */
-#define FIO_RISKY3_IV0 0x0000001000000001ULL
-#define FIO_RISKY3_IV1 0x0000010000000010ULL
-#define FIO_RISKY3_IV2 0x0000100000000100ULL
-#define FIO_RISKY3_IV3 0x0001000000001000ULL
-/* read u64 in little endian */
-#define FIO_RISKY_BUF2U64 fio_buf2u64_little
-
-/* switch to 0 if the compiler's optimizer prefers arrays... */
-#if 0
-/*  Computes a facil.io Risky Hash. */
-SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  register uint64_t v0 = FIO_RISKY3_IV0;
-  register uint64_t v1 = FIO_RISKY3_IV1;
-  register uint64_t v2 = FIO_RISKY3_IV2;
-  register uint64_t v3 = FIO_RISKY3_IV3;
-  register uint64_t w0;
-  register uint64_t w1;
-  register uint64_t w2;
-  register uint64_t w3;
-  register const uint8_t *data = (const uint8_t *)data_;
-
-#define FIO_RISKY3_ROUND64(vi, w_)                                             \
-  w##vi = w_;                                                                  \
-  v##vi += w##vi;                                                              \
-  v##vi = fio_lrot64(v##vi, 29);                                               \
-  v##vi += w##vi;                                                              \
-  v##vi *= FIO_RISKY3_PRIME##vi;
-
-#define FIO_RISKY3_ROUND256(w0, w1, w2, w3)                                    \
-  FIO_RISKY3_ROUND64(0, w0);                                                   \
-  FIO_RISKY3_ROUND64(1, w1);                                                   \
-  FIO_RISKY3_ROUND64(2, w2);                                                   \
-  FIO_RISKY3_ROUND64(3, w3);
-
-  if (seed) {
-    /* process the seed as if it was a prepended 8 Byte string. */
-    v0 *= seed;
-    v1 *= seed;
-    v2 *= seed;
-    v3 *= seed;
-    v1 ^= seed;
-    v2 ^= seed;
-    v3 ^= seed;
-  }
-
-  for (size_t i = 31; i < len; i += 32) {
-    /* vectorized 32 bytes / 256 bit access */
-    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
-                        FIO_RISKY_BUF2U64(data + 8),
-                        FIO_RISKY_BUF2U64(data + 16),
-                        FIO_RISKY_BUF2U64(data + 24));
-    data += 32;
-  }
-  switch (len & 24) {
-  case 24:
-    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16));
-    /* fall through */
-  case 16:
-    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));
-    /* fall through */
-  case 8:
-    FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
-    data += len & 24;
-  }
-
-  /* add offset information to padding */
-  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
-  /* leftover bytes */
-  switch ((len & 7)) {
-  case 7:
-    tmp |= ((uint64_t)data[6]) << 48; /* fall through */
-  case 6:
-    tmp |= ((uint64_t)data[5]) << 40; /* fall through */
-  case 5:
-    tmp |= ((uint64_t)data[4]) << 32; /* fall through */
-  case 4:
-    tmp |= ((uint64_t)data[3]) << 24; /* fall through */
-  case 3:
-    tmp |= ((uint64_t)data[2]) << 16; /* fall through */
-  case 2:
-    tmp |= ((uint64_t)data[1]) << 8; /* fall through */
-  case 1:
-    tmp |= ((uint64_t)data[0]);
-    /* the last (now padded) byte's position */
-    switch ((len & 24)) {
-    case 24: /* offset 24 in 32 byte segment */
-      FIO_RISKY3_ROUND64(3, tmp);
-      break;
-    case 16: /* offset 16 in 32 byte segment */
-      FIO_RISKY3_ROUND64(2, tmp);
-      break;
-    case 8: /* offset 8 in 32 byte segment */
-      FIO_RISKY3_ROUND64(1, tmp);
-      break;
-    case 0: /* offset 0 in 32 byte segment */
-      FIO_RISKY3_ROUND64(0, tmp);
-      break;
-    }
-  }
-
-  /* irreversible avalanche... I think */
-  uint64_t r = (len) ^ ((uint64_t)len << 36);
-  r += fio_lrot64(v0, 17) + fio_lrot64(v1, 13) + fio_lrot64(v2, 47) +
-       fio_lrot64(v3, 57);
-  r += v0 ^ v1;
-  r ^= fio_lrot64(r, 13);
-  r += v1 ^ v2;
-  r ^= fio_lrot64(r, 29);
-  r += v2 ^ v3;
-  r += fio_lrot64(r, 33);
-  r += v3 ^ v0;
-  r ^= fio_lrot64(r, 51);
-  r ^= (r >> 29) * FIO_RISKY3_PRIME4;
-  return r;
-}
-#else
-/*  Computes a facil.io Risky Hash. */
-SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  FIO_ALIGN(16)
-  uint64_t v[4] = {FIO_RISKY3_IV0,
-                   FIO_RISKY3_IV1,
-                   FIO_RISKY3_IV2,
-                   FIO_RISKY3_IV3};
-  FIO_ALIGN(16) uint64_t w[4];
-  const uint8_t *data = (const uint8_t *)data_;
-
-#define FIO_RISKY3_ROUND64(vi, w_)                                             \
-  w[vi] = w_;                                                                  \
-  v[vi] += w[vi];                                                              \
-  v[vi] = fio_lrot64(v[vi], 29);                                               \
-  v[vi] += w[vi];                                                              \
-  v[vi] *= FIO_RISKY3_PRIME##vi;
-
-#define FIO_RISKY3_ROUND256(w0, w1, w2, w3)                                    \
-  FIO_RISKY3_ROUND64(0, w0);                                                   \
-  FIO_RISKY3_ROUND64(1, w1);                                                   \
-  FIO_RISKY3_ROUND64(2, w2);                                                   \
-  FIO_RISKY3_ROUND64(3, w3);
-
-  if (seed) {
-    /* process the seed as if it was a prepended 8 Byte string. */
-    v[0] *= seed;
-    v[1] *= seed;
-    v[2] *= seed;
-    v[3] *= seed;
-    v[1] ^= seed;
-    v[2] ^= seed;
-    v[3] ^= seed;
-  }
-
-  for (size_t i = 31; i < len; i += 32) {
-    /* 32 bytes / 256 bit access */
-    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
-                        FIO_RISKY_BUF2U64(data + 8),
-                        FIO_RISKY_BUF2U64(data + 16),
-                        FIO_RISKY_BUF2U64(data + 24));
-    data += 32;
-  }
-  switch (len & 24) {
-  case 24:
-    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16));
-    /* fall through */
-  case 16:
-    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));
-    /* fall through */
-  case 8:
-    FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
-    data += len & 24;
-  }
-
-  /* add offset information to padding */
-  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
-  /* leftover bytes */
-  switch ((len & 7)) {
-  case 7:
-    tmp |= ((uint64_t)data[6]) << 48; /* fall through */
-  case 6:
-    tmp |= ((uint64_t)data[5]) << 40; /* fall through */
-  case 5:
-    tmp |= ((uint64_t)data[4]) << 32; /* fall through */
-  case 4:
-    tmp |= ((uint64_t)data[3]) << 24; /* fall through */
-  case 3:
-    tmp |= ((uint64_t)data[2]) << 16; /* fall through */
-  case 2:
-    tmp |= ((uint64_t)data[1]) << 8; /* fall through */
-  case 1:
-    tmp |= ((uint64_t)data[0]);
-    /* the last (now padded) byte's position */
-    switch ((len & 24)) {
-    case 24: /* offset 24 in 32 byte segment */
-      FIO_RISKY3_ROUND64(3, tmp);
-      break;
-    case 16: /* offset 16 in 32 byte segment */
-      FIO_RISKY3_ROUND64(2, tmp);
-      break;
-    case 8: /* offset 8 in 32 byte segment */
-      FIO_RISKY3_ROUND64(1, tmp);
-      break;
-    case 0: /* offset 0 in 32 byte segment */
-      FIO_RISKY3_ROUND64(0, tmp);
-      break;
-    }
-  }
-
-  /* irreversible avalanche... I think */
-  uint64_t r = (len) ^ ((uint64_t)len << 36);
-  r += fio_lrot64(v[0], 17) + fio_lrot64(v[1], 13) + fio_lrot64(v[2], 47) +
-       fio_lrot64(v[3], 57);
-  r += v[0] ^ v[1];
-  r ^= fio_lrot64(r, 13);
-  r += v[1] ^ v[2];
-  r ^= fio_lrot64(r, 29);
-  r += v[2] ^ v[3];
-  r += fio_lrot64(r, 33);
-  r += v[3] ^ v[0];
-  r ^= fio_lrot64(r, 51);
-  r ^= (r >> 29) * FIO_RISKY3_PRIME4;
-  return r;
-}
-#endif
-
-/**
- * Masks data using a Risky Hash and a counter mode nonce.
- */
-IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
-  { /* avoid zero nonce, make sure nonce is effective and odd */
-    nonce |= 1;
-    nonce *= 0xDB1DD478B9E93B1ULL;
-    nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce |= 1;
-  }
-  uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
-  fio_xmask2(buf, len, hash, nonce);
-}
-/* *****************************************************************************
-Risky Hash - Cleanup
-***************************************************************************** */
-#undef FIO_RISKY3_ROUND64
-#undef FIO_RISKY3_ROUND256
-#undef FIO_RISKY_BUF2U64
-
-#endif /* FIO_EXTERN_COMPLETE */
-#endif
-#undef FIO_RISKY_HASH
-
-/* *****************************************************************************
-
-
-
-
-                      Psedo-Random Generator Functions
-
-
-
-
-***************************************************************************** */
-#if defined(FIO_RAND) && !defined(H___FIO_RAND_H)
-#define H___FIO_RAND_H
-/* *****************************************************************************
-Random - API
-***************************************************************************** */
-
-/** Returns 64 psedo-random bits. Probably not cryptographically safe. */
-SFUNC uint64_t fio_rand64(void);
-
-/** Writes `len` bytes of psedo-random bits to the target buffer. */
-SFUNC void fio_rand_bytes(void *target, size_t len);
-
-/** Feeds up to 1023 bytes of entropy to the random state. */
-IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
-
-/** Reseeds the random engin using system state (rusage / jitter). */
-IFUNC void fio_rand_reseed(void);
-
-/* *****************************************************************************
-Random - Implementation
-***************************************************************************** */
-
-#ifdef FIO_EXTERN_COMPLETE
-
-#if FIO_OS_POSIX ||                                                            \
-    (__has_include("sys/resource.h") && __has_include("sys/time.h"))
-#include <sys/resource.h>
-#include <sys/time.h>
-#endif
-
-static volatile uint64_t fio___rand_state[4]; /* random state */
-static volatile size_t fio___rand_counter;    /* seed counter */
-/* feeds random data to the algorithm through this 256 bit feed. */
-static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
-                                                 0x7cc568e838f6a40d,
-                                                 0x4bb8d885a0fe47d5,
-                                                 0x95561f0927ad7ecd};
-
-IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
-  len &= 1023;
-  uint8_t *buf = (uint8_t *)buf_;
-  uint8_t offset = (fio___rand_counter & 3);
-  uint64_t tmp = 0;
-  for (size_t i = 0; i < (len >> 3); ++i) {
-    tmp = FIO_NAME2(fio_buf, u64_local)(buf);
-    fio___rand_buffer[(offset++ & 3)] ^= tmp;
-    buf += 8;
-  }
-  switch (len & 7) {
-  case 7:
-    tmp <<= 8;
-    tmp |= buf[6];
-    /* fall through */
-  case 6:
-    tmp <<= 8;
-    tmp |= buf[5];
-  /* fall through */
-  case 5:
-    tmp <<= 8;
-    tmp |= buf[4];
-  /* fall through */
-  case 4:
-    tmp <<= 8;
-    tmp |= buf[3];
-  /* fall through */
-  case 3:
-    tmp <<= 8;
-    tmp |= buf[2];
-  /* fall through */
-  case 2:
-    tmp <<= 8;
-    tmp |= buf[1];
-  /* fall through */
-  case 1:
-    tmp <<= 8;
-    tmp |= buf[1];
-    fio___rand_buffer[(offset & 3)] ^= tmp;
-    break;
-  }
-}
-
-/* used here, defined later */
-FIO_IFUNC int64_t fio_time_nano();
-
-IFUNC void fio_rand_reseed(void) {
-  const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
-#if defined(RUSAGE_SELF)
-  {
-    struct rusage rusage;
-    getrusage(RUSAGE_SELF, &rusage);
-    fio___rand_state[0] ^=
-        fio_risky_hash(&rusage, sizeof(rusage), fio___rand_state[0]);
-  }
-#endif
-  for (size_t i = 0; i < jitter_samples; ++i) {
-    uint64_t clk = (uint64_t)fio_time_nano();
-    fio___rand_state[0] ^=
-        fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
-    clk = fio_time_nano();
-    fio___rand_state[1] ^=
-        fio_risky_hash(&clk,
-                       sizeof(clk),
-                       fio___rand_state[1] + fio___rand_counter);
-  }
-  fio___rand_state[2] ^=
-      fio_risky_hash((void *)fio___rand_buffer,
-                     sizeof(fio___rand_buffer),
-                     fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
-                                        sizeof(fio___rand_state),
-                                        fio___rand_state[1] + jitter_samples);
-  fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
-  fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
-  fio___rand_buffer[2] ^= fio___rand_buffer[0];
-  fio___rand_buffer[3] ^= fio___rand_buffer[1];
-  fio___rand_counter += jitter_samples;
-}
-
-/* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
-SFUNC uint64_t fio_rand64(void) {
-  /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
-  const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
-  if (((fio___rand_counter++) & (((size_t)1 << 19) - 1)) == 0) {
-    /* re-seed state every 524,288 requests / 2^19-1 attempts  */
-    fio_rand_reseed();
-  }
-  fio___rand_state[0] +=
-      (fio_lrot64(fio___rand_state[0], 33) + fio___rand_counter) * P[0];
-  fio___rand_state[1] += fio_lrot64(fio___rand_state[1], 33) * P[1];
-  fio___rand_state[2] +=
-      (fio_lrot64(fio___rand_state[2], 33) + fio___rand_counter) * (~P[0]);
-  fio___rand_state[3] += fio_lrot64(fio___rand_state[3], 33) * (~P[1]);
-  return fio_lrot64(fio___rand_state[0], 31) +
-         fio_lrot64(fio___rand_state[1], 29) +
-         fio_lrot64(fio___rand_state[2], 27) +
-         fio_lrot64(fio___rand_state[3], 30);
-}
-
-/* copies 64 bits of randomness (8 bytes) repeatedly. */
-SFUNC void fio_rand_bytes(void *data_, size_t len) {
-  if (!data_ || !len)
-    return;
-  uint8_t *data = (uint8_t *)data_;
-
-  if (len < 8)
-    goto small_random;
-
-  if ((uintptr_t)data & 7) {
-    /* align pointer to 64 bit word */
-    size_t offset = 8 - ((uintptr_t)data & 7);
-    fio_rand_bytes(data_, offset); /* perform small_random */
-    data += offset;
-    len -= offset;
-  }
-
-  /* 128 random bits at a time */
-  for (size_t i = (len >> 4); i; --i) {
-    uint64_t t0 = fio_rand64();
-    uint64_t t1 = fio_rand64();
-    FIO_NAME2(fio_u, buf64_local)(data, t0);
-    FIO_NAME2(fio_u, buf64_local)(data + 8, t1);
-    data += 16;
-  }
-  /* 64 random bits at tail */
-  if ((len & 8)) {
-    uint64_t t0 = fio_rand64();
-    FIO_NAME2(fio_u, buf64_local)(data, t0);
-  }
-
-small_random:
-  if ((len & 7)) {
-    /* leftover bits */
-    uint64_t tmp = fio_rand64();
-    /* leftover bytes */
-    switch ((len & 7)) {
-    case 7:
-      data[6] = (tmp >> 8) & 0xFF;
-      /* fall through */
-    case 6:
-      data[5] = (tmp >> 16) & 0xFF;
-      /* fall through */
-    case 5:
-      data[4] = (tmp >> 24) & 0xFF;
-      /* fall through */
-    case 4:
-      data[3] = (tmp >> 32) & 0xFF;
-      /* fall through */
-    case 3:
-      data[2] = (tmp >> 40) & 0xFF;
-      /* fall through */
-    case 2:
-      data[1] = (tmp >> 48) & 0xFF;
-      /* fall through */
-    case 1:
-      data[0] = (tmp >> 56) & 0xFF;
-    }
-  }
-}
-
-/* *****************************************************************************
-Hashing speed test
-***************************************************************************** */
-#ifdef FIO_TEST_CSTL
-#include <math.h>
-
-typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
-
-FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
-                                      char *name,
-                                      uint8_t size_log,
-                                      uint8_t mem_alignment_offset,
-                                      uint8_t fast) {
-  /* test based on code from BearSSL with credit to Thomas Pornin */
-  if (size_log >= 21 || ((sizeof(uint64_t) - 1) >> size_log)) {
-    FIO_LOG_ERROR("fio_test_hash_function called with a log size too big.");
-    return;
-  }
-  mem_alignment_offset &= 7;
-  size_t const buffer_len = (1ULL << size_log);
-  uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
-  if (size_log < 13)
-    cycles_start_at <<= (13 - size_log);
-  else if (size_log > 13)
-    cycles_start_at >>= (size_log - 13);
-
-#ifdef DEBUG
-  fprintf(stderr,
-          "* Testing %s speed with %zu byte blocks"
-          "(DEBUG mode detected - speed may be affected).\n",
-          name,
-          buffer_len);
-#else
-  fprintf(stderr,
-          "* Testing %s speed with %zu byte blocks.\n",
-          name,
-          buffer_len);
-#endif
-
-  uint8_t *buffer_mem = (uint8_t *)
-      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_offset) + 64, 0);
-  uint8_t *buffer = buffer_mem + mem_alignment_offset;
-
-  memset(buffer, 'T', buffer_len);
-  /* warmup */
-  uint64_t hash = 0;
-  for (size_t i = 0; i < 4; i++) {
-    hash += h((char *)buffer, buffer_len);
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
-  }
-  /* loop until test runs for more than 2 seconds */
-  for (uint64_t cycles = cycles_start_at;;) {
-    clock_t start, end;
-    start = clock();
-    for (size_t i = cycles; i > 0; i--) {
-      hash += h((char *)buffer, buffer_len);
-      FIO_COMPILER_GUARD;
-    }
-    end = clock();
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
-    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
-        cycles >= ((uint64_t)1 << 62)) {
-      fprintf(stderr,
-              "\t%-40s %8.2f MB/s\n",
-              name,
-              (double)(buffer_len * cycles) /
-                  (((end - start) * (1000000.0 / CLOCKS_PER_SEC))));
-      break;
-    }
-    cycles <<= 1;
-  }
-  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_offset) + 64);
-}
-
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
-  return fio_risky_hash(buf, len, 1);
-}
-
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
-                                                           size_t len) {
-  fio_risky_mask(buf, len, 0, 0);
-  return len;
-}
-
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
-  fio_xmask(buf, len, fio_rand64());
-  return len;
-}
-
-FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
-  for (int i = 0; i < 8; ++i) {
-    char buf[128];
-    uint64_t nonce = fio_rand64();
-    const char *str = "this is a short text, to test risky masking";
-    char *tmp = buf + i;
-    FIO_MEMCPY(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
-    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
-    size_t err = 0;
-    for (size_t b = 0; b < strlen(str); ++b) {
-      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
-                 "Risky Hash masking didn't mask buf[%zu] on offset "
-                 "%d (statistical deviation?)",
-                 b,
-                 i);
-      err += (tmp[b] == str[b]);
-    }
-    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
-  }
-  const uint8_t alignment_test_offset = 0;
-  if (alignment_test_offset)
-    fprintf(stderr,
-            "The following speed tests use a memory alignment offset of %d "
-            "bytes.\n",
-            (int)(alignment_test_offset & 7));
-#if !DEBUG
-  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
-                         (char *)"fio_risky_hash",
-                         7,
-                         alignment_test_offset,
-                         3);
-  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
-                         (char *)"fio_risky_hash",
-                         13,
-                         alignment_test_offset,
-                         2);
-  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
-                         (char *)"fio_risky_mask (Risky XOR + counter)",
-                         13,
-                         alignment_test_offset,
-                         4);
-  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
-                         (char *)"fio_risky_mask (unaligned)",
-                         13,
-                         1,
-                         4);
-  if (0) {
-    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
-                           (char *)"fio_xmask (XOR, NO counter)",
-                           13,
-                           alignment_test_offset,
-                           4);
-    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
-                           (char *)"fio_xmask (unaligned)",
-                           13,
-                           1,
-                           4);
-  }
-#endif
-}
-
-FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
-                                                 size_t len,
-                                                 const char *name,
-                                                 size_t clk) {
-  size_t totals[2] = {0};
-  size_t freq[256] = {0};
-  const size_t total_bits = (len * sizeof(*stream) * 8);
-  uint64_t hemming = 0;
-  /* collect data */
-  for (size_t i = 1; i < len; i += 2) {
-    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
-    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
-      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
-      ++freq[val];
-      for (int bit = 0; bit < 8; ++bit) {
-        ++totals[(val >> bit) & 1];
-      }
-    }
-  }
-  hemming /= len;
-  fprintf(stderr, "\n");
-#if DEBUG
-  fprintf(stderr,
-          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
-          name,
-          clk);
-#else
-  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
-#endif
-  fprintf(stderr,
-          "\t  zeros / ones (bit frequency)\t%.05f\n",
-          ((float)1.0 * totals[0]) / totals[1]);
-  if (!(totals[0] < totals[1] + (total_bits / 20) &&
-        totals[1] < totals[0] + (total_bits / 20)))
-    FIO_LOG_ERROR("randomness isn't random?");
-  fprintf(stderr,
-          "\t  avarage hemming distance\t%zu (should be: 14-18)\n",
-          (size_t)hemming);
-  /* expect avarage hemming distance of 25% == 16 bits */
-  if (!(hemming >= 14 && hemming <= 18))
-    FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
-  /* test chi-square ... I think */
-  if (len * sizeof(*stream) > 2560) {
-    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
-    double chi_square = 0;
-    for (unsigned int i = 0; i < 256; ++i) {
-      double f = freq[i] - n_r;
-      chi_square += (f * f);
-    }
-    chi_square /= n_r;
-    double chi_square_r_abs =
-        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
-    fprintf(
-        stderr,
-        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
-        chi_square_r_abs,
-        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
-             ? "good"
-             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
-                                                      : "\x1B[1mBAD\x1B[0m")),
-        2 * (sqrt(n_r)));
-  }
-}
-
-FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
-  fprintf(stderr,
-          "* Testing randomness "
-          "- bit frequency / hemming distance / chi-square.\n");
-  const size_t test_len = (FIO_TEST_REPEAT << 7);
-  uint64_t *rs =
-      (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
-  clock_t start, end;
-  FIO_ASSERT_ALLOC(rs);
-
-  rand(); /* warmup */
-  if (sizeof(int) < sizeof(uint64_t)) {
-    start = clock();
-    for (size_t i = 0; i < test_len; ++i) {
-      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
-    }
-    end = clock();
-  } else {
-    start = clock();
-    for (size_t i = 0; i < test_len; ++i) {
-      rs[i] = (uint64_t)rand();
-    }
-    end = clock();
-  }
-  FIO_NAME_TEST(stl, random_buffer)
-  (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
-
-  memset(rs, 0, sizeof(*rs) * test_len);
-  {
-    if (RAND_MAX == ~(uint64_t)0ULL) {
-      /* RAND_MAX fills all bits */
-      start = clock();
-      for (size_t i = 0; i < test_len; ++i) {
-        rs[i] = (uint64_t)rand();
-      }
-      end = clock();
-    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
-      /* RAND_MAX fill at least 32 bits per call */
-      uint32_t *rs_adjusted = (uint32_t *)rs;
-
-      start = clock();
-      for (size_t i = 0; i < (test_len << 1); ++i) {
-        rs_adjusted[i] = (uint32_t)rand();
-      }
-      end = clock();
-    } else if (RAND_MAX >= (~(uint16_t)0U)) {
-      /* RAND_MAX fill at least 16 bits per call */
-      uint16_t *rs_adjusted = (uint16_t *)rs;
-
-      start = clock();
-      for (size_t i = 0; i < (test_len << 2); ++i) {
-        rs_adjusted[i] = (uint16_t)rand();
-      }
-      end = clock();
-    } else {
-      /* assume RAND_MAX fill at least 8 bits per call */
-      uint8_t *rs_adjusted = (uint8_t *)rs;
-
-      start = clock();
-      for (size_t i = 0; i < (test_len << 2); ++i) {
-        rs_adjusted[i] = (uint8_t)rand();
-      }
-      end = clock();
-    }
-    /* test RAND_MAX value */
-    uint8_t rand_bits = 63;
-    while (rand_bits) {
-      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
-        break;
-      --rand_bits;
-    }
-    rand_bits = 64 - rand_bits;
-
-    char buffer[128] = {0};
-    snprintf(buffer,
-             128 - 14,
-             "rand (system - fixed, testing %d random bits)",
-             (int)rand_bits);
-    FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
-  }
-
-  memset(rs, 0, sizeof(*rs) * test_len);
-  fio_rand64(); /* warmup */
-  start = clock();
-  for (size_t i = 0; i < test_len; ++i) {
-    rs[i] = fio_rand64();
-  }
-  end = clock();
-  FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
-  memset(rs, 0, sizeof(*rs) * test_len);
-  start = clock();
-  fio_rand_bytes(rs, test_len * sizeof(*rs));
-  end = clock();
-  FIO_NAME_TEST(stl, random_buffer)
-  (rs, test_len, "fio_rand_bytes", end - start);
-
-  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
-  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
-  fprintf(stderr, "\n");
-#if DEBUG
-  fprintf(stderr,
-          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
-#endif /* DEBUG */
-}
-#endif /* FIO_TEST_CSTL */
-/* *****************************************************************************
-Random - Cleanup
-***************************************************************************** */
-#endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_RAND */
-#undef FIO_RAND
-/* *****************************************************************************
-Copyright: Boaz Segev, 2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_BITWISE                 /* Development inclusion - ignore line */
-#define FIO_SHA1                    /* Development inclusion - ignore line */
+#define FIO_MATH                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
 
 
-                                    SHA 1
+                    Basic Math Operations and Multi-Precision
+                        Constant Time (when possible)
 
 
 
 
 ***************************************************************************** */
-#ifdef FIO_SHA1
+#if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
+#define H___FIO_MATH___H 1
+
 /* *****************************************************************************
-SHA 1
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
 
-/** The data tyope containing the SHA1 digest (result). */
-typedef union {
-#ifdef __SIZEOF_INT128__
-  __uint128_t align__;
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out);
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out);
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
+
+/* *****************************************************************************
+Multi-precision, little endian helpers.
+
+Works with little endian uint64_t arrays or 64 bit numbers.
+***************************************************************************** */
+
+/** Multi-precision ADD for `len*64` bit long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t number_array_length);
+
+/** Multi-precision SUB for `len*64` bit long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t number_array_length);
+
+/** Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` .*/
+FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t number_array_length);
+
+/**
+ * Multi-precision DIV for `len*64` bit long a, b.
+ *
+ * This is NOT constant time.
+ *
+ * The algorithm might be slow, as my math isn't that good and I couldn't
+ * understand faster division algorithms (such as Newton–Raphson division)... so
+ * this is sort of a factorized variation on long division.
+ */
+FIO_IFUNC void fio_math_div(uint64_t *dest,
+                            uint64_t *reminder,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t number_array_length);
+
+/** Multi-precision shift right for `len` word number `n`. */
+FIO_IFUNC void fio_math_shr(uint64_t *dest,
+                            uint64_t *n,
+                            const size_t right_shift_bits,
+                            size_t number_array_length);
+
+/** Multi-precision shift left for `len*64` bit number `n`. */
+FIO_IFUNC void fio_math_shl(uint64_t *dest,
+                            uint64_t *n,
+                            const size_t left_shift_bits,
+                            const size_t number_array_length);
+
+/** Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`). */
+FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
+
+/** Multi-precision - returns the index for the most significant bit or -1. */
+FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
+
+/** Multi-precision - returns the index for the least significant bit or -1. */
+FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
+
+// clang-format on
+/* *****************************************************************************
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
+#if __has_builtin(__builtin_addcll) && 0
+  return __builtin_addcll(a, b, carry_in, carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
+  /* This is actually slower as it occupies more CPU registers */
+  __uint128_t u = (__uint128_t)a + b + carry_in;
+  *carry_out = (uint64_t)(u >> 64U);
+  return (uint64_t)u;
 #else
-  uint64_t align__;
+  uint64_t u = a + (b += carry_in);
+  *carry_out = (b < carry_in) + (u < a);
+  return u;
 #endif
-  uint32_t v[5];
-  uint8_t digest[20];
-} fio_sha1_s;
-
-/**
- * A simple, non streaming, implementation of the SHA1 hashing algorithm.
- *
- * Do NOT use - SHA1 is broken... but for some reason some protocols still
- * require it's use (i.e., WebSockets), so it's here for your convenience.
- */
-SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len);
-
-/** returns the digest length of SHA1 in bytes */
-FIO_IFUNC size_t fio_sha1_len(void);
-
-/** returns the digest of a SHA1 object. */
-FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s);
-
-/* *****************************************************************************
-SHA 1 Implementation - inlined static functions
-***************************************************************************** */
-
-/** returns the digest length of SHA1 in bytes */
-FIO_IFUNC size_t fio_sha1_len(void) { return 20; }
-
-/** returns the digest of a SHA1 object. */
-FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s) { return s->digest; }
-
-/* *****************************************************************************
-Implementation - possibly externed functions.
-***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
-
-FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
-                                   uint32_t *w /* 16 words */) {
-
-  register uint32_t v0 = old->v[0];
-  register uint32_t v1 = old->v[1];
-  register uint32_t v2 = old->v[2];
-  register uint32_t v3 = old->v[3];
-  register uint32_t v4 = old->v[4];
-  register uint32_t v5;
-
-#define FIO___SHA1_ROTATE(K, F, i)                                             \
-  v5 = fio_lrot32(v0, 5) + v4 + F + (uint32_t)K + w[(i)&15];                   \
-  v4 = v3;                                                                     \
-  v3 = v2;                                                                     \
-  v2 = fio_lrot32(v1, 30);                                                     \
-  v1 = v0;                                                                     \
-  v0 = v5;
-#define FIO___SHA1_CALC_WORD(i)                                                \
-  fio_lrot32(                                                                  \
-      (w[(i + 13) & 15] ^ w[(i + 8) & 15] ^ w[(i + 2) & 15] ^ w[(i)&15]),      \
-      1);
-
-#define FIO___SHA1_ROUND4(K, F, i)                                             \
-  FIO___SHA1_ROUND((K), (F), i);                                               \
-  FIO___SHA1_ROUND((K), (F), i + 1);                                           \
-  FIO___SHA1_ROUND((K), (F), i + 2);                                           \
-  FIO___SHA1_ROUND((K), (F), i + 3);
-#define FIO___SHA1_ROUND16(K, F, i)                                            \
-  FIO___SHA1_ROUND4((K), (F), i);                                              \
-  FIO___SHA1_ROUND4((K), (F), i + 4);                                          \
-  FIO___SHA1_ROUND4((K), (F), i + 8);                                          \
-  FIO___SHA1_ROUND4((K), (F), i + 12);
-#define FIO___SHA1_ROUND20(K, F, i)                                            \
-  FIO___SHA1_ROUND16(K, F, i);                                                 \
-  FIO___SHA1_ROUND4((K), (F), i + 16);
-
-#define FIO___SHA1_ROUND(K, F, i)                                              \
-  w[i] = fio_ntol32(w[i]);                                                     \
-  FIO___SHA1_ROTATE(K, F, i);
-
-  FIO___SHA1_ROUND16(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 0);
-
-#undef FIO___SHA1_ROUND
-#define FIO___SHA1_ROUND(K, F, i)                                              \
-  w[(i)&15] = FIO___SHA1_CALC_WORD(i);                                         \
-  FIO___SHA1_ROTATE(K, F, i);
-
-  FIO___SHA1_ROUND4(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 16);
-
-  FIO___SHA1_ROUND20(0x6ED9EBA1, (v1 ^ v2 ^ v3), 20);
-  FIO___SHA1_ROUND20(0x8F1BBCDC, ((v1 & (v2 | v3)) | (v2 & v3)), 40);
-  FIO___SHA1_ROUND20(0xCA62C1D6, (v1 ^ v2 ^ v3), 60);
-
-  old->v[0] += v0;
-  old->v[1] += v1;
-  old->v[2] += v2;
-  old->v[3] += v3;
-  old->v[4] += v4;
-
-#undef FIO___SHA1_ROTATE
-#undef FIO___SHA1_CALC_WORD
-#undef FIO___SHA1_ROUND
-#undef FIO___SHA1_ROUND4
-#undef FIO___SHA1_ROUND16
-#undef FIO___SHA1_ROUND20
 }
 
-/**
- * A simple, non streaming, implementation of the SHA1 hashing algorithm.
- *
- * Do NOT use - SHA1 is broken... but for some reason some protocols still
- * require it's use (i.e., WebSockets), so it's here for your convinience.
- */
-SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  /* TODO: hash */
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
+#if __has_builtin(__builtin_subcll) && 0
+  uint64_t u = __builtin_subcll(a, b, carry_in, carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
+  __uint128_t u = (__uint128_t)a - b - carry_in;
+  if (carry_out)
+    *carry_out = (uint64_t)(u >> 127U);
+#else
+  uint64_t u = a - b;
+  a = u > a;
+  b = u < carry_in;
+  u -= carry_in;
+  if (carry_out)
+    *carry_out = a + b;
+#endif
+  return (uint64_t)u;
+}
 
-  fio_sha1_s s = (fio_sha1_s){
-      .v =
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t *carry_out) {
+#if defined(__SIZEOF_INT128__)
+  __uint128_t r = (__uint128_t)a * b;
+  *carry_out = (uint64_t)(r >> 64U);
+#elif 1 /* At this point long multiplication makes sense... */
+  uint64_t r, midc = 0, lowc = 0;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
+#elif 1 /* Using Karatsuba Multiplication will degrade performance */
+  uint64_t r, c;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t asum = al + ah;
+  const uint64_t bsum = bl + bh;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  /* asum * bsum might overflow, but we know each value is <= 0x100000000 */
+  uint64_t midlo = (asum & 0xFFFFFFFF) * (bsum & 0xFFFFFFFF);
+  uint64_t midhi = (asum & bsum) >> 32;
+  uint64_t midmid = (bsum & (((uint64_t)0ULL - (asum >> 32)) >> 32)) +
+                    (asum & (((uint64_t)0ULL - (bsum >> 32)) >> 32));
+  midlo = fio_math_addc64(midlo, (midmid << 32), 0, &c);
+  midhi += c + (midmid >> 32);
+  midlo = fio_math_subc64(midlo, lo, 0, &c);
+  midhi -= c;
+  midlo = fio_math_subc64(midlo, hi, 0, &c);
+  midhi -= c;
+  r = fio_math_addc64(lo, midlo << 32, 0, &c);
+  *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
+#else   /* never use binary for MUL... so slow... */
+  uint64_t r, c = 0;
+  r = a & ((uint64_t)0ULL - (b & 1));
+  for (uint_fast8_t i = 1; i < 64; ++i) {
+    uint64_t mask = ((uint64_t)0ULL - ((b >> i) & 1));
+    uint64_t tmp = a & mask;
+    uint64_t al = (tmp << i);
+    uint64_t ah = (tmp >> (64 - i));
+    r = fio_math_addc64(r, al, 0, &tmp);
+    c += ah + tmp;
+  }
+  *carry_out = c;
+#endif
+  return (uint64_t)r;
+}
+
+/* *****************************************************************************
+Multi-precision, little endian helpers. Works with full uint64_t arrays.
+***************************************************************************** */
+
+/** Multi-precision ADD for `bits` long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i) {
+    dest[i] = fio_math_addc64(a[i], b[i], c, &c);
+  }
+  return c;
+}
+
+/** Multi-precision SUB for `bits` long a + b. Returns the carry. */
+FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
+                                const uint64_t *a,
+                                const uint64_t *b,
+                                const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i) {
+    dest[i] = fio_math_subc64(a[i], b[i], c, &c);
+  }
+  return c;
+}
+
+/** Multi-precision Inverse for `bits` number `n`. */
+FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, const size_t len) {
+  uint64_t c = 1;
+  for (size_t i = 0; i < len; ++i) {
+    uint64_t tmp = ~n[i] + c;
+    c = (tmp ^ n[i]) >> 63;
+    dest[i] = tmp;
+  }
+}
+
+/** Multi-precision shift right for `bits` number `n`. */
+FIO_IFUNC void fio_math_shr(uint64_t *dest,
+                            uint64_t *n,
+                            size_t bits,
+                            size_t len) {
+  const size_t offset = len - (bits >> 6);
+  bits &= 63;
+  // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu bits", len - offset, bits);
+  uint64_t c = 0, trash;
+  uint64_t *p_select[] = {dest + offset, &trash};
+  while (len--) {
+    --p_select[0];
+    uint64_t ntmp = n[len];
+    uint64_t ctmp = (ntmp << (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+    dest[len] &= (uint64_t)0ULL - (len < offset);
+    p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
+    c = ctmp;
+  }
+}
+
+/** Multi-precision shift left for `bits` number `n`. */
+FIO_IFUNC void fio_math_shl(uint64_t *dest,
+                            uint64_t *n,
+                            size_t bits,
+                            const size_t len) {
+  const size_t offset = bits >> 6;
+  bits &= 63;
+  uint64_t c = 0, trash;
+  uint64_t *p_select[] = {dest + offset, &trash};
+  for (size_t i = 0; i < len; (++i), ++p_select[0]) {
+    uint64_t ntmp = n[i];
+    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+    ;
+    dest[i] &= (uint64_t)0ULL - (i >= offset);
+    p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
+    c = ctmp;
+  }
+}
+
+/** Multi-precision - returns the index for the most significant bit. */
+FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, size_t len) {
+  size_t r[2] = {0, (size_t)-1};
+  uint64_t a = 0;
+  while (len--) {
+    const uint64_t mask = ((uint64_t)0ULL - (!a));
+    a |= (mask & n[len]);
+    r[0] += (64 & (~mask));
+  }
+  r[0] += fio_bits_msb_index(a);
+  return r[!a];
+}
+
+/** Multi-precision - returns the index for the least significant bit. */
+FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len) {
+  size_t r[2] = {0, (size_t)-1};
+  uint64_t a = 0;
+  uint64_t mask = (~(uint64_t)0ULL);
+  for (size_t i = 0; i < len; ++i) {
+    a |= mask & n[i];
+    mask = ((uint64_t)0ULL - (!a));
+    r[0] += (64 & mask);
+  }
+  r[0] += fio_bits_lsb_index(a);
+  return r[!a];
+}
+
+/** Multi-precision MUL for `bits` long a + b. `dest` must be `len * 2`. */
+FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t len) {
+  if (len == 1) { /* route to the correct function */
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    return;
+  } else if (len == 2) { /* long MUL is faster */
+    uint64_t tmp[2], c;
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] += c;
+
+    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
+    dest[3] = c;
+    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] += tmp[1] + c;
+    return;
+  } else if (len == 3) { /* long MUL is still faster */
+    uint64_t tmp[2], c;
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] += c;
+    tmp[0] = fio_math_mulc64(a[0], b[2], dest + 3);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] += c;
+
+    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
+    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
+    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
+    dest[3] += c;
+    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
+    dest[4] = c;
+    tmp[0] = fio_math_mulc64(a[1], b[2], tmp + 1);
+    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
+    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
+    dest[5] = c;
+
+    tmp[0] = fio_math_mulc64(a[2], b[0], tmp + 1);
+    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
+    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
+    dest[4] = fio_math_addc64(dest[4], c, 0, &c);
+    dest[5] += c;
+    tmp[0] = fio_math_mulc64(a[2], b[1], tmp + 1);
+    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
+    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
+    dest[5] += c;
+    tmp[0] = fio_math_mulc64(a[2], b[2], tmp + 1);
+    dest[4] = fio_math_addc64(dest[4], tmp[0], 0, &c);
+    dest[5] += tmp[1] + c;
+  } else { /* long MUL is just too long to write */
+    uint64_t c = 0;
+#if !defined(__cplusplus) || __cplusplus > 201402L
+    uint64_t abwmul[len * 2];
+#else
+    uint64_t abwmul[512];
+    FIO_ASSERT(
+        len <= 256,
+        "Multi Precision MUL (fio_math_mul) overflows at 16384 bit numbers");
+#endif
+    for (size_t i = 0; i < len; ++i) { // clang-format off
+     dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
+     dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
+   } // clang-format on
+    c = 0;
+    for (size_t i = 0; i < len - 1; ++i) {
+      dest[(i + 1) << 1] += c;
+      for (size_t j = i + 1; j < len; ++j) {
+        /* calculate the "middle" word sum */
+        uint64_t mid0, mid1, mid2, ac, bc;
+        uint64_t asum = fio_math_addc64(a[i], a[j], 0, &ac);
+        uint64_t bsum = fio_math_addc64(b[i], b[j], 0, &bc);
+        mid0 = fio_math_mulc64(asum, bsum, &mid1);
+        mid2 = ac & bc;
+        mid1 = fio_math_addc64(mid1, (asum & ((uint64_t)0ULL - bc)), 0, &c);
+        mid2 += c;
+        mid1 = fio_math_addc64(mid1, (bsum & ((uint64_t)0ULL - ac)), 0, &c);
+        mid2 += c;
+        mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
+        mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
+        mid2 -= c;
+        mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
+        mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
+        mid2 -= c;
+        dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
+        dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
+        c += mid2;
+      }
+    }
+  }
+}
+
+/** Multi-precision DIV for `len*64` bit long a, b. NOT constant time. */
+FIO_IFUNC void fio_math_div(uint64_t *dest,
+                            uint64_t *reminder,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t len) {
+#if !defined(__cplusplus) || __cplusplus > 201402L
+  uint64_t t[len];
+  uint64_t r[len];
+  uint64_t q[len];
+#else
+  uint64_t t[256];
+  uint64_t r[256];
+  uint64_t q[256];
+  FIO_ASSERT(
+      len <= 256,
+      "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
+#endif
+  memcpy(r, a, sizeof(uint64_t) * len);
+  memset(q, 0, sizeof(uint64_t) * len);
+  size_t rlen;
+  uint64_t c;
+  const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
+  if (!blen) { /* divide by zero! */
+    FIO_LOG_ERROR("divide by zero!");
+    if (dest)
+      memset(dest, 0xFFFFFFFF, sizeof(*dest) * len);
+    if (reminder)
+      memset(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
+    return;
+  }
+  while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
+    const size_t delta = rlen - blen;
+    fio_math_shl(t, (uint64_t *)b, delta, len);
+    fio_math_sub(r, (uint64_t *)r, t, len);
+    q[delta >> 6] =
+        fio_math_addc64(q[delta >> 6], (1ULL << (delta & 63)), 0, &c);
+    for (size_t i = ((delta >> 6) + 1); i < len; ++i) {
+      q[i] = fio_math_addc64(q[i], 0, c, &c);
+    }
+  }
+  fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
+  const uint64_t mask =
+      (uint64_t)0ULL -
+      ((t[len - 1] ^ (b[len - 1] ^ a[len - 1])) >> 63); /* SUB overflowed */
+  const uint64_t imask = ~mask;                         /* r was >= b */
+  q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
+  for (size_t i = 1; i < len; ++i) {
+    q[i] = fio_math_addc64(q[i], 0, c, &c);
+  }
+  if (dest) {
+    memcpy(dest, q, len * sizeof(uint64_t));
+  }
+  if (reminder) {
+    for (size_t i = 0; i < len; ++i) {
+      reminder[i] = (t[i] & imask) | (r[i] & mask);
+    }
+  }
+}
+
+/* *****************************************************************************
+Common Math operations - test
+***************************************************************************** */
+#if defined(FIO_TEST_CSTL)
+
+FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
+  fprintf(stderr, "* Testing multi-precision math operations (partial).\n");
+
+  { /* Test add/sub carry */
+    uint64_t a, c;
+    a = fio_math_addc64(1ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 3 && c == 0,
+               "fio_math_addc64(1ULL, 1ULL, 1ULL, &c) failed");
+    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
+    c = 0;
+    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 1 && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c) failed");
+    c = 0;
+    a = fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c) failed");
+    a = fio_math_subc64(3ULL, 1ULL, 1ULL, &c);
+    FIO_ASSERT(a == 1 && c == 0, "fio_math_subc64 failed");
+    a = fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(c == 0,
+               "fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
+    a = fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c);
+    FIO_ASSERT(!a && c == 1,
+               "fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c) failed "
+               "(%llu, %llu)",
+               a,
+               c);
+    a = fio_math_subc64(0ULL, 1ULL, 0ULL, &c);
+    FIO_ASSERT(a == ~(uint64_t)0ULL && c == 1,
+               "fio_math_subc64(0ULL, 1ULL, 0ULL, &c) failed");
+  }
+
+  for (size_t k = 0; k < 16; ++k) { /* Test multiplication */
+    for (size_t j = 0; j < 16; ++j) {
+      uint64_t a = (j << (k << 1)), b = (j << k);
+      {
+        for (int i = 0; i < 16; ++i) {
+          uint64_t r0, r1, c0, c1;
+          FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
+          r0 = fio_math_mulc64(a, b, &c0); /* implementation for the system. */
+          FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
+                        (void *)r0,
+                        (void *)c0);
+
+          { /* long multiplication (school algorithm). */
+            uint64_t midc = 0, lowc = 0;
+            const uint64_t al = a & 0xFFFFFFFF;
+            const uint64_t ah = a >> 32;
+            const uint64_t bl = b & 0xFFFFFFFF;
+            const uint64_t bh = b >> 32;
+            const uint64_t lo = al * bl;
+            const uint64_t hi = ah * bh;
+            const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+            const uint64_t r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+            const uint64_t c = hi + (mid >> 32) + (midc << 32) + lowc;
+            FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
+                          (void *)r,
+                          (void *)c);
+            r1 = r;
+            c1 = c;
+          }
+          FIO_ASSERT((r0 == r1) && (c0 == c1), "fail");
           {
-              0x67452301,
-              0xEFCDAB89,
-              0x98BADCFE,
-              0x10325476,
-              0xC3D2E1F0,
-          },
-  };
+            uint64_t r2[2];
+            fio_math_mul(r2, &a, &b, 1);
+            FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
+                          (void *)r2[0],
+                          (void *)r2[1]);
+            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
+                       "fail Xlen MUL with len == 1");
+          }
+          {
+            uint64_t a2[4] = {a, 0, 0, a};
+            uint64_t b2[4] = {b, 0, 0, 0};
+            uint64_t r2[8];
+            fio_math_mul(r2, a2, b2, 4);
+            FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
+                          (void *)r2[3],
+                          (void *)r2[4]);
+            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
+                       "fail Xlen MUL (1) with len == 4");
+            FIO_ASSERT((r0 == r2[3]) && (c0 == r2[4]),
+                       "fail Xlen MUL (2) with len == 4");
+          }
 
-  const uint8_t *buf = (const uint8_t *)data;
-
-  uint32_t vec[16];
-
-  for (size_t i = 63; i < len; i += 64) {
-    FIO_MEMCPY(vec, buf, 64);
-    fio___sha1_round512(&s, vec);
-    buf += 64;
+          a <<= 8;
+          b <<= 8;
+          a += 0xFAFA;
+          b += 0xAFAF;
+        }
+      }
+    }
   }
-  memset(vec, 0, sizeof(vec));
-  if ((len & 63)) {
-    FIO_MEMCPY(vec, buf, (len & 63));
+  { /* Test division */
+    uint64_t n = 0, d = 1;
+    for (size_t i = 0; i < 64; ++i) {
+      n = (n << 7) ^ 0xAA;
+      for (size_t j = 0; j < 64; ++j) {
+        d = (d << 3) ^ 0xAA;
+        uint64_t q, r;
+        FIO_COMPILER_GUARD;
+        fio_math_div(&q, &r, &n, &d, 1);
+        FIO_ASSERT(q == (n / d),
+                   "fio_math_div failed quotient for 0x%llX / 0x%llX (Q=0x%llX "
+                   "R=0x%llX)",
+                   (long long)n,
+                   (long long)d,
+                   (long long)q,
+                   (long long)r);
+        FIO_ASSERT(
+            (q * d) + r == n,
+            "fio_math_div failed remainder for 0x%llX / 0x%llX (Q=0x%llX "
+            "R=0x%llX)",
+            (long long)n,
+            (long long)d,
+            (long long)q,
+            (long long)r);
+      }
+    }
   }
-  ((uint8_t *)vec)[(len & 63)] = 0x80;
-
-  if ((len & 63) > 55) {
-    fio___sha1_round512(&s, vec);
-    memset(vec, 0, sizeof(vec));
+  { /* Test bit shifting */
+    uint64_t a[] = {0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0};
+    uint64_t b[] = {0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 1};
+    uint64_t c[3];
+    fio_math_shl(c, a, 1, 3);
+    FIO_ASSERT(!memcmp(b, c, sizeof(c)),
+               "left shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
+    fio_math_shr(c, c, 1, 3);
+    FIO_ASSERT(!memcmp(a, c, sizeof(c)),
+               "right shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
+    fio_math_shl(c, a, 128, 3);
+    FIO_ASSERT(!c[0] && !c[1] && !(~c[2]),
+               "left shift failed, %llX:%llX:%llX",
+               c[0],
+               c[1],
+               c[2]);
+    FIO_ASSERT(fio_math_msb_index(a, 3) == 127,
+               "fio_math_msb_index(a) failed %zu",
+               fio_math_msb_index(a, 3));
+    FIO_ASSERT(fio_math_lsb_index(a, 3) == 0,
+               "fio_math_lsb_index(a) failed %zu",
+               fio_math_lsb_index(a, 3));
+    FIO_ASSERT(fio_math_msb_index(b, 3) == 128,
+               "fio_math_msb_index(b) failed %zu",
+               fio_math_msb_index(b, 3));
+    FIO_ASSERT(fio_math_lsb_index(b, 3) == 1,
+               "fio_math_lsb_index(b) failed %zu",
+               fio_math_lsb_index(b, 3));
   }
-
-  fio_u2buf64((void *)(vec + 14), (len << 3));
-  fio___sha1_round512(&s, vec);
-
-  s.v[0] = fio_ntol32(s.v[0]);
-  s.v[1] = fio_ntol32(s.v[1]);
-  s.v[2] = fio_ntol32(s.v[2]);
-  s.v[3] = fio_ntol32(s.v[3]);
-  s.v[4] = fio_ntol32(s.v[4]);
-  return s;
-}
-
-/* *****************************************************************************
-SHA1 Testing
-***************************************************************************** */
-#ifdef FIO_TEST_CSTL
-
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
-  fio_sha1_s h = fio_sha1((const void *)data, (uint64_t)len);
-  return *(uintptr_t *)h.digest;
-}
-
-#if HAVE_OPENSSL
-#include <openssl/bio.h>
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
-                                                                size_t len) {
-  /* test based on code from BearSSL with credit to Thomas Pornin */
-  uintptr_t result[6];
-  SHA_CTX o_sh1;
-  SHA1_Init(&o_sh1);
-  SHA1_Update(&o_sh1, data, len);
-  SHA1_Final((unsigned char *)result, &o_sh1);
-  return result[0];
-}
-
-#endif
-
-FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
-  fprintf(stderr, "* Testing SHA1\n");
-  struct {
-    const char *str;
-    const char *sha1;
-  } data[] = {
-      {
-          .str = "",
-          .sha1 = "\xda\x39\xa3\xee\x5e\x6b\x4b\x0d\x32\x55\xbf\xef\x95\x60\x18"
-                  "\x90\xaf\xd8\x07\x09",
-      },
-      {
-          .str = "The quick brown fox jumps over the lazy dog",
-          .sha1 = "\x2f\xd4\xe1\xc6\x7a\x2d\x28\xfc\xed\x84\x9e\xe1\xbb\x76\xe7"
-                  "\x39\x1b\x93\xeb\x12",
-      },
-      {
-          .str = "The quick brown fox jumps over the lazy cog",
-          .sha1 = "\xde\x9f\x2c\x7f\xd2\x5e\x1b\x3a\xfa\xd3\xe8\x5a\x0b\xd1\x7d"
-                  "\x9b\x10\x0d\xb4\xb3",
-      },
-  };
-  for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
-    fio_sha1_s sha1 = fio_sha1(data[i].str, strlen(data[i].str));
-
-    FIO_ASSERT(!memcmp(sha1.digest, data[i].sha1, fio_sha1_len()),
-               "SHA1 mismatch for \"%s\"",
-               data[i].str);
-  }
-#if !DEBUG
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
-                         (char *)"fio_sha1",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
-                         (char *)"fio_sha1",
-                         13,
-                         0,
-                         1);
-#if HAVE_OPENSSL
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
-                         13,
-                         0,
-                         1);
-#endif /* HAVE_OPENSSL */
-#endif /* !DEBUG */
 }
 
 #endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
-Module Cleanup
+Math - cleanup
 ***************************************************************************** */
-
-#endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_SHA1 */
-#undef FIO_SHA1
+#endif /* FIO_MATH */
+#undef FIO_MATH
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -6184,631 +5701,1226 @@ Module Cleanup
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
 /* *****************************************************************************
-Copyright: Boaz Segev, 2022
+Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_MATH                    /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
+#include "005 math.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
 
 
-                    Basic Math Operations and Multi-Precision
-                        Constant Time (when possible)
+                        Risky Hash - a fast and simple hash
 
 
 
 
 ***************************************************************************** */
-#if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
-#define H___FIO_MATH___H 1
+
+#if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
+#define H___FIO_RISKY_HASH_H
 
 /* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+Risky Hash - API
 ***************************************************************************** */
 
-/** Add with carry. */
-FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out);
-/** Subtract with carry. */
-FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out);
-/** Multiply with carry out. */
-FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
+/** Computes a facil.io Stable Hash (will not be updated, even if broken). */
+SFUNC uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 
-/* *****************************************************************************
-Multi-precision, little endian helpers.
+/** Computes a facil.io Stable Hash (will not be updated, even if broken). */
+SFUNC void fio_stable_hash128(void *restrict dest,
+                              const void *restrict data,
+                              size_t len,
+                              uint64_t seed);
 
-Works with little endian uint64_t arrays or 64 bit numbers.
-***************************************************************************** */
+/** Computes a facil.io Risky Hash (Risky v.3). */
+SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 
-/** Multi-precision ADD for `len*64` bit long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
-                                const uint64_t *a,
-                                const uint64_t *b,
-                                const size_t number_array_length);
-
-/** Multi-precision SUB for `len*64` bit long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
-                                const uint64_t *a,
-                                const uint64_t *b,
-                                const size_t number_array_length);
-
-/** Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` .*/
-FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
-                            const uint64_t *a,
-                            const uint64_t *b,
-                            const size_t number_array_length);
+/** Adds bit of entropy to pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
- * Multi-precision DIV for `len*64` bit long a, b.
+ * Masks data using a Risky Hash and a counter mode nonce.
  *
- * This is NOT constant time.
+ * Used for mitigating memory access attacks when storing "secret" information
+ * in memory.
  *
- * The algorithm might be slow, as my math isn't that good and I couldn't
- * understand faster division algorithms (such as Newton–Raphson division)... so
- * this is sort of a factorized variation on long division.
+ * Keep the nonce information in a different memory address then the secret. For
+ * example, if the secret is on the stack, store the nonce on the heap or using
+ * a static variable.
+ *
+ * Don't use the same nonce-secret combination for other data.
+ *
+ * This is NOT a cryptographically secure encryption. Even if the algorithm was
+ * secure, it would provide no more then a 32bit level encryption, which isn't
+ * strong enough for any cryptographic use-case.
+ *
+ * However, this could be used to mitigate memory probing attacks. Secrets
+ * stored in the memory might remain accessible after the program exists or
+ * through core dump information. By storing "secret" information masked in this
+ * way, it mitigates the risk of secret information being recognized or
+ * deciphered.
  */
-FIO_IFUNC void fio_math_div(uint64_t *dest,
-                            uint64_t *reminder,
-                            const uint64_t *a,
-                            const uint64_t *b,
-                            const size_t number_array_length);
-
-/** Multi-precision shift right for `len` word number `n`. */
-FIO_IFUNC void fio_math_shr(uint64_t *dest,
-                            uint64_t *n,
-                            const size_t right_shift_bits,
-                            size_t number_array_length);
-
-/** Multi-precision shift left for `len*64` bit number `n`. */
-FIO_IFUNC void fio_math_shl(uint64_t *dest,
-                            uint64_t *n,
-                            const size_t left_shift_bits,
-                            const size_t number_array_length);
-
-/** Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`). */
-FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
-
-/** Multi-precision - returns the index for the most significant bit or -1. */
-FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
-
-/** Multi-precision - returns the index for the least significant bit or -1. */
-FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
-
-// clang-format on
-/* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-
-/** Add with carry. */
-FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__) && 0
-  /* This is actually slower as it occupies more CPU registers */
-  __uint128_t u = (__uint128_t)a + b + carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 64U);
-#else
-  uint64_t u = a + (b += carry_in);
-  if (carry_out)
-    *carry_out = (b < carry_in) + (u < a);
-#endif
-  return (uint64_t)u;
-}
-
-/** Subtract with carry. */
-FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__) && 0
-  __uint128_t u = (__uint128_t)a - b - carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 127U);
-#else
-  uint64_t u = a - b;
-  a = u > a;
-  b = u < carry_in;
-  u -= carry_in;
-  if (carry_out)
-    *carry_out = a + b;
-#endif
-  return (uint64_t)u;
-}
-
-/** Multiply with carry out. */
-FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__)
-  __uint128_t r = (__uint128_t)a * b;
-  *carry_out = (uint64_t)(r >> 64U);
-#elif 1 /* At this point long multiplication makes sense... */
-  uint64_t r, midc = 0, lowc = 0;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
-  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
-  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
-#else   /* Using Karatsuba Multiplication will degrade performance */
-  uint64_t r, c;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t asum = al + ah;
-  const uint64_t bsum = bl + bh;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  /* asum * bsum might overflow, but we know each value is <= 0x100000000 */
-  uint64_t midlo = (asum & 0xFFFFFFFF) * (bsum & 0xFFFFFFFF);
-  uint64_t midhi = (asum & bsum) >> 32;
-  uint64_t midmid = (bsum & (((uint64_t)0ULL - (asum >> 32)) >> 32)) +
-                    (asum & (((uint64_t)0ULL - (bsum >> 32)) >> 32));
-  midlo = fio_math_addc64(midlo, (midmid << 32), 0, &c);
-  midhi += c + (midmid >> 32);
-  midlo = fio_math_subc64(midlo, lo, 0, &c);
-  midhi -= c;
-  midlo = fio_math_subc64(midlo, hi, 0, &c);
-  midhi -= c;
-  r = fio_math_addc64(lo, midlo << 32, 0, &c);
-  *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
-#endif
-  return (uint64_t)r;
-}
+IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
 
 /* *****************************************************************************
-Multi-precision, little endian helpers. Works with full uint64_t arrays.
+Risky Hash - Implementation
+
+Note: I don't remember what information I used when designing this, but Risky
+Hash is probably NOT cryptographically safe (though I wanted it to be).
+
+Here's a few resources about hashes that might explain more:
+- https://komodoplatform.com/cryptographic-hash-function/
+- https://en.wikipedia.org/wiki/Avalanche_effect
+- http://ticki.github.io/blog/designing-a-good-non-cryptographic-hash-function/
+
 ***************************************************************************** */
 
-/** Multi-precision ADD for `bits` long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_add(uint64_t *dest,
-                                const uint64_t *a,
-                                const uint64_t *b,
-                                const size_t len) {
-  uint64_t c = 0;
-  for (size_t i = 0; i < len; ++i) {
-    dest[i] = fio_math_addc64(a[i], b[i], c, &c);
-  }
-  return c;
+/* Risky Hash primes */
+#define FIO_RISKY3_PRIME0 0xCAEF89D1E9A5EB21ULL
+#define FIO_RISKY3_PRIME1 0xAB137439982B86C9ULL
+#define FIO_RISKY3_PRIME2 0xD9FDC73ABE9EDECDULL
+#define FIO_RISKY3_PRIME3 0x3532D520F9511B13ULL
+#define FIO_RISKY3_PRIME4 0x038720DDEB5A8415ULL
+
+/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
+  uint64_t n = (uint64_t)(uintptr_t)ptr;
+  n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n ^= fio_rrot64(n, 7);
+  n ^= fio_rrot64(n, 13);
+  n ^= fio_rrot64(n, 17);
+  n ^= fio_rrot64(n, 31);
+  return n;
 }
 
-/** Multi-precision SUB for `bits` long a + b. Returns the carry. */
-FIO_IFUNC uint64_t fio_math_sub(uint64_t *dest,
-                                const uint64_t *a,
-                                const uint64_t *b,
-                                const size_t len) {
-  uint64_t c = 0;
-  for (size_t i = 0; i < len; ++i) {
-    dest[i] = fio_math_subc64(a[i], b[i], c, &c);
+#ifdef FIO_EXTERN_COMPLETE
+
+/* Risky Hash initialization constants */
+#define FIO_RISKY3_IV0 0x0000001000000001ULL
+#define FIO_RISKY3_IV1 0x0000010000000010ULL
+#define FIO_RISKY3_IV2 0x0000100000000100ULL
+#define FIO_RISKY3_IV3 0x0001000000001000ULL
+/* read u64 in little endian */
+#define FIO_RISKY_BUF2U64 fio_buf2u64_little
+
+/*  Computes a facil.io Risky Hash. */
+SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
+  FIO_ALIGN(16)
+  uint64_t v[4] = {FIO_RISKY3_IV0,
+                   FIO_RISKY3_IV1,
+                   FIO_RISKY3_IV2,
+                   FIO_RISKY3_IV3};
+  FIO_ALIGN(16) uint64_t w[4];
+  const uint8_t *data = (const uint8_t *)data_;
+
+#define FIO_RISKY3_ROUND64(vi, w_)                                             \
+  w[vi] = w_;                                                                  \
+  v[vi] += w[vi];                                                              \
+  v[vi] = fio_lrot64(v[vi], 29);                                               \
+  v[vi] += w[vi];                                                              \
+  v[vi] *= FIO_RISKY3_PRIME##vi;
+
+#define FIO_RISKY3_ROUND256(w0, w1, w2, w3)                                    \
+  FIO_RISKY3_ROUND64(0, w0);                                                   \
+  FIO_RISKY3_ROUND64(1, w1);                                                   \
+  FIO_RISKY3_ROUND64(2, w2);                                                   \
+  FIO_RISKY3_ROUND64(3, w3);
+
+  if (seed) {
+    /* process the seed as if it was a prepended 8 Byte string. */
+    v[0] *= seed;
+    v[1] *= seed;
+    v[2] *= seed;
+    v[3] *= seed;
+    v[1] ^= seed;
+    v[2] ^= seed;
+    v[3] ^= seed;
   }
-  return c;
+
+  for (size_t i = 31; i < len; i += 32) {
+    /* 32 bytes / 256 bit access */
+    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
+                        FIO_RISKY_BUF2U64(data + 8),
+                        FIO_RISKY_BUF2U64(data + 16),
+                        FIO_RISKY_BUF2U64(data + 24));
+    data += 32;
+  }
+  switch (len & 24) {
+  case 24:
+    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16));
+    /* fall through */
+  case 16:
+    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));
+    /* fall through */
+  case 8:
+    FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
+    data += len & 24;
+  }
+
+  /* add offset information to padding */
+  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
+  /* leftover bytes */
+  switch ((len & 7)) {
+  case 7:
+    tmp |= ((uint64_t)data[6]) << 48; /* fall through */
+  case 6:
+    tmp |= ((uint64_t)data[5]) << 40; /* fall through */
+  case 5:
+    tmp |= ((uint64_t)data[4]) << 32; /* fall through */
+  case 4:
+    tmp |= ((uint64_t)data[3]) << 24; /* fall through */
+  case 3:
+    tmp |= ((uint64_t)data[2]) << 16; /* fall through */
+  case 2:
+    tmp |= ((uint64_t)data[1]) << 8; /* fall through */
+  case 1:
+    tmp |= ((uint64_t)data[0]);
+    /* the last (now padded) byte's position */
+    switch ((len & 24)) {
+    case 24: /* offset 24 in 32 byte segment */
+      FIO_RISKY3_ROUND64(3, tmp);
+      break;
+    case 16: /* offset 16 in 32 byte segment */
+      FIO_RISKY3_ROUND64(2, tmp);
+      break;
+    case 8: /* offset 8 in 32 byte segment */
+      FIO_RISKY3_ROUND64(1, tmp);
+      break;
+    case 0: /* offset 0 in 32 byte segment */
+      FIO_RISKY3_ROUND64(0, tmp);
+      break;
+    }
+  }
+
+  /* irreversible avalanche... I think */
+  uint64_t r = (len) ^ ((uint64_t)len << 36);
+  r += fio_lrot64(v[0], 17) + fio_lrot64(v[1], 13) + fio_lrot64(v[2], 47) +
+       fio_lrot64(v[3], 57);
+  r += v[0] ^ v[1];
+  r ^= fio_lrot64(r, 13);
+  r += v[1] ^ v[2];
+  r ^= fio_lrot64(r, 29);
+  r += v[2] ^ v[3];
+  r += fio_lrot64(r, 33);
+  r += v[3] ^ v[0];
+  r ^= fio_lrot64(r, 51);
+  r ^= (r >> 29) * FIO_RISKY3_PRIME4;
+  return r;
 }
 
-/** Multi-precision Inverse for `bits` number `n`. */
-FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, const size_t len) {
-  uint64_t c = 1;
-  for (size_t i = 0; i < len; ++i) {
-    uint64_t tmp = ~n[i] + c;
-    c = (tmp ^ n[i]) >> 63;
-    dest[i] = tmp;
+/**
+ * Masks data using a Risky Hash and a counter mode nonce.
+ */
+IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
+  { /* avoid zero nonce, make sure nonce is effective and odd */
+    nonce |= 1;
+    nonce *= 0xDB1DD478B9E93B1ULL;
+    nonce ^= ((nonce << 24) | (nonce >> 40));
+    nonce |= 1;
   }
+  uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
+  fio_xmask2(buf, len, hash, nonce);
 }
 
-/** Multi-precision shift right for `bits` number `n`. */
-FIO_IFUNC void fio_math_shr(uint64_t *dest,
-                            uint64_t *n,
-                            size_t bits,
-                            size_t len) {
-  const size_t offset = len - (bits >> 6);
-  bits &= 63;
-  // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu bits", len - offset, bits);
-  uint64_t c = 0, trash;
-  uint64_t *p_select[] = {dest + offset, &trash};
-  while (len--) {
-    --p_select[0];
-    uint64_t ntmp = n[len];
-    uint64_t ctmp = (ntmp << (64 - bits)) & ((uint64_t)0ULL - (!!bits));
-    dest[len] &= (uint64_t)0ULL - (len < offset);
-    p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
-    c = ctmp;
+#undef FIO_STABLE_HASH_ROUND64
+#undef FIO_STABLE_HASH_ROUND128
+
+/* *****************************************************************************
+Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
+***************************************************************************** */
+
+/* Risky Hash primes */
+#define FIO_STABLE_HASH_PRIME0 0xCAEF89D1E9A5EB21ULL
+#define FIO_STABLE_HASH_PRIME1 0xAB137439982B86C9ULL
+#define FIO_STABLE_HASH_PRIME2 0xD9FDC73ABE9EDECDULL
+#define FIO_STABLE_HASH_PRIME3 0x3532D520F9511B13ULL
+#define FIO_STABLE_HASH_PRIME4 0x038720DDEB5A8415ULL
+
+/*  Computes a facil.io Stable Hash. */
+SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
+  uint64_t r;
+  FIO_ALIGN(16)
+  uint64_t v[4], w[4];
+  FIO_ALIGN(16)
+  const uint8_t *data = (const uint8_t *)data_;
+  seed ^= fio_lrot64(seed + len, 47) + len;
+  seed = seed * FIO_STABLE_HASH_PRIME0;
+  seed ^= seed >> 33;
+  seed = fio_ct_if(fio_ct_true(seed), seed, FIO_STABLE_HASH_PRIME0);
+
+  v[0] = seed;
+  v[1] = seed;
+  v[2] = seed;
+  v[3] = seed;
+
+#define FIO_STABLE_HASH_ROUND_FULL()                                           \
+  seed ^= w[0] + w[1] + w[2] + w[3];                                           \
+  v[0] ^= w[0];                                                                \
+  v[1] ^= w[1];                                                                \
+  v[2] ^= w[2];                                                                \
+  v[3] ^= w[3];                                                                \
+  v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[1] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[2] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[3] *= FIO_STABLE_HASH_PRIME0;                                              \
+  w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
+  w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
+  w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
+  w[3] = fio_lrot64(w[3], 31) ^ seed;                                          \
+  v[0] += w[0];                                                                \
+  v[1] += w[1];                                                                \
+  v[2] += w[2];                                                                \
+  v[3] += w[3];
+
+  for (size_t i = 31; i < len; i += 32) {
+    /* 16 bytes / 128 bit access */
+    FIO_MEMCPY(w, data, 32);
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
+    FIO_STABLE_HASH_ROUND_FULL();
+    data += 32;
   }
+
+  if (len & 31) {
+    w[0] = w[1] = w[2] = w[3] = 0;
+    FIO_MEMCPY(w, data, (len & 31));
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
+    FIO_STABLE_HASH_ROUND_FULL();
+  }
+
+#define FIO_STABLE_HASH_AVA(i_)                                                \
+  v[0] ^= v[0] >> (29 + i_);                                                   \
+  v[1] ^= v[1] >> (29 + i_);                                                   \
+  v[2] ^= v[2] >> (29 + i_);                                                   \
+  v[3] ^= v[3] >> (29 + i_);                                                   \
+  v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[1] *= FIO_STABLE_HASH_PRIME1;                                              \
+  v[2] *= FIO_STABLE_HASH_PRIME2;                                              \
+  v[3] *= FIO_STABLE_HASH_PRIME3;
+
+  FIO_STABLE_HASH_AVA(0);
+  FIO_STABLE_HASH_AVA(2);
+  v[0] ^= fio_lrot64(v[0], 27);
+  v[1] ^= fio_lrot64(v[1], 27);
+  v[2] ^= fio_lrot64(v[2], 27);
+  v[3] ^= fio_lrot64(v[3], 27);
+
+  r = v[0] + v[1] + v[2] + v[3];
+  r ^= r >> 31;
+  r *= FIO_STABLE_HASH_PRIME4;
+  r ^= r >> 31;
+
+  return r;
 }
 
-/** Multi-precision shift left for `bits` number `n`. */
-FIO_IFUNC void fio_math_shl(uint64_t *dest,
-                            uint64_t *n,
-                            size_t bits,
-                            const size_t len) {
-  const size_t offset = bits >> 6;
-  bits &= 63;
-  uint64_t c = 0, trash;
-  uint64_t *p_select[] = {dest + offset, &trash};
-  for (size_t i = 0; i < len; (++i), ++p_select[0]) {
-    uint64_t ntmp = n[i];
-    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
-    ;
-    dest[i] &= (uint64_t)0ULL - (i >= offset);
-    p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
-    c = ctmp;
+SFUNC void fio_stable_hash128(void *restrict dest,
+                              const void *restrict data_,
+                              size_t len,
+                              uint64_t seed) {
+  uint64_t v[4], w[4];
+  FIO_ALIGN(16)
+  const uint8_t *data = (const uint8_t *)data_;
+  seed ^= fio_lrot64(seed + len, 47) + len;
+  seed = seed * FIO_STABLE_HASH_PRIME0;
+  seed ^= seed >> 33;
+  seed = fio_ct_if(fio_ct_true(seed), seed, FIO_STABLE_HASH_PRIME0);
+
+  v[0] = seed;
+  v[1] = seed;
+  v[2] = seed;
+  v[3] = seed;
+
+  for (size_t i = 31; i < len; i += 32) {
+    /* 16 bytes / 128 bit access */
+    FIO_MEMCPY(w, data, 32);
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
+    FIO_STABLE_HASH_ROUND_FULL();
+    data += 32;
   }
+
+  if (len & 31) {
+    w[0] = w[1] = w[2] = w[3] = 0;
+    FIO_MEMCPY(w, data, (len & 31));
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
+    FIO_STABLE_HASH_ROUND_FULL();
+  }
+
+  FIO_STABLE_HASH_AVA(0);
+  FIO_STABLE_HASH_AVA(2);
+  v[0] ^= fio_lrot64(v[0], 27);
+  v[1] ^= fio_lrot64(v[1], 27);
+  v[2] ^= fio_lrot64(v[2], 27);
+  v[3] ^= fio_lrot64(v[3], 27);
+
+  uint64_t r[2];
+
+  r[0] = v[0] + v[1] + v[2] + v[3];
+  r[1] = v[0] ^ v[1] ^ v[2] ^ v[3];
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  r[0] *= FIO_STABLE_HASH_PRIME4;
+  r[1] *= FIO_STABLE_HASH_PRIME0;
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  FIO_MEMCPY(dest, r, sizeof(r[0]) * 2);
 }
 
-/** Multi-precision - returns the index for the most significant bit. */
-FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, size_t len) {
-  size_t r[2] = {0, (size_t)-1};
-  uint64_t a = 0;
-  while (len--) {
-    const uint64_t mask = ((uint64_t)0ULL - (!a));
-    a |= (mask & n[len]);
-    r[0] += (64 & (~mask));
-  }
-  r[0] += fio_bits_msb_index(a);
-  return r[!a];
-}
+#undef FIO_STABLE_HASH_AVA
+#undef FIO_STABLE_HASH_ROUND_FULL
 
-/** Multi-precision - returns the index for the least significant bit. */
-FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len) {
-  size_t r[2] = {0, (size_t)-1};
-  uint64_t a = 0;
-  uint64_t mask = (~(uint64_t)0ULL);
-  for (size_t i = 0; i < len; ++i) {
-    a |= mask & n[i];
-    mask = ((uint64_t)0ULL - (!a));
-    r[0] += (64 & mask);
-  }
-  r[0] += fio_bits_lsb_index(a);
-  return r[!a];
-}
+/* *****************************************************************************
+Risky Hash - Cleanup
+***************************************************************************** */
+#undef FIO_RISKY_BUF2U64
 
-/** Multi-precision MUL for `bits` long a + b. `dest` must be `len * 2`. */
-FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
-                            const uint64_t *a,
-                            const uint64_t *b,
-                            const size_t len) {
-  if (len == 1) { /* route to the correct function */
-    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
-    return;
-  } else if (len == 2) { /* long MUL is faster */
-    uint64_t tmp[2], c;
-    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
-    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
-    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
-    dest[2] += c;
-
-    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
-    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
-    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
-    dest[3] = c;
-    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
-    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
-    dest[3] += tmp[1] + c;
-    return;
-  } else if (len == 3) { /* long MUL is still faster */
-    uint64_t tmp[2], c;
-    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
-    tmp[0] = fio_math_mulc64(a[0], b[1], dest + 2);
-    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
-    dest[2] += c;
-    tmp[0] = fio_math_mulc64(a[0], b[2], dest + 3);
-    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
-    dest[3] += c;
-
-    tmp[0] = fio_math_mulc64(a[1], b[0], tmp + 1);
-    dest[1] = fio_math_addc64(dest[1], tmp[0], 0, &c);
-    dest[2] = fio_math_addc64(dest[2], tmp[1], c, &c);
-    dest[3] += c;
-    tmp[0] = fio_math_mulc64(a[1], b[1], tmp + 1);
-    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
-    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
-    dest[4] = c;
-    tmp[0] = fio_math_mulc64(a[1], b[2], tmp + 1);
-    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
-    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
-    dest[5] = c;
-
-    tmp[0] = fio_math_mulc64(a[2], b[0], tmp + 1);
-    dest[2] = fio_math_addc64(dest[2], tmp[0], 0, &c);
-    dest[3] = fio_math_addc64(dest[3], tmp[1], c, &c);
-    dest[4] = fio_math_addc64(dest[4], c, 0, &c);
-    dest[5] += c;
-    tmp[0] = fio_math_mulc64(a[2], b[1], tmp + 1);
-    dest[3] = fio_math_addc64(dest[3], tmp[0], 0, &c);
-    dest[4] = fio_math_addc64(dest[4], tmp[1], c, &c);
-    dest[5] += c;
-    tmp[0] = fio_math_mulc64(a[2], b[2], tmp + 1);
-    dest[4] = fio_math_addc64(dest[4], tmp[0], 0, &c);
-    dest[5] += tmp[1] + c;
-  } else { /* long MUL is just too long to write */
-    uint64_t c = 0;
-#if !defined(__cplusplus) || __cplusplus > 201402L
-    uint64_t abwmul[len * 2];
-#else
-    uint64_t abwmul[512];
-    FIO_ASSERT(
-        len <= 256,
-        "Multi Precision MUL (fio_math_mul) overflows at 16384 bit numbers");
+#endif /* FIO_EXTERN_COMPLETE */
 #endif
-    for (size_t i = 0; i < len; ++i) { // clang-format off
-     dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
-     dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
-   } // clang-format on
-    c = 0;
-    for (size_t i = 0; i < len - 1; ++i) {
-      dest[(i + 1) << 1] = fio_math_addc64(dest[(i + 1) << 1], c, 0, NULL);
-      for (size_t j = i + 1; j < len; ++j) {
-        /* calculate the "middle" word sum */
-        uint64_t mid0, mid1, mid2, ac, bc;
-        uint64_t asum = fio_math_addc64(a[i], a[j], 0, &ac);
-        uint64_t bsum = fio_math_addc64(b[i], b[j], 0, &bc);
-        mid0 = fio_math_mulc64(asum, bsum, &mid1);
-        mid2 = ac & bc;
-        mid1 = fio_math_addc64(mid1, (asum & ((uint64_t)0ULL - bc)), 0, &c);
-        mid2 += c;
-        mid1 = fio_math_addc64(mid1, (bsum & ((uint64_t)0ULL - ac)), 0, &c);
-        mid2 += c;
-        mid0 = fio_math_subc64(mid0, abwmul[(i << 1)], 0, &c);
-        mid1 = fio_math_subc64(mid1, abwmul[(i << 1) + 1], c, &c);
-        mid2 = fio_math_subc64(mid2, c, 0, NULL);
-        mid0 = fio_math_subc64(mid0, abwmul[(j << 1)], 0, &c);
-        mid1 = fio_math_subc64(mid1, abwmul[(j << 1) + 1], c, &c);
-        mid2 = fio_math_subc64(mid2, c, 0, NULL);
-        dest[i + j] = fio_math_addc64(dest[i + j], mid0, 0, &c);
-        dest[i + j + 1] = fio_math_addc64(dest[i + j + 1], mid1, c, &c);
-        c += mid2;
+#undef FIO_RISKY_HASH
+
+/* *****************************************************************************
+
+
+
+
+                      Psedo-Random Generator Functions
+
+
+
+
+***************************************************************************** */
+#if defined(FIO_RAND) && !defined(H___FIO_RAND_H)
+#define H___FIO_RAND_H
+/* *****************************************************************************
+Random - API
+***************************************************************************** */
+
+/** Returns 64 psedo-random bits. Probably not cryptographically safe. */
+SFUNC uint64_t fio_rand64(void);
+
+/** Writes `len` bytes of psedo-random bits to the target buffer. */
+SFUNC void fio_rand_bytes(void *target, size_t len);
+
+/** Feeds up to 1023 bytes of entropy to the random state. */
+IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
+
+/** Reseeds the random engin using system state (rusage / jitter). */
+IFUNC void fio_rand_reseed(void);
+
+/* *****************************************************************************
+Random - Implementation
+***************************************************************************** */
+
+#ifdef FIO_EXTERN_COMPLETE
+
+#if FIO_OS_POSIX ||                                                            \
+    (__has_include("sys/resource.h") && __has_include("sys/time.h"))
+#include <sys/resource.h>
+#include <sys/time.h>
+#endif
+
+static volatile uint64_t fio___rand_state[4]; /* random state */
+static volatile size_t fio___rand_counter;    /* seed counter */
+/* feeds random data to the algorithm through this 256 bit feed. */
+static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
+                                                 0x7cc568e838f6a40d,
+                                                 0x4bb8d885a0fe47d5,
+                                                 0x95561f0927ad7ecd};
+
+IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
+  len &= 1023;
+  uint8_t *buf = (uint8_t *)buf_;
+  uint8_t offset = (fio___rand_counter & 3);
+  uint64_t tmp = 0;
+  for (size_t i = 0; i < (len >> 3); ++i) {
+    tmp = FIO_NAME2(fio_buf, u64_local)(buf);
+    fio___rand_buffer[(offset++ & 3)] ^= tmp;
+    buf += 8;
+  }
+  switch (len & 7) {
+  case 7:
+    tmp <<= 8;
+    tmp |= buf[6];
+    /* fall through */
+  case 6:
+    tmp <<= 8;
+    tmp |= buf[5];
+  /* fall through */
+  case 5:
+    tmp <<= 8;
+    tmp |= buf[4];
+  /* fall through */
+  case 4:
+    tmp <<= 8;
+    tmp |= buf[3];
+  /* fall through */
+  case 3:
+    tmp <<= 8;
+    tmp |= buf[2];
+  /* fall through */
+  case 2:
+    tmp <<= 8;
+    tmp |= buf[1];
+  /* fall through */
+  case 1:
+    tmp <<= 8;
+    tmp |= buf[1];
+    fio___rand_buffer[(offset & 3)] ^= tmp;
+    break;
+  }
+}
+
+/* used here, defined later */
+FIO_IFUNC int64_t fio_time_nano();
+
+IFUNC void fio_rand_reseed(void) {
+  const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
+#if defined(RUSAGE_SELF)
+  {
+    struct rusage rusage;
+    getrusage(RUSAGE_SELF, &rusage);
+    fio___rand_state[0] ^=
+        fio_risky_hash(&rusage, sizeof(rusage), fio___rand_state[0]);
+  }
+#endif
+  for (size_t i = 0; i < jitter_samples; ++i) {
+    uint64_t clk = (uint64_t)fio_time_nano();
+    fio___rand_state[0] ^=
+        fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
+    clk = fio_time_nano();
+    fio___rand_state[1] ^=
+        fio_risky_hash(&clk,
+                       sizeof(clk),
+                       fio___rand_state[1] + fio___rand_counter);
+  }
+  fio___rand_state[2] ^=
+      fio_risky_hash((void *)fio___rand_buffer,
+                     sizeof(fio___rand_buffer),
+                     fio___rand_counter + fio___rand_state[0]);
+  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
+                                        sizeof(fio___rand_state),
+                                        fio___rand_state[1] + jitter_samples);
+  fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
+  fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
+  fio___rand_buffer[2] ^= fio___rand_buffer[0];
+  fio___rand_buffer[3] ^= fio___rand_buffer[1];
+  fio___rand_counter += jitter_samples;
+}
+
+/* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
+SFUNC uint64_t fio_rand64(void) {
+  /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
+  const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
+  if (((fio___rand_counter++) & (((size_t)1 << 19) - 1)) == 0) {
+    /* re-seed state every 524,288 requests / 2^19-1 attempts  */
+    fio_rand_reseed();
+  }
+  fio___rand_state[0] +=
+      (fio_lrot64(fio___rand_state[0], 33) + fio___rand_counter) * P[0];
+  fio___rand_state[1] += fio_lrot64(fio___rand_state[1], 33) * P[1];
+  fio___rand_state[2] +=
+      (fio_lrot64(fio___rand_state[2], 33) + fio___rand_counter) * (~P[0]);
+  fio___rand_state[3] += fio_lrot64(fio___rand_state[3], 33) * (~P[1]);
+  return fio_lrot64(fio___rand_state[0], 31) +
+         fio_lrot64(fio___rand_state[1], 29) +
+         fio_lrot64(fio___rand_state[2], 27) +
+         fio_lrot64(fio___rand_state[3], 30);
+}
+
+/* copies 64 bits of randomness (8 bytes) repeatedly. */
+SFUNC void fio_rand_bytes(void *data_, size_t len) {
+  if (!data_ || !len)
+    return;
+  uint8_t *data = (uint8_t *)data_;
+
+  if (len < 8)
+    goto small_random;
+
+  if ((uintptr_t)data & 7) {
+    /* align pointer to 64 bit word */
+    size_t offset = 8 - ((uintptr_t)data & 7);
+    fio_rand_bytes(data_, offset); /* perform small_random */
+    data += offset;
+    len -= offset;
+  }
+
+  /* 128 random bits at a time */
+  for (size_t i = (len >> 4); i; --i) {
+    uint64_t t0 = fio_rand64();
+    uint64_t t1 = fio_rand64();
+    FIO_NAME2(fio_u, buf64_local)(data, t0);
+    FIO_NAME2(fio_u, buf64_local)(data + 8, t1);
+    data += 16;
+  }
+  /* 64 random bits at tail */
+  if ((len & 8)) {
+    uint64_t t0 = fio_rand64();
+    FIO_NAME2(fio_u, buf64_local)(data, t0);
+  }
+
+small_random:
+  if ((len & 7)) {
+    /* leftover bits */
+    uint64_t tmp = fio_rand64();
+    /* leftover bytes */
+    switch ((len & 7)) {
+    case 7:
+      data[6] = (tmp >> 8) & 0xFF;
+      /* fall through */
+    case 6:
+      data[5] = (tmp >> 16) & 0xFF;
+      /* fall through */
+    case 5:
+      data[4] = (tmp >> 24) & 0xFF;
+      /* fall through */
+    case 4:
+      data[3] = (tmp >> 32) & 0xFF;
+      /* fall through */
+    case 3:
+      data[2] = (tmp >> 40) & 0xFF;
+      /* fall through */
+    case 2:
+      data[1] = (tmp >> 48) & 0xFF;
+      /* fall through */
+    case 1:
+      data[0] = (tmp >> 56) & 0xFF;
+    }
+  }
+}
+
+/* *****************************************************************************
+Hashing speed test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+#include <math.h>
+
+typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
+
+FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
+                                      char *name,
+                                      uint8_t size_log,
+                                      uint8_t mem_alignment_offset,
+                                      uint8_t fast) {
+  /* test based on code from BearSSL with credit to Thomas Pornin */
+  if (size_log >= 21 || ((sizeof(uint64_t) - 1) >> size_log)) {
+    FIO_LOG_ERROR("fio_test_hash_function called with a log size too big.");
+    return;
+  }
+  mem_alignment_offset &= 7;
+  size_t const buffer_len = (1ULL << size_log);
+  uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
+  if (size_log < 13)
+    cycles_start_at <<= (13 - size_log);
+  else if (size_log > 13)
+    cycles_start_at >>= (size_log - 13);
+
+#ifdef DEBUG
+  fprintf(stderr,
+          "* Testing %s speed with %zu byte blocks"
+          "(DEBUG mode detected - speed may be affected).\n",
+          name,
+          buffer_len);
+#else
+  fprintf(stderr,
+          "* Testing %s speed with %zu byte blocks.\n",
+          name,
+          buffer_len);
+#endif
+
+  uint8_t *buffer_mem = (uint8_t *)
+      FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_offset) + 64, 0);
+  uint8_t *buffer = buffer_mem + mem_alignment_offset;
+
+  memset(buffer, 'T', buffer_len);
+  /* warmup */
+  uint64_t hash = 0;
+  for (size_t i = 0; i < 4; i++) {
+    hash += h((char *)buffer, buffer_len);
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+  }
+  /* loop until test runs for more than 2 seconds */
+  for (uint64_t cycles = cycles_start_at;;) {
+    clock_t start, end;
+    start = clock();
+    for (size_t i = cycles; i > 0; i--) {
+      hash += h((char *)buffer, buffer_len);
+      FIO_COMPILER_GUARD;
+    }
+    end = clock();
+    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
+        cycles >= ((uint64_t)1 << 62)) {
+      fprintf(stderr,
+              "\t%-40s %8.2f MB/s\n",
+              name,
+              (double)(buffer_len * cycles) /
+                  (((end - start) * (1000000.0 / CLOCKS_PER_SEC))));
+      break;
+    }
+    cycles <<= 1;
+  }
+  FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_offset) + 64);
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
+  return fio_risky_hash(buf, len, 1);
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
+  return fio_stable_hash(buf, len, 0);
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
+                                                           size_t len) {
+  fio_risky_mask(buf, len, 0, 0);
+  return len;
+}
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
+  fio_xmask(buf, len, fio_rand64());
+  return len;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+  for (int i = 0; i < 8; ++i) {
+    char buf[128];
+    uint64_t nonce = fio_rand64();
+    const char *str = "this is a short text, to test risky masking";
+    char *tmp = buf + i;
+    FIO_MEMCPY(tmp, str, strlen(str));
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
+    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
+    size_t err = 0;
+    for (size_t b = 0; b < strlen(str); ++b) {
+      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
+                 "Risky Hash masking didn't mask buf[%zu] on offset "
+                 "%d (statistical deviation?)",
+                 b,
+                 i);
+      err += (tmp[b] == str[b]);
+    }
+    fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
+    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
+  }
+  const uint8_t alignment_test_offset = 0;
+  if (alignment_test_offset)
+    fprintf(stderr,
+            "The following speed tests use a memory alignment offset of %d "
+            "bytes.\n",
+            (int)(alignment_test_offset & 7));
+#if !DEBUG
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         7,
+                         alignment_test_offset,
+                         3);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         13,
+                         alignment_test_offset,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit)",
+                         7,
+                         alignment_test_offset,
+                         3);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_unstable_hash",
+                         13,
+                         alignment_test_offset,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (Risky XOR + counter)",
+                         13,
+                         alignment_test_offset,
+                         4);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
+                         (char *)"fio_risky_mask (unaligned)",
+                         13,
+                         1,
+                         4);
+  if (0) {
+    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                           (char *)"fio_xmask (XOR, NO counter)",
+                           13,
+                           alignment_test_offset,
+                           4);
+    fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                           (char *)"fio_xmask (unaligned)",
+                           13,
+                           1,
+                           4);
+  }
+#endif
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
+                                                 size_t len,
+                                                 const char *name,
+                                                 size_t clk) {
+  size_t totals[2] = {0};
+  size_t freq[256] = {0};
+  const size_t total_bits = (len * sizeof(*stream) * 8);
+  uint64_t hemming = 0;
+  /* collect data */
+  for (size_t i = 1; i < len; i += 2) {
+    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
+    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
+      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
+      ++freq[val];
+      for (int bit = 0; bit < 8; ++bit) {
+        ++totals[(val >> bit) & 1];
       }
     }
   }
+  hemming /= len;
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
+          name,
+          clk);
+#else
+  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
+#endif
+  fprintf(stderr,
+          "\t  zeros / ones (bit frequency)\t%.05f\n",
+          ((float)1.0 * totals[0]) / totals[1]);
+  if (!(totals[0] < totals[1] + (total_bits / 20) &&
+        totals[1] < totals[0] + (total_bits / 20)))
+    FIO_LOG_ERROR("randomness isn't random?");
+  fprintf(stderr,
+          "\t  avarage hemming distance\t%zu (should be: 14-18)\n",
+          (size_t)hemming);
+  /* expect avarage hemming distance of 25% == 16 bits */
+  if (!(hemming >= 14 && hemming <= 18))
+    FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
+  /* test chi-square ... I think */
+  if (len * sizeof(*stream) > 2560) {
+    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
+    double chi_square = 0;
+    for (unsigned int i = 0; i < 256; ++i) {
+      double f = freq[i] - n_r;
+      chi_square += (f * f);
+    }
+    chi_square /= n_r;
+    double chi_square_r_abs =
+        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
+    fprintf(
+        stderr,
+        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
+        chi_square_r_abs,
+        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
+             ? "good"
+             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
+                                                      : "\x1B[1mBAD\x1B[0m")),
+        2 * (sqrt(n_r)));
+  }
 }
 
-/** Multi-precision DIV for `len*64` bit long a, b. NOT constant time. */
-FIO_IFUNC void fio_math_div(uint64_t *dest,
-                            uint64_t *reminder,
-                            const uint64_t *a,
-                            const uint64_t *b,
-                            const size_t len) {
-#if !defined(__cplusplus) || __cplusplus > 201402L
-  uint64_t t[len];
-  uint64_t r[len];
-  uint64_t q[len];
+FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
+  fprintf(stderr,
+          "* Testing randomness "
+          "- bit frequency / hemming distance / chi-square.\n");
+  const size_t test_len = (FIO_TEST_REPEAT << 7);
+  uint64_t *rs =
+      (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
+  clock_t start, end;
+  FIO_ASSERT_ALLOC(rs);
+
+  rand(); /* warmup */
+  if (sizeof(int) < sizeof(uint64_t)) {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
+    }
+    end = clock();
+  } else {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = (uint64_t)rand();
+    }
+    end = clock();
+  }
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  {
+    if (RAND_MAX == ~(uint64_t)0ULL) {
+      /* RAND_MAX fills all bits */
+      start = clock();
+      for (size_t i = 0; i < test_len; ++i) {
+        rs[i] = (uint64_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
+      /* RAND_MAX fill at least 32 bits per call */
+      uint32_t *rs_adjusted = (uint32_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 1); ++i) {
+        rs_adjusted[i] = (uint32_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint16_t)0U)) {
+      /* RAND_MAX fill at least 16 bits per call */
+      uint16_t *rs_adjusted = (uint16_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint16_t)rand();
+      }
+      end = clock();
+    } else {
+      /* assume RAND_MAX fill at least 8 bits per call */
+      uint8_t *rs_adjusted = (uint8_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint8_t)rand();
+      }
+      end = clock();
+    }
+    /* test RAND_MAX value */
+    uint8_t rand_bits = 63;
+    while (rand_bits) {
+      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
+        break;
+      --rand_bits;
+    }
+    rand_bits = 64 - rand_bits;
+
+    char buffer[128] = {0};
+    snprintf(buffer,
+             128 - 14,
+             "rand (system - fixed, testing %d random bits)",
+             (int)rand_bits);
+    FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
+  }
+
+  memset(rs, 0, sizeof(*rs) * test_len);
+  fio_rand64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio_rand64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
+  memset(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio_rand_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "fio_rand_bytes", end - start);
+
+  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
+  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
+#endif /* DEBUG */
+}
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Random - Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_RAND */
+#undef FIO_RAND
+/* *****************************************************************************
+Copyright: Boaz Segev, 2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_BITWISE                 /* Development inclusion - ignore line */
+#define FIO_SHA1                    /* Development inclusion - ignore line */
+#include "000 header.h"             /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                    SHA 1
+
+
+
+
+***************************************************************************** */
+#ifdef FIO_SHA1
+/* *****************************************************************************
+SHA 1
+***************************************************************************** */
+
+/** The data tyope containing the SHA1 digest (result). */
+typedef union {
+#ifdef __SIZEOF_INT128__
+  __uint128_t align__;
 #else
-  uint64_t t[256];
-  uint64_t r[256];
-  uint64_t q[256];
-  FIO_ASSERT(
-      len <= 256,
-      "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
+  uint64_t align__;
 #endif
-  memcpy(r, a, sizeof(uint64_t) * len);
-  memset(q, 0, sizeof(uint64_t) * len);
-  size_t rlen;
-  uint64_t c;
-  const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
-  if (!blen) { /* divide by zero! */
-    FIO_LOG_ERROR("divide by zero!");
-    if (dest)
-      memset(dest, 0xFFFFFFFF, sizeof(*dest) * len);
-    if (reminder)
-      memset(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
-    return;
+  uint32_t v[5];
+  uint8_t digest[20];
+} fio_sha1_s;
+
+/**
+ * A simple, non streaming, implementation of the SHA1 hashing algorithm.
+ *
+ * Do NOT use - SHA1 is broken... but for some reason some protocols still
+ * require it's use (i.e., WebSockets), so it's here for your convenience.
+ */
+SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len);
+
+/** returns the digest length of SHA1 in bytes */
+FIO_IFUNC size_t fio_sha1_len(void);
+
+/** returns the digest of a SHA1 object. */
+FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s);
+
+/* *****************************************************************************
+SHA 1 Implementation - inlined static functions
+***************************************************************************** */
+
+/** returns the digest length of SHA1 in bytes */
+FIO_IFUNC size_t fio_sha1_len(void) { return 20; }
+
+/** returns the digest of a SHA1 object. */
+FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s) { return s->digest; }
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
+
+FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
+                                   uint32_t *w /* 16 words */) {
+
+  register uint32_t v0 = old->v[0];
+  register uint32_t v1 = old->v[1];
+  register uint32_t v2 = old->v[2];
+  register uint32_t v3 = old->v[3];
+  register uint32_t v4 = old->v[4];
+  register uint32_t v5;
+
+#define FIO___SHA1_ROTATE(K, F, i)                                             \
+  v5 = fio_lrot32(v0, 5) + v4 + F + (uint32_t)K + w[(i)&15];                   \
+  v4 = v3;                                                                     \
+  v3 = v2;                                                                     \
+  v2 = fio_lrot32(v1, 30);                                                     \
+  v1 = v0;                                                                     \
+  v0 = v5;
+#define FIO___SHA1_CALC_WORD(i)                                                \
+  fio_lrot32(                                                                  \
+      (w[(i + 13) & 15] ^ w[(i + 8) & 15] ^ w[(i + 2) & 15] ^ w[(i)&15]),      \
+      1);
+
+#define FIO___SHA1_ROUND4(K, F, i)                                             \
+  FIO___SHA1_ROUND((K), (F), i);                                               \
+  FIO___SHA1_ROUND((K), (F), i + 1);                                           \
+  FIO___SHA1_ROUND((K), (F), i + 2);                                           \
+  FIO___SHA1_ROUND((K), (F), i + 3);
+#define FIO___SHA1_ROUND16(K, F, i)                                            \
+  FIO___SHA1_ROUND4((K), (F), i);                                              \
+  FIO___SHA1_ROUND4((K), (F), i + 4);                                          \
+  FIO___SHA1_ROUND4((K), (F), i + 8);                                          \
+  FIO___SHA1_ROUND4((K), (F), i + 12);
+#define FIO___SHA1_ROUND20(K, F, i)                                            \
+  FIO___SHA1_ROUND16(K, F, i);                                                 \
+  FIO___SHA1_ROUND4((K), (F), i + 16);
+
+#define FIO___SHA1_ROUND(K, F, i)                                              \
+  w[i] = fio_ntol32(w[i]);                                                     \
+  FIO___SHA1_ROTATE(K, F, i);
+
+  FIO___SHA1_ROUND16(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 0);
+
+#undef FIO___SHA1_ROUND
+#define FIO___SHA1_ROUND(K, F, i)                                              \
+  w[(i)&15] = FIO___SHA1_CALC_WORD(i);                                         \
+  FIO___SHA1_ROTATE(K, F, i);
+
+  FIO___SHA1_ROUND4(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 16);
+
+  FIO___SHA1_ROUND20(0x6ED9EBA1, (v1 ^ v2 ^ v3), 20);
+  FIO___SHA1_ROUND20(0x8F1BBCDC, ((v1 & (v2 | v3)) | (v2 & v3)), 40);
+  FIO___SHA1_ROUND20(0xCA62C1D6, (v1 ^ v2 ^ v3), 60);
+
+  old->v[0] += v0;
+  old->v[1] += v1;
+  old->v[2] += v2;
+  old->v[3] += v3;
+  old->v[4] += v4;
+
+#undef FIO___SHA1_ROTATE
+#undef FIO___SHA1_CALC_WORD
+#undef FIO___SHA1_ROUND
+#undef FIO___SHA1_ROUND4
+#undef FIO___SHA1_ROUND16
+#undef FIO___SHA1_ROUND20
+}
+
+/**
+ * A simple, non streaming, implementation of the SHA1 hashing algorithm.
+ *
+ * Do NOT use - SHA1 is broken... but for some reason some protocols still
+ * require it's use (i.e., WebSockets), so it's here for your convinience.
+ */
+SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
+  /* TODO: hash */
+
+  fio_sha1_s s = (fio_sha1_s){
+      .v =
+          {
+              0x67452301,
+              0xEFCDAB89,
+              0x98BADCFE,
+              0x10325476,
+              0xC3D2E1F0,
+          },
+  };
+
+  const uint8_t *buf = (const uint8_t *)data;
+
+  uint32_t vec[16];
+
+  for (size_t i = 63; i < len; i += 64) {
+    FIO_MEMCPY(vec, buf, 64);
+    fio___sha1_round512(&s, vec);
+    buf += 64;
   }
-  while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
-    const size_t delta = rlen - blen;
-    fio_math_shl(t, (uint64_t *)b, delta, len);
-    fio_math_sub(r, (uint64_t *)r, t, len);
-    q[delta >> 6] =
-        fio_math_addc64(q[delta >> 6], (1ULL << (delta & 63)), 0, &c);
-    for (size_t i = ((delta >> 6) + 1); i < len; ++i) {
-      q[i] = fio_math_addc64(q[i], 0, c, &c);
-    }
+  memset(vec, 0, sizeof(vec));
+  if ((len & 63)) {
+    FIO_MEMCPY(vec, buf, (len & 63));
   }
-  fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
-  const uint64_t mask =
-      (uint64_t)0ULL -
-      ((t[len - 1] ^ (b[len - 1] ^ a[len - 1])) >> 63); /* SUB overflowed */
-  const uint64_t imask = ~mask;                         /* r was >= b */
-  q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
-  for (size_t i = 1; i < len; ++i) {
-    q[i] = fio_math_addc64(q[i], 0, c, &c);
+  ((uint8_t *)vec)[(len & 63)] = 0x80;
+
+  if ((len & 63) > 55) {
+    fio___sha1_round512(&s, vec);
+    memset(vec, 0, sizeof(vec));
   }
-  if (dest) {
-    memcpy(dest, q, len * sizeof(uint64_t));
-  }
-  if (reminder) {
-    for (size_t i = 0; i < len; ++i) {
-      reminder[i] = (t[i] & imask) | (r[i] & mask);
-    }
-  }
+
+  fio_u2buf64((void *)(vec + 14), (len << 3));
+  fio___sha1_round512(&s, vec);
+
+  s.v[0] = fio_ntol32(s.v[0]);
+  s.v[1] = fio_ntol32(s.v[1]);
+  s.v[2] = fio_ntol32(s.v[2]);
+  s.v[3] = fio_ntol32(s.v[3]);
+  s.v[4] = fio_ntol32(s.v[4]);
+  return s;
 }
 
 /* *****************************************************************************
-Common Math operations - test
+SHA1 Testing
 ***************************************************************************** */
-#if defined(FIO_TEST_CSTL)
+#ifdef FIO_TEST_CSTL
 
-FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
-  fprintf(stderr, "* Testing multi-precision math operations (partial).\n");
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
+  fio_sha1_s h = fio_sha1((const void *)data, (uint64_t)len);
+  return *(uintptr_t *)h.digest;
+}
 
-  { /* Test add/sub carry */
-    uint64_t a, c;
-    a = fio_math_addc64(1ULL, 1ULL, 1ULL, &c);
-    FIO_ASSERT(a == 3 && c == 0,
-               "fio_math_addc64(1ULL, 1ULL, 1ULL, &c) failed");
-    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
-    FIO_ASSERT(!a && c == 1,
-               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
-    c = 0;
-    a = fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c);
-    FIO_ASSERT(a == 1 && c == 1,
-               "fio_math_addc64(~(uint64_t)0ULL, 1ULL, 1ULL, &c) failed");
-    c = 0;
-    a = fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c);
-    FIO_ASSERT(!a && c == 1,
-               "fio_math_addc64(~(uint64_t)0ULL, 0ULL, 1ULL, &c) failed");
-    a = fio_math_subc64(3ULL, 1ULL, 1ULL, &c);
-    FIO_ASSERT(a == 1 && c == 0, "fio_math_subc64 failed");
-    a = fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c);
-    FIO_ASSERT(c == 0,
-               "fio_math_subc64(~(uint64_t)0ULL, 1ULL, 0ULL, &c) failed");
-    a = fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c);
-    FIO_ASSERT(!a && c == 1,
-               "fio_math_subc64(0ULL, ~(uint64_t)0ULL, 1ULL, &c) failed "
-               "(%llu, %llu)",
-               a,
-               c);
-    a = fio_math_subc64(0ULL, 1ULL, 0ULL, &c);
-    FIO_ASSERT(a == ~(uint64_t)0ULL && c == 1,
-               "fio_math_subc64(0ULL, 1ULL, 0ULL, &c) failed");
-  }
+#if HAVE_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 
-  for (size_t k = 0; k < 16; ++k) { /* Test multiplication */
-    for (size_t j = 0; j < 16; ++j) {
-      uint64_t a = (j << (k << 1)), b = (j << k);
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
+                                                                size_t len) {
+  uintptr_t result[6];
+  SHA_CTX o_sh1;
+  SHA1_Init(&o_sh1);
+  SHA1_Update(&o_sh1, data, len);
+  SHA1_Final((unsigned char *)result, &o_sh1);
+  return result[0];
+}
+
+#endif
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
+  fprintf(stderr, "* Testing SHA1\n");
+  struct {
+    const char *str;
+    const char *sha1;
+  } data[] = {
       {
-        for (int i = 0; i < 16; ++i) {
-          uint64_t r0, r1, c0, c1;
-          FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
-          r0 = fio_math_mulc64(a, b, &c0); /* implementation for the system. */
-          FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
-                        (void *)r0,
-                        (void *)c0);
+          .str = "",
+          .sha1 = "\xda\x39\xa3\xee\x5e\x6b\x4b\x0d\x32\x55\xbf\xef\x95\x60\x18"
+                  "\x90\xaf\xd8\x07\x09",
+      },
+      {
+          .str = "The quick brown fox jumps over the lazy dog",
+          .sha1 = "\x2f\xd4\xe1\xc6\x7a\x2d\x28\xfc\xed\x84\x9e\xe1\xbb\x76\xe7"
+                  "\x39\x1b\x93\xeb\x12",
+      },
+      {
+          .str = "The quick brown fox jumps over the lazy cog",
+          .sha1 = "\xde\x9f\x2c\x7f\xd2\x5e\x1b\x3a\xfa\xd3\xe8\x5a\x0b\xd1\x7d"
+                  "\x9b\x10\x0d\xb4\xb3",
+      },
+  };
+  for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
+    fio_sha1_s sha1 = fio_sha1(data[i].str, strlen(data[i].str));
 
-          { /* long multiplication (school algorithm). */
-            uint64_t midc = 0, lowc = 0;
-            const uint64_t al = a & 0xFFFFFFFF;
-            const uint64_t ah = a >> 32;
-            const uint64_t bl = b & 0xFFFFFFFF;
-            const uint64_t bh = b >> 32;
-            const uint64_t lo = al * bl;
-            const uint64_t hi = ah * bh;
-            const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
-            const uint64_t r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
-            const uint64_t c = hi + (mid >> 32) + (midc << 32) + lowc;
-            FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
-                          (void *)r,
-                          (void *)c);
-            r1 = r;
-            c1 = c;
-          }
-          FIO_ASSERT((r0 == r1) && (c0 == c1), "fail");
-          {
-            uint64_t r2[2];
-            fio_math_mul(r2, &a, &b, 1);
-            FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
-                          (void *)r2[0],
-                          (void *)r2[1]);
-            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
-                       "fail Xlen MUL with len == 1");
-          }
-          {
-            uint64_t a2[4] = {a, 0, 0, a};
-            uint64_t b2[4] = {b, 0, 0, 0};
-            uint64_t r2[8];
-            fio_math_mul(r2, a2, b2, 4);
-            FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
-                          (void *)r2[3],
-                          (void *)r2[4]);
-            FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
-                       "fail Xlen MUL (1) with len == 4");
-            FIO_ASSERT((r0 == r2[3]) && (c0 == r2[4]),
-                       "fail Xlen MUL (2) with len == 4");
-          }
-
-          a <<= 8;
-          b <<= 8;
-          a += 0xFAFA;
-          b += 0xAFAF;
-        }
-      }
-    }
+    FIO_ASSERT(!memcmp(sha1.digest, data[i].sha1, fio_sha1_len()),
+               "SHA1 mismatch for \"%s\"",
+               data[i].str);
   }
-  { /* Test division */
-    uint64_t n = 0, d = 1;
-    for (size_t i = 0; i < 64; ++i) {
-      n = (n << 7) ^ 0xAA;
-      for (size_t j = 0; j < 64; ++j) {
-        d = (d << 3) ^ 0xAA;
-        uint64_t q, r;
-        FIO_COMPILER_GUARD;
-        fio_math_div(&q, &r, &n, &d, 1);
-        FIO_ASSERT(q == (n / d),
-                   "fio_math_div failed quotient for 0x%llX / 0x%llX (Q=0x%llX "
-                   "R=0x%llX)",
-                   (long long)n,
-                   (long long)d,
-                   (long long)q,
-                   (long long)r);
-        FIO_ASSERT(
-            (q * d) + r == n,
-            "fio_math_div failed remainder for 0x%llX / 0x%llX (Q=0x%llX "
-            "R=0x%llX)",
-            (long long)n,
-            (long long)d,
-            (long long)q,
-            (long long)r);
-      }
-    }
-  }
-  { /* Test bit shifting */
-    uint64_t a[] = {0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0};
-    uint64_t b[] = {0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 1};
-    uint64_t c[3];
-    fio_math_shl(c, a, 1, 3);
-    FIO_ASSERT(!memcmp(b, c, sizeof(c)),
-               "left shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
-    fio_math_shr(c, c, 1, 3);
-    FIO_ASSERT(!memcmp(a, c, sizeof(c)),
-               "right shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
-    fio_math_shl(c, a, 128, 3);
-    FIO_ASSERT(!c[0] && !c[1] && !(~c[2]),
-               "left shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
-    FIO_ASSERT(fio_math_msb_index(a, 3) == 127,
-               "fio_math_msb_index(a) failed %zu",
-               fio_math_msb_index(a, 3));
-    FIO_ASSERT(fio_math_lsb_index(a, 3) == 0,
-               "fio_math_lsb_index(a) failed %zu",
-               fio_math_lsb_index(a, 3));
-    FIO_ASSERT(fio_math_msb_index(b, 3) == 128,
-               "fio_math_msb_index(b) failed %zu",
-               fio_math_msb_index(b, 3));
-    FIO_ASSERT(fio_math_lsb_index(b, 3) == 1,
-               "fio_math_lsb_index(b) failed %zu",
-               fio_math_lsb_index(b, 3));
-  }
+#if !DEBUG
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
+                         (char *)"fio_sha1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
+                         (char *)"fio_sha1",
+                         13,
+                         0,
+                         1);
+#if HAVE_OPENSSL
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA1",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA1",
+                         13,
+                         0,
+                         1);
+#endif /* HAVE_OPENSSL */
+#endif /* !DEBUG */
 }
 
 #endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
-Math - cleanup
+Module Cleanup
 ***************************************************************************** */
-#endif /* FIO_MATH */
-#undef FIO_MATH
+
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_SHA1 */
+#undef FIO_SHA1
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -7975,8 +8087,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "007 threads.h"            /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -12671,8 +12783,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "210 map api.h"            /* Development inclusion - ignore line */
 #include "211 ordered map.h"        /* Development inclusion - ignore line */
@@ -16584,8 +16696,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_FILES                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -25672,11 +25784,11 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "051 json.h"               /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
-#include "210 hashmap.h"            /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
 #include "220 string.h"             /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */

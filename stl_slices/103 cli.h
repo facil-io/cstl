@@ -8,8 +8,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_CLI                     /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "005 riskyhash.h"          /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "210 map api.h"            /* Development inclusion - ignore line */
 #include "211 ordered map.h"        /* Development inclusion - ignore line */
