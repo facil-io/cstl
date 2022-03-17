@@ -1,4 +1,4 @@
-## Atomic operations:
+## Atomic operations
 
 If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
 
