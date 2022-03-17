@@ -6440,7 +6440,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          alignment_test_offset,
                          3);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
-                         (char *)"fio_unstable_hash",
+                         (char *)"fio_stable_hash",
                          13,
                          alignment_test_offset,
                          2);
