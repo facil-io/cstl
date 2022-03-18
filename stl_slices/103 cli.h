@@ -774,7 +774,7 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_hash_destroy(&fio___cli_aliases);
   fio___cli_unnamed_count = 0;
   if (fio___cli_default_values.next) {
-    while (!FIO_LIST_IS_EMPTY(&fio___cli_default_values)) {
+    while (fio___cli_default_values.next != &fio___cli_default_values) {
       fio___cli_def_str_s *node;
       FIO_LIST_POP(fio___cli_def_str_s, node, node, &fio___cli_default_values);
       FIO_MEM_FREE_(node, sizeof(*node) + node->len + 1);

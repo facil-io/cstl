@@ -5941,24 +5941,6 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 #define FIO_STABLE_HASH_PRIME2 0xD9FDC73ABE9EDECDULL
 #define FIO_STABLE_HASH_PRIME3 0x3532D520F9511B13ULL
 #define FIO_STABLE_HASH_PRIME4 0x038720DDEB5A8415ULL
-
-/*  Computes a facil.io Stable Hash. */
-SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t r;
-  FIO_ALIGN(16)
-  uint64_t v[4], w[4];
-  FIO_ALIGN(16)
-  const uint8_t *data = (const uint8_t *)data_;
-  seed ^= fio_lrot64(seed + len, 47) + len;
-  seed = seed * FIO_STABLE_HASH_PRIME0;
-  seed ^= seed >> 33;
-  seed = fio_ct_if(fio_ct_true(seed), seed, FIO_STABLE_HASH_PRIME0);
-
-  v[0] = seed;
-  v[1] = seed;
-  v[2] = seed;
-  v[3] = seed;
-
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
   seed ^= w[0] + w[1] + w[2] + w[3];                                           \
   v[0] ^= w[0];                                                                \
@@ -5977,6 +5959,32 @@ SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   v[1] += w[1];                                                                \
   v[2] += w[2];                                                                \
   v[3] += w[3];
+#define FIO_STABLE_HASH_AVA(i_)                                                \
+  v[0] ^= v[0] >> (29 + i_);                                                   \
+  v[1] ^= v[1] >> (29 + i_);                                                   \
+  v[2] ^= v[2] >> (29 + i_);                                                   \
+  v[3] ^= v[3] >> (29 + i_);                                                   \
+  v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[1] *= FIO_STABLE_HASH_PRIME1;                                              \
+  v[2] *= FIO_STABLE_HASH_PRIME2;                                              \
+  v[3] *= FIO_STABLE_HASH_PRIME3;
+
+/*  Computes a facil.io Stable Hash. */
+SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
+  uint64_t r;
+  FIO_ALIGN(16)
+  uint64_t v[4], w[4];
+  FIO_ALIGN(16)
+  const uint8_t *data = (const uint8_t *)data_;
+  seed ^= fio_lrot64(seed + len, 47) + len;
+  seed = seed * FIO_STABLE_HASH_PRIME0;
+  seed ^= seed >> 33;
+  seed = fio_ct_if(fio_ct_true(seed), seed, FIO_STABLE_HASH_PRIME0);
+
+  v[0] = seed;
+  v[1] = seed;
+  v[2] = seed;
+  v[3] = seed;
 
   for (size_t i = 31; i < len; i += 32) {
     /* 16 bytes / 128 bit access */
@@ -5998,16 +6006,6 @@ SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
     w[3] = fio_ltole64(w[3]);
     FIO_STABLE_HASH_ROUND_FULL();
   }
-
-#define FIO_STABLE_HASH_AVA(i_)                                                \
-  v[0] ^= v[0] >> (29 + i_);                                                   \
-  v[1] ^= v[1] >> (29 + i_);                                                   \
-  v[2] ^= v[2] >> (29 + i_);                                                   \
-  v[3] ^= v[3] >> (29 + i_);                                                   \
-  v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
-  v[1] *= FIO_STABLE_HASH_PRIME1;                                              \
-  v[2] *= FIO_STABLE_HASH_PRIME2;                                              \
-  v[3] *= FIO_STABLE_HASH_PRIME3;
 
   FIO_STABLE_HASH_AVA(0);
   FIO_STABLE_HASH_AVA(2);
@@ -13549,7 +13547,7 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_hash_destroy(&fio___cli_aliases);
   fio___cli_unnamed_count = 0;
   if (fio___cli_default_values.next) {
-    while (!FIO_LIST_IS_EMPTY(&fio___cli_default_values)) {
+    while (fio___cli_default_values.next != &fio___cli_default_values) {
       fio___cli_def_str_s *node;
       FIO_LIST_POP(fio___cli_def_str_s, node, node, &fio___cli_default_values);
       FIO_MEM_FREE_(node, sizeof(*node) + node->len + 1);
