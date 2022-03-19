@@ -269,7 +269,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
   seed ^= seed >> 33;
   seed += FIO_STABLE_HASH_PRIME0;
   seed |= 1;
-  // seed = fio_ct_if(fio_ct_true(seed), seed, FIO_STABLE_HASH_PRIME0);
 
   v[0] = seed;
   v[1] = seed;
@@ -323,22 +322,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
              FIO_STABLE_HASH_ROUND_FULL();
   } // clang-format on
   /* inner vector avalanche */
-  // v[0] *= FIO_STABLE_HASH_PRIME0;
-  // v[1] *= FIO_STABLE_HASH_PRIME1;
-  // v[2] *= FIO_STABLE_HASH_PRIME2;
-  // v[3] *= FIO_STABLE_HASH_PRIME3;
-  // v[0] ^= fio_lrot64(v[0], 31);
-  // v[1] ^= fio_lrot64(v[1], 31);
-  // v[2] ^= fio_lrot64(v[2], 31);
-  // v[3] ^= fio_lrot64(v[3], 31);
-  // v[0] *= FIO_STABLE_HASH_PRIME0;
-  // v[1] *= FIO_STABLE_HASH_PRIME1;
-  // v[2] *= FIO_STABLE_HASH_PRIME2;
-  // v[3] *= FIO_STABLE_HASH_PRIME3;
-  // v[0] ^= fio_lrot64(v[0], 27);
-  // v[1] ^= fio_lrot64(v[1], 27);
-  // v[2] ^= fio_lrot64(v[2], 27);
-  // v[3] ^= fio_lrot64(v[3], 27);
   v[0] *= FIO_STABLE_HASH_PRIME0;
   v[1] *= FIO_STABLE_HASH_PRIME1;
   v[2] *= FIO_STABLE_HASH_PRIME2;
