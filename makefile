@@ -111,8 +111,8 @@ else
   # POSIX libraries
   LINKER_LIBS=pthread m
 endif
-# optimization level. (-march=native fails with some ARM compilers)
-OPTIMIZATION=-O2 
+# optimization level. (-march=native fails with clang on some ARM compilers)
+OPTIMIZATION=-O3 
 # optimization level in debug mode.
 OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=thread -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
