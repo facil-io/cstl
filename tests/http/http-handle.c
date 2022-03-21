@@ -31,65 +31,19 @@ Helper types
 #define FIO_STR_NAME lstr
 #include "fio-stl.h"
 #define FIO_ARRAY_NAME                sary
-#define FIO_ARRAY_TYPE                lstr_s
-#define FIO_ARRAY_TYPE_CMP(a, b)      lstr_is_eq(&(a), &(b))
-#define FIO_ARRAY_TYPE_COPY(a, b)     lstr_init_copy2(&(a), &(b))
-#define FIO_ARRAY_TYPE_DESTROY(s)     lstr_destroy(&(s))
+#define FIO_ARRAY_TYPE                sstr_s
+#define FIO_ARRAY_TYPE_CMP(a, b)      sstr_is_eq(&(a), &(b))
+#define FIO_ARRAY_TYPE_COPY(a, b)     sstr_init_copy2(&(a), &(b))
+#define FIO_ARRAY_TYPE_DESTROY(s)     sstr_destroy(&(s))
 #define FIO_ARRAY_TYPE_INVALID_SIMPLE 1
 #include "fio-stl.h"
 
-typedef struct arystr_u {
-  unsigned count;
-  int is_ary;
-  union {
-    sary_s ary;
-    lstr_s str;
-  } u;
-} arystr_s;
-
-FIO_IFUNC void arystr_copy(arystr_s *a, arystr_s *b) {
-  FIO_ASSERT_DEBUG(!b->is_ary, "cannot copy from an array of headers!");
-  fio_str_info_s i = lstr_info(&b->u.str);
-  switch (a->is_ary) {
-  case 0:
-    if (!i.len) {
-      lstr_destroy(&a->u.str);
-      *a = (arystr_s){0};
-      return;
-    }
-    if (!a->count) {
-      ++a->count;
-      lstr_init_copy2(&a->u.str, &b->u.str);
-      return;
-    }
-    lstr_s tmp = a->u.str;
-    a->u.ary = (sary_s){0};
-    a->is_ary = 1;
-    sary_reserve(&a->u.ary, 2);
-    a->u.ary.ary[0] = tmp;
-    a->u.ary.end = 1;
-    /* fall through */
-  default:
-    if (!i.len) {
-      sary_destroy(&a->u.ary);
-      *a = (arystr_s){0};
-      return;
-    }
-    ++a->count;
-    sary_push(&a->u.ary, b->u.str);
-    return;
-  }
-}
-
-FIO_IFUNC void arystr_destroy(arystr_s *a) {
-  switch (a->is_ary) {
-  case 1:
-    sary_destroy(&a->u.ary);
-    return;
-  default:
-    lstr_destroy(&a->u.str);
-    return;
-  }
+FIO_IFUNC sary_s sary_tmp(sstr_s v) {
+  sary_s a = FIO_ARRAY_INIT;
+  sstr_s v_tmp = FIO_STR_INIT;
+  sary_push(&a, v_tmp); /* avoid string data copy */
+  sary2ptr(&a)[0] = v;
+  return a;
 }
 
 #define FIO_MAP_NAME            smap
@@ -122,34 +76,50 @@ FIO_IFUNC fio_str_info_s smap_get2(smap_s *map, fio_str_info_s key) {
 }
 
 #define FIO_MAP_NAME            hmap
-#define FIO_MAP_TYPE            arystr_s
-#define FIO_MAP_TYPE_COPY(a, b) arystr_copy(&(a), &(b))
-#define FIO_MAP_TYPE_DESTROY(o) arystr_destroy(&(o))
+#define FIO_MAP_TYPE            sary_s
+#define FIO_MAP_TYPE_COPY(a, b) sary_push(&(a), sary_get((&b), 0))
+#define FIO_MAP_TYPE_DESTROY(o) sary_destroy(&(o))
 #define FIO_MAP_KEY             sstr_s
 #define FIO_MAP_KEY_CMP(a, b)   sstr_is_eq(&(a), &(b))
 #define FIO_MAP_KEY_COPY(a, b)  sstr_init_copy2(&(a), &(b))
 #define FIO_MAP_KEY_DESTROY(o)  sstr_destroy(&(o))
 #include "fio-stl.h"
 
-FIO_IFUNC lstr_s *hmap_set2(hmap_s *map,
+FIO_IFUNC sstr_s *hmap_set2(hmap_s *map,
                             fio_str_info_s key,
-                            fio_str_info_s val) {
-  lstr_s *r = NULL;
-  arystr_s v = {0};
-  arystr_s *o = NULL;
+                            fio_str_info_s val,
+                            uint8_t add) {
+  sstr_s *r = NULL;
+  sary_s *o = NULL;
   sstr_s k = {0};
-  sstr_init_const(&k, key.buf, key.len);
-  lstr_init_const(&v.u.str, val.buf, val.len);
-  if (!key.buf || !key.len)
+  sstr_s v = {0};
+  sary_s va = {0};
+  if (!key.buf || !key.len || !map)
     return r;
+  sstr_init_const(&k, key.buf, key.len);
+  sstr_init_const(&v, val.buf, val.len);
   const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
   if (!val.buf || !val.len)
     goto remove_key;
-  o = hmap_set_ptr(map, h, k, v, NULL, 1);
-  if (!o)
+  va = sary_tmp(v);
+  o = hmap_get_ptr(map, h, k);
+  if (!o) {
+    o = hmap_set_ptr(map, h, k, va, NULL, 1);
+    add = 0;
+  }
+  sary_destroy(&va);
+  if (FIO_UNLIKELY(!o)) {
+    FIO_LOG_ERROR("Couldn't add value to header: %.*s:%.*s",
+                  (int)key.len,
+                  key.buf,
+                  (int)val.len,
+                  val.buf);
     return r;
-  r = o->is_ary ? (sary2ptr(&o->u.ary) + sary_count(&o->u.ary) - 1)
-                : (&o->u.str);
+  }
+  if (add) {
+    sary_push(o, v);
+  }
+  r = sary2ptr(o) + (sary_count(o) - 1);
   return r;
 
 remove_key:
@@ -157,21 +127,20 @@ remove_key:
   return r;
 }
 
-FIO_IFUNC fio_str_info_s hmap_get2(hmap_s *map,
-                                   fio_str_info_s key,
-                                   size_t index) {
+FIO_IFUNC fio_str_info_s hmap_get2(hmap_s *map, fio_str_info_s key, int index) {
   fio_str_info_s r = {0};
   sstr_s k;
   sstr_init_const(&k, key.buf, key.len);
   const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
-  arystr_s *a = hmap_get_ptr(map, h, k);
+  sary_s *a = hmap_get_ptr(map, h, k);
   if (!a)
     return r;
-  if (!a->is_ary) {
-    r = lstr_info(&a->u.str);
+  const uint32_t count = sary_count(a);
+  if (index < 0)
+    index += count;
+  if ((uint32_t)index >= count)
     return r;
-  }
-  r = lstr_info(sary2ptr(&a->u.ary) + index);
+  r = sstr_info(sary2ptr(a) + index);
   return r;
 }
 
@@ -360,11 +329,8 @@ typedef struct {
 FIO_SFUNC int http___h_each_task_wrapper(hmap_each_s *e) {
   http___h_each_data_s *data = e->udata;
   fio_str_info_s k = sstr_info(&e->key);
-  if (!e->value.is_ary) {
-    return data->callback(data->h, k, lstr_info(&e->value.u.str), data->udata);
-  }
-  FIO_ARRAY_EACH(sary, &e->value.u.ary, pos) {
-    if (data->callback(data->h, k, lstr_info(pos), data->udata) == -1)
+  FIO_ARRAY_EACH(sary, &e->value, pos) {
+    if (data->callback(data->h, k, sstr_info(pos), data->udata) == -1)
       return -1;
   }
   return 0;
@@ -395,8 +361,7 @@ fio_str_info_s http_request_header_set(http_s *h,
                                        fio_str_info_s name,
                                        fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  hmap_set2(HTTP_HDR_REQUEST(h), name, (fio_str_info_s){0});
-  return lstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value));
+  return sstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value, 0));
 }
 
 /** Adds to the header information associated with the HTTP handle. */
@@ -404,7 +369,7 @@ fio_str_info_s http_request_header_add(http_s *h,
                                        fio_str_info_s name,
                                        fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return lstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value));
+  return sstr_info(hmap_set2(HTTP_HDR_REQUEST(h), name, value, 1));
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -450,8 +415,7 @@ fio_str_info_s http_response_header_set(http_s *h,
                                         fio_str_info_s name,
                                         fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  hmap_set2(HTTP_HDR_RESPONSE(h), name, (fio_str_info_s){0});
-  return lstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value));
+  return sstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 0));
 }
 
 /**
@@ -464,7 +428,7 @@ fio_str_info_s http_response_header_add(http_s *h,
                                         fio_str_info_s name,
                                         fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return lstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value));
+  return sstr_info(hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 1));
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -644,9 +608,9 @@ move2file:
 Cookies
 ***************************************************************************** */
 
-FIO_IFUNC void http_cookie___parse_cookie(http_s *h, lstr_s *c) {
+FIO_IFUNC void http_cookie___parse_cookie(http_s *h, sstr_s *c) {
   /* loop and read Cookie: name=value; name2=value2; name3=value3 */
-  fio_str_info_s s = lstr_info(c);
+  fio_str_info_s s = sstr_info(c);
   while (s.len) {
     fio_str_info_s k = {0}, v = {0};
     /* remove white-space */
@@ -678,7 +642,7 @@ FIO_IFUNC void http_cookie___parse_cookie(http_s *h, lstr_s *c) {
 }
 
 FIO_SFUNC void http_cookie___collect(http_s *h) {
-  arystr_s *header = NULL;
+  sary_s *header = NULL;
   {
     sstr_s k = {0};
     sstr_init_const(&k, "cookie", 6);
@@ -688,13 +652,8 @@ FIO_SFUNC void http_cookie___collect(http_s *h) {
   }
   if (!header)
     return;
-  if (header->is_ary) {
-    FIO_ARRAY_EACH(sary, (&header->u.ary), pos) {
-      http_cookie___parse_cookie(h, pos);
-    }
-    return;
-  }
-  http_cookie___parse_cookie(h, &header->u.str);
+  FIO_ARRAY_EACH(sary, header, pos) { http_cookie___parse_cookie(h, pos); }
+  return;
 }
 
 void http_cookie_set___(void); /* sublime text marker */
@@ -851,18 +810,17 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
     lstr_write(&c, "SameSite=Strict;", 16);
     break;
   }
-  lstr_s *ptr =
-      smap_set2(h->cookies + 1,
-                (fio_str_info_s){(char *)cookie.name, cookie.name_len},
-                (fio_str_info_s){(char *)"tmp", 3},
-                1);
+  lstr_s *ptr = smap_set2(h->cookies + 1,
+                          FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+                          lstr_info(&c),
+                          1);
   if (!ptr)
     goto ptr_error;
   *ptr = c;
   /* set the "read" cookie store data */
   smap_set2(h->cookies,
-            (fio_str_info_s){(char *)cookie.name, cookie.name_len},
-            (fio_str_info_s){(char *)cookie.value, cookie.value_len},
+            FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+            FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
             1);
   return 0;
 
@@ -939,25 +897,25 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
     if (args.finish) {
       /* validate / set Content-Length (not streaming) */
       sstr_s k = {0};
-      arystr_s v = {0};
+      sstr_s v = {0};
+      sary_s va = {0};
       sstr_init_const(&k, "content-length", 14);
-      lstr_write_i(&v.u.str, args.len);
+      sstr_write_i(&v, args.len);
+      va = sary_tmp(v);
       const uint64_t hash =
           fio_risky_hash("content-length", 14, (uint64_t)(uintptr_t)(hdrs));
       hmap_remove(hdrs, hash, k, NULL);
-      hmap_set_ptr(hdrs, hash, k, v, NULL, 1);
+      hmap_set_ptr(hdrs, hash, k, va, NULL, 1);
+      sary_destroy(&va);
+      sstr_destroy(&v);
     }
     /* start a response, unless status == 0 (which starts a request). */
     (&c->start_response)[h->status == 0](h, h->status, !args.finish);
     /* loop and write headers */
     FIO_MAP_EACH(hmap, hdrs, pos) {
       fio_str_info_s name = sstr_info(&pos->obj.key);
-      if (!pos->obj.value.is_ary) {
-        c->write_header(h, name, lstr_info(&pos->obj.value.u.str));
-        continue;
-      }
-      FIO_ARRAY_EACH(sary, (&pos->obj.value.u.ary), i) {
-        c->write_header(h, name, lstr_info(i));
+      FIO_ARRAY_EACH(sary, (&pos->obj.value), i) {
+        c->write_header(h, name, sstr_info(i));
       }
     }
     c->finish_headers(h);
@@ -982,8 +940,8 @@ fio_str_info_s http_status2str(size_t status) {
   fio_str_info_s r = {0};
 #define HTTP_RETURN_STATUS(str)                                                \
   do {                                                                         \
-    r.buf = str;                                                               \
     r.len = strlen(str);                                                       \
+    r.buf = str;                                                               \
     return r;                                                                  \
   } while (0);
   switch (status) {
@@ -1115,40 +1073,37 @@ void http_test FIO_NOOP(void) {
     FIO_ASSERT(http_query_get(h).buf != url.query.buf, "query copy error");
     /* host header */
     http_request_header_add(h,
-                            (fio_str_info_s){"host", 4},
+                            FIO_STR_INFO2("host", 4),
                             FIO_BUF2STR_INFO(url.host));
     http_request_header_add(h,
-                            (fio_str_info_s){"host", 4},
+                            FIO_STR_INFO2("host", 4),
                             FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(
-        http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).len ==
-                url.host.len &&
-            !memcmp(
-                http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).buf,
-                url.host.buf,
-                url.host.len),
+        (http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).len ==
+             url.host.len &&
+         !memcmp(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf,
+                 url.host.buf,
+                 url.host.len)),
         "host header set round-trip error");
-    FIO_ASSERT(http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).buf !=
+    FIO_ASSERT(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf !=
                    url.host.buf,
                "host copy error");
     http_request_header_add(h,
-                            (fio_str_info_s){"host", 4},
+                            FIO_STR_INFO2("host", 4),
                             FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(
-        http_request_header_get(h, (fio_str_info_s){"host", 4}, 1).len ==
+        http_request_header_get(h, FIO_STR_INFO2("host", 4), 1).len ==
                 url.path.len &&
-            !memcmp(
-                http_request_header_get(h, (fio_str_info_s){"host", 4}, 1).buf,
-                url.path.buf,
-                url.path.len),
+            !memcmp(http_request_header_get(h, FIO_STR_INFO2("host", 4), 1).buf,
+                    url.path.buf,
+                    url.path.len),
         "host header[1] set round-trip error");
     FIO_ASSERT(
-        http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).len ==
+        http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).len ==
                 url.host.len &&
-            !memcmp(
-                http_request_header_get(h, (fio_str_info_s){"host", 4}, 0).buf,
-                url.host.buf,
-                url.host.len),
+            !memcmp(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf,
+                    url.host.buf,
+                    url.host.len),
         "host header[0] data lost!");
   }
   http_free(h);

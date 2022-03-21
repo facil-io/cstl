@@ -337,8 +337,8 @@ Some functions use the `fio_str_info_s` type to either collect or return string 
 
 ```c
 typedef struct fio_str_info_s {
-  char *buf;   /* The string's buffer (pointer to first byte) or NULL on error. */
   size_t len;  /* The string's length, if any. */
+  char *buf;   /* The string's buffer (pointer to first byte) or NULL on error. */
   size_t capa; /* The buffer's capacity. Zero (0) indicates the buffer is read-only. */
 } fio_str_info_s;
 ```
@@ -352,8 +352,8 @@ Also, note that `capa` might be `0` or otherwise less than `len`. This would ind
 
 ```c
 typedef struct fio_buf_info_s {
-  char *buf;  /* The buffer's address (may be NULL if no buffer). */
   size_t len; /* The buffer's length, if any. */
+  char *buf;  /* The buffer's address (may be NULL if no buffer). */
 } fio_buf_info_s;
 ```
 
@@ -372,7 +372,8 @@ This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for c
 #### `FIO_STR_INFO1`
 
 ```c
-#define FIO_STR_INFO1(str) ((fio_str_info_s){(str), strlen((str))})
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
 ```
 
 Converts a C String into a `fio_str_info_s`.
@@ -380,7 +381,8 @@ Converts a C String into a `fio_str_info_s`.
 #### `FIO_STR_INFO2`
 
 ```c
-#define FIO_STR_INFO2(str, length) ((fio_str_info_s){(str), (length)})
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
 ```
 
 Converts a String with a known length into a `fio_str_info_s`.
@@ -388,7 +390,8 @@ Converts a String with a known length into a `fio_str_info_s`.
 #### `FIO_STR_INFO3`
 
 ```c
-#define FIO_STR_INFO3(str, length, capacity) ((fio_str_info_s){(str), (length), (capacity)})
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
 ```
 
 Converts a String with a known length and capacity into a `fio_str_info_s`.
@@ -396,7 +399,8 @@ Converts a String with a known length and capacity into a `fio_str_info_s`.
 #### `FIO_BUF2STR_INFO`
 
 ```c
-#define FIO_BUF2STR_INFO(buf_info) ((fio_str_info_s){(buf_info).buf, (buf_info).len})
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
 ```
 
 Converts a `fio_buf_info_s` into a `fio_str_info_s`.
@@ -404,7 +408,8 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 #### `FIO_STR2BUF_INFO`
 
 ```c
-#define FIO_STR2BUF_INFO(str_info) ((fio_buf_info_s){(str_info).buf, (str_info).len})
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 ```
 
 Converts a `fio_buf_info_s` into a `fio_str_info_s`.

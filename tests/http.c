@@ -407,18 +407,18 @@ static int http1_on_request(http1_parser_s *parser) {
 #ifdef HTTP_RESPONSE_ECHO
   http_send_response(c,
                      200,
-                     (fio_str_info_s){"OK", 2},
+                     FIO_STR_INFO2("OK", 2),
                      0,
                      NULL,
-                     (fio_str_info_s){c->method, strlen(c->method)});
+                     FIO_STR_INFO1(c->method));
 
 #elif HTTP_RESPONSE_DYNAMIC
   http_send_response(c,
                      200,
-                     (fio_str_info_s){"OK", 2},
+                     FIO_STR_INFO2("OK", 2),
                      0,
                      NULL,
-                     (fio_str_info_s){"Hello World!", 12});
+                     FIO_STR_INFO2("Hello World!", 12));
 #else
   char *response =
       "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!\n";

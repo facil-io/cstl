@@ -284,7 +284,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
-
   /* copy bytes in little endian to the word block */
   w[0] = w[1] = w[2] = w[3] = 0;
   switch (len & 31) { // clang-format off

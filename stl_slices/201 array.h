@@ -417,16 +417,34 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
 /* *****************************************************************************
 Dynamic Arrays - embedded arrays
 ***************************************************************************** */
+typedef struct {
+  /* start common header */
+  /** the offset to the first item. */
+  uint32_t start;
+  /** The offset to the first empty location the array. */
+  uint32_t end;
+  /* end common header */
+  FIO_ARRAY_TYPE embedded[];
+} FIO_NAME(FIO_ARRAY_NAME, ___embedded_s);
+
+#define FIO_ARRAY2EMBEDDED(a) ((FIO_NAME(FIO_ARRAY_NAME, ___embedded_s) *)(a))
+
 #if FIO_ARRAY_ENABLE_EMBEDDED
 #define FIO_ARRAY_IS_EMBEDDED(a)                                               \
-  (sizeof(FIO_ARRAY_TYPE) <= sizeof(void *) &&                                 \
+  ((sizeof(FIO_ARRAY_TYPE) +                                                   \
+    sizeof(FIO_NAME(FIO_ARRAY_NAME, ___embedded_s))) <=                        \
+       sizeof(FIO_NAME(FIO_ARRAY_NAME, s)) &&                                  \
    (((a)->start > (a)->end) || !(a)->ary))
 #define FIO_ARRAY_IS_EMBEDDED_PTR(ary, ptr)                                    \
-  (sizeof(FIO_ARRAY_TYPE) <= sizeof(void *) &&                                 \
+  ((sizeof(FIO_ARRAY_TYPE) +                                                   \
+    sizeof(FIO_NAME(FIO_ARRAY_NAME, ___embedded_s))) <=                        \
+       sizeof(FIO_NAME(FIO_ARRAY_NAME, s)) &&                                  \
    (uintptr_t)(ptr) > (uintptr_t)(ary) &&                                      \
    (uintptr_t)(ptr) < (uintptr_t)((ary) + 1))
 #define FIO_ARRAY_EMBEDDED_CAPA                                                \
-  (sizeof(FIO_ARRAY_TYPE) > sizeof(void *)                                     \
+  ((sizeof(FIO_ARRAY_TYPE) +                                                   \
+    sizeof(FIO_NAME(FIO_ARRAY_NAME, ___embedded_s))) >                         \
+           sizeof(FIO_NAME(FIO_ARRAY_NAME, s))                                 \
        ? 0                                                                     \
        : ((sizeof(FIO_NAME(FIO_ARRAY_NAME, s)) -                               \
            sizeof(FIO_NAME(FIO_ARRAY_NAME, ___embedded_s))) /                  \
@@ -438,19 +456,6 @@ Dynamic Arrays - embedded arrays
 #define FIO_ARRAY_EMBEDDED_CAPA             0
 
 #endif /* FIO_ARRAY_ENABLE_EMBEDDED */
-
-typedef struct {
-  /* start common header */
-  /** the offser to the first item. */
-  uint32_t start;
-  /** The offset to the first empty location the array. */
-  uint32_t end;
-  /* end common header */
-  FIO_ARRAY_TYPE embedded[];
-} FIO_NAME(FIO_ARRAY_NAME, ___embedded_s);
-
-#define FIO_ARRAY2EMBEDDED(a) ((FIO_NAME(FIO_ARRAY_NAME, ___embedded_s) *)(a))
-
 /* *****************************************************************************
 Inlined functions
 ***************************************************************************** */

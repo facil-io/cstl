@@ -151,6 +151,11 @@ extern "C" {
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H
 #define H___FIO_CSTL_INCLUDE_ONCE_H
 
+#ifndef FIO_UNALIGNED_ACCESS
+/** Allows facil.io to use unaligned memory access on some CPU systems. */
+#define FIO_UNALIGNED_ACCESS 0
+#endif
+
 /* *****************************************************************************
 Compiler detection, GCC / CLang features and OS dependent included files
 ***************************************************************************** */
@@ -507,20 +512,20 @@ String Information Helper Type
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
-  /** The string's buffer (pointer to first byte) or NULL on error. */
-  char *buf;
   /** The string's length, if any. */
   size_t len;
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
   /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
   size_t capa;
 } fio_str_info_s;
 
 /** An information type for reporting/storing buffer data (no `capa`). */
 typedef struct fio_buf_info_s {
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf;
   /** The buffer's length, if any. */
-  size_t len;
+  size_t len; /* len must be 1st to fit with small string header types */
+  /** The buffer's address (may be NULL if no buffer). */
+  char *buf; /* buf must be 2nd to fit with small string header types */
 } fio_buf_info_s;
 
 /** Compares two `fio_str_info_s` objects for content equality. */
@@ -529,22 +534,24 @@ typedef struct fio_buf_info_s {
                             !memcmp((s1).buf, (s2).buf, (s1).len)))
 
 /** Converts a C String into a fio_str_info_s. */
-#define FIO_STR_INFO1(str) ((fio_str_info_s){(str), strlen((str))})
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
-#define FIO_STR_INFO2(str, length) ((fio_str_info_s){(str), (length)})
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
 
 /** Converts a String with a known length and capacity into a fio_str_info_s. */
 #define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){(str), (length), (capacity)})
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
 
 /** Converts a fio_buf_info_s into a fio_str_info_s. */
 #define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){(buf_info).buf, (buf_info).len})
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
 
 /** Converts a fio_buf_info_s into a fio_str_info_s. */
 #define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){(str_info).buf, (str_info).len})
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
@@ -1048,7 +1055,7 @@ Common macros
 #endif
 
 /* Modules that require File Utils */
-#if defined(FIO_STR_NAME)
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
 #define FIO_FILES
 #endif
 
