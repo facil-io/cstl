@@ -730,7 +730,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     if (!tmp)
       return FIO_ARRAY_EMBEDDED_CAPA;
     if (capa_ >= 0) {
-      /* copy items at begining of memory stack */
+      /* copy items at beginning of memory stack */
       if (ary->start) {
         FIO_MEMCPY(tmp,
                    FIO_ARRAY2EMBEDDED(ary)->embedded,

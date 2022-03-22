@@ -46,8 +46,10 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_ATOMIC
 #define FIO_BITMAP
 #define FIO_BITWISE
+#define FIO_CHACHA
 #define FIO_CLI
 #define FIO_GLOB_MATCH
+#define FIO_MATH
 #define FIO_POLL
 #define FIO_QUEUE
 #define FIO_RAND
@@ -56,9 +58,9 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_STREAM
+#define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
-#define FIO_THREADS
 
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
@@ -988,6 +990,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, chacha)();
 #if !DEBUG
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, lock_speed)();

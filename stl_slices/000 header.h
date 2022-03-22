@@ -1024,9 +1024,20 @@ Common macros
 
 
 ***************************************************************************** */
-/* Common testing values / Macros */
-#if defined(FIO_TEST_CSTL) && !defined(FIO_TEST_REPEAT)
+/* Testing Dependencies */
+#if defined(FIO_TEST_CSTL)
+#ifndef FIO_TEST_REPEAT
 #define FIO_TEST_REPEAT 4096
+#endif
+#ifndef FIO_LOG
+#define FIO_LOG
+#endif
+#ifndef FIO_RISKY_HASH
+#define FIO_RISKY_HASH
+#endif
+#ifndef FIO_RAND
+#define FIO_RAND
+#endif
 #endif
 
 /* Modules required by FIO_SERVER */
@@ -1083,7 +1094,7 @@ Common macros
 #endif /* FIO_RISKY_HASH */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_RISKY_HASH) || defined(FIO_TEST_CSTL)
+#if defined(FIO_RISKY_HASH) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
 #endif
@@ -1098,7 +1109,8 @@ Common macros
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME) || defined(FIO_SHA1) || defined(FIO_MATH)
+    defined(FIO_UMAP_NAME) || defined(FIO_SHA1) || defined(FIO_MATH) ||        \
+    defined(FIO_CHACHA)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -1118,7 +1130,7 @@ Common macros
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
     defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON) ||              \
-    defined(FIO_FILES)
+    defined(FIO_FILES) || defined(FIO_TEST_CSTL)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
