@@ -1150,6 +1150,7 @@ the bitmap is implemented using atomic operations.
 
 If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
 
+Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
 
 ### Multi-Precision Math Building Blocks
 
@@ -1233,7 +1234,7 @@ void fio_math_div(uint64_t *dest,
 
 Multi-precision DIV for `len*64` bit long a, b.
 
-This is NOT constant time.
+This is **NOT constant time**.
 
 The algorithm might be slow, as my math isn't that good and I couldn't understand faster division algorithms (such as Newton–Raphson division)... so this is sort of a factorized variation on long division.
 
@@ -1509,7 +1510,7 @@ If the `FIO_RISKY_HASH` macro is defined than the following static function will
 uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 ```
 
-Computes a 64 bit facil.io Stable Hash (will not be updated, even if broken).
+Computes a 64 bit facil.io Stable Hash (once version 0.8 is released, this algorithm will not be updated, even if broken).
 
 #### `fio_stable_hash128`
 
@@ -1520,7 +1521,7 @@ void fio_stable_hash128(void *restrict dest,
                         uint64_t seed);
 ```
 
-Computes a 128 bit facil.io Stable Hash (will not be updated, even if broken).
+Computes a 128 bit facil.io Stable Hash (once version 0.8 is released, this algorithm will not be updated, even if broken).
 
 #### `fio_risky_hash`
 

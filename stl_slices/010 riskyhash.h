@@ -244,9 +244,9 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
   v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
-  v[1] *= FIO_STABLE_HASH_PRIME0;                                              \
-  v[2] *= FIO_STABLE_HASH_PRIME0;                                              \
-  v[3] *= FIO_STABLE_HASH_PRIME0;                                              \
+  v[1] *= FIO_STABLE_HASH_PRIME1;                                              \
+  v[2] *= FIO_STABLE_HASH_PRIME2;                                              \
+  v[3] *= FIO_STABLE_HASH_PRIME3;                                              \
   w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
   w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
   w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
@@ -263,8 +263,8 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
   FIO_ALIGN(16) uint64_t w[4];
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
-  seed ^= fio_lrot64(seed + len, 47) + len;
-  seed ^= seed >> 33;
+  seed += len;
+  seed ^= fio_lrot64(seed, 47);
   seed += FIO_STABLE_HASH_PRIME0;
   seed |= 1;
 
@@ -323,7 +323,6 @@ SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   r ^= r >> 31;
   r *= FIO_STABLE_HASH_PRIME4;
   r ^= r >> 31;
-
   return r;
 }
 

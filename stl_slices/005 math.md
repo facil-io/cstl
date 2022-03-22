@@ -2,6 +2,7 @@
 
 If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
 
+Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
 
 ### Multi-Precision Math Building Blocks
 
@@ -85,7 +86,7 @@ void fio_math_div(uint64_t *dest,
 
 Multi-precision DIV for `len*64` bit long a, b.
 
-This is NOT constant time.
+This is **NOT constant time**.
 
 The algorithm might be slow, as my math isn't that good and I couldn't understand faster division algorithms (such as Newton–Raphson division)... so this is sort of a factorized variation on long division.
 

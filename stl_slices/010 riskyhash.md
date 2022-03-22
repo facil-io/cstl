@@ -15,7 +15,7 @@ If the `FIO_RISKY_HASH` macro is defined than the following static function will
 uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 ```
 
-Computes a 64 bit facil.io Stable Hash (will not be updated, even if broken).
+Computes a 64 bit facil.io Stable Hash (once version 0.8 is released, this algorithm will not be updated, even if broken).
 
 #### `fio_stable_hash128`
 
@@ -26,7 +26,7 @@ void fio_stable_hash128(void *restrict dest,
                         uint64_t seed);
 ```
 
-Computes a 128 bit facil.io Stable Hash (will not be updated, even if broken).
+Computes a 128 bit facil.io Stable Hash (once version 0.8 is released, this algorithm will not be updated, even if broken).
 
 #### `fio_risky_hash`
 
