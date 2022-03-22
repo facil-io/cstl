@@ -151,11 +151,9 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   }
   switch (len & 24) {
   case 24:
-    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16));
-    /* fall through */
+    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /* fall through */
   case 16:
-    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));
-    /* fall through */
+    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8)); /* fall through */
   case 8:
     FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
     data += len & 24;
@@ -284,42 +282,26 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
-  /* copy bytes in little endian to the word block */
-  w[0] = w[1] = w[2] = w[3] = 0;
-  switch (len & 31) { // clang-format off
-    case 31: w[3] |= (((uint64_t)data[30] & 0xFF) << 48); /* fall through */
-    case 30: w[3] |= (((uint64_t)data[29] & 0xFF) << 40); /* fall through */
-    case 29: w[3] |= (((uint64_t)data[28] & 0xFF) << 32); /* fall through */
-    case 28: w[3] |= (((uint64_t)data[27] & 0xFF) << 24); /* fall through */
-    case 27: w[3] |= (((uint64_t)data[26] & 0xFF) << 16); /* fall through */
-    case 26: w[3] |= (((uint64_t)data[25] & 0xFF) << 8);  /* fall through */
-    case 25: w[3] |= (((uint64_t)data[24] & 0xFF));       /* fall through */
-    case 24: w[2] |= (((uint64_t)data[23] & 0xFF) << 56); /* fall through */
-    case 23: w[2] |= (((uint64_t)data[22] & 0xFF) << 48); /* fall through */
-    case 22: w[2] |= (((uint64_t)data[21] & 0xFF) << 40); /* fall through */
-    case 21: w[2] |= (((uint64_t)data[20] & 0xFF) << 32); /* fall through */
-    case 20: w[2] |= (((uint64_t)data[19] & 0xFF) << 24); /* fall through */
-    case 19: w[2] |= (((uint64_t)data[18] & 0xFF) << 16); /* fall through */
-    case 18: w[2] |= (((uint64_t)data[17] & 0xFF) << 8);  /* fall through */
-    case 17: w[2] |= (((uint64_t)data[16] & 0xFF));       /* fall through */
-    case 16: w[1] |= (((uint64_t)data[15] & 0xFF) << 56); /* fall through */
-    case 15: w[1] |= (((uint64_t)data[14] & 0xFF) << 48); /* fall through */
-    case 14: w[1] |= (((uint64_t)data[13] & 0xFF) << 40); /* fall through */
-    case 13: w[1] |= (((uint64_t)data[12] & 0xFF) << 32); /* fall through */
-    case 12: w[1] |= (((uint64_t)data[11] & 0xFF) << 24); /* fall through */
-    case 11: w[1] |= (((uint64_t)data[10] & 0xFF) << 16); /* fall through */
-    case 10: w[1] |= (((uint64_t)data[9] & 0xFF) << 8);   /* fall through */
-    case 9:  w[1] |= (((uint64_t)data[8] & 0xFF));        /* fall through */
-    case 8:  w[0] |= (((uint64_t)data[7] & 0xFF) << 56);  /* fall through */
-    case 7:  w[0] |= (((uint64_t)data[6] & 0xFF) << 48);  /* fall through */
-    case 6:  w[0] |= (((uint64_t)data[5] & 0xFF) << 40);  /* fall through */
-    case 5:  w[0] |= (((uint64_t)data[4] & 0xFF) << 32);  /* fall through */
-    case 4:  w[0] |= (((uint64_t)data[3] & 0xFF) << 24);  /* fall through */
-    case 3:  w[0] |= (((uint64_t)data[2] & 0xFF) << 16);  /* fall through */
-    case 2:  w[0] |= (((uint64_t)data[1] & 0xFF) << 8);   /* fall through */
-    case 1:  w[0] |= (((uint64_t)data[0] & 0xFF));
-             FIO_STABLE_HASH_ROUND_FULL();
-  } // clang-format on
+  /* copy bytes to the word block in little endian */
+  if ((len & 31)) {
+    w[0] = w[1] = w[2] = w[3] = 0;
+    uint64_t *wp = w;
+    switch ((len & (8 | 16))) { // clang-format off
+      case 24: *(wp++) = fio_buf2u64_little(data); data += 8; /* fall through */
+      case 16: *(wp++) = fio_buf2u64_little(data); data += 8;  /* fall through */
+      case 8:  *(wp++) = fio_buf2u64_little(data); data += 8;
+    }
+    switch ((len & 7)) { // clang-format off
+      case 7: wp[0] |= (((uint64_t)data[6] & 0xFF) << 48);  /* fall through */
+      case 6: wp[0] |= (((uint64_t)data[5] & 0xFF) << 40);  /* fall through */
+      case 5: wp[0] |= (((uint64_t)data[4] & 0xFF) << 32);  /* fall through */
+      case 4: wp[0] |= (((uint64_t)data[3] & 0xFF) << 24);  /* fall through */
+      case 3: wp[0] |= (((uint64_t)data[2] & 0xFF) << 16);  /* fall through */
+      case 2: wp[0] |= (((uint64_t)data[1] & 0xFF) << 8);   /* fall through */
+      case 1: wp[0] |= (((uint64_t)data[0] & 0xFF));
+    } // clang-format on
+    FIO_STABLE_HASH_ROUND_FULL();
+  }
   /* inner vector avalanche */
   v[0] *= FIO_STABLE_HASH_PRIME0;
   v[1] *= FIO_STABLE_HASH_PRIME1;
@@ -604,7 +586,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     return;
   }
   mem_alignment_offset &= 7;
-  size_t const buffer_len = (1ULL << size_log);
+  size_t const buffer_len = (1ULL << size_log) - mem_alignment_offset;
   uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
   if (size_log < 13)
     cycles_start_at <<= (13 - size_log);
@@ -708,27 +690,37 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
                          7,
-                         alignment_test_offset,
+                         0,
                          3);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
                          13,
-                         alignment_test_offset,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash (unaligned)",
+                         6,
+                         3,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
-                         alignment_test_offset,
+                         0,
                          3);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          13,
-                         alignment_test_offset,
+                         0,
+                         3);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit unaligned)",
+                         6,
+                         3,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
-                         alignment_test_offset,
+                         0,
                          4);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
@@ -739,7 +731,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
                            13,
-                           alignment_test_offset,
+                           0,
                            4);
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (unaligned)",

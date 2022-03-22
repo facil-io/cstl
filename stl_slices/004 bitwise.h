@@ -382,7 +382,7 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
 }
 #endif /* __SIZEOF_INT128__ */
 
-#else /* !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#else /* !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED && !FIO_BITWISE_USE_MEMCPY */
 
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
