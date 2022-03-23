@@ -109,12 +109,9 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  FIO_ALIGN(16)
-  uint64_t v[4] = {FIO_RISKY3_IV0,
-                   FIO_RISKY3_IV1,
-                   FIO_RISKY3_IV2,
-                   FIO_RISKY3_IV3};
-  FIO_ALIGN(16) uint64_t w[4];
+  uint64_t FIO_ALIGN(32)
+      v[4] = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
+  uint64_t FIO_ALIGN(32) w[4];
   const uint8_t *data = (const uint8_t *)data_;
 
 #define FIO_RISKY3_ROUND64(vi, w_)                                             \
@@ -162,37 +159,26 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   /* add offset information to padding */
   uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
-  switch ((len & 7)) {
-  case 7:
-    tmp |= ((uint64_t)data[6]) << 48; /* fall through */
-  case 6:
-    tmp |= ((uint64_t)data[5]) << 40; /* fall through */
-  case 5:
-    tmp |= ((uint64_t)data[4]) << 32; /* fall through */
-  case 4:
-    tmp |= ((uint64_t)data[3]) << 24; /* fall through */
-  case 3:
-    tmp |= ((uint64_t)data[2]) << 16; /* fall through */
-  case 2:
-    tmp |= ((uint64_t)data[1]) << 8; /* fall through */
-  case 1:
-    tmp |= ((uint64_t)data[0]);
+  switch ((len & 7)) { // clang-format off
+  case 7: tmp |= ((uint64_t)data[6]) << 48; /* fall through */
+  case 6: tmp |= ((uint64_t)data[5]) << 40; /* fall through */
+  case 5: tmp |= ((uint64_t)data[4]) << 32; /* fall through */
+  case 4: tmp |= ((uint64_t)data[3]) << 24; /* fall through */
+  case 3: tmp |= ((uint64_t)data[2]) << 16; /* fall through */
+  case 2: tmp |= ((uint64_t)data[1]) << 8;  /* fall through */
+  case 1: tmp |= ((uint64_t)data[0]);
     /* the last (now padded) byte's position */
     switch ((len & 24)) {
     case 24: /* offset 24 in 32 byte segment */
-      FIO_RISKY3_ROUND64(3, tmp);
-      break;
+      FIO_RISKY3_ROUND64(3, tmp); break;
     case 16: /* offset 16 in 32 byte segment */
-      FIO_RISKY3_ROUND64(2, tmp);
-      break;
+      FIO_RISKY3_ROUND64(2, tmp); break;
     case 8: /* offset 8 in 32 byte segment */
-      FIO_RISKY3_ROUND64(1, tmp);
-      break;
+      FIO_RISKY3_ROUND64(1, tmp); break;
     case 0: /* offset 0 in 32 byte segment */
-      FIO_RISKY3_ROUND64(0, tmp);
-      break;
+      FIO_RISKY3_ROUND64(0, tmp); break;
     }
-  }
+  } // clang-format on
 
   /* irreversible avalanche... I think */
   uint64_t r = (len) ^ ((uint64_t)len << 36);
@@ -231,12 +217,13 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
 Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
-/* Risky Hash primes */
-#define FIO_STABLE_HASH_PRIME0 0xCAEF89D1E9A5EB21ULL
-#define FIO_STABLE_HASH_PRIME1 0xAB137439982B86C9ULL
-#define FIO_STABLE_HASH_PRIME2 0xD9FDC73ABE9EDECDULL
-#define FIO_STABLE_HASH_PRIME3 0x3532D520F9511B13ULL
-#define FIO_STABLE_HASH_PRIME4 0x038720DDEB5A8415ULL
+/* Stable Hash primes */
+#define FIO_STABLE_HASH_PRIME0 0x39664DEECA23D825ULL /* prime 32 set bits */
+#define FIO_STABLE_HASH_PRIME1 0x48644F7B3959621FULL /* prime 32 set bits */
+#define FIO_STABLE_HASH_PRIME2 0x613A19F5CB0D98D5ULL /* prime 32 set bits */
+#define FIO_STABLE_HASH_PRIME3 0x84B56B93C869EA0FULL /* prime 32 set bits */
+#define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* prime 32 set bits */
+
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
   seed ^= w[0] + w[1] + w[2] + w[3];                                           \
   v[0] ^= w[0];                                                                \
@@ -256,17 +243,17 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[2] += w[2];                                                                \
   v[3] += w[3];
 
-FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
+FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
                                        const void *data_,
                                        size_t len,
                                        uint64_t seed) {
-  FIO_ALIGN(16) uint64_t w[4];
+  uint64_t FIO_ALIGN(16) w[4], FIO_ALIGN(16) v[4];
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed += FIO_STABLE_HASH_PRIME0;
-  seed |= 1;
+  seed |= (seed == 0);
 
   v[0] = seed;
   v[1] = seed;
@@ -274,7 +261,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
   v[3] = seed;
 
   for (size_t i = 31; i < len; i += 32) {
-    /* 32 bytes / 256 bit access */
+    /* consumes 32 bytes (256 bits) each loop */
     w[0] = fio_buf2u64_little(data);
     w[1] = fio_buf2u64_little(data + 8);
     w[2] = fio_buf2u64_little(data + 16);
@@ -285,20 +272,28 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
     w[0] = w[1] = w[2] = w[3] = 0;
-    uint64_t *wp = w;
-    switch ((len & (8 | 16))) { // clang-format off
-      case 24: *(wp++) = fio_buf2u64_little(data); data += 8; /* fall through */
-      case 16: *(wp++) = fio_buf2u64_little(data); data += 8;  /* fall through */
-      case 8:  *(wp++) = fio_buf2u64_little(data); data += 8;
+    const size_t word_tail_len = len & 24;
+    uint64_t tmp = 0;
+    switch (word_tail_len) { // clang-format off
+      case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
+      case 16: w[1] = fio_buf2u64_little(data + 8 ); /* fall through */
+      case 8:  w[0] = fio_buf2u64_little(data);
+      data += word_tail_len;
     }
-    switch ((len & 7)) { // clang-format off
-      case 7: wp[0] |= (((uint64_t)data[6] & 0xFF) << 48);  /* fall through */
-      case 6: wp[0] |= (((uint64_t)data[5] & 0xFF) << 40);  /* fall through */
-      case 5: wp[0] |= (((uint64_t)data[4] & 0xFF) << 32);  /* fall through */
-      case 4: wp[0] |= (((uint64_t)data[3] & 0xFF) << 24);  /* fall through */
-      case 3: wp[0] |= (((uint64_t)data[2] & 0xFF) << 16);  /* fall through */
-      case 2: wp[0] |= (((uint64_t)data[1] & 0xFF) << 8);   /* fall through */
-      case 1: wp[0] |= (((uint64_t)data[0] & 0xFF));
+    switch ((len & 7)) {
+      case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48);    /* fall through */
+      case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40);    /* fall through */
+      case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32);    /* fall through */
+      case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24);    /* fall through */
+      case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16);    /* fall through */
+      case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);     /* fall through */
+      case 1: tmp |= (((uint64_t)data[0] & 0xFF));
+      switch((word_tail_len >> 3)) {
+        case 0: w[0] = tmp; break;
+        case 1: w[1] = tmp; break;
+        case 2: w[2] = tmp; break;
+        case 3: w[3] = tmp; break;
+      }
     } // clang-format on
     FIO_STABLE_HASH_ROUND_FULL();
   }
@@ -307,16 +302,22 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) v,
   v[1] *= FIO_STABLE_HASH_PRIME1;
   v[2] *= FIO_STABLE_HASH_PRIME2;
   v[3] *= FIO_STABLE_HASH_PRIME3;
-  v[0] ^= fio_lrot64(v[0], 27);
-  v[1] ^= fio_lrot64(v[1], 29);
-  v[2] ^= fio_lrot64(v[2], 31);
-  v[3] ^= fio_lrot64(v[3], 37);
+
+  v[0] ^= fio_lrot64(v[0], 7);
+  v[1] ^= fio_lrot64(v[1], 11);
+  v[2] ^= fio_lrot64(v[2], 13);
+  v[3] ^= fio_lrot64(v[3], 17);
+
+  dest[0] = v[0];
+  dest[1] = v[1];
+  dest[2] = v[2];
+  dest[3] = v[3];
 }
 
 /*  Computes a facil.io Stable Hash. */
 SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   uint64_t r;
-  FIO_ALIGN(16) uint64_t v[4];
+  uint64_t FIO_ALIGN(16) v[4];
   fio_stable_hash___inner(v, data_, len, seed);
   /* summing avalanche */
   r = v[0] + v[1] + v[2] + v[3];
@@ -330,7 +331,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               const void *restrict data_,
                               size_t len,
                               uint64_t seed) {
-  FIO_ALIGN(16) uint64_t v[4];
+  uint64_t FIO_ALIGN(16) v[4];
   fio_stable_hash___inner(v, data_, len, seed);
   uint64_t r[2];
   r[0] = v[0] + v[1] + v[2] + v[3];
