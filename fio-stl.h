@@ -5748,11 +5748,11 @@ Here's a few resources about hashes that might explain more:
 ***************************************************************************** */
 
 /* Risky Hash primes */
-#define FIO_RISKY3_PRIME0 0xCAEF89D1E9A5EB21ULL
-#define FIO_RISKY3_PRIME1 0xAB137439982B86C9ULL
-#define FIO_RISKY3_PRIME2 0xD9FDC73ABE9EDECDULL
-#define FIO_RISKY3_PRIME3 0x3532D520F9511B13ULL
-#define FIO_RISKY3_PRIME4 0x038720DDEB5A8415ULL
+#define FIO_RISKY3_PRIME0 0x39664DEECA23D825ULL
+#define FIO_RISKY3_PRIME1 0x48644F7B3959621FULL
+#define FIO_RISKY3_PRIME2 0x613A19F5CB0D98D5ULL
+#define FIO_RISKY3_PRIME3 0x84B56B93C869EA0FULL
+#define FIO_RISKY3_PRIME4 0x8EE38D13E0D95A8DULL
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
@@ -5814,15 +5814,12 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
                         FIO_RISKY_BUF2U64(data + 24));
     data += 32;
   }
-  switch (len & 24) {
-  case 24:
-    FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /* fall through */
-  case 16:
-    FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8)); /* fall through */
-  case 8:
-    FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
+  switch (len & 24) { // clang-format off
+  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /* fall through */
+  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8)); /* fall through */
+  case 8:  FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
     data += len & 24;
-  }
+  } // clang-format on
 
   /* add offset information to padding */
   uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
@@ -5837,14 +5834,10 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   case 1: tmp |= ((uint64_t)data[0]);
     /* the last (now padded) byte's position */
     switch ((len & 24)) {
-    case 24: /* offset 24 in 32 byte segment */
-      FIO_RISKY3_ROUND64(3, tmp); break;
-    case 16: /* offset 16 in 32 byte segment */
-      FIO_RISKY3_ROUND64(2, tmp); break;
-    case 8: /* offset 8 in 32 byte segment */
-      FIO_RISKY3_ROUND64(1, tmp); break;
-    case 0: /* offset 0 in 32 byte segment */
-      FIO_RISKY3_ROUND64(0, tmp); break;
+    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /* offset 24 in 32 byte segment */
+    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /* offset 16 in 32 byte segment */
+    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset 8 in 32 byte segment */
+    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset 0 in 32 byte segment */
     }
   } // clang-format on
 
@@ -5893,7 +5886,6 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 #define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* prime 32 set bits */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  seed ^= w[0] + w[1] + w[2] + w[3];                                           \
   v[0] ^= w[0];                                                                \
   v[1] ^= w[1];                                                                \
   v[2] ^= w[2];                                                                \
@@ -5920,7 +5912,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
-  seed += FIO_STABLE_HASH_PRIME0;
+  seed ^= FIO_STABLE_HASH_PRIME0;
   seed |= (seed == 0);
 
   v[0] = seed;
@@ -5934,14 +5926,15 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     w[1] = fio_buf2u64_little(data + 8);
     w[2] = fio_buf2u64_little(data + 16);
     w[3] = fio_buf2u64_little(data + 24);
+    seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w[0] = w[1] = w[2] = w[3] = 0;
-    const size_t word_tail_len = len & 24;
-    uint64_t tmp = 0;
+    register const size_t word_tail_len = (len & 24);
+    register uint64_t tmp = 0;
+    w[0] = w[1] = w[2] = w[3] = 0; /* we don't need to set w[0], but ... */
     switch (word_tail_len) { // clang-format off
       case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
       case 16: w[1] = fio_buf2u64_little(data + 8 ); /* fall through */
@@ -5956,25 +5949,25 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
       case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16);    /* fall through */
       case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);     /* fall through */
       case 1: tmp |= (((uint64_t)data[0] & 0xFF));
-      switch((word_tail_len >> 3)) {
-        case 0: w[0] = tmp; break;
-        case 1: w[1] = tmp; break;
-        case 2: w[2] = tmp; break;
-        case 3: w[3] = tmp; break;
+      switch(word_tail_len) {
+        case 24: w[3] = tmp; break;
+        case 16: w[2] = tmp; break;
+        case 8:  w[1] = tmp; break;
+        case 0:  w[0] = tmp; break;
       }
-    } // clang-format on
+    }                              // clang-format on
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
-  v[0] *= FIO_STABLE_HASH_PRIME0;
-  v[1] *= FIO_STABLE_HASH_PRIME1;
-  v[2] *= FIO_STABLE_HASH_PRIME2;
-  v[3] *= FIO_STABLE_HASH_PRIME3;
+  w[0] = v[0] * FIO_STABLE_HASH_PRIME0;
+  w[1] = v[1] * FIO_STABLE_HASH_PRIME1;
+  w[2] = v[2] * FIO_STABLE_HASH_PRIME2;
+  w[3] = v[3] * FIO_STABLE_HASH_PRIME3;
 
-  v[0] ^= fio_lrot64(v[0], 7);
-  v[1] ^= fio_lrot64(v[1], 11);
-  v[2] ^= fio_lrot64(v[2], 13);
-  v[3] ^= fio_lrot64(v[3], 17);
+  v[0] ^= fio_lrot64(w[0], 7);
+  v[1] ^= fio_lrot64(w[1], 11);
+  v[2] ^= fio_lrot64(w[2], 13);
+  v[3] ^= fio_lrot64(w[3], 17);
 
   dest[0] = v[0];
   dest[1] = v[1];
@@ -6313,7 +6306,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
   return fio_risky_hash(buf, len, 1);
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
-  return fio_stable_hash(buf, len, 0);
+  return fio_stable_hash(buf, len, 1);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
@@ -6370,6 +6363,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          6,
                          3,
                          2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash (unaligned)",
+                         5,
+                         3,
+                         3);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
@@ -6383,6 +6381,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit unaligned)",
                          6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit unaligned)",
+                         5,
                          3,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
