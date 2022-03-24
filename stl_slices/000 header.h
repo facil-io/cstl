@@ -1038,6 +1038,9 @@ Common macros
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
+#ifndef FIO_BITMAP
+#define FIO_BITMAP
+#endif
 #endif
 
 /* Modules required by FIO_SERVER */

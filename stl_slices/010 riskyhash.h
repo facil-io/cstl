@@ -222,10 +222,10 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[1] ^= w[1];                                                                \
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
-  v[0] *= FIO_STABLE_HASH_PRIME0;                                              \
-  v[1] *= FIO_STABLE_HASH_PRIME1;                                              \
-  v[2] *= FIO_STABLE_HASH_PRIME2;                                              \
-  v[3] *= FIO_STABLE_HASH_PRIME3;                                              \
+  v[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                         \
+  v[1] = v[1] * prime[1]; /* FIO_STABLE_HASH_PRIME1 */                         \
+  v[2] = v[2] * prime[2]; /* FIO_STABLE_HASH_PRIME2 */                         \
+  v[3] = v[3] * prime[3]; /* FIO_STABLE_HASH_PRIME3 */                         \
   w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
   w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
   w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
@@ -239,7 +239,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
                                        const void *data_,
                                        size_t len,
                                        uint64_t seed) {
-  uint64_t FIO_ALIGN(16) w[4], FIO_ALIGN(16) v[4];
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
@@ -247,11 +246,11 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   seed ^= FIO_STABLE_HASH_PRIME0;
   seed |= (seed == 0);
 
-  v[0] = seed;
-  v[1] = seed;
-  v[2] = seed;
-  v[3] = seed;
-
+  uint64_t FIO_ALIGN(16) w[4], FIO_ALIGN(16) v[4] = {seed, seed, seed, seed};
+  const uint64_t FIO_ALIGN(16) prime[4] = {FIO_STABLE_HASH_PRIME0,
+                                           FIO_STABLE_HASH_PRIME1,
+                                           FIO_STABLE_HASH_PRIME2,
+                                           FIO_STABLE_HASH_PRIME3};
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
     w[0] = fio_buf2u64_little(data);
@@ -259,14 +258,14 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     w[2] = fio_buf2u64_little(data + 16);
     w[3] = fio_buf2u64_little(data + 24);
     seed ^= w[0] + w[1] + w[2] + w[3];
-    FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
+    FIO_STABLE_HASH_ROUND_FULL();
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
     register const size_t word_tail_len = (len & 24);
     register uint64_t tmp = 0;
-    w[0] = w[1] = w[2] = w[3] = 0; /* we don't need to set w[0], but ... */
+    w[0] = w[1] = w[2] = w[3] = 0;
     switch (word_tail_len) { // clang-format off
       case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
       case 16: w[1] = fio_buf2u64_little(data + 8 ); /* fall through */
@@ -287,14 +286,14 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
         case 8:  w[1] = tmp; break;
         case 0:  w[0] = tmp; break;
       }
-    }                              // clang-format on
+    } // clang-format on
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
-  w[0] = v[0] * FIO_STABLE_HASH_PRIME0;
-  w[1] = v[1] * FIO_STABLE_HASH_PRIME1;
-  w[2] = v[2] * FIO_STABLE_HASH_PRIME2;
-  w[3] = v[3] * FIO_STABLE_HASH_PRIME3;
+  w[0] = v[0] * prime[0];
+  w[1] = v[1] * prime[1];
+  w[2] = v[2] * prime[2];
+  w[3] = v[3] * prime[3];
 
   v[0] ^= fio_lrot64(w[0], 7);
   v[1] ^= fio_lrot64(w[1], 11);
