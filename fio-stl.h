@@ -5690,10 +5690,8 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-
 #if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
 #define H___FIO_RISKY_HASH_H
-
 /* *****************************************************************************
 Risky Hash - API
 ***************************************************************************** */
@@ -5893,10 +5891,10 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[1] ^= w[1];                                                                \
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
-  v[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                         \
-  v[1] = v[1] * prime[1]; /* FIO_STABLE_HASH_PRIME1 */                         \
-  v[2] = v[2] * prime[2]; /* FIO_STABLE_HASH_PRIME2 */                         \
-  v[3] = v[3] * prime[3]; /* FIO_STABLE_HASH_PRIME3 */                         \
+  v[0] *= prime[0]; /* FIO_STABLE_HASH_PRIME0 */                               \
+  v[1] *= prime[1]; /* FIO_STABLE_HASH_PRIME1 */                               \
+  v[2] *= prime[2]; /* FIO_STABLE_HASH_PRIME2 */                               \
+  v[3] *= prime[3]; /* FIO_STABLE_HASH_PRIME3 */                               \
   w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
   w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
   w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
@@ -5928,8 +5926,8 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     w[1] = fio_buf2u64_little(data + 8);
     w[2] = fio_buf2u64_little(data + 16);
     w[3] = fio_buf2u64_little(data + 24);
-    seed ^= w[0] + w[1] + w[2] + w[3];
     data += 32;
+    seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* copy bytes to the word block in little endian */
@@ -6079,37 +6077,16 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
     fio___rand_buffer[(offset++ & 3)] ^= tmp;
     buf += 8;
   }
-  switch (len & 7) {
-  case 7:
-    tmp <<= 8;
-    tmp |= buf[6];
-    /* fall through */
-  case 6:
-    tmp <<= 8;
-    tmp |= buf[5];
-  /* fall through */
-  case 5:
-    tmp <<= 8;
-    tmp |= buf[4];
-  /* fall through */
-  case 4:
-    tmp <<= 8;
-    tmp |= buf[3];
-  /* fall through */
-  case 3:
-    tmp <<= 8;
-    tmp |= buf[2];
-  /* fall through */
-  case 2:
-    tmp <<= 8;
-    tmp |= buf[1];
-  /* fall through */
-  case 1:
-    tmp <<= 8;
-    tmp |= buf[1];
-    fio___rand_buffer[(offset & 3)] ^= tmp;
-    break;
-  }
+  switch (len & 7) { // clang-format off
+  case 7: tmp <<= 8; tmp |= buf[6]; /* fall through */
+  case 6: tmp <<= 8; tmp |= buf[5]; /* fall through */
+  case 5: tmp <<= 8; tmp |= buf[4]; /* fall through */
+  case 4: tmp <<= 8; tmp |= buf[3]; /* fall through */
+  case 3: tmp <<= 8; tmp |= buf[2]; /* fall through */
+  case 2: tmp <<= 8; tmp |= buf[1]; /* fall through */
+  case 1: tmp <<= 8; tmp |= buf[1];
+          fio___rand_buffer[(offset & 3)] ^= tmp;
+  } // clang-format on
 }
 
 /* used here, defined later */
