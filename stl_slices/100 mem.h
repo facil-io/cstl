@@ -8,6 +8,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "007 threads.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -532,22 +533,15 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       d += sizeof(size_t);
       s += sizeof(size_t);
     }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7:
-      *(d++) = *(s++); /* fall through */
-    case 6:
-      *(d++) = *(s++); /* fall through */
-    case 5:
-      *(d++) = *(s++); /* fall through */
-    case 4:
-      *(d++) = *(s++); /* fall through */
-    case 3:
-      *(d++) = *(s++); /* fall through */
-    case 2:
-      *(d++) = *(s++); /* fall through */
-    case 1:
-      *(d++) = *(s++); /* fall through */
-    }
+    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    case 7: *(d++) = *(s++); /* fall through */
+    case 6: *(d++) = *(s++); /* fall through */
+    case 5: *(d++) = *(s++); /* fall through */
+    case 4: *(d++) = *(s++); /* fall through */
+    case 3: *(d++) = *(s++); /* fall through */
+    case 2: *(d++) = *(s++); /* fall through */
+    case 1: *(d++) = *(s++); /* fall through */
+    } // clang-format on
     return;
   } else {
     /* walk backwards (memmove) */
@@ -576,22 +570,15 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       s -= sizeof(size_t);
       ((size_t *)d)[0] = ((size_t *)s)[0];
     }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7:
-      *(--d) = *(--s); /* fall through */
-    case 6:
-      *(--d) = *(--s); /* fall through */
-    case 5:
-      *(--d) = *(--s); /* fall through */
-    case 4:
-      *(--d) = *(--s); /* fall through */
-    case 3:
-      *(--d) = *(--s); /* fall through */
-    case 2:
-      *(--d) = *(--s); /* fall through */
-    case 1:
-      *(--d) = *(--s); /* fall through */
-    }
+    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    case 7: *(--d) = *(--s); /* fall through */
+    case 6: *(--d) = *(--s); /* fall through */
+    case 5: *(--d) = *(--s); /* fall through */
+    case 4: *(--d) = *(--s); /* fall through */
+    case 3: *(--d) = *(--s); /* fall through */
+    case 2: *(--d) = *(--s); /* fall through */
+    case 1: *(--d) = *(--s); /* fall through */
+    } // clang-format on
   }
 }
 /** an 8 byte aligned memset implementation. */
@@ -623,22 +610,17 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   case 8:
     *(dest++) = data; /* fall through */
   }
-  switch (bytes & 7) {
-  case 7:
-    ((uint8_t *)dest)[7] = ((uint8_t *)&data)[7]; /* fall through */
-  case 6:
-    ((uint8_t *)dest)[6] = ((uint8_t *)&data)[6]; /* fall through */
-  case 5:
-    ((uint8_t *)dest)[5] = ((uint8_t *)&data)[5]; /* fall through */
-  case 4:
-    ((uint8_t *)dest)[4] = ((uint8_t *)&data)[4]; /* fall through */
-  case 3:
-    ((uint8_t *)dest)[3] = ((uint8_t *)&data)[3]; /* fall through */
-  case 2:
-    ((uint8_t *)dest)[2] = ((uint8_t *)&data)[2]; /* fall through */
-  case 1:
-    ((uint8_t *)dest)[1] = ((uint8_t *)&data)[1];
-  }
+  // clang-format off
+  union { uint64_t u64; uint8_t u8[8]; } u = {.u64 = data};
+  switch (bytes & 7) { 
+  case 7: ((uint8_t *)dest)[6] = u.u8[6]; /* fall through */
+  case 6: ((uint8_t *)dest)[5] = u.u8[5]; /* fall through */
+  case 5: ((uint8_t *)dest)[4] = u.u8[4]; /* fall through */
+  case 4: ((uint8_t *)dest)[3] = u.u8[3]; /* fall through */
+  case 3: ((uint8_t *)dest)[2] = u.u8[2]; /* fall through */
+  case 2: ((uint8_t *)dest)[1] = u.u8[1]; /* fall through */
+  case 1: ((uint8_t *)dest)[0] = u.u8[0];
+  } // clang-format on
 }
 
 /**
@@ -648,34 +630,36 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-
   const char *cbuf = (const char *)buffer;
 
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-  /* align pointer if needed */
-  switch (((uintptr_t)cbuf & 7)) {
-#define FIO_MEMCHR___CASE(i)                                                   \
-    /* fall through */                                                         \
-  case i:                                                                      \
-    if (cbuf[i] == token)                                                      \
+  /* align pointer if required */
+#define FIO___MEMCHR_TEST(i)                                                   \
+  /* fall through */ case i:                                                   \
+    if (*cbuf == token)                                                        \
       return (void *)cbuf;                                                     \
     ++cbuf;                                                                    \
     --len;
-    FIO_MEMCHR___CASE(1);
-    FIO_MEMCHR___CASE(2);
-    FIO_MEMCHR___CASE(3);
-    FIO_MEMCHR___CASE(4);
-    FIO_MEMCHR___CASE(5);
-    FIO_MEMCHR___CASE(6);
-    FIO_MEMCHR___CASE(7);
-#undef FIO_MEMCHR___CASE
+  switch (((uintptr_t)cbuf & 7)) {
+    FIO___MEMCHR_TEST(1); /* fall through */
+    FIO___MEMCHR_TEST(2); /* fall through */
+    FIO___MEMCHR_TEST(3); /* fall through */
+    FIO___MEMCHR_TEST(4); /* fall through */
+    FIO___MEMCHR_TEST(5); /* fall through */
+    FIO___MEMCHR_TEST(6); /* fall through */
+    FIO___MEMCHR_TEST(7);
+#undef FIO___MEMCHR_TEST
   }
 #endif
-  {
-    /* bit-magic SIMD, always portable */
+
+  { /* bit-magic SIMD, always portable */
     const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
     const uint64_t *ubuf = (const uint64_t *)cbuf;
     register uint64_t r0, r1, r2, r3;
+#define FIO___MEMCHR_TEST(i)                                                   \
+  if (r##i)                                                                    \
+  return (void *)(((const char *)(ubuf + i)) +                                 \
+                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
 
     /* consume 32 byte groups */
     for (; len >= 32; (len -= 32), (ubuf += 4)) {
@@ -684,63 +668,41 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
             (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
             (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
         continue;
-#define FIO_MEMCHR___TEST(i)                                                   \
-  if (r##i)                                                                    \
-  return (void *)(((const char *)(ubuf + i)) +                                 \
-                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
-      FIO_MEMCHR___TEST(0);
-      FIO_MEMCHR___TEST(1);
-      FIO_MEMCHR___TEST(2);
-      FIO_MEMCHR___TEST(3);
-#undef FIO_MEMCHR___TEST
+      FIO___MEMCHR_TEST(0);
+      FIO___MEMCHR_TEST(1);
+      FIO___MEMCHR_TEST(2);
+      FIO___MEMCHR_TEST(3);
     }
     /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
-    switch ((len & 24)) {
-#define FIO_MEMCHR___CASE(i)                                                   \
-    /* fall through */                                                         \
-  case i:                                                                      \
-    if ((r0 = fio_has_zero_byte64(umask ^ ubuf[0])))                           \
-      return (void *)(((const char *)ubuf) +                                   \
-                      fio_bits_lsb_index(fio_has_byte2bitmap(r0)));            \
-    ++ubuf;
-      FIO_MEMCHR___CASE(24);
-      FIO_MEMCHR___CASE(16);
-      FIO_MEMCHR___CASE(8);
-#undef FIO_MEMCHR___CASE
-    }
+    r0 = r1 = r2 = 0;
+    switch ((len & 24)) { // clang-format off
+    case 24: r2 = fio_has_zero_byte64(umask ^ ubuf[2]); /* fall through */
+    case 16: r1 = fio_has_zero_byte64(umask ^ ubuf[1]); /* fall through */
+    case 8:  r0 = fio_has_zero_byte64(umask ^ ubuf[0]);
+             FIO___MEMCHR_TEST(0);
+             FIO___MEMCHR_TEST(1);
+             FIO___MEMCHR_TEST(2);
+    } // clang-format on
+#undef FIO___MEMCHR_TEST
     /* reset char pointer value */
     cbuf = (const char *)ubuf;
   }
   /* All that's left is a maximum of 7 bytes */
-  switch (len & 7) {
-#define FIO_MEMCHR___TEST()                                                    \
+#define FIO___MEMCHR_TEST()                                                    \
   if (cbuf[0] == token)                                                        \
     return (void *)cbuf;                                                       \
-  ++cbuf;
-  case 7:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 6:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 5:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 4:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 3:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 2:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 1:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-#undef FIO_MEMCHR___TEST
-  }
+  ++cbuf; /* fall through */
+  switch (len & 7) { // clang-format off
+  case 7: FIO___MEMCHR_TEST() /* fall through */
+  case 6: FIO___MEMCHR_TEST() /* fall through */
+  case 5: FIO___MEMCHR_TEST() /* fall through */
+  case 4: FIO___MEMCHR_TEST() /* fall through */
+  case 3: FIO___MEMCHR_TEST() /* fall through */
+  case 2: FIO___MEMCHR_TEST() /* fall through */
+  case 1: FIO___MEMCHR_TEST() /* fall through */
+  }       // clang-format on
   return NULL;
+#undef FIO___MEMCHR_TEST
 }
 
 /* *****************************************************************************
@@ -3119,7 +3081,8 @@ Memory pool cleanup
 
 /* *****************************************************************************
 Memory management macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #if !defined(FIO_MEM_REALLOC_) || !defined(FIO_MEM_FREE_)
 #undef FIO_MEM_REALLOC_

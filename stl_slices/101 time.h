@@ -89,6 +89,15 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
 
+/** Adds two `struct timespec` objects (TODO: untested). */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
+
+/** Adds milliseconds to a `struct timespec` object (TODO: untested). */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
+
+/** Compares two `struct timespec` objects (TODO: untested). */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
+
 /* *****************************************************************************
 Time Inline Helpers
 ***************************************************************************** */
@@ -128,6 +137,40 @@ FIO_IFUNC int64_t fio_time_milli() {
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
   return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/* Normalizes a timespec struct after an `add` or `sub` operation. */
+FIO_IFUNC void fio_time___normalize(struct timespec *t) {
+  const long ns_norm[2] = {0, 1000000000LL};
+  t->tv_nsec += ns_norm[(t->tv_nsec < 0)];
+  t->tv_sec += (t->tv_nsec < 0);
+  t->tv_nsec -= ns_norm[(1000000000LL < t->tv_nsec)];
+  t->tv_sec += (1000000000LL < t->tv_nsec);
+}
+
+/** Adds to timespec. */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2) {
+  t.tv_sec += t2.tv_sec;
+  t.tv_nsec += t2.tv_nsec;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Adds milliseconds to timespec. */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli) {
+  t.tv_sec += milli >> 10; /* 1024 is close enough, will be normalized */
+  t.tv_nsec += (milli & 1023) * 1000000;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Compares two timespecs. */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
+  size_t a = (t2.tv_sec < t1.tv_sec) << 1;
+  a |= (t2.tv_nsec < t1.tv_nsec);
+  size_t b = (t1.tv_sec < t2.tv_sec) << 1;
+  b |= (t1.tv_nsec < t2.tv_nsec);
+  return (0 - (a < b)) + (b < a);
 }
 
 /* *****************************************************************************
@@ -214,8 +257,9 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     // 146,097 = days in era (400 years)
     const size_t era = (b >= 0 ? b : b - 146096) / 146097;
     const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
-    const uint16_t yoe = (uint16_t)(
-        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365); // year of era
+    const uint16_t yoe =
+        (uint16_t)((doe - doe / 1460 + doe / 36524 - doe / 146096) /
+                   365); // year of era
     a = yoe;
     a += era * 400; // a == year number, assuming year starts on March 1st...
     const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));

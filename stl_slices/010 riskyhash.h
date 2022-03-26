@@ -166,8 +166,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     switch ((len & 24)) {
     case 24: FIO_RISKY3_ROUND64(3, tmp); break; /* offset 24 in 32 byte segment */
     case 16: FIO_RISKY3_ROUND64(2, tmp); break; /* offset 16 in 32 byte segment */
-    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset 8 in 32 byte segment */
-    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset 0 in 32 byte segment */
+    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset  8  in 32 byte segment */
+    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset  0  in 32 byte segment */
     }
   } // clang-format on
 
@@ -215,15 +215,17 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 #define FIO_STABLE_HASH_PRIME3 0x84B56B93C869EA0FULL /* prime 32 set bits */
 #define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* prime 32 set bits */
 
+#define FIO_STABLE_HASH_MUL_PRIME(dest)                                        \
+  (dest)[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                    \
+  (dest)[1] = v[1] * prime[1]; /* FIO_STABLE_HASH_PRIME1 */                    \
+  (dest)[2] = v[2] * prime[2]; /* FIO_STABLE_HASH_PRIME2 */                    \
+  (dest)[3] = v[3] * prime[3]  /* FIO_STABLE_HASH_PRIME3 */
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
   v[0] ^= w[0];                                                                \
   v[1] ^= w[1];                                                                \
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
-  v[0] *= prime[0]; /* FIO_STABLE_HASH_PRIME0 */                               \
-  v[1] *= prime[1]; /* FIO_STABLE_HASH_PRIME1 */                               \
-  v[2] *= prime[2]; /* FIO_STABLE_HASH_PRIME2 */                               \
-  v[3] *= prime[3]; /* FIO_STABLE_HASH_PRIME3 */                               \
+  FIO_STABLE_HASH_MUL_PRIME(v);                                                \
   w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
   w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
   w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
@@ -234,7 +236,7 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[3] += w[3];
 
 FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
-                                       const void *data_,
+                                       const void *restrict data_,
                                        size_t len,
                                        uint64_t seed) {
   const uint8_t *data = (const uint8_t *)data_;
@@ -243,12 +245,13 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME0;
   seed |= (seed == 0);
+  typedef uint64_t fio___shash_vec_u[4] FIO_ALIGN(32);
+  fio___shash_vec_u w, v = {seed, seed, seed, seed};
+  fio___shash_vec_u prime = {FIO_STABLE_HASH_PRIME0,
+                             FIO_STABLE_HASH_PRIME1,
+                             FIO_STABLE_HASH_PRIME2,
+                             FIO_STABLE_HASH_PRIME3};
 
-  uint64_t FIO_ALIGN(16) w[4], FIO_ALIGN(16) v[4] = {seed, seed, seed, seed};
-  const uint64_t FIO_ALIGN(16) prime[4] = {FIO_STABLE_HASH_PRIME0,
-                                           FIO_STABLE_HASH_PRIME1,
-                                           FIO_STABLE_HASH_PRIME2,
-                                           FIO_STABLE_HASH_PRIME3};
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
     w[0] = fio_buf2u64_little(data);
@@ -288,10 +291,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
-  w[0] = v[0] * prime[0];
-  w[1] = v[1] * prime[1];
-  w[2] = v[2] * prime[2];
-  w[3] = v[3] * prime[3];
+  FIO_STABLE_HASH_MUL_PRIME(w);
 
   v[0] ^= fio_lrot64(w[0], 7);
   v[1] ^= fio_lrot64(w[1], 11);

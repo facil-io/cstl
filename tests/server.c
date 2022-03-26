@@ -262,13 +262,12 @@ static int http1_on_body_chunk(http1_parser_s *parser,
 /** called when a protocol error occurred. */
 static int http1_on_error(http1_parser_s *parser) {
   client_s *c = (client_s *)parser;
-  http_send_response(
-      c,
-      400,
-      (fio_str_info_s){"Bad Request", 11},
-      0,
-      NULL,
-      (fio_str_info_s){"Bad Request... be nicer next time!", 34});
+  http_send_response(c,
+                     400,
+                     FIO_STR_INFO2("Bad Request", 11),
+                     0,
+                     NULL,
+                     FIO_STR_INFO2("Bad Request... be nicer next time!", 34));
   fio_close(c->io);
   return -1;
 }

@@ -5837,8 +5837,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
     switch ((len & 24)) {
     case 24: FIO_RISKY3_ROUND64(3, tmp); break; /* offset 24 in 32 byte segment */
     case 16: FIO_RISKY3_ROUND64(2, tmp); break; /* offset 16 in 32 byte segment */
-    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset 8 in 32 byte segment */
-    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset 0 in 32 byte segment */
+    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset  8  in 32 byte segment */
+    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset  0  in 32 byte segment */
     }
   } // clang-format on
 
@@ -5886,15 +5886,17 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 #define FIO_STABLE_HASH_PRIME3 0x84B56B93C869EA0FULL /* prime 32 set bits */
 #define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* prime 32 set bits */
 
+#define FIO_STABLE_HASH_MUL_PRIME(dest)                                        \
+  (dest)[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                    \
+  (dest)[1] = v[1] * prime[1]; /* FIO_STABLE_HASH_PRIME1 */                    \
+  (dest)[2] = v[2] * prime[2]; /* FIO_STABLE_HASH_PRIME2 */                    \
+  (dest)[3] = v[3] * prime[3]  /* FIO_STABLE_HASH_PRIME3 */
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
   v[0] ^= w[0];                                                                \
   v[1] ^= w[1];                                                                \
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
-  v[0] *= prime[0]; /* FIO_STABLE_HASH_PRIME0 */                               \
-  v[1] *= prime[1]; /* FIO_STABLE_HASH_PRIME1 */                               \
-  v[2] *= prime[2]; /* FIO_STABLE_HASH_PRIME2 */                               \
-  v[3] *= prime[3]; /* FIO_STABLE_HASH_PRIME3 */                               \
+  FIO_STABLE_HASH_MUL_PRIME(v);                                                \
   w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
   w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
   w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
@@ -5905,7 +5907,7 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[3] += w[3];
 
 FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
-                                       const void *data_,
+                                       const void *restrict data_,
                                        size_t len,
                                        uint64_t seed) {
   const uint8_t *data = (const uint8_t *)data_;
@@ -5914,12 +5916,13 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME0;
   seed |= (seed == 0);
+  typedef uint64_t fio___shash_vec_u[4] FIO_ALIGN(32);
+  fio___shash_vec_u w, v = {seed, seed, seed, seed};
+  fio___shash_vec_u prime = {FIO_STABLE_HASH_PRIME0,
+                             FIO_STABLE_HASH_PRIME1,
+                             FIO_STABLE_HASH_PRIME2,
+                             FIO_STABLE_HASH_PRIME3};
 
-  uint64_t FIO_ALIGN(16) w[4], FIO_ALIGN(16) v[4] = {seed, seed, seed, seed};
-  const uint64_t FIO_ALIGN(16) prime[4] = {FIO_STABLE_HASH_PRIME0,
-                                           FIO_STABLE_HASH_PRIME1,
-                                           FIO_STABLE_HASH_PRIME2,
-                                           FIO_STABLE_HASH_PRIME3};
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
     w[0] = fio_buf2u64_little(data);
@@ -5959,10 +5962,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
-  w[0] = v[0] * prime[0];
-  w[1] = v[1] * prime[1];
-  w[2] = v[2] * prime[2];
-  w[3] = v[3] * prime[3];
+  FIO_STABLE_HASH_MUL_PRIME(w);
 
   v[0] ^= fio_lrot64(w[0], 7);
   v[1] ^= fio_lrot64(w[1], 11);
@@ -8684,6 +8684,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "007 threads.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -9208,22 +9209,15 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       d += sizeof(size_t);
       s += sizeof(size_t);
     }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7:
-      *(d++) = *(s++); /* fall through */
-    case 6:
-      *(d++) = *(s++); /* fall through */
-    case 5:
-      *(d++) = *(s++); /* fall through */
-    case 4:
-      *(d++) = *(s++); /* fall through */
-    case 3:
-      *(d++) = *(s++); /* fall through */
-    case 2:
-      *(d++) = *(s++); /* fall through */
-    case 1:
-      *(d++) = *(s++); /* fall through */
-    }
+    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    case 7: *(d++) = *(s++); /* fall through */
+    case 6: *(d++) = *(s++); /* fall through */
+    case 5: *(d++) = *(s++); /* fall through */
+    case 4: *(d++) = *(s++); /* fall through */
+    case 3: *(d++) = *(s++); /* fall through */
+    case 2: *(d++) = *(s++); /* fall through */
+    case 1: *(d++) = *(s++); /* fall through */
+    } // clang-format on
     return;
   } else {
     /* walk backwards (memmove) */
@@ -9252,22 +9246,15 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       s -= sizeof(size_t);
       ((size_t *)d)[0] = ((size_t *)s)[0];
     }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7:
-      *(--d) = *(--s); /* fall through */
-    case 6:
-      *(--d) = *(--s); /* fall through */
-    case 5:
-      *(--d) = *(--s); /* fall through */
-    case 4:
-      *(--d) = *(--s); /* fall through */
-    case 3:
-      *(--d) = *(--s); /* fall through */
-    case 2:
-      *(--d) = *(--s); /* fall through */
-    case 1:
-      *(--d) = *(--s); /* fall through */
-    }
+    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    case 7: *(--d) = *(--s); /* fall through */
+    case 6: *(--d) = *(--s); /* fall through */
+    case 5: *(--d) = *(--s); /* fall through */
+    case 4: *(--d) = *(--s); /* fall through */
+    case 3: *(--d) = *(--s); /* fall through */
+    case 2: *(--d) = *(--s); /* fall through */
+    case 1: *(--d) = *(--s); /* fall through */
+    } // clang-format on
   }
 }
 /** an 8 byte aligned memset implementation. */
@@ -9299,22 +9286,17 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   case 8:
     *(dest++) = data; /* fall through */
   }
-  switch (bytes & 7) {
-  case 7:
-    ((uint8_t *)dest)[7] = ((uint8_t *)&data)[7]; /* fall through */
-  case 6:
-    ((uint8_t *)dest)[6] = ((uint8_t *)&data)[6]; /* fall through */
-  case 5:
-    ((uint8_t *)dest)[5] = ((uint8_t *)&data)[5]; /* fall through */
-  case 4:
-    ((uint8_t *)dest)[4] = ((uint8_t *)&data)[4]; /* fall through */
-  case 3:
-    ((uint8_t *)dest)[3] = ((uint8_t *)&data)[3]; /* fall through */
-  case 2:
-    ((uint8_t *)dest)[2] = ((uint8_t *)&data)[2]; /* fall through */
-  case 1:
-    ((uint8_t *)dest)[1] = ((uint8_t *)&data)[1];
-  }
+  // clang-format off
+  union { uint64_t u64; uint8_t u8[8]; } u = {.u64 = data};
+  switch (bytes & 7) { 
+  case 7: ((uint8_t *)dest)[6] = u.u8[6]; /* fall through */
+  case 6: ((uint8_t *)dest)[5] = u.u8[5]; /* fall through */
+  case 5: ((uint8_t *)dest)[4] = u.u8[4]; /* fall through */
+  case 4: ((uint8_t *)dest)[3] = u.u8[3]; /* fall through */
+  case 3: ((uint8_t *)dest)[2] = u.u8[2]; /* fall through */
+  case 2: ((uint8_t *)dest)[1] = u.u8[1]; /* fall through */
+  case 1: ((uint8_t *)dest)[0] = u.u8[0];
+  } // clang-format on
 }
 
 /**
@@ -9324,34 +9306,36 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-
   const char *cbuf = (const char *)buffer;
 
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-  /* align pointer if needed */
-  switch (((uintptr_t)cbuf & 7)) {
-#define FIO_MEMCHR___CASE(i)                                                   \
-    /* fall through */                                                         \
-  case i:                                                                      \
-    if (cbuf[i] == token)                                                      \
+  /* align pointer if required */
+#define FIO___MEMCHR_TEST(i)                                                   \
+  /* fall through */ case i:                                                   \
+    if (*cbuf == token)                                                        \
       return (void *)cbuf;                                                     \
     ++cbuf;                                                                    \
     --len;
-    FIO_MEMCHR___CASE(1);
-    FIO_MEMCHR___CASE(2);
-    FIO_MEMCHR___CASE(3);
-    FIO_MEMCHR___CASE(4);
-    FIO_MEMCHR___CASE(5);
-    FIO_MEMCHR___CASE(6);
-    FIO_MEMCHR___CASE(7);
-#undef FIO_MEMCHR___CASE
+  switch (((uintptr_t)cbuf & 7)) {
+    FIO___MEMCHR_TEST(1); /* fall through */
+    FIO___MEMCHR_TEST(2); /* fall through */
+    FIO___MEMCHR_TEST(3); /* fall through */
+    FIO___MEMCHR_TEST(4); /* fall through */
+    FIO___MEMCHR_TEST(5); /* fall through */
+    FIO___MEMCHR_TEST(6); /* fall through */
+    FIO___MEMCHR_TEST(7);
+#undef FIO___MEMCHR_TEST
   }
 #endif
-  {
-    /* bit-magic SIMD, always portable */
+
+  { /* bit-magic SIMD, always portable */
     const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
     const uint64_t *ubuf = (const uint64_t *)cbuf;
     register uint64_t r0, r1, r2, r3;
+#define FIO___MEMCHR_TEST(i)                                                   \
+  if (r##i)                                                                    \
+  return (void *)(((const char *)(ubuf + i)) +                                 \
+                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
 
     /* consume 32 byte groups */
     for (; len >= 32; (len -= 32), (ubuf += 4)) {
@@ -9360,63 +9344,41 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
             (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
             (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
         continue;
-#define FIO_MEMCHR___TEST(i)                                                   \
-  if (r##i)                                                                    \
-  return (void *)(((const char *)(ubuf + i)) +                                 \
-                  fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
-      FIO_MEMCHR___TEST(0);
-      FIO_MEMCHR___TEST(1);
-      FIO_MEMCHR___TEST(2);
-      FIO_MEMCHR___TEST(3);
-#undef FIO_MEMCHR___TEST
+      FIO___MEMCHR_TEST(0);
+      FIO___MEMCHR_TEST(1);
+      FIO___MEMCHR_TEST(2);
+      FIO___MEMCHR_TEST(3);
     }
     /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
-    switch ((len & 24)) {
-#define FIO_MEMCHR___CASE(i)                                                   \
-    /* fall through */                                                         \
-  case i:                                                                      \
-    if ((r0 = fio_has_zero_byte64(umask ^ ubuf[0])))                           \
-      return (void *)(((const char *)ubuf) +                                   \
-                      fio_bits_lsb_index(fio_has_byte2bitmap(r0)));            \
-    ++ubuf;
-      FIO_MEMCHR___CASE(24);
-      FIO_MEMCHR___CASE(16);
-      FIO_MEMCHR___CASE(8);
-#undef FIO_MEMCHR___CASE
-    }
+    r0 = r1 = r2 = 0;
+    switch ((len & 24)) { // clang-format off
+    case 24: r2 = fio_has_zero_byte64(umask ^ ubuf[2]); /* fall through */
+    case 16: r1 = fio_has_zero_byte64(umask ^ ubuf[1]); /* fall through */
+    case 8:  r0 = fio_has_zero_byte64(umask ^ ubuf[0]);
+             FIO___MEMCHR_TEST(0);
+             FIO___MEMCHR_TEST(1);
+             FIO___MEMCHR_TEST(2);
+    } // clang-format on
+#undef FIO___MEMCHR_TEST
     /* reset char pointer value */
     cbuf = (const char *)ubuf;
   }
   /* All that's left is a maximum of 7 bytes */
-  switch (len & 7) {
-#define FIO_MEMCHR___TEST()                                                    \
+#define FIO___MEMCHR_TEST()                                                    \
   if (cbuf[0] == token)                                                        \
     return (void *)cbuf;                                                       \
-  ++cbuf;
-  case 7:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 6:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 5:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 4:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 3:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 2:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-  case 1:
-    FIO_MEMCHR___TEST();
-    /* fall through */
-#undef FIO_MEMCHR___TEST
-  }
+  ++cbuf; /* fall through */
+  switch (len & 7) { // clang-format off
+  case 7: FIO___MEMCHR_TEST() /* fall through */
+  case 6: FIO___MEMCHR_TEST() /* fall through */
+  case 5: FIO___MEMCHR_TEST() /* fall through */
+  case 4: FIO___MEMCHR_TEST() /* fall through */
+  case 3: FIO___MEMCHR_TEST() /* fall through */
+  case 2: FIO___MEMCHR_TEST() /* fall through */
+  case 1: FIO___MEMCHR_TEST() /* fall through */
+  }       // clang-format on
   return NULL;
+#undef FIO___MEMCHR_TEST
 }
 
 /* *****************************************************************************
@@ -11795,7 +11757,8 @@ Memory pool cleanup
 
 /* *****************************************************************************
 Memory management macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #if !defined(FIO_MEM_REALLOC_) || !defined(FIO_MEM_FREE_)
 #undef FIO_MEM_REALLOC_
@@ -11906,6 +11869,15 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
 
+/** Adds two `struct timespec` objects (TODO: untested). */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
+
+/** Adds milliseconds to a `struct timespec` object (TODO: untested). */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
+
+/** Compares two `struct timespec` objects (TODO: untested). */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
+
 /* *****************************************************************************
 Time Inline Helpers
 ***************************************************************************** */
@@ -11945,6 +11917,40 @@ FIO_IFUNC int64_t fio_time_milli() {
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
   return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/* Normalizes a timespec struct after an `add` or `sub` operation. */
+FIO_IFUNC void fio_time___normalize(struct timespec *t) {
+  const long ns_norm[2] = {0, 1000000000LL};
+  t->tv_nsec += ns_norm[(t->tv_nsec < 0)];
+  t->tv_sec += (t->tv_nsec < 0);
+  t->tv_nsec -= ns_norm[(1000000000LL < t->tv_nsec)];
+  t->tv_sec += (1000000000LL < t->tv_nsec);
+}
+
+/** Adds to timespec. */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2) {
+  t.tv_sec += t2.tv_sec;
+  t.tv_nsec += t2.tv_nsec;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Adds milliseconds to timespec. */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli) {
+  t.tv_sec += milli >> 10; /* 1024 is close enough, will be normalized */
+  t.tv_nsec += (milli & 1023) * 1000000;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Compares two timespecs. */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
+  size_t a = (t2.tv_sec < t1.tv_sec) << 1;
+  a |= (t2.tv_nsec < t1.tv_nsec);
+  size_t b = (t1.tv_sec < t2.tv_sec) << 1;
+  b |= (t1.tv_nsec < t2.tv_nsec);
+  return (0 - (a < b)) + (b < a);
 }
 
 /* *****************************************************************************
@@ -12031,8 +12037,9 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     // 146,097 = days in era (400 years)
     const size_t era = (b >= 0 ? b : b - 146096) / 146097;
     const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
-    const uint16_t yoe = (uint16_t)(
-        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365); // year of era
+    const uint16_t yoe =
+        (uint16_t)((doe - doe / 1460 + doe / 36524 - doe / 146096) /
+                   365); // year of era
     a = yoe;
     a += era * 400; // a == year number, assuming year starts on March 1st...
     const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));
