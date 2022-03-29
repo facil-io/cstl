@@ -101,7 +101,6 @@ FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
 /** Multi-precision - returns the index for the least significant bit or -1. */
 FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 
-// clang-format on
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */

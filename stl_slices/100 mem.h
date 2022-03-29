@@ -533,7 +533,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       d += sizeof(size_t);
       s += sizeof(size_t);
     }
-    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7: *(d++) = *(s++); /* fall through */
     case 6: *(d++) = *(s++); /* fall through */
     case 5: *(d++) = *(s++); /* fall through */
@@ -541,7 +541,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case 3: *(d++) = *(s++); /* fall through */
     case 2: *(d++) = *(s++); /* fall through */
     case 1: *(d++) = *(s++); /* fall through */
-    } // clang-format on
+    }
     return;
   } else {
     /* walk backwards (memmove) */
@@ -570,7 +570,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       s -= sizeof(size_t);
       ((size_t *)d)[0] = ((size_t *)s)[0];
     }
-    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7: *(--d) = *(--s); /* fall through */
     case 6: *(--d) = *(--s); /* fall through */
     case 5: *(--d) = *(--s); /* fall through */
@@ -578,7 +578,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case 3: *(--d) = *(--s); /* fall through */
     case 2: *(--d) = *(--s); /* fall through */
     case 1: *(--d) = *(--s); /* fall through */
-    } // clang-format on
+    }
   }
 }
 /** an 8 byte aligned memset implementation. */
@@ -603,16 +603,15 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
     dest += 4;
   }
   switch (bytes & 24) {
-  case 24:
-    *(dest++) = data; /* fall through */
-  case 16:
-    *(dest++) = data; /* fall through */
-  case 8:
-    *(dest++) = data; /* fall through */
+  case 24: *(dest++) = data; /* fall through */
+  case 16: *(dest++) = data; /* fall through */
+  case 8: *(dest++) = data;  /* fall through */
   }
-  // clang-format off
-  union { uint64_t u64; uint8_t u8[8]; } u = {.u64 = data};
-  switch (bytes & 7) { 
+  union {
+    uint64_t u64;
+    uint8_t u8[8];
+  } u = {.u64 = data};
+  switch (bytes & 7) {
   case 7: ((uint8_t *)dest)[6] = u.u8[6]; /* fall through */
   case 6: ((uint8_t *)dest)[5] = u.u8[5]; /* fall through */
   case 5: ((uint8_t *)dest)[4] = u.u8[4]; /* fall through */
@@ -620,7 +619,7 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   case 3: ((uint8_t *)dest)[2] = u.u8[2]; /* fall through */
   case 2: ((uint8_t *)dest)[1] = u.u8[1]; /* fall through */
   case 1: ((uint8_t *)dest)[0] = u.u8[0];
-  } // clang-format on
+  }
 }
 
 /**
@@ -630,17 +629,95 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-  const char *cbuf = (const char *)buffer;
+  union {
+    const char *c;
+    const uint64_t *u64;
+    uintptr_t uptr;
+  } u = {.c = (const char *)buffer}, end = {.c = (const char *)buffer + len};
+
+  if (len > 7) {
+#if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+    /* align pointer */
+#define FIO___MEMCHR_TEST(i)                                                   \
+  /* fall through */ case i:                                                   \
+    if (*u.c == token)                                                         \
+      return (void *)u.c;                                                      \
+    ++u.c;
+    switch ((u.uptr & 7)) {
+      FIO___MEMCHR_TEST(1); /* fall through */
+      FIO___MEMCHR_TEST(2); /* fall through */
+      FIO___MEMCHR_TEST(3); /* fall through */
+      FIO___MEMCHR_TEST(4); /* fall through */
+      FIO___MEMCHR_TEST(5); /* fall through */
+      FIO___MEMCHR_TEST(6); /* fall through */
+      FIO___MEMCHR_TEST(7);
+#undef FIO___MEMCHR_TEST
+    }
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+    {  /* SIMD like approach */
+      const uint64_t umask = ~(0x0101010101010101ULL * (uint8_t)token);
+      uint64_t r[4] FIO_ALIGN(32) = {0};
+      while (u.c + 31 < end.c) { // clang-format off
+        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
+        r[0] = fio_has_full_byte64(r[0]);
+        r[1] = fio_has_full_byte64(r[1]);
+        r[2] = fio_has_full_byte64(r[2]);
+        r[3] = fio_has_full_byte64(r[3]);
+        if (!(r[0] | r[1] | r[2] | r[3])) {
+          u.c += 32;
+          continue;
+        }
+        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+        if (r[1]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
+        if (r[2]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[2])) + 16);
+        return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[3])) + 24);
+      }
+      if (u.c + 15 < end.c) {
+        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask;
+        r[0] = fio_has_full_byte64(r[0]); r[1] = fio_has_full_byte64(r[1]);
+        if(r[0] | r[1]) {
+          if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+          return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
+        }
+        u.c += 16;
+      }
+      if (u.c + 7 < end.c) {
+        r[0] = u.u64[0] ^ umask; r[0] = fio_has_full_byte64(r[0]);
+        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+        u.c += 8;
+      } // clang-format on
+    }
+  }
+  while (u.c < end.c) {
+    if (u.c[0] == token)
+      return (void *)u.c;
+    ++u.c;
+  }
+  return NULL;
+}
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr2(const void *buffer, const char token, size_t len) {
+  if (!buffer || !len)
+    return NULL;
+  union {
+    const char *c;
+    const uint64_t *u64;
+    uintptr_t uptr;
+  } u = {.c = (const char *)buffer};
 
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
   /* align pointer if required */
 #define FIO___MEMCHR_TEST(i)                                                   \
   /* fall through */ case i:                                                   \
-    if (*cbuf == token)                                                        \
-      return (void *)cbuf;                                                     \
-    ++cbuf;                                                                    \
+    if (*u.c == token)                                                         \
+      return (void *)u.c;                                                      \
+    ++u.c;                                                                     \
     --len;
-  switch (((uintptr_t)cbuf & 7)) {
+  switch ((u.uptr & 7)) {
     FIO___MEMCHR_TEST(1); /* fall through */
     FIO___MEMCHR_TEST(2); /* fall through */
     FIO___MEMCHR_TEST(3); /* fall through */
@@ -653,20 +730,19 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
 #endif
 
   { /* bit-magic SIMD, always portable */
-    const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
-    const uint64_t *ubuf = (const uint64_t *)cbuf;
+    const uint64_t umask = ~(0x0101010101010101ULL * (uint8_t)token);
     register uint64_t r0, r1, r2, r3;
 #define FIO___MEMCHR_TEST(i)                                                   \
   if (r##i)                                                                    \
-  return (void *)(((const char *)(ubuf + i)) +                                 \
+  return (void *)(((const char *)(u.u64 + i)) +                                \
                   fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
 
     /* consume 32 byte groups */
-    for (; len >= 32; (len -= 32), (ubuf += 4)) {
-      if (!((r0 = fio_has_zero_byte64(umask ^ ubuf[0])) |
-            (r1 = fio_has_zero_byte64(umask ^ ubuf[1])) |
-            (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
-            (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
+    for (; len >= 32; (len -= 32), (u.u64 += 4)) {
+      if (!((r0 = fio_has_full_byte64(umask ^ u.u64[0])) |
+            (r1 = fio_has_full_byte64(umask ^ u.u64[1])) |
+            (r2 = fio_has_full_byte64(umask ^ u.u64[2])) |
+            (r3 = fio_has_full_byte64(umask ^ u.u64[3]))))
         continue;
       FIO___MEMCHR_TEST(0);
       FIO___MEMCHR_TEST(1);
@@ -675,24 +751,24 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     }
     /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
     r0 = r1 = r2 = 0;
-    switch ((len & 24)) { // clang-format off
-    case 24: r2 = fio_has_zero_byte64(umask ^ ubuf[2]); /* fall through */
-    case 16: r1 = fio_has_zero_byte64(umask ^ ubuf[1]); /* fall through */
-    case 8:  r0 = fio_has_zero_byte64(umask ^ ubuf[0]);
-             FIO___MEMCHR_TEST(0);
-             FIO___MEMCHR_TEST(1);
-             FIO___MEMCHR_TEST(2);
-    } // clang-format on
+    switch ((len & 24)) {
+    case 24: r2 = fio_has_full_byte64(umask ^ u.u64[2]); /* fall through */
+    case 16: r1 = fio_has_full_byte64(umask ^ u.u64[1]); /* fall through */
+    case 8:
+      r0 = fio_has_full_byte64(umask ^ u.u64[0]);
+      FIO___MEMCHR_TEST(0);
+      FIO___MEMCHR_TEST(1);
+      FIO___MEMCHR_TEST(2);
+    }
 #undef FIO___MEMCHR_TEST
     /* reset char pointer value */
-    cbuf = (const char *)ubuf;
   }
   /* All that's left is a maximum of 7 bytes */
 #define FIO___MEMCHR_TEST()                                                    \
-  if (cbuf[0] == token)                                                        \
-    return (void *)cbuf;                                                       \
-  ++cbuf; /* fall through */
-  switch (len & 7) { // clang-format off
+  if (u.c[0] == token)                                                         \
+    return (void *)u.c;                                                        \
+  ++u.c; /* fall through */
+  switch (len & 7) {
   case 7: FIO___MEMCHR_TEST() /* fall through */
   case 6: FIO___MEMCHR_TEST() /* fall through */
   case 5: FIO___MEMCHR_TEST() /* fall through */
@@ -700,7 +776,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   case 3: FIO___MEMCHR_TEST() /* fall through */
   case 2: FIO___MEMCHR_TEST() /* fall through */
   case 1: FIO___MEMCHR_TEST() /* fall through */
-  }       // clang-format on
+  }
   return NULL;
 #undef FIO___MEMCHR_TEST
 }
@@ -2733,7 +2809,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
   for (int len_i = 5; len_i < 20; ++len_i) {
     const size_t mem_len = (1ULL << len_i) - 1;
-    const size_t token_index = (mem_len >> 1) + (mem_len >> 2);
+    const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
     fio_memset_aligned(mem,
@@ -2754,7 +2830,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
     fprintf(stderr,
             "\tfio_memchr\t\t(%zu bytes):\t%zu us\n",
-            mem_len,
+            token_index,
             (size_t)(end - start));
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
@@ -2766,7 +2842,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
     fprintf(stderr,
             "\tsystem memchr\t\t(%zu bytes):\t%zu us\n",
-            mem_len,
+            token_index,
             (size_t)(end - start));
 
     free(mem);

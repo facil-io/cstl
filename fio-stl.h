@@ -3220,72 +3220,72 @@ FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
 }
 
 FIO_IFUNC size_t fio_bits___map_bit2index(uint64_t i) {
-  switch (i) { // clang-format off
-    case UINT64_C(0x1): return 0;
-    case UINT64_C(0x2): return 1;
-    case UINT64_C(0x4): return 2;
-    case UINT64_C(0x8): return 3;
-    case UINT64_C(0x10): return 4;
-    case UINT64_C(0x20): return 5;
-    case UINT64_C(0x40): return 6;
-    case UINT64_C(0x80): return 7;
-    case UINT64_C(0x100): return 8;
-    case UINT64_C(0x200): return 9;
-    case UINT64_C(0x400): return 10;
-    case UINT64_C(0x800): return 11;
-    case UINT64_C(0x1000): return 12;
-    case UINT64_C(0x2000): return 13;
-    case UINT64_C(0x4000): return 14;
-    case UINT64_C(0x8000): return 15;
-    case UINT64_C(0x10000): return 16;
-    case UINT64_C(0x20000): return 17;
-    case UINT64_C(0x40000): return 18;
-    case UINT64_C(0x80000): return 19;
-    case UINT64_C(0x100000): return 20;
-    case UINT64_C(0x200000): return 21;
-    case UINT64_C(0x400000): return 22;
-    case UINT64_C(0x800000): return 23;
-    case UINT64_C(0x1000000): return 24;
-    case UINT64_C(0x2000000): return 25;
-    case UINT64_C(0x4000000): return 26;
-    case UINT64_C(0x8000000): return 27;
-    case UINT64_C(0x10000000): return 28;
-    case UINT64_C(0x20000000): return 29;
-    case UINT64_C(0x40000000): return 30;
-    case UINT64_C(0x80000000): return 31;
-    case UINT64_C(0x100000000): return 32;
-    case UINT64_C(0x200000000): return 33;
-    case UINT64_C(0x400000000): return 34;
-    case UINT64_C(0x800000000): return 35;
-    case UINT64_C(0x1000000000): return 36;
-    case UINT64_C(0x2000000000): return 37;
-    case UINT64_C(0x4000000000): return 38;
-    case UINT64_C(0x8000000000): return 39;
-    case UINT64_C(0x10000000000): return 40;
-    case UINT64_C(0x20000000000): return 41;
-    case UINT64_C(0x40000000000): return 42;
-    case UINT64_C(0x80000000000): return 43;
-    case UINT64_C(0x100000000000): return 44;
-    case UINT64_C(0x200000000000): return 45;
-    case UINT64_C(0x400000000000): return 46;
-    case UINT64_C(0x800000000000): return 47;
-    case UINT64_C(0x1000000000000): return 48;
-    case UINT64_C(0x2000000000000): return 49;
-    case UINT64_C(0x4000000000000): return 50;
-    case UINT64_C(0x8000000000000): return 51;
-    case UINT64_C(0x10000000000000): return 52;
-    case UINT64_C(0x20000000000000): return 53;
-    case UINT64_C(0x40000000000000): return 54;
-    case UINT64_C(0x80000000000000): return 55;
-    case UINT64_C(0x100000000000000): return 56;
-    case UINT64_C(0x200000000000000): return 57;
-    case UINT64_C(0x400000000000000): return 58;
-    case UINT64_C(0x800000000000000): return 59;
-    case UINT64_C(0x1000000000000000): return 60;
-    case UINT64_C(0x2000000000000000): return 61;
-    case UINT64_C(0x4000000000000000): return 62;
-    case UINT64_C(0x8000000000000000): return 63;
-  } // clang-format on
+  switch (i) {
+  case UINT64_C(0x1): return 0;
+  case UINT64_C(0x2): return 1;
+  case UINT64_C(0x4): return 2;
+  case UINT64_C(0x8): return 3;
+  case UINT64_C(0x10): return 4;
+  case UINT64_C(0x20): return 5;
+  case UINT64_C(0x40): return 6;
+  case UINT64_C(0x80): return 7;
+  case UINT64_C(0x100): return 8;
+  case UINT64_C(0x200): return 9;
+  case UINT64_C(0x400): return 10;
+  case UINT64_C(0x800): return 11;
+  case UINT64_C(0x1000): return 12;
+  case UINT64_C(0x2000): return 13;
+  case UINT64_C(0x4000): return 14;
+  case UINT64_C(0x8000): return 15;
+  case UINT64_C(0x10000): return 16;
+  case UINT64_C(0x20000): return 17;
+  case UINT64_C(0x40000): return 18;
+  case UINT64_C(0x80000): return 19;
+  case UINT64_C(0x100000): return 20;
+  case UINT64_C(0x200000): return 21;
+  case UINT64_C(0x400000): return 22;
+  case UINT64_C(0x800000): return 23;
+  case UINT64_C(0x1000000): return 24;
+  case UINT64_C(0x2000000): return 25;
+  case UINT64_C(0x4000000): return 26;
+  case UINT64_C(0x8000000): return 27;
+  case UINT64_C(0x10000000): return 28;
+  case UINT64_C(0x20000000): return 29;
+  case UINT64_C(0x40000000): return 30;
+  case UINT64_C(0x80000000): return 31;
+  case UINT64_C(0x100000000): return 32;
+  case UINT64_C(0x200000000): return 33;
+  case UINT64_C(0x400000000): return 34;
+  case UINT64_C(0x800000000): return 35;
+  case UINT64_C(0x1000000000): return 36;
+  case UINT64_C(0x2000000000): return 37;
+  case UINT64_C(0x4000000000): return 38;
+  case UINT64_C(0x8000000000): return 39;
+  case UINT64_C(0x10000000000): return 40;
+  case UINT64_C(0x20000000000): return 41;
+  case UINT64_C(0x40000000000): return 42;
+  case UINT64_C(0x80000000000): return 43;
+  case UINT64_C(0x100000000000): return 44;
+  case UINT64_C(0x200000000000): return 45;
+  case UINT64_C(0x400000000000): return 46;
+  case UINT64_C(0x800000000000): return 47;
+  case UINT64_C(0x1000000000000): return 48;
+  case UINT64_C(0x2000000000000): return 49;
+  case UINT64_C(0x4000000000000): return 50;
+  case UINT64_C(0x8000000000000): return 51;
+  case UINT64_C(0x10000000000000): return 52;
+  case UINT64_C(0x20000000000000): return 53;
+  case UINT64_C(0x40000000000000): return 54;
+  case UINT64_C(0x80000000000000): return 55;
+  case UINT64_C(0x100000000000000): return 56;
+  case UINT64_C(0x200000000000000): return 57;
+  case UINT64_C(0x400000000000000): return 58;
+  case UINT64_C(0x800000000000000): return 59;
+  case UINT64_C(0x1000000000000000): return 60;
+  case UINT64_C(0x2000000000000000): return 61;
+  case UINT64_C(0x4000000000000000): return 62;
+  case UINT64_C(0x8000000000000000): return 63;
+  }
   return (size_t)-1;
 }
 
@@ -3342,58 +3342,26 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
   mask = m;
 #if __BIG_ENDIAN__
   switch ((len & 7)) {
-  case 0:
-    return mask;
-  case 7:
-    buf[6] ^= ((uint8_t *)(&mask))[6];
-  /* fall through */
-  case 6:
-    buf[5] ^= ((uint8_t *)(&mask))[5];
-  /* fall through */
-  case 5:
-    buf[4] ^= ((uint8_t *)(&mask))[4];
-  /* fall through */
-  case 4:
-    buf[3] ^= ((uint8_t *)(&mask))[3];
-  /* fall through */
-  case 3:
-    buf[2] ^= ((uint8_t *)(&mask))[2];
-  /* fall through */
-  case 2:
-    buf[1] ^= ((uint8_t *)(&mask))[1];
-  /* fall through */
+  case 0: return mask;
+  case 7: buf[6] ^= ((uint8_t *)(&mask))[6]; /* fall through */
+  case 6: buf[5] ^= ((uint8_t *)(&mask))[5]; /* fall through */
+  case 5: buf[4] ^= ((uint8_t *)(&mask))[4]; /* fall through */
+  case 4: buf[3] ^= ((uint8_t *)(&mask))[3]; /* fall through */
+  case 3: buf[2] ^= ((uint8_t *)(&mask))[2]; /* fall through */
+  case 2: buf[1] ^= ((uint8_t *)(&mask))[1]; /* fall through */
   case 1:
     buf[0] ^= ((uint8_t *)(&mask))[0];
     /* fall through */
   }
 #else
   switch ((len & 7)) {
-  case 0:
-    return mask;
-  case 7:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
-  case 6:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
-  case 5:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
-  case 4:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
-  case 3:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
-  case 2:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-  /* fall through */
+  case 0: return mask;
+  case 7: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
+  case 6: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
+  case 5: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
+  case 4: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
+  case 3: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
+  case 2: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
   case 1:
     (buf++)[0] ^= m & 0xFF;
     m >>= 8;
@@ -3430,27 +3398,13 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   } pn;
   pn.p64 = &t;
   switch ((len & 7)) {
-  case 7:
-    buf[6] ^= pn.p8[6];
-  /* fall through */
-  case 6:
-    buf[5] ^= pn.p8[5];
-  /* fall through */
-  case 5:
-    buf[4] ^= pn.p8[4];
-  /* fall through */
-  case 4:
-    buf[3] ^= pn.p8[3];
-  /* fall through */
-  case 3:
-    buf[2] ^= pn.p8[2];
-  /* fall through */
-  case 2:
-    buf[1] ^= pn.p8[1];
-  /* fall through */
-  case 1:
-    buf[0] ^= pn.p8[0];
-    /* fall through */
+  case 7: buf[6] ^= pn.p8[6]; /* fall through */
+  case 6: buf[5] ^= pn.p8[5]; /* fall through */
+  case 5: buf[4] ^= pn.p8[4]; /* fall through */
+  case 4: buf[3] ^= pn.p8[3]; /* fall through */
+  case 3: buf[2] ^= pn.p8[2]; /* fall through */
+  case 2: buf[1] ^= pn.p8[1]; /* fall through */
+  case 1: buf[0] ^= pn.p8[0]; /* fall through */
   }
 }
 
@@ -3852,7 +3806,6 @@ FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
 /** Multi-precision - returns the index for the least significant bit or -1. */
 FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 
-// clang-format on
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
@@ -4615,20 +4568,16 @@ SFUNC int64_t fio_atol(char **pstr) {
   }
   switch (*p) {
   case 'x': /* fall through */
-  case 'X':
-    goto is_hex;
+  case 'X': goto is_hex;
   case 'b': /* fall through */
-  case 'B':
-    goto is_binary;
+  case 'B': goto is_binary;
   case '0':
     ++p;
     switch (*p) {
     case 'x': /* fall through */
-    case 'X':
-      goto is_hex;
+    case 'X': goto is_hex;
     case 'b': /* fall through */
-    case 'B':
-      goto is_binary;
+    case 'B': goto is_binary;
     }
     goto is_base8;
   }
@@ -4884,9 +4833,7 @@ zero:
     dest[len++] = '0';
     dest[len++] = 'b';
     break;
-  case 8:
-    dest[len++] = '0';
-    break;
+  case 8: dest[len++] = '0'; break;
   case 16:
     dest[len++] = '0';
     dest[len++] = 'x';
@@ -4924,10 +4871,8 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
       *start = '.'; // locale issues?
     /* fall through */
     case 'e': /* fall through */
-    case '.': /* fall through */
-      goto finish;
-    case 0:
-      goto add_dot_zero;
+    case '.': /* fall through */ goto finish;
+    case 0: goto add_dot_zero;
     }
     ++start;
   }
@@ -5057,8 +5002,7 @@ SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   switch (base) {
   case 2: /* overflow - unsupported */
   case 8: /* overflow - unsupported */
-  case 10:
-    return sprintf(dest, "%" PRId64, num);
+  case 10: return sprintf(dest, "%" PRId64, num);
   case 16:
     if (num >= 0)
       return sprintf(dest, "0x%.16" PRIx64, num);
@@ -5815,32 +5759,31 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
                         FIO_RISKY_BUF2U64(data + 24));
     data += 32;
   }
-  switch (len & 24) { // clang-format off
-  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /* fall through */
-  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8)); /* fall through */
-  case 8:  FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
-    data += len & 24;
-  } // clang-format on
+  switch (len & 24) {
+  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /*fall through*/
+  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));  /*fall through*/
+  case 8: FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0)); data += len & 24;
+  }
 
   /* add offset information to padding */
   uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
-  switch ((len & 7)) { // clang-format off
+  switch ((len & 7)) {
   case 7: tmp |= ((uint64_t)data[6]) << 48; /* fall through */
   case 6: tmp |= ((uint64_t)data[5]) << 40; /* fall through */
   case 5: tmp |= ((uint64_t)data[4]) << 32; /* fall through */
   case 4: tmp |= ((uint64_t)data[3]) << 24; /* fall through */
   case 3: tmp |= ((uint64_t)data[2]) << 16; /* fall through */
   case 2: tmp |= ((uint64_t)data[1]) << 8;  /* fall through */
-  case 1: tmp |= ((uint64_t)data[0]);
-    /* the last (now padded) byte's position */
-    switch ((len & 24)) {
-    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /* offset 24 in 32 byte segment */
-    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /* offset 16 in 32 byte segment */
-    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset  8  in 32 byte segment */
-    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset  0  in 32 byte segment */
+  case 1:
+    tmp |= ((uint64_t)data[0]);
+    switch ((len & 24)) { /* the last (now padded) byte's position */
+    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /*offset 24 in 32 byte segment*/
+    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /*offset 16 in 32 byte segment*/
+    case 8: FIO_RISKY3_ROUND64(1, tmp); break;  /*offset  8 in 32 byte segment*/
+    case 0: FIO_RISKY3_ROUND64(0, tmp); break;  /*offset  0 in 32 byte segment*/
     }
-  } // clang-format on
+  }
 
   /* irreversible avalanche... I think */
   uint64_t r = (len) ^ ((uint64_t)len << 36);
@@ -5938,27 +5881,27 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     register const size_t word_tail_len = (len & 24);
     register uint64_t tmp = 0;
     w[0] = w[1] = w[2] = w[3] = 0;
-    switch (word_tail_len) { // clang-format off
-      case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
-      case 16: w[1] = fio_buf2u64_little(data + 8 ); /* fall through */
-      case 8:  w[0] = fio_buf2u64_little(data);
-      data += word_tail_len;
+    switch (word_tail_len) {
+    case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
+    case 16: w[1] = fio_buf2u64_little(data + 8);  /* fall through */
+    case 8: w[0] = fio_buf2u64_little(data); data += word_tail_len;
     }
     switch ((len & 7)) {
-      case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48);    /* fall through */
-      case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40);    /* fall through */
-      case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32);    /* fall through */
-      case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24);    /* fall through */
-      case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16);    /* fall through */
-      case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);     /* fall through */
-      case 1: tmp |= (((uint64_t)data[0] & 0xFF));
-      switch(word_tail_len) {
-        case 24: w[3] = tmp; break;
-        case 16: w[2] = tmp; break;
-        case 8:  w[1] = tmp; break;
-        case 0:  w[0] = tmp; break;
+    case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48); /* fall through */
+    case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40); /* fall through */
+    case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32); /* fall through */
+    case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24); /* fall through */
+    case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16); /* fall through */
+    case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);  /* fall through */
+    case 1:
+      tmp |= (((uint64_t)data[0] & 0xFF));
+      switch (word_tail_len) {
+      case 24: w[3] = tmp; break;
+      case 16: w[2] = tmp; break;
+      case 8: w[1] = tmp; break;
+      case 0: w[0] = tmp; break;
       }
-    } // clang-format on
+    }
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -6077,16 +6020,18 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
     fio___rand_buffer[(offset++ & 3)] ^= tmp;
     buf += 8;
   }
-  switch (len & 7) { // clang-format off
+  switch (len & 7) {
   case 7: tmp <<= 8; tmp |= buf[6]; /* fall through */
   case 6: tmp <<= 8; tmp |= buf[5]; /* fall through */
   case 5: tmp <<= 8; tmp |= buf[4]; /* fall through */
   case 4: tmp <<= 8; tmp |= buf[3]; /* fall through */
   case 3: tmp <<= 8; tmp |= buf[2]; /* fall through */
   case 2: tmp <<= 8; tmp |= buf[1]; /* fall through */
-  case 1: tmp <<= 8; tmp |= buf[1];
-          fio___rand_buffer[(offset & 3)] ^= tmp;
-  } // clang-format on
+  case 1:
+    tmp <<= 8;
+    tmp |= buf[1];
+    fio___rand_buffer[(offset & 3)] ^= tmp;
+  }
 }
 
 /* used here, defined later */
@@ -6183,26 +6128,13 @@ small_random:
     uint64_t tmp = fio_rand64();
     /* leftover bytes */
     switch ((len & 7)) {
-    case 7:
-      data[6] = (tmp >> 8) & 0xFF;
-      /* fall through */
-    case 6:
-      data[5] = (tmp >> 16) & 0xFF;
-      /* fall through */
-    case 5:
-      data[4] = (tmp >> 24) & 0xFF;
-      /* fall through */
-    case 4:
-      data[3] = (tmp >> 32) & 0xFF;
-      /* fall through */
-    case 3:
-      data[2] = (tmp >> 40) & 0xFF;
-      /* fall through */
-    case 2:
-      data[1] = (tmp >> 48) & 0xFF;
-      /* fall through */
-    case 1:
-      data[0] = (tmp >> 56) & 0xFF;
+    case 7: data[6] = (tmp >> 8) & 0xFF;  /* fall through */
+    case 6: data[5] = (tmp >> 16) & 0xFF; /* fall through */
+    case 5: data[4] = (tmp >> 24) & 0xFF; /* fall through */
+    case 4: data[3] = (tmp >> 32) & 0xFF; /* fall through */
+    case 3: data[2] = (tmp >> 40) & 0xFF; /* fall through */
+    case 2: data[1] = (tmp >> 48) & 0xFF; /* fall through */
+    case 1: data[0] = (tmp >> 56) & 0xFF;
     }
   }
 }
@@ -7114,8 +7046,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
   uint64_t n[2] = {0, 0};
   /* read / pad leftover */
   ((uint8_t *)n)[len & 15] = 0x01;
-  switch ((len & 15)) {
-    // clang-format off
+  switch ((len & 15)) { // clang-format off
     case 15: n[1] |= ((uint64_t)msg[14] & 0xFF) << 48; /* fall through */
     case 14: n[1] |= ((uint64_t)msg[13] & 0xFF) << 40; /* fall through */
     case 13: n[1] |= ((uint64_t)msg[12] & 0xFF) << 32; /* fall through */
@@ -7132,8 +7063,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
     case 2:  n[0] |= ((uint64_t)msg[ 1] & 0xFF) <<  8; /* fall through */
     case 1:  n[0] |= ((uint64_t)msg[ 0] & 0xFF) <<  0;
              fio___poly_consume128bit(pl, (void*)n, 0);
-    // clang-format on
-  }
+  } // clang-format on
   (void)msg;
   (void)len;
 }
@@ -7182,8 +7112,7 @@ FIO_IFUNC fio___chacha_u fio___chacha_init(void *key,
               fio_buf2u32_little(nounce),
               fio_buf2u32_little((uint8_t *)nounce + 4),
               fio_buf2u32_little((uint8_t *)nounce + 8),
-              // clang-format on
-          },
+          }, // clang-format on
   };
   return o;
 }
@@ -9209,7 +9138,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       d += sizeof(size_t);
       s += sizeof(size_t);
     }
-    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7: *(d++) = *(s++); /* fall through */
     case 6: *(d++) = *(s++); /* fall through */
     case 5: *(d++) = *(s++); /* fall through */
@@ -9217,7 +9146,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case 3: *(d++) = *(s++); /* fall through */
     case 2: *(d++) = *(s++); /* fall through */
     case 1: *(d++) = *(s++); /* fall through */
-    } // clang-format on
+    }
     return;
   } else {
     /* walk backwards (memmove) */
@@ -9246,7 +9175,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
       s -= sizeof(size_t);
       ((size_t *)d)[0] = ((size_t *)s)[0];
     }
-    switch ((bytes & (sizeof(size_t) - 1))) { // clang-format off
+    switch ((bytes & (sizeof(size_t) - 1))) {
     case 7: *(--d) = *(--s); /* fall through */
     case 6: *(--d) = *(--s); /* fall through */
     case 5: *(--d) = *(--s); /* fall through */
@@ -9254,7 +9183,7 @@ SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
     case 3: *(--d) = *(--s); /* fall through */
     case 2: *(--d) = *(--s); /* fall through */
     case 1: *(--d) = *(--s); /* fall through */
-    } // clang-format on
+    }
   }
 }
 /** an 8 byte aligned memset implementation. */
@@ -9279,16 +9208,15 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
     dest += 4;
   }
   switch (bytes & 24) {
-  case 24:
-    *(dest++) = data; /* fall through */
-  case 16:
-    *(dest++) = data; /* fall through */
-  case 8:
-    *(dest++) = data; /* fall through */
+  case 24: *(dest++) = data; /* fall through */
+  case 16: *(dest++) = data; /* fall through */
+  case 8: *(dest++) = data;  /* fall through */
   }
-  // clang-format off
-  union { uint64_t u64; uint8_t u8[8]; } u = {.u64 = data};
-  switch (bytes & 7) { 
+  union {
+    uint64_t u64;
+    uint8_t u8[8];
+  } u = {.u64 = data};
+  switch (bytes & 7) {
   case 7: ((uint8_t *)dest)[6] = u.u8[6]; /* fall through */
   case 6: ((uint8_t *)dest)[5] = u.u8[5]; /* fall through */
   case 5: ((uint8_t *)dest)[4] = u.u8[4]; /* fall through */
@@ -9296,7 +9224,7 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
   case 3: ((uint8_t *)dest)[2] = u.u8[2]; /* fall through */
   case 2: ((uint8_t *)dest)[1] = u.u8[1]; /* fall through */
   case 1: ((uint8_t *)dest)[0] = u.u8[0];
-  } // clang-format on
+  }
 }
 
 /**
@@ -9306,17 +9234,95 @@ SFUNC void fio_memset_aligned(void *restrict dest_,
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-  const char *cbuf = (const char *)buffer;
+  union {
+    const char *c;
+    const uint64_t *u64;
+    uintptr_t uptr;
+  } u = {.c = (const char *)buffer}, end = {.c = (const char *)buffer + len};
+
+  if (len > 7) {
+#if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+    /* align pointer */
+#define FIO___MEMCHR_TEST(i)                                                   \
+  /* fall through */ case i:                                                   \
+    if (*u.c == token)                                                         \
+      return (void *)u.c;                                                      \
+    ++u.c;
+    switch ((u.uptr & 7)) {
+      FIO___MEMCHR_TEST(1); /* fall through */
+      FIO___MEMCHR_TEST(2); /* fall through */
+      FIO___MEMCHR_TEST(3); /* fall through */
+      FIO___MEMCHR_TEST(4); /* fall through */
+      FIO___MEMCHR_TEST(5); /* fall through */
+      FIO___MEMCHR_TEST(6); /* fall through */
+      FIO___MEMCHR_TEST(7);
+#undef FIO___MEMCHR_TEST
+    }
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+    {  /* SIMD like approach */
+      const uint64_t umask = ~(0x0101010101010101ULL * (uint8_t)token);
+      uint64_t r[4] FIO_ALIGN(32) = {0};
+      while (u.c + 31 < end.c) { // clang-format off
+        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
+        r[0] = fio_has_full_byte64(r[0]);
+        r[1] = fio_has_full_byte64(r[1]);
+        r[2] = fio_has_full_byte64(r[2]);
+        r[3] = fio_has_full_byte64(r[3]);
+        if (!(r[0] | r[1] | r[2] | r[3])) {
+          u.c += 32;
+          continue;
+        }
+        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+        if (r[1]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
+        if (r[2]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[2])) + 16);
+        return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[3])) + 24);
+      }
+      if (u.c + 15 < end.c) {
+        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask;
+        r[0] = fio_has_full_byte64(r[0]); r[1] = fio_has_full_byte64(r[1]);
+        if(r[0] | r[1]) {
+          if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+          return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
+        }
+        u.c += 16;
+      }
+      if (u.c + 7 < end.c) {
+        r[0] = u.u64[0] ^ umask; r[0] = fio_has_full_byte64(r[0]);
+        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
+        u.c += 8;
+      } // clang-format on
+    }
+  }
+  while (u.c < end.c) {
+    if (u.c[0] == token)
+      return (void *)u.c;
+    ++u.c;
+  }
+  return NULL;
+}
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr2(const void *buffer, const char token, size_t len) {
+  if (!buffer || !len)
+    return NULL;
+  union {
+    const char *c;
+    const uint64_t *u64;
+    uintptr_t uptr;
+  } u = {.c = (const char *)buffer};
 
 #if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
   /* align pointer if required */
 #define FIO___MEMCHR_TEST(i)                                                   \
   /* fall through */ case i:                                                   \
-    if (*cbuf == token)                                                        \
-      return (void *)cbuf;                                                     \
-    ++cbuf;                                                                    \
+    if (*u.c == token)                                                         \
+      return (void *)u.c;                                                      \
+    ++u.c;                                                                     \
     --len;
-  switch (((uintptr_t)cbuf & 7)) {
+  switch ((u.uptr & 7)) {
     FIO___MEMCHR_TEST(1); /* fall through */
     FIO___MEMCHR_TEST(2); /* fall through */
     FIO___MEMCHR_TEST(3); /* fall through */
@@ -9329,20 +9335,19 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
 #endif
 
   { /* bit-magic SIMD, always portable */
-    const uint64_t umask = 0x0101010101010101ULL * (uint8_t)token;
-    const uint64_t *ubuf = (const uint64_t *)cbuf;
+    const uint64_t umask = ~(0x0101010101010101ULL * (uint8_t)token);
     register uint64_t r0, r1, r2, r3;
 #define FIO___MEMCHR_TEST(i)                                                   \
   if (r##i)                                                                    \
-  return (void *)(((const char *)(ubuf + i)) +                                 \
+  return (void *)(((const char *)(u.u64 + i)) +                                \
                   fio_bits_lsb_index(fio_has_byte2bitmap(r##i)))
 
     /* consume 32 byte groups */
-    for (; len >= 32; (len -= 32), (ubuf += 4)) {
-      if (!((r0 = fio_has_zero_byte64(umask ^ ubuf[0])) |
-            (r1 = fio_has_zero_byte64(umask ^ ubuf[1])) |
-            (r2 = fio_has_zero_byte64(umask ^ ubuf[2])) |
-            (r3 = fio_has_zero_byte64(umask ^ ubuf[3]))))
+    for (; len >= 32; (len -= 32), (u.u64 += 4)) {
+      if (!((r0 = fio_has_full_byte64(umask ^ u.u64[0])) |
+            (r1 = fio_has_full_byte64(umask ^ u.u64[1])) |
+            (r2 = fio_has_full_byte64(umask ^ u.u64[2])) |
+            (r3 = fio_has_full_byte64(umask ^ u.u64[3]))))
         continue;
       FIO___MEMCHR_TEST(0);
       FIO___MEMCHR_TEST(1);
@@ -9351,24 +9356,24 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     }
     /* consume 32 byte partials of 8 byte groups (so reminder <= 7 bytes) */
     r0 = r1 = r2 = 0;
-    switch ((len & 24)) { // clang-format off
-    case 24: r2 = fio_has_zero_byte64(umask ^ ubuf[2]); /* fall through */
-    case 16: r1 = fio_has_zero_byte64(umask ^ ubuf[1]); /* fall through */
-    case 8:  r0 = fio_has_zero_byte64(umask ^ ubuf[0]);
-             FIO___MEMCHR_TEST(0);
-             FIO___MEMCHR_TEST(1);
-             FIO___MEMCHR_TEST(2);
-    } // clang-format on
+    switch ((len & 24)) {
+    case 24: r2 = fio_has_full_byte64(umask ^ u.u64[2]); /* fall through */
+    case 16: r1 = fio_has_full_byte64(umask ^ u.u64[1]); /* fall through */
+    case 8:
+      r0 = fio_has_full_byte64(umask ^ u.u64[0]);
+      FIO___MEMCHR_TEST(0);
+      FIO___MEMCHR_TEST(1);
+      FIO___MEMCHR_TEST(2);
+    }
 #undef FIO___MEMCHR_TEST
     /* reset char pointer value */
-    cbuf = (const char *)ubuf;
   }
   /* All that's left is a maximum of 7 bytes */
 #define FIO___MEMCHR_TEST()                                                    \
-  if (cbuf[0] == token)                                                        \
-    return (void *)cbuf;                                                       \
-  ++cbuf; /* fall through */
-  switch (len & 7) { // clang-format off
+  if (u.c[0] == token)                                                         \
+    return (void *)u.c;                                                        \
+  ++u.c; /* fall through */
+  switch (len & 7) {
   case 7: FIO___MEMCHR_TEST() /* fall through */
   case 6: FIO___MEMCHR_TEST() /* fall through */
   case 5: FIO___MEMCHR_TEST() /* fall through */
@@ -9376,7 +9381,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   case 3: FIO___MEMCHR_TEST() /* fall through */
   case 2: FIO___MEMCHR_TEST() /* fall through */
   case 1: FIO___MEMCHR_TEST() /* fall through */
-  }       // clang-format on
+  }
   return NULL;
 #undef FIO___MEMCHR_TEST
 }
@@ -11409,7 +11414,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
   for (int len_i = 5; len_i < 20; ++len_i) {
     const size_t mem_len = (1ULL << len_i) - 1;
-    const size_t token_index = (mem_len >> 1) + (mem_len >> 2);
+    const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
     fio_memset_aligned(mem,
@@ -11430,7 +11435,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
     fprintf(stderr,
             "\tfio_memchr\t\t(%zu bytes):\t%zu us\n",
-            mem_len,
+            token_index,
             (size_t)(end - start));
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
@@ -11442,7 +11447,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
     fprintf(stderr,
             "\tsystem memchr\t\t(%zu bytes):\t%zu us\n",
-            mem_len,
+            token_index,
             (size_t)(end - start));
 
     free(mem);
@@ -17137,8 +17142,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
     pat.len--;
 
     switch (d) {
-    case '?': /* Wildcard: anything goes */
-      break;
+    case '?': /* Wildcard: anything goes */ break;
 
     case '*':       /* Any-length wildcard */
       if (!pat.len) /* Optimize trailing * case */
@@ -17183,9 +17187,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
       pat.buf = (char *)cls;
 
     } break;
-    case '\\':
-      d = *(uint8_t *)pat.buf++;
-      pat.len--;
+    case '\\': d = *(uint8_t *)pat.buf++; pat.len--;
     /* fall through */
     default: /* Literal character */
       if (c == d)

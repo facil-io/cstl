@@ -83,8 +83,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
     pat.len--;
 
     switch (d) {
-    case '?': /* Wildcard: anything goes */
-      break;
+    case '?': /* Wildcard: anything goes */ break;
 
     case '*':       /* Any-length wildcard */
       if (!pat.len) /* Optimize trailing * case */
@@ -129,9 +128,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
       pat.buf = (char *)cls;
 
     } break;
-    case '\\':
-      d = *(uint8_t *)pat.buf++;
-      pat.len--;
+    case '\\': d = *(uint8_t *)pat.buf++; pat.len--;
     /* fall through */
     default: /* Literal character */
       if (c == d)

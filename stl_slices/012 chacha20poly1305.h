@@ -268,8 +268,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
   uint64_t n[2] = {0, 0};
   /* read / pad leftover */
   ((uint8_t *)n)[len & 15] = 0x01;
-  switch ((len & 15)) {
-    // clang-format off
+  switch ((len & 15)) { // clang-format off
     case 15: n[1] |= ((uint64_t)msg[14] & 0xFF) << 48; /* fall through */
     case 14: n[1] |= ((uint64_t)msg[13] & 0xFF) << 40; /* fall through */
     case 13: n[1] |= ((uint64_t)msg[12] & 0xFF) << 32; /* fall through */
@@ -286,8 +285,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
     case 2:  n[0] |= ((uint64_t)msg[ 1] & 0xFF) <<  8; /* fall through */
     case 1:  n[0] |= ((uint64_t)msg[ 0] & 0xFF) <<  0;
              fio___poly_consume128bit(pl, (void*)n, 0);
-    // clang-format on
-  }
+  } // clang-format on
   (void)msg;
   (void)len;
 }
@@ -336,8 +334,7 @@ FIO_IFUNC fio___chacha_u fio___chacha_init(void *key,
               fio_buf2u32_little(nounce),
               fio_buf2u32_little((uint8_t *)nounce + 4),
               fio_buf2u32_little((uint8_t *)nounce + 8),
-              // clang-format on
-          },
+          }, // clang-format on
   };
   return o;
 }

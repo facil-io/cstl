@@ -144,32 +144,31 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
                         FIO_RISKY_BUF2U64(data + 24));
     data += 32;
   }
-  switch (len & 24) { // clang-format off
-  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /* fall through */
-  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8)); /* fall through */
-  case 8:  FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0));
-    data += len & 24;
-  } // clang-format on
+  switch (len & 24) {
+  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /*fall through*/
+  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));  /*fall through*/
+  case 8: FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0)); data += len & 24;
+  }
 
   /* add offset information to padding */
   uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
   /* leftover bytes */
-  switch ((len & 7)) { // clang-format off
+  switch ((len & 7)) {
   case 7: tmp |= ((uint64_t)data[6]) << 48; /* fall through */
   case 6: tmp |= ((uint64_t)data[5]) << 40; /* fall through */
   case 5: tmp |= ((uint64_t)data[4]) << 32; /* fall through */
   case 4: tmp |= ((uint64_t)data[3]) << 24; /* fall through */
   case 3: tmp |= ((uint64_t)data[2]) << 16; /* fall through */
   case 2: tmp |= ((uint64_t)data[1]) << 8;  /* fall through */
-  case 1: tmp |= ((uint64_t)data[0]);
-    /* the last (now padded) byte's position */
-    switch ((len & 24)) {
-    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /* offset 24 in 32 byte segment */
-    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /* offset 16 in 32 byte segment */
-    case 8:  FIO_RISKY3_ROUND64(1, tmp); break; /* offset  8  in 32 byte segment */
-    case 0:  FIO_RISKY3_ROUND64(0, tmp); break; /* offset  0  in 32 byte segment */
+  case 1:
+    tmp |= ((uint64_t)data[0]);
+    switch ((len & 24)) { /* the last (now padded) byte's position */
+    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /*offset 24 in 32 byte segment*/
+    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /*offset 16 in 32 byte segment*/
+    case 8: FIO_RISKY3_ROUND64(1, tmp); break;  /*offset  8 in 32 byte segment*/
+    case 0: FIO_RISKY3_ROUND64(0, tmp); break;  /*offset  0 in 32 byte segment*/
     }
-  } // clang-format on
+  }
 
   /* irreversible avalanche... I think */
   uint64_t r = (len) ^ ((uint64_t)len << 36);
@@ -267,27 +266,27 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
     register const size_t word_tail_len = (len & 24);
     register uint64_t tmp = 0;
     w[0] = w[1] = w[2] = w[3] = 0;
-    switch (word_tail_len) { // clang-format off
-      case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
-      case 16: w[1] = fio_buf2u64_little(data + 8 ); /* fall through */
-      case 8:  w[0] = fio_buf2u64_little(data);
-      data += word_tail_len;
+    switch (word_tail_len) {
+    case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
+    case 16: w[1] = fio_buf2u64_little(data + 8);  /* fall through */
+    case 8: w[0] = fio_buf2u64_little(data); data += word_tail_len;
     }
     switch ((len & 7)) {
-      case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48);    /* fall through */
-      case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40);    /* fall through */
-      case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32);    /* fall through */
-      case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24);    /* fall through */
-      case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16);    /* fall through */
-      case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);     /* fall through */
-      case 1: tmp |= (((uint64_t)data[0] & 0xFF));
-      switch(word_tail_len) {
-        case 24: w[3] = tmp; break;
-        case 16: w[2] = tmp; break;
-        case 8:  w[1] = tmp; break;
-        case 0:  w[0] = tmp; break;
+    case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48); /* fall through */
+    case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40); /* fall through */
+    case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32); /* fall through */
+    case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24); /* fall through */
+    case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16); /* fall through */
+    case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);  /* fall through */
+    case 1:
+      tmp |= (((uint64_t)data[0] & 0xFF));
+      switch (word_tail_len) {
+      case 24: w[3] = tmp; break;
+      case 16: w[2] = tmp; break;
+      case 8: w[1] = tmp; break;
+      case 0: w[0] = tmp; break;
       }
-    } // clang-format on
+    }
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -406,16 +405,18 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
     fio___rand_buffer[(offset++ & 3)] ^= tmp;
     buf += 8;
   }
-  switch (len & 7) { // clang-format off
+  switch (len & 7) {
   case 7: tmp <<= 8; tmp |= buf[6]; /* fall through */
   case 6: tmp <<= 8; tmp |= buf[5]; /* fall through */
   case 5: tmp <<= 8; tmp |= buf[4]; /* fall through */
   case 4: tmp <<= 8; tmp |= buf[3]; /* fall through */
   case 3: tmp <<= 8; tmp |= buf[2]; /* fall through */
   case 2: tmp <<= 8; tmp |= buf[1]; /* fall through */
-  case 1: tmp <<= 8; tmp |= buf[1];
-          fio___rand_buffer[(offset & 3)] ^= tmp;
-  } // clang-format on
+  case 1:
+    tmp <<= 8;
+    tmp |= buf[1];
+    fio___rand_buffer[(offset & 3)] ^= tmp;
+  }
 }
 
 /* used here, defined later */
@@ -512,26 +513,13 @@ small_random:
     uint64_t tmp = fio_rand64();
     /* leftover bytes */
     switch ((len & 7)) {
-    case 7:
-      data[6] = (tmp >> 8) & 0xFF;
-      /* fall through */
-    case 6:
-      data[5] = (tmp >> 16) & 0xFF;
-      /* fall through */
-    case 5:
-      data[4] = (tmp >> 24) & 0xFF;
-      /* fall through */
-    case 4:
-      data[3] = (tmp >> 32) & 0xFF;
-      /* fall through */
-    case 3:
-      data[2] = (tmp >> 40) & 0xFF;
-      /* fall through */
-    case 2:
-      data[1] = (tmp >> 48) & 0xFF;
-      /* fall through */
-    case 1:
-      data[0] = (tmp >> 56) & 0xFF;
+    case 7: data[6] = (tmp >> 8) & 0xFF;  /* fall through */
+    case 6: data[5] = (tmp >> 16) & 0xFF; /* fall through */
+    case 5: data[4] = (tmp >> 24) & 0xFF; /* fall through */
+    case 4: data[3] = (tmp >> 32) & 0xFF; /* fall through */
+    case 3: data[2] = (tmp >> 40) & 0xFF; /* fall through */
+    case 2: data[1] = (tmp >> 48) & 0xFF; /* fall through */
+    case 1: data[0] = (tmp >> 56) & 0xFF;
     }
   }
 }

@@ -221,20 +221,16 @@ SFUNC int64_t fio_atol(char **pstr) {
   }
   switch (*p) {
   case 'x': /* fall through */
-  case 'X':
-    goto is_hex;
+  case 'X': goto is_hex;
   case 'b': /* fall through */
-  case 'B':
-    goto is_binary;
+  case 'B': goto is_binary;
   case '0':
     ++p;
     switch (*p) {
     case 'x': /* fall through */
-    case 'X':
-      goto is_hex;
+    case 'X': goto is_hex;
     case 'b': /* fall through */
-    case 'B':
-      goto is_binary;
+    case 'B': goto is_binary;
     }
     goto is_base8;
   }
@@ -490,9 +486,7 @@ zero:
     dest[len++] = '0';
     dest[len++] = 'b';
     break;
-  case 8:
-    dest[len++] = '0';
-    break;
+  case 8: dest[len++] = '0'; break;
   case 16:
     dest[len++] = '0';
     dest[len++] = 'x';
@@ -530,10 +524,8 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
       *start = '.'; // locale issues?
     /* fall through */
     case 'e': /* fall through */
-    case '.': /* fall through */
-      goto finish;
-    case 0:
-      goto add_dot_zero;
+    case '.': /* fall through */ goto finish;
+    case 0: goto add_dot_zero;
     }
     ++start;
   }
@@ -663,8 +655,7 @@ SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   switch (base) {
   case 2: /* overflow - unsupported */
   case 8: /* overflow - unsupported */
-  case 10:
-    return sprintf(dest, "%" PRId64, num);
+  case 10: return sprintf(dest, "%" PRId64, num);
   case 16:
     if (num >= 0)
       return sprintf(dest, "0x%.16" PRIx64, num);
