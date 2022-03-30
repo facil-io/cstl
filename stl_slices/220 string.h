@@ -233,6 +233,9 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, destroy)(FIO_STR_PTR s);
  */
 FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s);
 
+/** Frees the pointer returned by `detach`. */
+SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
+
 /* *****************************************************************************
 String API - String state (data pointers, length, capacity, etc')
 ***************************************************************************** */
@@ -603,9 +606,9 @@ String Macro Helpers
  * directly to `mmap` (due to their size, usually over 12KB).
  */
 #define FIO_STR_CAPA2WORDS(num)                                                \
-  ((size_t)(                                                                   \
-      (size_t)(num) |                                                          \
-      ((sizeof(long double) > 16) ? (sizeof(long double) - 1) : (size_t)15)))
+  ((size_t)((size_t)(num) |                                                    \
+            ((sizeof(long double) > 16) ? (sizeof(long double) - 1)            \
+                                        : (size_t)15)))
 
 /* *****************************************************************************
 String Constructors (inline)
@@ -1024,6 +1027,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 String Implementation - Memory management
 ***************************************************************************** */
 
+/** Frees the pointer returned by `detach`. */
+SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
+  FIO_MEM_FREE_(ptr, -1);
+}
+
 /**
  * Reserves at least `amount` of bytes for the string's data (reserved count
  * includes used data).
@@ -1203,9 +1211,7 @@ uint8_t fio__str_utf8_map[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
               (((uint8_t *)(ptr))[3] & 63);                                    \
       (ptr) += 4;                                                              \
       break;                                                                   \
-    default:                                                                   \
-      (i32) = -1;                                                              \
-      break;                                                                   \
+    default: (i32) = -1; break;                                                \
     }                                                                          \
   } while (0);
 #endif
@@ -1291,9 +1297,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
       ++*pos;
       do {
         switch (fio__str_utf8_map[((uint8_t *)p)[0] >> 3]) {
-        case 5:
-          ++c;
-          break;
+        case 5: ++c; break;
         case 4:
           if (c != 3)
             goto error;
@@ -1317,8 +1321,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
             goto error;
           ++(*pos);
           break;
-        default:
-          goto error;
+        default: goto error;
         }
         --p;
       } while (p > state.buf && *pos);
@@ -1593,9 +1596,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
     case '\t': /* fall through */
     case '"':  /* fall through */
     case '\\': /* fall through */
-    case '/':  /* fall through */
-      ++extra_len;
-      break;
+    case '/': /* fall through */ ++extra_len; break;
     default:
       /* escaping all control charactes and non-UTF-8 characters */
       extra_len += 5;
@@ -1651,13 +1652,9 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
         break; /* from switch */
       }
       switch (fio__str_utf8_map[src[i] >> 3]) {
-      case 4:
-        dest.buf[at++] = src[i++]; /* fall through */
-      case 3:
-        dest.buf[at++] = src[i++]; /* fall through */
-      case 2:
-        dest.buf[at++] = src[i++];
-        dest.buf[at++] = src[i];
+      case 4: dest.buf[at++] = src[i++]; /* fall through */
+      case 3: dest.buf[at++] = src[i++]; /* fall through */
+      case 2: dest.buf[at++] = src[i++]; dest.buf[at++] = src[i];
       }
       continue;
     }
@@ -1665,30 +1662,14 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
     /* write escape sequence */
     dest.buf[at++] = '\\';
     switch (src[i]) {
-    case '\b':
-      dest.buf[at++] = 'b';
-      break;
-    case '\f':
-      dest.buf[at++] = 'f';
-      break;
-    case '\n':
-      dest.buf[at++] = 'n';
-      break;
-    case '\r':
-      dest.buf[at++] = 'r';
-      break;
-    case '\t':
-      dest.buf[at++] = 't';
-      break;
-    case '"':
-      dest.buf[at++] = '"';
-      break;
-    case '\\':
-      dest.buf[at++] = '\\';
-      break;
-    case '/':
-      dest.buf[at++] = '/';
-      break;
+    case '\b': dest.buf[at++] = 'b'; break;
+    case '\f': dest.buf[at++] = 'f'; break;
+    case '\n': dest.buf[at++] = 'n'; break;
+    case '\r': dest.buf[at++] = 'r'; break;
+    case '\t': dest.buf[at++] = 't'; break;
+    case '"': dest.buf[at++] = '"'; break;
+    case '\\': dest.buf[at++] = '\\'; break;
+    case '/': dest.buf[at++] = '/'; break;
     default:
       /* escaping all control charactes and non-UTF-8 characters */
       if (src[i] < 127) {

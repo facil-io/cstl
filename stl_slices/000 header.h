@@ -1045,10 +1045,18 @@ Common macros
 
 /* Modules required by FIO_SERVER */
 #if defined(FIO_SERVER)
+#ifndef FIO_POLL
 #define FIO_POLL
+#endif
+#ifndef FIO_STREAM
 #define FIO_STREAM
+#endif
+#ifndef FIO_QUEUE
 #define FIO_QUEUE
+#endif
+#ifndef FIO_SIGNAL
 #define FIO_SIGNAL
+#endif
 #endif
 
 /* Modules that require FIO_SOCK */

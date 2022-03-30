@@ -7,12 +7,18 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_SERVER                  /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #include "102 queue.h"              /* Development inclusion - ignore line */
 #include "104 sock.h"               /* Development inclusion - ignore line */
 #include "105 poll.h"               /* Development inclusion - ignore line */
 #include "105 stream.h"             /* Development inclusion - ignore line */
 #include "106 signals.h"            /* Development inclusion - ignore line */
+#include "299 reference counter.h"  /* Development inclusion - ignore line */
+#include "700 cleanup.h"            /* Development inclusion - ignore line */
+#define SFUNC FIO_SFUNC             /* Development inclusion - ignore line */
+#define IFUNC FIO_IFUNC             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -230,8 +236,12 @@ SFUNC void fio_undup(fio_s *io);
 
 /** Suspends future "on_data" events for the IO. */
 SFUNC void fio_suspend(fio_s *io);
+
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_unsuspend(fio_s *io);
+
+/** Returns 1 if the IO handle was suspended. */
+SFUNC int fio_is_suspend(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
@@ -881,10 +891,16 @@ SFUNC void fio_close_now(fio_s *io) {
 
 /** Suspends future "on_data" events for the IO. */
 SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_unsuspend(fio_s *io) {
   if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) & FIO_STATE_SUSPENDED))
     fio_poll_monitor(&fio___srvdata.fds, io->fd, (void *)io, POLLIN);
+}
+
+/** Returns 1 if the IO handle was suspended. */
+SFUNC int fio_is_suspend(fio_s *io) {
+  return (io->state & FIO_STATE_SUSPENDED);
 }
 
 /* *****************************************************************************

@@ -358,6 +358,15 @@ The returned C string is **always dynamic** and **must be freed** using the same
 
 Returns NULL if there's no String data.
 
+#### `STR_dealloc`
+```c
+void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
+```
+
+Frees the pointer returned by [`detach`](#str_detach).
+
+**Note**: this might cause memory leaks if the `size` in the [`FIO_MEM_FREE` macro](#fio_mem_free) was a required parameter, as this function will always use `size == -1` (since the information about the size was lost during `detach`.
+
 ### String API - String state (data pointers, length, capacity, etc')
 
 #### `STR_info`

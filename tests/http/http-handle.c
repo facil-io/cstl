@@ -75,9 +75,13 @@ FIO_IFUNC fio_str_info_s smap_get2(smap_s *map, fio_str_info_s key) {
   return lstr_info(smap_get_ptr(map, h, k));
 }
 
-#define FIO_MAP_NAME            hmap
-#define FIO_MAP_TYPE            sary_s
-#define FIO_MAP_TYPE_COPY(a, b) sary_push(&(a), sary_get((&b), 0))
+#define FIO_MAP_NAME hmap
+#define FIO_MAP_TYPE sary_s
+#define FIO_MAP_TYPE_COPY(a, b)                                                \
+  do {                                                                         \
+    (a) = (sary_s)FIO_ARRAY_INIT;                                              \
+    sary_push(&(a), sary_get((&b), 0));                                        \
+  } while (0)
 #define FIO_MAP_TYPE_DESTROY(o) sary_destroy(&(o))
 #define FIO_MAP_KEY             sstr_s
 #define FIO_MAP_KEY_CMP(a, b)   sstr_is_eq(&(a), &(b))
@@ -798,14 +802,9 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
   }
   switch (cookie.same_site) {
   case HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT: /* fall through */
-  default:
-    break;
-  case HTTP_COOKIE_SAME_SITE_NONE:
-    lstr_write(&c, "SameSite=None;", 14);
-    break;
-  case HTTP_COOKIE_SAME_SITE_LAX:
-    lstr_write(&c, "SameSite=Lax;", 13);
-    break;
+  default: break;
+  case HTTP_COOKIE_SAME_SITE_NONE: lstr_write(&c, "SameSite=None;", 14); break;
+  case HTTP_COOKIE_SAME_SITE_LAX: lstr_write(&c, "SameSite=Lax;", 13); break;
   case HTTP_COOKIE_SAME_SITE_STRICT:
     lstr_write(&c, "SameSite=Strict;", 16);
     break;

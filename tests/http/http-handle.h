@@ -369,8 +369,7 @@ void http_write(http_s *, http_write_args_s args);
 /** Named arguments helper. See http_write and http_write_args_s for details. */
 #define http_write(http_handle, ...)                                           \
   http_write(http_handle, (http_write_args_s){__VA_ARGS__})
-#define http_finish(http_handle)                                               \
-  http_write(http_handle, (http_write_args_s){.finish = 1})
+#define http_finish(http_handle) http_write(http_handle, .finish = 1)
 #endif
 
 #ifdef TEST
