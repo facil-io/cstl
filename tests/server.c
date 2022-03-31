@@ -74,6 +74,16 @@ FIO_SFUNC int http_write_headers_to_string(http_s *h,
 FIO_SFUNC void http_respond(http_s *h) {
 #if HTTP_RESPONSE_ECHO
   str_s out = FIO_STR_INIT;
+  str_write(&out, http_method_get(h).buf, http_method_get(h).len);
+  str_write(&out, " ", 1);
+  str_write(&out, http_path_get(h).buf, http_path_get(h).len);
+  if (http_query_get(h).len) {
+    str_write(&out, "?", 1);
+    str_write(&out, http_query_get(h).buf, http_query_get(h).len);
+  }
+  str_write(&out, " ", 1);
+  str_write(&out, http_version_get(h).buf, http_version_get(h).len);
+  str_write(&out, "\r\n", 2);
   http_request_header_each(h, http_write_headers_to_string, &out);
   if (http_body_length(h)) {
     fio_str_info_s body = http_body_read(h, -1);
@@ -88,6 +98,7 @@ FIO_SFUNC void http_respond(http_s *h) {
              .dealloc = str_dealloc,
              .copy = 0,
              .finish = 1);
+
 #else
   http_response_header_set(h,
                            FIO_STR_INFO1("server"),
