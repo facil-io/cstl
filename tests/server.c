@@ -91,7 +91,6 @@ FIO_SFUNC void http_respond(http_s *h) {
     str_write(&out, body.buf, body.len);
   }
   size_t len = str_len((&out));
-  FIO_LOG_DEBUG("echoing:\n%s", str2ptr(&out));
   http_write(h,
              .data = str_detach(&out),
              .len = len,
