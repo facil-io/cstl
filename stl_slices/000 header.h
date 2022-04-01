@@ -554,6 +554,166 @@ typedef struct fio_buf_info_s {
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 
 /* *****************************************************************************
+String Writer Helpers
+***************************************************************************** */
+
+/**
+ * Writes data to the end of the string in the `fio_str_info_s` struct,
+ * returning an updated `fio_str_info_s` struct.
+ *
+ * The returned string is NUL terminated if edited.
+ *
+ * * `dest` an `fio_str_info_s` struct containing the destination string.
+ *
+ * * `reserve` is a callback that attempts to reserve more memory (i.e., using
+ *   realloc) and returns an updated `fio_str_info_s` struct containing the
+ *   updated capacity and buffer pointer (as well as the original length).
+ *
+ *   On failure the original `fio_str_info_s` should be returned. if `reserve`
+ *   is NULL or fails, the data copied will be truncated.
+ *
+ * * `src` is the data to be written to the end of `dest`.
+ *
+ * * `len` is the length of the data to be written to the end of `dest`.
+ *
+ * Note: this function performs only minimal checks and assumes that `dest` is
+ *       fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is
+ *       valid, etc'.
+ *
+ * An example for a `reserve` callback using the system's `realloc` function:
+ *
+ *      fio_str_info_s fio_str_info_realloc_system(fio_str_info_s dest,
+ *                                                size_t new_capa) {
+ *       void *tmp = realloc(dest.buf, new_capa);
+ *       if (!tmp)
+ *         return dest;
+ *       dest.capa = new_capa;
+ *       dest.buf = (char *)tmp;
+ *       return dest;
+ *     }
+ *
+ * An example for using the function:
+ *
+ *     void example(void) {
+ *       char buf[32];
+ *       fio_str_info_s str = FIO_STR_INFO3(buf, 0, 32);
+ *       str = fio_str_info_write(str, NULL, "The answer is: 0x", 17);
+ *       str.len += fio_ltoa(str.buf + str.len, 42, 16);
+ *       str = fio_str_info_write(str, NULL, "!\n", 2);
+ *       printf("%s", str.buf);
+ *     }
+ */
+FIO_IFUNC fio_str_info_s
+fio_str_info_write(fio_str_info_s dest,
+                   fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                   const void *src,
+                   size_t len) {
+  if (reserve && (dest.capa < dest.len + len + 1)) {
+    const size_t new_len = dest.len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    dest = reserve(dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest.capa < dest.len + 1))
+    return dest;
+  if (FIO_UNLIKELY(dest.capa < dest.len + len + 1)) {
+    len = dest.capa - (dest.len + 1);
+  }
+  if (len && src) {
+    memcpy(dest.buf + dest.len, src, len);
+    dest.len += len;
+    dest.buf[dest.len] = 0;
+  }
+  return dest;
+}
+
+/** Similar to fio_str_info_write, only using vprintf semantics. */
+FIO_IFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
+fio_str_info_vprintf(fio_str_info_s dest,
+                     fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                     const char *format,
+                     va_list argv) {
+  va_list argv_cpy;
+  va_copy(argv_cpy, argv);
+  int len = vsnprintf(NULL, 0, format, argv_cpy);
+  va_end(argv_cpy);
+  if (len <= 0)
+    return dest;
+  if (reserve && (dest.capa < dest.len + len + 1)) {
+    const size_t new_len = dest.len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    dest = reserve(dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest.capa < dest.len + 1))
+    return dest;
+  if (FIO_UNLIKELY(dest.capa < dest.len + len + 1)) {
+    len = dest.capa - (dest.len + 1);
+  }
+  vsnprintf(dest.buf + dest.len, len + 1, format, argv);
+  dest.len += len;
+  return dest;
+}
+
+/** Similar to fio_str_info_write, only using printf semantics. */
+FIO_IFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
+fio_str_info_printf(fio_str_info_s dest,
+                    fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                    const char *format,
+                    ...) {
+  va_list argv;
+  va_start(argv, format);
+  dest = fio_str_info_vprintf(dest, reserve, format, argv);
+  va_end(argv);
+  return dest;
+}
+
+/**
+ * Similar to fio_str_info_write, only replacing a sub-string or inserting a
+ * string in a specific location.
+ */
+FIO_IFUNC fio_str_info_s
+fio_str_info_insert(fio_str_info_s dest,
+                    fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                    intptr_t start_pos,
+                    size_t overwrite_len,
+                    const void *src,
+                    size_t len) {
+  if (start_pos < 0) {
+    start_pos = dest.len + start_pos;
+    if (start_pos < 0)
+      start_pos = 0;
+  }
+  if (dest.len < (size_t)start_pos + len + 1) {
+    if ((size_t)start_pos < dest.len)
+      dest.len = start_pos;
+    return fio_str_info_write(dest, reserve, src, len);
+  }
+  size_t move_start = start_pos + overwrite_len;
+  size_t move_len = dest.len - (start_pos + overwrite_len);
+  if (overwrite_len < len) {
+    /* adjust for possible memory expansion */
+    const size_t extra = len - overwrite_len;
+    if (dest.capa < dest.len + extra + 1) {
+      if (reserve) {
+        const size_t new_len = dest.len + extra;
+        const size_t new_capa =
+            (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+        dest = reserve(dest, new_capa);
+      }
+      if (FIO_UNLIKELY(dest.capa < dest.len + extra + 1)) {
+        move_len -= (dest.len + extra + 1) - dest.capa;
+      }
+    }
+  }
+  memmove(dest.buf + start_pos + len, dest.buf + move_start, move_len);
+  memcpy(dest.buf + start_pos, src, len);
+  dest.len = start_pos + len + move_len;
+  dest.buf[dest.len] = 0;
+  return dest;
+}
+
+/* *****************************************************************************
 Linked Lists Persistent Macros and Types
 ***************************************************************************** */
 
@@ -772,11 +932,13 @@ Miscellaneous helper macros
 #define FIO_LOG_DEBUG2(...)   ((void)0)
 
 #ifdef DEBUG
-#define FIO_LOG_DDEBUG(...)  FIO_LOG_DEBUG(__VA_ARGS__)
-#define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
+#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
 #else
 #define FIO_LOG_DDEBUG(...)  ((void)(0))
 #define FIO_LOG_DDEBUG2(...) ((void)(0))
+#define FIO_ASSERT___PERFORM_SIGNAL()
 #endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
@@ -791,7 +953,7 @@ Miscellaneous helper macros
       FIO_LOG_FATAL("(" FIO__FILE__                                            \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
       fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
-      kill(0, SIGINT);                                                         \
+      FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
   } while (0)
@@ -809,7 +971,7 @@ Miscellaneous helper macros
       FIO_LOG_FATAL("(" FIO__FILE__                                            \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
       fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
-      kill(0, SIGINT);                                                         \
+      FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
   } while (0)

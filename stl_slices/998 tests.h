@@ -158,6 +158,41 @@ static int ary____test_was_destroyed = 0;
 #include __FILE__
 
 /* *****************************************************************************
+fio_str_info_write - Test
+***************************************************************************** */
+
+FIO_SFUNC void fio___dynamic_types_test___fio_str_info_write(void) {
+  fprintf(stderr, "* Testing fio_str_info_s helpers.\n");
+  char mem[16];
+  fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
+  buf = fio_str_info_write(buf, NULL, "Hello World", 11);
+  FIO_ASSERT(mem == buf.buf && buf.len == 11 &&
+                 !memcmp(buf.buf, "Hello World", 12),
+             "fio_str_info_write failed!");
+  buf = fio_str_info_write(buf, NULL, "Hello World", 11);
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "Hello WorldHell", 16),
+             "fio_str_info_write failed to truncate!");
+  buf = fio_str_info_insert(buf, NULL, 0, 5, "Hola", 4);
+  FIO_ASSERT(mem == buf.buf && buf.len == 14 &&
+                 !memcmp(buf.buf, "Hola WorldHell", 15),
+             "fio_str_info_insert at index 0 failed!");
+  buf = fio_str_info_insert(buf, NULL, 5, 9, "World", 5);
+  FIO_ASSERT(mem == buf.buf && buf.len == 10 &&
+                 !memcmp(buf.buf, "Hola World", 11),
+             "fio_str_info_insert end overwrite failed!");
+  buf = fio_str_info_insert(buf, NULL, 5, 0, "my beautiful", 12);
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "Hola my beautif", 16),
+             "fio_str_info_insert failed to truncate!");
+  buf = FIO_STR_INFO3(mem, 0, 16);
+  buf = fio_str_info_printf(buf, NULL, "I think %d is the best answer", 42);
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "I think 42 is t", 16),
+             "fio_str_info_printf failed to truncate!");
+}
+
+/* *****************************************************************************
 Linked List - Test
 ***************************************************************************** */
 
@@ -610,12 +645,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   case 4:
     fprintf(stderr, "* 32bit words size (some features might be slower).\n");
     break;
-  case 8:
-    fprintf(stderr, "* 64bit words size okay.\n");
-    break;
-  case 16:
-    fprintf(stderr, "* 128bit words size... wow!\n");
-    break;
+  case 8: fprintf(stderr, "* 64bit words size okay.\n"); break;
+  case 16: fprintf(stderr, "* 128bit words size... wow!\n"); break;
   default:
     fprintf(stderr, "* Unknown words size %zubit!\n", sizeof(void *) << 3);
     break;
@@ -944,6 +975,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, glob_matching)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sha1)();
+  fprintf(stderr, "===============\n");
+  fio___dynamic_types_test___fio_str_info_write();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");

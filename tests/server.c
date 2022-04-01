@@ -158,7 +158,6 @@ typedef struct {
   http1_parser_s parser;
   fio_s *io;
   http_s *h;
-  fio_str_info_s out;
   int buf_pos;
   int buf_con;
   char buf[]; /* header and data buffer */
@@ -170,7 +169,6 @@ typedef struct {
   do {                                                                         \
     http_free((c).h);                                                          \
     (c).h = NULL;                                                              \
-    FIO_MEM_FREE((c).out.buf, (c).out.capa);                                   \
   } while (0)
 #define FIO_REF_FLEX_TYPE char
 #include "fio-stl.h"
@@ -242,32 +240,6 @@ int http1_start_request(http_s *h, int reserved, int streaming) {
     return -1;
   return -1;
 }
-/** called by the HTTP handle for each header. */
-void http1_write_header(http_s *h, fio_str_info_s name, fio_str_info_s value) {
-  client_s *c = http_controller_data(h);
-  if (!c->io)
-    return;
-  const size_t minimal_capa = (c->out.len + name.len + value.len + 3);
-  if (c->out.capa < minimal_capa) {
-    const size_t new_capa = (minimal_capa + 17) & (~((size_t)15ULL));
-    void *tmp = FIO_MEM_REALLOC(c->out.buf, c->out.capa, new_capa, c->out.len);
-    if (!tmp) {
-      FIO_LOG_ERROR(
-          "Couldn't allocate memory for header output (required %zu bytes)!",
-          new_capa);
-      return;
-    }
-    c->out.buf = tmp;
-    c->out.capa = new_capa;
-  }
-  memcpy(c->out.buf + c->out.len, name.buf, name.len);
-  c->out.buf[c->out.len + name.len] = ':';
-  memcpy(c->out.buf + c->out.len + name.len + 1, value.buf, value.len);
-  c->out.buf[c->out.len + name.len + value.len + 1] = '\r';
-  c->out.buf[c->out.len + name.len + value.len + 2] = '\n';
-  c->out.len = minimal_capa;
-}
-
 /** Called before an HTTP handler link to an HTTP Controller is revoked. */
 void http1_on_unlinked(http_s *h, void *c_) {
   client_s *c = c_; // client_s *c = http_controller_data(h);
@@ -279,58 +251,85 @@ void http1_on_unlinked(http_s *h, void *c_) {
 
 /** Informs the controller that a response is starting. */
 int http1_start_response(http_s *h, int status, int streaming) {
+  (void)status;
   client_s *c = http_controller_data(h);
   if (!c->io)
     return -1;
-  char buf[32];
-  fio_str_info_s ver = http_version_get(h);
-  size_t n_len = fio_ltoa(buf, status, 10);
-  fio_str_info_s ststr = http_status2str(status);
-  FIO_ASSERT(!c->out.buf,
-             "we shouldn't handle http_finish twice concurrently!");
-  size_t capa = (ver.len + ststr.len + n_len + 4);
-  capa = (capa + 15) & (~((size_t)15ULL));
-  c->out.buf = FIO_MEM_REALLOC(NULL, 0, capa, 0);
-  if (!c->out.buf) {
-    FIO_LOG_ERROR("memory allocation error!");
-    return -1;
-  }
-  c->out.capa = capa;
-  c->out.len = (ver.len + ststr.len + n_len + 4);
-  if (ver.len > 15) {
-    FIO_LOG_ERROR("HTTP/1.1 version string too long!");
-    return -1;
-  }
-  memcpy(c->out.buf, ver.buf, ver.len);
-  c->out.buf[ver.len] = ' ';
-  memcpy(c->out.buf + ver.len + 1, buf, n_len);
-  c->out.buf[n_len + ver.len + 1] = ' ';
-  memcpy(c->out.buf + n_len + ver.len + 2, ststr.buf, ststr.len);
-  c->out.buf[n_len + ver.len + ststr.len + 2] = '\r';
-  c->out.buf[n_len + ver.len + ststr.len + 3] = '\n';
   if (streaming) {
     /* TODO: add streaming headers */
   }
   return 0;
 }
 
-static void http_1_free_wrapper(void *ptr) { FIO_MEM_FREE(ptr, 0); }
+static void http_1___str_free(void *ptr) { FIO_MEM_FREE(ptr, 0); }
+static fio_str_info_s http_1___str_reserve(fio_str_info_s dest,
+                                           size_t new_capa) {
+  void *tmp = FIO_MEM_REALLOC(dest.buf, dest.capa, new_capa, dest.len);
+  if (!tmp)
+    return dest;
+  dest.capa = new_capa;
+  dest.buf = (char *)tmp;
+  return dest;
+}
+
+/** called by the HTTP handle for each header. */
+int http1___write_header_callback(http_s *h,
+                                  fio_str_info_s name,
+                                  fio_str_info_s value,
+                                  void *out_) {
+  (void)h;
+  fio_str_info_s *out = (fio_str_info_s *)out_;
+  size_t new_len = out->len + name.len + 1 + value.len + 2;
+  if (out->capa < new_len + 1) {
+    *out = http_1___str_reserve(
+        *out,
+        ((new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL))));
+  }
+  if (out->capa < new_len + 1)
+    return -1;
+  memcpy(out->buf + out->len, name.buf, name.len);
+  out->buf[out->len + name.len] = ':';
+  memcpy(out->buf + out->len + name.len + 1, value.buf, value.len);
+  out->buf[out->len + name.len + value.len + 1] = '\r';
+  out->buf[out->len + name.len + value.len + 2] = '\n';
+  out->len = new_len;
+  return 0;
+}
 
 /** Informs the controller that all headers were provided. */
-void http1_finish_headers(http_s *h) {
+void http1_send_headers(http_s *h) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     return;
-  c->out.buf[c->out.len] = '\r';
-  c->out.buf[c->out.len + 1] = '\n';
-  c->out.len += 2;
+  fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
+  /* write status string */
+  fio_str_info_s tmp = http_version_get(h);
+  if (tmp.len > 15) {
+    FIO_LOG_ERROR("HTTP/1.1 client version string too long!");
+    tmp = FIO_STR_INFO1("HTTP/1.1");
+  }
+  buf = fio_str_info_write(buf, http_1___str_reserve, tmp.buf, tmp.len);
+  {
+    char num_buf[32];
+    num_buf[0] = ' ';
+    size_t n_len = fio_ltoa(num_buf + 1, http_status_get(h), 10) + 1;
+    num_buf[n_len++] = ' ';
+    buf = fio_str_info_write(buf, http_1___str_reserve, num_buf, n_len);
+  }
+  tmp = http_status2str(http_status_get(h));
+  buf = fio_str_info_write(buf, http_1___str_reserve, tmp.buf, tmp.len);
+  buf = fio_str_info_write(buf, http_1___str_reserve, "\r\n", 2);
+  /* write headers */
+  http_response_header_each(h, http1___write_header_callback, &buf);
+  /* write cookies */
+  http_set_cookie_each(h, http1___write_header_callback, &buf);
+  buf = fio_str_info_write(buf, http_1___str_reserve, "\r\n", 2);
+
   fio_write2(c->io,
-             .buf = c->out.buf,
-             .len = c->out.len,
+             .buf = buf.buf,
+             .len = buf.len,
              .copy = 0,
-             .dealloc = http_1_free_wrapper);
-  c->out.len = c->out.capa = 0;
-  c->out.buf = NULL;
+             .dealloc = http_1___str_free);
 }
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 void http1_write_body(http_s *h, http_write_args_s args) {
@@ -355,8 +354,7 @@ http_controller_s HTTP1_CONTROLLER = {
     .on_unlinked = http1_on_unlinked,
     .start_response = http1_start_response,
     .start_request = http1_start_request,
-    .write_header = http1_write_header,
-    .finish_headers = http1_finish_headers,
+    .send_headers = http1_send_headers,
     .write_body = http1_write_body,
 };
 
