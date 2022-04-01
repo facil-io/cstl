@@ -239,14 +239,7 @@ FIO_SFUNC int mock_c_start_response(http_s *h, int status, int streaming) {
   (void)status;
   (void)streaming;
 }
-FIO_SFUNC void mock_c_write_header(http_s *h,
-                                   fio_str_info_s name,
-                                   fio_str_info_s value) {
-  (void)h;
-  (void)name;
-  (void)value;
-}
-FIO_SFUNC void mock_c_finish_headers(http_s *h) { (void)h; }
+FIO_SFUNC void mock_c_send_headers(http_s *h) { (void)h; }
 FIO_SFUNC void mock_c_write_body(http_s *h, http_write_args_s args) {
   if (args.data) {
     if (args.dealloc)
@@ -264,10 +257,8 @@ FIO_SFUNC void http_controller_validate(http_controller_s *c) {
     c->start_response = mock_c_start_response;
   if (!c->start_request)
     c->start_request = mock_c_start_response;
-  if (!c->write_header)
-    c->write_header = mock_c_write_header;
-  if (!c->finish_headers)
-    c->finish_headers = mock_c_finish_headers;
+  if (!c->send_headers)
+    c->send_headers = mock_c_send_headers;
   if (!c->write_body)
     c->write_body = mock_c_write_body;
 }
@@ -855,6 +846,28 @@ size_t http_cookie_each(http_s *h,
   return i;
 }
 
+/**
+ * Iterates through all response set cookies.
+ *
+ * A non-zero return will stop iteration.
+ */
+size_t http_set_cookie_each(http_s *h,
+                            int (*callback)(http_s *,
+                                            fio_str_info_s name,
+                                            fio_str_info_s value,
+                                            void *udata),
+                            void *udata) {
+  size_t i = 0;
+  smap_s *set_cookies = h->cookies + 1;
+  fio_str_info_s header_name = FIO_STR_INFO2("set-cookie", 10);
+  FIO_MAP_EACH(smap, set_cookies, pos) {
+    ++i;
+    if (callback(h, header_name, lstr_info(&pos->obj.value), udata))
+      return i;
+  }
+  return i;
+}
+
 /* *****************************************************************************
 Responding to an HTTP event.
 ***************************************************************************** */
@@ -910,14 +923,7 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
     }
     /* start a response, unless status == 0 (which starts a request). */
     (&c->start_response)[h->status == 0](h, h->status, !args.finish);
-    /* loop and write headers */
-    FIO_MAP_EACH(hmap, hdrs, pos) {
-      fio_str_info_s name = sstr_info(&pos->obj.key);
-      FIO_ARRAY_EACH(sary, (&pos->obj.value), i) {
-        c->write_header(h, name, sstr_info(i));
-      }
-    }
-    c->finish_headers(h);
+    c->send_headers(h);
   }
   c->write_body(h, args);
   h->state |= HTTP_STATE_FINISHED * (!!args.finish);

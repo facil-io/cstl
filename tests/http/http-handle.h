@@ -56,13 +56,11 @@ typedef struct http_controller_s {
   /** Called before an HTTP handler link to an HTTP Controller is revoked. */
   void (*on_unlinked)(http_s *h, void *cdata);
   /** Informs the controller that a response is starting. */
-  int (*start_response)(http_s *h, int status, int streaming);
+  int (*start_response)(http_s *h, int status, int will_stream);
   /** Informs the controller that a request is starting. */
-  int (*start_request)(http_s *h, int reserved, int streaming);
-  /** called by the HTTP handle for each header. */
-  void (*write_header)(http_s *h, fio_str_info_s name, fio_str_info_s value);
-  /** Informs the controller that all headers were provided. */
-  void (*finish_headers)(http_s *h);
+  int (*start_request)(http_s *h, int reserved, int will_stream);
+  /** Informs the controller that all headers must be sent. */
+  void (*send_headers)(http_s *h);
   /** called by the HTTP handle for each body chunk (or to finish a response. */
   void (*write_body)(http_s *h, http_write_args_s args);
 } http_controller_s;
@@ -161,7 +159,11 @@ fio_str_info_s http_request_header_add(http_s *,
                                        fio_str_info_s name,
                                        fio_str_info_s value);
 
-/** Iterates through all headers. A non-zero return will stop iteration. */
+/**
+ * Iterates through all request headers (except cookies!).
+ *
+ * A non-zero return will stop iteration.
+ * */
 size_t http_request_header_each(http_s *,
                                 int (*callback)(http_s *,
                                                 fio_str_info_s name,
@@ -279,6 +281,17 @@ size_t http_cookie_each(http_s *,
                                         void *udata),
                         void *udata);
 
+/**
+ * Iterates through all response set cookies.
+ * A non-zero return will stop iteration.
+ */
+size_t http_set_cookie_each(http_s *h,
+                            int (*callback)(http_s *,
+                                            fio_str_info_s set_cookie_header,
+                                            fio_str_info_s value,
+                                            void *udata),
+                            void *udata);
+
 /* *****************************************************************************
 Responding to an HTTP event.
 ***************************************************************************** */
@@ -331,7 +344,11 @@ fio_str_info_s http_response_header_add(http_s *,
                                         fio_str_info_s name,
                                         fio_str_info_s value);
 
-/** Iterates through all headers. A non-zero return will stop iteration. */
+/**
+ * Iterates through all response headers (except cookies!).
+ *
+ * A non-zero return will stop iteration.
+ * */
 size_t http_response_header_each(http_s *,
                                  int (*callback)(http_s *,
                                                  fio_str_info_s name,
