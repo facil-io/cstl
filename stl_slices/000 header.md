@@ -418,7 +418,7 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
 ```c
 fio_str_info_s fio_str_info_write(fio_str_info_s dest,
-                         fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                         fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
                          const void *src,
                          size_t len);
 ```
@@ -430,8 +430,8 @@ The returned string is NUL terminated if edited.
 
 * `dest` an `fio_str_info_s` struct containing the destination string.
 
-* `reserve` is a callback that attempts to reserve more memory (i.e., using realloc) and returns an updated `fio_str_info_s` struct containing the updated capacity and buffer pointer (as well as the original length).
-   On failure the original `fio_str_info_s` should be returned. if `reserve` is NULL or fails, the data copied will be truncated.
+* `reallocate` is a callback that attempts to reallocate more memory (i.e., using realloc) and returns an updated `fio_str_info_s` struct containing the updated capacity and buffer pointer (as well as the original length).
+   On failure the original `fio_str_info_s` should be returned. if `reallocate` is NULL or fails, the data copied will be truncated.
 
 * `src` is the data to be written to the end of `dest`.
 
@@ -439,7 +439,7 @@ The returned string is NUL terminated if edited.
 
 **Note**: this function performs only minimal checks and assumes that `dest` is fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is valid, etc'.
 
-An example for a `reserve` callback using the system's `realloc` function:
+An example for a `reallocate` callback using the system's `realloc` function:
 
 ```c
 fio_str_info_s fio_str_info_realloc_system(fio_str_info_s dest,
@@ -471,7 +471,7 @@ void example(void) {
 ```c
 static inline __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
 fio_str_info_s fio_str_info_vprintf(fio_str_info_s dest,
-                           fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                           fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
                            const char *format,
                            va_list argv);
 ```
@@ -483,7 +483,7 @@ Similar to `fio_str_info_write`, only using `vprintf` semantics.
 ```c
 static inline __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
 fio_str_info_s fio_str_info_printf(fio_str_info_s dest,
-                          fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                          fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
                           const char *format,
                           ...);
 ```
@@ -494,7 +494,7 @@ Similar to `fio_str_info_write`, only using `printf` semantics.
 
 ```c
 fio_str_info_s fio_str_info_insert(fio_str_info_s dest,
-                          fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
+                          fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
                           intptr_t start_pos,
                           size_t overwrite_len,
                           const void *src,

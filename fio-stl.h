@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
+Copyright: Boaz Segev, 2019-2022
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -156,6 +156,10 @@ extern "C" {
 #define FIO_UNALIGNED_ACCESS 0
 #endif
 
+#ifndef FIO_STR_INFO_WRITE2
+/** When enabled, the fio_str_info_write2 function is defined (more overhead) */
+#define FIO_STR_INFO_WRITE2 1
+#endif
 /* *****************************************************************************
 Compiler detection, GCC / CLang features and OS dependent included files
 ***************************************************************************** */
@@ -507,211 +511,102 @@ Security Related macros
   } while (0)
 
 /* *****************************************************************************
-String Information Helper Type
+Assertions
 ***************************************************************************** */
-
-/** An information type for reporting the string's state. */
-typedef struct fio_str_info_s {
-  /** The string's length, if any. */
-  size_t len;
-  /** The string's buffer (pointer to first byte) or NULL on error. */
-  char *buf;
-  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
-  size_t capa;
-} fio_str_info_s;
-
-/** An information type for reporting/storing buffer data (no `capa`). */
-typedef struct fio_buf_info_s {
-  /** The buffer's length, if any. */
-  size_t len; /* len must be 1st to fit with small string header types */
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf; /* buf must be 2nd to fit with small string header types */
-} fio_buf_info_s;
-
-/** Compares two `fio_str_info_s` objects for content equality. */
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
-
-/** Converts a C String into a fio_str_info_s. */
-#define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
-
-/** Converts a String with a known length into a fio_str_info_s. */
-#define FIO_STR_INFO2(str, length)                                             \
-  ((fio_str_info_s){.len = (length), .buf = (str)})
-
-/** Converts a String with a known length and capacity into a fio_str_info_s. */
-#define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+#ifdef static_assert
+static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
+static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
+static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
+static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
+#endif
 
 /* *****************************************************************************
-String Writer Helpers
+Dynamic Endian Test
 ***************************************************************************** */
 
-/**
- * Writes data to the end of the string in the `fio_str_info_s` struct,
- * returning an updated `fio_str_info_s` struct.
- *
- * The returned string is NUL terminated if edited.
- *
- * * `dest` an `fio_str_info_s` struct containing the destination string.
- *
- * * `reserve` is a callback that attempts to reserve more memory (i.e., using
- *   realloc) and returns an updated `fio_str_info_s` struct containing the
- *   updated capacity and buffer pointer (as well as the original length).
- *
- *   On failure the original `fio_str_info_s` should be returned. if `reserve`
- *   is NULL or fails, the data copied will be truncated.
- *
- * * `src` is the data to be written to the end of `dest`.
- *
- * * `len` is the length of the data to be written to the end of `dest`.
- *
- * Note: this function performs only minimal checks and assumes that `dest` is
- *       fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is
- *       valid, etc'.
- *
- * An example for a `reserve` callback using the system's `realloc` function:
- *
- *      fio_str_info_s fio_str_info_realloc_system(fio_str_info_s dest,
- *                                                size_t new_capa) {
- *       void *tmp = realloc(dest.buf, new_capa);
- *       if (!tmp)
- *         return dest;
- *       dest.capa = new_capa;
- *       dest.buf = (char *)tmp;
- *       return dest;
- *     }
- *
- * An example for using the function:
- *
- *     void example(void) {
- *       char buf[32];
- *       fio_str_info_s str = FIO_STR_INFO3(buf, 0, 32);
- *       str = fio_str_info_write(str, NULL, "The answer is: 0x", 17);
- *       str.len += fio_ltoa(str.buf + str.len, 42, 16);
- *       str = fio_str_info_write(str, NULL, "!\n", 2);
- *       printf("%s", str.buf);
- *     }
- */
-FIO_IFUNC fio_str_info_s
-fio_str_info_write(fio_str_info_s dest,
-                   fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
-                   const void *src,
-                   size_t len) {
-  if (reserve && (dest.capa < dest.len + len + 1)) {
-    const size_t new_len = dest.len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    dest = reserve(dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest.capa < dest.len + 1))
-    return dest;
-  if (FIO_UNLIKELY(dest.capa < dest.len + len + 1)) {
-    len = dest.capa - (dest.len + 1);
-  }
-  if (len && src) {
-    memcpy(dest.buf + dest.len, src, len);
-    dest.len += len;
-    dest.buf[dest.len] = 0;
-  }
-  return dest;
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(size_t)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
 }
 
-/** Similar to fio_str_info_write, only using vprintf semantics. */
-FIO_IFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
-fio_str_info_vprintf(fio_str_info_s dest,
-                     fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
-                     const char *format,
-                     va_list argv) {
-  va_list argv_cpy;
-  va_copy(argv_cpy, argv);
-  int len = vsnprintf(NULL, 0, format, argv_cpy);
-  va_end(argv_cpy);
-  if (len <= 0)
-    return dest;
-  if (reserve && (dest.capa < dest.len + len + 1)) {
-    const size_t new_len = dest.len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    dest = reserve(dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest.capa < dest.len + 1))
-    return dest;
-  if (FIO_UNLIKELY(dest.capa < dest.len + len + 1)) {
-    len = dest.capa - (dest.len + 1);
-  }
-  vsnprintf(dest.buf + dest.len, len + 1, format, argv);
-  dest.len += len;
-  return dest;
-}
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 
-/** Similar to fio_str_info_write, only using printf semantics. */
-FIO_IFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
-fio_str_info_printf(fio_str_info_s dest,
-                    fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
-                    const char *format,
-                    ...) {
-  va_list argv;
-  va_start(argv, format);
-  dest = fio_str_info_vprintf(dest, reserve, format, argv);
-  va_end(argv);
-  return dest;
-}
+/* *****************************************************************************
+Miscellaneous helper macros
+***************************************************************************** */
 
-/**
- * Similar to fio_str_info_write, only replacing a sub-string or inserting a
- * string in a specific location.
- */
-FIO_IFUNC fio_str_info_s
-fio_str_info_insert(fio_str_info_s dest,
-                    fio_str_info_s (*reserve)(fio_str_info_s, size_t new_capa),
-                    intptr_t start_pos,
-                    size_t overwrite_len,
-                    const void *src,
-                    size_t len) {
-  if (start_pos < 0) {
-    start_pos = dest.len + start_pos;
-    if (start_pos < 0)
-      start_pos = 0;
-  }
-  if (dest.len < (size_t)start_pos + len + 1) {
-    if ((size_t)start_pos < dest.len)
-      dest.len = start_pos;
-    return fio_str_info_write(dest, reserve, src, len);
-  }
-  size_t move_start = start_pos + overwrite_len;
-  size_t move_len = dest.len - (start_pos + overwrite_len);
-  if (overwrite_len < len) {
-    /* adjust for possible memory expansion */
-    const size_t extra = len - overwrite_len;
-    if (dest.capa < dest.len + extra + 1) {
-      if (reserve) {
-        const size_t new_len = dest.len + extra;
-        const size_t new_capa =
-            (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-        dest = reserve(dest, new_capa);
-      }
-      if (FIO_UNLIKELY(dest.capa < dest.len + extra + 1)) {
-        move_len -= (dest.len + extra + 1) - dest.capa;
-      }
-    }
-  }
-  memmove(dest.buf + start_pos + len, dest.buf + move_start, move_len);
-  memcpy(dest.buf + start_pos, src, len);
-  dest.len = start_pos + len + move_len;
-  dest.buf[dest.len] = 0;
-  return dest;
-}
+/* avoid printing a full / nested path when __FILE_NAME__ is available */
+#ifdef __FILE_NAME__
+#define FIO__FILE__ __FILE_NAME__
+#else
+#define FIO__FILE__ __FILE__
+#endif
+
+/** An empty macro, adding white space. Used to avoid function like macros. */
+#define FIO_NOOP
+/* allow logging to quitely fail unless enabled */
+#define FIO_LOG2STDERR(...)   ((void)0)
+#define FIO_LOG2STDERR2(...)  ((void)0)
+#define FIO_LOG_PRINT__(...)  ((void)0)
+#define FIO_LOG_FATAL(...)    ((void)0)
+#define FIO_LOG_ERROR(...)    ((void)0)
+#define FIO_LOG_SECURITY(...) ((void)0)
+#define FIO_LOG_WARNING(...)  ((void)0)
+#define FIO_LOG_INFO(...)     ((void)0)
+#define FIO_LOG_DEBUG(...)    ((void)0)
+#define FIO_LOG_DEBUG2(...)   ((void)0)
+
+#ifdef DEBUG
+#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
+#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
+#else
+#define FIO_LOG_DDEBUG(...)  ((void)(0))
+#define FIO_LOG_DDEBUG2(...) ((void)(0))
+#define FIO_ASSERT___PERFORM_SIGNAL()
+#endif /* DEBUG */
+
+#ifndef FIO_LOG_LENGTH_LIMIT
+/** Defines a point at which logging truncates (limited by stack memory) */
+#define FIO_LOG_LENGTH_LIMIT 1024
+#endif
+
+/* Asserts a condition is true, or kills the application using SIGINT. */
+#define FIO_ASSERT(cond, ...)                                                  \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      FIO_LOG_FATAL("(" FIO__FILE__                                            \
+                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
+      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_ASSERT___PERFORM_SIGNAL();                                           \
+      exit(-1);                                                                \
+    }                                                                          \
+  } while (0)
+
+#ifndef FIO_ASSERT_ALLOC
+/** Tests for an allocation failure. The behavior can be overridden. */
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
+#endif
+
+#ifdef DEBUG
+/** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
+#define FIO_ASSERT_DEBUG(cond, ...)                                            \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      FIO_LOG_FATAL("(" FIO__FILE__                                            \
+                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
+      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_ASSERT___PERFORM_SIGNAL();                                           \
+      exit(-1);                                                                \
+    }                                                                          \
+  } while (0)
+#else
+#define FIO_ASSERT_DEBUG(...)
+#endif
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
@@ -844,6 +739,493 @@ typedef struct fio_index8_node_s {
 #endif
 
 /* *****************************************************************************
+Common String Helpers
+***************************************************************************** */
+
+/** An information type for reporting the string's state. */
+typedef struct fio_str_info_s {
+  /** The string's length, if any. */
+  size_t len;
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+  size_t capa;
+} fio_str_info_s;
+
+/** An information type for reporting/storing buffer data (no `capa`). */
+typedef struct fio_buf_info_s {
+  /** The buffer's length, if any. */
+  size_t len; /* len must be 1st to fit with small string header types */
+  /** The buffer's address (may be NULL if no buffer). */
+  char *buf; /* buf must be 2nd to fit with small string header types */
+} fio_buf_info_s;
+
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
+                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+
+/** Converts a C String into a fio_str_info_s. */
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
+
+/** Converts a String with a known length into a fio_str_info_s. */
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
+
+/** Converts a String with a known length and capacity into a fio_str_info_s. */
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+
+/**
+ * Writes data to the end of the string in the `fio_str_info_s` struct,
+ * returning an updated `fio_str_info_s` struct.
+ *
+ * The returned string is NUL terminated if edited.
+ *
+ * * `dest` an `fio_str_info_s` struct containing the destination string.
+ *
+ * * `reallocate` is a callback that attempts to reallocate more memory (i.e.,
+ * using realloc) and returns an updated `fio_str_info_s` struct containing the
+ *   updated capacity and buffer pointer (as well as the original length).
+ *
+ *   On failure the original `fio_str_info_s` should be returned. if
+ * `reallocate` is NULL or fails, the data copied will be truncated.
+ *
+ * * `src` is the data to be written to the end of `dest`.
+ *
+ * * `len` is the length of the data to be written to the end of `dest`.
+ *
+ * Note: this function performs only minimal checks and assumes that `dest` is
+ *       fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is
+ *       valid, etc'.
+ *
+ * An example for a `reallocate` callback using the system's `realloc` function:
+ *
+ *      fio_str_info_s fio_str_info_realloc_system(fio_str_info_s dest,
+ *                                                size_t new_capa) {
+ *       void *tmp = realloc(dest.buf, new_capa);
+ *       if (!tmp)
+ *         return dest;
+ *       dest.capa = new_capa;
+ *       dest.buf = (char *)tmp;
+ *       return dest;
+ *     }
+ *
+ * An example for using the function:
+ *
+ *     void example(void) {
+ *       char buf[32];
+ *       fio_str_info_s str = FIO_STR_INFO3(buf, 0, 32);
+ *       fio_str_info_write(&str, NULL, "The answer is: 0x", 17);
+ *       str.len += fio_ltoa(str.buf + str.len, 42, 16);
+ *       fio_str_info_write(&str, NULL, "!\n", 2);
+ *       printf("%s", str.buf);
+ *     }
+ */
+FIO_IFUNC int fio_str_info_write(fio_str_info_s *dest,
+                                 fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                              size_t new_capa),
+                                 const void *src,
+                                 size_t len);
+
+/**
+ * Similar to fio_str_info_write, only writes multiple strings at once.
+ *
+ * The last source in the `srcs` array MUST be a string with a NULL pointer.
+ */
+FIO_IFUNC int fio_str_info_join(fio_str_info_s *dest,
+                                fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                             size_t new_capa),
+                                const fio_str_info_s srcs[]);
+
+/* Helper macro for fio_str_info_write2 */
+#define fio_str_info_join(dest, reallocate, ...)                               \
+  fio_str_info_join((dest), (reallocate), (fio_str_info_s[]){__VA_ARGS__, {0}})
+
+/**
+ * Similar to fio_str_info_write, only replacing a sub-string or inserting a
+ * string in a specific location.
+ */
+FIO_IFUNC int fio_str_info_insert(fio_str_info_s *dest,
+                                  fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                               size_t new_capa),
+                                  intptr_t start_pos,
+                                  size_t overwrite_len,
+                                  const void *src,
+                                  size_t len);
+
+/** Similar to fio_str_info_write, only using printf semantics. */
+FIO_IFUNC int fio_str_info_printf(fio_str_info_s *dest,
+                                  fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                               size_t new_capa),
+                                  const char *format,
+                                  ...);
+
+/** Similar to fio_str_info_write, only using vprintf semantics. */
+FIO_IFUNC int fio_str_info_vprintf(
+    fio_str_info_s *dest,
+    fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
+    const char *format,
+    va_list argv);
+
+/** Argument type used by fio_str_info_write2. */
+typedef struct {
+  size_t klass;
+  union {
+    fio_str_info_s str;
+    double f;
+    int64_t mem[8];
+    char raw[64];
+  } info;
+} fio_str_info_write_s;
+
+#if FIO_STR_INFO_WRITE2
+/**
+ * Writes a group of objects (strings, numbers, etc') to `dest`.
+ *
+ * `dest` and `reallocate` are similar to `fio_str_info_write`.
+ *
+ * `src` is an array of `fio_str_info_write_s` structs, ending with a struct
+ * that's all set to 0.
+ *
+ * Use the `fio_str_info_write2` macro for ease, i.e.:
+ *
+ *    fio_str_info_s str = {0};
+ *    fio_str_info_write2(&str, my_reallocate,
+ *                        FIO_STR_INFO_WRITE_STR1("The answer is: "),
+ *                        FIO_STR_INFO_WRITE_NUM(42),
+ *                        FIO_STR_INFO_WRITE_STR2("(0x", 3),
+ *                        FIO_STR_INFO_WRITE_HEX(42),
+ *                        FIO_STR_INFO_WRITE_STR2(")", 1));
+ *
+ * Note: this function requires `FIO_ATOL` to be defined.
+ */
+FIO_IFUNC int fio_str_info_write2(fio_str_info_s *restrict dest,
+                                  fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                               size_t new_capa),
+                                  fio_str_info_write_s srcs[]);
+
+/* Helper macro for fio_str_info_write2 */
+#define fio_str_info_write2(dest, reallocate, ...)                             \
+  fio_str_info_write2((dest),                                                  \
+                      (reallocate),                                            \
+                      (fio_str_info_write_s[]){__VA_ARGS__, {0}})
+
+#define FIO_STR_INFO_WRITE_STR1(str_)                                          \
+  ((fio_str_info_write_s){.klass = 1,                                          \
+                          .info.str = {.len = strlen((str_)), .buf = (str_)}})
+#define FIO_STR_INFO_WRITE_STR2(str_, len_)                                    \
+  ((fio_str_info_write_s){.klass = 1,                                          \
+                          .info.str = {.len = (len_), .buf = (str_)}})
+#define FIO_STR_INFO_WRITE_NUM(num)                                            \
+  ((fio_str_info_write_s){.klass = 2, .info.mem = {(int64_t)(num)}})
+#define FIO_STR_INFO_WRITE_FLOAT(num)                                          \
+  ((fio_str_info_write_s){.klass = 3, .info.f = (double)(num)})
+#define FIO_STR_INFO_WRITE_HEX(num)                                            \
+  ((fio_str_info_write_s){.klass = 4, .info.mem = {(num)}})
+#define FIO_STR_INFO_WRITE_BIN(num)                                            \
+  ((fio_str_info_write_s){.klass = 5, .info.mem = {(num)}})
+#endif
+/* *****************************************************************************
+Common String Helpers - (inlined) implementation
+***************************************************************************** */
+
+/* fio_str_info_write */
+FIO_IFUNC int fio_str_info_write(fio_str_info_s *dest,
+                                 fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                              size_t new_capa),
+                                 const void *src,
+                                 size_t len) {
+  int r = 0;
+  if (reallocate && (dest->capa < dest->len + len + 1)) {
+    const size_t new_len = dest->len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    *dest = reallocate(*dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
+    r = -1;
+    return r;
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1)) {
+    len = dest->capa - (dest->len + 1);
+    r = -1;
+  }
+  if (len && src) {
+    memcpy(dest->buf + dest->len, src, len);
+    dest->len += len;
+    dest->buf[dest->len] = 0;
+  }
+  return r;
+}
+
+/* fio_str_info_insert */
+FIO_IFUNC int fio_str_info_insert(fio_str_info_s *dest,
+                                  fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                               size_t new_capa),
+                                  intptr_t start_pos,
+                                  size_t overwrite_len,
+                                  const void *src,
+                                  size_t len) {
+  int r = 0;
+  if (start_pos < 0) {
+    start_pos = dest->len + start_pos;
+    if (start_pos < 0)
+      start_pos = 0;
+  }
+  if (dest->len < (size_t)start_pos + len + 1) {
+    if ((size_t)start_pos < dest->len)
+      dest->len = start_pos;
+    return fio_str_info_write(dest, reallocate, src, len);
+  }
+  size_t move_start = start_pos + overwrite_len;
+  size_t move_len = dest->len - (start_pos + overwrite_len);
+  if (overwrite_len < len) {
+    /* adjust for possible memory expansion */
+    const size_t extra = len - overwrite_len;
+    if (dest->capa < dest->len + extra + 1) {
+      if (reallocate) {
+        const size_t new_len = dest->len + extra;
+        const size_t new_capa =
+            (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+        *dest = reallocate(*dest, new_capa);
+      }
+      if (FIO_UNLIKELY(dest->capa < dest->len + extra + 1)) {
+        move_len -= (dest->len + extra + 1) - dest->capa;
+        r = -1;
+      }
+    }
+  }
+  memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
+  memcpy(dest->buf + start_pos, src, len);
+  dest->len = start_pos + len + move_len;
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/**
+ * Similar to fio_str_info_write, only writes multiple strings at once.
+ *
+ * The last source in the `srcs` array MUST be a string with a NULL pointer.
+ */
+FIO_IFUNC int fio_str_info_join
+FIO_NOOP(fio_str_info_s *dest,
+         fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
+         const fio_str_info_s srcs[]) {
+  int r = 0;
+  size_t len = 0;
+  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
+    len += pos->len;
+  }
+  if (reallocate && (dest->capa < dest->len + len + 1)) {
+    const size_t new_len = dest->len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    *dest = reallocate(*dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
+    r = -1;
+    return r;
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1))
+    goto truncate;
+  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
+    FIO_MEMCPY(&dest->buf[dest->len], pos->buf, pos->len);
+    dest->len += pos->len;
+  }
+finish:
+  dest->buf[dest->len] = 0;
+  return r;
+truncate:
+  r = -1;
+  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
+    len = pos->len;
+    if (dest->capa < dest->len + len + 1)
+      len = dest->capa - (dest->len + 1);
+    if (len)
+      FIO_MEMCPY(&dest->buf[dest->len], pos->buf, pos->len);
+    dest->len += len;
+    if (len != pos->len)
+      goto finish;
+  }
+  goto finish;
+}
+
+/* Similar to fio_str_info_write, only using vprintf semantics. */
+FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
+fio_str_info_vprintf(fio_str_info_s *dest,
+                     fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                  size_t new_capa),
+                     const char *format,
+                     va_list argv) {
+  int r = 0;
+  va_list argv_cpy;
+  va_copy(argv_cpy, argv);
+  int len = vsnprintf(NULL, 0, format, argv_cpy);
+  va_end(argv_cpy);
+  if (len <= 0)
+    return -1;
+  if (reallocate && (dest->capa < dest->len + len + 1)) {
+    const size_t new_len = dest->len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    *dest = reallocate(*dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + 2))
+    return -1;
+  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1)) {
+    len = dest->capa - (dest->len + 1);
+    r = -1;
+  }
+  vsnprintf(dest->buf + dest->len, len + 1, format, argv);
+  dest->len += len;
+  return r;
+}
+
+/** Similar to fio_str_info_write, only using printf semantics. */
+FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
+fio_str_info_printf(fio_str_info_s *dest,
+                    fio_str_info_s (*reallocate)(fio_str_info_s,
+                                                 size_t new_capa),
+                    const char *format,
+                    ...) {
+  int r = 0;
+  va_list argv;
+  va_start(argv, format);
+  r = fio_str_info_vprintf(dest, reallocate, format, argv);
+  va_end(argv);
+  return r;
+}
+
+#if FIO_STR_INFO_WRITE2
+/* the fio_str_info_write2 is a printf alternative. */
+FIO_IFUNC int fio_str_info_write2
+FIO_NOOP(fio_str_info_s *restrict dest,
+         fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
+         fio_str_info_write_s srcs[]) {
+  static const char fio___i2c_map[] = "0123456789ABCDEF";
+  int r = 0;
+  fio_str_info_write_s *pos = srcs;
+  size_t len = 0;
+  while (pos->klass) {
+    size_t tmp = 0;
+    union {
+      int64_t i;
+      uint64_t u;
+    } num = {.i = pos->info.mem[0]};
+    char inv = 0;
+    switch (pos->klass) {
+    case 2: /* number */
+      pos->klass = 2;
+      if (num.i < 0) {
+        inv = '-';
+        num.i = 0 - num.i;
+      }
+      while (num.i) {
+        size_t nxt = num.i / 10;
+        pos->info.raw[tmp] = '0' + (num.i - (nxt * 10));
+        ++tmp;
+        num.i = nxt;
+      }
+      pos->info.raw[tmp] = inv;
+      tmp += (!!inv);
+      pos->klass |= (tmp << 8);
+      break;
+    case 3: /* float */
+      pos->klass = 3;
+      tmp = snprintf(pos->info.raw, 64, "%.15g", pos->info.f);
+      pos->klass |= (tmp << 8);
+      break;
+    case 4: /* hex */
+      pos->klass = 2;
+      while (num.u) {
+        pos->info.raw[tmp] = fio___i2c_map[(num.u & 0xF)];
+        pos->info.raw[tmp + 1] = fio___i2c_map[((num.u >> 4) & 0xF)];
+        tmp += 2;
+        num.u >>= 8;
+      }
+      pos->klass |= (tmp << 8);
+      break;
+    case 5: /* binary */
+      pos->klass = 2;
+      while (num.u) {
+        pos->info.raw[tmp] = '0' + (num.u & 0x1);
+        pos->info.raw[tmp + 1] = '0' + ((num.u >> 1) & 0x1);
+        tmp += 2;
+        num.u >>= 2;
+      }
+      pos->klass |= (tmp << 8);
+      break;
+    default: tmp = pos->info.str.len;
+    }
+    len += tmp;
+    ++pos;
+  }
+  if (reallocate && (dest->capa < dest->len + len + 1)) {
+    const size_t new_len = dest->len + len;
+    const size_t new_capa =
+        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
+    *dest = reallocate(*dest, new_capa);
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
+    r = -1;
+    return r;
+  }
+  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1))
+    r = -1;
+  for (pos = srcs; pos->klass; ++pos) {
+    size_t src_len;
+    void *src;
+    switch (pos->klass & 3) {
+    case 2: /* numbers are in reverse order... so... */
+      src_len = pos->klass >> 8;
+      src = pos->info.raw;
+      /* partial numbers are never printed, to avoid security issues */
+      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len)))
+        goto finish;
+      for (size_t i = src_len; i;) {
+        --i;
+        dest->buf[dest->len] = ((char *)src)[i];
+        ++dest->len;
+      }
+      continue;
+    case 3:
+      src_len = pos->klass >> 8;
+      src = pos->info.raw;
+      /* partial numbers are never printed, to avoid security issues */
+      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len)))
+        goto finish;
+      break;
+    default:
+      src_len = pos->info.str.len;
+      src = pos->info.str.buf;
+      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len))) {
+        src_len = dest->capa - (dest->len + 1);
+        memcpy(dest->buf + dest->len, src, src_len);
+        dest->len += src_len;
+        goto finish;
+      }
+      break;
+    }
+    memcpy(dest->buf + dest->len, src, src_len);
+    dest->len += src_len;
+  }
+finish:
+  dest->buf[dest->len] = 0;
+  return r;
+}
+#endif
+
+/* *****************************************************************************
 Sleep / Thread Scheduling Macros
 ***************************************************************************** */
 
@@ -879,104 +1261,6 @@ Sleep / Thread Scheduling Macros
  * In practice, the thread will probably sleep for 60ns or more.
  */
 #define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
-#endif
-
-/* *****************************************************************************
-Assertions
-***************************************************************************** */
-#ifdef static_assert
-static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
-static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
-static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
-static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
-static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
-#endif
-
-/* *****************************************************************************
-Dynamic Endian Test
-***************************************************************************** */
-
-FIO_IFUNC unsigned int fio_is_little_endian(void) {
-  union {
-    unsigned long ul;
-    unsigned char u8[sizeof(size_t)];
-  } u = {.ul = 1};
-  return (unsigned int)u.u8[0];
-}
-
-FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
-
-/* *****************************************************************************
-Miscellaneous helper macros
-***************************************************************************** */
-
-/* avoid printing a full / nested path when __FILE_NAME__ is available */
-#ifdef __FILE_NAME__
-#define FIO__FILE__ __FILE_NAME__
-#else
-#define FIO__FILE__ __FILE__
-#endif
-
-/** An empty macro, adding white space. Used to avoid function like macros. */
-#define FIO_NOOP
-/* allow logging to quitely fail unless enabled */
-#define FIO_LOG2STDERR(...)   ((void)0)
-#define FIO_LOG2STDERR2(...)  ((void)0)
-#define FIO_LOG_PRINT__(...)  ((void)0)
-#define FIO_LOG_FATAL(...)    ((void)0)
-#define FIO_LOG_ERROR(...)    ((void)0)
-#define FIO_LOG_SECURITY(...) ((void)0)
-#define FIO_LOG_WARNING(...)  ((void)0)
-#define FIO_LOG_INFO(...)     ((void)0)
-#define FIO_LOG_DEBUG(...)    ((void)0)
-#define FIO_LOG_DEBUG2(...)   ((void)0)
-
-#ifdef DEBUG
-#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
-#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
-#else
-#define FIO_LOG_DDEBUG(...)  ((void)(0))
-#define FIO_LOG_DDEBUG2(...) ((void)(0))
-#define FIO_ASSERT___PERFORM_SIGNAL()
-#endif /* DEBUG */
-
-#ifndef FIO_LOG_LENGTH_LIMIT
-/** Defines a point at which logging truncates (limited by stack memory) */
-#define FIO_LOG_LENGTH_LIMIT 1024
-#endif
-
-/* Asserts a condition is true, or kills the application using SIGINT. */
-#define FIO_ASSERT(cond, ...)                                                  \
-  do {                                                                         \
-    if (!(cond)) {                                                             \
-      FIO_LOG_FATAL("(" FIO__FILE__                                            \
-                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
-      FIO_ASSERT___PERFORM_SIGNAL();                                           \
-      exit(-1);                                                                \
-    }                                                                          \
-  } while (0)
-
-#ifndef FIO_ASSERT_ALLOC
-/** Tests for an allocation failure. The behavior can be overridden. */
-#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
-#endif
-
-#ifdef DEBUG
-/** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
-#define FIO_ASSERT_DEBUG(cond, ...)                                            \
-  do {                                                                         \
-    if (!(cond)) {                                                             \
-      FIO_LOG_FATAL("(" FIO__FILE__                                            \
-                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
-      FIO_ASSERT___PERFORM_SIGNAL();                                           \
-      exit(-1);                                                                \
-    }                                                                          \
-  } while (0)
-#else
-#define FIO_ASSERT_DEBUG(...)
 #endif
 
 /* *****************************************************************************
@@ -29347,31 +29631,72 @@ FIO_SFUNC void fio___dynamic_types_test___fio_str_info_write(void) {
   fprintf(stderr, "* Testing fio_str_info_s helpers.\n");
   char mem[16];
   fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
-  buf = fio_str_info_write(buf, NULL, "Hello World", 11);
+  fio_str_info_write(&buf, NULL, "Hello World", 11);
   FIO_ASSERT(mem == buf.buf && buf.len == 11 &&
                  !memcmp(buf.buf, "Hello World", 12),
              "fio_str_info_write failed!");
-  buf = fio_str_info_write(buf, NULL, "Hello World", 11);
+  fio_str_info_write(&buf, NULL, "Hello World", 11);
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "Hello WorldHell", 16),
              "fio_str_info_write failed to truncate!");
-  buf = fio_str_info_insert(buf, NULL, 0, 5, "Hola", 4);
+  fio_str_info_insert(&buf, NULL, 0, 5, "Hola", 4);
   FIO_ASSERT(mem == buf.buf && buf.len == 14 &&
                  !memcmp(buf.buf, "Hola WorldHell", 15),
              "fio_str_info_insert at index 0 failed!");
-  buf = fio_str_info_insert(buf, NULL, 5, 9, "World", 5);
+  fio_str_info_insert(&buf, NULL, 5, 9, "World", 5);
   FIO_ASSERT(mem == buf.buf && buf.len == 10 &&
                  !memcmp(buf.buf, "Hola World", 11),
              "fio_str_info_insert end overwrite failed!");
-  buf = fio_str_info_insert(buf, NULL, 5, 0, "my beautiful", 12);
+  fio_str_info_insert(&buf, NULL, 5, 0, "my beautiful", 12);
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "Hola my beautif", 16),
              "fio_str_info_insert failed to truncate!");
   buf = FIO_STR_INFO3(mem, 0, 16);
-  buf = fio_str_info_printf(buf, NULL, "I think %d is the best answer", 42);
+  fio_str_info_printf(&buf, NULL, "I think %d is the best answer", 42);
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "I think 42 is t", 16),
              "fio_str_info_printf failed to truncate!");
+
+#if FIO_STR_INFO_WRITE2
+  memset(mem, 0, 16);
+  buf = FIO_STR_INFO3(mem, 0, 16);
+  fio_str_info_write2(&buf,
+                      NULL,
+                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
+                      FIO_STR_INFO_WRITE_NUM(42),
+                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "I think 42 is t", 16),
+             "fio_str_info_write2 failed to truncate!");
+  memset(mem, 0, 16);
+  buf = FIO_STR_INFO3(mem, 0, 16);
+  fio_str_info_write2(&buf,
+                      NULL,
+                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
+                      FIO_STR_INFO_WRITE_HEX(42),
+                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "I think 2A is t", 16),
+             "fio_str_info_write2 failed to truncate (hex)!");
+  memset(mem, 0, 16);
+  buf = FIO_STR_INFO3(mem, 0, 16);
+  fio_str_info_write2(&buf,
+                      NULL,
+                      FIO_STR_INFO_WRITE_STR2("I Think ", 8),
+                      FIO_STR_INFO_WRITE_FLOAT(42.42),
+                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
+  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
+                 !memcmp(buf.buf, "I Think 42.42 i", 16),
+             "fio_str_info_write2 failed to truncate (float)!");
+  buf = FIO_STR_INFO3(mem, 0, 16);
+  fio_str_info_write2(&buf,
+                      NULL,
+                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
+                      FIO_STR_INFO_WRITE_BIN(-1LL),
+                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
+  FIO_ASSERT(mem == buf.buf && buf.len == 8 && !memcmp(buf.buf, "I think ", 8),
+             "fio_str_info_write2 failed to truncate (bin)!");
+#endif /* FIO_STR_INFO_WRITE2 */
 }
 
 /* *****************************************************************************
