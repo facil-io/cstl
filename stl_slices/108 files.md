@@ -18,7 +18,7 @@ If `path` starts with a `"~/"` than it will be relative to the user's Home folde
 int fio_filename_is_unsafe(const char *path);
 ```
 
-Returns 1 if `path` does folds backwards (has "/../" or "//").
+Returns 1 if `path` possibly folds backwards (has "/../" or "//").
 
 #### `fio_filename_tmp`
 
@@ -56,5 +56,30 @@ Since some systems have a limit on the number of bytes that can be written at a 
 
 If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
 
--------------------------------------------------------------------------------
+#### `fio_filename_parse`
 
+```c
+fio_filename_s fio_filename_parse(const char *filename);
+/** A result type for the filename parsing helper. */
+typedef struct {
+  fio_buf_info_s folder;   /* folder name */
+  fio_buf_info_s basename; /* base file name */
+  fio_buf_info_s ext;      /* extension (without '.') */
+} fio_filename_s;
+```
+
+Parses a file name to folder, base name and extension (zero-copy).
+
+#### `FIO_FOLDER_SEPARATOR`
+
+```c
+#if FIO_OS_WIN
+#define FIO_FOLDER_SEPARATOR '\\'
+#else
+#define FIO_FOLDER_SEPARATOR '/'
+#endif
+```
+
+Selects the folder separation character according to the detected OS.
+
+-------------------------------------------------------------------------------

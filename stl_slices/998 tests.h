@@ -158,82 +158,6 @@ static int ary____test_was_destroyed = 0;
 #include __FILE__
 
 /* *****************************************************************************
-fio_str_info_write - Test
-***************************************************************************** */
-
-FIO_SFUNC void fio___dynamic_types_test___fio_str_info_write(void) {
-  fprintf(stderr, "* Testing fio_str_info_s helpers.\n");
-  char mem[16];
-  fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_write(&buf, NULL, "Hello World", 11);
-  FIO_ASSERT(mem == buf.buf && buf.len == 11 &&
-                 !memcmp(buf.buf, "Hello World", 12),
-             "fio_str_info_write failed!");
-  fio_str_info_write(&buf, NULL, "Hello World", 11);
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "Hello WorldHell", 16),
-             "fio_str_info_write failed to truncate!");
-  fio_str_info_insert(&buf, NULL, 0, 5, "Hola", 4);
-  FIO_ASSERT(mem == buf.buf && buf.len == 14 &&
-                 !memcmp(buf.buf, "Hola WorldHell", 15),
-             "fio_str_info_insert at index 0 failed!");
-  fio_str_info_insert(&buf, NULL, 5, 9, "World", 5);
-  FIO_ASSERT(mem == buf.buf && buf.len == 10 &&
-                 !memcmp(buf.buf, "Hola World", 11),
-             "fio_str_info_insert end overwrite failed!");
-  fio_str_info_insert(&buf, NULL, 5, 0, "my beautiful", 12);
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "Hola my beautif", 16),
-             "fio_str_info_insert failed to truncate!");
-  buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_printf(&buf, NULL, "I think %d is the best answer", 42);
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "I think 42 is t", 16),
-             "fio_str_info_printf failed to truncate!");
-
-#if FIO_STR_INFO_WRITE2
-  memset(mem, 0, 16);
-  buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_write2(&buf,
-                      NULL,
-                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
-                      FIO_STR_INFO_WRITE_NUM(42),
-                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "I think 42 is t", 16),
-             "fio_str_info_write2 failed to truncate!");
-  memset(mem, 0, 16);
-  buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_write2(&buf,
-                      NULL,
-                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
-                      FIO_STR_INFO_WRITE_HEX(42),
-                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "I think 2A is t", 16),
-             "fio_str_info_write2 failed to truncate (hex)!");
-  memset(mem, 0, 16);
-  buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_write2(&buf,
-                      NULL,
-                      FIO_STR_INFO_WRITE_STR2("I Think ", 8),
-                      FIO_STR_INFO_WRITE_FLOAT(42.42),
-                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
-  FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                 !memcmp(buf.buf, "I Think 42.42 i", 16),
-             "fio_str_info_write2 failed to truncate (float)!");
-  buf = FIO_STR_INFO3(mem, 0, 16);
-  fio_str_info_write2(&buf,
-                      NULL,
-                      FIO_STR_INFO_WRITE_STR2("I think ", 8),
-                      FIO_STR_INFO_WRITE_BIN(-1LL),
-                      FIO_STR_INFO_WRITE_STR1(" is the best answer"));
-  FIO_ASSERT(mem == buf.buf && buf.len == 8 && !memcmp(buf.buf, "I think ", 8),
-             "fio_str_info_write2 failed to truncate (bin)!");
-#endif /* FIO_STR_INFO_WRITE2 */
-}
-
-/* *****************************************************************************
 Linked List - Test
 ***************************************************************************** */
 
@@ -1017,7 +941,7 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sha1)();
   fprintf(stderr, "===============\n");
-  fio___dynamic_types_test___fio_str_info_write();
+  FIO_NAME_TEST(stl, string_core_helpers)();
   fprintf(stderr, "===============\n");
   fio___dynamic_types_test___linked_list_test();
   fprintf(stderr, "===============\n");
@@ -1043,11 +967,13 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, cli)();
+  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, stream)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, signal)();
-  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, poll)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, filename)();
   fprintf(stderr, "===============\n");
 #ifndef FIO_MEMORY_DISABLE
   FIO_NAME_TEST(stl, mem_helper_speeds)();

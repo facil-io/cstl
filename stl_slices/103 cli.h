@@ -177,6 +177,9 @@ SFUNC char const *fio_cli_unnamed(unsigned int index);
  */
 SFUNC void fio_cli_set(char const *name, char const *value);
 
+/** Sets an unrecognized argument at a 0 based `index`. */
+SFUNC void fio_cli_unnamed_set(unsigned int index, char const *value);
+
 /**
  * This MACRO is the same as:
  *
@@ -353,14 +356,12 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
   char const **pos = parser->names;
   while (*pos) {
     switch ((intptr_t)*pos) {
-    case FIO_CLI_STRING__TYPE_I:       /* fall through */
-    case FIO_CLI_BOOL__TYPE_I:         /* fall through */
-    case FIO_CLI_INT__TYPE_I:          /* fall through */
-    case FIO_CLI_PRINT__TYPE_I:        /* fall through */
-    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
-    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
-      ++pos;
-      continue;
+    case FIO_CLI_STRING__TYPE_I:     /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:       /* fall through */
+    case FIO_CLI_INT__TYPE_I:        /* fall through */
+    case FIO_CLI_PRINT__TYPE_I:      /* fall through */
+    case FIO_CLI_PRINT_LINE__TYPE_I: /* fall through */
+    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */ ++pos; continue;
     }
     if (line == *pos) {
       goto found;
@@ -370,13 +371,12 @@ FIO_SFUNC char const *fio___cli_get_line_type(fio_cli_parser_data_s *parser,
   return NULL;
 found:
   switch ((size_t)pos[1]) {
-  case FIO_CLI_STRING__TYPE_I:       /* fall through */
-  case FIO_CLI_BOOL__TYPE_I:         /* fall through */
-  case FIO_CLI_INT__TYPE_I:          /* fall through */
-  case FIO_CLI_PRINT__TYPE_I:        /* fall through */
-  case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
-  case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
-    return pos[1];
+  case FIO_CLI_STRING__TYPE_I:     /* fall through */
+  case FIO_CLI_BOOL__TYPE_I:       /* fall through */
+  case FIO_CLI_INT__TYPE_I:        /* fall through */
+  case FIO_CLI_PRINT__TYPE_I:      /* fall through */
+  case FIO_CLI_PRINT_LINE__TYPE_I: /* fall through */
+  case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */ return pos[1];
   }
   return NULL;
 }
@@ -543,9 +543,7 @@ print_help:
     case FIO_CLI_INT__TYPE_I:        /* fall through */
     case FIO_CLI_PRINT__TYPE_I:      /* fall through */
     case FIO_CLI_PRINT_LINE__TYPE_I: /* fall through */
-    case FIO_CLI_PRINT_HEADER__TYPE_I:
-      ++pos;
-      continue;
+    case FIO_CLI_PRINT_HEADER__TYPE_I: ++pos; continue;
     }
     type = (char *)FIO_CLI_STRING__TYPE_I;
     switch ((intptr_t)pos[1]) {
@@ -569,8 +567,7 @@ print_help:
 
     case FIO_CLI_STRING__TYPE_I: /* fall through */
     case FIO_CLI_BOOL__TYPE_I:   /* fall through */
-    case FIO_CLI_INT__TYPE_I:    /* fall through */
-      type = pos[1];
+    case FIO_CLI_INT__TYPE_I: /* fall through */ type = pos[1];
     }
     /* print line @ pos, starting with main argument name */
     int alias_count = 0;
@@ -718,14 +715,12 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
   char const **line = names;
   while (*line) {
     switch ((intptr_t)*line) {
-    case FIO_CLI_STRING__TYPE_I:       /* fall through */
-    case FIO_CLI_BOOL__TYPE_I:         /* fall through */
-    case FIO_CLI_INT__TYPE_I:          /* fall through */
-    case FIO_CLI_PRINT__TYPE_I:        /* fall through */
-    case FIO_CLI_PRINT_LINE__TYPE_I:   /* fall through */
-    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */
-      ++line;
-      continue;
+    case FIO_CLI_STRING__TYPE_I:     /* fall through */
+    case FIO_CLI_BOOL__TYPE_I:       /* fall through */
+    case FIO_CLI_INT__TYPE_I:        /* fall through */
+    case FIO_CLI_PRINT__TYPE_I:      /* fall through */
+    case FIO_CLI_PRINT_LINE__TYPE_I: /* fall through */
+    case FIO_CLI_PRINT_HEADER__TYPE_I: /* fall through */ ++line; continue;
     }
     if (line[1] != (char *)FIO_CLI_PRINT__TYPE_I &&
         line[1] != (char *)FIO_CLI_PRINT_LINE__TYPE_I &&
@@ -827,6 +822,14 @@ SFUNC char const *fio_cli_unnamed(unsigned int index) {
 SFUNC void fio_cli_set(char const *name, char const *value) {
   fio___cli_cstr_s n = (fio___cli_cstr_s){.buf = name, .len = strlen(name)};
   fio___cli_hash_set(&fio___cli_values, FIO_CLI_HASH_VAL(n), n, value, NULL);
+}
+
+/** Sets an unrecognized argument at a 0 based `index`. */
+SFUNC void fio_cli_unnamed_set(unsigned int index, char const *value) {
+  fio___cli_cstr_s n = {.buf = NULL, .len = index + 1};
+  fio___cli_hash_set(&fio___cli_values, n.len, n, value, NULL);
+  if (fio___cli_unnamed_count < n.len)
+    fio___cli_unnamed_count = n.len;
 }
 
 /* *****************************************************************************

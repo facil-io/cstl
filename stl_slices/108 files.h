@@ -73,6 +73,22 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  */
 FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
 
+/** A result type for the filename parsing helper. */
+typedef struct {
+  fio_buf_info_s folder;
+  fio_buf_info_s basename;
+  fio_buf_info_s ext;
+} fio_filename_s;
+
+/** Parses a file name to folder, base name and extension (zero-copy). */
+SFUNC fio_filename_s fio_filename_parse(const char *filename);
+
+#if FIO_OS_WIN
+#define FIO_FOLDER_SEPARATOR '\\'
+#else
+#define FIO_FOLDER_SEPARATOR '/'
+#endif
+
 /* *****************************************************************************
 File Helper Inline Implementation
 ***************************************************************************** */
@@ -156,11 +172,7 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
     return fd;
   char *path = NULL;
   size_t path_len = 0;
-#if FIO_OS_WIN
-  const char sep = '\\';
-#else
-  const char sep = '/';
-#endif
+  const char sep = FIO_FOLDER_SEPARATOR;
 
   if (filename[0] == '~' && filename[1] == sep) {
     char *home = getenv("HOME");
@@ -269,11 +281,110 @@ SFUNC int fio_filename_tmp(void) {
   (void)tmp;
 }
 
+/** Parses a file name to folder, base name and extension (zero-copy). */
+SFUNC fio_filename_s fio_filename_parse(const char *filename) {
+  fio_filename_s r = {0};
+  if (!filename || !filename[0])
+    return r;
+  const char *pos = filename;
+  for (;;) {
+    switch (*pos) {
+    case 0:
+      if (r.folder.buf) {
+        r.basename.buf = r.folder.buf + r.folder.len;
+        r.basename.len = (size_t)(pos - (r.folder.buf + r.folder.len));
+      } else {
+        r.basename.buf = (char *)filename;
+        r.basename.len = (size_t)(pos - filename);
+      }
+      if (pos == r.folder.buf + r.folder.len) {
+        r.basename.buf = 0;
+        r.basename.len = 0;
+        r.ext.buf = 0;
+        r.ext.len = 0;
+        return r;
+      }
+      if (r.ext.buf) {
+        r.ext.len = pos - r.ext.buf;
+        if (FIO_UNLIKELY(filename + r.folder.len == r.ext.buf)) {
+          r.basename.buf = r.ext.buf;
+          r.basename.len = r.ext.len;
+          r.ext.buf = 0;
+          r.ext.len = 0;
+        } else if (r.ext.len > 1) {
+          r.basename.len -= r.ext.len;
+          ++r.ext.buf; /* skip the '.' */
+          --r.ext.len;
+        } else {
+          r.ext.buf = 0;
+          r.ext.len = 0;
+        }
+      }
+      return r;
+    case FIO_FOLDER_SEPARATOR:
+      r.folder.buf = (char *)filename;
+      r.folder.len = (size_t)(pos - filename) + 1;
+      r.ext.buf = NULL;
+      break;
+    case '.': r.ext.buf = (char *)pos; break;
+    }
+    ++pos;
+  }
+}
+
 /* *****************************************************************************
 Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
+  fprintf(stderr, "* Testing file utilities (partial).\n");
+  struct {
+    const char *str;
+    fio_filename_s result;
+  } filename_test[] = {
+      // clang-format off
+      {.str = "/", .result = {.folder = FIO_BUF_INFO2((char*)0, 1), .basename = FIO_BUF_INFO2(NULL, 0), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "/.", .result = {.folder = FIO_BUF_INFO2((char*)0, 1), .basename = FIO_BUF_INFO2((char*)1, 1), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "/..", .result = {.folder = FIO_BUF_INFO2((char*)0, 1), .basename = FIO_BUF_INFO2((char*)1, 2), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "name", .result = {.folder = FIO_BUF_INFO2(NULL, 0), .basename = FIO_BUF_INFO2(0, 4), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "name.ext", .result = {.folder = FIO_BUF_INFO2(NULL, 0), .basename = FIO_BUF_INFO2((char*)0, 4), .ext = FIO_BUF_INFO2((char*)5, 3)}},
+      {.str = ".name", .result = {.folder = FIO_BUF_INFO2(NULL, 0), .basename = FIO_BUF_INFO2((char*)0, 5), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "/.name", .result = {.folder = FIO_BUF_INFO2((char*)0, 1), .basename = FIO_BUF_INFO2((char*)1, 5), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "/my_folder/.name", .result = {.folder = FIO_BUF_INFO2((char*)0, 11), .basename = FIO_BUF_INFO2((char*)11, 5), .ext = FIO_BUF_INFO2(NULL, 0)}},
+      {.str = "/my_folder/name.ext", .result = {.folder = FIO_BUF_INFO2((char*)0, 11), .basename = FIO_BUF_INFO2((char*)11, 4), .ext = FIO_BUF_INFO2((char*)16, 3)}},
+      {0}, // clang-format on
+  };
+  for (size_t i = 0; filename_test[i].str; ++i) {
+    fio_filename_s r = fio_filename_parse(filename_test[i].str);
+    FIO_ASSERT(
+        r.folder.len == filename_test[i].result.folder.len &&
+            r.basename.len == filename_test[i].result.basename.len &&
+            r.ext.len == filename_test[i].result.ext.len &&
+            ((!r.folder.buf && !filename_test[i].result.folder.len) ||
+             r.folder.buf == (filename_test[i].str +
+                              (size_t)filename_test[i].result.folder.buf)) &&
+            ((!r.basename.buf && !filename_test[i].result.basename.len) ||
+             r.basename.buf ==
+                 (filename_test[i].str +
+                  (size_t)filename_test[i].result.basename.buf)) &&
+            ((!r.ext.buf && !filename_test[i].result.ext.len) ||
+             r.ext.buf == (filename_test[i].str +
+                           (size_t)filename_test[i].result.ext.buf)),
+        "fio_filename_parse error for %s"
+        "\n\t folder:    (%zu) %.*s"
+        "\n\t basename:  (%zu) %.*s"
+        "\n\t extension: (%zu) %.*s",
+        filename_test[i].str,
+        r.folder.len,
+        (int)r.folder.len,
+        (r.folder.buf ? r.folder.buf : "null"),
+        r.basename.len,
+        (int)r.basename.len,
+        (r.basename.buf ? r.basename.buf : "null"),
+        r.ext.len,
+        (int)r.ext.len,
+        (r.ext.buf ? r.ext.buf : "null"));
+  }
 }
 
 #endif /* FIO_TEST_CSTL */

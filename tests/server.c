@@ -261,28 +261,18 @@ int http1_start_response(http_s *h, int status, int streaming) {
   return 0;
 }
 
-static void http_1___str_free(void *ptr) { FIO_MEM_FREE(ptr, 0); }
-static fio_str_info_s http_1___str_reserve(fio_str_info_s dest,
-                                           size_t new_capa) {
-  void *tmp = FIO_MEM_REALLOC(dest.buf, dest.capa, new_capa, dest.len);
-  if (!tmp)
-    return dest;
-  dest.capa = new_capa;
-  dest.buf = (char *)tmp;
-  return dest;
-}
-
 /** called by the HTTP handle for each header. */
 int http1___write_header_callback(http_s *h,
                                   fio_str_info_s name,
                                   fio_str_info_s value,
                                   void *out_) {
   (void)h;
+  /* manually copy, as this is an "all or nothing" copy (no truncation) */
   fio_str_info_s *out = (fio_str_info_s *)out_;
   size_t new_len = out->len + name.len + 1 + value.len + 2;
   if (out->capa < new_len + 1) {
-    *out = http_1___str_reserve(
-        *out,
+    FIO_STRING_REALLOC(
+        out,
         ((new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL))));
   }
   if (out->capa < new_len + 1)
@@ -303,34 +293,35 @@ void http1_send_headers(http_s *h) {
     return;
   fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
   /* write status string */
-  fio_str_info_s tmp = http_version_get(h);
-  if (tmp.len > 15) {
-    FIO_LOG_ERROR("HTTP/1.1 client version string too long!");
-    tmp = FIO_STR_INFO1("HTTP/1.1");
-  }
-  buf = fio_str_info_write(buf, http_1___str_reserve, tmp.buf, tmp.len);
   {
-    char num_buf[32];
-    num_buf[0] = ' ';
-    size_t n_len = fio_ltoa(num_buf + 1, http_status_get(h), 10) + 1;
-    num_buf[n_len++] = ' ';
-    buf = fio_str_info_write(buf, http_1___str_reserve, num_buf, n_len);
+    fio_str_info_s ver = http_version_get(h);
+    fio_str_info_s status = http_status2str(http_status_get(h));
+    if (ver.len > 15) {
+      FIO_LOG_ERROR("HTTP/1.1 client version string too long!");
+      ver = FIO_STR_INFO1("HTTP/1.1");
+    }
+    fio_string_write2(&buf,
+                      FIO_STRING_REALLOC,
+                      FIO_STRING_WRITE_STR2(ver.buf, ver.len),
+                      FIO_STRING_WRITE_STR2(" ", 1),
+                      FIO_STRING_WRITE_NUM(http_status_get(h)),
+                      FIO_STRING_WRITE_STR2(" ", 1),
+                      FIO_STRING_WRITE_STR2(status.buf, status.len),
+                      FIO_STRING_WRITE_STR2("\r\n", 2));
   }
-  tmp = http_status2str(http_status_get(h));
-  buf = fio_str_info_write(buf, http_1___str_reserve, tmp.buf, tmp.len);
-  buf = fio_str_info_write(buf, http_1___str_reserve, "\r\n", 2);
   /* write headers */
   http_response_header_each(h, http1___write_header_callback, &buf);
   /* write cookies */
   http_set_cookie_each(h, http1___write_header_callback, &buf);
-  buf = fio_str_info_write(buf, http_1___str_reserve, "\r\n", 2);
-
+  fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
+  /* send data (move memory ownership) */
   fio_write2(c->io,
              .buf = buf.buf,
              .len = buf.len,
              .copy = 0,
-             .dealloc = http_1___str_free);
+             .dealloc = FIO_STRING_FREE);
 }
+
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 void http1_write_body(http_s *h, http_write_args_s args) {
   client_s *c = http_controller_data(h);

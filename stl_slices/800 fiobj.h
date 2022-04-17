@@ -834,26 +834,17 @@ FIO_IFUNC size_t fiobj_type(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
     switch ((uintptr_t)(o)) {
-    case FIOBJ_T_NULL:
-      return FIOBJ_T_NULL;
-    case FIOBJ_T_TRUE:
-      return FIOBJ_T_TRUE;
-    case FIOBJ_T_FALSE:
-      return FIOBJ_T_FALSE;
+    case FIOBJ_T_NULL: return FIOBJ_T_NULL;
+    case FIOBJ_T_TRUE: return FIOBJ_T_TRUE;
+    case FIOBJ_T_FALSE: return FIOBJ_T_FALSE;
     };
     return FIOBJ_T_INVALID;
-  case FIOBJ_T_NUMBER:
-    return FIOBJ_T_NUMBER;
-  case FIOBJ_T_FLOAT:
-    return FIOBJ_T_FLOAT;
-  case FIOBJ_T_STRING:
-    return FIOBJ_T_STRING;
-  case FIOBJ_T_ARRAY:
-    return FIOBJ_T_ARRAY;
-  case FIOBJ_T_HASH:
-    return FIOBJ_T_HASH;
-  case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->type_id;
+  case FIOBJ_T_NUMBER: return FIOBJ_T_NUMBER;
+  case FIOBJ_T_FLOAT: return FIOBJ_T_FLOAT;
+  case FIOBJ_T_STRING: return FIOBJ_T_STRING;
+  case FIOBJ_T_ARRAY: return FIOBJ_T_ARRAY;
+  case FIOBJ_T_HASH: return FIOBJ_T_HASH;
+  case FIOBJ_T_OTHER: return (*fiobj_object_metadata(o))->type_id;
   }
   if (!o)
     return FIOBJ_T_NULL;
@@ -869,8 +860,7 @@ FIO_IFUNC FIOBJ fiobj_dup(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
-  case FIOBJ_T_FLOAT:     /* fall through */
-    return o;
+  case FIOBJ_T_FLOAT: /* fall through */ return o;
   case FIOBJ_T_STRING: /* fall through */
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), dup)(o);
     break;
@@ -880,8 +870,7 @@ FIO_IFUNC FIOBJ fiobj_dup(FIOBJ o) {
   case FIOBJ_T_HASH: /* fall through */
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), dup)(o);
     break;
-  case FIOBJ_T_OTHER: /* fall through */
-    fiobj_object_dup(o);
+  case FIOBJ_T_OTHER: /* fall through */ fiobj_object_dup(o);
   }
   return o;
 }
@@ -891,8 +880,7 @@ FIO_IFUNC void fiobj_free(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
-  case FIOBJ_T_FLOAT:
-    return;
+  case FIOBJ_T_FLOAT: return;
   case FIOBJ_T_STRING:
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), free)(o);
     return;
@@ -902,9 +890,7 @@ FIO_IFUNC void fiobj_free(FIOBJ o) {
   case FIOBJ_T_HASH:
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), free)(o);
     return;
-  case FIOBJ_T_OTHER:
-    (*fiobj_object_metadata(o))->free2(o);
-    return;
+  case FIOBJ_T_OTHER: (*fiobj_object_metadata(o))->free2(o); return;
   }
 }
 
@@ -926,14 +912,11 @@ FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
   switch (FIOBJ_TYPE_CLASS(a)) {
   case FIOBJ_T_PRIMITIVE:
   case FIOBJ_T_NUMBER: /* fall through */
-  case FIOBJ_T_FLOAT:  /* fall through */
-    return a == b;
+  case FIOBJ_T_FLOAT: /* fall through */ return a == b;
   case FIOBJ_T_STRING:
     return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
-  case FIOBJ_T_ARRAY:
-    return fiobj___test_eq_nested(a, b, 0);
-  case FIOBJ_T_HASH:
-    return fiobj___test_eq_nested(a, b, 0);
+  case FIOBJ_T_ARRAY: return fiobj___test_eq_nested(a, b, 0);
+  case FIOBJ_T_HASH: return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_OTHER:
     if ((*fiobj_object_metadata(a))->count(a) ||
         (*fiobj_object_metadata(b))->count(b)) {
@@ -954,10 +937,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
     switch ((uintptr_t)(o)) {
-    case FIOBJ_T_NULL:
-      return (fio_str_info_s){.buf = (char *)"null", .len = 4};
-    case FIOBJ_T_TRUE:
-      return (fio_str_info_s){.buf = (char *)"true", .len = 4};
+    case FIOBJ_T_NULL: return (fio_str_info_s){.buf = (char *)"null", .len = 4};
+    case FIOBJ_T_TRUE: return (fio_str_info_s){.buf = (char *)"true", .len = 4};
     case FIOBJ_T_FALSE:
       return (fio_str_info_s){.buf = (char *)"false", .len = 5};
     };
@@ -973,11 +954,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   case FIOBJ_T_HASH: {
     return (fio_str_info_s){.buf = (char *)"{...}", .len = 5};
   }
-  case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->to_s(o);
+  case FIOBJ_T_OTHER: return (*fiobj_object_metadata(o))->to_s(o);
   }
-  if (!o)
-    return (fio_str_info_s){.buf = (char *)"null", .len = 4};
+  /* a non-explicit NULL is an empty string. */
   return (fio_str_info_s){.buf = (char *)""};
 }
 
@@ -987,12 +966,9 @@ FIO_IFUNC intptr_t FIO_NAME2(fiobj, i)(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
     switch ((uintptr_t)(o)) {
-    case FIOBJ_T_NULL:
-      return 0;
-    case FIOBJ_T_TRUE:
-      return 1;
-    case FIOBJ_T_FALSE:
-      return 0;
+    case FIOBJ_T_NULL: return 0;
+    case FIOBJ_T_TRUE: return 1;
+    case FIOBJ_T_FALSE: return 0;
     };
     return -1;
   case FIOBJ_T_NUMBER:
@@ -1008,8 +984,7 @@ FIO_IFUNC intptr_t FIO_NAME2(fiobj, i)(FIOBJ o) {
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
   case FIOBJ_T_HASH:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-  case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->to_i(o);
+  case FIOBJ_T_OTHER: return (*fiobj_object_metadata(o))->to_i(o);
   }
   if (!o)
     return 0;
@@ -1023,10 +998,8 @@ FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o) {
   case FIOBJ_T_PRIMITIVE:
     switch ((uintptr_t)(o)) {
     case FIOBJ_T_FALSE: /* fall through */
-    case FIOBJ_T_NULL:
-      return 0.0;
-    case FIOBJ_T_TRUE:
-      return 1.0;
+    case FIOBJ_T_NULL: return 0.0;
+    case FIOBJ_T_TRUE: return 1.0;
     };
     return -1.0;
   case FIOBJ_T_NUMBER:
@@ -1042,8 +1015,7 @@ FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o) {
     return (double)FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
   case FIOBJ_T_HASH:
     return (double)FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-  case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->to_f(o);
+  case FIOBJ_T_OTHER: return (*fiobj_object_metadata(o))->to_f(o);
   }
   if (!o)
     return 0.0;
@@ -1217,8 +1189,7 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
   case FIOBJ_T_STRING:    /* fall through */
-  case FIOBJ_T_FLOAT:
-    return 0;
+  case FIOBJ_T_FLOAT: return 0;
   case FIOBJ_T_ARRAY:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each)(
         o,
@@ -1427,8 +1398,7 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
     case FIOBJ_T_PRIMITIVE: /* fall through */
     case FIOBJ_T_STRING:    /* fall through */
     case FIOBJ_T_FLOAT:     /* fall through */
-    case FIOBJ_T_OTHER:
-      break;
+    case FIOBJ_T_OTHER: break;
     }
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
     (dest, i->obj.key, fiobj_dup(i->obj.value));
@@ -1529,8 +1499,7 @@ FIO_SFUNC uint32_t fiobj____each2_element_count(FIOBJ o) {
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
   case FIOBJ_T_STRING:    /* fall through */
-  case FIOBJ_T_FLOAT:
-    return 0;
+  case FIOBJ_T_FLOAT: return 0;
   case FIOBJ_T_ARRAY:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
   case FIOBJ_T_HASH:
@@ -1643,8 +1612,7 @@ FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
   switch (FIOBJ_TYPE_CLASS(a)) {
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
-  case FIOBJ_T_FLOAT:
-    return a == b;
+  case FIOBJ_T_FLOAT: return a == b;
   case FIOBJ_T_STRING:
     return FIO_NAME_BL(FIO_NAME(fiobj, FIOBJ___NAME_STRING), eq)(a, b);
 
@@ -2210,8 +2178,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
         --end;
       }
     } /* fall through */
-    default:
-      return FIOBJ_INVALID;
+    default: return FIOBJ_INVALID;
     }
   }
 }

@@ -156,10 +156,6 @@ extern "C" {
 #define FIO_UNALIGNED_ACCESS 0
 #endif
 
-#ifndef FIO_STR_INFO_WRITE2
-/** When enabled, the fio_str_info_write2 function is defined (more overhead) */
-#define FIO_STR_INFO_WRITE2 1
-#endif
 /* *****************************************************************************
 Compiler detection, GCC / CLang features and OS dependent included files
 ***************************************************************************** */
@@ -579,8 +575,7 @@ Miscellaneous helper macros
 #define FIO_ASSERT(cond, ...)                                                  \
   do {                                                                         \
     if (!(cond)) {                                                             \
-      FIO_LOG_FATAL("(" FIO__FILE__                                            \
-                    ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
+      FIO_LOG_FATAL(__VA_ARGS__);                                              \
       fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
@@ -755,15 +750,18 @@ typedef struct fio_str_info_s {
 /** An information type for reporting/storing buffer data (no `capa`). */
 typedef struct fio_buf_info_s {
   /** The buffer's length, if any. */
-  size_t len; /* len must be 1st to fit with small string header types */
+  size_t len;
   /** The buffer's address (may be NULL if no buffer). */
-  char *buf; /* buf must be 2nd to fit with small string header types */
+  char *buf;
 } fio_buf_info_s;
 
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
                             !memcmp((s1).buf, (s2).buf, (s1).len)))
+
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
@@ -777,6 +775,14 @@ typedef struct fio_buf_info_s {
 #define FIO_STR_INFO3(str, length, capacity)                                   \
   ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
 
+/** Converts a C String into a fio_buf_info_s. */
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = strlen((str)), .buf = (str)})
+
+/** Converts a String with a known length into a fio_buf_info_s. */
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+
 /** Converts a fio_buf_info_s into a fio_str_info_s. */
 #define FIO_BUF2STR_INFO(buf_info)                                             \
   ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
@@ -784,446 +790,6 @@ typedef struct fio_buf_info_s {
 /** Converts a fio_buf_info_s into a fio_str_info_s. */
 #define FIO_STR2BUF_INFO(str_info)                                             \
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
-
-/**
- * Writes data to the end of the string in the `fio_str_info_s` struct,
- * returning an updated `fio_str_info_s` struct.
- *
- * The returned string is NUL terminated if edited.
- *
- * * `dest` an `fio_str_info_s` struct containing the destination string.
- *
- * * `reallocate` is a callback that attempts to reallocate more memory (i.e.,
- * using realloc) and returns an updated `fio_str_info_s` struct containing the
- *   updated capacity and buffer pointer (as well as the original length).
- *
- *   On failure the original `fio_str_info_s` should be returned. if
- * `reallocate` is NULL or fails, the data copied will be truncated.
- *
- * * `src` is the data to be written to the end of `dest`.
- *
- * * `len` is the length of the data to be written to the end of `dest`.
- *
- * Note: this function performs only minimal checks and assumes that `dest` is
- *       fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is
- *       valid, etc'.
- *
- * An example for a `reallocate` callback using the system's `realloc` function:
- *
- *      fio_str_info_s fio_str_info_realloc_system(fio_str_info_s dest,
- *                                                size_t new_capa) {
- *       void *tmp = realloc(dest.buf, new_capa);
- *       if (!tmp)
- *         return dest;
- *       dest.capa = new_capa;
- *       dest.buf = (char *)tmp;
- *       return dest;
- *     }
- *
- * An example for using the function:
- *
- *     void example(void) {
- *       char buf[32];
- *       fio_str_info_s str = FIO_STR_INFO3(buf, 0, 32);
- *       fio_str_info_write(&str, NULL, "The answer is: 0x", 17);
- *       str.len += fio_ltoa(str.buf + str.len, 42, 16);
- *       fio_str_info_write(&str, NULL, "!\n", 2);
- *       printf("%s", str.buf);
- *     }
- */
-FIO_IFUNC int fio_str_info_write(fio_str_info_s *dest,
-                                 fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                              size_t new_capa),
-                                 const void *src,
-                                 size_t len);
-
-/**
- * Similar to fio_str_info_write, only writes multiple strings at once.
- *
- * The last source in the `srcs` array MUST be a string with a NULL pointer.
- */
-FIO_IFUNC int fio_str_info_join(fio_str_info_s *dest,
-                                fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                             size_t new_capa),
-                                const fio_str_info_s srcs[]);
-
-/* Helper macro for fio_str_info_write2 */
-#define fio_str_info_join(dest, reallocate, ...)                               \
-  fio_str_info_join((dest), (reallocate), (fio_str_info_s[]){__VA_ARGS__, {0}})
-
-/**
- * Similar to fio_str_info_write, only replacing a sub-string or inserting a
- * string in a specific location.
- */
-FIO_IFUNC int fio_str_info_insert(fio_str_info_s *dest,
-                                  fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                               size_t new_capa),
-                                  intptr_t start_pos,
-                                  size_t overwrite_len,
-                                  const void *src,
-                                  size_t len);
-
-/** Similar to fio_str_info_write, only using printf semantics. */
-FIO_IFUNC int fio_str_info_printf(fio_str_info_s *dest,
-                                  fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                               size_t new_capa),
-                                  const char *format,
-                                  ...);
-
-/** Similar to fio_str_info_write, only using vprintf semantics. */
-FIO_IFUNC int fio_str_info_vprintf(
-    fio_str_info_s *dest,
-    fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
-    const char *format,
-    va_list argv);
-
-/** Argument type used by fio_str_info_write2. */
-typedef struct {
-  size_t klass;
-  union {
-    fio_str_info_s str;
-    double f;
-    int64_t mem[8];
-    char raw[64];
-  } info;
-} fio_str_info_write_s;
-
-#if FIO_STR_INFO_WRITE2
-/**
- * Writes a group of objects (strings, numbers, etc') to `dest`.
- *
- * `dest` and `reallocate` are similar to `fio_str_info_write`.
- *
- * `src` is an array of `fio_str_info_write_s` structs, ending with a struct
- * that's all set to 0.
- *
- * Use the `fio_str_info_write2` macro for ease, i.e.:
- *
- *    fio_str_info_s str = {0};
- *    fio_str_info_write2(&str, my_reallocate,
- *                        FIO_STR_INFO_WRITE_STR1("The answer is: "),
- *                        FIO_STR_INFO_WRITE_NUM(42),
- *                        FIO_STR_INFO_WRITE_STR2("(0x", 3),
- *                        FIO_STR_INFO_WRITE_HEX(42),
- *                        FIO_STR_INFO_WRITE_STR2(")", 1));
- *
- * Note: this function requires `FIO_ATOL` to be defined.
- */
-FIO_IFUNC int fio_str_info_write2(fio_str_info_s *restrict dest,
-                                  fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                               size_t new_capa),
-                                  fio_str_info_write_s srcs[]);
-
-/* Helper macro for fio_str_info_write2 */
-#define fio_str_info_write2(dest, reallocate, ...)                             \
-  fio_str_info_write2((dest),                                                  \
-                      (reallocate),                                            \
-                      (fio_str_info_write_s[]){__VA_ARGS__, {0}})
-
-#define FIO_STR_INFO_WRITE_STR1(str_)                                          \
-  ((fio_str_info_write_s){.klass = 1,                                          \
-                          .info.str = {.len = strlen((str_)), .buf = (str_)}})
-#define FIO_STR_INFO_WRITE_STR2(str_, len_)                                    \
-  ((fio_str_info_write_s){.klass = 1,                                          \
-                          .info.str = {.len = (len_), .buf = (str_)}})
-#define FIO_STR_INFO_WRITE_NUM(num)                                            \
-  ((fio_str_info_write_s){.klass = 2, .info.mem = {(int64_t)(num)}})
-#define FIO_STR_INFO_WRITE_FLOAT(num)                                          \
-  ((fio_str_info_write_s){.klass = 3, .info.f = (double)(num)})
-#define FIO_STR_INFO_WRITE_HEX(num)                                            \
-  ((fio_str_info_write_s){.klass = 4, .info.mem = {(num)}})
-#define FIO_STR_INFO_WRITE_BIN(num)                                            \
-  ((fio_str_info_write_s){.klass = 5, .info.mem = {(num)}})
-#endif
-/* *****************************************************************************
-Common String Helpers - (inlined) implementation
-***************************************************************************** */
-
-/* fio_str_info_write */
-FIO_IFUNC int fio_str_info_write(fio_str_info_s *dest,
-                                 fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                              size_t new_capa),
-                                 const void *src,
-                                 size_t len) {
-  int r = 0;
-  if (reallocate && (dest->capa < dest->len + len + 1)) {
-    const size_t new_len = dest->len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    *dest = reallocate(*dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
-    r = -1;
-    return r;
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1)) {
-    len = dest->capa - (dest->len + 1);
-    r = -1;
-  }
-  if (len && src) {
-    memcpy(dest->buf + dest->len, src, len);
-    dest->len += len;
-    dest->buf[dest->len] = 0;
-  }
-  return r;
-}
-
-/* fio_str_info_insert */
-FIO_IFUNC int fio_str_info_insert(fio_str_info_s *dest,
-                                  fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                               size_t new_capa),
-                                  intptr_t start_pos,
-                                  size_t overwrite_len,
-                                  const void *src,
-                                  size_t len) {
-  int r = 0;
-  if (start_pos < 0) {
-    start_pos = dest->len + start_pos;
-    if (start_pos < 0)
-      start_pos = 0;
-  }
-  if (dest->len < (size_t)start_pos + len + 1) {
-    if ((size_t)start_pos < dest->len)
-      dest->len = start_pos;
-    return fio_str_info_write(dest, reallocate, src, len);
-  }
-  size_t move_start = start_pos + overwrite_len;
-  size_t move_len = dest->len - (start_pos + overwrite_len);
-  if (overwrite_len < len) {
-    /* adjust for possible memory expansion */
-    const size_t extra = len - overwrite_len;
-    if (dest->capa < dest->len + extra + 1) {
-      if (reallocate) {
-        const size_t new_len = dest->len + extra;
-        const size_t new_capa =
-            (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-        *dest = reallocate(*dest, new_capa);
-      }
-      if (FIO_UNLIKELY(dest->capa < dest->len + extra + 1)) {
-        move_len -= (dest->len + extra + 1) - dest->capa;
-        r = -1;
-      }
-    }
-  }
-  memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
-  memcpy(dest->buf + start_pos, src, len);
-  dest->len = start_pos + len + move_len;
-  dest->buf[dest->len] = 0;
-  return r;
-}
-
-/**
- * Similar to fio_str_info_write, only writes multiple strings at once.
- *
- * The last source in the `srcs` array MUST be a string with a NULL pointer.
- */
-FIO_IFUNC int fio_str_info_join
-FIO_NOOP(fio_str_info_s *dest,
-         fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
-         const fio_str_info_s srcs[]) {
-  int r = 0;
-  size_t len = 0;
-  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
-    len += pos->len;
-  }
-  if (reallocate && (dest->capa < dest->len + len + 1)) {
-    const size_t new_len = dest->len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    *dest = reallocate(*dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
-    r = -1;
-    return r;
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1))
-    goto truncate;
-  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
-    FIO_MEMCPY(&dest->buf[dest->len], pos->buf, pos->len);
-    dest->len += pos->len;
-  }
-finish:
-  dest->buf[dest->len] = 0;
-  return r;
-truncate:
-  r = -1;
-  for (const fio_str_info_s *pos = srcs; pos->buf; ++pos) {
-    len = pos->len;
-    if (dest->capa < dest->len + len + 1)
-      len = dest->capa - (dest->len + 1);
-    if (len)
-      FIO_MEMCPY(&dest->buf[dest->len], pos->buf, pos->len);
-    dest->len += len;
-    if (len != pos->len)
-      goto finish;
-  }
-  goto finish;
-}
-
-/* Similar to fio_str_info_write, only using vprintf semantics. */
-FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
-fio_str_info_vprintf(fio_str_info_s *dest,
-                     fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                  size_t new_capa),
-                     const char *format,
-                     va_list argv) {
-  int r = 0;
-  va_list argv_cpy;
-  va_copy(argv_cpy, argv);
-  int len = vsnprintf(NULL, 0, format, argv_cpy);
-  va_end(argv_cpy);
-  if (len <= 0)
-    return -1;
-  if (reallocate && (dest->capa < dest->len + len + 1)) {
-    const size_t new_len = dest->len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    *dest = reallocate(*dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2))
-    return -1;
-  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1)) {
-    len = dest->capa - (dest->len + 1);
-    r = -1;
-  }
-  vsnprintf(dest->buf + dest->len, len + 1, format, argv);
-  dest->len += len;
-  return r;
-}
-
-/** Similar to fio_str_info_write, only using printf semantics. */
-FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
-fio_str_info_printf(fio_str_info_s *dest,
-                    fio_str_info_s (*reallocate)(fio_str_info_s,
-                                                 size_t new_capa),
-                    const char *format,
-                    ...) {
-  int r = 0;
-  va_list argv;
-  va_start(argv, format);
-  r = fio_str_info_vprintf(dest, reallocate, format, argv);
-  va_end(argv);
-  return r;
-}
-
-#if FIO_STR_INFO_WRITE2
-/* the fio_str_info_write2 is a printf alternative. */
-FIO_IFUNC int fio_str_info_write2
-FIO_NOOP(fio_str_info_s *restrict dest,
-         fio_str_info_s (*reallocate)(fio_str_info_s, size_t new_capa),
-         fio_str_info_write_s srcs[]) {
-  static const char fio___i2c_map[] = "0123456789ABCDEF";
-  int r = 0;
-  fio_str_info_write_s *pos = srcs;
-  size_t len = 0;
-  while (pos->klass) {
-    size_t tmp = 0;
-    union {
-      int64_t i;
-      uint64_t u;
-    } num = {.i = pos->info.mem[0]};
-    char inv = 0;
-    switch (pos->klass) {
-    case 2: /* number */
-      pos->klass = 2;
-      if (num.i < 0) {
-        inv = '-';
-        num.i = 0 - num.i;
-      }
-      while (num.i) {
-        size_t nxt = num.i / 10;
-        pos->info.raw[tmp] = '0' + (num.i - (nxt * 10));
-        ++tmp;
-        num.i = nxt;
-      }
-      pos->info.raw[tmp] = inv;
-      tmp += (!!inv);
-      pos->klass |= (tmp << 8);
-      break;
-    case 3: /* float */
-      pos->klass = 3;
-      tmp = snprintf(pos->info.raw, 64, "%.15g", pos->info.f);
-      pos->klass |= (tmp << 8);
-      break;
-    case 4: /* hex */
-      pos->klass = 2;
-      while (num.u) {
-        pos->info.raw[tmp] = fio___i2c_map[(num.u & 0xF)];
-        pos->info.raw[tmp + 1] = fio___i2c_map[((num.u >> 4) & 0xF)];
-        tmp += 2;
-        num.u >>= 8;
-      }
-      pos->klass |= (tmp << 8);
-      break;
-    case 5: /* binary */
-      pos->klass = 2;
-      while (num.u) {
-        pos->info.raw[tmp] = '0' + (num.u & 0x1);
-        pos->info.raw[tmp + 1] = '0' + ((num.u >> 1) & 0x1);
-        tmp += 2;
-        num.u >>= 2;
-      }
-      pos->klass |= (tmp << 8);
-      break;
-    default: tmp = pos->info.str.len;
-    }
-    len += tmp;
-    ++pos;
-  }
-  if (reallocate && (dest->capa < dest->len + len + 1)) {
-    const size_t new_len = dest->len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    *dest = reallocate(*dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
-    r = -1;
-    return r;
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1))
-    r = -1;
-  for (pos = srcs; pos->klass; ++pos) {
-    size_t src_len;
-    void *src;
-    switch (pos->klass & 3) {
-    case 2: /* numbers are in reverse order... so... */
-      src_len = pos->klass >> 8;
-      src = pos->info.raw;
-      /* partial numbers are never printed, to avoid security issues */
-      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len)))
-        goto finish;
-      for (size_t i = src_len; i;) {
-        --i;
-        dest->buf[dest->len] = ((char *)src)[i];
-        ++dest->len;
-      }
-      continue;
-    case 3:
-      src_len = pos->klass >> 8;
-      src = pos->info.raw;
-      /* partial numbers are never printed, to avoid security issues */
-      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len)))
-        goto finish;
-      break;
-    default:
-      src_len = pos->info.str.len;
-      src = pos->info.str.buf;
-      if (FIO_UNLIKELY(r & (dest->capa < dest->len + 1 + src_len))) {
-        src_len = dest->capa - (dest->len + 1);
-        memcpy(dest->buf + dest->len, src, src_len);
-        dest->len += src_len;
-        goto finish;
-      }
-      break;
-    }
-    memcpy(dest->buf + dest->len, src, src_len);
-    dest->len += src_len;
-  }
-finish:
-  dest->buf[dest->len] = 0;
-  return r;
-}
-#endif
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros

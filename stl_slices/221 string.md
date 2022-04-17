@@ -612,7 +612,7 @@ fio_str_info_s STR_readfile(FIO_STR_PTR s,
                             intptr_t limit);
 ```
 
-Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
+Opens the file `filename` and pastes it's contents (or a slice of it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
 
 If the file can't be located, opened or read, or if `start_at` is beyond the EOF position, NULL is returned in the state's `data` field.
 
