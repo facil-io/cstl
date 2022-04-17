@@ -241,7 +241,7 @@ FIO_SFUNC void fio_string_default_free2(fio_str_info_s str) {
 
 FIO_SFUNC void fio_string_default_free_noop(fio_str_info_s str) { (void)str; }
 
-/* fio_string_write */
+/* performs `reallocate` if necessary, `capa` rounded up to 16 byte units. */
 FIO_IFUNC size_t fio_string___write_validate_len(
     fio_str_info_s *dest,
     void (*reallocate)(fio_str_info_s *, size_t new_capa),
@@ -425,6 +425,8 @@ FIO_SFUNC int fio_string_insert(fio_str_info_s *dest,
   return r;
 }
 
+/* IDE marker */
+void fio_string_write2____(void);
 /* the fio_string_write2 is a printf alternative. */
 FIO_SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
                                          void (*reallocate)(fio_str_info_s *,
@@ -435,7 +437,7 @@ FIO_SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
   size_t len = 0;
 
   while (pos->klass) {
-    switch (pos->klass) {
+    switch (pos->klass) { /* use more memory rather then calculate twice. */
     case 2: /* number */ len += 20; break;
     case 3: /* unsigned */ len += 20; break;
     case 4: /* hex */ len += 16; break;
