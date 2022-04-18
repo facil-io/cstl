@@ -61,7 +61,9 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
-#define FIO_SORT num
+#define FIO_SORT      num
+#define FIO_SORT_TYPE size_t
+#define FIO_SORT_TEST 1
 
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 

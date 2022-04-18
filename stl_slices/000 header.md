@@ -78,6 +78,8 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Custom JSON Parser](#custom-json-parser) - defined by `FIO_JSON`
 
+* [Quick Sort and Insert Sort](#quick-sort-and-insert-sort) - defined by `FIO_SORT`
+
 * [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
 
 * [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
