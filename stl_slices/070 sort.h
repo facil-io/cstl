@@ -26,7 +26,7 @@ Sort Settings
 ***************************************************************************** */
 
 #ifndef FIO_SORT_THRESHOLD
-#define FIO_SORT_THRESHOLD 256
+#define FIO_SORT_THRESHOLD 96
 #endif
 
 #ifndef FIO_SORT_TYPE
@@ -204,13 +204,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
                       29, 26, 16, 24, 22, 11, 5, 14, 31, 25, 8,
                       12, 18, 20, 17, 1,  27, 9, 0,  6,  30};
-    size_t ordered[] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
-                        11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-                        22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+    size_t ordered[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
+                        29, 26, 16, 24, 22, 11, 5, 14, 31, 25, 8,
+                        12, 18, 20, 17, 1,  27, 9, 0,  6,  30};
     const size_t len =
         (sizeof(ordered) / sizeof(ordered[0])) > FIO_SORT_THRESHOLD
             ? FIO_SORT_THRESHOLD
             : (sizeof(ordered) / sizeof(ordered[0]));
+    qsort(ordered,
+          len,
+          sizeof(ordered[0]),
+          (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
+                                                        FIO_SORT));
     FIO_NAME(FIO_SORT, isort)(mixed, len);
     FIO_ASSERT(!memcmp(mixed, ordered, sizeof(*ordered) * len),
                "short sort failed!");
