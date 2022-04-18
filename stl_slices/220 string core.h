@@ -99,13 +99,13 @@ FIO_IFUNC int fio_string_write_bin(fio_str_info_s *dest,
  * Similar to fio_string_write, only replacing a sub-string or inserting a
  * string in a specific location.
  */
-FIO_SFUNC int fio_string_insert(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                intptr_t start_pos,
-                                size_t overwrite_len,
-                                const void *src,
-                                size_t len);
+SFUNC int fio_string_insert(fio_str_info_s *dest,
+                            void (*reallocate)(fio_str_info_s *,
+                                               size_t new_capa),
+                            intptr_t start_pos,
+                            size_t overwrite_len,
+                            const void *src,
+                            size_t len);
 
 /** Argument type used by fio_string_write2. */
 typedef struct {
@@ -136,10 +136,10 @@ typedef struct {
  *                        FIO_STRING_WRITE_HEX(42),
  *                        FIO_STRING_WRITE_STR2(")", 1));
  */
-FIO_SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                const fio_string_write_s srcs[]);
+SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
+                            void (*reallocate)(fio_str_info_s *,
+                                               size_t new_capa),
+                            const fio_string_write_s srcs[]);
 
 /* Helper macro for fio_string_write2 */
 #define fio_string_write2(dest, reallocate, ...)                               \
@@ -177,6 +177,13 @@ FIO_IFUNC int fio_string_vprintf(fio_str_info_s *dest,
                                  const char *format,
                                  va_list argv);
 
+/**
+ * Compares two strings, returning 1 if string a is bigger than string b.
+ *
+ * Note: returns 0 if string b is bigger than string a or if strings are equal.
+ */
+SFUNC int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
+
 /** Default reallocation callback implementation */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
@@ -189,17 +196,16 @@ FIO_IFUNC int fio_string_vprintf(fio_str_info_s *dest,
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
 
 /** default reallocation callback implementation */
-FIO_SFUNC void fio_string_default_reallocate(fio_str_info_s *dest,
-                                             size_t new_capa);
+SFUNC void fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
 /** default reallocation callback for memory that mustn't be freed. */
-FIO_SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                      size_t new_capa);
+SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
+                                                  size_t new_capa);
 /** frees memory that was allocated with the default callbacks. */
-FIO_SFUNC void fio_string_default_free(void *);
+SFUNC void fio_string_default_free(void *);
 /** frees memory that was allocated with the default callbacks. */
-FIO_SFUNC void fio_string_default_free2(fio_str_info_s str);
+SFUNC void fio_string_default_free2(fio_str_info_s str);
 /** does nothing. */
-FIO_SFUNC void fio_string_default_free_noop(fio_str_info_s str);
+SFUNC void fio_string_default_free_noop(fio_str_info_s str);
 
 /* *****************************************************************************
 
@@ -214,32 +220,6 @@ FIO_SFUNC void fio_string_default_free_noop(fio_str_info_s str);
 /* *****************************************************************************
 String Authorship Helpers - (inlined) implementation
 ***************************************************************************** */
-FIO_SFUNC void fio_string_default_reallocate(fio_str_info_s *dest,
-                                             size_t new_capa) {
-  void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
-  if (!tmp)
-    return;
-  dest->capa = new_capa;
-  dest->buf = (char *)tmp;
-}
-
-FIO_SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                      size_t new_capa) {
-  void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
-  if (!tmp)
-    return;
-  dest->capa = new_capa;
-  dest->buf = (char *)tmp;
-  if (dest->len)
-    FIO_MEMCPY(tmp, dest->buf, dest->len);
-}
-
-FIO_SFUNC void fio_string_default_free(void *ptr) { FIO_MEM_FREE_(ptr, 0); }
-FIO_SFUNC void fio_string_default_free2(fio_str_info_s str) {
-  FIO_MEM_FREE_(str.buf, str.capa);
-}
-
-FIO_SFUNC void fio_string_default_free_noop(fio_str_info_s str) { (void)str; }
 
 /* performs `reallocate` if necessary, `capa` rounded up to 16 byte units. */
 FIO_IFUNC size_t fio_string___write_validate_len(
@@ -381,14 +361,91 @@ FIO_IFUNC int fio_string_write_bin(fio_str_info_s *dest,
   return r;
 }
 
+/* Similar to fio_string_write, only using vprintf semantics. */
+FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
+fio_string_vprintf(fio_str_info_s *dest,
+                   void (*reallocate)(fio_str_info_s *, size_t new_capa),
+                   const char *format,
+                   va_list argv) {
+  int r = 0;
+  va_list argv_cpy;
+  va_copy(argv_cpy, argv);
+  int len = vsnprintf(NULL, 0, format, argv_cpy);
+  va_end(argv_cpy);
+  if (len <= 0)
+    return -1;
+  r = len;
+  len = fio_string___write_validate_len(dest, reallocate, len);
+  r = -1 + (r == len);
+  if (FIO_UNLIKELY(dest->capa < dest->len + 2))
+    return -1;
+  vsnprintf(dest->buf + dest->len, len + 1, format, argv);
+  dest->len += len;
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Similar to fio_string_write, only using printf semantics. */
+FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
+fio_string_printf(fio_str_info_s *dest,
+                  void (*reallocate)(fio_str_info_s *, size_t new_capa),
+                  const char *format,
+                  ...) {
+  int r = 0;
+  va_list argv;
+  va_start(argv, format);
+  r = fio_string_vprintf(dest, reallocate, format, argv);
+  va_end(argv);
+  return r;
+}
+
+/* *****************************************************************************
+Extern-ed functions
+***************************************************************************** */
+#ifdef FIO_EXTERN_COMPLETE
+
+/* *****************************************************************************
+Allocation Helpers
+***************************************************************************** */
+SFUNC void fio_string_default_reallocate(fio_str_info_s *dest,
+                                         size_t new_capa) {
+  void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
+  if (!tmp)
+    return;
+  dest->capa = new_capa;
+  dest->buf = (char *)tmp;
+}
+
+SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
+                                                  size_t new_capa) {
+  void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
+  if (!tmp)
+    return;
+  dest->capa = new_capa;
+  dest->buf = (char *)tmp;
+  if (dest->len)
+    FIO_MEMCPY(tmp, dest->buf, dest->len);
+}
+
+SFUNC void fio_string_default_free(void *ptr) { FIO_MEM_FREE_(ptr, 0); }
+SFUNC void fio_string_default_free2(fio_str_info_s str) {
+  FIO_MEM_FREE_(str.buf, str.capa);
+}
+
+SFUNC void fio_string_default_free_noop(fio_str_info_s str) { (void)str; }
+
+/* *****************************************************************************
+Insert / Write2
+***************************************************************************** */
+
 /* fio_string_insert */
-FIO_SFUNC int fio_string_insert(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                intptr_t start_pos,
-                                size_t overwrite_len,
-                                const void *src,
-                                size_t len) {
+SFUNC int fio_string_insert(fio_str_info_s *dest,
+                            void (*reallocate)(fio_str_info_s *,
+                                               size_t new_capa),
+                            intptr_t start_pos,
+                            size_t overwrite_len,
+                            const void *src,
+                            size_t len) {
   int r = 0;
   if (start_pos < 0) {
     start_pos = dest->len + start_pos;
@@ -428,10 +485,10 @@ FIO_SFUNC int fio_string_insert(fio_str_info_s *dest,
 /* IDE marker */
 void fio_string_write2____(void);
 /* the fio_string_write2 is a printf alternative. */
-FIO_SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
-                                         void (*reallocate)(fio_str_info_s *,
-                                                            size_t new_capa),
-                                         const fio_string_write_s srcs[]) {
+SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
+                                     void (*reallocate)(fio_str_info_s *,
+                                                        size_t new_capa),
+                                     const fio_string_write_s srcs[]) {
   int r = 0;
   const fio_string_write_s *pos = srcs;
   size_t len = 0;
@@ -503,44 +560,51 @@ truncate:
   goto finish;
 }
 
-/* Similar to fio_string_write, only using vprintf semantics. */
-FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
-fio_string_vprintf(fio_str_info_s *dest,
-                   void (*reallocate)(fio_str_info_s *, size_t new_capa),
-                   const char *format,
-                   va_list argv) {
-  int r = 0;
-  va_list argv_cpy;
-  va_copy(argv_cpy, argv);
-  int len = vsnprintf(NULL, 0, format, argv_cpy);
-  va_end(argv_cpy);
-  if (len <= 0)
-    return -1;
-  r = len;
-  len = fio_string___write_validate_len(dest, reallocate, len);
-  r = -1 + (r == len);
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2))
-    return -1;
-  vsnprintf(dest->buf + dest->len, len + 1, format, argv);
-  dest->len += len;
-  dest->buf[dest->len] = 0;
-  return r;
-}
+/* *****************************************************************************
+fio_string_is_bigger
+***************************************************************************** */
 
-/** Similar to fio_string_write, only using printf semantics. */
-FIO_IFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
-fio_string_printf(fio_str_info_s *dest,
-                  void (*reallocate)(fio_str_info_s *, size_t new_capa),
-                  const char *format,
-                  ...) {
-  int r = 0;
-  va_list argv;
-  va_start(argv, format);
-  r = fio_string_vprintf(dest, reallocate, format, argv);
-  va_end(argv);
-  return r;
+/**
+ * Compares two strings, returning 1 if string a is bigger than string b.
+ *
+ * Note: returns 0 if string b is bigger than string a or if strings are equal.
+ */
+SFUNC int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b) {
+  const size_t a_len_is_bigger = a.len > b.len;
+  const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
+  if (a.buf == b.buf)
+    return a_len_is_bigger;
+  uint64_t ua;
+  uint64_t ub;
+  if (len > 7)
+    for (size_t i = 0; i < len; i += 8) {
+      ua = fio_buf2u64(a.buf);
+      ub = fio_buf2u64(b.buf);
+      if (ua != ub)
+        return ua > ub;
+      a.buf += 8;
+      b.buf += 8;
+    }
+  if (len & 4) {
+    ua = fio_buf2u32(a.buf);
+    ub = fio_buf2u32(b.buf);
+    if (ua != ub)
+      return ua > ub;
+    a.buf += 4;
+    b.buf += 4;
+  }
+  ua = 0;
+  ub = 0;
+  switch ((len & 7)) { // clang-format off
+  case 3: ua |= ((uint64_t)a.buf[2] << 40); ub |= ((uint64_t)b.buf[2] << 40); /* fall through */
+  case 2: ua |= ((uint64_t)a.buf[1] << 48); ub |= ((uint64_t)b.buf[1] << 48); /* fall through */
+  case 1: ua |= ((uint64_t)a.buf[0] << 56); ub |= ((uint64_t)b.buf[0] << 56); /* fall through */
+  case 0: // clang-format on
+    if (ua > ub)
+      return 1;
+  }
+  return a_len_is_bigger & (ua == ub);
 }
-
 /* *****************************************************************************
 Testing
 ***************************************************************************** */
@@ -579,9 +643,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   buf = FIO_STR_INFO3(mem, 0, 16);
   fio_string_write2(&buf,
                     NULL,
-                    FIO_STRING_WRITE_STR2("I think ", 8),
+                    FIO_STRING_WRITE_STR2((char *)"I think ", 8),
                     FIO_STRING_WRITE_NUM(42),
-                    FIO_STRING_WRITE_STR1(" is the best answer"));
+                    FIO_STRING_WRITE_STR1((char *)" is the best answer"));
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "I think 42 is t", 16),
              "fio_string_write2 failed to truncate!");
@@ -589,9 +653,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   buf = FIO_STR_INFO3(mem, 0, 16);
   fio_string_write2(&buf,
                     NULL,
-                    FIO_STRING_WRITE_STR2("I think ", 8),
+                    FIO_STRING_WRITE_STR2((char *)"I think ", 8),
                     FIO_STRING_WRITE_HEX(42),
-                    FIO_STRING_WRITE_STR1(" is the best answer"));
+                    FIO_STRING_WRITE_STR1((char *)" is the best answer"));
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "I think 2A is t", 16),
              "fio_string_write2 failed to truncate (hex)!");
@@ -599,20 +663,73 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   buf = FIO_STR_INFO3(mem, 0, 16);
   fio_string_write2(&buf,
                     NULL,
-                    FIO_STRING_WRITE_STR2("I Think ", 8),
+                    FIO_STRING_WRITE_STR2((char *)"I Think ", 8),
                     FIO_STRING_WRITE_FLOAT(42.42),
-                    FIO_STRING_WRITE_STR1(" is the best answer"));
+                    FIO_STRING_WRITE_STR1((char *)" is the best answer"));
   FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                  !memcmp(buf.buf, "I Think 42.42 i", 16),
              "fio_string_write2 failed to truncate (float)!");
   buf = FIO_STR_INFO3(mem, 0, 16);
   fio_string_write2(&buf,
                     NULL,
-                    FIO_STRING_WRITE_STR2("I think ", 8),
+                    FIO_STRING_WRITE_STR2((char *)"I think ", 8),
                     FIO_STRING_WRITE_BIN(-1LL),
-                    FIO_STRING_WRITE_STR1(" is the best answer"));
+                    FIO_STRING_WRITE_STR1((char *)" is the best answer"));
   FIO_ASSERT(mem == buf.buf && buf.len == 8 && !memcmp(buf.buf, "I think ", 8),
              "fio_string_write2 failed to truncate (bin)!");
+
+  FIO_ASSERT(fio_string_is_bigger(FIO_STR_INFO1((char *)"A"),
+                                  FIO_STR_INFO1((char *)"")),
+             "fio_string_is_bigger failed for A vs __");
+  FIO_ASSERT(fio_string_is_bigger(FIO_STR_INFO1((char *)"hello world"),
+                                  FIO_STR_INFO1((char *)"hello worl")),
+             "fio_string_is_bigger failed for hello worl(d)");
+  FIO_ASSERT(fio_string_is_bigger(FIO_STR_INFO1((char *)"01234567"),
+                                  FIO_STR_INFO1((char *)"012345664")),
+             "fio_string_is_bigger failed for 01234567");
+  FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)""),
+                                   FIO_STR_INFO1((char *)"A")),
+             "fio_string_is_bigger failed for A inv");
+  FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)"hello worl"),
+                                   FIO_STR_INFO1((char *)"hello world")),
+             "fio_string_is_bigger failed for hello worl(d) inv");
+  FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)"012345664"),
+                                   FIO_STR_INFO1((char *)"01234567")),
+             "fio_string_is_bigger failed for 01234567 inv");
+#if !defined(DEBUG) || defined(NODEBUG)
+  {
+    char str_a[] =
+        "This is not a very long string but it should be bigger than the other "
+        "one that has one character missing at the end, okay??";
+    char str_b[] =
+        "This is not a very long string but it should be bigger than the other "
+        "one that has one character missing at the end, okay?";
+    fio_str_info_s sa = FIO_STR_INFO1(str_a);
+    fio_str_info_s sb = FIO_STR_INFO1(str_b);
+    clock_t start = clock();
+    for (size_t i = 0; i < (1ULL << 17); ++i) {
+      FIO_COMPILER_GUARD;
+      int r = fio_string_is_bigger(sa, sb);
+      FIO_ASSERT(r > 0, "fio_string_is_bigger error?!");
+    }
+    clock_t end = clock();
+    fprintf(stderr,
+            "\t* fio_string_is_bigger test cycles: %zu\n",
+            (size_t)(end - start));
+    start = clock();
+    for (size_t i = 0; i < (1ULL << 17); ++i) {
+      FIO_COMPILER_GUARD;
+      int r = memcmp(str_a, str_b, sa.len > sb.len ? sb.len : sa.len);
+      if (!r)
+        r = sa.len > sb.len;
+      FIO_ASSERT(r > 0, "memcmp error?!");
+    }
+    end = clock();
+    fprintf(stderr,
+            "\t* memcmp libc test cycles:            %zu\n",
+            (size_t)(end - start));
+  }
+#endif /* DEBUG */
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -620,5 +737,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
 /* *****************************************************************************
 String Core Cleanup
 ***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STR_CORE
 #endif /* H__FIO_STR_CORE__H */

@@ -566,28 +566,41 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                "ChaCha quarter round example error");
   }
   { /* test ChaCha20 independently */
-    char *key =
-        "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
-    char *nounce = "\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
-    char *src =
-        "\x4c\x61\x64\x69\x65\x73\x20\x61\x6e\x64\x20\x47\x65\x6e\x74\x6c"
-        "\x65\x6d\x65\x6e\x20\x6f\x66\x20\x74\x68\x65\x20\x63\x6c\x61\x73"
-        "\x73\x20\x6f\x66\x20\x27\x39\x39\x3a\x20\x49\x66\x20\x49\x20\x63"
-        "\x6f\x75\x6c\x64\x20\x6f\x66\x66\x65\x72\x20\x79\x6f\x75\x20\x6f"
-        "\x6e\x6c\x79\x20\x6f\x6e\x65\x20\x74\x69\x70\x20\x66\x6f\x72\x20"
-        "\x74\x68\x65\x20\x66\x75\x74\x75\x72\x65\x2c\x20\x73\x75\x6e\x73"
-        "\x63\x72\x65\x65\x6e\x20\x77\x6f\x75\x6c\x64\x20\x62\x65\x20\x69"
-        "\x74\x2e";
-    char *expected =
-        "\x6e\x2e\x35\x9a\x25\x68\xf9\x80\x41\xba\x07\x28\xdd\x0d\x69\x81"
-        "\xe9\x7e\x7a\xec\x1d\x43\x60\xc2\x0a\x27\xaf\xcc\xfd\x9f\xae\x0b"
-        "\xf9\x1b\x65\xc5\x52\x47\x33\xab\x8f\x59\x3d\xab\xcd\x62\xb3\x57"
-        "\x16\x39\xd6\x24\xe6\x51\x52\xab\x8f\x53\x0c\x35\x9f\x08\x61\xd8"
-        "\x07\xca\x0d\xbf\x50\x0d\x6a\x61\x56\xa3\x8e\x08\x8a\x22\xb6\x5e"
-        "\x52\xbc\x51\x4d\x16\xcc\xf8\x06\x81\x8c\xe9\x1a\xb7\x79\x37\x36"
-        "\x5a\xf9\x0b\xbf\x74\xa3\x5b\xe6\xb4\x0b\x8e\xed\xf2\x78\x5e\x42"
-        "\x87\x4d";
+    char *key = (char *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
+                        "\x0d\x0e\x0f"
+                        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
+                        "\x1d\x1e\x1f";
+    char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
+    char *src = (char *)"\x4c\x61\x64\x69\x65\x73\x20\x61\x6e\x64\x20\x47\x65"
+                        "\x6e\x74\x6c"
+                        "\x65\x6d\x65\x6e\x20\x6f\x66\x20\x74\x68\x65\x20\x63"
+                        "\x6c\x61\x73"
+                        "\x73\x20\x6f\x66\x20\x27\x39\x39\x3a\x20\x49\x66\x20"
+                        "\x49\x20\x63"
+                        "\x6f\x75\x6c\x64\x20\x6f\x66\x66\x65\x72\x20\x79\x6f"
+                        "\x75\x20\x6f"
+                        "\x6e\x6c\x79\x20\x6f\x6e\x65\x20\x74\x69\x70\x20\x66"
+                        "\x6f\x72\x20"
+                        "\x74\x68\x65\x20\x66\x75\x74\x75\x72\x65\x2c\x20\x73"
+                        "\x75\x6e\x73"
+                        "\x63\x72\x65\x65\x6e\x20\x77\x6f\x75\x6c\x64\x20\x62"
+                        "\x65\x20\x69"
+                        "\x74\x2e";
+    char *expected = (char *)"\x6e\x2e\x35\x9a\x25\x68\xf9\x80\x41\xba\x07\x28"
+                             "\xdd\x0d\x69\x81"
+                             "\xe9\x7e\x7a\xec\x1d\x43\x60\xc2\x0a\x27\xaf\xcc"
+                             "\xfd\x9f\xae\x0b"
+                             "\xf9\x1b\x65\xc5\x52\x47\x33\xab\x8f\x59\x3d\xab"
+                             "\xcd\x62\xb3\x57"
+                             "\x16\x39\xd6\x24\xe6\x51\x52\xab\x8f\x53\x0c\x35"
+                             "\x9f\x08\x61\xd8"
+                             "\x07\xca\x0d\xbf\x50\x0d\x6a\x61\x56\xa3\x8e\x08"
+                             "\x8a\x22\xb6\x5e"
+                             "\x52\xbc\x51\x4d\x16\xcc\xf8\x06\x81\x8c\xe9\x1a"
+                             "\xb7\x79\x37\x36"
+                             "\x5a\xf9\x0b\xbf\x74\xa3\x5b\xe6\xb4\x0b\x8e\xed"
+                             "\xf2\x78\x5e\x42"
+                             "\x87\x4d";
     size_t len = strlen(src);
     char buffer[256];
     memcpy(buffer, src, len);
@@ -597,12 +610,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
     FIO_ASSERT(!memcmp(buffer, src, len), "ChaCha20 decoding failed");
   }
   { /* test Poly1305 independently */
-    char *key =
-        "\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42\xd5\x06\xa8"
-        "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b";
-    char *msg = "Cryptographic Forum Research Group";
-    char *expected =
-        "\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b\xaf\x0c\x01\x27\xa9";
+    char *key = (char *)"\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42"
+                        "\xd5\x06\xa8"
+                        "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41"
+                        "\x49\xf5\x1b";
+    char *msg = (char *)"Cryptographic Forum Research Group";
+    char *expected = (char *)"\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b\xaf"
+                             "\x0c\x01\x27\xa9";
     char auth[16] = {0};
     char buf1[33] = {0};
     char buf2[33] = {0};
@@ -621,40 +635,56 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
 
 #if !DEBUG
-  fio_test_hash_function(fio__poly1305_speed_wrapper, "Poly1305", 7, 0, 0);
-  fio_test_hash_function(fio__poly1305_speed_wrapper, "Poly1305", 13, 0, 0);
   fio_test_hash_function(fio__poly1305_speed_wrapper,
-                         "Poly1305 (unaligned)",
+                         (char *)"Poly1305",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(fio__poly1305_speed_wrapper,
+                         (char *)"Poly1305",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(fio__poly1305_speed_wrapper,
+                         (char *)"Poly1305 (unaligned)",
                          13,
                          3,
                          0);
 
-  fio_test_hash_function(fio__chacha20_speed_wrapper, "ChaCha20", 7, 0, 0);
-  fio_test_hash_function(fio__chacha20_speed_wrapper, "ChaCha20", 13, 0, 0);
   fio_test_hash_function(fio__chacha20_speed_wrapper,
-                         "ChaCha20 (unaligned)",
+                         (char *)"ChaCha20",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(fio__chacha20_speed_wrapper,
+                         (char *)"ChaCha20",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(fio__chacha20_speed_wrapper,
+                         (char *)"ChaCha20 (unaligned)",
                          13,
                          3,
                          0);
 
   fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
-                         "ChaCha20Poly1305 (auth+decrypt)",
+                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
                          7,
                          0,
                          0);
   fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
-                         "ChaCha20Poly1305 (auth+decrypt)",
+                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
                          13,
                          0,
                          0);
 
   fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
-                         "ChaCha20Poly1305 (encrypt+MAC)",
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
                          7,
                          0,
                          0);
   fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
-                         "ChaCha20Poly1305 (encrypt+MAC)",
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
                          13,
                          0,
                          0);

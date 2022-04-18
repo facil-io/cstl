@@ -283,7 +283,7 @@ SFUNC int fio_filename_tmp(void) {
 
 /** Parses a file name to folder, base name and extension (zero-copy). */
 SFUNC fio_filename_s fio_filename_parse(const char *filename) {
-  fio_filename_s r = {0};
+  fio_filename_s r = {{0}};
   if (!filename || !filename[0])
     return r;
   const char *pos = filename;
@@ -352,7 +352,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
       {.str = "/.name", .result = {.folder = FIO_BUF_INFO2((char*)0, 1), .basename = FIO_BUF_INFO2((char*)1, 5), .ext = FIO_BUF_INFO2(NULL, 0)}},
       {.str = "/my_folder/.name", .result = {.folder = FIO_BUF_INFO2((char*)0, 11), .basename = FIO_BUF_INFO2((char*)11, 5), .ext = FIO_BUF_INFO2(NULL, 0)}},
       {.str = "/my_folder/name.ext", .result = {.folder = FIO_BUF_INFO2((char*)0, 11), .basename = FIO_BUF_INFO2((char*)11, 4), .ext = FIO_BUF_INFO2((char*)16, 3)}},
-      {0}, // clang-format on
+      {.str = NULL}, // clang-format on
   };
   for (size_t i = 0; filename_test[i].str; ++i) {
     fio_filename_s r = fio_filename_parse(filename_test[i].str);

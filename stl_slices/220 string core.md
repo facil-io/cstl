@@ -110,15 +110,14 @@ Writes a binary representation of `i` to the String.
 #### `fio_string_insert`
 
 ```c
-static int fio_string_insert(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                intptr_t start_pos,
-                                size_t overwrite_len,
-                                const void *src,
-                                size_t len);
+int fio_string_insert(fio_str_info_s *dest,
+                      void (*reallocate)(fio_str_info_s *,
+                                         size_t new_capa),
+                      intptr_t start_pos,
+                      size_t overwrite_len,
+                      const void *src,
+                      size_t len);
 ```
-
 
 Similar to `fio_string_write`, only replacing a sub-string or inserting a string in a specific location.
 
@@ -127,10 +126,10 @@ Similar to `fio_string_write`, only replacing a sub-string or inserting a string
 #### `fio_string_write2`
 
 ```c
-static int fio_string_write2(fio_str_info_s *restrict dest,
-                             void (*reallocate)(fio_str_info_s *,
-                                                size_t new_capa),
-                             const fio_string_write_s sources[]);
+int fio_string_write2(fio_str_info_s *restrict dest,
+                      void (*reallocate)(fio_str_info_s *,
+                                         size_t new_capa),
+                      const fio_string_write_s sources[]);
 /* Helper macro for fio_string_write2 */
 #define fio_string_write2(dest, reallocate, ...)                               \
   fio_string_write2((dest),                                                    \
@@ -221,6 +220,16 @@ inline int fio_string_vprintf(fio_str_info_s *dest,
 ```
 
 Similar to fio_string_write, only using vprintf semantics.
+
+#### `fio_string_is_bigger`
+
+```c
+int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
+```
+
+Compares two strings, returning 1 if string `a` is bigger than string `b`.
+
+**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal.
 
 #### `FIO_STRING_REALLOC`
 
