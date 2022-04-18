@@ -61,6 +61,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
+#define FIO_SORT num
 
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
@@ -934,6 +935,8 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, math)();
   FIO_NAME_TEST(stl, math_speed)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, FIO_NAME(sort, num))();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, url)();
   fprintf(stderr, "===============\n");

@@ -696,6 +696,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)"012345664"),
                                    FIO_STR_INFO1((char *)"01234567")),
              "fio_string_is_bigger failed for 01234567 inv");
+  FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)"Hzzzzzzzzzz"),
+                                   FIO_STR_INFO1((char *)"hello world")),
+             "fio_string_is_bigger failed for Hello world");
 #if !defined(DEBUG) || defined(NODEBUG)
   {
     char str_a[] =
