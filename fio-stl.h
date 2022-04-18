@@ -8854,7 +8854,7 @@ int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a, FIO_SORT_TYPE *b) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
-  fprintf(stderr, "* Testing facil.io small array sort\n");
+  fprintf(stderr, "* Testing facil.io array sort helper\n");
   {
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
                       29, 26, 16, 24, 22, 11, 5, 14, 31, 25, 8,
@@ -8938,10 +8938,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
     FIO_MEM_FREE(mem, (sizeof(*mem) * (len << 1)));
 
     fprintf(stderr,
-            "\t* facil.io quick sort test cycles:          %zu\n",
+            "\t* facil.io random quick sort test cycles:   %zu\n",
             (size_t)fio_clk);
     fprintf(stderr,
-            "\t* clib     quick sort test cycles:          %zu\n",
+            "\t* clib     random quick sort test cycles:   %zu\n",
             (size_t)lib_clk);
   }
 }
