@@ -8772,28 +8772,26 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
   struct {
     FIO_SORT_TYPE *lo;
     FIO_SORT_TYPE *hi;
-  } stack[CHAR_BIT * sizeof(count) + 1], *top = stack;
-#define stack_push(l, h)                                                       \
+  } queue[CHAR_BIT * sizeof(count) + 1], *top = queue;
+#define fio_sort___queue_push(l, h)                                            \
   top->lo = l;                                                                 \
   top->hi = h;                                                                 \
   ++top;
-#define stack_pop(l, h)                                                        \
-  --top;                                                                       \
-  l = top->lo;                                                                 \
-  h = top->hi;
-  /* push all array to the stack */
-  stack_push(array, array + (count - 1));
+  /* push all the array as the first queued partition */
+  fio_sort___queue_push(array, array + (count - 1));
   for (;;) {
     FIO_SORT_TYPE *lo;
     FIO_SORT_TYPE *hi;
     FIO_SORT_TYPE *mid;
-    stack_pop(lo, hi);
+    --top; /* pop stack */
+    lo = top->lo;
+    hi = top->hi;
     const size_t slice_len = (hi - lo) + 1;
 
     /* sort small ranges using insert sort */
     if (slice_len < FIO_SORT_THRESHOLD) {
       FIO_NAME(FIO_SORT, isort)(lo, slice_len);
-      if (stack == top)
+      if (queue == top)
         return;
       continue;
     }
@@ -8841,15 +8839,15 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
     }
     /* push partitions in order of size to the stack (clears smaller first) */
     if ((right - lo) > (hi - left)) {
-      stack_push(lo, right);
-      stack_push(left, hi);
+      fio_sort___queue_push(lo, right);
+      fio_sort___queue_push(left, hi);
     } else {
-      stack_push(left, hi);
-      stack_push(lo, right);
+      fio_sort___queue_push(left, hi);
+      fio_sort___queue_push(lo, right);
     }
   }
 }
-
+#undef fio_sort___queue_push
 /* *****************************************************************************
 Testing
 ***************************************************************************** */
