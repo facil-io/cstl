@@ -95,4 +95,41 @@ Sorts the first `count` members of `array` using insert-sort.
 
 Use only with small arrays (unless you are a fan of inefficiency).
 
+### Sort Example
+
+The following example code creates an array of random strings and then sorts the array.
+
+```c
+#define FIO_STR_SMALL sstr
+#define FIO_SORT      sstr
+#define FIO_SORT_TYPE sstr_s
+#define FIO_SORT_IS_BIGGER(a, b)                                               \
+  fio_string_is_bigger(sstr_info(&a), sstr_info(&b))
+#define FIO_RAND
+#include "fio-stl.h"
+
+#define STRING_ARRAY_LENGTH 128
+int main(int argc, char const *argv[]) {
+  (void)argc;
+  (void)argv;
+  sstr_s ary[STRING_ARRAY_LENGTH] = {{0}};
+  /* fill array with random data and print state */
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    sstr_write_hex(ary + i, fio_rand64());
+  }
+  printf("Starting with array of strings as:\n");
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
+  }
+  /* sort array and print state */
+  sstr_qsort(ary, STRING_ARRAY_LENGTH);
+  printf("\n\nOrdered array of strings is:\n");
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
+    sstr_destroy(ary + i); /* cleanup */
+  }
+  return 0;
+}
+```
+
 -------------------------------------------------------------------------------

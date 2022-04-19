@@ -84,20 +84,21 @@ SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count) {
   if ((!count | !array))
     return;
   if (count < 3) { /* special case */
-    if (FIO_SORT_IS_BIGGER(array[0], array[count == 2]))
-      FIO_SORT_SWAP(array[0], array[1]);
+    if (FIO_SORT_IS_BIGGER((array[0]), (array[count == 2])))
+      FIO_SORT_SWAP((array[0]), (array[1]));
     return;
   }
   /* place smallest item in position array[0] (guard element) */
   for (size_t pos = 1; pos < count; ++pos) {
-    if (FIO_SORT_IS_BIGGER(array[0], array[pos])) {
-      FIO_SORT_SWAP(array[0], array[pos]);
+    if (FIO_SORT_IS_BIGGER((array[0]), (array[pos]))) {
+      FIO_SORT_SWAP((array[0]), (array[pos]));
     }
   }
   /* perform insert sort */
   for (size_t i = 2; i < count; ++i) {
-    for (size_t a = i - 1; FIO_SORT_IS_BIGGER(array[a], array[a + 1]); --a) {
-      FIO_SORT_SWAP(array[a], array[a + 1]);
+    for (size_t a = i - 1; FIO_SORT_IS_BIGGER((array[a]), (array[a + 1]));
+         --a) {
+      FIO_SORT_SWAP((array[a]), (array[a + 1]));
     }
   }
 }
@@ -144,21 +145,21 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
     /* select a median element (1 of 3, fist, middle, last). */
     /* this also promises ordering between these 3 elements. */
     mid = lo + ((slice_len) >> 1);
-    if (FIO_SORT_IS_BIGGER(lo[0], hi[0]))
-      FIO_SORT_SWAP(lo[0], hi[0]);
-    if (FIO_SORT_IS_BIGGER(lo[0], mid[0]))
-      FIO_SORT_SWAP(lo[0], mid[0]);
-    else if (FIO_SORT_IS_BIGGER(mid[0], hi[0]))
-      FIO_SORT_SWAP(hi[0], mid[0]);
+    if (FIO_SORT_IS_BIGGER((lo[0]), (hi[0])))
+      FIO_SORT_SWAP((lo[0]), (hi[0]));
+    if (FIO_SORT_IS_BIGGER((lo[0]), (mid[0])))
+      FIO_SORT_SWAP((lo[0]), (mid[0]));
+    else if (FIO_SORT_IS_BIGGER((mid[0]), (hi[0])))
+      FIO_SORT_SWAP((hi[0]), (mid[0]));
 
     /* partition: swap elements and pointers so mid is a partition pivot */
     FIO_SORT_TYPE *left = lo + 1;
     FIO_SORT_TYPE *right = hi - 1;
     for (;;) {
       /* while order is fine, move on. */
-      while (FIO_SORT_IS_BIGGER(mid[0], left[0]))
+      while (FIO_SORT_IS_BIGGER((mid[0]), (left[0])))
         ++left;
-      while (FIO_SORT_IS_BIGGER(right[0], mid[0]))
+      while (FIO_SORT_IS_BIGGER((right[0]), (mid[0])))
         --right;
       /* order issue encountered (relative to pivot / mid)... */
       if (left < right) {
