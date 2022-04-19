@@ -56,13 +56,19 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Bitmap helpers](#bitmap-helpers) - defined by `FIO_BITMAP`
 
+* [Multi Precision Math Helpers](#multi-precision-math) - defined by `FIO_MATH`
+
 * [Glob Matching](#globe-matching) - defined by `FIO_GLOB_MATCH`
 
-* [Data Hashing (using Risky Hash)](#risky-hash-data-hashing) - defined by `FIO_RISKY_HASH`
+* [Data Hashing (Risky Hash / Stable Hash)](#risky-hash--stable-hash-data-hashing) - defined by `FIO_RISKY_HASH`
+
+* [SHA1](#sha1) and [ChaCha20 Poly1305](#chacha20--poly1305)- defined by `FIO_SHA1` and `FIO_CHACHA`
 
 * [Pseudo Random Generation](#pseudo-random-generation) - defined by `FIO_RAND`
 
 * [String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
+
+* [Binary Safe String Helpers](#binary-safe-string-core-helpers) - defined by `FIO_STR_CORE`
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 
@@ -8198,19 +8204,16 @@ int main(void) {
 
 -------------------------------------------------------------------------------
 
-
-<script language='javascript' id='header_folder'>
+<div><script language='javascript' id='header_folder'>
 
 var folding_containers = [];
 function unfold(e) {
-  for (var i = 0; i < folding_containers.length; i++) {
-    folding_containers[i].style.height = "0";
-  }
-  document.getElementById(e.target.id + "_container").style.height = "";
+  var target = document.getElementById(e.target.id + "_container");
+  target.style.height = (target.style.height == "") ? "0" : "";
 }
 
 function move2containers() {
-  var root = document.getElementById("header_folder").parentNode;
+  var root = document.getElementById("header_folder").parentNode.parentNode;
   var children = root.childNodes;
   var headers = [];
   var tmp = false;
@@ -8234,7 +8237,7 @@ function move2containers() {
     var c = document.createElement("div");
     c.id = tmp[0].id + "_container";
     c.style.transition = "height 0.35s ease-in-out";
-    // c.style.overflowY = "hidden";
+    c.style.overflowY = "hidden";
     c.style.height = "0";
     folding_containers.push(c);
     root.insertBefore(c, tmp[1])
@@ -8245,6 +8248,6 @@ function move2containers() {
   }
 }
 
-// move2containers();
+move2containers();
 
-</script>
+</script></div>

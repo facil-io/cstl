@@ -1,16 +1,13 @@
-
-<script language='javascript' id='header_folder'>
+<div><script language='javascript' id='header_folder'>
 
 var folding_containers = [];
 function unfold(e) {
-  for (var i = 0; i < folding_containers.length; i++) {
-    folding_containers[i].style.height = "0";
-  }
-  document.getElementById(e.target.id + "_container").style.height = "";
+  var target = document.getElementById(e.target.id + "_container");
+  target.style.height = (target.style.height == "") ? "0" : "";
 }
 
 function move2containers() {
-  var root = document.getElementById("header_folder").parentNode;
+  var root = document.getElementById("header_folder").parentNode.parentNode;
   var children = root.childNodes;
   var headers = [];
   var tmp = false;
@@ -34,7 +31,7 @@ function move2containers() {
     var c = document.createElement("div");
     c.id = tmp[0].id + "_container";
     c.style.transition = "height 0.35s ease-in-out";
-    // c.style.overflowY = "hidden";
+    c.style.overflowY = "hidden";
     c.style.height = "0";
     folding_containers.push(c);
     root.insertBefore(c, tmp[1])
@@ -45,6 +42,6 @@ function move2containers() {
   }
 }
 
-// move2containers();
+move2containers();
 
-</script>
+</script></div>

@@ -56,13 +56,19 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Bitmap helpers](#bitmap-helpers) - defined by `FIO_BITMAP`
 
+* [Multi Precision Math Helpers](#multi-precision-math) - defined by `FIO_MATH`
+
 * [Glob Matching](#globe-matching) - defined by `FIO_GLOB_MATCH`
 
-* [Data Hashing (using Risky Hash)](#risky-hash-data-hashing) - defined by `FIO_RISKY_HASH`
+* [Data Hashing (Risky Hash / Stable Hash)](#risky-hash--stable-hash-data-hashing) - defined by `FIO_RISKY_HASH`
+
+* [SHA1](#sha1) and [ChaCha20 Poly1305](#chacha20--poly1305)- defined by `FIO_SHA1` and `FIO_CHACHA`
 
 * [Pseudo Random Generation](#pseudo-random-generation) - defined by `FIO_RAND`
 
 * [String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
+
+* [Binary Safe String Helpers](#binary-safe-string-core-helpers) - defined by `FIO_STR_CORE`
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 
