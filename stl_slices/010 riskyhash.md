@@ -1,5 +1,10 @@
 ## Risky Hash / Stable Hash (data hashing):
 
+```c
+#define FIO_RISKY_HASH
+#include "fio-stl.h"
+```
+
 Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
 
 Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
@@ -68,6 +73,11 @@ However, this could be used to mitigate memory probing attacks. Secrets stored i
 -------------------------------------------------------------------------------
 
 ## Pseudo Random Generation
+
+```c
+#define FIO_RAND
+#include "fio-stl.h"
+```
 
 If the `FIO_RAND` macro is defined, the following, non-cryptographic psedo-random generator functions will be defined.
 

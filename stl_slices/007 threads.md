@@ -1,5 +1,10 @@
 ## Threads (portable)
 
+```c
+#define FIO_THREADS
+#include "fio-stl.h"
+```
+
 The facil.io `FIO_THREADS` module provides a simple API for threading that is OS portable between POSIX systems and Windows OS.
 
 The POSIX systems implementation uses `pthreads` under the hood.

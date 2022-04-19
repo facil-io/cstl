@@ -1,5 +1,10 @@
 ## Time Helpers
 
+```c
+#define FIO_TIME
+#include "fio-stl.h"
+```
+
 By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
 
 #### `fio_time_real`

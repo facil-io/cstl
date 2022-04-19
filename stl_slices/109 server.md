@@ -1,5 +1,10 @@
 ## Simple Server
 
+```c
+#define FIO_SERVER
+#include "fio-stl.h"
+```
+
 A simple server - `poll` based, evented and single-threaded - is included when `FIO_SERVER` is defined.
 
 All API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for `fio_defer`, `fio_dup`, `fio_undup`, and `fio_udata_get`.

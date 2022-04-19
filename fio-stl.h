@@ -6857,6 +6857,44 @@ SFUNC void fio_poly1305_auth(void *mac_dest,
                              void *additional_data,
                              size_t additional_data_len);
 
+/**
+ * Performs an in-place encryption of `data` using ChaCha20 with additional
+ * data, producing a 16 byte message authentication code (MAC) using Poly1305.
+ *
+ * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `ad`     MAY be omitted, will NOT be encrypted.
+ * * `data`   MAY be omitted, WILL be encrypted.
+ * * `mac`    MUST point to a buffer with (at least) 16 available bytes.
+ */
+SFUNC void fio_chacha20_poly1305_enc(void *mac,
+                                     void *data,
+                                     size_t len,
+                                     void *ad, /* additional data */
+                                     size_t adlen,
+                                     void *key,
+                                     void *nounce);
+
+/**
+ * Performs an in-place decryption of `data` using ChaCha20 after authenticating
+ * the message authentication code (MAC) using Poly1305.
+ *
+ * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `ad`     MAY be omitted ONLY IF originally omitted.
+ * * `data`   MAY be omitted, WILL be decrypted.
+ * * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
+ *
+ * Returns `-1` on error (authentication failed).
+ */
+SFUNC int fio_chacha20_poly1305_dec(void *mac,
+                                    void *data,
+                                    size_t len,
+                                    void *ad, /* additional data */
+                                    size_t adlen,
+                                    void *key,
+                                    void *nounce);
+
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
 ***************************************************************************** */
@@ -8858,7 +8896,7 @@ int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a, FIO_SORT_TYPE *b) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
-  fprintf(stderr, "* Testing facil.io array sort helper\n");
+  fprintf(stderr, "* Testing facil.io array sort helper:\n");
   { /* test insert sort of short array */
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
                       29, 26, 16, 24, 22, 11, 5, 14, 31, 25, 8,
@@ -13507,23 +13545,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
   const size_t max_threads = 12; // assumption / pure conjuncture...
   uintptr_t i_count;
-  clock_t start, end;
+  uint64_t start, end;
   i_count = 0;
-  start = clock();
+  start = fio_time_milli();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio___queue_test_sample_task(&i_count, NULL);
   }
-  end = clock();
+  end = fio_time_milli();
   if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(
-        stderr,
-        "\t- Queueless (direct call) counter: %lu cycles with i_count = %lu\n",
-        (unsigned long)(end - start),
-        (unsigned long)i_count);
+    fprintf(stderr,
+            "\t- Queueless (direct call) counter: %lu ms with i_count = %lu\n",
+            (unsigned long)(end - start),
+            (unsigned long)i_count);
   }
   size_t i_count_should_be = i_count;
   i_count = 0;
-  start = clock();
+  start = fio_time_milli();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio_queue_push(q,
                    .fn = fio___queue_test_sample_task,
@@ -13532,10 +13569,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
-  end = clock();
+  end = fio_time_milli();
   if (FIO___QUEUE_TEST_PRINT) {
     fprintf(stderr,
-            "\t- single task counter: %lu cycles with i_count = %lu\n",
+            "\t- single task counter: %lu ms with i_count = %lu\n",
             (unsigned long)(end - start),
             (unsigned long)i_count);
   }
@@ -13553,7 +13590,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     };
     const size_t tasks = 1 << i;
     i_count = 0;
-    start = clock();
+    start = fio_time_milli();
     for (size_t j = 0; j < tasks; ++j) {
       fio_queue_push(q,
                      fio___queue_test_sched_sample_task,
@@ -13581,12 +13618,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
     }
 
-    end = clock();
+    end = fio_time_milli();
     if (FIO___QUEUE_TEST_PRINT) {
       fprintf(stderr,
               "- queue performed using %zu threads, %zu scheduling tasks (%zu "
               "each):\n"
-              "    %lu cycles with i_count = %lu\n",
+              "    %lu ms with i_count = %lu\n",
               ((i % max_threads) + 1),
               tasks,
               info.count,
@@ -24445,7 +24482,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     }
     clock_t end = clock();
     fprintf(stderr,
-            "\t* fio_string_is_bigger test cycles: %zu\n",
+            "\t* fio_string_is_bigger test cycles:   %zu\n",
             (size_t)(end - start));
     start = clock();
     for (size_t i = 0; i < (1ULL << 17); ++i) {
@@ -24458,6 +24495,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     end = clock();
     fprintf(stderr,
             "\t* memcmp libc test cycles:            %zu\n",
+            (size_t)(end - start));
+    start = clock();
+    for (size_t i = 0; i < (1ULL << 17); ++i) {
+      FIO_COMPILER_GUARD;
+      int r = strcmp(str_a, str_b);
+      FIO_ASSERT(r > 0, "strcmp error?!");
+    }
+    end = clock();
+    fprintf(stderr,
+            "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
   }
 #endif /* DEBUG */

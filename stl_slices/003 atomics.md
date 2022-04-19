@@ -1,5 +1,10 @@
 ## Atomic operations
 
+```c
+#define FIO_ATOMIC
+#include "fio-stl.h"
+```
+
 If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
 
 In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
@@ -187,6 +192,13 @@ Unlocks all sub-locks, no matter which thread owns which lock.
 -------------------------------------------------------------------------------
 
 ## MultiLock with Thread Suspension
+
+```c
+#define FIO_LOCK2
+#include "fio-stl.h"
+```
+
+**BROKEN(!):** note that the `FIO_LOCK2` implementation currently does not work on all systems and assumes specific OS behavior.
 
 If the `FIO_LOCK2` macro is defined than the multi-lock `fio_lock2_s` type and it's functions will be defined.
 

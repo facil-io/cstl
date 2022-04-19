@@ -1,5 +1,12 @@
 ## Binary Safe String Core Helpers
 
+```c
+#define FIO_STR_CORE
+#include "fio-stl.h"
+```
+
+The following helpers are part of the String core library and they become available whenever [a String type was defined](#dynamic-strings) or when the `FIO_STR_CORE` is defined before any inclusion of the C STL header.
+
 #### `fio_string_write`
 
 ```c

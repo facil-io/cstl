@@ -1,7 +1,7 @@
 ## Dynamic Strings
 
 ```c
-FIO_STR_NAME fio_str
+#define FIO_STR_NAME fio_str
 #include "fio-stl.h"
 ```
 

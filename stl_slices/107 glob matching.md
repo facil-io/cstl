@@ -1,5 +1,10 @@
 ## Globe Matching
 
+```c
+#define FIO_GLOB_MATCH
+#include "fio-stl.h"
+```
+
 By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
 
 #### `fio_glob_match`

@@ -1,5 +1,10 @@
 ## Quick Sort and Insert Sort
 
+```c
+#define FIO_SORT
+#include "fio-stl.h"
+```
+
 If the `FIO_SORT` is defined (and named), the following functions will be defined.
 
 This can be performed multiple times for multiple types.

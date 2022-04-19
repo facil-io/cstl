@@ -1,5 +1,10 @@
 ## Custom JSON Parser
 
+```c
+#define FIO_JSON
+#include "fio-stl.h"
+```
+
 The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters, comments, and octal, hex and binary numbers.
 
 The parser allows for streaming data and decouples the parsing process from the resulting data-structure by calling static callbacks for JSON related events.

@@ -1,5 +1,10 @@
 ## Basic Socket / IO Helpers
 
+```c
+#define FIO_SOCK
+#include "fio-stl.h"
+```
+
 The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
 
 By defining `FIO_SOCK`, the following functions will be defined.

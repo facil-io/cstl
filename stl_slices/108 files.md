@@ -1,5 +1,10 @@
 ## File Utility Helpers
 
+```c
+#define FIO_FILES
+#include "fio-stl.h"
+```
+
 By defining the macro `FIO_FILES` the following file helper functions are defined:
 
 #### `fio_filename_open`

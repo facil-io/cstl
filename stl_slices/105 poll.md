@@ -1,5 +1,10 @@
 ## Basic IO Polling
 
+```c
+#define FIO_POLL
+#include "fio-stl.h"
+```
+
 IO polling using the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
 
 The facil.io standard library provides a persistent polling container for evented management of small IO (file descriptor) collections using the "one-shot" model.

@@ -1,5 +1,10 @@
 ## Multi-Precision Math
 
+```c
+#define FIO_MATH
+#include "fio-stl.h"
+```
+
 If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
 
 Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).

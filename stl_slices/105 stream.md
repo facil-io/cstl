@@ -1,5 +1,10 @@
 ## Data Stream Container
 
+```c
+#define FIO_STREAM
+#include "fio-stl.h"
+```
+
 Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
 
 Data Streams offer a way to store / concat different data sources (static strings, dynamic strings, files) as a single data stream. This allows the data to be easily written to an IO target (socket / pipe / file) using the `write` operation.

@@ -687,23 +687,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
   const size_t max_threads = 12; // assumption / pure conjuncture...
   uintptr_t i_count;
-  clock_t start, end;
+  uint64_t start, end;
   i_count = 0;
-  start = clock();
+  start = fio_time_milli();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio___queue_test_sample_task(&i_count, NULL);
   }
-  end = clock();
+  end = fio_time_milli();
   if (FIO___QUEUE_TEST_PRINT) {
-    fprintf(
-        stderr,
-        "\t- Queueless (direct call) counter: %lu cycles with i_count = %lu\n",
-        (unsigned long)(end - start),
-        (unsigned long)i_count);
+    fprintf(stderr,
+            "\t- Queueless (direct call) counter: %lu ms with i_count = %lu\n",
+            (unsigned long)(end - start),
+            (unsigned long)i_count);
   }
   size_t i_count_should_be = i_count;
   i_count = 0;
-  start = clock();
+  start = fio_time_milli();
   for (size_t i = 0; i < FIO___QUEUE_TOTAL_COUNT; i++) {
     fio_queue_push(q,
                    .fn = fio___queue_test_sample_task,
@@ -712,10 +711,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
-  end = clock();
+  end = fio_time_milli();
   if (FIO___QUEUE_TEST_PRINT) {
     fprintf(stderr,
-            "\t- single task counter: %lu cycles with i_count = %lu\n",
+            "\t- single task counter: %lu ms with i_count = %lu\n",
             (unsigned long)(end - start),
             (unsigned long)i_count);
   }
@@ -733,7 +732,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     };
     const size_t tasks = 1 << i;
     i_count = 0;
-    start = clock();
+    start = fio_time_milli();
     for (size_t j = 0; j < tasks; ++j) {
       fio_queue_push(q,
                      fio___queue_test_sched_sample_task,
@@ -761,12 +760,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
       FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
     }
 
-    end = clock();
+    end = fio_time_milli();
     if (FIO___QUEUE_TEST_PRINT) {
       fprintf(stderr,
               "- queue performed using %zu threads, %zu scheduling tasks (%zu "
               "each):\n"
-              "    %lu cycles with i_count = %lu\n",
+              "    %lu ms with i_count = %lu\n",
               ((i % max_threads) + 1),
               tasks,
               info.count,

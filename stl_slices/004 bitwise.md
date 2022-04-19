@@ -1,5 +1,10 @@
 ## Bit-Byte operations:
 
+```c
+#define FIO_BITWISE
+#include "fio-stl.h"
+```
+
 If the `FIO_BITWISE` macro is defined than the following macros will be
 defined:
 
@@ -233,6 +238,11 @@ The function may perform significantly better when the buffer's memory is aligne
 -------------------------------------------------------------------------------
 
 ## Bitmap helpers
+
+```c
+#define FIO_BITMAP
+#include "fio-stl.h"
+```
 
 If the `FIO_BITMAP` macro is defined than the following macros will be
 defined.

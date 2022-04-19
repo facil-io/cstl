@@ -1,5 +1,10 @@
 ## Logging and Assertions:
 
+```c
+#define FIO_LOG
+#include "fio-stl.h"
+```
+
 If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG2STDERR2` macro will be defined.
 
 #### `FIO_LOG_LEVEL`
@@ -57,7 +62,7 @@ Same as `FIO_LOG_DEBUG` if `DEBUG` was defined. Otherwise a no-op.
 
 #### `FIO_ASSERT(cond, msg, ...)`
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an exit(-1)`.
+Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an `exit(-1)`.
 
 The use of `SIGINT` should allow debuggers everywhere to pause execution before exiting the program.
 

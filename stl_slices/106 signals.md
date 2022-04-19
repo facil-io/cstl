@@ -1,5 +1,10 @@
 ## Signal Monitoring
 
+```c
+#define FIO_SIGNAL
+#include "fio-stl.h"
+```
+
 OS signal callbacks are very limited in the actions they are allowed to take. In fact, one of the only actions they are allowed to take is to set a volatile atomic flag.
 
 The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.

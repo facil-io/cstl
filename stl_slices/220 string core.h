@@ -717,7 +717,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     }
     clock_t end = clock();
     fprintf(stderr,
-            "\t* fio_string_is_bigger test cycles: %zu\n",
+            "\t* fio_string_is_bigger test cycles:   %zu\n",
             (size_t)(end - start));
     start = clock();
     for (size_t i = 0; i < (1ULL << 17); ++i) {
@@ -730,6 +730,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     end = clock();
     fprintf(stderr,
             "\t* memcmp libc test cycles:            %zu\n",
+            (size_t)(end - start));
+    start = clock();
+    for (size_t i = 0; i < (1ULL << 17); ++i) {
+      FIO_COMPILER_GUARD;
+      int r = strcmp(str_a, str_b);
+      FIO_ASSERT(r > 0, "strcmp error?!");
+    }
+    end = clock();
+    fprintf(stderr,
+            "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
   }
 #endif /* DEBUG */

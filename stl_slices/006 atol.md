@@ -1,5 +1,10 @@
 ## String / Number conversion
 
+```c
+#define FIO_ATOL
+#include "fio-stl.h"
+```
+
 If the `FIO_ATOL` macro is defined, the following functions will be defined:
 
 #### `fio_atol`

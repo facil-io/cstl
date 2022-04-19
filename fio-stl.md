@@ -554,6 +554,11 @@ Used internally to name test functions.
 -------------------------------------------------------------------------------
 ## Logging and Assertions:
 
+```c
+#define FIO_LOG
+#include "fio-stl.h"
+```
+
 If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG2STDERR2` macro will be defined.
 
 #### `FIO_LOG_LEVEL`
@@ -611,7 +616,7 @@ Same as `FIO_LOG_DEBUG` if `DEBUG` was defined. Otherwise a no-op.
 
 #### `FIO_ASSERT(cond, msg, ...)`
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an exit(-1)`.
+Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an `exit(-1)`.
 
 The use of `SIGINT` should allow debuggers everywhere to pause execution before exiting the program.
 
@@ -629,6 +634,11 @@ Note, this macro will **only** raise a `SIGINT` signal, but will not exit the pr
 
 -------------------------------------------------------------------------------
 ## Atomic operations
+
+```c
+#define FIO_ATOMIC
+#include "fio-stl.h"
+```
 
 If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
 
@@ -818,6 +828,13 @@ Unlocks all sub-locks, no matter which thread owns which lock.
 
 ## MultiLock with Thread Suspension
 
+```c
+#define FIO_LOCK2
+#include "fio-stl.h"
+```
+
+**BROKEN(!):** note that the `FIO_LOCK2` implementation currently does not work on all systems and assumes specific OS behavior.
+
 If the `FIO_LOCK2` macro is defined than the multi-lock `fio_lock2_s` type and it's functions will be defined.
 
 The `fio_lock2` locking mechanism follows a bitwise approach to multi-locking, allowing a single lock to contain up to 31 sublocks (on 32 bit machines) or 63 sublocks (on 64 bit machines).
@@ -901,6 +918,11 @@ fio_unlock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
 
 -------------------------------------------------------------------------------
 ## Bit-Byte operations:
+
+```c
+#define FIO_BITWISE
+#include "fio-stl.h"
+```
 
 If the `FIO_BITWISE` macro is defined than the following macros will be
 defined:
@@ -1136,6 +1158,11 @@ The function may perform significantly better when the buffer's memory is aligne
 
 ## Bitmap helpers
 
+```c
+#define FIO_BITMAP
+#include "fio-stl.h"
+```
+
 If the `FIO_BITMAP` macro is defined than the following macros will be
 defined.
 
@@ -1149,6 +1176,11 @@ the bitmap is implemented using atomic operations.
 
 -------------------------------------------------------------------------------
 ## Multi-Precision Math
+
+```c
+#define FIO_MATH
+#include "fio-stl.h"
+```
 
 If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
 
@@ -1293,6 +1325,11 @@ This can be used to extract an exponent value in base 2.
 -------------------------------------------------------------------------------
 ## String / Number conversion
 
+```c
+#define FIO_ATOL
+#include "fio-stl.h"
+```
+
 If the `FIO_ATOL` macro is defined, the following functions will be defined:
 
 #### `fio_atol`
@@ -1372,6 +1409,11 @@ This allows calculations for up to base 36.
 
 -------------------------------------------------------------------------------
 ## Threads (portable)
+
+```c
+#define FIO_THREADS
+#include "fio-stl.h"
+```
 
 The facil.io `FIO_THREADS` module provides a simple API for threading that is OS portable between POSIX systems and Windows OS.
 
@@ -1497,6 +1539,11 @@ Destroys the simple Mutex (cleanup).
 -------------------------------------------------------------------------------
 ## Risky Hash / Stable Hash (data hashing):
 
+```c
+#define FIO_RISKY_HASH
+#include "fio-stl.h"
+```
+
 Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
 
 Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
@@ -1566,6 +1613,11 @@ However, this could be used to mitigate memory probing attacks. Secrets stored i
 
 ## Pseudo Random Generation
 
+```c
+#define FIO_RAND
+#include "fio-stl.h"
+```
+
 If the `FIO_RAND` macro is defined, the following, non-cryptographic psedo-random generator functions will be defined.
 
 The "random" data is initialized / seeded automatically using a small number of functional cycles that collect data and hash it, hopefully resulting in enough jitter entropy.
@@ -1622,7 +1674,12 @@ Forces the random generator state to rotate.
 SHOULD be called after `fork` to prevent the two processes from outputting the same random numbers (until a reseed is called automatically).
 
 -------------------------------------------------------------------------------
-# SHA1
+## SHA1
+
+```c
+#define FIO_SHA1
+#include "fio-stl.h"
+```
 
 By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
 
@@ -1653,7 +1710,98 @@ uint8_t *fio_sha1_digest(fio_sha1_s *s);
 Returns the digest of a SHA1 object.
 
 -------------------------------------------------------------------------------
+## ChaCha20 & Poly1305
+
+```c
+#define FIO_CHACHA
+#include "fio-stl.h"
+```
+
+Non-streaming ChaCha20 and Poly1305 implementations are provided for cases when a cryptography library isn't available (or too heavy) but a good enough symmetric cryptographic solution is required. Please note that this implementation was not tested from a cryptographic viewpoint and although constant time was desired it might not have been achieved on all systems / CPUs.
+
+**Note:** some CPUs do not offer constant time MUL and might leak information through side-chain attacks.
+
+#### `fio_chacha20_poly1305_enc`
+
+```c
+void fio_chacha20_poly1305_enc(void *mac,
+                               void *data,
+                               size_t len,
+                               void *ad, /* additional data */
+                               size_t adlen,
+                               void *key,
+                               void *nounce);
+```
+
+Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
+
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted, will NOT be encrypted.
+* `data`   MAY be omitted, WILL be encrypted.
+* `mac`    MUST point to a buffer with (at least) 16 available bytes.
+
+#### `fio_chacha20_poly1305_dec`
+
+```c
+int fio_chacha20_poly1305_dec(void *mac,
+                              void *data,
+                              size_t len,
+                              void *ad, /* additional data */
+                              size_t adlen,
+                              void *key,
+                              void *nounce);
+```
+
+Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
+
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted ONLY IF originally omitted.
+* `data`   MAY be omitted, WILL be decrypted.
+* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
+
+Returns `-1` on error (authentication failed).
+
+#### `fio_chacha20`
+
+```c
+void fio_chacha20(void *data,
+                  size_t len,
+                  void *key,
+                  void *nounce,
+                  uint32_t counter);
+```
+
+Performs an in-place encryption/decryption of `data` using ChaCha20.
+
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
+
+
+#### `fio_poly1305_auth`
+
+```c
+void fio_poly1305_auth(void *mac_dest,
+                       void *key256bits,
+                       void *message,
+                       size_t len,
+                       void *additional_data,
+                       size_t additional_data_len);
+```
+
+Given a Poly1305 256bit (16 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
+
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+
+-------------------------------------------------------------------------------
 ## URL (URI) parsing
+
+```c
+#define FIO_URL
+#include "fio-stl.h"
+```
 
 URIs (Universal Resource Identifier), commonly referred to as URL (Uniform Resource Locator), are a common way to describe network and file addresses.
 
@@ -1739,6 +1887,11 @@ The `file` and `unix` schemas are special in the sense that they produce no `hos
 
 -------------------------------------------------------------------------------
 ## Custom JSON Parser
+
+```c
+#define FIO_JSON
+#include "fio-stl.h"
+```
 
 The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters, comments, and octal, hex and binary numbers.
 
@@ -2095,6 +2248,11 @@ void run_my_json_minifier(char *json, size_t len) {
 -------------------------------------------------------------------------------
 ## Quick Sort and Insert Sort
 
+```c
+#define FIO_SORT
+#include "fio-stl.h"
+```
+
 If the `FIO_SORT` is defined (and named), the following functions will be defined.
 
 This can be performed multiple times for multiple types.
@@ -2187,6 +2345,11 @@ Use only with small arrays (unless you are a fan of inefficiency).
 
 -------------------------------------------------------------------------------
 ## Local Memory Allocation
+
+```c
+#define FIO_MEMORY_NAME mem
+#include "fio-stl.h"
+```
 
 The facil.io Simple Template Library includes a fast, concurrent, local memory allocator designed for grouping together objects with similar lifespans.
 
@@ -2743,6 +2906,11 @@ The following are reserved macro names:
 -------------------------------------------------------------------------------
 ## Time Helpers
 
+```c
+#define FIO_TIME
+#include "fio-stl.h"
+```
+
 By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
 
 #### `fio_time_real`
@@ -2854,6 +3022,11 @@ Requires 28 or 29 characters (for positive, 4 digit years).
 
 -------------------------------------------------------------------------------
 ## Task Queue
+
+```c
+#define FIO_QUEUE
+#include "fio-stl.h"
+```
 
 The Simple Template Library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
 
@@ -3148,6 +3321,11 @@ When using the optional `pthread_mutex_t` implementation or using timers on Wind
 -------------------------------------------------------------------------------
 ## CLI (command line interface)
 
+```c
+#define FIO_CLI
+#include "fio-stl.h"
+```
+
 The Simple Template Library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
 
 * Auto-generation of the "help" / usage output.
@@ -3292,6 +3470,11 @@ Sets a value for the named argument (but **not** it's aliases).
 
 -------------------------------------------------------------------------------
 ## Basic Socket / IO Helpers
+
+```c
+#define FIO_SOCK
+#include "fio-stl.h"
+```
 
 The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
 
@@ -3568,6 +3751,11 @@ Creates a new Unix socket and binds it to a local address.
 -------------------------------------------------------------------------------
 ## Basic IO Polling
 
+```c
+#define FIO_POLL
+#include "fio-stl.h"
+```
+
 IO polling using the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
 
 The facil.io standard library provides a persistent polling container for evented management of small IO (file descriptor) collections using the "one-shot" model.
@@ -3728,6 +3916,11 @@ If defined before the first time `FIO_POLL` is included, this will add debug mes
 
 -------------------------------------------------------------------------------
 ## Data Stream Container
+
+```c
+#define FIO_STREAM
+#include "fio-stl.h"
+```
 
 Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
 
@@ -3896,6 +4089,11 @@ This macro should be set according to the specific allocator limits. By default,
 
 ## Signal Monitoring
 
+```c
+#define FIO_SIGNAL
+#include "fio-stl.h"
+```
+
 OS signal callbacks are very limited in the actions they are allowed to take. In fact, one of the only actions they are allowed to take is to set a volatile atomic flag.
 
 The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.
@@ -3932,6 +4130,11 @@ Stops monitoring the specified signal.
 
 -------------------------------------------------------------------------------
 ## Globe Matching
+
+```c
+#define FIO_GLOB_MATCH
+#include "fio-stl.h"
+```
 
 By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
 
@@ -3995,6 +4198,11 @@ The following patterns are recognized:
 -------------------------------------------------------------------------------
 
 ## File Utility Helpers
+
+```c
+#define FIO_FILES
+#include "fio-stl.h"
+```
 
 By defining the macro `FIO_FILES` the following file helper functions are defined:
 
@@ -4080,6 +4288,11 @@ Selects the folder separation character according to the detected OS.
 
 -------------------------------------------------------------------------------
 ## Simple Server
+
+```c
+#define FIO_SERVER
+#include "fio-stl.h"
+```
 
 A simple server - `poll` based, evented and single-threaded - is included when `FIO_SERVER` is defined.
 
@@ -5742,6 +5955,13 @@ To access the object information, use:
 -------------------------------------------------------------------------------
 ## Binary Safe String Core Helpers
 
+```c
+#define FIO_STR_CORE
+#include "fio-stl.h"
+```
+
+The following helpers are part of the String core library and they become available whenever [a String type was defined](#dynamic-strings) or when the `FIO_STR_CORE` is defined before any inclusion of the C STL header.
+
 #### `fio_string_write`
 
 ```c
@@ -6026,7 +6246,7 @@ Does nothing.
 ## Dynamic Strings
 
 ```c
-FIO_STR_NAME fio_str
+#define FIO_STR_NAME fio_str
 #include "fio-stl.h"
 ```
 

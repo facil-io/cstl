@@ -203,7 +203,7 @@ int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a, FIO_SORT_TYPE *b) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
-  fprintf(stderr, "* Testing facil.io array sort helper\n");
+  fprintf(stderr, "* Testing facil.io array sort helper:\n");
   { /* test insert sort of short array */
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
                       29, 26, 16, 24, 22, 11, 5, 14, 31, 25, 8,
