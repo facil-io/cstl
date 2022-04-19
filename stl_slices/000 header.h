@@ -1085,6 +1085,11 @@ Common macros
 #define FIO_THREADS
 #endif
 
+/* Modules that require the String Core API */
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
+#define FIO_STR
+#endif
+
 /* Modules that require File Utils */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
 #define FIO_FILES

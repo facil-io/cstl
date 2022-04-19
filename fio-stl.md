@@ -5864,11 +5864,15 @@ To access the object information, use:
 ## Binary Safe String Core Helpers
 
 ```c
-#define FIO_STR_CORE
+#define FIO_STR
 #include "fio-stl.h"
 ```
 
-The following helpers are part of the String core library and they become available whenever [a String type was defined](#dynamic-strings) or when the `FIO_STR_CORE` is defined before any inclusion of the C STL header.
+The following helpers are part of the String core library and they become available whenever [a String type was defined](#dynamic-strings) or when the `FIO_STR` is defined before any inclusion of the C STL header.
+
+The main difference between using the String Core API directly and defining a String type is that String types provide a few additional optimizations, such as embedding short strings (embedded within the type data rather than allocated), optional reference counting and pointer tagging features.
+
+### Core String Authorship
 
 #### `fio_string_write`
 
@@ -6052,6 +6056,8 @@ fio_string_write2(&str, my_reallocate,
                    FIO_STRING_WRITE_STR2(")", 1));
 ```
 
+**Note**: this function might end up allocating more memory than absolutely required as it favors speed over memory savings.
+
 For this function, the facil.io C STL reserves and defines the following type:
 
 ```c
@@ -6091,15 +6097,7 @@ inline int fio_string_vprintf(fio_str_info_s *dest,
 
 Similar to fio_string_write, only using vprintf semantics.
 
-#### `fio_string_is_bigger`
-
-```c
-int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
-```
-
-Compares two strings, returning 1 if string `a` is bigger than string `b`.
-
-**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal.
+### Core String Authorship Memory Helpers
 
 #### `FIO_STRING_REALLOC`
 
@@ -6110,7 +6108,6 @@ void fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
 
 Default reallocation callback implementation
 
-
 #### `FIO_STRING_ALLOC_COPY`
 
 ```c
@@ -6119,7 +6116,6 @@ void fio_string_default_copy_and_reallocate(fio_str_info_s *dest, size_t new_cap
 ```
 
 Default reallocation callback for memory that mustn't be freed.
-
 
 #### `FIO_STRING_FREE`
 
@@ -6130,7 +6126,6 @@ void fio_string_default_free(void *);
 
 Frees memory that was allocated with the default callbacks.
 
-
 #### `FIO_STRING_FREE2`
 
 ```c
@@ -6140,7 +6135,6 @@ void fio_string_default_free2(fio_str_info_s str);
 
 Frees memory that was allocated with the default callbacks.
 
-
 #### `FIO_STRING_FREE_NOOP`
 
 ```c
@@ -6149,6 +6143,50 @@ void fio_string_default_free_noop(fio_str_info_s str);
 ```
 
 Does nothing.
+
+### Core String Comparison
+
+#### `fio_string_is_bigger`
+
+```c
+int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
+```
+
+Compares two strings, returning 1 if string `a` is bigger than string `b`.
+
+**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal.
+
+### Core String UTF-8 Support
+
+#### `fio_string_utf8_valid`
+
+```c
+size_t fio_string_utf8_valid(fio_str_info_s str);
+```
+
+Returns 1 if the String is UTF-8 valid and 0 if not.
+
+#### `fio_string_utf8_len`
+
+```c
+size_t fio_string_utf8_len(fio_str_info_s str);
+```
+
+Returns the String's length in UTF-8 characters.
+
+#### `fio_string_utf8_select`
+
+```c
+int fio_string_utf8_select(fio_str_info_s str, intptr_t *pos, size_t *len);
+```
+
+Takes a UTF-8 character selection information (UTF-8 position and length) and updates the same variables so they reference the raw byte slice information.
+
+If the String isn't UTF-8 valid up to the requested selection, than `pos` will be updated to `-1` otherwise values are always positive.
+
+The returned `len` value may be shorter than the original if there wasn't enough data left to accommodate the requested length. When a `len` value of `0` is returned, this means that `pos` marks the end of the String.
+
+Returns -1 on error and 0 on success.
 
 -------------------------------------------------------------------------------
 ## Dynamic Strings

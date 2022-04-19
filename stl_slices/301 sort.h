@@ -199,7 +199,8 @@ Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SORT_TEST)
 
-int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a, FIO_SORT_TYPE *b) {
+FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a,
+                                                  FIO_SORT_TYPE *b) {
   return (int)(a[0] - b[0]);
 }
 

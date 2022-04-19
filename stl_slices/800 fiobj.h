@@ -13,7 +13,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "051 json.h"               /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
 #include "210 map api.h"            /* Development inclusion - ignore line */
-#include "220 string.h"             /* Development inclusion - ignore line */
+#include "220 string core.h"        /* Development inclusion - ignore line */
+#include "221 string.h"             /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
 #define FIO_FIOBJ                   /* Development inclusion - ignore line */
@@ -204,8 +205,8 @@ Debugging / Leak Detection
 #endif
 
 #if FIOBJ_MARK_MEMORY
-size_t __attribute__((weak)) FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
-size_t __attribute__((weak)) FIOBJ_MARK_MEMORY_FREE_COUNTER;
+size_t FIO_WEAK FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
+size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_ALLOC()                                              \
   fio_atomic_add(&FIOBJ_MARK_MEMORY_ALLOC_COUNTER, 1)
 #define FIOBJ_MARK_MEMORY_FREE()                                               \

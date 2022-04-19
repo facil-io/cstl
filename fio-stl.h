@@ -982,11 +982,15 @@ Common macros
 #ifndef FIO_PTR_TAG_TYPE
 #endif
 
+#ifndef FIO_PTR_TAG_VALIDATE
 /**
  * If FIO_PTR_TAG_VALIDATE is defined, tagging will be verified before executing
  * any code.
  */
-#ifdef FIO_PTR_TAG_VALIDATE
+#define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
+#endif
+
+#undef FIO_PTR_TAG_VALID_OR_RETURN
 #define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)                         \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -994,6 +998,7 @@ Common macros
       return (value);                                                          \
     }                                                                          \
   } while (0)
+#undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)                           \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -1001,6 +1006,7 @@ Common macros
       return;                                                                  \
     }                                                                          \
   } while (0)
+#undef FIO_PTR_TAG_VALID_OR_GOTO
 #define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -1010,15 +1016,6 @@ Common macros
       goto lable;                                                              \
     }                                                                          \
   } while (0)
-#else
-#define FIO_PTR_TAG_VALIDATE(tagged_ptr) 1
-#define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)
-#define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)
-#define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
-  while (0) {                                                                  \
-    goto lable;                                                                \
-  }
-#endif
 
 #else /* SFUNC_ - internal helper types are `static` */
 #undef SFUNC
@@ -1086,6 +1083,11 @@ Common macros
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
     defined(FIO_USE_THREAD_MUTEX_TMP)
 #define FIO_THREADS
+#endif
+
+/* Modules that require the String Core API */
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
+#define FIO_STR
 #endif
 
 /* Modules that require File Utils */
@@ -21917,11 +21919,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_TYPE *old) {
   if (old)
     *old = FIO_MAP_TYPE_INVALID;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m || !m->count)
     return -1;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key, 0);
@@ -22419,8 +22421,7 @@ seek_as_array:
   pos = 0;
   while (pos < m->count) {
     switch (imap[pos]) {
-    case 0:
-      return pos;
+    case 0: return pos;
     case 255:
       if (free_slot > pos)
         free_slot = pos;
@@ -22696,11 +22697,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_TYPE *old) {
   if (old)
     *old = FIO_MAP_TYPE_INVALID;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m || !m->count)
     return -1;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   FIO_MAP_SIZE_TYPE pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key);
   if (pos == (FIO_MAP_SIZE_TYPE)(-1) ||
@@ -23458,7 +23459,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_STR_CORE                /*Development inclusion - ignore line */
+#define FIO_STR                     /*Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -23472,10 +23473,13 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if (defined(FIO_STR_SMALL) || defined(FIO_STR_NAME) ||                        \
-     defined(FIO_STR_CORE)) &&                                                 \
-    !defined(H__FIO_STR_CORE__H)
-#define H__FIO_STR_CORE__H
+#if defined(FIO_STR) && !defined(H__FIO_STR__H)
+#define H__FIO_STR__H
+
+/* *****************************************************************************
+String Authorship Helpers
+***************************************************************************** */
+
 /**
  * Writes data to the end of the string in the `fio_string_s` struct,
  * returning an updated `fio_string_s` struct.
@@ -23571,6 +23575,20 @@ typedef struct {
   } info;
 } fio_string_write_s;
 
+/** Similar to fio_string_write, only using printf semantics. */
+FIO_IFUNC int fio_string_printf(fio_str_info_s *dest,
+                                void (*reallocate)(fio_str_info_s *,
+                                                   size_t new_capa),
+                                const char *format,
+                                ...);
+
+/** Similar to fio_string_write, only using vprintf semantics. */
+FIO_IFUNC int fio_string_vprintf(fio_str_info_s *dest,
+                                 void (*reallocate)(fio_str_info_s *,
+                                                    size_t new_capa),
+                                 const char *format,
+                                 va_list argv);
+
 /**
  * Writes a group of objects (strings, numbers, etc') to `dest`.
  *
@@ -23588,6 +23606,11 @@ typedef struct {
  *                        FIO_STRING_WRITE_STR2("(0x", 3),
  *                        FIO_STRING_WRITE_HEX(42),
  *                        FIO_STRING_WRITE_STR2(")", 1));
+ *
+ * Note: this function might end up allocating more memory than absolutely
+ * required as it favors fast performance over memory savings. It performs only
+ * a single allocation (if any) and computes numeral string length only when
+ * writing the numbers to the string.
  */
 SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
                             void (*reallocate)(fio_str_info_s *,
@@ -23600,42 +23623,38 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
                     (reallocate),                                              \
                     (fio_string_write_s[]){__VA_ARGS__, {0}})
 
+/** A macro to add a String to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR1(str_)                                            \
   ((fio_string_write_s){.klass = 1,                                            \
                         .info.str = {.len = strlen((str_)), .buf = (str_)}})
+
+/** A macro to add a String with known length to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
   ((fio_string_write_s){.klass = 1, .info.str = {.len = (len_), .buf = (str_)}})
+
+/** A macro to add a signed number to `fio_string_write2`. */
 #define FIO_STRING_WRITE_NUM(num)                                              \
   ((fio_string_write_s){.klass = 2, .info.i = (int64_t)(num)})
+
+/** A macro to add an unsigned number to `fio_string_write2`. */
 #define FIO_STRING_WRITE_UNUM(num)                                             \
   ((fio_string_write_s){.klass = 3, .info.u = (uint64_t)(num)})
+
+/** A macro to add a hex representation to `fio_string_write2`. */
 #define FIO_STRING_WRITE_HEX(num)                                              \
   ((fio_string_write_s){.klass = 4, .info.u = (uint64_t)(num)})
+
+/** A macro to add a binary representation to `fio_string_write2`. */
 #define FIO_STRING_WRITE_BIN(num)                                              \
   ((fio_string_write_s){.klass = 5, .info.u = (uint64_t)(num)})
+
+/** A macro to add a float (double) to `fio_string_write2`. */
 #define FIO_STRING_WRITE_FLOAT(num)                                            \
   ((fio_string_write_s){.klass = 6, .info.f = (double)(num)})
 
-/** Similar to fio_string_write, only using printf semantics. */
-FIO_IFUNC int fio_string_printf(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                const char *format,
-                                ...);
-
-/** Similar to fio_string_write, only using vprintf semantics. */
-FIO_IFUNC int fio_string_vprintf(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 const char *format,
-                                 va_list argv);
-
-/**
- * Compares two strings, returning 1 if string a is bigger than string b.
- *
- * Note: returns 0 if string b is bigger than string a or if strings are equal.
- */
-SFUNC int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
+/* *****************************************************************************
+Memory Helpers (for Authorship)
+***************************************************************************** */
 
 /** Default reallocation callback implementation */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
@@ -23659,6 +23678,45 @@ SFUNC void fio_string_default_free(void *);
 SFUNC void fio_string_default_free2(fio_str_info_s str);
 /** does nothing. */
 SFUNC void fio_string_default_free_noop(fio_str_info_s str);
+
+/* *****************************************************************************
+UTF-8 Support
+***************************************************************************** */
+
+/** Returns 1 if the String is UTF-8 valid and 0 if not. */
+SFUNC size_t fio_string_utf8_valid(fio_str_info_s str);
+
+/** Returns the String's length in UTF-8 characters. */
+SFUNC size_t fio_string_utf8_len(fio_str_info_s str);
+
+/**
+ * Takes a UTF-8 character selection information (UTF-8 position and length)
+ * and updates the same variables so they reference the raw byte slice
+ * information.
+ *
+ * If the String isn't UTF-8 valid up to the requested selection, than `pos`
+ * will be updated to `-1` otherwise values are always positive.
+ *
+ * The returned `len` value may be shorter than the original if there wasn't
+ * enough data left to accommodate the requested length. When a `len` value of
+ * `0` is returned, this means that `pos` marks the end of the String.
+ *
+ * Returns -1 on error and 0 on success.
+ */
+SFUNC int fio_string_utf8_select(fio_str_info_s str,
+                                 intptr_t *pos,
+                                 size_t *len);
+
+/* *****************************************************************************
+Sorting / Comparison Helpers
+***************************************************************************** */
+
+/**
+ * Compares two strings, returning 1 if string a is bigger than string b.
+ *
+ * Note: returns 0 if string b is bigger than string a or if strings are equal.
+ */
+SFUNC int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
 
 /* *****************************************************************************
 
@@ -23768,14 +23826,14 @@ FIO_IFUNC int fio_string_write_hex(fio_str_info_s *dest,
                                    void (*reallocate)(fio_str_info_s *,
                                                       size_t new_capa),
                                    uint64_t i) {
-  static const char fio___i2c_map[] = "0123456789ABCDEF";
+  static const char fio___i2c16_map[] = "0123456789ABCDEF";
   int r = -1;
   char buf[16];
   size_t len = 0;
   while (i) {
-    buf[len++] = fio___i2c_map[(i & 15)];
+    buf[len++] = fio___i2c16_map[(i & 15)];
     i >>= 4;
-    buf[len++] = fio___i2c_map[(i & 15)];
+    buf[len++] = fio___i2c16_map[(i & 15)];
     i >>= 4;
   }
   if (fio_string___write_validate_len(dest, reallocate, len) != len)
@@ -24014,6 +24072,217 @@ truncate:
 }
 
 /* *****************************************************************************
+UTF-8 Support
+***************************************************************************** */
+/**
+ * Maps the first 5 bits in a byte (0b11111xxx) to a UTF-8 codepoint length.
+ *
+ * Codepoint length 0 == error.
+ *
+ * The first valid length can be any value between 1 to 4.
+ *
+ * A continuation byte (second, third or forth) valid length marked as 5.
+ *
+ * To map was populated using the following Ruby script:
+ *
+ *      map = []; 32.times { map << 0 }; (0..0b1111).each {|i| map[i] = 1} ;
+ *      (0b10000..0b10111).each {|i| map[i] = 5} ;
+ *      (0b11000..0b11011).each {|i| map[i] = 2} ;
+ *      (0b11100..0b11101).each {|i| map[i] = 3} ;
+ *      map[0b11110] = 4; map;
+ */
+static __attribute__((unused)) uint8_t fio__string_utf8_map[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    5, 5, 5, 5, 5, 5, 5, 5, 2, 2, 2, 2, 3, 3, 4, 0};
+
+/**
+ * Advances the `ptr` by one utf-8 character, placing the value of the UTF-8
+ * character into the i32 variable (which must be a signed integer with 32bits
+ * or more). On error, `i32` will be equal to `-1` and `ptr` will not step
+ * forwards.
+ *
+ * The `end` value provides overflow protection.
+ */
+#define FIO_STR_UTF8_CODE_POINT(ptr, end, i32)                                 \
+  do {                                                                         \
+    switch (fio__string_utf8_map[((uint8_t *)(ptr))[0] >> 3]) {                \
+    case 1:                                                                    \
+      (i32) = ((uint8_t *)(ptr))[0];                                           \
+      ++(ptr);                                                                 \
+      break;                                                                   \
+    case 2:                                                                    \
+      if (((ptr) + 2 > (end)) ||                                               \
+          fio__string_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5) {             \
+        (i32) = -1;                                                            \
+        break;                                                                 \
+      }                                                                        \
+      (i32) =                                                                  \
+          ((((uint8_t *)(ptr))[0] & 31) << 6) | (((uint8_t *)(ptr))[1] & 63);  \
+      (ptr) += 2;                                                              \
+      break;                                                                   \
+    case 3:                                                                    \
+      if (((ptr) + 3 > (end)) ||                                               \
+          fio__string_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5 ||             \
+          fio__string_utf8_map[((uint8_t *)(ptr))[2] >> 3] != 5) {             \
+        (i32) = -1;                                                            \
+        break;                                                                 \
+      }                                                                        \
+      (i32) = ((((uint8_t *)(ptr))[0] & 15) << 12) |                           \
+              ((((uint8_t *)(ptr))[1] & 63) << 6) |                            \
+              (((uint8_t *)(ptr))[2] & 63);                                    \
+      (ptr) += 3;                                                              \
+      break;                                                                   \
+    case 4:                                                                    \
+      if (((ptr) + 4 > (end)) ||                                               \
+          fio__string_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5 ||             \
+          fio__string_utf8_map[((uint8_t *)(ptr))[2] >> 3] != 5 ||             \
+          fio__string_utf8_map[((uint8_t *)(ptr))[3] >> 3] != 5) {             \
+        (i32) = -1;                                                            \
+        break;                                                                 \
+      }                                                                        \
+      (i32) = ((((uint8_t *)(ptr))[0] & 7) << 18) |                            \
+              ((((uint8_t *)(ptr))[1] & 63) << 12) |                           \
+              ((((uint8_t *)(ptr))[2] & 63) << 6) |                            \
+              (((uint8_t *)(ptr))[3] & 63);                                    \
+      (ptr) += 4;                                                              \
+      break;                                                                   \
+    default: (i32) = -1; break;                                                \
+    }                                                                          \
+  } while (0);
+
+/** Returns 1 if the String is UTF-8 valid and 0 if not. */
+SFUNC size_t fio_string_utf8_valid(fio_str_info_s str) {
+  if (!str.len)
+    return 1;
+  char *const end = str.buf + str.len;
+  int32_t c = 0;
+  do {
+    FIO_STR_UTF8_CODE_POINT(str.buf, end, c);
+  } while (c > 0 && str.buf < end);
+  return str.buf == end && c >= 0;
+}
+
+/** Returns the String's length in UTF-8 characters. */
+SFUNC size_t fio_string_utf8_len(fio_str_info_s str) {
+  if (!str.len)
+    return 0;
+  char *end = str.buf + str.len;
+  size_t utf8len = 0;
+  int32_t c = 0;
+  do {
+    ++utf8len;
+    FIO_STR_UTF8_CODE_POINT(str.buf, end, c);
+  } while (c > 0 && str.buf < end);
+  if (str.buf != end || c == -1) {
+    /* invalid */
+    return 0;
+  }
+  return utf8len;
+}
+
+/**
+ * Takes a UTF-8 character selection information (UTF-8 position and length)
+ * and updates the same variables so they reference the raw byte slice
+ * information.
+ *
+ * If the String isn't UTF-8 valid up to the requested selection, than `pos`
+ * will be updated to `-1` otherwise values are always positive.
+ *
+ * The returned `len` value may be shorter than the original if there wasn't
+ * enough data left to accommodate the requested length. When a `len` value of
+ * `0` is returned, this means that `pos` marks the end of the String.
+ *
+ * Returns -1 on error and 0 on success.
+ */
+SFUNC int fio_string_utf8_select(fio_str_info_s str,
+                                 intptr_t *pos,
+                                 size_t *len) {
+  int32_t c = 0;
+  char *p = str.buf;
+  char *const end = str.buf + str.len;
+  size_t start;
+
+  if (!str.buf)
+    goto error;
+  if (!str.len || *pos == -1)
+    goto at_end;
+
+  if (*pos) {
+    if ((*pos) > 0) {
+      start = *pos;
+      while (start && p < end && c >= 0) {
+        FIO_STR_UTF8_CODE_POINT(p, end, c);
+        --start;
+      }
+      if (c == -1)
+        goto error;
+      if (start || p >= end)
+        goto at_end;
+      *pos = p - str.buf;
+    } else {
+      /* walk backwards */
+      p = str.buf + str.len - 1;
+      c = 0;
+      ++*pos;
+      do {
+        switch (fio__string_utf8_map[((uint8_t *)p)[0] >> 3]) {
+        case 5: ++c; break;
+        case 4:
+          if (c != 3)
+            goto error;
+          c = 0;
+          ++(*pos);
+          break;
+        case 3:
+          if (c != 2)
+            goto error;
+          c = 0;
+          ++(*pos);
+          break;
+        case 2:
+          if (c != 1)
+            goto error;
+          c = 0;
+          ++(*pos);
+          break;
+        case 1:
+          if (c)
+            goto error;
+          ++(*pos);
+          break;
+        default: goto error;
+        }
+        --p;
+      } while (p > str.buf && *pos);
+      if (c)
+        goto error;
+      ++p; /* There's always an extra back-step */
+      *pos = (p - str.buf);
+    }
+  }
+
+  /* find end */
+  start = *len;
+  while (start && p < end && c >= 0) {
+    FIO_STR_UTF8_CODE_POINT(p, end, c);
+    --start;
+  }
+  if (c == -1 || p > end)
+    goto error;
+  *len = p - (str.buf + (*pos));
+  return 0;
+
+at_end:
+  *pos = str.len;
+  *len = 0;
+  return 0;
+error:
+  *pos = -1;
+  *len = 0;
+  return -1;
+}
+
+/* *****************************************************************************
 fio_string_is_bigger
 ***************************************************************************** */
 
@@ -24131,6 +24400,55 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   FIO_ASSERT(mem == buf.buf && buf.len == 8 && !memcmp(buf.buf, "I think ", 8),
              "fio_string_write2 failed to truncate (bin)!");
 
+  {
+    /* Testing UTF-8 */
+    const char *utf8_sample = /* three hearts, small-big-small*/
+        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
+    fio_str_info_s utf8 = FIO_STR_INFO1((char *)utf8_sample);
+    intptr_t pos = -2;
+    size_t len = 2;
+    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
+               "`fio_string_utf8_select` returned error for negative pos on "
+               "UTF-8 data! (%zd, %zu)",
+               (ssize_t)pos,
+               len);
+    FIO_ASSERT(pos == (intptr_t)utf8.len - 4, /* 4 byte emoji */
+               "`fio_string_utf8_select` error, negative position invalid on "
+               "UTF-8 data! (%zd)",
+               (ssize_t)pos);
+    FIO_ASSERT(len == 4, /* last utf-8 char is 4 byte long */
+               "`fio_string_utf8_select` error, truncated length invalid on "
+               "UTF-8 data! (%zd)",
+               (ssize_t)len);
+    pos = 1;
+    len = 20;
+    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
+               "`fio_string_utf8_select` returned error on UTF-8 data! "
+               "(%zd, %zu)",
+               (ssize_t)pos,
+               len);
+    FIO_ASSERT(pos == 4,
+               "`fio_string_utf8_select` error, position invalid on "
+               "UTF-8 data! (%zd)",
+               (ssize_t)pos);
+    FIO_ASSERT(len == 10,
+               "`fio_string_utf8_select` error, length invalid on "
+               "UTF-8 data! (%zd)",
+               (ssize_t)len);
+    pos = 1;
+    len = 3;
+    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
+               "`fio_string_utf8_select` returned error on UTF-8 data "
+               "(2)! (%zd, %zu)",
+               (ssize_t)pos,
+               len);
+    FIO_ASSERT(len ==
+                   10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte codes == 10 */
+               "`fio_string_utf8_select` error, length invalid on UTF-8 data! "
+               "(%zd)",
+               (ssize_t)len);
+  }
+  /* Comparison testing */
   FIO_ASSERT(fio_string_is_bigger(FIO_STR_INFO1((char *)"A"),
                                   FIO_STR_INFO1((char *)"")),
              "fio_string_is_bigger failed for A vs __");
@@ -24152,6 +24470,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   FIO_ASSERT(!fio_string_is_bigger(FIO_STR_INFO1((char *)"Hzzzzzzzzzz"),
                                    FIO_STR_INFO1((char *)"hello world")),
              "fio_string_is_bigger failed for Hello world");
+  /* speed testing comparison */
 #if !defined(DEBUG) || defined(NODEBUG)
   {
     char str_a[] =
@@ -24199,13 +24518,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
 }
 
 #endif /* FIO_TEST_CSTL */
-
 /* *****************************************************************************
 String Core Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_STR_CORE
-#endif /* H__FIO_STR_CORE__H */
+#undef FIO_STR
+#endif /* H__FIO_STR__H */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -24217,6 +24535,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
+#include "220 string core.h"        /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -24248,7 +24567,7 @@ Feel free to copy, use and enjoy according to the license provided.
 /**
  * For each unit (0 by default), adds `sizeof(char *)` bytes to the type size,
  * increasing the amount of strings that could be embedded within the type
- * without memory allocation.
+ * without additional memory allocation.
  *
  * For example, when using a reference counter wrapper on a 64bit system, it
  * would make sense to set this value to 1 - allowing the type size to fully
@@ -24259,8 +24578,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 #ifndef FIO_STR_OPTIMIZE4IMMUTABILITY
 /**
- * Optimizes the struct to minimal size that can store the string length and a
- * pointer.
+ * Minimizes the struct size, storing only string length and pointer.
  *
  * By avoiding extra (mutable related) data, such as the allocated memory's
  * capacity, strings require less memory. However, this does introduce a
@@ -24276,7 +24594,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_STR_OPTIMIZE_EMBEDDED 1
 #endif
 #else
-/* enforce limit due to 6 bit embedded string length limit */
+/* enforce limit due to 6 bit embedded string length limit (assumes 64 bit) */
 #if FIO_STR_OPTIMIZE_EMBEDDED > 4
 #undef FIO_STR_OPTIMIZE_EMBEDDED
 #define FIO_STR_OPTIMIZE_EMBEDDED 4
@@ -24382,7 +24700,6 @@ typedef struct {
 #endif /* FIO_STR_INIT */
 
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
-
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void);
 
@@ -24390,7 +24707,6 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void);
  * Destroys the string and frees the container (if allocated with `new`).
  */
 FIO_IFUNC void FIO_NAME(FIO_STR_NAME, free)(FIO_STR_PTR s);
-
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /**
@@ -24426,7 +24742,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy2)(FIO_STR_PTR dest,
                                                             FIO_STR_PTR src);
 
 /**
- * Frees the String's resources and reinitializes the container.
+ * Frees the String's resources and re-initializes the container.
  *
  * Note: if the container isn't allocated on the stack, it should be freed
  * separately using the appropriate `free` function.
@@ -24464,22 +24780,16 @@ FIO_IFUNC size_t FIO_NAME(FIO_STR_NAME, len)(FIO_STR_PTR s);
 /** Returns the String's existing capacity (total used & available memory). */
 FIO_IFUNC size_t FIO_NAME(FIO_STR_NAME, capa)(FIO_STR_PTR s);
 
-/**
- * Prevents further manipulations to the String's content.
- */
+/** Prevents further manipulations to the String's content. */
 FIO_IFUNC void FIO_NAME(FIO_STR_NAME, freeze)(FIO_STR_PTR s);
 
-/**
- * Returns true if the string is frozen.
- */
+/** Returns true if the string is frozen. */
 FIO_IFUNC uint8_t FIO_NAME_BL(FIO_STR_NAME, frozen)(FIO_STR_PTR s);
 
-/** Returns 1 if memory was allocated and (the String must be destroyed). */
+/** Returns 1 if memory was allocated (and the String must be destroyed). */
 FIO_IFUNC int FIO_NAME_BL(FIO_STR_NAME, allocated)(const FIO_STR_PTR s);
 
-/**
- * Binary comparison returns `1` if both strings are equal and `0` if not.
- */
+/** Binary comparison returns `1` if both strings are equal and `0` if not. */
 FIO_IFUNC int FIO_NAME_BL(FIO_STR_NAME, eq)(const FIO_STR_PTR str1,
                                             const FIO_STR_PTR str2);
 
@@ -24522,9 +24832,11 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, compact)(FIO_STR_PTR s);
  * The reserved count includes used data. If `amount` is less than the current
  * string length, the string will be truncated(!).
  *
- * May corrupt the string length information (if string is assumed to be
- * immutable), make sure to call `resize` with the updated information once the
- * editing is done.
+ * Note: When optimized for immutability (`FIO_STR_SMALL`), this may corrupt the
+ * string length data.
+ *
+ * Make sure to call `resize` with the updated information once the editing is
+ * done.
  *
  * Returns the updated state of the String.
  */
@@ -24580,6 +24892,11 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s,
 /** Writes a number at the end of the String using Hex (base 16) notation. */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s,
                                                        int64_t num);
+
+/* Writes a binary representation of `i` to the String */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_bin)(FIO_STR_PTR s,
+                                                       int64_t num);
+
 /**
  * Appends the `src` String to the end of the `dest` String.
  *
@@ -24656,6 +24973,15 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s,
                                                       intptr_t start_at,
                                                       intptr_t limit);
 
+/** Writes data at the end of the String. */
+SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                              __write2)(FIO_STR_PTR s,
+                                        const fio_string_write_s srcs[]);
+
+#ifndef FIO_STR_WRITE2
+#define FIO_STR_WRITE2(str_name, dest, ...)                                    \
+  FIO_NAME(str_name, __write2)(dest, (fio_string_write_s[]){__VA_ARGS__, {0}})
+#endif
 /* *****************************************************************************
 String API - C / JSON escaping
 ***************************************************************************** */
@@ -24765,7 +25091,7 @@ String Macro Helpers
       }                                                                        \
     } else {                                                                   \
       if (!((l) & ((~(uint64_t)0) << 56))) {                                   \
-        (s)->reserved[0] = (l)&0xff;                                           \
+        (s)->reserved[0] = (l)&0xFF;                                           \
         (s)->reserved[1] = ((uint64_t)(l) >> 8) & 0xFF;                        \
         (s)->reserved[2] = ((uint64_t)(l) >> 16) & 0xFF;                       \
         (s)->reserved[3] = ((uint64_t)(l) >> 24) & 0xFF;                       \
@@ -25386,117 +25712,17 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
 String Implementation - UTF-8 State
 ***************************************************************************** */
 
-#ifndef FIO_STR_UTF8_CODE_POINT
-/**
- * Maps the first 5 bits in a byte (0b11111xxx) to a UTF-8 codepoint length.
- *
- * Codepoint length 0 == error.
- *
- * The first valid length can be any value between 1 to 4.
- *
- * A continuation byte (second, third or forth) valid length marked as 5.
- *
- * To map was populated using the following Ruby script:
- *
- *      map = []; 32.times { map << 0 }; (0..0b1111).each {|i| map[i] = 1} ;
- *      (0b10000..0b10111).each {|i| map[i] = 5} ;
- *      (0b11000..0b11011).each {|i| map[i] = 2} ;
- *      (0b11100..0b11101).each {|i| map[i] = 3} ;
- *      map[0b11110] = 4; map;
- */
-static __attribute__((unused))
-uint8_t fio__str_utf8_map[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                               5, 5, 5, 5, 5, 5, 5, 5, 2, 2, 2, 2, 3, 3, 4, 0};
-
-/**
- * Advances the `ptr` by one utf-8 character, placing the value of the UTF-8
- * character into the i32 variable (which must be a signed integer with 32bits
- * or more). On error, `i32` will be equal to `-1` and `ptr` will not step
- * forwards.
- *
- * The `end` value is only used for overflow protection.
- */
-#define FIO_STR_UTF8_CODE_POINT(ptr, end, i32)                                 \
-  do {                                                                         \
-    switch (fio__str_utf8_map[((uint8_t *)(ptr))[0] >> 3]) {                   \
-    case 1:                                                                    \
-      (i32) = ((uint8_t *)(ptr))[0];                                           \
-      ++(ptr);                                                                 \
-      break;                                                                   \
-    case 2:                                                                    \
-      if (((ptr) + 2 > (end)) ||                                               \
-          fio__str_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5) {                \
-        (i32) = -1;                                                            \
-        break;                                                                 \
-      }                                                                        \
-      (i32) =                                                                  \
-          ((((uint8_t *)(ptr))[0] & 31) << 6) | (((uint8_t *)(ptr))[1] & 63);  \
-      (ptr) += 2;                                                              \
-      break;                                                                   \
-    case 3:                                                                    \
-      if (((ptr) + 3 > (end)) ||                                               \
-          fio__str_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5 ||                \
-          fio__str_utf8_map[((uint8_t *)(ptr))[2] >> 3] != 5) {                \
-        (i32) = -1;                                                            \
-        break;                                                                 \
-      }                                                                        \
-      (i32) = ((((uint8_t *)(ptr))[0] & 15) << 12) |                           \
-              ((((uint8_t *)(ptr))[1] & 63) << 6) |                            \
-              (((uint8_t *)(ptr))[2] & 63);                                    \
-      (ptr) += 3;                                                              \
-      break;                                                                   \
-    case 4:                                                                    \
-      if (((ptr) + 4 > (end)) ||                                               \
-          fio__str_utf8_map[((uint8_t *)(ptr))[1] >> 3] != 5 ||                \
-          fio__str_utf8_map[((uint8_t *)(ptr))[2] >> 3] != 5 ||                \
-          fio__str_utf8_map[((uint8_t *)(ptr))[3] >> 3] != 5) {                \
-        (i32) = -1;                                                            \
-        break;                                                                 \
-      }                                                                        \
-      (i32) = ((((uint8_t *)(ptr))[0] & 7) << 18) |                            \
-              ((((uint8_t *)(ptr))[1] & 63) << 12) |                           \
-              ((((uint8_t *)(ptr))[2] & 63) << 6) |                            \
-              (((uint8_t *)(ptr))[3] & 63);                                    \
-      (ptr) += 4;                                                              \
-      break;                                                                   \
-    default: (i32) = -1; break;                                                \
-    }                                                                          \
-  } while (0);
-#endif
-
 /** Returns 1 if the String is UTF-8 valid and 0 if not. */
 SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_valid)(FIO_STR_PTR s_) {
-  FIO_NAME(FIO_STR_NAME, s) *s = (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
-  if (!s || !s_)
-    return 0;
+  FIO_PTR_TAG_VALID_OR_RETURN(s_, 0);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
-  if (!state.len)
-    return 1;
-  char *const end = state.buf + state.len;
-  int32_t c = 0;
-  do {
-    FIO_STR_UTF8_CODE_POINT(state.buf, end, c);
-  } while (c > 0 && state.buf < end);
-  return state.buf == end && c >= 0;
+  return fio_string_utf8_len(state);
 }
 
 /** Returns the String's length in UTF-8 characters. */
 SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s_) {
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
-  if (!state.len)
-    return 0;
-  char *end = state.buf + state.len;
-  size_t utf8len = 0;
-  int32_t c = 0;
-  do {
-    ++utf8len;
-    FIO_STR_UTF8_CODE_POINT(state.buf, end, c);
-  } while (c > 0 && state.buf < end);
-  if (state.buf != end || c == -1) {
-    /* invalid */
-    return 0;
-  }
-  return utf8len;
+  return fio_string_utf8_len(state);
 }
 
 /**
@@ -25515,90 +25741,9 @@ SFUNC size_t FIO_NAME(FIO_STR_NAME, utf8_len)(FIO_STR_PTR s_) {
  */
 SFUNC int FIO_NAME(FIO_STR_NAME,
                    utf8_select)(FIO_STR_PTR s_, intptr_t *pos, size_t *len) {
+  FIO_PTR_TAG_VALID_OR_RETURN(s_, -1);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, info)(s_);
-  int32_t c = 0;
-  char *p = state.buf;
-  char *const end = state.buf + state.len;
-  size_t start;
-
-  if (!state.buf)
-    goto error;
-  if (!state.len || *pos == -1)
-    goto at_end;
-
-  if (*pos) {
-    if ((*pos) > 0) {
-      start = *pos;
-      while (start && p < end && c >= 0) {
-        FIO_STR_UTF8_CODE_POINT(p, end, c);
-        --start;
-      }
-      if (c == -1)
-        goto error;
-      if (start || p >= end)
-        goto at_end;
-      *pos = p - state.buf;
-    } else {
-      /* walk backwards */
-      p = state.buf + state.len - 1;
-      c = 0;
-      ++*pos;
-      do {
-        switch (fio__str_utf8_map[((uint8_t *)p)[0] >> 3]) {
-        case 5: ++c; break;
-        case 4:
-          if (c != 3)
-            goto error;
-          c = 0;
-          ++(*pos);
-          break;
-        case 3:
-          if (c != 2)
-            goto error;
-          c = 0;
-          ++(*pos);
-          break;
-        case 2:
-          if (c != 1)
-            goto error;
-          c = 0;
-          ++(*pos);
-          break;
-        case 1:
-          if (c)
-            goto error;
-          ++(*pos);
-          break;
-        default: goto error;
-        }
-        --p;
-      } while (p > state.buf && *pos);
-      if (c)
-        goto error;
-      ++p; /* There's always an extra back-step */
-      *pos = (p - state.buf);
-    }
-  }
-
-  /* find end */
-  start = *len;
-  while (start && p < end && c >= 0) {
-    FIO_STR_UTF8_CODE_POINT(p, end, c);
-    --start;
-  }
-  if (c == -1 || p > end)
-    goto error;
-  *len = p - (state.buf + (*pos));
-  return 0;
-
-at_end:
-  *pos = state.len;
-  *len = 0;
-  return 0;
-error:
-  *pos = -1;
-  *len = 0;
-  return -1;
+  return fio_string_utf8_select(state, pos, len);
 }
 
 /* *****************************************************************************
@@ -25786,12 +25931,6 @@ FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
 String API - C / JSON escaping
 ***************************************************************************** */
 
-/* constant time (non-branching) if statement used in a loop as a helper */
-#define FIO_STR_WRITE_ESCAPED_CT_OR(cond, a, b)                                \
-  ((b) ^                                                                       \
-   ((0 - ((((cond) | (0 - (cond))) >> ((sizeof((cond)) << 3) - 1)) & 1)) &     \
-    ((a) ^ (b))))
-
 /**
  * Writes data at the end of the String, escaping the data using JSON semantics.
  *
@@ -25806,33 +25945,34 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
   size_t at = 0;
   uint8_t set_at = 1;
 
-  /* collect escaping requiremnents */
+  /* collect escaping requirements */
   for (size_t i = 0; i < len; ++i) {
     /* skip valid ascii */
     if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
         src[i] == ' ')
       continue;
     /* skip valid UTF-8 */
-    switch (fio__str_utf8_map[src[i] >> 3]) {
+    switch (fio__string_utf8_map[src[i] >> 3]) {
     case 4:
-      if (fio__str_utf8_map[src[i + 3] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
         break; /* from switch */
       }
     /* fall through */
     case 3:
-      if (fio__str_utf8_map[src[i + 2] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
         break; /* from switch */
       }
     /* fall through */
     case 2:
-      if (fio__str_utf8_map[src[i + 1] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
         break; /* from switch */
       }
-      i += fio__str_utf8_map[src[i] >> 3] - 1;
+      i += fio__string_utf8_map[src[i] >> 3] - 1;
       continue;
     }
     /* store first instance of character that needs escaping */
-    at = FIO_STR_WRITE_ESCAPED_CT_OR(set_at, i, at);
+    /* constant time (non-branching) alternative to if(`set_at`) */
+    at ^= ((set_at | (0 - set_at)) & (i ^ at));
     set_at = 0;
 
     /* count extra bytes */
@@ -25846,7 +25986,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
     case '\\': /* fall through */
     case '/': /* fall through */ ++extra_len; break;
     default:
-      /* escaping all control charactes and non-UTF-8 characters */
+      /* escaping all control characters and non-UTF-8 characters */
       extra_len += 5;
     }
   }
@@ -25884,22 +26024,22 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
       continue;
     }
     /* skip valid UTF-8 */
-    switch (fio__str_utf8_map[src[i] >> 3]) {
+    switch (fio__string_utf8_map[src[i] >> 3]) {
     case 4:
-      if (fio__str_utf8_map[src[i + 3] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
         break; /* from switch */
       }
     /* fall through */
     case 3:
-      if (fio__str_utf8_map[src[i + 2] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
         break; /* from switch */
       }
     /* fall through */
     case 2:
-      if (fio__str_utf8_map[src[i + 1] >> 3] != 5) {
+      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
         break; /* from switch */
       }
-      switch (fio__str_utf8_map[src[i] >> 3]) {
+      switch (fio__string_utf8_map[src[i] >> 3]) {
       case 4: dest.buf[at++] = src[i++]; /* fall through */
       case 3: dest.buf[at++] = src[i++]; /* fall through */
       case 2: dest.buf[at++] = src[i++]; dest.buf[at++] = src[i];
@@ -25954,7 +26094,6 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
   const uint8_t *end = src + len;
   dest.buf += dest.len;
   while (src < end) {
-#if 1 /* A/B performance at a later stage */
     if (*src != '\\') {
       const uint8_t *escape_pos = (const uint8_t *)memchr(src, '\\', end - src);
       if (!escape_pos)
@@ -25966,27 +26105,6 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
         src = escape_pos;
       }
     }
-#else
-#if __x86_64__ || __aarch64__
-    /* levarege unaligned memory access to test and copy 8 bytes at a time */
-    while (src + 8 <= end) {
-      const uint64_t wanted1 = 0x0101010101010101ULL * '\\';
-      const uint64_t eq1 =
-          ~((*((uint64_t *)src)) ^ wanted1); /* 0 == eq. inverted, all bits 1 */
-      const uint64_t t0 = (eq1 & 0x7f7f7f7f7f7f7f7fllu) + 0x0101010101010101llu;
-      const uint64_t t1 = (eq1 & 0x8080808080808080llu);
-      if ((t0 & t1)) {
-        break; /* from 8 byte seeking algorithm */
-      }
-      *(uint64_t *)(dest.buf + at) = *(uint64_t *)src;
-      src += 8;
-      at += 8;
-    }
-#endif
-    while (src < end && *src != '\\') {
-      dest.buf[at++] = *(src++);
-    }
-#endif
     if (end - src == 1) {
       dest.buf[at++] = *(src++);
     }
@@ -26407,7 +26525,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
   return state;
 }
 
-#ifdef FIO_FSTAT_UNDEF
+#if FIO_FSTAT_UNDEF
 #undef FIO_FSTAT_UNDEF
 #undef fstat
 #endif
@@ -26675,56 +26793,6 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   }
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
   if (1) {
-    /* Testing UTF-8 */
-    const char *utf8_sample = /* three hearts, small-big-small*/
-        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
-    FIO_NAME(FIO_STR_NAME, write)(&str, utf8_sample, strlen(utf8_sample));
-    intptr_t pos = -2;
-    size_t len = 2;
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
-               "`utf8_select` returned error for negative pos on "
-               "UTF-8 data! (%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(pos == (intptr_t)FIO_NAME(FIO_STR_NAME, len)(&str) -
-                          4, /* 4 byte emoji */
-               "`utf8_select` error, negative position invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)pos);
-    FIO_ASSERT(len == 4, /* last utf-8 char is 4 byte long */
-               "`utf8_select` error, trancated length invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)len);
-    pos = 1;
-    len = 20;
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
-               "`utf8_select` returned error on UTF-8 data! "
-               "(%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(pos == 4,
-               "`utf8_select` error, position invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)pos);
-    FIO_ASSERT(len == 10,
-               "`utf8_select` error, length invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)len);
-    pos = 1;
-    len = 3;
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(&str, &pos, &len) == 0,
-               "`utf8_select` returned error on UTF-8 data "
-               "(2)! (%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(len ==
-                   10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte codes == 10 */
-               "`utf8_select` error, length invalid on UTF-8 data! "
-               "(%zd)",
-               (ssize_t)len);
-  }
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
-  if (1) {
     /* Testing Static initialization and writing */
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
     FIO_NAME(FIO_STR_NAME, init_const)(&str, "Welcome", 7);
@@ -26919,7 +26987,6 @@ String Cleanup
 #undef FIO_STR_OPTIMIZE_EMBEDDED
 #undef FIO_STR_PTR
 #undef FIO_STR_THAW_
-#undef FIO_STR_WRITE_ESCAPED_CT_OR
 #undef FIO_STR_RESERVE_NAME
 
 #endif /* FIO_STR_NAME */
@@ -27368,7 +27435,8 @@ Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SORT_TEST)
 
-int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a, FIO_SORT_TYPE *b) {
+FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a,
+                                                  FIO_SORT_TYPE *b) {
   return (int)(a[0] - b[0]);
 }
 
@@ -27706,7 +27774,8 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "051 json.h"               /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
 #include "210 map api.h"            /* Development inclusion - ignore line */
-#include "220 string.h"             /* Development inclusion - ignore line */
+#include "220 string core.h"        /* Development inclusion - ignore line */
+#include "221 string.h"             /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
 #define FIO_FIOBJ                   /* Development inclusion - ignore line */
@@ -27897,8 +27966,8 @@ Debugging / Leak Detection
 #endif
 
 #if FIOBJ_MARK_MEMORY
-size_t __attribute__((weak)) FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
-size_t __attribute__((weak)) FIOBJ_MARK_MEMORY_FREE_COUNTER;
+size_t FIO_WEAK FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
+size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_ALLOC()                                              \
   fio_atomic_add(&FIOBJ_MARK_MEMORY_ALLOC_COUNTER, 1)
 #define FIOBJ_MARK_MEMORY_FREE()                                               \
