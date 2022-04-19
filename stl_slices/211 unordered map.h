@@ -226,8 +226,7 @@ seek_as_array:
   pos = 0;
   while (pos < m->count) {
     switch (imap[pos]) {
-    case 0:
-      return pos;
+    case 0: return pos;
     case 255:
       if (free_slot > pos)
         free_slot = pos;
@@ -503,11 +502,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_TYPE *old) {
   if (old)
     *old = FIO_MAP_TYPE_INVALID;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m || !m->count)
     return -1;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   FIO_MAP_SIZE_TYPE pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key);
   if (pos == (FIO_MAP_SIZE_TYPE)(-1) ||

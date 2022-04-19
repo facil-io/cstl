@@ -494,11 +494,11 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_TYPE *old) {
   if (old)
     *old = FIO_MAP_TYPE_INVALID;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m || !m->count)
     return -1;
-  FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
   hash = FIO_MAP_HASH_FIX(hash);
   FIO_NAME(FIO_MAP_NAME, __pos_s)
   pos = FIO_NAME(FIO_MAP_NAME, __index)(m, hash, key, 0);

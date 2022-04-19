@@ -982,11 +982,15 @@ Common macros
 #ifndef FIO_PTR_TAG_TYPE
 #endif
 
+#ifndef FIO_PTR_TAG_VALIDATE
 /**
  * If FIO_PTR_TAG_VALIDATE is defined, tagging will be verified before executing
  * any code.
  */
-#ifdef FIO_PTR_TAG_VALIDATE
+#define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
+#endif
+
+#undef FIO_PTR_TAG_VALID_OR_RETURN
 #define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)                         \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -994,6 +998,7 @@ Common macros
       return (value);                                                          \
     }                                                                          \
   } while (0)
+#undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)                           \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -1001,6 +1006,7 @@ Common macros
       return;                                                                  \
     }                                                                          \
   } while (0)
+#undef FIO_PTR_TAG_VALID_OR_GOTO
 #define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
@@ -1010,15 +1016,6 @@ Common macros
       goto lable;                                                              \
     }                                                                          \
   } while (0)
-#else
-#define FIO_PTR_TAG_VALIDATE(tagged_ptr) 1
-#define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)
-#define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)
-#define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
-  while (0) {                                                                  \
-    goto lable;                                                                \
-  }
-#endif
 
 #else /* SFUNC_ - internal helper types are `static` */
 #undef SFUNC
