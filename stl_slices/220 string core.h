@@ -97,15 +97,26 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                uint64_t i);
 
 /**
- * Similar to fio_string_write, only replacing a sub-string or inserting a
- * string in a specific location.
+ * Similar to `fio_string_write`, only replacing/inserting a sub-string in a
+ * specific location.
+ *
+ * Negative `start_pos` values are calculated backwards, `-1` == end of String.
+ *
+ * When `overwrite_len` is zero, the function will insert the data at
+ * `start_pos`, pushing existing data until after the inserted data.
+ *
+ * If `overwrite_len` is non-zero, than `overwrite_len` bytes will be
+ * overwritten (or deleted).
+ *
+ * If `len == 0` than `src` will be ignored and the data marked for replacement
+ * will be erased.
  */
-SFUNC int fio_string_insert(fio_str_info_s *dest,
-                            fio_string_realloc_fn reallocate,
-                            intptr_t start_pos,
-                            size_t overwrite_len,
-                            const void *src,
-                            size_t len);
+SFUNC int fio_string_replace(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             intptr_t start_pos,
+                             size_t overwrite_len,
+                             const void *src,
+                             size_t len);
 
 /** Argument type used by fio_string_write2. */
 typedef struct {
@@ -802,13 +813,13 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
 Insert / Write2
 ***************************************************************************** */
 
-/* fio_string_insert */
-SFUNC int fio_string_insert(fio_str_info_s *dest,
-                            fio_string_realloc_fn reallocate,
-                            intptr_t start_pos,
-                            size_t overwrite_len,
-                            const void *src,
-                            size_t len) {
+/* fio_string_replace */
+SFUNC int fio_string_replace(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             intptr_t start_pos,
+                             size_t overwrite_len,
+                             const void *src,
+                             size_t len) {
   int r = 0;
   if (start_pos < 0) {
     start_pos = dest->len + start_pos;
@@ -838,8 +849,10 @@ SFUNC int fio_string_insert(fio_str_info_s *dest,
       }
     }
   }
-  memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
-  memcpy(dest->buf + start_pos, src, len);
+  if (move_len)
+    memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
+  if (len)
+    memcpy(dest->buf + start_pos, src, len);
   dest->len = start_pos + len + move_len;
   dest->buf[dest->len] = 0;
   return r;
@@ -1416,18 +1429,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "Hello WorldHell", 16),
                "fio_string_write failed to truncate!");
-    fio_string_insert(&buf, NULL, 0, 5, "Hola", 4);
+    fio_string_replace(&buf, NULL, 0, 5, "Hola", 4);
     FIO_ASSERT(mem == buf.buf && buf.len == 14 &&
                    !memcmp(buf.buf, "Hola WorldHell", 15),
-               "fio_string_insert at index 0 failed!");
-    fio_string_insert(&buf, NULL, 5, 9, "World", 5);
+               "fio_string_replace at index 0 failed!");
+    fio_string_replace(&buf, NULL, 5, 9, "World", 5);
     FIO_ASSERT(mem == buf.buf && buf.len == 10 &&
                    !memcmp(buf.buf, "Hola World", 11),
-               "fio_string_insert end overwrite failed!");
-    fio_string_insert(&buf, NULL, 5, 0, "my beautiful", 12);
+               "fio_string_replace end overwrite failed!");
+    fio_string_replace(&buf, NULL, 5, 0, "my beautiful", 12);
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "Hola my beautif", 16),
-               "fio_string_insert failed to truncate!");
+               "fio_string_replace failed to truncate!");
     buf = FIO_STR_INFO3(mem, 0, 16);
     fio_string_printf(&buf, NULL, "I think %d is the best answer", 42);
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&

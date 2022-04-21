@@ -118,10 +118,10 @@ Writes a binary representation of `i` to the String.
 
 **Note**: `reallocate`, if called, will be called only once.
 
-#### `fio_string_insert`
+#### `fio_string_replace`
 
 ```c
-int fio_string_insert(fio_str_info_s *dest,
+int fio_string_replace(fio_str_info_s *dest,
                       void (*reallocate)(fio_str_info_s *,
                                          size_t new_capa),
                       intptr_t start_pos,
@@ -130,7 +130,15 @@ int fio_string_insert(fio_str_info_s *dest,
                       size_t len);
 ```
 
-Similar to `fio_string_write`, only replacing a sub-string or inserting a string in a specific location.
+Similar to `fio_string_write`, only replacing/inserting a sub-string in a specific location.
+
+Negative `start_pos` values are calculated backwards, `-1` == end of String.
+
+When `overwrite_len` is zero, the function will insert the data at `start_pos`, pushing existing data until after the inserted data.
+
+If `overwrite_len` is non-zero, than `overwrite_len` bytes will be overwritten (or deleted).
+
+If `len == 0` than `src` will be ignored and the data marked for replacement will be erased.
 
 **Note**: `reallocate`, if called, will be called only once.
 
