@@ -1133,9 +1133,9 @@ Common macros
 #endif /* FIO_BITMAP */
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
-#if defined(FIO_RISKY_HASH) || defined(FIO_JSON) || defined(FIO_MAP_NAME) ||   \
-    defined(FIO_UMAP_NAME) || defined(FIO_SHA1) || defined(FIO_MATH) ||        \
-    defined(FIO_CHACHA)
+#if defined(FIO_STR_NAME) || defined(FIO_RISKY_HASH) || defined(FIO_JSON) ||   \
+    defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
+    defined(FIO_MATH) || defined(FIO_CHACHA)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -1153,9 +1153,9 @@ Common macros
 #endif /* FIO_ATOMIC */
 
 /* Modules that require FIO_ATOL */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_QUEUE) ||   \
-    defined(FIO_TIME) || defined(FIO_CLI) || defined(FIO_JSON) ||              \
-    defined(FIO_FILES) || defined(FIO_TEST_CSTL)
+#if defined(FIO_STR) || defined(FIO_QUEUE) || defined(FIO_TIME) ||             \
+    defined(FIO_CLI) || defined(FIO_JSON) || defined(FIO_FILES) ||             \
+    defined(FIO_TEST_CSTL)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif

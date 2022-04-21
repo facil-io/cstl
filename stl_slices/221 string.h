@@ -1676,8 +1676,6 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
   return FIO_NAME(FIO_STR_NAME, resize)(s, dest.len + at);
 }
 
-#undef FIO_STR_WRITE_ESCAPED_CT_OR
-
 /* *****************************************************************************
 String - Base64 support
 ***************************************************************************** */

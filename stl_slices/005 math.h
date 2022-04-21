@@ -579,6 +579,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
         uint64_t q, r;
         FIO_COMPILER_GUARD;
         fio_math_div(&q, &r, &n, &d, 1);
+        FIO_COMPILER_GUARD;
         FIO_ASSERT(q == (n / d),
                    "fio_math_div failed quotient for 0x%llX / 0x%llX (Q=0x%llX "
                    "R=0x%llX)",

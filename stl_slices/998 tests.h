@@ -664,6 +664,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
       fio_math_div(&q, &r, &n, &d, 1);
+      FIO_COMPILER_GUARD;
     }
     (void)q;
   }
@@ -677,8 +678,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
       q = n / d;
-      (void)q;
+      FIO_COMPILER_GUARD;
     }
+    (void)q;
   }
   end[1] = fio_time_nano();
   FIO_LOG_INFO("\t fio_math_div test took %zu us (vs. %zu us) for a single "

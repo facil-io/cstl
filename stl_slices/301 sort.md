@@ -104,7 +104,7 @@ The following example code creates an array of random strings and then sorts the
 #define FIO_SORT      sstr
 #define FIO_SORT_TYPE sstr_s
 #define FIO_SORT_IS_BIGGER(a, b)                                               \
-  fio_string_is_bigger(sstr_info(&a), sstr_info(&b))
+  fio_string_is_greater(sstr_info(&a), sstr_info(&b))
 #define FIO_RAND
 #include "fio-stl.h"
 

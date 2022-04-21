@@ -6146,15 +6146,27 @@ Does nothing.
 
 ### Core String Comparison
 
-#### `fio_string_is_bigger`
+In addition to [`FIO_STR_INFO_IS_EQ(a,b)`](#fio_str_info_is_eq) and [`FIO_BUF_INFO_IS_EQ(a,b)`](#fio_buf_info_is_eq) MACROs, the following comparisons helpers are available:
+
+#### `fio_string_is_greater`
 
 ```c
-int fio_string_is_bigger(fio_str_info_s a, fio_str_info_s b);
+int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 ```
 
-Compares two strings, returning 1 if string `a` is bigger than string `b`.
+Compares two strings, returning 1 if the data in string `a` is greater in value than the data in string `b`.
 
-**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal.
+**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal, designed to be used with `FIO_SORT`.
+
+#### `fio_string_is_greater_buf`
+
+```c
+int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b);
+```
+
+Compares two `fio_buf_info_s`, returning 1 if the data in buffer `a` is greater in value than the data in buffer `b`.
+
+**Note**: returns 0 if data in `b` is greater than **or equal** to `a`, designed to be used with `FIO_SORT`.
 
 ### Core String UTF-8 Support
 
@@ -6187,6 +6199,58 @@ If the String isn't UTF-8 valid up to the requested selection, than `pos` will b
 The returned `len` value may be shorter than the original if there wasn't enough data left to accommodate the requested length. When a `len` value of `0` is returned, this means that `pos` marks the end of the String.
 
 Returns -1 on error and 0 on success.
+
+### Core String C / JSON escaping
+
+#### `fio_string_write_escape`
+
+```c
+int fio_string_write_escape(fio_str_info_s *restrict dest,
+                            fio_string_realloc_fn reallocate,
+                            const void *src,
+                            size_t len);
+```
+
+Writes data at the end of the String, escaping the data using JSON semantics.
+
+The JSON semantic are common to many programming languages, promising a UTF-8
+String while making it easy to read and copy the string during debugging.
+
+#### `fio_string_write_unescape`
+
+```c
+int fio_string_write_unescape(fio_str_info_s *dest,
+                              fio_string_realloc_fn reallocate,
+                              const void *src,
+                              size_t len);
+```
+
+Writes an escaped data into the string after un-escaping the data.
+
+### Core String Base64 support
+
+#### `fio_string_write_base64enc`
+
+```c
+SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *data,
+                                     size_t data_len,
+                                     uint8_t url_encoded);
+```
+
+Writes data to String using Base64 encoding.
+
+#### `fio_string_write_base64dec`
+
+```c
+SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *encoded,
+                                     size_t encoded_len);
+```
+
+Writes decoded base64 data to String.
 
 -------------------------------------------------------------------------------
 ## Dynamic Strings
@@ -7099,7 +7163,7 @@ The following example code creates an array of random strings and then sorts the
 #define FIO_SORT      sstr
 #define FIO_SORT_TYPE sstr_s
 #define FIO_SORT_IS_BIGGER(a, b)                                               \
-  fio_string_is_bigger(sstr_info(&a), sstr_info(&b))
+  fio_string_is_greater(sstr_info(&a), sstr_info(&b))
 #define FIO_RAND
 #include "fio-stl.h"
 
