@@ -1,4 +1,4 @@
-## Binary Safe String Core Helpers
+## Binary Safe Core String Helpers
 
 ```c
 #define FIO_STR
@@ -7,7 +7,10 @@
 
 The following helpers are part of the String core library and they become available whenever [a String type was defined](#dynamic-strings) or when the `FIO_STR` is defined before any inclusion of the C STL header.
 
-The main difference between using the String Core API directly and defining a String type is that String types provide a few additional optimizations, such as embedding short strings (embedded within the type data rather than allocated), optional reference counting and pointer tagging features.
+The main difference between using the Core String API directly and defining a String type is that String types provide a few additional optimizations, such as embedding short strings (embedded within the type data rather than allocated), optional reference counting and pointer tagging features.
+
+**Note**: the `fio_string` functions might fail or truncate data if memory allocation fails. Test the returned value for failure (success returns `0`, failure returns `-1`).
+
 
 ### Core String Authorship
 
@@ -65,58 +68,6 @@ void example(void) {
   printf("%s", str.buf);
 }
 ```
-
-#### `fio_string_write_i`
-
-```c
-static inline int fio_string_write_i(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 int64_t i);
-```
-
-Writes a signed number `i` to the String.
-
-**Note**: `reallocate`, if called, will be called only once.
-
-#### `fio_string_write_u`
-
-```c
-static inline int fio_string_write_u(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 uint64_t u);
-```
-
-Writes an unsigned number `u` to the String.
-
-**Note**: `reallocate`, if called, will be called only once.
-
-#### `fio_string_write_hex`
-
-```c
-static inline int fio_string_write_hex(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
-```
-
-Writes a hex representation of `i` to the String.
-
-**Note**: `reallocate`, if called, will be called only once.
-
-#### `fio_string_write_bin`
-
-```c
-static inline int fio_string_write_bin(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
-```
-
-Writes a binary representation of `i` to the String.
-
-**Note**: `reallocate`, if called, will be called only once.
 
 #### `fio_string_replace`
 
@@ -218,6 +169,62 @@ typedef struct {
 } fio_string_write_s;
 ```
 
+### Core String Numeral Helpers
+
+#### `fio_string_write_i`
+
+```c
+static inline int fio_string_write_i(fio_str_info_s *dest,
+                                 void (*reallocate)(fio_str_info_s *,
+                                                    size_t new_capa),
+                                 int64_t i);
+```
+
+Writes a signed number `i` to the String.
+
+**Note**: `reallocate`, if called, will be called only once.
+
+#### `fio_string_write_u`
+
+```c
+static inline int fio_string_write_u(fio_str_info_s *dest,
+                                 void (*reallocate)(fio_str_info_s *,
+                                                    size_t new_capa),
+                                 uint64_t u);
+```
+
+Writes an unsigned number `u` to the String.
+
+**Note**: `reallocate`, if called, will be called only once.
+
+#### `fio_string_write_hex`
+
+```c
+static inline int fio_string_write_hex(fio_str_info_s *dest,
+                                   void (*reallocate)(fio_str_info_s *,
+                                                      size_t new_capa),
+                                   uint64_t i);
+```
+
+Writes a hex representation of `i` to the String.
+
+**Note**: `reallocate`, if called, will be called only once.
+
+#### `fio_string_write_bin`
+
+```c
+static inline int fio_string_write_bin(fio_str_info_s *dest,
+                                   void (*reallocate)(fio_str_info_s *,
+                                                      size_t new_capa),
+                                   uint64_t i);
+```
+
+Writes a binary representation of `i` to the String.
+
+**Note**: `reallocate`, if called, will be called only once.
+
+### Core String `printf` Helpers
+
 #### `fio_string_printf`
 
 ```c
@@ -243,6 +250,16 @@ inline int fio_string_vprintf(fio_str_info_s *dest,
 Similar to fio_string_write, only using vprintf semantics.
 
 ### Core String Authorship Memory Helpers
+
+#### `fio_string_capa4len`
+
+```c
+size_t fio_string_capa4len(size_t new_len);
+```
+
+Calculates a 16 bytes boundary aligned capacity for `new_len`.
+
+The Core String API always allocates 16 byte aligned memory blocks, since most memory allocators will only allocate memory in multiples of 16 or more. By requesting the full 16 byte allocation, future allocations could be avoided without increasing memory usage.
 
 #### `FIO_STRING_REALLOC`
 
@@ -297,7 +314,6 @@ void fio_string_default_free_noop2(fio_str_info_s str);
 ```
 
 Does nothing. Made available for APIs that require a callback for memory management.
-
 
 ### Core String Comparison
 
@@ -406,5 +422,120 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 ```
 
 Writes decoded base64 data to String.
+
+-------------------------------------------------------------------------------
+
+## C Strings with Binary Data
+
+The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds).
+
+To create a new String simply write to `NULL` and a new `char *` pointer will be returned, pointing to the first byte of the new string.
+
+All `fio_bstr` functions that mutate the string return a pointer to the new string (**make sure to update the pointer!**).
+
+The pointer should be freed using `fio_bstr_free`. i.e.:
+
+```c
+char * str = fio_bstr_write(NULL, "Hello World!", 12);
+fprintf(stdout, "%s\n", str);
+fio_bstr_free(str);
+```
+
+To copy of a `fio_bstr` String simply write its content to `NULL`:
+
+```c
+char * str_org = fio_bstr_write(NULL, "Hello World!", 12);
+char * str_cpy = fio_bstr_write(NULL, str_org, fio_bstr_len(str_org));
+fio_bstr_free(str_org);
+fprintf(stdout, "%s\n", str_cpy);
+fio_bstr_free(str_cpy);
+```
+
+The `fio_bstr` functions wrap all `fio_string` core API, resulting in the following available functions:
+
+* fio_bstr_write - see [fio_string_write](#fio_string_write) for details.
+* fio_bstr_write2 (macro) - see [fio_string_write2](#fio_string_write2) for details.
+* fio_bstr_replace - see [fio_string_replace](#fio_string_replace) for details.
+
+* fio_bstr_write_i - see [fio_string_write_i](#fio_string_write_i) for details.
+* fio_bstr_write_u - see [fio_string_write_u](#fio_string_write_u) for details.
+* fio_bstr_write_hex - see [fio_string_write_hex](#fio_string_write_hex) for details.
+* fio_bstr_write_bin - see [fio_string_write_bin](#fio_string_write_bin) for details.
+
+* fio_bstr_write_escape - see [fio_string_write_escape](#fio_string_write_escape) for details.
+* fio_bstr_write_unescape - see [fio_string_write_unescape](#fio_string_write_unescape) for details.
+
+* fio_bstr_write_base64enc - see [fio_string_write_base64enc](#fio_string_write_base64enc) for details.
+* fio_bstr_write_base64dec - see [fio_string_write_base64dec](#fio_string_write_base64dec) for details.
+
+* fio_bstr_printf - see [fio_string_printf](#fio_string_printf) for details.
+
+* fio_bstr_is_greater - see [fio_string_is_greater](#fio_string_is_greater) for details.
+
+**Note**: the `fio_bstr` functions do not take a `reallocate` argument and their `dest` argument should be the existing `fio_bstr` pointer (`char *`).
+
+**Note**: the `fio_bstr` functions might fail quietly if memory allocation fails. For better error handling use the `fio_bstr_info`, `fio_bstr_reallocate` and `fio_bstr_len_set` functions with the Core String API (the `.buf` in the `fio_str_info_s` struct is the `fio_bstr` pointer).
+
+In addition, the following helpers are provided:
+
+#### `fio_bstr_reallocate`
+
+```c
+int fio_bstr_reallocate(fio_str_info_s *dest, size_t new_capa);
+```
+
+Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.
+
+#### `fio_bstr_free`
+
+```c
+void fio_bstr_free(char *bstr);
+```
+
+Frees a binary string allocated by a `fio_bstr` function.
+
+#### `fio_bstr_info`
+
+```c
+fio_str_info_s fio_bstr_info(char *bstr);
+```
+
+Returns information about the `fio_bstr` using the `fio_str_info_s` struct.
+
+#### `fio_bstr_buf`
+
+```c
+fio_buf_info_s fio_bstr_buf(char *bstr);
+```
+
+Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
+
+#### `fio_bstr_len`
+
+```c
+size_t fio_bstr_len(char *bstr);
+```
+
+Gets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+
+#### `fio_bstr_len_set`
+
+```c
+char *fio_bstr_len_set(char *bstr, size_t len);
+```
+
+Sets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+
+Returns `bstr`.
+
+**Note**: the function is mean to be used with the value returned from the Core String API, so no error checking is performed! `bstr` **MUST NOT** be `NULL` and `len` **MUST** be less then the `bstr` capacity.
+
+Use:
+
+```c
+fio_str_info_s str = {0};
+fio_string_write(&str, fio_bstr_reallocate, "Hello World!", 12);
+char * bstr = fio_bstr_len_set(str.buf, str.len);
+```
 
 -------------------------------------------------------------------------------
