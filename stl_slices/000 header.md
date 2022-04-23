@@ -317,11 +317,19 @@ This is when creating / managing dynamic types, where some type data could be wr
 
 #### `FIO_PTR_TAG`
 
+```c
+#define FIO_PTR_TAG(p) (p)
+```
+
 Supports embedded pointer tagging / untagging for the included types.
 
 Should resolve to a tagged pointer value. i.e.: `((uintptr_t)(p) | 1)`
 
 #### `FIO_PTR_UNTAG`
+
+```c
+#define FIO_PTR_UNTAG(p) (p)
+```
 
 Supports embedded pointer tagging / untagging for the included types.
 
@@ -332,6 +340,19 @@ Should resolve to an untagged pointer value. i.e.: `((uintptr_t)(p) | ~1UL)`
 #### `FIO_PTR_TAG_TYPE`
 
 If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer will return a pointer of the specified type instead.
+
+
+#### `FIO_PTR_TAG_VALIDATE`
+
+```c
+#define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
+```
+
+If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing
+any code.
+
+`FIO_PTR_TAG_VALIDATE` **must** fail on NULL pointers.
+
 
 -------------------------------------------------------------------------------
 

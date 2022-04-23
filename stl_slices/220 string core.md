@@ -284,10 +284,20 @@ Frees memory that was allocated with the default callbacks.
 
 ```c
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
-void fio_string_default_free_noop(fio_str_info_s str);
+void fio_string_default_free_noop(void * str);
 ```
 
-Does nothing.
+Does nothing. Made available for APIs that require a callback for memory management.
+
+#### `FIO_STRING_FREE_NOOP2`
+
+```c
+#define FIO_STRING_FREE_NOOP2 fio_string_default_free_noop2
+void fio_string_default_free_noop2(fio_str_info_s str);
+```
+
+Does nothing. Made available for APIs that require a callback for memory management.
+
 
 ### Core String Comparison
 

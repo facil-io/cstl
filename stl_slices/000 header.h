@@ -986,6 +986,8 @@ Common macros
 /**
  * If FIO_PTR_TAG_VALIDATE is defined, tagging will be verified before executing
  * any code.
+ *
+ * FIO_PTR_TAG_VALIDATE must fail on NULL pointers.
  */
 #define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
 #endif

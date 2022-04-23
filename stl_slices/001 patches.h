@@ -109,6 +109,13 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
 
+#if !defined(fstat)
+#define fstat _fstat
+#endif /* fstat */
+#if !defined(stat)
+#define stat _stat
+#endif /* stat */
+
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
@@ -314,9 +321,7 @@ SFUNC int fio_kill(int pid, int sig) {
       goto cleanup_after_error;
     }
     break;
-  default: /* not supported? */
-    errno = ENOSYS;
-    goto cleanup_after_error;
+  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
   }
 
   if (pid) {
@@ -327,16 +332,13 @@ SFUNC int fio_kill(int pid, int sig) {
 something_went_wrong:
 
   switch (GetLastError()) {
-  case ERROR_INVALID_PARAMETER:
-    errno = ESRCH;
-    break;
+  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
   case ERROR_ACCESS_DENIED:
     errno = EPERM;
     if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
       errno = ESRCH;
     break;
-  default:
-    errno = GetLastError();
+  default: errno = GetLastError();
   }
 cleanup_after_error:
   if (handle && pid)

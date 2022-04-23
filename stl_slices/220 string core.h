@@ -28,7 +28,8 @@ Feel free to copy, use and enjoy according to the license provided.
 String Authorship Helpers (`fio_string_write` functions)
 ***************************************************************************** */
 
-typedef void (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
+/** A reallocation callback type for buffers in a `fio_str_info_s`. */
+typedef int (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
 /**
  * Writes data to the end of the string in the `fio_string_s` struct,
  * returning an updated `fio_string_s` struct.
@@ -38,7 +39,7 @@ typedef void (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
  * * `dest` an `fio_string_s` struct containing the destination string.
  *
  * * `reallocate` is a callback that attempts to reallocate more memory (i.e.,
- * using realloc) and returns an updated `fio_string_s` struct containing the
+ * using `realloc`) and returns an updated `fio_string_s` struct containing the
  *   updated capacity and buffer pointer (as well as the original length).
  *
  *   On failure the original `fio_string_s` should be returned. if
@@ -54,14 +55,13 @@ typedef void (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
  *
  * An example for a `reallocate` callback using the system's `realloc` function:
  *
- *      fio_str_info_s fio_string_realloc_system(fio_str_info_s dest,
- *                                                size_t new_capa) {
+ *      int fio_string_realloc_system(fio_str_info_s *dest, size_t new_capa) {
  *       void *tmp = realloc(dest.buf, new_capa);
  *       if (!tmp)
- *         return dest;
+ *         return -1;
  *       dest.capa = new_capa;
  *       dest.buf = (char *)tmp;
- *       return dest;
+ *       return 0;
  *     }
  *
  * An example for using the function:
@@ -77,24 +77,8 @@ typedef void (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
  */
 FIO_SFUNC int fio_string_write(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
-                               const void *src,
+                               const void *restrict src,
                                size_t len);
-/* Writes a signed number `i` to the String */
-SFUNC int fio_string_write_i(fio_str_info_s *dest,
-                             fio_string_realloc_fn reallocate,
-                             int64_t i);
-/* Writes an unsigned number `i` to the String */
-SFUNC int fio_string_write_u(fio_str_info_s *dest,
-                             fio_string_realloc_fn reallocate,
-                             uint64_t i);
-/* Writes a hex representation of `i` to the String */
-SFUNC int fio_string_write_hex(fio_str_info_s *dest,
-                               fio_string_realloc_fn reallocate,
-                               uint64_t i);
-/* Writes a binary representation of `i` to the String */
-SFUNC int fio_string_write_bin(fio_str_info_s *dest,
-                               fio_string_realloc_fn reallocate,
-                               uint64_t i);
 
 /**
  * Similar to `fio_string_write`, only replacing/inserting a sub-string in a
@@ -128,18 +112,6 @@ typedef struct {
     uint64_t u;
   } info;
 } fio_string_write_s;
-
-/** Similar to fio_string_write, only using printf semantics. */
-SFUNC int fio_string_printf(fio_str_info_s *dest,
-                            fio_string_realloc_fn reallocate,
-                            const char *format,
-                            ...);
-
-/** Similar to fio_string_write, only using vprintf semantics. */
-SFUNC int fio_string_vprintf(fio_str_info_s *dest,
-                             fio_string_realloc_fn reallocate,
-                             const char *format,
-                             va_list argv);
 
 /**
  * Writes a group of objects (strings, numbers, etc') to `dest`.
@@ -204,6 +176,43 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
   ((fio_string_write_s){.klass = 6, .info.f = (double)(num)})
 
 /* *****************************************************************************
+String Numerals support
+***************************************************************************** */
+
+/* Writes a signed number `i` to the String */
+SFUNC int fio_string_write_i(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             int64_t i);
+/* Writes an unsigned number `i` to the String */
+SFUNC int fio_string_write_u(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             uint64_t i);
+/* Writes a hex representation of `i` to the String */
+SFUNC int fio_string_write_hex(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               uint64_t i);
+/* Writes a binary representation of `i` to the String */
+SFUNC int fio_string_write_bin(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               uint64_t i);
+
+/* *****************************************************************************
+String printf style support
+***************************************************************************** */
+
+/** Similar to fio_string_write, only using printf semantics. */
+SFUNC int fio_string_printf(fio_str_info_s *dest,
+                            fio_string_realloc_fn reallocate,
+                            const char *format,
+                            ...);
+
+/** Similar to fio_string_write, only using vprintf semantics. */
+SFUNC int fio_string_vprintf(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             const char *format,
+                             va_list argv);
+
+/* *****************************************************************************
 String C / JSON escaping
 ***************************************************************************** */
 
@@ -228,7 +237,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
 String Base64 support
 ***************************************************************************** */
 
-/** Writes data to String using Base64 encoding. */
+/** Writes data to String using base64 encoding. */
 SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
                                      fio_string_realloc_fn reallocate,
                                      const void *data,
@@ -245,6 +254,9 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 Memory Helpers (for Authorship)
 ***************************************************************************** */
 
+/* calculates a 16 bytes boundary aligned capacity for `new_len`. */
+FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
+
 /** Default reallocation callback implementation */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
@@ -255,18 +267,22 @@ Memory Helpers (for Authorship)
 #define FIO_STRING_FREE2 fio_string_default_free2
 /** Does nothing. */
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
+/** Does nothing. */
+#define FIO_STRING_FREE_NOOP2 fio_string_default_free_noop2
 
 /** default reallocation callback implementation */
-SFUNC void fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
+SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
 /** default reallocation callback for memory that mustn't be freed. */
-SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                  size_t new_capa);
+SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
+                                                 size_t new_capa);
 /** frees memory that was allocated with the default callbacks. */
 SFUNC void fio_string_default_free(void *);
 /** frees memory that was allocated with the default callbacks. */
 SFUNC void fio_string_default_free2(fio_str_info_s str);
 /** does nothing. */
-SFUNC void fio_string_default_free_noop(fio_str_info_s str);
+SFUNC void fio_string_default_free_noop(void *);
+/** does nothing. */
+SFUNC void fio_string_default_free_noop2(fio_str_info_s str);
 
 /* *****************************************************************************
 UTF-8 Support
@@ -328,34 +344,36 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 String Authorship Helpers - (inlined) implementation
 ***************************************************************************** */
 
-/* performs `reallocate` if necessary, `capa` rounded up to 16 byte units. */
-FIO_IFUNC size_t fio_string___write_validate_len(
-    fio_str_info_s *dest,
-    void (*reallocate)(fio_str_info_s *, size_t new_capa),
-    size_t len) {
-  if (reallocate && (dest->capa < dest->len + len + 1)) {
-    const size_t new_len = dest->len + len;
-    const size_t new_capa =
-        (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-    reallocate(dest, new_capa);
-  }
-  if (FIO_UNLIKELY(dest->capa < dest->len + len + 1)) {
-    len = dest->capa - (dest->len + 1);
-  }
-  return len;
+/* calculates a 16 bytes boundary aligned capacity for `new_len`. */
+FIO_IFUNC size_t fio_string_capa4len(size_t new_len) {
+  return sizeof(char) *
+         ((new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL)));
+}
+
+/*
+ * performs `reallocate` if necessary, `capa` rounded up to 16 byte units.
+ * updates `len` if reallocation fails (or is unavailable).
+ */
+FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
+                                              fio_string_realloc_fn reallocate,
+                                              size_t *restrict len) {
+  if ((dest->capa > dest->len + len[0]))
+    return 0;
+  if (reallocate && !reallocate(dest, fio_string_capa4len(dest->len + len[0])))
+    return 0;
+  if (dest->capa > dest->len)
+    len[0] = dest->capa - (dest->len + 1);
+  else
+    len = 0;
+  return -1;
 }
 
 /* fio_string_write */
 FIO_SFUNC int fio_string_write(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
-                               const void *src,
+                               const void *restrict src,
                                size_t len) {
-  int r = 0;
-  len = fio_string___write_validate_len(dest, reallocate, len);
-  if (FIO_UNLIKELY(dest->capa < dest->len + 2)) {
-    r = -1;
-    return r;
-  }
+  int r = fio_string___write_validate_len(dest, reallocate, &len);
   if (FIO_LIKELY(len && src))
     FIO_MEMCPY(dest->buf + dest->len, src, len);
   dest->len += len;
@@ -380,24 +398,25 @@ Extern-ed functions
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
-SFUNC void fio_string_default_reallocate(fio_str_info_s *dest,
-                                         size_t new_capa) {
+SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa) {
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
   if (!tmp)
-    return;
+    return -1;
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
+  return 0;
 }
 
-SFUNC void fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                  size_t new_capa) {
+SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
+                                                 size_t new_capa) {
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
-    return;
+    return -1;
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
+  return 0;
 }
 
 SFUNC void fio_string_default_free(void *ptr) { FIO_MEM_FREE_(ptr, 0); }
@@ -405,7 +424,8 @@ SFUNC void fio_string_default_free2(fio_str_info_s str) {
   FIO_MEM_FREE_(str.buf, str.capa);
 }
 
-SFUNC void fio_string_default_free_noop(fio_str_info_s str) { (void)str; }
+SFUNC void fio_string_default_free_noop(void *str) { (void)str; }
+SFUNC void fio_string_default_free_noop2(fio_str_info_s str) { (void)str; }
 
 /* *****************************************************************************
 Numeral Support
@@ -417,25 +437,26 @@ SFUNC int fio_string_write_i(fio_str_info_s *dest,
                              int64_t i) {
   int r = -1;
   char buf[32];
+  size_t len = 0;
   size_t inv = i < 0;
   if (inv) {
     i = 0 - i;
   }
-  size_t len = 0;
+  buf[0] = '0';
   while (i) {
     uint64_t nxt = (uint64_t)i / 10;
     buf[len++] = '0' + ((uint64_t)i - (nxt * 10));
     i = (int64_t)nxt;
   }
+  len += !len; /* printing 0 if zero */
+  buf[len] = '-';
   len += inv;
-  if (fio_string___write_validate_len(dest, reallocate, len) != len)
-    return r;
+  if (fio_string___write_validate_len(dest, reallocate, &len))
+    return r; /* no writing of partial numbers. */
   r = 0;
   while (len) {
     dest->buf[dest->len++] = buf[--len];
   }
-  dest->buf[dest->len] = '-';
-  dest->len += inv;
   dest->buf[dest->len] = 0;
   return r;
 }
@@ -447,13 +468,15 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
   int r = -1;
   char buf[32];
   size_t len = 0;
+  buf[0] = '0';
   while (i) {
     uint64_t nxt = i / 10;
     buf[len++] = '0' + (i - (nxt * 10));
     i = nxt;
   }
-  if (fio_string___write_validate_len(dest, reallocate, len) != len)
-    return r;
+  len += !len; /* printing 0 if zero */
+  if (fio_string___write_validate_len(dest, reallocate, &len))
+    return r; /* no writing of partial numbers. */
   r = 0;
   while (len) {
     dest->buf[dest->len++] = buf[--len];
@@ -469,14 +492,17 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
   int r = -1;
   char buf[16];
   size_t len = 0;
+  buf[0] = '0';
+  buf[1] = '0';
   while (i) {
     buf[len++] = fio_i2c(i & 15);
     i >>= 4;
     buf[len++] = fio_i2c(i & 15);
     i >>= 4;
   }
-  if (fio_string___write_validate_len(dest, reallocate, len) != len)
-    return r;
+  len += (!len << 1); /* printing 00 if zero */
+  if (fio_string___write_validate_len(dest, reallocate, &len))
+    return r; /* no writing of partial numbers. */
   r = 0;
   while (len) {
     dest->buf[dest->len++] = buf[--len];
@@ -492,14 +518,16 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
   int r = -1;
   char buf[64];
   size_t len = 0;
+  buf[0] = '0';
   while (i) {
     buf[len++] = '0' + (i & 1);
     i >>= 1;
     buf[len++] = '0' + (i & 1);
     i >>= 1;
   }
-  if (fio_string___write_validate_len(dest, reallocate, len) != len)
-    return r;
+  len += !len; /* printing 0 if zero */
+  if (fio_string___write_validate_len(dest, reallocate, &len))
+    return r; /* no writing of partial numbers. */
   r = 0;
   while (len) {
     dest->buf[dest->len++] = buf[--len];
@@ -523,16 +551,16 @@ fio_string_vprintf(fio_str_info_s *dest,
   int r = 0;
   va_list argv_cpy;
   va_copy(argv_cpy, argv);
-  int len = vsnprintf(NULL, 0, format, argv_cpy);
+  int len_i = vsnprintf(NULL, 0, format, argv_cpy);
   va_end(argv_cpy);
-  if (len <= 0)
+  if (len_i <= 0)
     return -1;
-  r = len;
-  len = fio_string___write_validate_len(dest, reallocate, len);
-  r = -1 + (r == len);
+  size_t len = (size_t)len_i;
+  r = fio_string___write_validate_len(dest, reallocate, &len);
   if (FIO_UNLIKELY(dest->capa < dest->len + 2))
     return -1;
-  vsnprintf(dest->buf + dest->len, len + 1, format, argv);
+  if (len)
+    vsnprintf(dest->buf + dest->len, len + 1, format, argv);
   dest->len += len;
   dest->buf[dest->len] = 0;
   return r;
@@ -822,37 +850,37 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
                              size_t len) {
   int r = 0;
   if (start_pos < 0) {
-    start_pos = dest->len + start_pos;
+    start_pos = dest->len + start_pos + 1;
     if (start_pos < 0)
       start_pos = 0;
   }
-  if (dest->len < (size_t)start_pos + len + 1) {
+  if (dest->len < (size_t)start_pos + overwrite_len + 1) {
     if ((size_t)start_pos < dest->len)
       dest->len = start_pos;
     return fio_string_write(dest, reallocate, src, len);
   }
+
   size_t move_start = start_pos + overwrite_len;
   size_t move_len = dest->len - (start_pos + overwrite_len);
   if (overwrite_len < len) {
     /* adjust for possible memory expansion */
     const size_t extra = len - overwrite_len;
     if (dest->capa < dest->len + extra + 1) {
-      if (reallocate) {
-        const size_t new_len = dest->len + extra;
-        const size_t new_capa =
-            (new_len + 15LL + (!(new_len & 15ULL))) & (~((size_t)15ULL));
-        reallocate(dest, new_capa);
-      }
-      if (FIO_UNLIKELY(dest->capa < dest->len + extra + 1)) {
+      if (!reallocate ||
+          FIO_UNLIKELY(
+              (r = reallocate(dest, fio_string_capa4len(dest->len + extra))))) {
         move_len -= (dest->len + extra + 1) - dest->capa;
-        r = -1;
+        if (dest->capa < start_pos + len + 1) {
+          move_len = 0;
+          len = dest->capa - start_pos - 1;
+        }
       }
     }
   }
   if (move_len)
     memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
   if (len)
-    memcpy(dest->buf + start_pos, src, len);
+    FIO_MEMCPY(dest->buf + start_pos, src, len);
   dest->len = start_pos + len + move_len;
   dest->buf[dest->len] = 0;
   return r;
@@ -862,8 +890,7 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
 void fio_string_write2____(void);
 /* the fio_string_write2 is a printf alternative. */
 SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
-                                     void (*reallocate)(fio_str_info_s *,
-                                                        size_t new_capa),
+                                     fio_string_realloc_fn reallocate,
                                      const fio_string_write_s srcs[]) {
   int r = 0;
   const fio_string_write_s *pos = srcs;
@@ -881,7 +908,7 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     ++pos;
   }
   pos = srcs;
-  if (fio_string___write_validate_len(dest, reallocate, len) != len)
+  if (fio_string___write_validate_len(dest, reallocate, &len))
     goto truncate;
   while (pos->klass) {
     switch (pos->klass) {
@@ -1005,8 +1032,9 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   }
   /* reserve space and copy any valid "head" */
   /* the +4 adds room for the usual use case of a following "\", \"" */
-  if (fio_string___write_validate_len(dest, reallocate, escaped_len + 4) <
-      escaped_len) {
+  if ((dest->capa < dest->len + escaped_len + 1) &&
+      (!reallocate ||
+       reallocate(dest, fio_string_capa4len(dest->len + escaped_len + 4)))) {
     r = -1;
     len = (dest->capa + len) - (dest->len + escaped_len + 2);
     if (dest->capa < len + 2)
@@ -1120,12 +1148,10 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too long");
     reduced = len - reduced;
   }
-  at = fio_string___write_validate_len(dest, reallocate, reduced);
-  if (reduced != at) {
+  if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
     r = -1;
-    len = at;
+    len = dest->capa - (dest->len + 1);
   }
-  at = 0;
   const uint8_t *src = (const uint8_t *)src_;
   const uint8_t *end = src + len;
   uint8_t *writer = (uint8_t *)dest->buf + dest->len;
@@ -1270,10 +1296,9 @@ SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
   /* base64 length and padding information */
   size_t groups = len / 3;
   const size_t mod = len - (groups * 3);
-  const size_t target_size = (groups + (mod != 0)) * 4;
+  size_t target_size = (groups + (mod != 0)) * 4;
 
-  if (fio_string___write_validate_len(dest, reallocate, target_size) !=
-      target_size) {
+  if (fio_string___write_validate_len(dest, reallocate, &target_size)) {
     return (r = -1); /* no partial encoding. */
   }
   char *writer = dest->buf + dest->len;
@@ -1365,9 +1390,8 @@ p valid; p decoder; nil
 
   /* reserve memory space */
   {
-    const uint32_t required_len = (((len >> 2) * 3) + 3);
-    if (fio_string___write_validate_len(dest, reallocate, required_len) !=
-        required_len) {
+    size_t required_len = (((len >> 2) * 3) + 3);
+    if (fio_string___write_validate_len(dest, reallocate, &required_len)) {
       return (r = -1); /* no partial decoding. */
     };
   }
@@ -1421,10 +1445,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr, "* Testing Core String writing functions.\n");
     char mem[16];
     fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
-    fio_string_write(&buf, NULL, "Hello World", 11);
+    fio_string_write(&buf, NULL, "World", 5);
+    FIO_ASSERT(mem == buf.buf && buf.len == 5 && !memcmp(buf.buf, "World", 6),
+               "fio_string_write failed!");
+    fio_string_replace(&buf, NULL, 0, 0, "Hello ", 6);
     FIO_ASSERT(mem == buf.buf && buf.len == 11 &&
                    !memcmp(buf.buf, "Hello World", 12),
-               "fio_string_write failed!");
+               "fio_string_replace failed to perform insert (index[0])!");
     fio_string_write(&buf, NULL, "Hello World", 11);
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "Hello WorldHell", 16),
@@ -1486,6 +1513,36 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 8 &&
                    !memcmp(buf.buf, "I think ", 8),
                "fio_string_write2 failed to truncate (bin)!");
+  }
+  { /* test numeral fio_string_write functions. */
+    char mem[16];
+    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
+    FIO_ASSERT(!fio_string_write_i(&buf, NULL, 0),
+               "fio_string_write_i returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
+               "fio_string_write_i didn't print 0!");
+    FIO_ASSERT(!fio_string_write_i(&buf, NULL, -42),
+               "fio_string_write_i returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "0-42", 5),
+               "fio_string_write_i didn't print -24!");
+    buf = FIO_STR_INFO3(mem, 0, 16);
+    FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 0),
+               "fio_string_write_hex returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 2 && !memcmp(buf.buf, "00", 3),
+               "fio_string_write_hex didn't print 0!");
+    FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 42),
+               "fio_string_write_hex returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "002A", 5),
+               "fio_string_write_hex didn't print 2A!");
+    buf = FIO_STR_INFO3(mem, 0, 16);
+    FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 0),
+               "fio_string_write_bin returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
+               "fio_string_write_bin didn't print 0!");
+    FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 16),
+               "fio_string_write_bin returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 7 && !memcmp(buf.buf, "0010000", 8),
+               "fio_string_write_bin didn't print 16!");
   }
   { /* Testing UTF-8 */
     fprintf(stderr, "* Testing UTF-8 support.\n");
@@ -1616,6 +1673,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                decoded.buf);
   }
   { /* Comparison testing */
+    fprintf(stderr, "* Testing comparison:\n");
     FIO_ASSERT(fio_string_is_greater(FIO_STR_INFO1((char *)"A"),
                                      FIO_STR_INFO1((char *)"")),
                "fio_string_is_greater failed for A vs __");

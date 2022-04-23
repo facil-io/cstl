@@ -317,11 +317,19 @@ This is when creating / managing dynamic types, where some type data could be wr
 
 #### `FIO_PTR_TAG`
 
+```c
+#define FIO_PTR_TAG(p) (p)
+```
+
 Supports embedded pointer tagging / untagging for the included types.
 
 Should resolve to a tagged pointer value. i.e.: `((uintptr_t)(p) | 1)`
 
 #### `FIO_PTR_UNTAG`
+
+```c
+#define FIO_PTR_UNTAG(p) (p)
+```
 
 Supports embedded pointer tagging / untagging for the included types.
 
@@ -332,6 +340,19 @@ Should resolve to an untagged pointer value. i.e.: `((uintptr_t)(p) | ~1UL)`
 #### `FIO_PTR_TAG_TYPE`
 
 If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer will return a pointer of the specified type instead.
+
+
+#### `FIO_PTR_TAG_VALIDATE`
+
+```c
+#define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
+```
+
+If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing
+any code.
+
+`FIO_PTR_TAG_VALIDATE` **must** fail on NULL pointers.
+
 
 -------------------------------------------------------------------------------
 
@@ -6147,10 +6168,20 @@ Frees memory that was allocated with the default callbacks.
 
 ```c
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
-void fio_string_default_free_noop(fio_str_info_s str);
+void fio_string_default_free_noop(void * str);
 ```
 
-Does nothing.
+Does nothing. Made available for APIs that require a callback for memory management.
+
+#### `FIO_STRING_FREE_NOOP2`
+
+```c
+#define FIO_STRING_FREE_NOOP2 fio_string_default_free_noop2
+void fio_string_default_free_noop2(fio_str_info_s str);
+```
+
+Does nothing. Made available for APIs that require a callback for memory management.
+
 
 ### Core String Comparison
 

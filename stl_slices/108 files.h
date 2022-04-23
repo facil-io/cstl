@@ -60,6 +60,30 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
                                      const void *buf,
                                      size_t len);
 
+/** Returns the file size (or 0 on both error / empty file). */
+FIO_IFUNC size_t fio_filename_size(const char *filename);
+
+/** Returns the file size (or 0 on both error / empty file). */
+FIO_IFUNC size_t fio_fd_size(int fd);
+
+/**
+ * Returns the file type (or 0 on both error).
+ *
+ * See: https://www.man7.org/linux/man-pages/man7/inode.7.html
+ */
+FIO_IFUNC mode_t fio_filename_type(const char *filename);
+
+/**
+ * Returns the file type (or 0 on both error).
+ *
+ * See: https://www.man7.org/linux/man-pages/man7/inode.7.html
+ */
+FIO_IFUNC mode_t fio_fd_type(int fd);
+
+/** Tests if `filename` references a folder. Returns -1 on error. */
+#define fio_filename_is_folder(filename)                                       \
+  (fio_filename_type((filename)) == S_IFDIR)
+
 /**
  * Writes data to a file, returning the number of bytes written.
  *
@@ -152,6 +176,46 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
   if ((size_t)w != len)
     return -1;
   return 0;
+}
+/* *****************************************************************************
+File Stat In-lined Helpers
+***************************************************************************** */
+
+FIO_IFUNC size_t fio_filename_size(const char *filename) {
+  size_t r = 0;
+  struct stat stt;
+  if (stat(filename, &stt))
+    return r;
+  return (r = stt.st_size);
+}
+
+FIO_IFUNC size_t fio_fd_size(int fd) {
+  size_t r = 0;
+  struct stat stt;
+  if (fd == -1)
+    return r;
+  if (fstat(fd, &stt))
+    return r;
+  return (r = stt.st_size);
+  // S_ISDIR(stat.st_mode)
+}
+
+FIO_IFUNC mode_t fio_filename_type(const char *filename) {
+  size_t r = 0;
+  struct stat stt;
+  if (stat(filename, &stt))
+    return r;
+  return ((stt.st_mode & S_IFMT));
+}
+
+FIO_IFUNC mode_t fio_fd_type(int fd) {
+  size_t r = 0;
+  struct stat stt;
+  if (fd == -1)
+    return r;
+  if (fstat(fd, &stt))
+    return r;
+  return ((stt.st_mode & S_IFMT));
 }
 
 /* *****************************************************************************
@@ -333,7 +397,7 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
 }
 
 /* *****************************************************************************
-Module Testing
+Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
