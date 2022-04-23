@@ -24877,7 +24877,7 @@ decoder = []; (0..127).each {|i| decoder[i] = 0 };
 s.each {|d| d.bytes.each_with_index { |b, i| decoder[b] = i; valid[b] = 1 } };
 p valid; p decoder; nil
   */
-  const static uint8_t base64_valid[256] = {
+  static const uint8_t base64_valid[256] = {
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
@@ -24890,7 +24890,7 @@ p valid; p decoder; nil
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   };
-  const static uint8_t base64_decodes[128] = {
+  static const uint8_t base64_decodes[128] = {
       0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
       0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
       0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  62, 0,  62, 0,  63,
@@ -25926,8 +25926,8 @@ FIO_IFUNC fio_buf_info_s FIO_NAME2(FIO_STR_NAME, buf)(const FIO_STR_PTR s_) {
 }
 
 /* Internal(!): updated String data according to `info`.  */
-FIO_IFUNC void FIO_NAME(FIO_STR_NAME, ___info_update)(const FIO_STR_PTR s_,
-                                                      fio_str_info_s info) {
+FIO_IFUNC void FIO_NAME(FIO_STR_NAME, __info_update)(const FIO_STR_PTR s_,
+                                                     fio_str_info_s info) {
   /* internally used function, tagging already validated. */
   FIO_NAME(FIO_STR_NAME, s) *s =
       (FIO_NAME(FIO_STR_NAME, s) *)(FIO_PTR_UNTAG(s_));
@@ -25951,8 +25951,8 @@ FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
                                                       size_t new_capa);
 
 /* Internal(!): updated String data according to `info`.  */
-FIO_IFUNC fio_string_realloc_fn
-FIO_NAME(FIO_STR_NAME, ___realloc_func)(const FIO_STR_PTR s_) {
+FIO_IFUNC fio_string_realloc_fn FIO_NAME(FIO_STR_NAME,
+                                         __realloc_func)(const FIO_STR_PTR s_) {
   fio_string_realloc_fn options[] = {
       FIO_NAME(FIO_STR_NAME, __default_reallocate),
       FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate),
@@ -26225,14 +26225,14 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
   /* resize may be used to reserve memory in advance while setting size  */
   if (i.capa < size) {
     fio_string_write(&i,
-                     FIO_NAME(FIO_STR_NAME, ___realloc_func)(s_),
+                     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
                      NULL,
                      size - i.len);
   } else {
     i.len = size;
     i.buf[i.len] = 0;
   }
-  FIO_NAME(FIO_STR_NAME, ___info_update)(s_, i);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
 
   return i;
 }
@@ -26301,8 +26301,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
-  fio_string_write(&i, FIO_NAME(FIO_STR_NAME, ___realloc_func)(s_), src, len);
-  FIO_NAME(FIO_STR_NAME, ___info_update)(s_, i);
+  fio_string_write(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), src, len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }
 
@@ -26516,8 +26516,8 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s_,
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
-  fio_string_write_i(&i, FIO_NAME(FIO_STR_NAME, ___realloc_func)(s_), num);
-  FIO_NAME(FIO_STR_NAME, ___info_update)(s_, i);
+  fio_string_write_i(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }
 
@@ -26526,12 +26526,24 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s_,
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s_,
                                                        int64_t num) {
-  /* using base 16 with fio_ltoa, buffer might minimize memory allocation. */
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
-  fio_string_write_hex(&i, FIO_NAME(FIO_STR_NAME, ___realloc_func)(s_), num);
-  FIO_NAME(FIO_STR_NAME, ___info_update)(s_, i);
+  fio_string_write_hex(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
+}
+
+/**
+ * Writes a number at the end of the String using binary notation.
+ */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_bin)(FIO_STR_PTR s_,
+                                                       int64_t num) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_bin(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }
 
@@ -26550,10 +26562,10 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest_,
   if (!src.len)
     return i;
   fio_string_write(&i,
-                   FIO_NAME(FIO_STR_NAME, ___realloc_func)(dest_),
+                   FIO_NAME(FIO_STR_NAME, __realloc_func)(dest_),
                    src.buf,
                    src.len);
-  FIO_NAME(FIO_STR_NAME, ___info_update)(dest_, i);
+  FIO_NAME(FIO_STR_NAME, __info_update)(dest_, i);
   return i;
 }
 
@@ -26574,17 +26586,32 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
                                                      size_t old_len,
                                                      const void *src,
                                                      size_t src_len) {
-  /* using base 16 with fio_ltoa, buffer might minimize memory allocation. */
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
   fio_string_replace(&i,
-                     FIO_NAME(FIO_STR_NAME, ___realloc_func)(s_),
+                     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
                      start_pos,
                      old_len,
                      src,
                      src_len);
-  FIO_NAME(FIO_STR_NAME, ___info_update)(s_, i);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
+}
+
+/**
+ * Writes a number at the end of the String using binary notation.
+ */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                              __write2)(FIO_STR_PTR s_,
+                                        const fio_string_write_s srcs[]) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write2 FIO_NOOP(&i,
+                             FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                             srcs);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }
 
@@ -26596,17 +26623,15 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
 SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 0)))
 FIO_NAME(FIO_STR_NAME,
          vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
-  va_list argv_cpy;
-  va_copy(argv_cpy, argv);
-  int len = vsnprintf(NULL, 0, format, argv_cpy);
-  va_end(argv_cpy);
-  if (len <= 0)
-    return FIO_NAME(FIO_STR_NAME, info)(s_);
-  fio_str_info_s state =
-      FIO_NAME(FIO_STR_NAME, resize)(s_, len + FIO_NAME(FIO_STR_NAME, len)(s_));
-  if (state.capa >= (size_t)len)
-    vsnprintf(state.buf + (state.len - len), len + 1, format, argv);
-  return state;
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_vprintf(&i,
+                     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                     format,
+                     argv);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /**
@@ -26633,273 +26658,35 @@ String API - C / JSON escaping
  * The JSON semantic are common to many programming languages, promising a UTF-8
  * String while making it easy to read and copy the string during debugging.
  */
-IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s,
-                                                          const void *src_,
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s_,
+                                                          const void *src,
                                                           size_t len) {
-  const uint8_t *src = (const uint8_t *)src_;
-  size_t extra_len = 0;
-  size_t at = 0;
-  uint8_t set_at = 1;
-
-  /* collect escaping requirements */
-  for (size_t i = 0; i < len; ++i) {
-    /* skip valid ascii */
-    if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
-        src[i] == ' ')
-      continue;
-    /* skip valid UTF-8 */
-    switch (fio__string_utf8_map[src[i] >> 3]) {
-    case 4:
-      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 3:
-      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 2:
-      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
-        break; /* from switch */
-      }
-      i += fio__string_utf8_map[src[i] >> 3] - 1;
-      continue;
-    }
-    /* store first instance of character that needs escaping */
-    /* constant time (non-branching) alternative to if(`set_at`) */
-    at ^= ((set_at | (0 - set_at)) & (i ^ at));
-    set_at = 0;
-
-    /* count extra bytes */
-    switch (src[i]) {
-    case '\b': /* fall through */
-    case '\f': /* fall through */
-    case '\n': /* fall through */
-    case '\r': /* fall through */
-    case '\t': /* fall through */
-    case '"':  /* fall through */
-    case '\\': /* fall through */
-    case '/': /* fall through */ ++extra_len; break;
-    default:
-      /* escaping all control characters and non-UTF-8 characters */
-      extra_len += 5;
-    }
-  }
-  /* reserve space and copy any valid "head" */
-  fio_str_info_s dest;
-  {
-    const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s);
-#if !FIO_STR_OPTIMIZE4IMMUTABILITY
-    /* often, after `write_escape` come quotes */
-    FIO_NAME(FIO_STR_NAME, reserve)(s, org_len + extra_len + len + 4);
-#endif
-    dest = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + extra_len + len);
-    dest.len = org_len;
-  }
-  dest.buf += dest.len;
-  /* is escaping required? - simple memcpy if we don't need to escape */
-  if (set_at) {
-    FIO_MEMCPY(dest.buf, src, len);
-    dest.buf -= dest.len;
-    dest.len += len;
-    return dest;
-  }
-  /* simple memcpy until first char that needs escaping */
-  if (at >= 8) {
-    FIO_MEMCPY(dest.buf, src, at);
-  } else {
-    at = 0;
-  }
-  /* start escaping */
-  for (size_t i = at; i < len; ++i) {
-    /* skip valid ascii */
-    if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
-        src[i] == ' ') {
-      dest.buf[at++] = src[i];
-      continue;
-    }
-    /* skip valid UTF-8 */
-    switch (fio__string_utf8_map[src[i] >> 3]) {
-    case 4:
-      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 3:
-      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 2:
-      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
-        break; /* from switch */
-      }
-      switch (fio__string_utf8_map[src[i] >> 3]) {
-      case 4: dest.buf[at++] = src[i++]; /* fall through */
-      case 3: dest.buf[at++] = src[i++]; /* fall through */
-      case 2: dest.buf[at++] = src[i++]; dest.buf[at++] = src[i];
-      }
-      continue;
-    }
-
-    /* write escape sequence */
-    dest.buf[at++] = '\\';
-    switch (src[i]) {
-    case '\b': dest.buf[at++] = 'b'; break;
-    case '\f': dest.buf[at++] = 'f'; break;
-    case '\n': dest.buf[at++] = 'n'; break;
-    case '\r': dest.buf[at++] = 'r'; break;
-    case '\t': dest.buf[at++] = 't'; break;
-    case '"': dest.buf[at++] = '"'; break;
-    case '\\': dest.buf[at++] = '\\'; break;
-    case '/': dest.buf[at++] = '/'; break;
-    default:
-      /* escaping all control charactes and non-UTF-8 characters */
-      if (src[i] < 127) {
-        dest.buf[at++] = 'u';
-        dest.buf[at++] = '0';
-        dest.buf[at++] = '0';
-        dest.buf[at++] = fio_i2c(src[i] >> 4);
-        dest.buf[at++] = fio_i2c(src[i] & 15);
-      } else {
-        /* non UTF-8 data... encode as...? */
-        dest.buf[at++] = 'x';
-        dest.buf[at++] = fio_i2c(src[i] >> 4);
-        dest.buf[at++] = fio_i2c(src[i] & 15);
-      }
-    }
-  }
-  return FIO_NAME(FIO_STR_NAME, resize)(s, dest.len + at);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_escape(&i,
+                          FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                          src,
+                          len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /**
  * Writes an escaped data into the string after unescaping the data.
  */
-IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s,
-                                                            const void *src_,
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s_,
+                                                            const void *src,
                                                             size_t len) {
-  fio_str_info_s dest;
-  {
-    const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s);
-    dest = FIO_NAME(FIO_STR_NAME, resize)(s, org_len + len);
-    dest.len = org_len;
-  }
-  size_t at = 0;
-  const uint8_t *src = (const uint8_t *)src_;
-  const uint8_t *end = src + len;
-  dest.buf += dest.len;
-  while (src < end) {
-    if (*src != '\\') {
-      const uint8_t *escape_pos = (const uint8_t *)memchr(src, '\\', end - src);
-      if (!escape_pos)
-        escape_pos = end;
-      const size_t valid_len = escape_pos - src;
-      if (valid_len) {
-        memmove(dest.buf + at, src, valid_len);
-        at += valid_len;
-        src = escape_pos;
-      }
-    }
-    if (end - src == 1) {
-      dest.buf[at++] = *(src++);
-    }
-    if (src >= end)
-      break;
-    /* escaped data - src[0] == '\\' */
-    ++src;
-    switch (src[0]) {
-    case 'b':
-      dest.buf[at++] = '\b';
-      ++src;
-      break; /* from switch */
-    case 'f':
-      dest.buf[at++] = '\f';
-      ++src;
-      break; /* from switch */
-    case 'n':
-      dest.buf[at++] = '\n';
-      ++src;
-      break; /* from switch */
-    case 'r':
-      dest.buf[at++] = '\r';
-      ++src;
-      break; /* from switch */
-    case 't':
-      dest.buf[at++] = '\t';
-      ++src;
-      break; /* from switch */
-    case 'u': {
-      /* test UTF-8 notation */
-      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16 &&
-          fio_c2i(src[3]) < 16 && fio_c2i(src[4]) < 16) {
-        uint32_t u = (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) << 8) |
-                     ((fio_c2i(src[3]) << 4) | fio_c2i(src[4]));
-        if (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) == 0xD8U &&
-            src[5] == '\\' && src[6] == 'u' && fio_c2i(src[7]) < 16 &&
-            fio_c2i(src[8]) < 16 && fio_c2i(src[9]) < 16 &&
-            fio_c2i(src[10]) < 16) {
-          /* surrogate-pair */
-          u = (u & 0x03FF) << 10;
-          u |= (((((fio_c2i(src[7]) << 4) | fio_c2i(src[8])) << 8) |
-                 ((fio_c2i(src[9]) << 4) | fio_c2i(src[10]))) &
-                0x03FF);
-          u += 0x10000;
-          src += 6;
-        }
-        if (u <= 127) {
-          dest.buf[at++] = u;
-        } else if (u <= 2047) {
-          dest.buf[at++] = 192 | (u >> 6);
-          dest.buf[at++] = 128 | (u & 63);
-        } else if (u <= 65535) {
-          dest.buf[at++] = 224 | (u >> 12);
-          dest.buf[at++] = 128 | ((u >> 6) & 63);
-          dest.buf[at++] = 128 | (u & 63);
-        } else {
-          dest.buf[at++] = 240 | ((u >> 18) & 7);
-          dest.buf[at++] = 128 | ((u >> 12) & 63);
-          dest.buf[at++] = 128 | ((u >> 6) & 63);
-          dest.buf[at++] = 128 | (u & 63);
-        }
-        src += 5;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case 'x': { /* test for hex notation */
-      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16) {
-        dest.buf[at++] = (fio_c2i(src[1]) << 4) | fio_c2i(src[2]);
-        src += 3;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7': { /* test for octal notation */
-      if (src[0] >= '0' && src[0] <= '7' && src[1] >= '0' && src[1] <= '7') {
-        dest.buf[at++] = ((src[0] - '0') << 3) | (src[1] - '0');
-        src += 2;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case '"':
-    case '\\':
-    case '/':
-    /* fall through */
-    default:
-    invalid_escape:
-      dest.buf[at++] = *(src++);
-    }
-  }
-  return FIO_NAME(FIO_STR_NAME, resize)(s, dest.len + at);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_unescape(&i,
+                            FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                            src,
+                            len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /* *****************************************************************************
@@ -26915,62 +26702,15 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                                                const void *data,
                                                size_t len,
                                                uint8_t url_encoded) {
-  if (!s_ || !FIO_PTR_UNTAG(s_) || !len ||
-      FIO_NAME_BL(FIO_STR_NAME, frozen)(s_))
-    return FIO_NAME(FIO_STR_NAME, info)(s_);
-
-  /* the base64 encoding array */
-  const char *encoding;
-  if (url_encoded == 0) {
-    encoding =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-  } else {
-    encoding =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=";
-  }
-
-  /* base64 length and padding information */
-  int groups = len / 3;
-  const int mod = len - (groups * 3);
-  const int target_size = (groups + (mod != 0)) * 4;
-  const uint32_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + target_size);
-  char *writer = i.buf + org_len;
-  const unsigned char *reader = (const unsigned char *)data;
-
-  /* write encoded data */
-  while (groups) {
-    --groups;
-    const unsigned char tmp1 = *(reader++);
-    const unsigned char tmp2 = *(reader++);
-    const unsigned char tmp3 = *(reader++);
-
-    *(writer++) = encoding[(tmp1 >> 2) & 63];
-    *(writer++) = encoding[(((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15))];
-    *(writer++) = encoding[((tmp2 & 15) << 2) | ((tmp3 >> 6) & 3)];
-    *(writer++) = encoding[tmp3 & 63];
-  }
-
-  /* write padding / ending */
-  switch (mod) {
-  case 2: {
-    const unsigned char tmp1 = *(reader++);
-    const unsigned char tmp2 = *(reader++);
-
-    *(writer++) = encoding[(tmp1 >> 2) & 63];
-    *(writer++) = encoding[((tmp1 & 3) << 4) | ((tmp2 >> 4) & 15)];
-    *(writer++) = encoding[((tmp2 & 15) << 2)];
-    *(writer++) = '=';
-  } break;
-  case 1: {
-    const unsigned char tmp1 = *(reader++);
-
-    *(writer++) = encoding[(tmp1 >> 2) & 63];
-    *(writer++) = encoding[(tmp1 & 3) << 4];
-    *(writer++) = '=';
-    *(writer++) = '=';
-  } break;
-  }
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_base64enc(&i,
+                             FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                             data,
+                             len,
+                             url_encoded);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }
 
@@ -26981,150 +26721,15 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               write_base64dec)(FIO_STR_PTR s_,
                                                const void *encoded_,
                                                size_t len) {
-  /*
-  Base64 decoding array. Generation script (Ruby):
-
-a = []; a[255] = 0
-s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=".bytes;
-s.length.times {|i| a[s[i]] = (i << 1) | 1 };
-s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,".bytes;
-s.length.times {|i| a[s[i]] = (i << 1) | 1 };
-s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".bytes;
-s.length.times {|i| a[s[i]] = (i << 1) | 1 }; a.map!{ |i| i.to_i }; a
-
-  */
-  const uint8_t base64_decodes[] = {
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   125, 127,
-      125, 0,   127, 105, 107, 109, 111, 113, 115, 117, 119, 121, 123, 0,   0,
-      0,   129, 0,   0,   0,   1,   3,   5,   7,   9,   11,  13,  15,  17,  19,
-      21,  23,  25,  27,  29,  31,  33,  35,  37,  39,  41,  43,  45,  47,  49,
-      51,  0,   0,   0,   0,   127, 0,   53,  55,  57,  59,  61,  63,  65,  67,
-      69,  71,  73,  75,  77,  79,  81,  83,  85,  87,  89,  91,  93,  95,  97,
-      99,  101, 103, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-      0};
-#define FIO_BASE64_BITVAL(x) ((base64_decodes[(x)] >> 1) & 63)
-
-  if (!s_ || !FIO_PTR_UNTAG(s_) || !len || !encoded_ ||
-      FIO_NAME_BL(FIO_STR_NAME, frozen)(s_))
-    return FIO_NAME(FIO_STR_NAME, info)(s_);
-
-  const uint8_t *encoded = (const uint8_t *)encoded_;
-
-  /* skip unknown data at end */
-  while (len && !base64_decodes[encoded[len - 1]]) {
-    len--;
-  }
-
-  /* reserve memory space */
-  const uint32_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
-  fio_str_info_s i =
-      FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + ((len >> 2) * 3) + 3);
-  i.buf += org_len;
-
-  /* decoded and count actual length */
-  int32_t written = 0;
-  uint8_t tmp1, tmp2, tmp3, tmp4;
-  while (len >= 4) {
-    if (isspace((*encoded))) {
-      while (len && isspace((*encoded))) {
-        len--;
-        encoded++;
-      }
-      continue;
-    }
-    tmp1 = *(encoded++);
-    tmp2 = *(encoded++);
-    tmp3 = *(encoded++);
-    tmp4 = *(encoded++);
-    if (!base64_decodes[tmp1] || !base64_decodes[tmp2] ||
-        !base64_decodes[tmp3] || !base64_decodes[tmp4]) {
-      return (fio_str_info_s){.buf = NULL};
-    }
-    *(i.buf++) =
-        (FIO_BASE64_BITVAL(tmp1) << 2) | (FIO_BASE64_BITVAL(tmp2) >> 4);
-    *(i.buf++) =
-        (FIO_BASE64_BITVAL(tmp2) << 4) | (FIO_BASE64_BITVAL(tmp3) >> 2);
-    *(i.buf++) = (FIO_BASE64_BITVAL(tmp3) << 6) | (FIO_BASE64_BITVAL(tmp4));
-    /* make sure we don't loop forever */
-    len -= 4;
-    /* count written bytes */
-    written += 3;
-  }
-  /* skip white spaces */
-  while (len && isspace((*encoded))) {
-    len--;
-    encoded++;
-  }
-  /* decode "tail" - if any (mis-encoded, shouldn't happen) */
-  tmp1 = 0;
-  tmp2 = 0;
-  tmp3 = 0;
-  tmp4 = 0;
-  switch (len) {
-  case 1:
-    tmp1 = *(encoded++);
-    if (!base64_decodes[tmp1]) {
-      return (fio_str_info_s){.buf = NULL};
-    }
-    *(i.buf++) = FIO_BASE64_BITVAL(tmp1);
-    written += 1;
-    break;
-  case 2:
-    tmp1 = *(encoded++);
-    tmp2 = *(encoded++);
-    if (!base64_decodes[tmp1] || !base64_decodes[tmp2]) {
-      return (fio_str_info_s){.buf = NULL};
-    }
-    *(i.buf++) =
-        (FIO_BASE64_BITVAL(tmp1) << 2) | (FIO_BASE64_BITVAL(tmp2) >> 6);
-    *(i.buf++) = (FIO_BASE64_BITVAL(tmp2) << 4);
-    written += 2;
-    break;
-  case 3:
-    tmp1 = *(encoded++);
-    tmp2 = *(encoded++);
-    tmp3 = *(encoded++);
-    if (!base64_decodes[tmp1] || !base64_decodes[tmp2] ||
-        !base64_decodes[tmp3]) {
-      return (fio_str_info_s){.buf = NULL};
-    }
-    *(i.buf++) =
-        (FIO_BASE64_BITVAL(tmp1) << 2) | (FIO_BASE64_BITVAL(tmp2) >> 6);
-    *(i.buf++) =
-        (FIO_BASE64_BITVAL(tmp2) << 4) | (FIO_BASE64_BITVAL(tmp3) >> 2);
-    *(i.buf++) = FIO_BASE64_BITVAL(tmp3) << 6;
-    written += 3;
-    break;
-  }
-#undef FIO_BASE64_BITVAL
-
-  if (encoded[-1] == '=') {
-    i.buf--;
-    written--;
-    if (encoded[-2] == '=') {
-      i.buf--;
-      written--;
-    }
-    if (written < 0)
-      written = 0;
-  }
-
-  // if (FIO_STR_IS_SMALL(s_))
-  //   FIO_STR_SMALL_LEN_SET(s_, (org_len + written));
-  // else
-  //   FIO_STR_BIG_LEN_SET(s_, (org_len + written));
-
-  return FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + written);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_base64dec(&i,
+                             FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                             encoded_,
+                             len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /* *****************************************************************************
