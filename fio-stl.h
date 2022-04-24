@@ -24540,20 +24540,57 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
+#if 0
   for (size_t i = 15; i < len; i += 16) {
     uint64_t ua0 = fio_buf2u64(a.buf);
-    uint64_t ua1 = fio_buf2u64(a.buf);
+    uint64_t ua1 = fio_buf2u64(a.buf + 8);
     uint64_t ub0 = fio_buf2u64(b.buf);
-    uint64_t ub1 = fio_buf2u64(b.buf);
-    if (!((ua0 ^ ub0) | (ua1 ^ ub1))) {
-      a.buf += 16;
-      b.buf += 16;
+    uint64_t ub1 = fio_buf2u64(b.buf + 8);
+    a.buf += 16;
+    b.buf += 16;
+    if (!((ua0 ^ ub0) | (ua1 ^ ub1)))
       continue;
-    }
     if (ua0 != ub0)
       return ua0 > ub0;
     return ua1 > ub1;
   }
+#else
+  for (size_t i = 31; i < len; i += 32) {
+    uint64_t ua0 = fio_buf2u64(a.buf);
+    uint64_t ua1 = fio_buf2u64(a.buf + 8);
+    uint64_t ua2 = fio_buf2u64(a.buf + 16);
+    uint64_t ua3 = fio_buf2u64(a.buf + 24);
+    uint64_t ub0 = fio_buf2u64(b.buf);
+    uint64_t ub1 = fio_buf2u64(b.buf + 8);
+    uint64_t ub2 = fio_buf2u64(b.buf + 16);
+    uint64_t ub3 = fio_buf2u64(b.buf + 24);
+    if (!((ua0 ^ ub0) | (ua1 ^ ub1) | (ua2 ^ ub2) | (ua3 ^ ub3))) {
+      a.buf += 32;
+      b.buf += 32;
+      continue;
+    }
+    if (ua0 != ub0)
+      return ua0 > ub0;
+    if (ua1 != ub1)
+      return ua1 > ub1;
+    if (ua2 != ub2)
+      return ua2 > ub2;
+    return ua3 > ub3;
+  }
+  if ((len & 16)) {
+    uint64_t ua0 = fio_buf2u64(a.buf);
+    uint64_t ua1 = fio_buf2u64(a.buf + 8);
+    uint64_t ub0 = fio_buf2u64(b.buf);
+    uint64_t ub1 = fio_buf2u64(b.buf + 8);
+    if (((ua0 ^ ub0) | (ua1 ^ ub1))) {
+      if (ua0 != ub0)
+        return ua0 > ub0;
+      return ua1 > ub1;
+    }
+    a.buf += 16;
+    b.buf += 16;
+  }
+#endif
   if ((len & 8)) {
     ua = fio_buf2u64(a.buf);
     ub = fio_buf2u64(b.buf);
@@ -25575,15 +25612,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   }
 #if !defined(DEBUG) || defined(NODEBUG)
   { /* speed testing comparison */
+    char mem[4096];
+    fio_str_info_s sa = FIO_STR_INFO3(mem, 0, 2047);
+    fio_str_info_s sb = FIO_STR_INFO3(mem + 2048, 0, 2047);
+    fio_string_readfile(&sa, NULL, __FILE__, 0, 0);
+    fio_string_write(&sb, NULL, sa.buf, sa.len);
+    sa.buf[sa.len - 1] += 1;
     fprintf(stderr, "* Testing comparison speeds:\n");
-    char str_a[] = "This is not a very long string but it should be bigger "
-                   "than the other "
-                   "one that has one character missing at the end, okay??";
-    char str_b[] = "This is not a very long string but it should be bigger "
-                   "than the other "
-                   "one that has one character missing at the end, okay?";
-    fio_str_info_s sa = FIO_STR_INFO1(str_a);
-    fio_str_info_s sb = FIO_STR_INFO1(str_b);
     clock_t start = clock();
     for (size_t i = 0; i < (1ULL << 17); ++i) {
       FIO_COMPILER_GUARD;
@@ -25597,7 +25632,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     start = clock();
     for (size_t i = 0; i < (1ULL << 17); ++i) {
       FIO_COMPILER_GUARD;
-      int r = memcmp(str_a, str_b, sa.len > sb.len ? sb.len : sa.len);
+      int r = memcmp(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
       if (!r)
         r = sa.len > sb.len;
       FIO_ASSERT(r > 0, "memcmp error?!");
@@ -25609,7 +25644,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     start = clock();
     for (size_t i = 0; i < (1ULL << 17); ++i) {
       FIO_COMPILER_GUARD;
-      int r = strcmp(str_a, str_b);
+      int r = strcmp(sa.buf, sb.buf);
       FIO_ASSERT(r > 0, "strcmp error?!");
     }
     end = clock();
