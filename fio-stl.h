@@ -153,7 +153,7 @@ extern "C" {
 
 #ifndef FIO_UNALIGNED_ACCESS
 /** Allows facil.io to use unaligned memory access on *some* CPU systems. */
-#define FIO_UNALIGNED_ACCESS 1
+#define FIO_UNALIGNED_ACCESS 0
 #endif
 
 /* *****************************************************************************
@@ -285,61 +285,122 @@ typedef SSIZE_T ssize_t;
 #ifndef FIO_MEMCPY
 #if __has_builtin(__builtin_memcpy)
 #define FIO_MEMCPY              __builtin_memcpy
+#define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
+#define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
+#define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
 #define FIO_MEMCPY8(dest, src)  __builtin_memcpy((dest), (src), 8)
 #define FIO_MEMCPY16(dest, src) __builtin_memcpy((dest), (src), 16)
 #define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
 #define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
 #else
-#define FIO_MEMCPY memcpy
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#define FIO_MEMCPY8(dest, src)                                                 \
-  (((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0])
+#define FIO_MEMCPY             memcpy
+#define FIO_MEMCPY1(dest, src) fio___memcpy1((dest), (src))
+#define FIO_MEMCPY2(dest, src) fio___memcpy2((dest), (src))
+#define FIO_MEMCPY4(dest, src) fio___memcpy4((dest), (src))
+#define FIO_MEMCPY8(dest, src) fio___memcpy8((dest), (src))
 #define FIO_MEMCPY16(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]))
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+  } while (0)
 #define FIO_MEMCPY32(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
-   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
-   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]))
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
+    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
+  } while (0)
 #define FIO_MEMCPY64(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
-   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
-   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]),                         \
-   (((uint64_t *)(dest))[4] = ((uint64_t *)(src))[4]),                         \
-   (((uint64_t *)(dest))[5] = ((uint64_t *)(src))[5]),                         \
-   (((uint64_t *)(dest))[6] = ((uint64_t *)(src))[6]),                         \
-   (((uint64_t *)(dest))[7] = ((uint64_t *)(src))[7]))
-#elif 0 /* use memcpy */
-#define FIO_MEMCPY8(dest, src)  memcpy((dest), (src), 8)
-#define FIO_MEMCPY16(dest, src) memcpy((dest), (src), 16)
-#define FIO_MEMCPY32(dest, src) memcpy((dest), (src), 32)
-#define FIO_MEMCPY64(dest, src) memcpy((dest), (src), 64)
-#else /* all by hand, pray for good compiler optimizations */
-#define FIO_MEMCPY8(dest, src)                                                 \
-  ((((char *)(dest))[0] = ((char *)(src))[0]),                                 \
-   (((char *)(dest))[1] = ((char *)(src))[1]),                                 \
-   (((char *)(dest))[2] = ((char *)(src))[2]),                                 \
-   (((char *)(dest))[3] = ((char *)(src))[3]),                                 \
-   (((char *)(dest))[4] = ((char *)(src))[4]),                                 \
-   (((char *)(dest))[5] = ((char *)(src))[5]),                                 \
-   (((char *)(dest))[6] = ((char *)(src))[6]),                                 \
-   (((char *)(dest))[7] = ((char *)(src))[7]))
-#define FIO_MEMCPY16(dest, src)                                                \
-  (FIO_MEMCPY8((dest), (src)),                                                 \
-   FIO_MEMCPY8((((char *)(dest)) + 8), (((char *)(src)) + 8)))
-#define FIO_MEMCPY32(dest, src)                                                \
-  (FIO_MEMCPY16((dest), (src)),                                                \
-   FIO_MEMCPY16((((char *)(dest)) + 16), (((char *)(src)) + 16)))
-#define FIO_MEMCPY64(dest, src)                                                \
-  (FIO_MEMCPY32((dest), (src)),                                                \
-   FIO_MEMCPY32((((char *)(dest)) + 32), (((char *)(src)) + 32)))
-#endif
-#endif
-#endif
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
+    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
+    fio___memcpy8(((char *)(dest) + 32), ((char *)(src) + 32));                \
+    fio___memcpy8(((char *)(dest) + 40), ((char *)(src) + 40));                \
+    fio___memcpy8(((char *)(dest) + 48), ((char *)(src) + 48));                \
+    fio___memcpy8(((char *)(dest) + 56), ((char *)(src) + 56));                \
+  } while (0)
 
-static inline __attribute__((unused)) void fio_memcpy_small_7(
+static inline __attribute__((unused)) void fio___memcpy4(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+}
+static inline __attribute__((unused)) void fio___memcpy2(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+}
+static inline __attribute__((unused)) void fio___memcpy1(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+}
+
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+static inline __attribute__((unused)) void fio___memcpy8(void *dest,
+                                                         const void *src) {
+  union {
+    const void *ptr;
+    unsigned *u;
+    unsigned long *ul;
+    unsigned long long *ull;
+  } d = {.ptr = dest}, s = {.ptr = src};
+  if (sizeof(unsigned long long) == 8) {
+    *d.ull = *s.ull;
+  } else if (sizeof(unsigned long) == 8) {
+    *d.ul = *s.ul;
+  } else if (sizeof(unsigned) == 8) {
+    *d.ul = *s.ul;
+  } else if (sizeof(unsigned) == 4) {
+    d.u[0] = s.u[0];
+    d.u[1] = s.u[1];
+  } else if (sizeof(unsigned) == 2) {
+    d.u[0] = s.u[0];
+    d.u[1] = s.u[1];
+    d.u[2] = s.u[2];
+    d.u[3] = s.u[3];
+  }
+}
+#else  /* all by hand, pray for good compiler optimizations */
+static inline __attribute__((unused)) void fio___memcpy8(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+  d[4] = s[4];
+  d[5] = s[5];
+  d[6] = s[6];
+  d[7] = s[7];
+}
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#endif /* __has_builtin(__builtin_memcpy) */
+
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+#define FIO_MEMCPY63x(dest, src, len)                                          \
+  fio___memcpy_small_63((dest), (src), (len))
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+#define FIO_MEMCPY31x(dest, src, len)                                          \
+  fio___memcpy_small_31((dest), (src), (len))
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+#define FIO_MEMCPY15x(dest, src, len)                                          \
+  fio___memcpy_small_15((dest), (src), (len))
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+#define FIO_MEMCPY7x(dest, src, len) fio___memcpy_small_7((dest), (src), (len))
+
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+static inline __attribute__((unused)) void fio___memcpy_small_7(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -355,8 +416,8 @@ static inline __attribute__((unused)) void fio_memcpy_small_7(
   case 1: dest[0] = src[0]; /* fall through */
   }
 }
-
-static inline __attribute__((unused)) void fio_memcpy_small_15(
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+static inline __attribute__((unused)) void fio___memcpy_small_15(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -367,11 +428,10 @@ static inline __attribute__((unused)) void fio_memcpy_small_15(
     dest += 8;
     src += 8;
   }
-  fio_memcpy_small_7(dest, src, len);
+  fio___memcpy_small_7(dest, src, len);
 }
-
-
-static inline __attribute__((unused)) void fio_memcpy_small_31(
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+static inline __attribute__((unused)) void fio___memcpy_small_31(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -382,10 +442,10 @@ static inline __attribute__((unused)) void fio_memcpy_small_31(
     dest += 16;
     src += 16;
   }
-  fio_memcpy_small_15(dest, src, len);
+  fio___memcpy_small_15(dest, src, len);
 }
-
-static inline __attribute__((unused)) void fio_memcpy_small_63(
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+static inline __attribute__((unused)) void fio___memcpy_small_63(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -396,17 +456,9 @@ static inline __attribute__((unused)) void fio_memcpy_small_63(
     dest += 32;
     src += 32;
   }
-  fio_memcpy_small_31(dest, src, len);
+  fio___memcpy_small_31(dest, src, len);
 }
-
-#define FIO_MEMCPY63x(dest, src, len)                                         \
-  fio_memcpy_small_63((dest), (src), (len))
-#define FIO_MEMCPY31x(dest, src, len)                                         \
-  fio_memcpy_small_31((dest), (src), (len))
-#define FIO_MEMCPY15x(dest, src, len)                                         \
-  fio_memcpy_small_15((dest), (src), (len))
-#define FIO_MEMCPY7x(dest, src, len)                                         \
-  fio_memcpy_small_7((dest), (src), (len))
+#endif /* !defined(FIO_MEMCPY) */
 
 /* *****************************************************************************
 Function Attributes
@@ -2787,225 +2839,51 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 Unaligned memory read / write operations
 ***************************************************************************** */
 
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-/** Converts an unaligned byte stream to a 16 bit number (local byte order). */
-FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
-  return *(const uint16_t *)c; /* fio_buf2u16 */
-}
-/** Converts an unaligned byte stream to a 32 bit number (local byte order). */
-FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
-  return *(const uint32_t *)c; /* fio_buf2u32 */
-}
-/** Converts an unaligned byte stream to a 64 bit number (local byte order). */
-FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
-  return *(const uint64_t *)c; /* fio_buf2u64 */
-}
-
-/** Writes a local 16 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  *((uint16_t *)buf) = i; /* fio_u2buf16 */
-}
-/** Writes a local 32 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  *((uint32_t *)buf) = i; /* fio_u2buf32 */
-}
-/** Writes a local 64 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  *((uint64_t *)buf) = i; /* fio_u2buf64 */
-}
-
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
-  return *(const __uint128_t *)c; /* fio_buf2u128 */
-}
-
-/** Writes a local 128 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  *((__uint128_t *)buf) = i; /* fio_u2buf128 */
-}
-#endif /* __SIZEOF_INT128__ */
-
-#elif FIO_BITWISE_USE_MEMCPY && __has_builtin(__builtin_memcpy)
-
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY2(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY4(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
   uint64_t tmp; /* fio_buf2u64 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY8(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  __builtin_memcpy(buf, &i, sizeof(i)); /* fio_u2buf16 */
+  FIO_MEMCPY2(buf, &i); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  __builtin_memcpy(buf, &i, sizeof(i)); /* fio_u2buf32 */
+  FIO_MEMCPY4(buf, &i); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  __builtin_memcpy(buf, &i, sizeof(i)); /* fio_u2buf64 */
+  FIO_MEMCPY8(buf, &i); /* fio_u2buf64 */
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
   __uint128_t tmp; /* fio_buf2u1128 */
-  __builtin_memcpy(&tmp, c, sizeof(tmp));
+  FIO_MEMCPY16(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  __builtin_memcpy(buf, &i, sizeof(i)); /* fio_u2buf128 */
+  FIO_MEMCPY16(buf, &i); /* fio_u2buf128 */
 }
 #endif /* __SIZEOF_INT128__ */
-
-#else /* !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED && !FIO_BITWISE_USE_MEMCPY */
-
-/** Converts an unaligned byte stream to a 16 bit number (local byte order). */
-FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
-  union {
-    uint16_t u16[1];
-    uint8_t u8[2];
-  } u;
-  u.u8[0] = ((uint8_t *)c)[0];
-  u.u8[1] = ((uint8_t *)c)[1];
-  return u.u16[0];
-}
-/** Converts an unaligned byte stream to a 32 bit number (local byte order). */
-FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
-  union {
-    uint32_t u32[1];
-    uint8_t u8[4];
-  } u;
-  u.u8[0] = ((uint8_t *)c)[0];
-  u.u8[1] = ((uint8_t *)c)[1];
-  u.u8[2] = ((uint8_t *)c)[2];
-  u.u8[3] = ((uint8_t *)c)[3];
-  return u.u32[0];
-}
-/** Converts an unaligned byte stream to a 64 bit number (local byte order). */
-FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
-  union {
-    uint64_t u64[1];
-    uint8_t u8[8];
-  } u;
-  u.u8[0] = ((uint8_t *)c)[0];
-  u.u8[1] = ((uint8_t *)c)[1];
-  u.u8[2] = ((uint8_t *)c)[2];
-  u.u8[3] = ((uint8_t *)c)[3];
-  u.u8[4] = ((uint8_t *)c)[4];
-  u.u8[5] = ((uint8_t *)c)[5];
-  u.u8[6] = ((uint8_t *)c)[6];
-  u.u8[7] = ((uint8_t *)c)[7];
-  return u.u64[0];
-}
-
-/** Writes a local 16 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  union {
-    uint16_t u[1];
-    uint8_t u8[2];
-  } u;
-  u.u[0] = i;
-  ((uint8_t *)buf)[0] = u.u8[0];
-  ((uint8_t *)buf)[1] = u.u8[1];
-}
-/** Writes a local 32 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  union {
-    uint32_t u[1];
-    uint8_t u8[4];
-  } u;
-  u.u[0] = i;
-  ((uint8_t *)buf)[0] = u.u8[0];
-  ((uint8_t *)buf)[1] = u.u8[1];
-  ((uint8_t *)buf)[2] = u.u8[2];
-  ((uint8_t *)buf)[3] = u.u8[3];
-}
-/** Writes a local 64 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  union {
-    uint64_t u[1];
-    uint8_t u8[8];
-  } u;
-  u.u[0] = i;
-  ((uint8_t *)buf)[0] = u.u8[0];
-  ((uint8_t *)buf)[1] = u.u8[1];
-  ((uint8_t *)buf)[2] = u.u8[2];
-  ((uint8_t *)buf)[3] = u.u8[3];
-  ((uint8_t *)buf)[4] = u.u8[4];
-  ((uint8_t *)buf)[5] = u.u8[5];
-  ((uint8_t *)buf)[6] = u.u8[6];
-  ((uint8_t *)buf)[7] = u.u8[7];
-}
-
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
-  union {
-    __uint128_t u128[1];
-    uint8_t u8[16];
-  } u;
-  u.u8[0] = ((uint8_t *)c)[0];
-  u.u8[1] = ((uint8_t *)c)[1];
-  u.u8[2] = ((uint8_t *)c)[2];
-  u.u8[3] = ((uint8_t *)c)[3];
-  u.u8[4] = ((uint8_t *)c)[4];
-  u.u8[5] = ((uint8_t *)c)[5];
-  u.u8[6] = ((uint8_t *)c)[6];
-  u.u8[7] = ((uint8_t *)c)[7];
-  u.u8[8] = ((uint8_t *)c)[8];
-  u.u8[9] = ((uint8_t *)c)[9];
-  u.u8[10] = ((uint8_t *)c)[10];
-  u.u8[11] = ((uint8_t *)c)[11];
-  u.u8[12] = ((uint8_t *)c)[12];
-  u.u8[13] = ((uint8_t *)c)[13];
-  u.u8[14] = ((uint8_t *)c)[14];
-  u.u8[15] = ((uint8_t *)c)[15];
-  return u.u128[0];
-}
-
-/** Writes a local 128 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  union {
-    __uint128_t u[1];
-    uint8_t u8[16];
-  } u;
-  u.u[0] = i;
-  ((uint8_t *)buf)[0] = u.u8[0];
-  ((uint8_t *)buf)[1] = u.u8[1];
-  ((uint8_t *)buf)[2] = u.u8[2];
-  ((uint8_t *)buf)[3] = u.u8[3];
-  ((uint8_t *)buf)[4] = u.u8[4];
-  ((uint8_t *)buf)[5] = u.u8[5];
-  ((uint8_t *)buf)[6] = u.u8[6];
-  ((uint8_t *)buf)[7] = u.u8[7];
-  ((uint8_t *)buf)[8] = u.u8[8];
-  ((uint8_t *)buf)[9] = u.u8[9];
-  ((uint8_t *)buf)[10] = u.u8[10];
-  ((uint8_t *)buf)[11] = u.u8[11];
-  ((uint8_t *)buf)[12] = u.u8[12];
-  ((uint8_t *)buf)[13] = u.u8[13];
-  ((uint8_t *)buf)[14] = u.u8[14];
-  ((uint8_t *)buf)[15] = u.u8[15];
-}
-#endif /* __SIZEOF_INT128__ */
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /** Converts an unaligned byte stream to a 16 bit number (reversed order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_bswap)(const void *c) {
@@ -24677,7 +24555,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
       continue;
     }
     if (ua[0] != ub[0]) {
-      ua[0] = fio_lton64(ua[0]);
+      ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
       ub[0] = fio_lton64(ub[0]);
       return ua[0] > ub[0];
     }
@@ -24738,99 +24616,6 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     }
   }
   return a_len_is_bigger;
-}
-/**
- * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
- *
- * Note: returns 0 if data in b is bigger than or equal(!).
- */
-SFUNC int fio_string_is_greater_buf2(fio_buf_info_s a, fio_buf_info_s b) {
-  const size_t a_len_is_bigger = a.len > b.len;
-  const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
-  if (a.buf == b.buf)
-    return a_len_is_bigger;
-  uint64_t ua;
-  uint64_t ub;
-  for (size_t i = 31; i < len; i += 32) {
-    uint64_t ua4[4] FIO_ALIGN(16);
-    uint64_t ub4[4] FIO_ALIGN(16);
-    FIO_MEMCPY32(ua4, a.buf);
-    FIO_MEMCPY32(ub4, b.buf);
-    ua = (ua4[0] ^ ub4[0]);
-    ua |= (ua4[1] ^ ub4[1]);
-    ua |= (ua4[2] ^ ub4[2]);
-    ua |= (ua4[3] ^ ub4[3]);
-    if (!ua) {
-      a.buf += 32;
-      b.buf += 32;
-      continue;
-    }
-    ua4[0] = fio_lton64(ua4[0]);
-    ua4[1] = fio_lton64(ua4[1]);
-    ua4[2] = fio_lton64(ua4[2]);
-    ua4[3] = fio_lton64(ua4[3]);
-    ub4[0] = fio_lton64(ub4[0]);
-    ub4[1] = fio_lton64(ub4[1]);
-    ub4[2] = fio_lton64(ub4[2]);
-    ub4[3] = fio_lton64(ub4[3]);
-    if (ua4[0] != ub4[0])
-      return ua4[0] > ub4[0];
-    if (ua4[1] != ub4[1])
-      return ua4[1] > ub4[1];
-    if (ua4[2] != ub4[2])
-      return ua4[2] > ub4[2];
-    return ua4[3] > ub4[3];
-  }
-  if ((len & 16)) {
-    uint64_t ua2[2] FIO_ALIGN(16);
-    uint64_t ub2[2] FIO_ALIGN(16);
-    FIO_MEMCPY16(ua2, a.buf);
-    FIO_MEMCPY16(ub2, b.buf);
-    ua = (ua2[0] ^ ub2[0]);
-    ua |= (ua2[1] ^ ub2[1]);
-    if (ua) {
-      ua2[0] = fio_lton64(ua2[0]);
-      ua2[1] = fio_lton64(ua2[1]);
-      ub2[0] = fio_lton64(ub2[0]);
-      ub2[1] = fio_lton64(ub2[1]);
-      if (ua2[0] != ub2[0])
-        return ua2[0] > ub2[0];
-      return ua2[1] > ub2[1];
-    }
-    a.buf += 16;
-    b.buf += 16;
-  }
-  if ((len & 8)) {
-    ua = fio_buf2u64_local(a.buf);
-    ub = fio_buf2u64_local(b.buf);
-    if (ua != ub) {
-      ua = fio_lton64(ua);
-      ub = fio_lton64(ub);
-      return ua > ub;
-    }
-    a.buf += 8;
-    b.buf += 8;
-  }
-  if ((len & 4)) {
-    ua = fio_buf2u32(a.buf);
-    ub = fio_buf2u32(b.buf);
-    if (ua != ub) {
-      return ua > ub;
-    }
-    a.buf += 4;
-    b.buf += 4;
-  }
-  ua = 0;
-  ub = 0;
-  switch ((len & 3)) { // clang-format off
-  case 3: ua |= ((uint64_t)a.buf[2] << 40); ub |= ((uint64_t)b.buf[2] << 40); /* fall through */
-  case 2: ua |= ((uint64_t)a.buf[1] << 48); ub |= ((uint64_t)b.buf[1] << 48); /* fall through */
-  case 1: ua |= ((uint64_t)a.buf[0] << 56); ub |= ((uint64_t)b.buf[0] << 56); /* fall through */
-  case 0: // clang-format on
-    if (ua > ub)
-      return 1;
-  }
-  return a_len_is_bigger & (ua == ub);
 }
 
 /* *****************************************************************************

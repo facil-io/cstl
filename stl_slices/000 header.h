@@ -153,7 +153,7 @@ extern "C" {
 
 #ifndef FIO_UNALIGNED_ACCESS
 /** Allows facil.io to use unaligned memory access on *some* CPU systems. */
-#define FIO_UNALIGNED_ACCESS 1
+#define FIO_UNALIGNED_ACCESS 0
 #endif
 
 /* *****************************************************************************
@@ -285,61 +285,122 @@ typedef SSIZE_T ssize_t;
 #ifndef FIO_MEMCPY
 #if __has_builtin(__builtin_memcpy)
 #define FIO_MEMCPY              __builtin_memcpy
+#define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
+#define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
+#define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
 #define FIO_MEMCPY8(dest, src)  __builtin_memcpy((dest), (src), 8)
 #define FIO_MEMCPY16(dest, src) __builtin_memcpy((dest), (src), 16)
 #define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
 #define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
 #else
-#define FIO_MEMCPY memcpy
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#define FIO_MEMCPY8(dest, src)                                                 \
-  (((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0])
+#define FIO_MEMCPY             memcpy
+#define FIO_MEMCPY1(dest, src) fio___memcpy1((dest), (src))
+#define FIO_MEMCPY2(dest, src) fio___memcpy2((dest), (src))
+#define FIO_MEMCPY4(dest, src) fio___memcpy4((dest), (src))
+#define FIO_MEMCPY8(dest, src) fio___memcpy8((dest), (src))
 #define FIO_MEMCPY16(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]))
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+  } while (0)
 #define FIO_MEMCPY32(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
-   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
-   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]))
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
+    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
+  } while (0)
 #define FIO_MEMCPY64(dest, src)                                                \
-  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
-   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
-   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
-   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]),                         \
-   (((uint64_t *)(dest))[4] = ((uint64_t *)(src))[4]),                         \
-   (((uint64_t *)(dest))[5] = ((uint64_t *)(src))[5]),                         \
-   (((uint64_t *)(dest))[6] = ((uint64_t *)(src))[6]),                         \
-   (((uint64_t *)(dest))[7] = ((uint64_t *)(src))[7]))
-#elif 0 /* use memcpy */
-#define FIO_MEMCPY8(dest, src)  memcpy((dest), (src), 8)
-#define FIO_MEMCPY16(dest, src) memcpy((dest), (src), 16)
-#define FIO_MEMCPY32(dest, src) memcpy((dest), (src), 32)
-#define FIO_MEMCPY64(dest, src) memcpy((dest), (src), 64)
-#else /* all by hand, pray for good compiler optimizations */
-#define FIO_MEMCPY8(dest, src)                                                 \
-  ((((char *)(dest))[0] = ((char *)(src))[0]),                                 \
-   (((char *)(dest))[1] = ((char *)(src))[1]),                                 \
-   (((char *)(dest))[2] = ((char *)(src))[2]),                                 \
-   (((char *)(dest))[3] = ((char *)(src))[3]),                                 \
-   (((char *)(dest))[4] = ((char *)(src))[4]),                                 \
-   (((char *)(dest))[5] = ((char *)(src))[5]),                                 \
-   (((char *)(dest))[6] = ((char *)(src))[6]),                                 \
-   (((char *)(dest))[7] = ((char *)(src))[7]))
-#define FIO_MEMCPY16(dest, src)                                                \
-  (FIO_MEMCPY8((dest), (src)),                                                 \
-   FIO_MEMCPY8((((char *)(dest)) + 8), (((char *)(src)) + 8)))
-#define FIO_MEMCPY32(dest, src)                                                \
-  (FIO_MEMCPY16((dest), (src)),                                                \
-   FIO_MEMCPY16((((char *)(dest)) + 16), (((char *)(src)) + 16)))
-#define FIO_MEMCPY64(dest, src)                                                \
-  (FIO_MEMCPY32((dest), (src)),                                                \
-   FIO_MEMCPY32((((char *)(dest)) + 32), (((char *)(src)) + 32)))
-#endif
-#endif
-#endif
+  do {                                                                         \
+    fio___memcpy8((dest), (src));                                              \
+    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
+    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
+    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
+    fio___memcpy8(((char *)(dest) + 32), ((char *)(src) + 32));                \
+    fio___memcpy8(((char *)(dest) + 40), ((char *)(src) + 40));                \
+    fio___memcpy8(((char *)(dest) + 48), ((char *)(src) + 48));                \
+    fio___memcpy8(((char *)(dest) + 56), ((char *)(src) + 56));                \
+  } while (0)
 
-static inline __attribute__((unused)) void fio_memcpy_small_7(
+static inline __attribute__((unused)) void fio___memcpy4(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+}
+static inline __attribute__((unused)) void fio___memcpy2(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+}
+static inline __attribute__((unused)) void fio___memcpy1(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+}
+
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+static inline __attribute__((unused)) void fio___memcpy8(void *dest,
+                                                         const void *src) {
+  union {
+    const void *ptr;
+    unsigned *u;
+    unsigned long *ul;
+    unsigned long long *ull;
+  } d = {.ptr = dest}, s = {.ptr = src};
+  if (sizeof(unsigned long long) == 8) {
+    *d.ull = *s.ull;
+  } else if (sizeof(unsigned long) == 8) {
+    *d.ul = *s.ul;
+  } else if (sizeof(unsigned) == 8) {
+    *d.ul = *s.ul;
+  } else if (sizeof(unsigned) == 4) {
+    d.u[0] = s.u[0];
+    d.u[1] = s.u[1];
+  } else if (sizeof(unsigned) == 2) {
+    d.u[0] = s.u[0];
+    d.u[1] = s.u[1];
+    d.u[2] = s.u[2];
+    d.u[3] = s.u[3];
+  }
+}
+#else  /* all by hand, pray for good compiler optimizations */
+static inline __attribute__((unused)) void fio___memcpy8(void *dest,
+                                                         const void *src) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+  d[4] = s[4];
+  d[5] = s[5];
+  d[6] = s[6];
+  d[7] = s[7];
+}
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#endif /* __has_builtin(__builtin_memcpy) */
+
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+#define FIO_MEMCPY63x(dest, src, len)                                          \
+  fio___memcpy_small_63((dest), (src), (len))
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+#define FIO_MEMCPY31x(dest, src, len)                                          \
+  fio___memcpy_small_31((dest), (src), (len))
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+#define FIO_MEMCPY15x(dest, src, len)                                          \
+  fio___memcpy_small_15((dest), (src), (len))
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+#define FIO_MEMCPY7x(dest, src, len) fio___memcpy_small_7((dest), (src), (len))
+
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+static inline __attribute__((unused)) void fio___memcpy_small_7(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -355,8 +416,8 @@ static inline __attribute__((unused)) void fio_memcpy_small_7(
   case 1: dest[0] = src[0]; /* fall through */
   }
 }
-
-static inline __attribute__((unused)) void fio_memcpy_small_15(
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+static inline __attribute__((unused)) void fio___memcpy_small_15(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -367,11 +428,10 @@ static inline __attribute__((unused)) void fio_memcpy_small_15(
     dest += 8;
     src += 8;
   }
-  fio_memcpy_small_7(dest, src, len);
+  fio___memcpy_small_7(dest, src, len);
 }
-
-
-static inline __attribute__((unused)) void fio_memcpy_small_31(
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+static inline __attribute__((unused)) void fio___memcpy_small_31(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -382,10 +442,10 @@ static inline __attribute__((unused)) void fio_memcpy_small_31(
     dest += 16;
     src += 16;
   }
-  fio_memcpy_small_15(dest, src, len);
+  fio___memcpy_small_15(dest, src, len);
 }
-
-static inline __attribute__((unused)) void fio_memcpy_small_63(
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+static inline __attribute__((unused)) void fio___memcpy_small_63(
     void *restrict dest_,
     const void *restrict src_,
     size_t len) {
@@ -396,17 +456,9 @@ static inline __attribute__((unused)) void fio_memcpy_small_63(
     dest += 32;
     src += 32;
   }
-  fio_memcpy_small_31(dest, src, len);
+  fio___memcpy_small_31(dest, src, len);
 }
-
-#define FIO_MEMCPY63x(dest, src, len)                                         \
-  fio_memcpy_small_63((dest), (src), (len))
-#define FIO_MEMCPY31x(dest, src, len)                                         \
-  fio_memcpy_small_31((dest), (src), (len))
-#define FIO_MEMCPY15x(dest, src, len)                                         \
-  fio_memcpy_small_15((dest), (src), (len))
-#define FIO_MEMCPY7x(dest, src, len)                                         \
-  fio_memcpy_small_7((dest), (src), (len))
+#endif /* !defined(FIO_MEMCPY) */
 
 /* *****************************************************************************
 Function Attributes
