@@ -1493,7 +1493,8 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
   }
   dest->len += at;
   dest->buf[dest->len] = 0;
-  FIO_ASSERT_DEBUG(at < reduced, "string unescape reduced calculation error");
+  FIO_ASSERT_DEBUG(at < reduced + 1,
+                   "string unescape reduced calculation error");
   return r;
 }
 
