@@ -152,8 +152,8 @@ extern "C" {
 #define H___FIO_CSTL_INCLUDE_ONCE_H
 
 #ifndef FIO_UNALIGNED_ACCESS
-/** Allows facil.io to use unaligned memory access on some CPU systems. */
-#define FIO_UNALIGNED_ACCESS 0
+/** Allows facil.io to use unaligned memory access on *some* CPU systems. */
+#define FIO_UNALIGNED_ACCESS 1
 #endif
 
 /* *****************************************************************************
@@ -284,11 +284,129 @@ typedef SSIZE_T ssize_t;
 /* memcpy selectors / overriding */
 #ifndef FIO_MEMCPY
 #if __has_builtin(__builtin_memcpy)
-#define FIO_MEMCPY __builtin_memcpy
+#define FIO_MEMCPY              __builtin_memcpy
+#define FIO_MEMCPY8(dest, src)  __builtin_memcpy((dest), (src), 8)
+#define FIO_MEMCPY16(dest, src) __builtin_memcpy((dest), (src), 16)
+#define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
+#define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
 #else
 #define FIO_MEMCPY memcpy
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#define FIO_MEMCPY8(dest, src)                                                 \
+  (((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0])
+#define FIO_MEMCPY16(dest, src)                                                \
+  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
+   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]))
+#define FIO_MEMCPY32(dest, src)                                                \
+  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
+   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
+   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
+   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]))
+#define FIO_MEMCPY64(dest, src)                                                \
+  ((((uint64_t *)(dest))[0] = ((uint64_t *)(src))[0]),                         \
+   (((uint64_t *)(dest))[1] = ((uint64_t *)(src))[1]),                         \
+   (((uint64_t *)(dest))[2] = ((uint64_t *)(src))[2]),                         \
+   (((uint64_t *)(dest))[3] = ((uint64_t *)(src))[3]),                         \
+   (((uint64_t *)(dest))[4] = ((uint64_t *)(src))[4]),                         \
+   (((uint64_t *)(dest))[5] = ((uint64_t *)(src))[5]),                         \
+   (((uint64_t *)(dest))[6] = ((uint64_t *)(src))[6]),                         \
+   (((uint64_t *)(dest))[7] = ((uint64_t *)(src))[7]))
+#elif 0 /* use memcpy */
+#define FIO_MEMCPY8(dest, src)  memcpy((dest), (src), 8)
+#define FIO_MEMCPY16(dest, src) memcpy((dest), (src), 16)
+#define FIO_MEMCPY32(dest, src) memcpy((dest), (src), 32)
+#define FIO_MEMCPY64(dest, src) memcpy((dest), (src), 64)
+#else /* all by hand, pray for good compiler optimizations */
+#define FIO_MEMCPY8(dest, src)                                                 \
+  ((((char *)(dest))[0] = ((char *)(src))[0]),                                 \
+   (((char *)(dest))[1] = ((char *)(src))[1]),                                 \
+   (((char *)(dest))[2] = ((char *)(src))[2]),                                 \
+   (((char *)(dest))[3] = ((char *)(src))[3]),                                 \
+   (((char *)(dest))[4] = ((char *)(src))[4]),                                 \
+   (((char *)(dest))[5] = ((char *)(src))[5]),                                 \
+   (((char *)(dest))[6] = ((char *)(src))[6]),                                 \
+   (((char *)(dest))[7] = ((char *)(src))[7]))
+#define FIO_MEMCPY16(dest, src)                                                \
+  (FIO_MEMCPY8((dest), (src)),                                                 \
+   FIO_MEMCPY8((((char *)(dest)) + 8), (((char *)(src)) + 8)))
+#define FIO_MEMCPY32(dest, src)                                                \
+  (FIO_MEMCPY16((dest), (src)),                                                \
+   FIO_MEMCPY16((((char *)(dest)) + 16), (((char *)(src)) + 16)))
+#define FIO_MEMCPY64(dest, src)                                                \
+  (FIO_MEMCPY32((dest), (src)),                                                \
+   FIO_MEMCPY32((((char *)(dest)) + 32), (((char *)(src)) + 32)))
 #endif
 #endif
+#endif
+
+static inline __attribute__((unused)) void fio_memcpy_small_7(
+    void *restrict dest_,
+    const void *restrict src_,
+    size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  switch (len & 7) {
+  case 7: dest[6] = src[6]; /* fall through */
+  case 6: dest[5] = src[5]; /* fall through */
+  case 5: dest[4] = src[4]; /* fall through */
+  case 4: dest[3] = src[3]; /* fall through */
+  case 3: dest[2] = src[2]; /* fall through */
+  case 2: dest[1] = src[1]; /* fall through */
+  case 1: dest[0] = src[0]; /* fall through */
+  }
+}
+
+static inline __attribute__((unused)) void fio_memcpy_small_15(
+    void *restrict dest_,
+    const void *restrict src_,
+    size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 8)) {
+    FIO_MEMCPY8(dest, src);
+    dest += 8;
+    src += 8;
+  }
+  fio_memcpy_small_7(dest, src, len);
+}
+
+
+static inline __attribute__((unused)) void fio_memcpy_small_31(
+    void *restrict dest_,
+    const void *restrict src_,
+    size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 16)) {
+    FIO_MEMCPY16(dest, src);
+    dest += 16;
+    src += 16;
+  }
+  fio_memcpy_small_15(dest, src, len);
+}
+
+static inline __attribute__((unused)) void fio_memcpy_small_63(
+    void *restrict dest_,
+    const void *restrict src_,
+    size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 32)) {
+    FIO_MEMCPY32(dest, src);
+    dest += 32;
+    src += 32;
+  }
+  fio_memcpy_small_31(dest, src, len);
+}
+
+#define FIO_MEMCPY63x(dest, src, len)                                         \
+  fio_memcpy_small_63((dest), (src), (len))
+#define FIO_MEMCPY31x(dest, src, len)                                         \
+  fio_memcpy_small_31((dest), (src), (len))
+#define FIO_MEMCPY15x(dest, src, len)                                         \
+  fio_memcpy_small_15((dest), (src), (len))
+#define FIO_MEMCPY7x(dest, src, len)                                         \
+  fio_memcpy_small_7((dest), (src), (len))
 
 /* *****************************************************************************
 Function Attributes
@@ -5895,16 +6013,21 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    w[0] = fio_buf2u64_little(data);
-    w[1] = fio_buf2u64_little(data + 8);
-    w[2] = fio_buf2u64_little(data + 16);
-    w[3] = fio_buf2u64_little(data + 24);
+    FIO_MEMCPY32(w, data);
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
     data += 32;
     seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
+#if 1
+    w[0] = w[1] = w[2] = w[3] = 0;
+    FIO_MEMCPY31x(w, data, len);
+#else
     register const size_t word_tail_len = (len & 24);
     register uint64_t tmp = 0;
     w[0] = w[1] = w[2] = w[3] = 0;
@@ -5929,6 +6052,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
       case 0: w[0] = tmp; break;
       }
     }
+#endif
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -5973,7 +6097,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
   r[1] *= FIO_STABLE_HASH_PRIME0;
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
-  FIO_MEMCPY(dest, r, sizeof(r[0]) * 2);
+  FIO_MEMCPY16(dest, r);
 }
 
 #undef FIO_STABLE_HASH_AVA
@@ -6687,13 +6811,13 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   uint32_t vec[16];
 
   for (size_t i = 63; i < len; i += 64) {
-    FIO_MEMCPY(vec, buf, 64);
+    FIO_MEMCPY64(vec, buf);
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
   memset(vec, 0, sizeof(vec));
   if ((len & 63)) {
-    FIO_MEMCPY(vec, buf, (len & 63));
+    FIO_MEMCPY63x(vec, buf, len);
   }
   ((uint8_t *)vec)[(len & 63)] = 0x80;
 
@@ -7251,17 +7375,17 @@ SFUNC void fio_chacha20(void *data,
     fio___chacha_u c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY(dest.u64, data, 64);
+    FIO_MEMCPY64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
-    FIO_MEMCPY(data, dest.u64, 64);
+    FIO_MEMCPY64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
-  FIO_MEMCPY(dest.u64, data, (len & 63));
+  FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
-  FIO_MEMCPY(data, dest.u64, (len & 63));
+  FIO_MEMCPY63x(data, dest.u64, len);
 }
 
 /* *****************************************************************************
@@ -24538,24 +24662,100 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
+  uint64_t ua[4] FIO_ALIGN(16);
+  uint64_t ub[4] FIO_ALIGN(16);
+  for (size_t i = 31; i < len; i += 32) {
+    FIO_MEMCPY32(ua, a.buf);
+    FIO_MEMCPY32(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    tmp |= (ua[1] ^ ub[1]);
+    tmp |= (ua[2] ^ ub[2]);
+    tmp |= (ua[3] ^ ub[3]);
+    if (!tmp) {
+      a.buf += 32;
+      b.buf += 32;
+      continue;
+    }
+    if (ua[0] != ub[0]) {
+      ua[0] = fio_lton64(ua[0]);
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
+    }
+    if (ua[1] != ub[1]) {
+      ua[1] = fio_lton64(ua[1]);
+      ub[1] = fio_lton64(ub[1]);
+      return ua[1] > ub[1];
+    }
+    if (ua[2] != ub[2]) {
+      ua[2] = fio_lton64(ua[2]);
+      ub[2] = fio_lton64(ub[2]);
+      return ua[2] > ub[2];
+    }
+    ua[3] = fio_lton64(ua[3]);
+    ub[3] = fio_lton64(ub[3]);
+    return ua[3] > ub[3];
+  }
+  if (len & 16) {
+    FIO_MEMCPY16(ua, a.buf);
+    FIO_MEMCPY16(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    tmp |= (ua[1] ^ ub[1]);
+    if (tmp) {
+      if (ua[0] != ub[0]) {
+        ua[0] = fio_lton64(ua[0]);
+        ub[0] = fio_lton64(ub[0]);
+        return ua[0] > ub[0];
+      }
+      ua[1] = fio_lton64(ua[1]);
+      ub[1] = fio_lton64(ub[1]);
+      return ua[1] > ub[1];
+    }
+    a.buf += 16;
+    b.buf += 16;
+  }
+  if (len & 8) {
+    FIO_MEMCPY8(ua, a.buf);
+    FIO_MEMCPY8(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    if (tmp) {
+      ua[0] = fio_lton64(ua[0]);
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
+    }
+    a.buf += 8;
+    b.buf += 8;
+  }
+  if ((len & 7)) {
+    ua[0] = 0;
+    ub[0] = 0;
+    FIO_MEMCPY7x(ua, a.buf, len);
+    FIO_MEMCPY7x(ub, b.buf, len);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    if (tmp) {
+      ua[0] = fio_lton64(ua[0]);
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
+    }
+  }
+  return a_len_is_bigger;
+}
+/**
+ * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
+ *
+ * Note: returns 0 if data in b is bigger than or equal(!).
+ */
+SFUNC int fio_string_is_greater_buf2(fio_buf_info_s a, fio_buf_info_s b) {
+  const size_t a_len_is_bigger = a.len > b.len;
+  const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
+  if (a.buf == b.buf)
+    return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
   for (size_t i = 31; i < len; i += 32) {
-#if 0
-    uint64_t ua4[4] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
-                                     fio_buf2u64_local(a.buf + 8),
-                                     fio_buf2u64_local(a.buf + 16),
-                                     fio_buf2u64_local(a.buf + 24)};
-    uint64_t ub4[4] FIO_ALIGN(16) = {fio_buf2u64_local(b.buf),
-                                     fio_buf2u64_local(b.buf + 8),
-                                     fio_buf2u64_local(b.buf + 16),
-                                     fio_buf2u64_local(b.buf + 24)};
-#else
     uint64_t ua4[4] FIO_ALIGN(16);
     uint64_t ub4[4] FIO_ALIGN(16);
-    FIO_MEMCPY(ua4, a.buf, 32);
-    FIO_MEMCPY(ub4, b.buf, 32);
-#endif
+    FIO_MEMCPY32(ua4, a.buf);
+    FIO_MEMCPY32(ub4, b.buf);
     ua = (ua4[0] ^ ub4[0]);
     ua |= (ua4[1] ^ ub4[1]);
     ua |= (ua4[2] ^ ub4[2]);
@@ -24582,17 +24782,10 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return ua4[3] > ub4[3];
   }
   if ((len & 16)) {
-#if 0
-    uint64_t ua2[2] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
-                                     fio_buf2u64_local(a.buf + 8)};
-    uint64_t ub2[2] FIO_ALIGN(16) = {fio_buf2u64_local(b.buf),
-                                     fio_buf2u64_local(b.buf + 8)};
-#else
     uint64_t ua2[2] FIO_ALIGN(16);
     uint64_t ub2[2] FIO_ALIGN(16);
-    FIO_MEMCPY(ua2, a.buf, 16);
-    FIO_MEMCPY(ub2, b.buf, 16);
-#endif
+    FIO_MEMCPY16(ua2, a.buf);
+    FIO_MEMCPY16(ub2, b.buf);
     ua = (ua2[0] ^ ub2[0]);
     ua |= (ua2[1] ^ ub2[1]);
     if (ua) {

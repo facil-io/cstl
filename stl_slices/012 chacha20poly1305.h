@@ -446,17 +446,17 @@ SFUNC void fio_chacha20(void *data,
     fio___chacha_u c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY(dest.u64, data, 64);
+    FIO_MEMCPY64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
-    FIO_MEMCPY(data, dest.u64, 64);
+    FIO_MEMCPY64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
-  FIO_MEMCPY(dest.u64, data, (len & 63));
+  FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
-  FIO_MEMCPY(data, dest.u64, (len & 63));
+  FIO_MEMCPY63x(data, dest.u64, len);
 }
 
 /* *****************************************************************************

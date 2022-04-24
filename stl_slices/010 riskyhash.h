@@ -253,16 +253,21 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    w[0] = fio_buf2u64_little(data);
-    w[1] = fio_buf2u64_little(data + 8);
-    w[2] = fio_buf2u64_little(data + 16);
-    w[3] = fio_buf2u64_little(data + 24);
+    FIO_MEMCPY32(w, data);
+    w[0] = fio_ltole64(w[0]);
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
     data += 32;
     seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
+#if 1
+    w[0] = w[1] = w[2] = w[3] = 0;
+    FIO_MEMCPY31x(w, data, len);
+#else
     register const size_t word_tail_len = (len & 24);
     register uint64_t tmp = 0;
     w[0] = w[1] = w[2] = w[3] = 0;
@@ -287,6 +292,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
       case 0: w[0] = tmp; break;
       }
     }
+#endif
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -331,7 +337,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
   r[1] *= FIO_STABLE_HASH_PRIME0;
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
-  FIO_MEMCPY(dest, r, sizeof(r[0]) * 2);
+  FIO_MEMCPY16(dest, r);
 }
 
 #undef FIO_STABLE_HASH_AVA

@@ -1095,106 +1095,82 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua;
-  uint64_t ub;
+  uint64_t ua[4] FIO_ALIGN(16);
+  uint64_t ub[4] FIO_ALIGN(16);
   for (size_t i = 31; i < len; i += 32) {
-#if 0
-    uint64_t ua4[4] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
-                                     fio_buf2u64_local(a.buf + 8),
-                                     fio_buf2u64_local(a.buf + 16),
-                                     fio_buf2u64_local(a.buf + 24)};
-    uint64_t ub4[4] FIO_ALIGN(16) = {fio_buf2u64_local(b.buf),
-                                     fio_buf2u64_local(b.buf + 8),
-                                     fio_buf2u64_local(b.buf + 16),
-                                     fio_buf2u64_local(b.buf + 24)};
-#else
-    uint64_t ua4[4] FIO_ALIGN(16);
-    uint64_t ub4[4] FIO_ALIGN(16);
-    FIO_MEMCPY(ua4, a.buf, 32);
-    FIO_MEMCPY(ub4, b.buf, 32);
-#endif
-    ua = (ua4[0] ^ ub4[0]);
-    ua |= (ua4[1] ^ ub4[1]);
-    ua |= (ua4[2] ^ ub4[2]);
-    ua |= (ua4[3] ^ ub4[3]);
-    if (!ua) {
+    FIO_MEMCPY32(ua, a.buf);
+    FIO_MEMCPY32(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    tmp |= (ua[1] ^ ub[1]);
+    tmp |= (ua[2] ^ ub[2]);
+    tmp |= (ua[3] ^ ub[3]);
+    if (!tmp) {
       a.buf += 32;
       b.buf += 32;
       continue;
     }
-    ua4[0] = fio_lton64(ua4[0]);
-    ua4[1] = fio_lton64(ua4[1]);
-    ua4[2] = fio_lton64(ua4[2]);
-    ua4[3] = fio_lton64(ua4[3]);
-    ub4[0] = fio_lton64(ub4[0]);
-    ub4[1] = fio_lton64(ub4[1]);
-    ub4[2] = fio_lton64(ub4[2]);
-    ub4[3] = fio_lton64(ub4[3]);
-    if (ua4[0] != ub4[0])
-      return ua4[0] > ub4[0];
-    if (ua4[1] != ub4[1])
-      return ua4[1] > ub4[1];
-    if (ua4[2] != ub4[2])
-      return ua4[2] > ub4[2];
-    return ua4[3] > ub4[3];
+    if (ua[0] != ub[0]) {
+      ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
+    }
+    if (ua[1] != ub[1]) {
+      ua[1] = fio_lton64(ua[1]);
+      ub[1] = fio_lton64(ub[1]);
+      return ua[1] > ub[1];
+    }
+    if (ua[2] != ub[2]) {
+      ua[2] = fio_lton64(ua[2]);
+      ub[2] = fio_lton64(ub[2]);
+      return ua[2] > ub[2];
+    }
+    ua[3] = fio_lton64(ua[3]);
+    ub[3] = fio_lton64(ub[3]);
+    return ua[3] > ub[3];
   }
-  if ((len & 16)) {
-#if 0
-    uint64_t ua2[2] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
-                                     fio_buf2u64_local(a.buf + 8)};
-    uint64_t ub2[2] FIO_ALIGN(16) = {fio_buf2u64_local(b.buf),
-                                     fio_buf2u64_local(b.buf + 8)};
-#else
-    uint64_t ua2[2] FIO_ALIGN(16);
-    uint64_t ub2[2] FIO_ALIGN(16);
-    FIO_MEMCPY(ua2, a.buf, 16);
-    FIO_MEMCPY(ub2, b.buf, 16);
-#endif
-    ua = (ua2[0] ^ ub2[0]);
-    ua |= (ua2[1] ^ ub2[1]);
-    if (ua) {
-      ua2[0] = fio_lton64(ua2[0]);
-      ua2[1] = fio_lton64(ua2[1]);
-      ub2[0] = fio_lton64(ub2[0]);
-      ub2[1] = fio_lton64(ub2[1]);
-      if (ua2[0] != ub2[0])
-        return ua2[0] > ub2[0];
-      return ua2[1] > ub2[1];
+  if (len & 16) {
+    FIO_MEMCPY16(ua, a.buf);
+    FIO_MEMCPY16(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    tmp |= (ua[1] ^ ub[1]);
+    if (tmp) {
+      if (ua[0] != ub[0]) {
+        ua[0] = fio_lton64(ua[0]);
+        ub[0] = fio_lton64(ub[0]);
+        return ua[0] > ub[0];
+      }
+      ua[1] = fio_lton64(ua[1]);
+      ub[1] = fio_lton64(ub[1]);
+      return ua[1] > ub[1];
     }
     a.buf += 16;
     b.buf += 16;
   }
-  if ((len & 8)) {
-    ua = fio_buf2u64_local(a.buf);
-    ub = fio_buf2u64_local(b.buf);
-    if (ua != ub) {
-      ua = fio_lton64(ua);
-      ub = fio_lton64(ub);
-      return ua > ub;
+  if (len & 8) {
+    FIO_MEMCPY8(ua, a.buf);
+    FIO_MEMCPY8(ub, b.buf);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    if (tmp) {
+      ua[0] = fio_lton64(ua[0]);
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
     }
     a.buf += 8;
     b.buf += 8;
   }
-  if ((len & 4)) {
-    ua = fio_buf2u32(a.buf);
-    ub = fio_buf2u32(b.buf);
-    if (ua != ub) {
-      return ua > ub;
+  if ((len & 7)) {
+    ua[0] = 0;
+    ub[0] = 0;
+    FIO_MEMCPY7x(ua, a.buf, len);
+    FIO_MEMCPY7x(ub, b.buf, len);
+    uint64_t tmp = (ua[0] ^ ub[0]);
+    if (tmp) {
+      ua[0] = fio_lton64(ua[0]);
+      ub[0] = fio_lton64(ub[0]);
+      return ua[0] > ub[0];
     }
-    a.buf += 4;
-    b.buf += 4;
   }
-  ua = 0;
-  ub = 0;
-  switch ((len & 3)) { // clang-format off
-  case 3: ua |= ((uint64_t)a.buf[2] << 40); ub |= ((uint64_t)b.buf[2] << 40); /* fall through */
-  case 2: ua |= ((uint64_t)a.buf[1] << 48); ub |= ((uint64_t)b.buf[1] << 48); /* fall through */
-  case 1: ua |= ((uint64_t)a.buf[0] << 56); ub |= ((uint64_t)b.buf[0] << 56); /* fall through */
-  case 0: // clang-format on
-    if (ua > ub)
-      return 1;
-  }
-  return a_len_is_bigger & (ua == ub);
+  return a_len_is_bigger;
 }
 
 /* *****************************************************************************

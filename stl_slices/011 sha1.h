@@ -159,13 +159,13 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   uint32_t vec[16];
 
   for (size_t i = 63; i < len; i += 64) {
-    FIO_MEMCPY(vec, buf, 64);
+    FIO_MEMCPY64(vec, buf);
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
   memset(vec, 0, sizeof(vec));
   if ((len & 63)) {
-    FIO_MEMCPY(vec, buf, (len & 63));
+    FIO_MEMCPY63x(vec, buf, len);
   }
   ((uint8_t *)vec)[(len & 63)] = 0x80;
 
