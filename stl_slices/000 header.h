@@ -153,7 +153,7 @@ extern "C" {
 
 #ifndef FIO_UNALIGNED_ACCESS
 /** Allows facil.io to use unaligned memory access on *some* CPU systems. */
-#define FIO_UNALIGNED_ACCESS 0
+#define FIO_UNALIGNED_ACCESS 1
 #endif
 
 /* *****************************************************************************
