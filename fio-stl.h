@@ -24540,7 +24540,21 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
-  for (size_t i = 7; i < len; i += 8) {
+  for (size_t i = 15; i < len; i += 16) {
+    uint64_t ua0 = fio_buf2u64(a.buf);
+    uint64_t ua1 = fio_buf2u64(a.buf);
+    uint64_t ub0 = fio_buf2u64(b.buf);
+    uint64_t ub1 = fio_buf2u64(b.buf);
+    if (!((ua0 ^ ub0) | (ua1 ^ ub1))) {
+      a.buf += 16;
+      b.buf += 16;
+      continue;
+    }
+    if (ua0 != ub0)
+      return ua0 > ub0;
+    return ua1 > ub1;
+  }
+  if ((len & 8)) {
     ua = fio_buf2u64(a.buf);
     ub = fio_buf2u64(b.buf);
     if (ua != ub)
@@ -24548,7 +24562,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     a.buf += 8;
     b.buf += 8;
   }
-  if (len & 4) {
+  if ((len & 4)) {
     ua = fio_buf2u32(a.buf);
     ub = fio_buf2u32(b.buf);
     if (ua != ub)
