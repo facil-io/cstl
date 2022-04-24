@@ -1472,57 +1472,21 @@ String - read file
  * for sockets).
  *
  * The file descriptor will remain open and should be closed manually.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
                                                     int fd,
                                                     intptr_t start_at,
                                                     intptr_t limit) {
-  fio_str_info_s state = {.buf = NULL};
-
-  size_t file_len = fio_fd_size(fd);
-
-  if (start_at < 0) {
-    start_at += (intptr_t)file_len + 1;
-    if (start_at < 0)
-      start_at = 0;
-  }
-  if (limit < 1 || file_len < (size_t)(limit + start_at)) {
-    limit = (intptr_t)file_len - start_at;
-  }
-
-  if (!file_len || !limit || (size_t)start_at >= file_len) {
-    state = FIO_NAME(FIO_STR_NAME, info)(s_);
-    return state;
-  }
-
-  const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
-  size_t write_pos = org_len;
-  state = FIO_NAME(FIO_STR_NAME, resize)(s_, org_len + limit);
-  if (state.capa < (org_len + limit) || !state.buf) {
-    return state;
-  }
-
-  while (limit) {
-    /* copy up to 128Mb at a time... why? because pread might fail */
-    const size_t to_read =
-        (limit & (((size_t)1 << 27) - 1)) | ((!!(limit >> 27)) << 27);
-    if (pread(fd, state.buf + write_pos, to_read, start_at) !=
-        (ssize_t)to_read) {
-      goto error;
-    }
-    limit -= to_read;
-    write_pos += to_read;
-    start_at += to_read;
-  }
-  return state;
-
-error:
-  FIO_NAME(FIO_STR_NAME, resize)(s_, org_len);
-  state.buf = NULL;
-  state.len = state.capa = 0;
-  return state;
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_readfd(&i,
+                    FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                    fd,
+                    start_at,
+                    limit);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /**
@@ -1532,21 +1496,21 @@ error:
  *
  * If the file can't be located, opened or read, or if `start_at` is beyond
  * the EOF position, NULL is returned in the state's `data` field.
- *
- * Currently implemented only on POSIX systems.
  */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
                                                       const char *filename,
                                                       intptr_t start_at,
                                                       intptr_t limit) {
-  fio_str_info_s state = {.buf = NULL};
-  /* POSIX implementations. */
-  int fd = fio_filename_open(filename, O_RDONLY);
-  if (fd == -1)
-    return state;
-  state = FIO_NAME(FIO_STR_NAME, readfd)(s_, fd, start_at, limit);
-  close(fd);
-  return state;
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_readfile(&i,
+                      FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                      filename,
+                      start_at,
+                      limit);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
 }
 
 /* *****************************************************************************

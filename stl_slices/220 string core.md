@@ -423,6 +423,40 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 
 Writes decoded base64 data to String.
 
+### Core String File Reading support
+
+#### `fio_string_readfd`
+
+```c
+int fio_string_readfd(fio_str_info_s *dest,
+                      fio_string_realloc_fn reallocate,
+                      int fd,
+                      intptr_t start_at,
+                      intptr_t limit);
+```
+
+Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
+
+If `limit` is 0 (or less than 0) data will be written until EOF.
+
+If `start_at` is negative, position will be calculated from the end of the file where `-1 == EOF`.
+
+Note: this will fail unless used on actual files (not sockets, not pipes).
+
+#### `fio_string_readfile`
+
+```c
+int fio_string_readfile(fio_str_info_s *dest,
+                        fio_string_realloc_fn reallocate,
+                        const char *filename,
+                        intptr_t start_at,
+                        intptr_t limit);
+```
+
+Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
+
+If the file can't be located, opened or read, or if `start_at` is beyond the EOF position, NULL is returned in the state's `data` field.
+
 -------------------------------------------------------------------------------
 
 ## C Strings with Binary Data
@@ -453,24 +487,27 @@ fio_bstr_free(str_cpy);
 
 The `fio_bstr` functions wrap all `fio_string` core API, resulting in the following available functions:
 
-* fio_bstr_write - see [fio_string_write](#fio_string_write) for details.
-* fio_bstr_write2 (macro) - see [fio_string_write2](#fio_string_write2) for details.
-* fio_bstr_replace - see [fio_string_replace](#fio_string_replace) for details.
+* `fio_bstr_write` - see [`fio_string_write`](#fio_string_write) for details.
+* `fio_bstr_write2` (macro) - see [`fio_string_write2`](#fio_string_write2) for details.
+* `fio_bstr_replace` - see [`fio_string_replace`](#fio_string_replace) for details.
 
-* fio_bstr_write_i - see [fio_string_write_i](#fio_string_write_i) for details.
-* fio_bstr_write_u - see [fio_string_write_u](#fio_string_write_u) for details.
-* fio_bstr_write_hex - see [fio_string_write_hex](#fio_string_write_hex) for details.
-* fio_bstr_write_bin - see [fio_string_write_bin](#fio_string_write_bin) for details.
+* `fio_bstr_write_i` - see [`fio_string_write_i`](#fio_string_write_i) for details.
+* `fio_bstr_write_u` - see [`fio_string_write_u`](#fio_string_write_u) for details.
+* `fio_bstr_write_hex` - see [`fio_string_write_hex`](#fio_string_write_hex) for details.
+* `fio_bstr_write_bin` - see [`fio_string_write_bin`](#fio_string_write_bin) for details.
 
-* fio_bstr_write_escape - see [fio_string_write_escape](#fio_string_write_escape) for details.
-* fio_bstr_write_unescape - see [fio_string_write_unescape](#fio_string_write_unescape) for details.
+* `fio_bstr_write_escape` - see [`fio_string_write_escape`](#fio_string_write_escape) for details.
+* `fio_bstr_write_unescape` - see [`fio_string_write_unescape`](#fio_string_write_unescape) for details.
 
-* fio_bstr_write_base64enc - see [fio_string_write_base64enc](#fio_string_write_base64enc) for details.
-* fio_bstr_write_base64dec - see [fio_string_write_base64dec](#fio_string_write_base64dec) for details.
+* `fio_bstr_write_base64enc` - see [`fio_string_write_base64enc`](#fio_string_write_base64enc) for details.
+* `fio_bstr_write_base64dec` - see [`fio_string_write_base64dec`](#fio_string_write_base64dec) for details.
 
-* fio_bstr_printf - see [fio_string_printf](#fio_string_printf) for details.
+* `fio_bstr_readfd` - see [`fio_string_readfd`](#fio_string_readfd) for details.
+* `fio_bstr_readfile` - see [`fio_string_readfile`](#fio_string_readfile) for details.
 
-* fio_bstr_is_greater - see [fio_string_is_greater](#fio_string_is_greater) for details.
+* `fio_bstr_printf` - see [`fio_string_printf`](#fio_string_printf) for details.
+
+* `fio_bstr_is_greater` - see [`fio_string_is_greater`](#fio_string_is_greater) for details.
 
 **Note**: the `fio_bstr` functions do not take a `reallocate` argument and their `dest` argument should be the existing `fio_bstr` pointer (`char *`).
 

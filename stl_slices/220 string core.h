@@ -9,6 +9,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
+#include "108 files.h"              /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -253,6 +254,40 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
                                      size_t encoded_len);
 
 /* *****************************************************************************
+String File Reading support
+***************************************************************************** */
+
+/**
+ * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
+ *
+ * If `limit` is 0 (or less than 0) data will be written until EOF.
+ *
+ * If `start_at` is negative, position will be calculated from the end of the
+ * file where `-1 == EOF`.
+ *
+ * Note: this will fail unless used on actual files (not sockets, not pipes).
+ * */
+SFUNC int fio_string_readfd(fio_str_info_s *dest,
+                            fio_string_realloc_fn reallocate,
+                            int fd,
+                            intptr_t start_at,
+                            intptr_t limit);
+
+/**
+ * Opens the file `filename` and pastes it's contents (or a slice ot it) at
+ * the end of the String. If `limit == 0`, than the data will be read until
+ * EOF.
+ *
+ * If the file can't be located, opened or read, or if `start_at` is beyond
+ * the EOF position, NULL is returned in the state's `data` field.
+ */
+SFUNC int fio_string_readfile(fio_str_info_s *dest,
+                              fio_string_realloc_fn reallocate,
+                              const char *filename,
+                              intptr_t start_at,
+                              intptr_t limit);
+
+/* *****************************************************************************
 Memory Helpers (for Authorship)
 ***************************************************************************** */
 
@@ -395,6 +430,17 @@ FIO_IFUNC char *fio_bstr_write_base64enc(char *bstr,
 FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
                                          const void *src,
                                          size_t len);
+
+/** Writes to the String from a regular file `fd`. */
+FIO_IFUNC char *fio_bstr_readfd(char *bstr,
+                                int fd,
+                                intptr_t start_at,
+                                intptr_t limit);
+/** Writes to the String from a regular file named `filename`. */
+FIO_IFUNC char *fio_bstr_readfile(char *bstr,
+                                  const char *filename,
+                                  intptr_t start_at,
+                                  intptr_t limit);
 
 /** Writes a `fio_bstr` in `printf` style. */
 FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
@@ -607,6 +653,25 @@ fio_bstr_printf(char *bstr, const char *format, ...) {
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_vprintf(&i, fio_bstr_reallocate, format, argv);
   va_end(argv);
+  return fio_bstr_len_set(i.buf, i.len);
+}
+
+/** Writes to the String from a regular file `fd`. */
+FIO_IFUNC char *fio_bstr_readfd(char *bstr,
+                                int fd,
+                                intptr_t start_at,
+                                intptr_t limit) {
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_readfd(&i, fio_bstr_reallocate, fd, start_at, limit);
+  return fio_bstr_len_set(i.buf, i.len);
+}
+/** Writes to the String from a regular file named `filename`. */
+FIO_IFUNC char *fio_bstr_readfile(char *bstr,
+                                  const char *filename,
+                                  intptr_t start_at,
+                                  intptr_t limit) {
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_readfile(&i, fio_bstr_reallocate, filename, start_at, limit);
   return fio_bstr_len_set(i.buf, i.len);
 }
 
@@ -1659,6 +1724,83 @@ p valid; p decoder; nil
     writer = ((uint8_t *)dest->buf + dest->len);
   dest->len = (size_t)(writer - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
+  return r;
+}
+
+/* *****************************************************************************
+String File Reading support
+***************************************************************************** */
+
+/**
+ * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
+ *
+ * If `limit` is 0 (or less than 0) data will be written until EOF.
+ *
+ * If `start_at` is negative, position will be calculated from the end of the
+ * file where `-1 == EOF`.
+ *
+ * Note: this will fail unless used on actual files (not sockets, not pipes).
+ * */
+SFUNC int fio_string_readfd(fio_str_info_s *dest,
+                            fio_string_realloc_fn reallocate,
+                            int fd,
+                            intptr_t start_at,
+                            intptr_t limit) {
+  int r = 0;
+  size_t file_len = fio_fd_size(fd);
+
+  if (start_at < 0) {
+    start_at += (intptr_t)file_len + 1;
+    if (start_at < 0)
+      start_at = 0;
+  }
+  if (limit < 1 || file_len < (size_t)(limit + start_at)) {
+    limit = (intptr_t)file_len - start_at;
+  }
+  if (!dest || !file_len || !limit || (size_t)start_at >= file_len) {
+    return (r = -1);
+  }
+  size_t total_len = limit;
+  r = fio_string___write_validate_len(dest, reallocate, &total_len);
+  for (;;) {
+    /* use read sizes of up to 27 bits */
+    const size_t to_read =
+        (total_len & (((size_t)1 << 27) - 1)) | ((!!(total_len >> 27)) << 27);
+    ssize_t act;
+    if ((act = pread(fd, dest->buf + dest->len, to_read, start_at)) > 0) {
+      total_len -= act;
+      dest->len += act;
+      start_at += act;
+      if (!total_len)
+        break;
+      continue;
+    }
+    r = -1;
+    break;
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/**
+ * Opens the file `filename` and pastes it's contents (or a slice ot it) at
+ * the end of the String. If `limit == 0`, than the data will be read until
+ * EOF.
+ *
+ * If the file can't be located, opened or read, or if `start_at` is beyond
+ * the EOF position, NULL is returned in the state's `data` field.
+ */
+SFUNC int fio_string_readfile(fio_str_info_s *dest,
+                              fio_string_realloc_fn reallocate,
+                              const char *filename,
+                              intptr_t start_at,
+                              intptr_t limit) {
+  int r = -1;
+  int fd = fio_filename_open(filename, O_RDONLY);
+  if (fd == -1)
+    return r;
+  r = fio_string_readfd(dest, reallocate, fd, start_at, limit);
+  close(fd);
   return r;
 }
 

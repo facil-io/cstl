@@ -1093,7 +1093,7 @@ Common macros
 #endif
 
 /* Modules that require File Utils */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
+#if defined(FIO_STR)
 #define FIO_FILES
 #endif
 
