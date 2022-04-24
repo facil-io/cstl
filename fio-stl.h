@@ -25862,7 +25862,7 @@ String API - String state (data pointers, length, capacity, etc')
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, info)(const FIO_STR_PTR s);
 
 /** Returns the String's partial state (length and pointer).  */
-FIO_IFUNC fio_buf_info_s FIO_NAME2(FIO_STR_NAME, buf)(const FIO_STR_PTR s);
+FIO_IFUNC fio_buf_info_s FIO_NAME(FIO_STR_NAME, buf)(const FIO_STR_PTR s);
 
 /** Returns a pointer (`char *`) to the String's content. */
 FIO_IFUNC char *FIO_NAME2(FIO_STR_NAME, ptr)(FIO_STR_PTR s);
@@ -26250,7 +26250,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, info)(const FIO_STR_PTR s_) {
 }
 
 /** Returns the String's partial state (length and pointer).  */
-FIO_IFUNC fio_buf_info_s FIO_NAME2(FIO_STR_NAME, buf)(const FIO_STR_PTR s_) {
+FIO_IFUNC fio_buf_info_s FIO_NAME(FIO_STR_NAME, buf)(const FIO_STR_PTR s_) {
   fio_buf_info_s r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, r);
   FIO_NAME(FIO_STR_NAME, s) *s =
@@ -26617,8 +26617,8 @@ FIO_IFUNC int FIO_NAME_BL(FIO_STR_NAME, eq)(const FIO_STR_PTR str1_,
     return 1;
   FIO_PTR_TAG_VALID_OR_RETURN(str1_, 0);
   FIO_PTR_TAG_VALID_OR_RETURN(str2_, 0);
-  fio_buf_info_s s1 = FIO_NAME2(FIO_STR_NAME, buf)(str1_);
-  fio_buf_info_s s2 = FIO_NAME2(FIO_STR_NAME, buf)(str2_);
+  fio_buf_info_s s1 = FIO_NAME(FIO_STR_NAME, buf)(str1_);
+  fio_buf_info_s s2 = FIO_NAME(FIO_STR_NAME, buf)(str2_);
   return FIO_BUF_INFO_IS_EQ(s1, s2);
 }
 
@@ -26629,7 +26629,7 @@ FIO_IFUNC int FIO_NAME_BL(FIO_STR_NAME, eq)(const FIO_STR_PTR str1_,
  */
 FIO_IFUNC uint64_t FIO_NAME(FIO_STR_NAME, hash)(const FIO_STR_PTR s_,
                                                 uint64_t seed) {
-  fio_buf_info_s i = FIO_NAME2(FIO_STR_NAME, buf)(s_);
+  fio_buf_info_s i = FIO_NAME(FIO_STR_NAME, buf)(s_);
   return fio_risky_hash((void *)i.buf, i.len, seed);
 }
 
