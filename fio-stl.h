@@ -24540,35 +24540,47 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
-#if 1
+#if 0
   for (size_t i = 15; i < len; i += 16) {
-    uint64_t ua0 = fio_buf2u64(a.buf);
-    uint64_t ua1 = fio_buf2u64(a.buf + 8);
-    uint64_t ub0 = fio_buf2u64(b.buf);
-    uint64_t ub1 = fio_buf2u64(b.buf + 8);
+    uint64_t ua0 = fio_buf2u64_local(a.buf);
+    uint64_t ua1 = fio_buf2u64_local(a.buf + 8);
+    uint64_t ub0 = fio_buf2u64_local(b.buf);
+    uint64_t ub1 = fio_buf2u64_local(b.buf + 8);
     a.buf += 16;
     b.buf += 16;
     if (!((ua0 ^ ub0) | (ua1 ^ ub1)))
       continue;
+    ua0 = fio_lton64(ua0);
+    ua1 = fio_lton64(ua1);
+    ub0 = fio_lton64(ub0);
+    ub1 = fio_lton64(ub1);
     if (ua0 != ub0)
       return ua0 > ub0;
     return ua1 > ub1;
   }
 #else
   for (size_t i = 31; i < len; i += 32) {
-    uint64_t ua0 = fio_buf2u64(a.buf);
-    uint64_t ua1 = fio_buf2u64(a.buf + 8);
-    uint64_t ua2 = fio_buf2u64(a.buf + 16);
-    uint64_t ua3 = fio_buf2u64(a.buf + 24);
-    uint64_t ub0 = fio_buf2u64(b.buf);
-    uint64_t ub1 = fio_buf2u64(b.buf + 8);
-    uint64_t ub2 = fio_buf2u64(b.buf + 16);
-    uint64_t ub3 = fio_buf2u64(b.buf + 24);
+    uint64_t ua0 = fio_buf2u64_local(a.buf);
+    uint64_t ua1 = fio_buf2u64_local(a.buf + 8);
+    uint64_t ua2 = fio_buf2u64_local(a.buf + 16);
+    uint64_t ua3 = fio_buf2u64_local(a.buf + 24);
+    uint64_t ub0 = fio_buf2u64_local(b.buf);
+    uint64_t ub1 = fio_buf2u64_local(b.buf + 8);
+    uint64_t ub2 = fio_buf2u64_local(b.buf + 16);
+    uint64_t ub3 = fio_buf2u64_local(b.buf + 24);
     if (!((ua0 ^ ub0) | (ua1 ^ ub1) | (ua2 ^ ub2) | (ua3 ^ ub3))) {
       a.buf += 32;
       b.buf += 32;
       continue;
     }
+    ua0 = fio_lton64(ua0);
+    ua1 = fio_lton64(ua1);
+    ua2 = fio_lton64(ua2);
+    ua3 = fio_lton64(ua3);
+    ub0 = fio_lton64(ub0);
+    ub1 = fio_lton64(ub1);
+    ub2 = fio_lton64(ub2);
+    ub3 = fio_lton64(ub3);
     if (ua0 != ub0)
       return ua0 > ub0;
     if (ua1 != ub1)
@@ -24578,11 +24590,15 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return ua3 > ub3;
   }
   if ((len & 16)) {
-    uint64_t ua0 = fio_buf2u64(a.buf);
-    uint64_t ua1 = fio_buf2u64(a.buf + 8);
-    uint64_t ub0 = fio_buf2u64(b.buf);
-    uint64_t ub1 = fio_buf2u64(b.buf + 8);
+    uint64_t ua0 = fio_buf2u64_local(a.buf);
+    uint64_t ua1 = fio_buf2u64_local(a.buf + 8);
+    uint64_t ub0 = fio_buf2u64_local(b.buf);
+    uint64_t ub1 = fio_buf2u64_local(b.buf + 8);
     if (((ua0 ^ ub0) | (ua1 ^ ub1))) {
+      ua0 = fio_lton64(ua0);
+      ua1 = fio_lton64(ua1);
+      ub0 = fio_lton64(ub0);
+      ub1 = fio_lton64(ub1);
       if (ua0 != ub0)
         return ua0 > ub0;
       return ua1 > ub1;
@@ -24592,18 +24608,22 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   }
 #endif
   if ((len & 8)) {
-    ua = fio_buf2u64(a.buf);
-    ub = fio_buf2u64(b.buf);
-    if (ua != ub)
+    ua = fio_buf2u64_local(a.buf);
+    ub = fio_buf2u64_local(b.buf);
+    if (ua != ub) {
+      ua = fio_lton64(ua);
+      ub = fio_lton64(ub);
       return ua > ub;
+    }
     a.buf += 8;
     b.buf += 8;
   }
   if ((len & 4)) {
     ua = fio_buf2u32(a.buf);
     ub = fio_buf2u32(b.buf);
-    if (ua != ub)
+    if (ua != ub) {
       return ua > ub;
+    }
     a.buf += 4;
     b.buf += 4;
   }
