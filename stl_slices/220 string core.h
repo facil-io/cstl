@@ -1113,8 +1113,11 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     FIO_MEMCPY(ua4, a.buf, 32);
     FIO_MEMCPY(ub4, b.buf, 32);
 #endif
-    if (!((ua4[0] ^ ub4[0]) | (ua4[1] ^ ub4[1]) | (ua4[2] ^ ub4[2]) |
-          (ua4[3] ^ ub4[3]))) {
+    ua = (ua4[0] ^ ub4[0]);
+    ua |= (ua4[1] ^ ub4[1]);
+    ua |= (ua4[2] ^ ub4[2]);
+    ua |= (ua4[3] ^ ub4[3]);
+    if (!ua) {
       a.buf += 32;
       b.buf += 32;
       continue;
@@ -1136,11 +1139,20 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return ua4[3] > ub4[3];
   }
   if ((len & 16)) {
+#if 0
     uint64_t ua2[2] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
                                      fio_buf2u64_local(a.buf + 8)};
     uint64_t ub2[2] FIO_ALIGN(16) = {fio_buf2u64_local(b.buf),
                                      fio_buf2u64_local(b.buf + 8)};
-    if (((ua2[0] ^ ub2[0]) | (ua2[1] ^ ub2[1]))) {
+#else
+    uint64_t ua2[2] FIO_ALIGN(16);
+    uint64_t ub2[2] FIO_ALIGN(16);
+    FIO_MEMCPY(ua2, a.buf, 16);
+    FIO_MEMCPY(ub2, b.buf, 16);
+#endif
+    ua = (ua2[0] ^ ub2[0]);
+    ua |= (ua2[1] ^ ub2[1]);
+    if (ua) {
       ua2[0] = fio_lton64(ua2[0]);
       ua2[1] = fio_lton64(ua2[1]);
       ub2[0] = fio_lton64(ub2[0]);
