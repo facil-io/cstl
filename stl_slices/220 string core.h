@@ -1097,15 +1097,14 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
-  if (len > 7)
-    for (size_t i = 0; i < len; i += 8) {
-      ua = fio_buf2u64(a.buf);
-      ub = fio_buf2u64(b.buf);
-      if (ua != ub)
-        return ua > ub;
-      a.buf += 8;
-      b.buf += 8;
-    }
+  for (size_t i = 7; i < len; i += 8) {
+    ua = fio_buf2u64(a.buf);
+    ub = fio_buf2u64(b.buf);
+    if (ua != ub)
+      return ua > ub;
+    a.buf += 8;
+    b.buf += 8;
+  }
   if (len & 4) {
     ua = fio_buf2u32(a.buf);
     ub = fio_buf2u32(b.buf);
@@ -1116,7 +1115,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   }
   ua = 0;
   ub = 0;
-  switch ((len & 7)) { // clang-format off
+  switch ((len & 3)) { // clang-format off
   case 3: ua |= ((uint64_t)a.buf[2] << 40); ub |= ((uint64_t)b.buf[2] << 40); /* fall through */
   case 2: ua |= ((uint64_t)a.buf[1] << 48); ub |= ((uint64_t)b.buf[1] << 48); /* fall through */
   case 1: ua |= ((uint64_t)a.buf[0] << 56); ub |= ((uint64_t)b.buf[0] << 56); /* fall through */
