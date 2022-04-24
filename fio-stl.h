@@ -4246,11 +4246,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
       {
         for (int i = 0; i < 16; ++i) {
           uint64_t r0, r1, c0, c1;
-          FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
+          // FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
           r0 = fio_math_mulc64(a, b, &c0); /* implementation for the system. */
-          FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
-                        (void *)r0,
-                        (void *)c0);
+          // FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
+          //               (void *)r0,
+          //               (void *)c0);
 
           { /* long multiplication (school algorithm). */
             uint64_t midc = 0, lowc = 0;
@@ -4263,9 +4263,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
             const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
             const uint64_t r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
             const uint64_t c = hi + (mid >> 32) + (midc << 32) + lowc;
-            FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
-                          (void *)r,
-                          (void *)c);
+            // FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
+            //               (void *)r,
+            //               (void *)c);
             r1 = r;
             c1 = c;
           }
@@ -4273,9 +4273,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
           {
             uint64_t r2[2];
             fio_math_mul(r2, &a, &b, 1);
-            FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
-                          (void *)r2[0],
-                          (void *)r2[1]);
+            // FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
+            //               (void *)r2[0],
+            //               (void *)r2[1]);
             FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
                        "fail Xlen MUL with len == 1");
           }
@@ -4284,9 +4284,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
             uint64_t b2[4] = {b, 0, 0, 0};
             uint64_t r2[8];
             fio_math_mul(r2, a2, b2, 4);
-            FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
-                          (void *)r2[3],
-                          (void *)r2[4]);
+            // FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
+            //               (void *)r2[3],
+            //               (void *)r2[4]);
             FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
                        "fail Xlen MUL (1) with len == 4");
             FIO_ASSERT((r0 == r2[3]) && (c0 == r2[4]),
@@ -25483,6 +25483,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
+#include "108 files.h"              /* Development inclusion - ignore line */
 #include "220 string core.h"        /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -26936,11 +26937,6 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
 String - read file
 ***************************************************************************** */
 
-#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
-#define fstat           _fstat64
-#define FIO_FSTAT_UNDEF 1
-#endif /* FIO_OS_WIN && _MSC_VER */
-
 /**
  * Reads data from a file descriptor `fd` at offset `start_at` and pastes it's
  * contents (or a slice of it) at the end of the String. If `limit == 0`, than
@@ -26957,19 +26953,22 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
                                                     int fd,
                                                     intptr_t start_at,
                                                     intptr_t limit) {
-  struct stat f_data;
   fio_str_info_s state = {.buf = NULL};
-  if (fd == -1 || fstat(fd, &f_data) == -1) {
-    return state;
+
+  size_t file_len = fio_fd_size(fd);
+
+  if (start_at < 0) {
+    start_at += (intptr_t)file_len + 1;
+    if (start_at < 0)
+      start_at = 0;
+  }
+  if (limit < 1 || file_len < (size_t)(limit + start_at)) {
+    limit = (intptr_t)file_len - start_at;
   }
 
-  if (f_data.st_size <= 0 || start_at >= f_data.st_size) {
+  if (!file_len || !limit || (size_t)start_at >= file_len) {
     state = FIO_NAME(FIO_STR_NAME, info)(s_);
     return state;
-  }
-
-  if (limit <= 0 || f_data.st_size < (limit + start_at)) {
-    limit = f_data.st_size - start_at;
   }
 
   const size_t org_len = FIO_NAME(FIO_STR_NAME, len)(s_);
@@ -27023,11 +27022,6 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
   close(fd);
   return state;
 }
-
-#if FIO_FSTAT_UNDEF
-#undef FIO_FSTAT_UNDEF
-#undef fstat
-#endif
 
 /* *****************************************************************************
 

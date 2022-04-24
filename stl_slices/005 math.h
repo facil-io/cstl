@@ -515,11 +515,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
       {
         for (int i = 0; i < 16; ++i) {
           uint64_t r0, r1, c0, c1;
-          FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
+          // FIO_LOG_DEBUG("Test MUL a = %p; b = %p", (void *)a, (void *)b);
           r0 = fio_math_mulc64(a, b, &c0); /* implementation for the system. */
-          FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
-                        (void *)r0,
-                        (void *)c0);
+          // FIO_LOG_DEBUG("Sys  Mul      MUL = %p, carry = %p",
+          //               (void *)r0,
+          //               (void *)c0);
 
           { /* long multiplication (school algorithm). */
             uint64_t midc = 0, lowc = 0;
@@ -532,9 +532,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
             const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
             const uint64_t r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
             const uint64_t c = hi + (mid >> 32) + (midc << 32) + lowc;
-            FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
-                          (void *)r,
-                          (void *)c);
+            // FIO_LOG_DEBUG("Long Mul      MUL = %p, carry = %p",
+            //               (void *)r,
+            //               (void *)c);
             r1 = r;
             c1 = c;
           }
@@ -542,9 +542,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
           {
             uint64_t r2[2];
             fio_math_mul(r2, &a, &b, 1);
-            FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
-                          (void *)r2[0],
-                          (void *)r2[1]);
+            // FIO_LOG_DEBUG("multi Mul     MUL = %p, carry = %p",
+            //               (void *)r2[0],
+            //               (void *)r2[1]);
             FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
                        "fail Xlen MUL with len == 1");
           }
@@ -553,9 +553,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
             uint64_t b2[4] = {b, 0, 0, 0};
             uint64_t r2[8];
             fio_math_mul(r2, a2, b2, 4);
-            FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
-                          (void *)r2[3],
-                          (void *)r2[4]);
+            // FIO_LOG_DEBUG("multi4 Mul    MUL = %p, carry = %p",
+            //               (void *)r2[3],
+            //               (void *)r2[4]);
             FIO_ASSERT((r0 == r2[0]) && (c0 == r2[1]),
                        "fail Xlen MUL (1) with len == 4");
             FIO_ASSERT((r0 == r2[3]) && (c0 == r2[4]),
