@@ -24540,7 +24540,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua;
   uint64_t ub;
-#if 0
+#if 1
   for (size_t i = 15; i < len; i += 16) {
     uint64_t ua0 = fio_buf2u64(a.buf);
     uint64_t ua1 = fio_buf2u64(a.buf + 8);
