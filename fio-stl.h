@@ -24541,6 +24541,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   uint64_t ua;
   uint64_t ub;
   for (size_t i = 31; i < len; i += 32) {
+#if 0
     uint64_t ua4[4] FIO_ALIGN(16) = {fio_buf2u64_local(a.buf),
                                      fio_buf2u64_local(a.buf + 8),
                                      fio_buf2u64_local(a.buf + 16),
@@ -24549,6 +24550,12 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
                                      fio_buf2u64_local(b.buf + 8),
                                      fio_buf2u64_local(b.buf + 16),
                                      fio_buf2u64_local(b.buf + 24)};
+#else
+    uint64_t ua4[4] FIO_ALIGN(16);
+    uint64_t ub4[4] FIO_ALIGN(16);
+    FIO_MEMCPY(ua4, a.buf, 32);
+    FIO_MEMCPY(ub4, b.buf, 32);
+#endif
     if (!((ua4[0] ^ ub4[0]) | (ua4[1] ^ ub4[1]) | (ua4[2] ^ ub4[2]) |
           (ua4[3] ^ ub4[3]))) {
       a.buf += 32;
