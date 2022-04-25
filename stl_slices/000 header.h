@@ -151,10 +151,25 @@ extern "C" {
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H
 #define H___FIO_CSTL_INCLUDE_ONCE_H
 
+/* *****************************************************************************
+Aligned Memory Access
+***************************************************************************** */
+
 #ifndef FIO_UNALIGNED_ACCESS
-/** Allows facil.io to use unaligned memory access on *some* CPU systems. */
+/** Allows facil.io to attempt unaligned memory access on *some* CPU systems. */
 #define FIO_UNALIGNED_ACCESS 1
 #endif
+
+#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#if FIO_UNALIGNED_ACCESS &&                                                    \
+    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
+     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
+/** True when unaligned memory is allowed. */
+#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
+#else
+#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
+#endif
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /* *****************************************************************************
 Compiler detection, GCC / CLang features and OS dependent included files
@@ -271,194 +286,44 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h>
 #endif
 
-#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#if FIO_UNALIGNED_ACCESS &&                                                    \
-    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
-     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
-#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
-#else
-#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
+/* *****************************************************************************
+Big Endian / Small Endian
+***************************************************************************** */
+
+#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
+    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 0
 #endif
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
-
-/* memcpy selectors / overriding */
-#ifndef FIO_MEMCPY
-#if __has_builtin(__builtin_memcpy)
-#define FIO_MEMCPY              __builtin_memcpy
-#define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
-#define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
-#define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
-#define FIO_MEMCPY8(dest, src)  __builtin_memcpy((dest), (src), 8)
-#define FIO_MEMCPY16(dest, src) __builtin_memcpy((dest), (src), 16)
-#define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
-#define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 1
+#endif
+#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
+    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 1
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 0
+#endif
+#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
+    !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
 #else
-#define FIO_MEMCPY             memcpy
-#define FIO_MEMCPY1(dest, src) fio___memcpy1((dest), (src))
-#define FIO_MEMCPY2(dest, src) fio___memcpy2((dest), (src))
-#define FIO_MEMCPY4(dest, src) fio___memcpy4((dest), (src))
-#define FIO_MEMCPY8(dest, src) fio___memcpy8((dest), (src))
-#define FIO_MEMCPY16(dest, src)                                                \
-  do {                                                                         \
-    fio___memcpy8((dest), (src));                                              \
-    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
-  } while (0)
-#define FIO_MEMCPY32(dest, src)                                                \
-  do {                                                                         \
-    fio___memcpy8((dest), (src));                                              \
-    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
-    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
-    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
-  } while (0)
-#define FIO_MEMCPY64(dest, src)                                                \
-  do {                                                                         \
-    fio___memcpy8((dest), (src));                                              \
-    fio___memcpy8(((char *)(dest) + 8), ((char *)(src) + 8));                  \
-    fio___memcpy8(((char *)(dest) + 16), ((char *)(src) + 16));                \
-    fio___memcpy8(((char *)(dest) + 24), ((char *)(src) + 24));                \
-    fio___memcpy8(((char *)(dest) + 32), ((char *)(src) + 32));                \
-    fio___memcpy8(((char *)(dest) + 40), ((char *)(src) + 40));                \
-    fio___memcpy8(((char *)(dest) + 48), ((char *)(src) + 48));                \
-    fio___memcpy8(((char *)(dest) + 56), ((char *)(src) + 56));                \
-  } while (0)
+#error Could not detect byte order on this system.
+#endif
 
-static inline __attribute__((unused)) void fio___memcpy4(void *dest,
-                                                         const void *src) {
-  char *d = (char *)dest;
-  const char *s = (const char *)src;
-  d[0] = s[0];
-  d[1] = s[1];
-  d[2] = s[2];
-  d[3] = s[3];
-}
-static inline __attribute__((unused)) void fio___memcpy2(void *dest,
-                                                         const void *src) {
-  char *d = (char *)dest;
-  const char *s = (const char *)src;
-  d[0] = s[0];
-  d[1] = s[1];
-}
-static inline __attribute__((unused)) void fio___memcpy1(void *dest,
-                                                         const void *src) {
-  char *d = (char *)dest;
-  const char *s = (const char *)src;
-  d[0] = s[0];
-}
-
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-static inline __attribute__((unused)) void fio___memcpy8(void *dest,
-                                                         const void *src) {
-  union {
-    const void *ptr;
-    unsigned *u;
-    unsigned long *ul;
-    unsigned long long *ull;
-  } d = {.ptr = dest}, s = {.ptr = src};
-  if (sizeof(unsigned long long) == 8) {
-    *d.ull = *s.ull;
-  } else if (sizeof(unsigned long) == 8) {
-    *d.ul = *s.ul;
-  } else if (sizeof(unsigned) == 8) {
-    *d.ul = *s.ul;
-  } else if (sizeof(unsigned) == 4) {
-    d.u[0] = s.u[0];
-    d.u[1] = s.u[1];
-  } else if (sizeof(unsigned) == 2) {
-    d.u[0] = s.u[0];
-    d.u[1] = s.u[1];
-    d.u[2] = s.u[2];
-    d.u[3] = s.u[3];
-  }
-}
-#else  /* all by hand, pray for good compiler optimizations */
-static inline __attribute__((unused)) void fio___memcpy8(void *dest,
-                                                         const void *src) {
-  char *d = (char *)dest;
-  const char *s = (const char *)src;
-  d[0] = s[0];
-  d[1] = s[1];
-  d[2] = s[2];
-  d[3] = s[3];
-  d[4] = s[4];
-  d[5] = s[5];
-  d[6] = s[6];
-  d[7] = s[7];
-}
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
-#endif /* __has_builtin(__builtin_memcpy) */
-
-/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-#define FIO_MEMCPY63x(dest, src, len)                                          \
-  fio___memcpy_small_63((dest), (src), (len))
-/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-#define FIO_MEMCPY31x(dest, src, len)                                          \
-  fio___memcpy_small_31((dest), (src), (len))
-/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-#define FIO_MEMCPY15x(dest, src, len)                                          \
-  fio___memcpy_small_15((dest), (src), (len))
-/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-#define FIO_MEMCPY7x(dest, src, len) fio___memcpy_small_7((dest), (src), (len))
-
-/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-static inline __attribute__((unused)) void fio___memcpy_small_7(
-    void *restrict dest_,
-    const void *restrict src_,
-    size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
-  switch (len & 7) {
-  case 7: dest[6] = src[6]; /* fall through */
-  case 6: dest[5] = src[5]; /* fall through */
-  case 5: dest[4] = src[4]; /* fall through */
-  case 4: dest[3] = src[3]; /* fall through */
-  case 3: dest[2] = src[2]; /* fall through */
-  case 2: dest[1] = src[1]; /* fall through */
-  case 1: dest[0] = src[0]; /* fall through */
-  }
-}
-/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-static inline __attribute__((unused)) void fio___memcpy_small_15(
-    void *restrict dest_,
-    const void *restrict src_,
-    size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
-  if ((len & 8)) {
-    FIO_MEMCPY8(dest, src);
-    dest += 8;
-    src += 8;
-  }
-  fio___memcpy_small_7(dest, src, len);
-}
-/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-static inline __attribute__((unused)) void fio___memcpy_small_31(
-    void *restrict dest_,
-    const void *restrict src_,
-    size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
-  if ((len & 16)) {
-    FIO_MEMCPY16(dest, src);
-    dest += 16;
-    src += 16;
-  }
-  fio___memcpy_small_15(dest, src, len);
-}
-/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-static inline __attribute__((unused)) void fio___memcpy_small_63(
-    void *restrict dest_,
-    const void *restrict src_,
-    size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
-  if ((len & 32)) {
-    FIO_MEMCPY32(dest, src);
-    dest += 32;
-    src += 32;
-  }
-  fio___memcpy_small_31(dest, src, len);
-}
-#endif /* !defined(FIO_MEMCPY) */
+#endif /* predefined / test endianess */
 
 /* *****************************************************************************
 Function Attributes
@@ -510,6 +375,151 @@ Function Attributes
   FIO_SFUNC                                                                    \
   __attribute__((destructor)) void fname FIO_NOOP(void)
 #endif
+
+/* *****************************************************************************
+Memory Copying Primitives
+***************************************************************************** */
+
+/* memcpy selectors / overriding */
+#if __has_builtin(__builtin_memcpy)
+#define FIO_MEMCPY              __builtin_memcpy
+#define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
+#define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
+#define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
+#define FIO_MEMCPY8(dest, src)  __builtin_memcpy((dest), (src), 8)
+#define FIO_MEMCPY16(dest, src) __builtin_memcpy((dest), (src), 16)
+#define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
+#define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
+#else
+#define FIO_MEMCPY              memcpy
+#define FIO_MEMCPY1(dest, src)  fio___memcpy1((dest), (src))
+#define FIO_MEMCPY2(dest, src)  fio___memcpy2((dest), (src))
+#define FIO_MEMCPY4(dest, src)  fio___memcpy4((dest), (src))
+#define FIO_MEMCPY8(dest, src)  fio___memcpy8((dest), (src))
+#define FIO_MEMCPY16(dest, src) fio___memcpy16((dest), (src))
+#define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
+#define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
+
+#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
+  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
+    union {                                                                    \
+      const void *ptr;                                                         \
+      uint##bits##_t *u;                                                       \
+    } d = {.ptr = dest}, s = {.ptr = src};                                     \
+    *d.u = *s.u;                                                               \
+  }
+#define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
+  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
+    struct fio___memcpy##bytes##_s {                                           \
+      uint64_t data[groups_of_8];                                              \
+    };                                                                         \
+    union {                                                                    \
+      const void *ptr;                                                         \
+      struct fio___memcpy##bytes##_s *grp;                                     \
+    } d = {.ptr = dest}, s = {.ptr = src};                                     \
+    *d.grp = *s.grp;                                                           \
+  }
+#else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+#define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
+  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
+    struct fio___memcpy##bytes##_s {                                           \
+      char data[bytes];                                                        \
+    };                                                                         \
+    union {                                                                    \
+      const void *ptr;                                                         \
+      struct fio___memcpy##bytes##_s *grp;                                     \
+    } d = {.ptr = dest}, s = {.ptr = src};                                     \
+    *d.grp = *s.grp;                                                           \
+    _Static_assert(((sizeof(*d.grp)) == bytes),                                \
+                   "compiler padded fio___memcpy" #bytes                       \
+                   "_s adding memory alignment issues.");                      \
+  }
+#define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
+  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
+    struct fio___memcpy##bytes##_s {                                           \
+      char data[bytes];                                                        \
+    };                                                                         \
+    union {                                                                    \
+      const void *ptr;                                                         \
+      struct fio___memcpy##bytes##_s *grp;                                     \
+    } d = {.ptr = dest}, s = {.ptr = src};                                     \
+    *d.grp = *s.grp;                                                           \
+  }
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
+
+FIO___MAKE_MEMCPY_SMALL(1, 8)
+FIO___MAKE_MEMCPY_SMALL(2, 16)
+FIO___MAKE_MEMCPY_SMALL(4, 32)
+FIO___MAKE_MEMCPY_SMALL(8, 64)
+FIO___MAKE_MEMCPY_FIXED(16, 2)
+FIO___MAKE_MEMCPY_FIXED(32, 4)
+FIO___MAKE_MEMCPY_FIXED(64, 8)
+#undef FIO___MAKE_MEMCPY_SMALL
+#undef FIO___MAKE_MEMCPY_FIXED
+
+#endif /* __has_builtin(__builtin_memcpy) */
+
+#define FIO_MEMCPY7x(dest, src, len)  fio___memcpy7x((dest), (src), (len))
+#define FIO_MEMCPY15x(dest, src, len) fio___memcpy15x((dest), (src), (len))
+#define FIO_MEMCPY31x(dest, src, len) fio___memcpy31x((dest), (src), (len))
+#define FIO_MEMCPY63x(dest, src, len) fio___memcpy63x((dest), (src), (len))
+
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+FIO_IFUNC void fio___memcpy7x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
+  char *d = (char *)d_, *s = (char *)s_;
+  switch (l & 7) {
+  case 7: d[6] = s[6]; /* fall through */
+  case 6: d[5] = s[5]; /* fall through */
+  case 5: d[4] = s[4]; /* fall through */
+  case 4: d[3] = s[3]; /* fall through */
+  case 3: d[2] = s[2]; /* fall through */
+  case 2: d[1] = s[1]; /* fall through */
+  case 1: d[0] = s[0]; /* fall through */
+  }
+}
+
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+FIO_IFUNC void fio___memcpy15x(void *restrict dest_,
+                               const void *restrict src_,
+                               size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 8)) {
+    FIO_MEMCPY8(dest, src);
+    dest += 8;
+    src += 8;
+  }
+  fio___memcpy7x(dest, src, len);
+}
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
+                               const void *restrict src_,
+                               size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 16)) {
+    FIO_MEMCPY16(dest, src);
+    dest += 16;
+    src += 16;
+  }
+  fio___memcpy15x(dest, src, len);
+}
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
+                               const void *restrict src_,
+                               size_t len) {
+  char *dest = (char *)dest_;
+  const char *src = (const char *)src_;
+  if ((len & 32)) {
+    FIO_MEMCPY32(dest, src);
+    dest += 32;
+    src += 32;
+  }
+  fio___memcpy31x(dest, src, len);
+}
 
 /* *****************************************************************************
 Macro Stringifier

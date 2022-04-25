@@ -24,24 +24,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_ATOL_H
 #include <inttypes.h>
 #include <math.h>
+
 /* *****************************************************************************
-Strings to Numbers - API
+Strings <=> Numbers - Main Helper API
 ***************************************************************************** */
-/**
- * A helper function that converts between String data to a signed int64_t.
- *
- * Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and
- * binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant
- * Bit must come first.
- *
- * The most significant difference between this function and `strtol` (aside of
- * API design), is the added support for binary representations.
- */
-SFUNC int64_t fio_atol(char **pstr);
-
-/** A helper function that converts between String data to a signed double. */
-SFUNC double fio_atof(char **pstr);
-
 /**
  * Maps characters to alphanumerical value, where numbers have their natural
  * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
@@ -62,6 +48,31 @@ IFUNC uint8_t fio_c2i(unsigned char c);
  * This allows printing of numerals for up to base 36.
  */
 IFUNC uint8_t fio_i2c(unsigned char i);
+
+/** Returns the number of digits in base 10. */
+FIO_IFUNC size_t fio_digits10(int64_t i);
+/** Returns the number of digits in base 10 for an unsigned number. */
+FIO_IFUNC size_t fio_digits10u(uint64_t i);
+/** Returns the number of digits in base 16 for an unsigned number. */
+FIO_IFUNC size_t fio_digits16(uint64_t i);
+
+/* *****************************************************************************
+Strings to Numbers - API
+***************************************************************************** */
+/**
+ * A helper function that converts between String data to a signed int64_t.
+ *
+ * Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and
+ * binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant
+ * Bit must come first.
+ *
+ * The most significant difference between this function and `strtol` (aside of
+ * API design), is the added support for binary representations.
+ */
+SFUNC int64_t fio_atol(char **pstr);
+
+/** A helper function that converts between String data to a signed double. */
+SFUNC double fio_atof(char **pstr);
 
 /* *****************************************************************************
 Numbers to Strings - API
@@ -100,7 +111,53 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
  */
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
 /* *****************************************************************************
-Strings to Numbers - Implementation
+Strings to Numbers - Implementation - inlined
+***************************************************************************** */
+
+/** Returns the number of digits in base 10. */
+FIO_IFUNC size_t fio_digits10(int64_t i) {
+  if (i + 1 > 0)
+    return fio_digits10u(i);
+  return fio_digits10u((0 - i)) + 1;
+}
+/** Returns the number of digits in base 10 for an unsigned number. */
+FIO_IFUNC size_t fio_digits10u(uint64_t i) {
+  size_t r = 1;
+  for (;;) {
+    if (i < 10ULL)
+      return r;
+    if (i < 100ULL)
+      return r + 1;
+    if (i < 1000ULL)
+      return r + 2;
+    if (i < 10000ULL)
+      return r + 3;
+    r += 4;
+    i /= 10000ULL;
+  }
+}
+
+/** Returns the number of digits in base 16 for an unsigned number. */
+FIO_IFUNC size_t fio_digits16(uint64_t i) {
+  if (i < 0x100ULL)
+    return 2;
+  if (i < 0x10000ULL)
+    return 4;
+  if (i < 0x1000000ULL)
+    return 6;
+  if (i < 0x100000000ULL)
+    return 8;
+  if (i < 0x10000000000ULL)
+    return 10;
+  if (i < 0x1000000000000ULL)
+    return 12;
+  if (i < 0x100000000000000ULL)
+    return 14;
+  return 16;
+}
+
+/* *****************************************************************************
+Strings to Numbers - Implementation - possibly externed
 ***************************************************************************** */
 #ifdef FIO_EXTERN_COMPLETE
 
@@ -199,8 +256,85 @@ FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
     r.val = (r.val << 4) | tmp;
     ++(*pstr);
   }
-  while ((fio_c2i(**pstr)) < 16)
+  while ((fio_c2i(**pstr)) < 16) {
+    ++(*pstr);
     ++r.expo;
+  }
+  return r;
+}
+
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
+  if (!inv) {
+    /* overflow? */
+    if (!(val & 0x8000000000000000ULL))
+      return val;
+    errno = E2BIG;
+    val = 0x7FFFFFFFFFFFFFFFULL;
+    return val;
+  }
+  if (!(val & 0x8000000000000000ULL)) {
+    val = (int64_t)0LL - val;
+    return val;
+  }
+  /* read overflow */
+  errno = E2BIG;
+  return (val = 0x8000000000000000ULL);
+}
+
+SFUNC int64_t fio_atol10(char **pstr) {
+  int64_t r;
+  const uint64_t loop_limit = ((~(uint64_t)0ULL) / 10000) + 1;
+  const uint64_t add_limit = (~(uint64_t)0ULL) - 8;
+  char *pos = *pstr;
+  const size_t inv = (pos[0] == '-');
+  pos += inv;
+  uint64_t val = 0;
+  uint64_t r0, r1, r2, r3;
+  for (;;) {
+    r0 = pos[0] - '0';
+    r1 = pos[1] - '0';
+    r2 = pos[2] - '0';
+    r3 = pos[3] - '0';
+    if ((r0 < 10UL) & (r1 < 10UL) & (r2 < 10UL) & (r3 < 10UL)) {
+      val *= 10000ULL;
+      r0 *= 1000ULL;
+      r1 *= 100ULL;
+      r2 *= 10ULL;
+      val += r0 + r1 + r2 + r3;
+      pos += 4;
+      if (val < loop_limit)
+        continue;
+    }
+    break;
+  }
+  while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
+    val *= 10;
+    val += r0;
+    ++pos;
+  }
+  while (((size_t)(pos[0] - '0') < 10ULL)) {
+    errno = E2BIG;
+    ++pos;
+  }
+  *pstr = pos;
+  r = fio_u2i_limit(val, inv);
+  return r;
+}
+
+SFUNC int64_t fio_atol16(char **pstr) {
+  uint64_t r = 0;
+  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
+  for (; !(r & mask);) {
+    uint8_t tmp = fio_c2i(**pstr);
+    if (tmp > 15)
+      return r;
+    r = (r << 4) | tmp;
+    ++(*pstr);
+  }
+  while ((fio_c2i(**pstr)) < 16) {
+    errno = E2BIG;
+    ++(*pstr);
+  }
   return r;
 }
 
@@ -236,6 +370,7 @@ SFUNC int64_t fio_atol(char **pstr) {
   }
 
   /* is_base10: */
+  return fio_atol10(pstr);
   *pstr = p;
   n = fio___aton_read_b2_bX(pstr, 10);
 
@@ -339,10 +474,8 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
     {
       uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
       uint8_t i = 0;    /* counting bits */
-
-      /* dest[len++] = '0'; */
-      /* dest[len++] = 'b'; */
-
+                        /* dest[len++] = '0'; */
+                        /* dest[len++] = 'b'; */
 #if __has_builtin(__builtin_clzll)
       i = __builtin_clzll(n);
       /* make sure the Binary representation doesn't appear signed */
@@ -775,6 +908,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_ATOL("9223372036854775806",
             9223372036854775806LL); /* almost INT64_MAX */
 #undef TEST_ATOL
+
+#define TEST_LTOA_DIGITS10(num, digits)                                        \
+  FIO_ASSERT(fio_digits10(num) == digits,                                      \
+             "fio_digits10 failed for " #num " != (%zu)",                      \
+             (size_t)fio_digits10(num));
+  TEST_LTOA_DIGITS10(1LL, 1);
+  TEST_LTOA_DIGITS10(22LL, 2);
+  TEST_LTOA_DIGITS10(333LL, 3);
+  TEST_LTOA_DIGITS10(4444LL, 4);
+  TEST_LTOA_DIGITS10(55555LL, 5);
+  TEST_LTOA_DIGITS10(666666LL, 6);
+  TEST_LTOA_DIGITS10(7777777LL, 7);
+  TEST_LTOA_DIGITS10(88888888LL, 8);
+  TEST_LTOA_DIGITS10(999999999LL, 9);
+  TEST_LTOA_DIGITS10(-1LL, (1 + 1));
+  TEST_LTOA_DIGITS10(-22LL, (2 + 1));
+  TEST_LTOA_DIGITS10(-333LL, (3 + 1));
+  TEST_LTOA_DIGITS10(-4444LL, (4 + 1));
+  TEST_LTOA_DIGITS10(-55555LL, (5 + 1));
+  TEST_LTOA_DIGITS10(-666666LL, (6 + 1));
+  TEST_LTOA_DIGITS10(-7777777LL, (7 + 1));
+  TEST_LTOA_DIGITS10(-88888888LL, (8 + 1));
+  TEST_LTOA_DIGITS10(-999999999LL, (9 + 1));
+#undef TEST_LTOA_DIGITS10
+
+#define TEST_LTOA_DIGITS16(num, digits)                                        \
+  FIO_ASSERT(fio_digits16(num) == digits,                                      \
+             "fio_digits16 failed for " #num " != (%zu)",                      \
+             (size_t)fio_digits16(num));
+  TEST_LTOA_DIGITS16(0x00ULL, 2);
+  TEST_LTOA_DIGITS16(-0x01ULL, 16);
+  TEST_LTOA_DIGITS16(0x10ULL, 2);
+  TEST_LTOA_DIGITS16(0x100ULL, 4);
+  TEST_LTOA_DIGITS16(0x10000ULL, 6);
+  TEST_LTOA_DIGITS16(0xFFFFFFULL, 6);
+  TEST_LTOA_DIGITS16(0x1000000ULL, 8);
+  TEST_LTOA_DIGITS16(0x10000000ULL, 8);
+  TEST_LTOA_DIGITS16(0x100000000ULL, 10);
+  TEST_LTOA_DIGITS16(0x10000000000ULL, 12);
+  TEST_LTOA_DIGITS16(0x1000000000000ULL, 14);
+  TEST_LTOA_DIGITS16(0x100000000000000ULL, 16);
+  TEST_LTOA_DIGITS16(0xFF00000000000000ULL, 16);
+#undef TEST_LTOA_DIGITS16
 
   FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
   FIO_NAME_TEST(stl, atol_speed)

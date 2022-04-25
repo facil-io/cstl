@@ -663,7 +663,9 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
       umask = ~umask;
       uint64_t r[4] FIO_ALIGN(32) = {0};
       while (u.c + 31 < end) { // clang-format off
-        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
+        FIO_MEMCPY32(r, u.u64);
+        // r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
+        r[0] ^= umask; r[1] ^= umask; r[2] ^= umask; r[3] ^= umask;
         r[0] = fio_has_full_byte64(r[0]);
         r[1] = fio_has_full_byte64(r[1]);
         r[2] = fio_has_full_byte64(r[2]);

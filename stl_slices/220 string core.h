@@ -732,13 +732,12 @@ SFUNC int fio_string_write_i(fio_str_info_s *dest,
   if (inv) {
     i = 0 - i;
   }
-  buf[0] = '0';
-  while (i) {
+  while (i > 9) {
     uint64_t nxt = (uint64_t)i / 10;
     buf[len++] = '0' + ((uint64_t)i - (nxt * 10));
     i = (int64_t)nxt;
   }
-  len += !len; /* printing 0 if zero */
+  buf[len++] = '0' + (unsigned char)i;
   buf[len] = '-';
   len += inv;
   if (fio_string___write_validate_len(dest, reallocate, &len))
@@ -758,13 +757,12 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
   int r = -1;
   char buf[32];
   size_t len = 0;
-  buf[0] = '0';
-  while (i) {
+  while (i > 9) {
     uint64_t nxt = i / 10;
     buf[len++] = '0' + (i - (nxt * 10));
     i = nxt;
   }
-  len += !len; /* printing 0 if zero */
+  buf[len++] = '0' + (unsigned char)i;
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
@@ -782,15 +780,15 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
   int r = -1;
   char buf[16];
   size_t len = 0;
-  buf[0] = '0';
-  buf[1] = '0';
-  while (i) {
+  while (i > 255) {
     buf[len++] = fio_i2c(i & 15);
     i >>= 4;
     buf[len++] = fio_i2c(i & 15);
     i >>= 4;
   }
-  len += (!len << 1); /* printing 00 if zero */
+  buf[len++] = fio_i2c(i & 15);
+  i >>= 4;
+  buf[len++] = fio_i2c(i & 15);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
@@ -1235,10 +1233,10 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
 
   while (pos->klass) {
     switch (pos->klass) { /* use more memory rather then calculate twice. */
-    case 2: /* number */ len += 20; break;
-    case 3: /* unsigned */ len += 20; break;
-    case 4: /* hex */ len += 16; break;
-    case 5: /* binary */ len += 64; break;
+    case 2: /* number */ len += fio_digits10(pos->info.i); break;
+    case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
+    case 4: /* hex */ len += fio_digits16(pos->info.u); break;
+    case 5: /* binary */ len += fio_bits_msb_index(pos->info.u) + 1; break;
     case 6: /* float */ len += 18; break;
     default: len += pos->info.str.len;
     }
@@ -1876,6 +1874,19 @@ SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t new_capa) {
 Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+FIO_SFUNC size_t FIO_NAME_TEST(stl, string_core_ltoa)(char *buf,
+                                                      int64_t i,
+                                                      uint8_t base) {
+  fio_str_info_s s = FIO_STR_INFO3(buf, 0, 1024);
+  if (base == 16) {
+    fio_string_write_hex(&s, NULL, i);
+    return s.len;
+  }
+  fio_string_write_i(&s, NULL, i);
+  return s.len;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   fprintf(stderr, "* Testing Core String API.\n");
   { /* test basic fio_string_write functions. */
@@ -2204,6 +2215,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
+    FIO_NAME_TEST(stl, atol_speed)
+    ("fio_string_write/fio_atol",
+     fio_atol,
+     FIO_NAME_TEST(stl, string_core_ltoa));
   }
 #endif /* DEBUG */
 }

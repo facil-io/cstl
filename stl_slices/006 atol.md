@@ -7,6 +7,50 @@
 
 If the `FIO_ATOL` macro is defined, the following functions will be defined:
 
+### String / Number Helpers
+
+#### `fio_c2i`
+
+```c
+uint8_t fio_c2i(unsigned char c);
+```
+
+Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+
+Out of bound values return 255.
+
+This allows calculations for up to base 36.
+
+#### `fio_digits10`
+
+```c
+size_t fio_digits10(int64_t i);
+```
+
+Returns the signed number of digits in base 10. This number includes the possible `-` sign digit.
+
+#### `fio_digits10u`
+
+```c
+size_t fio_digits10u(uint64_t i);
+```
+
+Returns the number of digits in base 10 for an unsigned number.
+
+#### `fio_digits16`
+
+```c
+size_t fio_digits16(uint64_t i);
+```
+
+Returns the number of digits in base 16 for an **unsigned** number.
+
+Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
+
+**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
+
+### String / Number Conversion API
+
 #### `fio_atol`
 
 ```c
@@ -68,18 +112,5 @@ to base 10. Prefixes aren't added (i.e., no "0x" or "0b" at the beginning of the
 string).
 
 Returns the number of bytes actually written (excluding the NUL terminator).
-
-
-#### `fio_c2i`
-
-```c
-uint8_t fio_c2i(unsigned char c);
-```
-
-Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
-
-Out of bound values return 255.
-
-This allows calculations for up to base 36.
 
 -------------------------------------------------------------------------------
