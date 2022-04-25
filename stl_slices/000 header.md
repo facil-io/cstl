@@ -445,6 +445,117 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
 -------------------------------------------------------------------------------
 
+## Memory Copying Primitives
+
+The following macros are defined to allow for memory copying primitives of set sizes.
+
+Id addition an overridable `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
+#### `FIO_MEMCPY`
+
+```c
+#define FIO_MEMCPY memcpy // or __builtin_memcpy if available
+```
+
+Makes it easy to override `memcpy` implementations.
+
+#### `FIO_MEMCPY1`
+
+```c
+#define FIO_MEMCPY1(dest, src)  fio___memcpy1((dest), (src))
+```
+
+Copies 1 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY2`
+
+```c
+#define FIO_MEMCPY2(dest, src)  fio___memcpy2((dest), (src))
+```
+
+Copies 2 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY4`
+
+```c
+#define FIO_MEMCPY4(dest, src)  fio___memcpy4((dest), (src))
+```
+
+Copies 4 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY8`
+
+```c
+#define FIO_MEMCPY8(dest, src)  fio___memcpy8((dest), (src))
+```
+
+Copies 8 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY16`
+
+```c
+#define FIO_MEMCPY16(dest, src) fio___memcpy16((dest), (src))
+```
+
+Copies 16 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY32`
+
+```c
+#define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
+```
+
+Copies 32 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY64`
+
+```c
+#define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
+```
+
+Copies 64 bytes from `src` to `dest`.
+
+#### `FIO_MEMCPY7x`
+
+```c
+#define FIO_MEMCPY7x(dest, src, len)  fio___memcpy7x((dest), (src), (len))
+```
+
+Copies up to  7 bytes from `src` to `dest`, using `len & 7` to calculate the umber of bytes to copy.
+
+This is provided to allow for easy "tail" processing.
+
+#### `FIO_MEMCPY15x`
+
+```c
+#define FIO_MEMCPY15x(dest, src, len) fio___memcpy15x((dest), (src), (len))
+```
+
+Copies  up to 15 bytes from `src` to `dest`, using `len & 15` to calculate the umber of bytes to copy.
+
+This is provided to allow for easy "tail" processing.
+
+#### `FIO_MEMCPY31x`
+
+```c
+#define FIO_MEMCPY31x(dest, src, len) fio___memcpy31x((dest), (src), (len))
+```
+
+Copies  up to 31 bytes from `src` to `dest`, using `len & 31` to calculate the umber of bytes to copy.
+
+This is provided to allow for easy "tail" processing.
+
+#### `FIO_MEMCPY63x`
+
+```c
+#define FIO_MEMCPY63x(dest, src, len) fio___memcpy63x((dest), (src), (len))
+```
+
+Copies  up to 63 bytes from `src` to `dest`, using `len & 63` to calculate the umber of bytes to copy.
+
+This is provided to allow for easy "tail" processing.
+
+-------------------------------------------------------------------------------
+
 ## Naming and Misc. Macros
 
 #### `FIO_IFUNC`
@@ -490,14 +601,6 @@ When supported by the compiler (i.e., `gcc` / `clang`), this function will execu
 Marks a function as a _destructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
-
-#### `FIO_MEMCPY`
-
-```c
-#define FIO_MEMCPY memcpy // or __builtin_memcpy if unavailable
-```
-
-Makes it easy to override `memcpy` implementations.
 
 #### `FIO_MACRO2STR`
 

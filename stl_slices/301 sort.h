@@ -154,7 +154,10 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
 
     /* partition: swap elements and pointers so mid is a partition pivot */
     FIO_SORT_TYPE *left = lo + 1;
-    FIO_SORT_TYPE *right = hi - 1;
+    FIO_SORT_TYPE *right = hi - 2;
+    /* place mid in the lower partition and update pointer, as it's known */
+    FIO_SORT_SWAP((right[1]), (mid[0]));
+    mid = right + 1;
     for (;;) {
       /* while order is fine, move on. */
       while (FIO_SORT_IS_BIGGER((mid[0]), (left[0])))
@@ -165,12 +168,6 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
       if (left < right) {
         /* right now, left is bigger than mid *and* right is smaller... swap. */
         FIO_SORT_SWAP(left[0], right[0]);
-        /* if we actually swapped mid, pointer follows to keep mid constant. */
-        if (mid == left)
-          mid = right;
-        else if (mid == right)
-          mid = left;
-        /* even if we continue past mid, it will be in the correct partition. */
         ++left;
         --right;
         continue;

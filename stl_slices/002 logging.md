@@ -78,4 +78,8 @@ Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATA
 
 Note, this macro will **only** raise a `SIGINT` signal, but will not exit the program. This is designed to allow debuggers to catch these occurrences and continue execution when possible.
 
+#### `FIO_ASSERT_STATIC(cond, msg)`
+
+Performs static assertion test (tested during compile time). Note that `cond` **must** be a constant expression and `msg` cannot be formatted.
+
 -------------------------------------------------------------------------------

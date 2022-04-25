@@ -500,13 +500,61 @@ Helpers and System Memory Allocation
 Aligned memory copying
 ***************************************************************************** */
 
+/** memcpy / memmove alternative that should work with unaligned memory */
+SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
+  char *d = (char *)dest_;
+  const char *s = (const char *)src_;
+  if ((d == s) | !bytes | !d | !s)
+    return;
+  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
+    /* walk forwards (memcpy) */
+    /* 4 word groups */
+    for (; bytes >= 64; bytes -= 64) {
+      FIO_MEMCPY64(d, s);
+      d += 64;
+      s += 64;
+    }
+    FIO_MEMCPY63x(d, s, bytes);
+    return;
+  } else {
+    /* some memory overlaps, walk backwards (memmove) */
+    d += bytes;
+    s += bytes;
+    for (; bytes >= 64;) {
+      bytes -= 64;
+      d -= 64;
+      s -= 64;
+      FIO_MEMCPY64(d, s);
+    }
+    /* the same as FIO_MEMCPY63x, but walking backwards... */
+    if (bytes & 32) {
+      d -= 32;
+      s -= 32;
+      FIO_MEMCPY32(d, s);
+    }
+    if (bytes & 16) {
+      d -= 16;
+      s -= 16;
+      FIO_MEMCPY16(d, s);
+    }
+    if (bytes & 8) {
+      d -= 8;
+      s -= 8;
+      FIO_MEMCPY8(d, s);
+    }
+    d -= (bytes & 7);
+    s -= (bytes & 7);
+    FIO_MEMCPY7x(d, s, bytes);
+  }
+}
+
 /** memcpy / memmove alternative that requires `size_t` aligned memory */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
   if ((d == s) | !bytes | !d | !s)
     return;
-  if (((s + bytes) <= d) | ((d + bytes) <= s)) {
+  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
     /* walk forwards (memcpy) */
     /* 4 word groups */
     for (; bytes >= (sizeof(size_t) << 2);) {

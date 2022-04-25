@@ -324,10 +324,14 @@ SFUNC int64_t fio_atol10(char **pstr) {
 SFUNC int64_t fio_atol16(char **pstr) {
   uint64_t r = 0;
   const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
+  const size_t inv = (**pstr == '-');
+  *pstr += inv;
+  *pstr += (**pstr == '0');
+  *pstr += ((**pstr | 32) == 'x');
   for (; !(r & mask);) {
     uint8_t tmp = fio_c2i(**pstr);
     if (tmp > 15)
-      return r;
+      goto done;
     r = (r << 4) | tmp;
     ++(*pstr);
   }
@@ -335,7 +339,10 @@ SFUNC int64_t fio_atol16(char **pstr) {
     errno = E2BIG;
     ++(*pstr);
   }
-  return r;
+done:
+  if (!inv) /* do not limit unsigned representation for positive r */
+    return r;
+  return (r = fio_u2i_limit(r, inv));
 }
 
 SFUNC int64_t fio_atol(char **pstr) {
@@ -673,10 +680,12 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  FIO_MEMCPY(dest + written, "Infinity", 9);
-  return written + 8;
+  FIO_MEMCPY8(dest + written, "Infinity");
+  written += 8;
+  dest[written] = 0;
+  return written;
 is_nan:
-  FIO_MEMCPY(dest, "NaN", 4);
+  FIO_MEMCPY4(dest, "NaN");
   return 3;
 }
 
@@ -912,7 +921,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #define TEST_LTOA_DIGITS10(num, digits)                                        \
   FIO_ASSERT(fio_digits10(num) == digits,                                      \
              "fio_digits10 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits10(num));
+             (size_t)fio_digits10(num));                                       \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol10(&pstr__) == num, "fio_atol10 failed for " #num);     \
+  }
   TEST_LTOA_DIGITS10(1LL, 1);
   TEST_LTOA_DIGITS10(22LL, 2);
   TEST_LTOA_DIGITS10(333LL, 3);
@@ -936,7 +950,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #define TEST_LTOA_DIGITS16(num, digits)                                        \
   FIO_ASSERT(fio_digits16(num) == digits,                                      \
              "fio_digits16 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits16(num));
+             (size_t)fio_digits16(num));                                       \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol16(&pstr__) == (int64_t)num,                            \
+               "fio_atol16 failed for " #num);                                 \
+  }
   TEST_LTOA_DIGITS16(0x00ULL, 2);
   TEST_LTOA_DIGITS16(-0x01ULL, 16);
   TEST_LTOA_DIGITS16(0x10ULL, 2);
@@ -1146,7 +1166,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    FIO_MEMCPY(buffer, "1234567890.123", 14);
+    FIO_MEMCPY15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();

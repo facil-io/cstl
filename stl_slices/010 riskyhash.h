@@ -225,10 +225,14 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
   FIO_STABLE_HASH_MUL_PRIME(v);                                                \
-  w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
-  w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
-  w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
-  w[3] = fio_lrot64(w[3], 31) ^ seed;                                          \
+  w[0] = fio_lrot64(w[0], 31);                                                 \
+  w[1] = fio_lrot64(w[1], 31);                                                 \
+  w[2] = fio_lrot64(w[2], 31);                                                 \
+  w[3] = fio_lrot64(w[3], 31);                                                 \
+  w[0] ^= seed;                                                                \
+  w[1] ^= seed;                                                                \
+  w[2] ^= seed;                                                                \
+  w[3] ^= seed;                                                                \
   v[0] += w[0];                                                                \
   v[1] += w[1];                                                                \
   v[2] += w[2];                                                                \
@@ -264,35 +268,8 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-#if 1
     w[0] = w[1] = w[2] = w[3] = 0;
-    FIO_MEMCPY31x(w, data, len);
-#else
-    register const size_t word_tail_len = (len & 24);
-    register uint64_t tmp = 0;
-    w[0] = w[1] = w[2] = w[3] = 0;
-    switch (word_tail_len) {
-    case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
-    case 16: w[1] = fio_buf2u64_little(data + 8);  /* fall through */
-    case 8: w[0] = fio_buf2u64_little(data); data += word_tail_len;
-    }
-    switch ((len & 7)) {
-    case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48); /* fall through */
-    case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40); /* fall through */
-    case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32); /* fall through */
-    case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24); /* fall through */
-    case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16); /* fall through */
-    case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);  /* fall through */
-    case 1:
-      tmp |= (((uint64_t)data[0] & 0xFF));
-      switch (word_tail_len) {
-      case 24: w[3] = tmp; break;
-      case 16: w[2] = tmp; break;
-      case 8: w[1] = tmp; break;
-      case 0: w[0] = tmp; break;
-      }
-    }
-#endif
+    FIO_MEMCPY31x(w, data, len); /* copies `len & 31` bytes */
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -578,7 +555,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY8(buffer, &hash);
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -589,7 +566,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_COMPILER_GUARD;
     }
     end = clock();
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY8(buffer, &hash);
     if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
         cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,

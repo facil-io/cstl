@@ -482,23 +482,23 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
     c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY(dest.u64, data, 64);
+    FIO_MEMCPY64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
     fio___poly_consume128bit(&pl, dest.u64, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 2, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 4, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 6, 1);
-    FIO_MEMCPY(data, dest.u64, 64);
+    FIO_MEMCPY64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
   memset(dest.u64, 0, 64);
-  FIO_MEMCPY(dest.u64, data, (len & 63));
+  FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
   fio___poly_consume_msg(&pl, (uint8_t *)&dest, (len & 63));
-  FIO_MEMCPY(data, dest.u64, (len & 63));
+  FIO_MEMCPY63x(data, dest.u64, len);
   fio___poly_finilize(&pl);
   fio_u2buf64_little(mac, pl.a[0]);
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
