@@ -287,45 +287,6 @@ typedef SSIZE_T ssize_t;
 #endif
 
 /* *****************************************************************************
-Big Endian / Small Endian
-***************************************************************************** */
-
-#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
-    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 0
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 1
-#endif
-#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
-    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 1
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 0
-#endif
-#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
-    !defined(__LITTLE_ENDIAN__)
-#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
-#define FIO_BIG_ENDIAN_TEST    0x34333231UL
-#define FIO_ENDIAN_ORDER_TEST  ('1234')
-#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
-#define __BIG_ENDIAN__    0
-#define __LITTLE_ENDIAN__ 1
-#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
-#define __BIG_ENDIAN__    1
-#define __LITTLE_ENDIAN__ 0
-#else
-#error Could not detect byte order on this system.
-#endif
-
-#endif /* predefined / test endianess */
-
-/* *****************************************************************************
 Function Attributes
 ***************************************************************************** */
 
@@ -377,12 +338,67 @@ Function Attributes
 #endif
 
 /* *****************************************************************************
+Static Endian Test
+***************************************************************************** */
+
+#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
+    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 0
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 1
+#endif
+#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
+    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 1
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 0
+#endif
+#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
+    !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
+#else
+#error Could not detect byte order on this system.
+#endif
+
+#endif /* predefined / test endianess */
+
+/* *****************************************************************************
+Dynamic Endian Test
+***************************************************************************** */
+
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(size_t)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
+}
+
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+
+/* *****************************************************************************
 Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
 #if __has_builtin(__builtin_memcpy)
-#define FIO_MEMCPY              __builtin_memcpy
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY __builtin_memcpy
+#endif
 #define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
 #define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
 #define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
@@ -391,7 +407,9 @@ Memory Copying Primitives
 #define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
 #define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
 #else
-#define FIO_MEMCPY              memcpy
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY memcpy
+#endif
 #define FIO_MEMCPY1(dest, src)  fio___memcpy1((dest), (src))
 #define FIO_MEMCPY2(dest, src)  fio___memcpy2((dest), (src))
 #define FIO_MEMCPY4(dest, src)  fio___memcpy4((dest), (src))
@@ -431,9 +449,6 @@ Memory Copying Primitives
       struct fio___memcpy##bytes##_s *grp;                                     \
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
-    _Static_assert(((sizeof(*d.grp)) == bytes),                                \
-                   "compiler padded fio___memcpy" #bytes                       \
-                   "_s adding memory alignment issues.");                      \
   }
 #define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
@@ -687,29 +702,32 @@ Security Related macros
   } while (0)
 
 /* *****************************************************************************
-Assertions
+Static Assertions
 ***************************************************************************** */
-#ifdef static_assert
-static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
-static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
-static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
-static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
-static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
+#if __STDC_VERSION__ >= 201112L
+#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
+#else
+#define FIO_ASSERT_STATIC(cond, msg)                                           \
+  static const char *FIO_NAME(fio_static_assertion_failed,                     \
+                              __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
 #endif
 
-/* *****************************************************************************
-Dynamic Endian Test
-***************************************************************************** */
+typedef struct {
+  char data[2];
+} fio___padding_char_struct_test_s;
 
-FIO_IFUNC unsigned int fio_is_little_endian(void) {
-  union {
-    unsigned long ul;
-    unsigned char u8[sizeof(size_t)];
-  } u = {.ul = 1};
-  return (unsigned int)u.u8[0];
-}
-
-FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+FIO_ASSERT_STATIC(sizeof(uint8_t) == 1,
+                  "facil.io requires an 8bit wide uint8_t");
+FIO_ASSERT_STATIC(sizeof(uint16_t) == 2,
+                  "facil.io requires a 16bit wide uint16_t");
+FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
+                  "facil.io requires a 32bit wide uint32_t");
+FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
+                  "facil.io requires a 64bit wide uint64_t");
+FIO_ASSERT_STATIC(
+    sizeof(fio___padding_char_struct_test_s) == 2,
+    "compiler adds padding to fio___memcpyX, adding memory alignment issues.");
 
 /* *****************************************************************************
 Miscellaneous helper macros

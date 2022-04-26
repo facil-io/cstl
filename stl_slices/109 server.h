@@ -305,8 +305,8 @@ struct fio_protocol_s {
   void (*on_timeout)(fio_s *io);
   /**
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
-   * system calls
-   * */
+   * system calls.
+   */
   struct {
     /** Called to perform a non-blocking `read`, same as the system call. */
     ssize_t (*read)(int fd, void *buf, size_t len, void *tls);

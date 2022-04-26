@@ -1,11 +1,11 @@
 ## Quick Sort and Insert Sort
 
 ```c
-#define FIO_SORT
+#define FIO_SORT_NAME
 #include "fio-stl.h"
 ```
 
-If the `FIO_SORT` is defined (and named), the following functions will be defined.
+If the `FIO_SORT_NAME` is defined (and named), the following functions will be defined.
 
 This can be performed multiple times for multiple types.
 
@@ -13,10 +13,10 @@ This can be performed multiple times for multiple types.
 
 The following macros define the behavior of the sorting algorithm.
 
-#### `FIO_SORT`
+#### `FIO_SORT_NAME`
 
 ```c
-#define FIO_SORT num // will produce function names such as num_sort(...)
+#define FIO_SORT_NAME num // will produce function names such as num_sort(...)
 ```
 
 The prefix used for naming the sorting functions.
@@ -101,7 +101,7 @@ The following example code creates an array of random strings and then sorts the
 
 ```c
 #define FIO_STR_SMALL sstr
-#define FIO_SORT      sstr
+#define FIO_SORT_NAME      sstr
 #define FIO_SORT_TYPE sstr_s
 #define FIO_SORT_IS_BIGGER(a, b)                                               \
   fio_string_is_greater(sstr_info(&a), sstr_info(&b))

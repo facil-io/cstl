@@ -287,45 +287,6 @@ typedef SSIZE_T ssize_t;
 #endif
 
 /* *****************************************************************************
-Big Endian / Small Endian
-***************************************************************************** */
-
-#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
-    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 0
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 1
-#endif
-#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
-    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 1
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 0
-#endif
-#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
-    !defined(__LITTLE_ENDIAN__)
-#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
-#define FIO_BIG_ENDIAN_TEST    0x34333231UL
-#define FIO_ENDIAN_ORDER_TEST  ('1234')
-#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
-#define __BIG_ENDIAN__    0
-#define __LITTLE_ENDIAN__ 1
-#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
-#define __BIG_ENDIAN__    1
-#define __LITTLE_ENDIAN__ 0
-#else
-#error Could not detect byte order on this system.
-#endif
-
-#endif /* predefined / test endianess */
-
-/* *****************************************************************************
 Function Attributes
 ***************************************************************************** */
 
@@ -377,12 +338,67 @@ Function Attributes
 #endif
 
 /* *****************************************************************************
+Static Endian Test
+***************************************************************************** */
+
+#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
+    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 0
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 1
+#endif
+#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
+    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 1
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 0
+#endif
+#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
+    !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
+#else
+#error Could not detect byte order on this system.
+#endif
+
+#endif /* predefined / test endianess */
+
+/* *****************************************************************************
+Dynamic Endian Test
+***************************************************************************** */
+
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(size_t)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
+}
+
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+
+/* *****************************************************************************
 Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
 #if __has_builtin(__builtin_memcpy)
-#define FIO_MEMCPY              __builtin_memcpy
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY __builtin_memcpy
+#endif
 #define FIO_MEMCPY1(dest, src)  __builtin_memcpy((dest), (src), 1)
 #define FIO_MEMCPY2(dest, src)  __builtin_memcpy((dest), (src), 2)
 #define FIO_MEMCPY4(dest, src)  __builtin_memcpy((dest), (src), 4)
@@ -391,7 +407,9 @@ Memory Copying Primitives
 #define FIO_MEMCPY32(dest, src) __builtin_memcpy((dest), (src), 32)
 #define FIO_MEMCPY64(dest, src) __builtin_memcpy((dest), (src), 64)
 #else
-#define FIO_MEMCPY              memcpy
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY memcpy
+#endif
 #define FIO_MEMCPY1(dest, src)  fio___memcpy1((dest), (src))
 #define FIO_MEMCPY2(dest, src)  fio___memcpy2((dest), (src))
 #define FIO_MEMCPY4(dest, src)  fio___memcpy4((dest), (src))
@@ -431,9 +449,6 @@ Memory Copying Primitives
       struct fio___memcpy##bytes##_s *grp;                                     \
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
-    _Static_assert(((sizeof(*d.grp)) == bytes),                                \
-                   "compiler padded fio___memcpy" #bytes                       \
-                   "_s adding memory alignment issues.");                      \
   }
 #define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
@@ -687,29 +702,32 @@ Security Related macros
   } while (0)
 
 /* *****************************************************************************
-Assertions
+Static Assertions
 ***************************************************************************** */
-#ifdef static_assert
-static_assert(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
-static_assert(sizeof(uint8_t) == 1, "facil.io requires an 8bit wide uint8_t");
-static_assert(sizeof(uint16_t) == 2, "facil.io requires a 16bit wide uint16_t");
-static_assert(sizeof(uint32_t) == 4, "facil.io requires a 32bit wide uint32_t");
-static_assert(sizeof(uint64_t) == 8, "facil.io requires a 64bit wide uint64_t");
+#if __STDC_VERSION__ >= 201112L
+#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
+#else
+#define FIO_ASSERT_STATIC(cond, msg)                                           \
+  static const char *FIO_NAME(fio_static_assertion_failed,                     \
+                              __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
 #endif
 
-/* *****************************************************************************
-Dynamic Endian Test
-***************************************************************************** */
+typedef struct {
+  char data[2];
+} fio___padding_char_struct_test_s;
 
-FIO_IFUNC unsigned int fio_is_little_endian(void) {
-  union {
-    unsigned long ul;
-    unsigned char u8[sizeof(size_t)];
-  } u = {.ul = 1};
-  return (unsigned int)u.u8[0];
-}
-
-FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+FIO_ASSERT_STATIC(sizeof(uint8_t) == 1,
+                  "facil.io requires an 8bit wide uint8_t");
+FIO_ASSERT_STATIC(sizeof(uint16_t) == 2,
+                  "facil.io requires a 16bit wide uint16_t");
+FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
+                  "facil.io requires a 32bit wide uint32_t");
+FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
+                  "facil.io requires a 64bit wide uint64_t");
+FIO_ASSERT_STATIC(
+    sizeof(fio___padding_char_struct_test_s) == 2,
+    "compiler adds padding to fio___memcpyX, adding memory alignment issues.");
 
 /* *****************************************************************************
 Miscellaneous helper macros
@@ -4670,10 +4688,14 @@ SFUNC int64_t fio_atol10(char **pstr) {
 SFUNC int64_t fio_atol16(char **pstr) {
   uint64_t r = 0;
   const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
+  const size_t inv = (**pstr == '-');
+  *pstr += inv;
+  *pstr += (**pstr == '0');
+  *pstr += ((**pstr | 32) == 'x');
   for (; !(r & mask);) {
     uint8_t tmp = fio_c2i(**pstr);
     if (tmp > 15)
-      return r;
+      goto done;
     r = (r << 4) | tmp;
     ++(*pstr);
   }
@@ -4681,7 +4703,10 @@ SFUNC int64_t fio_atol16(char **pstr) {
     errno = E2BIG;
     ++(*pstr);
   }
-  return r;
+done:
+  if (!inv) /* do not limit unsigned representation for positive r */
+    return r;
+  return (r = fio_u2i_limit(r, inv));
 }
 
 SFUNC int64_t fio_atol(char **pstr) {
@@ -5019,10 +5044,12 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  FIO_MEMCPY(dest + written, "Infinity", 9);
-  return written + 8;
+  FIO_MEMCPY8(dest + written, "Infinity");
+  written += 8;
+  dest[written] = 0;
+  return written;
 is_nan:
-  FIO_MEMCPY(dest, "NaN", 4);
+  FIO_MEMCPY4(dest, "NaN");
   return 3;
 }
 
@@ -5258,7 +5285,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #define TEST_LTOA_DIGITS10(num, digits)                                        \
   FIO_ASSERT(fio_digits10(num) == digits,                                      \
              "fio_digits10 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits10(num));
+             (size_t)fio_digits10(num));                                       \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol10(&pstr__) == num, "fio_atol10 failed for " #num);     \
+  }
   TEST_LTOA_DIGITS10(1LL, 1);
   TEST_LTOA_DIGITS10(22LL, 2);
   TEST_LTOA_DIGITS10(333LL, 3);
@@ -5282,7 +5314,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #define TEST_LTOA_DIGITS16(num, digits)                                        \
   FIO_ASSERT(fio_digits16(num) == digits,                                      \
              "fio_digits16 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits16(num));
+             (size_t)fio_digits16(num));                                       \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol16(&pstr__) == (int64_t)num,                            \
+               "fio_atol16 failed for " #num);                                 \
+  }
   TEST_LTOA_DIGITS16(0x00ULL, 2);
   TEST_LTOA_DIGITS16(-0x01ULL, 16);
   TEST_LTOA_DIGITS16(0x10ULL, 2);
@@ -5492,7 +5530,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    FIO_MEMCPY(buffer, "1234567890.123", 14);
+    FIO_MEMCPY15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();
@@ -6015,10 +6053,14 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[2] ^= w[2];                                                                \
   v[3] ^= w[3];                                                                \
   FIO_STABLE_HASH_MUL_PRIME(v);                                                \
-  w[0] = fio_lrot64(w[0], 31) ^ seed;                                          \
-  w[1] = fio_lrot64(w[1], 31) ^ seed;                                          \
-  w[2] = fio_lrot64(w[2], 31) ^ seed;                                          \
-  w[3] = fio_lrot64(w[3], 31) ^ seed;                                          \
+  w[0] = fio_lrot64(w[0], 31);                                                 \
+  w[1] = fio_lrot64(w[1], 31);                                                 \
+  w[2] = fio_lrot64(w[2], 31);                                                 \
+  w[3] = fio_lrot64(w[3], 31);                                                 \
+  w[0] ^= seed;                                                                \
+  w[1] ^= seed;                                                                \
+  w[2] ^= seed;                                                                \
+  w[3] ^= seed;                                                                \
   v[0] += w[0];                                                                \
   v[1] += w[1];                                                                \
   v[2] += w[2];                                                                \
@@ -6054,35 +6096,8 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-#if 1
     w[0] = w[1] = w[2] = w[3] = 0;
-    FIO_MEMCPY31x(w, data, len);
-#else
-    register const size_t word_tail_len = (len & 24);
-    register uint64_t tmp = 0;
-    w[0] = w[1] = w[2] = w[3] = 0;
-    switch (word_tail_len) {
-    case 24: w[2] = fio_buf2u64_little(data + 16); /* fall through */
-    case 16: w[1] = fio_buf2u64_little(data + 8);  /* fall through */
-    case 8: w[0] = fio_buf2u64_little(data); data += word_tail_len;
-    }
-    switch ((len & 7)) {
-    case 7: tmp |= (((uint64_t)data[6] & 0xFF) << 48); /* fall through */
-    case 6: tmp |= (((uint64_t)data[5] & 0xFF) << 40); /* fall through */
-    case 5: tmp |= (((uint64_t)data[4] & 0xFF) << 32); /* fall through */
-    case 4: tmp |= (((uint64_t)data[3] & 0xFF) << 24); /* fall through */
-    case 3: tmp |= (((uint64_t)data[2] & 0xFF) << 16); /* fall through */
-    case 2: tmp |= (((uint64_t)data[1] & 0xFF) << 8);  /* fall through */
-    case 1:
-      tmp |= (((uint64_t)data[0] & 0xFF));
-      switch (word_tail_len) {
-      case 24: w[3] = tmp; break;
-      case 16: w[2] = tmp; break;
-      case 8: w[1] = tmp; break;
-      case 0: w[0] = tmp; break;
-      }
-    }
-#endif
+    FIO_MEMCPY31x(w, data, len); /* copies `len & 31` bytes */
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
@@ -6368,7 +6383,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY8(buffer, &hash);
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -6379,7 +6394,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_COMPILER_GUARD;
     }
     end = clock();
-    FIO_MEMCPY(buffer, &hash, sizeof(hash));
+    FIO_MEMCPY8(buffer, &hash);
     if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
         cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
@@ -7441,23 +7456,23 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
     c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY(dest.u64, data, 64);
+    FIO_MEMCPY64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
     fio___poly_consume128bit(&pl, dest.u64, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 2, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 4, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 6, 1);
-    FIO_MEMCPY(data, dest.u64, 64);
+    FIO_MEMCPY64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
   memset(dest.u64, 0, 64);
-  FIO_MEMCPY(dest.u64, data, (len & 63));
+  FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
   fio___poly_consume_msg(&pl, (uint8_t *)&dest, (len & 63));
-  FIO_MEMCPY(data, dest.u64, (len & 63));
+  FIO_MEMCPY63x(data, dest.u64, len);
   fio___poly_finilize(&pl);
   fio_u2buf64_little(mac, pl.a[0]);
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
@@ -9354,13 +9369,61 @@ Helpers and System Memory Allocation
 Aligned memory copying
 ***************************************************************************** */
 
+/** memcpy / memmove alternative that should work with unaligned memory */
+SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
+  char *d = (char *)dest_;
+  const char *s = (const char *)src_;
+  if ((d == s) | !bytes | !d | !s)
+    return;
+  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
+    /* walk forwards (memcpy) */
+    /* 4 word groups */
+    for (; bytes >= 64; bytes -= 64) {
+      FIO_MEMCPY64(d, s);
+      d += 64;
+      s += 64;
+    }
+    FIO_MEMCPY63x(d, s, bytes);
+    return;
+  } else {
+    /* some memory overlaps, walk backwards (memmove) */
+    d += bytes;
+    s += bytes;
+    for (; bytes >= 64;) {
+      bytes -= 64;
+      d -= 64;
+      s -= 64;
+      FIO_MEMCPY64(d, s);
+    }
+    /* the same as FIO_MEMCPY63x, but walking backwards... */
+    if (bytes & 32) {
+      d -= 32;
+      s -= 32;
+      FIO_MEMCPY32(d, s);
+    }
+    if (bytes & 16) {
+      d -= 16;
+      s -= 16;
+      FIO_MEMCPY16(d, s);
+    }
+    if (bytes & 8) {
+      d -= 8;
+      s -= 8;
+      FIO_MEMCPY8(d, s);
+    }
+    d -= (bytes & 7);
+    s -= (bytes & 7);
+    FIO_MEMCPY7x(d, s, bytes);
+  }
+}
+
 /** memcpy / memmove alternative that requires `size_t` aligned memory */
 SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
   if ((d == s) | !bytes | !d | !s)
     return;
-  if (((s + bytes) <= d) | ((d + bytes) <= s)) {
+  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
     /* walk forwards (memcpy) */
     /* 4 word groups */
     for (; bytes >= (sizeof(size_t) << 2);) {
@@ -18234,8 +18297,8 @@ struct fio_protocol_s {
   void (*on_timeout)(fio_s *io);
   /**
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
-   * system calls
-   * */
+   * system calls.
+   */
   struct {
     /** Called to perform a non-blocking `read`, same as the system call. */
     ssize_t (*read)(int fd, void *buf, size_t len, void *tls);
@@ -28054,7 +28117,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_SORT      num           /* Development inclusion - ignore line */
+#define FIO_SORT_NAME num           /* Development inclusion - ignore line */
 #define FIO_SORT_TYPE size_t        /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -28069,7 +28132,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_SORT
+#ifdef FIO_SORT_NAME
 
 /* *****************************************************************************
 Sort Settings
@@ -28104,13 +28167,14 @@ Sort API
 ***************************************************************************** */
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members (quicksort). */
-FIO_IFUNC void FIO_NAME(FIO_SORT, sort)(FIO_SORT_TYPE *array, size_t count);
+FIO_IFUNC void FIO_NAME(FIO_SORT_NAME, sort)(FIO_SORT_TYPE *array,
+                                             size_t count);
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count);
+SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count);
 
 /* Quick sort, for larger arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count);
+SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count);
 
 /* *****************************************************************************
 Sort Implementation - inlined static functions
@@ -28118,8 +28182,9 @@ see ideas from: https://youtu.be/FJJTYQYB1JQ
 ***************************************************************************** */
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members (quicksort). */
-FIO_IFUNC void FIO_NAME(FIO_SORT, sort)(FIO_SORT_TYPE *array, size_t count) {
-  FIO_NAME(FIO_SORT, qsort)(array, count);
+FIO_IFUNC void FIO_NAME(FIO_SORT_NAME, sort)(FIO_SORT_TYPE *array,
+                                             size_t count) {
+  FIO_NAME(FIO_SORT_NAME, qsort)(array, count);
 }
 
 /* *****************************************************************************
@@ -28128,7 +28193,7 @@ Sort Implementation - possibly externed functions.
 #ifdef FIO_EXTERN_COMPLETE
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count) {
+SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
   /* TODO: a fast(ish) small sort on small arrays */
   if ((!count | !array))
     return;
@@ -28153,14 +28218,14 @@ SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count) {
 }
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members. */
-SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
+SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
   /* With thanks to Douglas C. Schmidt, as I used his code for reference:
    * https://code.woboq.org/userspace/glibc/stdlib/qsort.c.html
    */
   if ((!count | !array))
     return;
   if (count < FIO_SORT_THRESHOLD) {
-    FIO_NAME(FIO_SORT, isort)(array, count);
+    FIO_NAME(FIO_SORT_NAME, isort)(array, count);
     return;
   }
   /* no recursion, setup a stack that can hold log2(count). */
@@ -28185,7 +28250,7 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
 
     /* sort small ranges using insert sort */
     if (slice_len < FIO_SORT_THRESHOLD) {
-      FIO_NAME(FIO_SORT, isort)(lo, slice_len);
+      FIO_NAME(FIO_SORT_NAME, isort)(lo, slice_len);
       if (queue == top)
         return;
       continue;
@@ -28203,7 +28268,10 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
 
     /* partition: swap elements and pointers so mid is a partition pivot */
     FIO_SORT_TYPE *left = lo + 1;
-    FIO_SORT_TYPE *right = hi - 1;
+    FIO_SORT_TYPE *right = hi - 2;
+    /* place mid in the lower partition and update pointer, as it's known */
+    FIO_SORT_SWAP((right[1]), (mid[0]));
+    mid = right + 1;
     for (;;) {
       /* while order is fine, move on. */
       while (FIO_SORT_IS_BIGGER((mid[0]), (left[0])))
@@ -28214,12 +28282,6 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
       if (left < right) {
         /* right now, left is bigger than mid *and* right is smaller... swap. */
         FIO_SORT_SWAP(left[0], right[0]);
-        /* if we actually swapped mid, pointer follows to keep mid constant. */
-        if (mid == left)
-          mid = right;
-        else if (mid == right)
-          mid = left;
-        /* even if we continue past mid, it will be in the correct partition. */
         ++left;
         --right;
         continue;
@@ -28248,12 +28310,12 @@ Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SORT_TEST)
 
-FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a,
-                                                  FIO_SORT_TYPE *b) {
+FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT_NAME)(FIO_SORT_TYPE *a,
+                                                       FIO_SORT_TYPE *b) {
   return (int)(a[0] - b[0]);
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT_NAME))(void) {
   fprintf(stderr, "* Testing facil.io array sort helper:\n");
   { /* test insert sort of short array */
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
@@ -28270,15 +28332,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
           len,
           sizeof(ordered[0]),
           (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                        FIO_SORT));
-    FIO_NAME(FIO_SORT, isort)(mixed, len);
+                                                        FIO_SORT_NAME));
+    FIO_NAME(FIO_SORT_NAME, isort)(mixed, len);
     FIO_ASSERT(!memcmp(mixed, ordered, sizeof(*ordered) * len),
                "short sort failed!");
     clock_t start, end;
     start = clock();
     for (size_t i = 0; i < (1UL << 16); ++i) {
       FIO_COMPILER_GUARD;
-      FIO_NAME(FIO_SORT, sort)(mixed, len);
+      FIO_NAME(FIO_SORT_NAME, sort)(mixed, len);
     }
     end = clock();
     fprintf(stderr,
@@ -28291,7 +28353,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
             len,
             sizeof(mixed[0]),
             (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                          FIO_SORT));
+                                                          FIO_SORT_NAME));
     }
     end = clock();
     fprintf(stderr,
@@ -28305,12 +28367,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
     for (size_t i = 0; i < len; ++i) {
       mem[i] = mem[len + i] = (size_t)rand();
     }
-    FIO_NAME(FIO_SORT, sort)(mem, len);
+    FIO_NAME(FIO_SORT_NAME, sort)(mem, len);
     qsort(mem + len,
           len,
           sizeof(mem[0]),
           (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                        FIO_SORT));
+                                                        FIO_SORT_NAME));
     if (memcmp(mem, mem + len, (sizeof(mem[0]) * len))) {
       size_t i = 0;
       while (mem[i] == mem[len + i] && i < len)
@@ -28323,7 +28385,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
         mem[i] = mem[len + i] = (size_t)rand();
       }
       start = clock();
-      FIO_NAME(FIO_SORT, sort)(mem, len);
+      FIO_NAME(FIO_SORT_NAME, sort)(mem, len);
       end = clock();
       fio_clk += end - start;
       start = clock();
@@ -28331,7 +28393,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
             len,
             sizeof(mem[0]),
             (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                          FIO_SORT));
+                                                          FIO_SORT_NAME));
       end = clock();
       lib_clk += end - start;
       FIO_ASSERT(!memcmp(mem, mem + len, (sizeof(mem[0]) * len)),
@@ -28359,8 +28421,8 @@ Module Cleanup
 #undef FIO_SORT_TYPE
 #undef FIO_SORT_TEST
 #undef FIO_SORT_SWAP
-#undef FIO_SORT
-#endif /* FIO_SORT */
+#undef FIO_SORT_NAME
+#endif /* FIO_SORT_NAME */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -31231,7 +31293,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
-#define FIO_SORT      num
+#define FIO_SORT_NAME num
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
 

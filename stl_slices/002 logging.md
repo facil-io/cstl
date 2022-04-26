@@ -1,4 +1,4 @@
-## Logging and Assertions:
+## Logging and Assertions
 
 ```c
 #define FIO_LOG

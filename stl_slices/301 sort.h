@@ -5,7 +5,7 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_SORT      num           /* Development inclusion - ignore line */
+#define FIO_SORT_NAME num           /* Development inclusion - ignore line */
 #define FIO_SORT_TYPE size_t        /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -20,7 +20,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_SORT
+#ifdef FIO_SORT_NAME
 
 /* *****************************************************************************
 Sort Settings
@@ -55,13 +55,14 @@ Sort API
 ***************************************************************************** */
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members (quicksort). */
-FIO_IFUNC void FIO_NAME(FIO_SORT, sort)(FIO_SORT_TYPE *array, size_t count);
+FIO_IFUNC void FIO_NAME(FIO_SORT_NAME, sort)(FIO_SORT_TYPE *array,
+                                             size_t count);
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count);
+SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count);
 
 /* Quick sort, for larger arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count);
+SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count);
 
 /* *****************************************************************************
 Sort Implementation - inlined static functions
@@ -69,8 +70,9 @@ see ideas from: https://youtu.be/FJJTYQYB1JQ
 ***************************************************************************** */
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members (quicksort). */
-FIO_IFUNC void FIO_NAME(FIO_SORT, sort)(FIO_SORT_TYPE *array, size_t count) {
-  FIO_NAME(FIO_SORT, qsort)(array, count);
+FIO_IFUNC void FIO_NAME(FIO_SORT_NAME, sort)(FIO_SORT_TYPE *array,
+                                             size_t count) {
+  FIO_NAME(FIO_SORT_NAME, qsort)(array, count);
 }
 
 /* *****************************************************************************
@@ -79,7 +81,7 @@ Sort Implementation - possibly externed functions.
 #ifdef FIO_EXTERN_COMPLETE
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
-SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count) {
+SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
   /* TODO: a fast(ish) small sort on small arrays */
   if ((!count | !array))
     return;
@@ -104,14 +106,14 @@ SFUNC void FIO_NAME(FIO_SORT, isort)(FIO_SORT_TYPE *array, size_t count) {
 }
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members. */
-SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
+SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
   /* With thanks to Douglas C. Schmidt, as I used his code for reference:
    * https://code.woboq.org/userspace/glibc/stdlib/qsort.c.html
    */
   if ((!count | !array))
     return;
   if (count < FIO_SORT_THRESHOLD) {
-    FIO_NAME(FIO_SORT, isort)(array, count);
+    FIO_NAME(FIO_SORT_NAME, isort)(array, count);
     return;
   }
   /* no recursion, setup a stack that can hold log2(count). */
@@ -136,7 +138,7 @@ SFUNC void FIO_NAME(FIO_SORT, qsort)(FIO_SORT_TYPE *array, size_t count) {
 
     /* sort small ranges using insert sort */
     if (slice_len < FIO_SORT_THRESHOLD) {
-      FIO_NAME(FIO_SORT, isort)(lo, slice_len);
+      FIO_NAME(FIO_SORT_NAME, isort)(lo, slice_len);
       if (queue == top)
         return;
       continue;
@@ -196,12 +198,12 @@ Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SORT_TEST)
 
-FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT)(FIO_SORT_TYPE *a,
-                                                  FIO_SORT_TYPE *b) {
+FIO_SFUNC int FIO_NAME(fio_qsort___cmp, FIO_SORT_NAME)(FIO_SORT_TYPE *a,
+                                                       FIO_SORT_TYPE *b) {
   return (int)(a[0] - b[0]);
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT_NAME))(void) {
   fprintf(stderr, "* Testing facil.io array sort helper:\n");
   { /* test insert sort of short array */
     size_t mixed[] = {19, 23, 28, 21, 3,  10, 7, 2,  13, 4,  15,
@@ -218,15 +220,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
           len,
           sizeof(ordered[0]),
           (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                        FIO_SORT));
-    FIO_NAME(FIO_SORT, isort)(mixed, len);
+                                                        FIO_SORT_NAME));
+    FIO_NAME(FIO_SORT_NAME, isort)(mixed, len);
     FIO_ASSERT(!memcmp(mixed, ordered, sizeof(*ordered) * len),
                "short sort failed!");
     clock_t start, end;
     start = clock();
     for (size_t i = 0; i < (1UL << 16); ++i) {
       FIO_COMPILER_GUARD;
-      FIO_NAME(FIO_SORT, sort)(mixed, len);
+      FIO_NAME(FIO_SORT_NAME, sort)(mixed, len);
     }
     end = clock();
     fprintf(stderr,
@@ -239,7 +241,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
             len,
             sizeof(mixed[0]),
             (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                          FIO_SORT));
+                                                          FIO_SORT_NAME));
     }
     end = clock();
     fprintf(stderr,
@@ -253,12 +255,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
     for (size_t i = 0; i < len; ++i) {
       mem[i] = mem[len + i] = (size_t)rand();
     }
-    FIO_NAME(FIO_SORT, sort)(mem, len);
+    FIO_NAME(FIO_SORT_NAME, sort)(mem, len);
     qsort(mem + len,
           len,
           sizeof(mem[0]),
           (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                        FIO_SORT));
+                                                        FIO_SORT_NAME));
     if (memcmp(mem, mem + len, (sizeof(mem[0]) * len))) {
       size_t i = 0;
       while (mem[i] == mem[len + i] && i < len)
@@ -271,7 +273,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
         mem[i] = mem[len + i] = (size_t)rand();
       }
       start = clock();
-      FIO_NAME(FIO_SORT, sort)(mem, len);
+      FIO_NAME(FIO_SORT_NAME, sort)(mem, len);
       end = clock();
       fio_clk += end - start;
       start = clock();
@@ -279,7 +281,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_NAME(sort, FIO_SORT))(void) {
             len,
             sizeof(mem[0]),
             (int (*)(const void *, const void *))FIO_NAME(fio_qsort___cmp,
-                                                          FIO_SORT));
+                                                          FIO_SORT_NAME));
       end = clock();
       lib_clk += end - start;
       FIO_ASSERT(!memcmp(mem, mem + len, (sizeof(mem[0]) * len)),
@@ -307,5 +309,5 @@ Module Cleanup
 #undef FIO_SORT_TYPE
 #undef FIO_SORT_TEST
 #undef FIO_SORT_SWAP
-#undef FIO_SORT
-#endif /* FIO_SORT */
+#undef FIO_SORT_NAME
+#endif /* FIO_SORT_NAME */
