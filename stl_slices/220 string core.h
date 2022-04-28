@@ -29,8 +29,13 @@ Feel free to copy, use and enjoy according to the license provided.
 String Authorship Helpers (`fio_string_write` functions)
 ***************************************************************************** */
 
-/** A reallocation callback type for buffers in a `fio_str_info_s`. */
-typedef int (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
+/**
+ * A reallocation callback type for buffers in a `fio_str_info_s`.
+ *
+ * The callback MUST allocate at least `len + 1` bytes, setting the new capacity
+ * in `dest->capa`.
+ * */
+typedef int (*fio_string_realloc_fn)(fio_str_info_s *dest, size_t len);
 /**
  * Writes data to the end of the string in the `fio_string_s` struct,
  * returning an updated `fio_string_s` struct.
@@ -56,7 +61,8 @@ typedef int (*fio_string_realloc_fn)(fio_str_info_s *, size_t);
  *
  * An example for a `reallocate` callback using the system's `realloc` function:
  *
- *      int fio_string_realloc_system(fio_str_info_s *dest, size_t new_capa) {
+ *      int fio_string_realloc_system(fio_str_info_s *dest, size_t len_no_nul) {
+ *       const size_t new_capa = fio_string_capa4len(len_pre_nul);
  *       void *tmp = realloc(dest.buf, new_capa);
  *       if (!tmp)
  *         return -1;
@@ -307,8 +313,8 @@ FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 /** Does nothing. */
 #define FIO_STRING_FREE_NOOP2 fio_string_default_free_noop2
 
-/** default reallocation callback implementation */
-SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
+/** default reallocation callback implementation. */
+SFUNC int fio_string_default_reallocate(fio_str_info_s *dst, size_t len);
 /** default reallocation callback for memory that mustn't be freed. */
 SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
                                                  size_t new_capa);
@@ -371,11 +377,32 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
+/* for internal use only */
+typedef struct {
+  uint32_t len;
+  uint32_t capa;
+} fio___bstr_meta_s;
+
+/* for internal use only */
+typedef struct {
+  fio___bstr_meta_s meta;
+  char *ptr;
+} fio___bstr_const_s;
+
+/** A macro for wrapping a regular C string to allow for comparison. */
+#define FIO_BSTR_TMP_CONST2(var_name, str, length)                             \
+  const fio___bstr_const_s var_name##__mem = {.meta.len = length,              \
+                                              .ptr = (char *)str};             \
+  char *var_name = (char *)&var_name##__mem.ptr;
+/** A macro for wrapping a regular C string to allow for comparison. */
+#define FIO_BSTR_TMP_CONST1(var_name, str)                                     \
+  FIO_BSTR_STATIC2(var_name, str, strlen(str))
+
 /** Frees a binary string allocated by a `fio_bstr` function. */
 FIO_IFUNC void fio_bstr_free(char *bstr);
 
 /** default reallocation callback implementation */
-SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t new_capa);
+SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr);
@@ -475,12 +502,12 @@ FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
                                               size_t *restrict len) {
   if ((dest->capa > dest->len + len[0]))
     return 0;
-  if (reallocate && !reallocate(dest, fio_string_capa4len(dest->len + len[0])))
+  if (reallocate && !reallocate(dest, dest->len + len[0]))
     return 0;
-  if (dest->capa > dest->len)
+  if (dest->capa > dest->len + 1)
     len[0] = dest->capa - (dest->len + 1);
   else
-    len = 0;
+    len[0] = 0;
   return -1;
 }
 
@@ -510,16 +537,13 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
-typedef struct {
-  size_t len;
-  size_t capa;
-} fio___bstr_meta_s;
-
 /** Frees a binary string allocated by a `fio_bstr` function. */
 FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
     return;
   fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  if (!meta->capa)
+    return;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
@@ -528,6 +552,9 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
   fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
+  if (FIO_LIKELY(meta->len <= meta->capa))
+    return FIO_STR_INFO3(bstr, meta->len, meta->capa);
+  bstr = (char *)((char **)bstr)[0];
   return FIO_STR_INFO3(bstr, meta->len, meta->capa);
 }
 
@@ -550,6 +577,9 @@ FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
   fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
+  if (FIO_LIKELY(meta->len <= meta->capa))
+    return FIO_BUF_INFO2(bstr, meta->len);
+  bstr = (char *)((char **)bstr)[0];
   return FIO_BUF_INFO2(bstr, meta->len);
 }
 
@@ -688,21 +718,23 @@ Extern-ed functions
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
-SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa) {
-  void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
+SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
+  len = fio_string_capa4len(len);
+  void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, len, dest->len);
   if (!tmp)
     return -1;
-  dest->capa = new_capa;
+  dest->capa = len;
   dest->buf = (char *)tmp;
   return 0;
 }
 
 SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                 size_t new_capa) {
-  void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
+                                                 size_t len) {
+  len = fio_string_capa4len(len);
+  void *tmp = FIO_MEM_REALLOC_(NULL, 0, len, 0);
   if (!tmp)
     return -1;
-  dest->capa = new_capa;
+  dest->capa = len;
   dest->buf = (char *)tmp;
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
@@ -1852,21 +1884,21 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 /** default reallocation callback implementation */
-SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t new_capa) {
+SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = ((fio___bstr_meta_s *)dest->buf) - 1;
-  if (!dest->buf)
-    bstr_m = (fio___bstr_meta_s *)
-        FIO_MEM_REALLOC_(NULL, 0, new_capa + sizeof(bstr_m[0]), 0);
+  const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
+  if (!dest->capa)
+    bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   else
     bstr_m =
         (fio___bstr_meta_s *)FIO_MEM_REALLOC_(bstr_m,
                                               sizeof(bstr_m[0]) + bstr_m->capa,
-                                              new_capa + sizeof(bstr_m[0]),
+                                              new_capa,
                                               bstr_m->len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
   dest->buf = (char *)(bstr_m + 1);
-  bstr_m->capa = dest->capa = new_capa;
+  bstr_m->capa = dest->capa = new_capa - sizeof(bstr_m[0]);
   return 0;
 }
 
@@ -2172,6 +2204,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(fio_bstr_info(str).len == 12 &&
                    !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
                "fio_bstr_write2 failed!");
+    FIO_BSTR_TMP_CONST2(const_cstr, "Hello World!", 12);
+    FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(str), fio_bstr_buf(const_cstr)),
+               "`FIO_BSTR_TMP_CONST2` error?");
     fio_bstr_free(str);
   }
 #if !defined(DEBUG) || defined(NODEBUG)

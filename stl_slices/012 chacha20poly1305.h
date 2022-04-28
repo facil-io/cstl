@@ -641,7 +641,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                              "\x87\x4d";
     size_t len = strlen(src);
     char buffer[256];
-    memcpy(buffer, src, len);
+    FIO_MEMCPY(buffer, src, len);
     fio_chacha20(buffer, len, key, nounce, 1);
     FIO_ASSERT(!memcmp(buffer, expected, len), "ChaCha20 encoding failed");
     fio_chacha20(buffer, len, key, nounce, 1);

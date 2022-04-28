@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
+Copyright: Boaz Segev, 2019-2022
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -15,6 +15,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "105 poll.h"               /* Development inclusion - ignore line */
 #include "105 stream.h"             /* Development inclusion - ignore line */
 #include "106 signals.h"            /* Development inclusion - ignore line */
+#include "220 strings core.h"       /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
 #define SFUNC FIO_SFUNC             /* Development inclusion - ignore line */
@@ -87,6 +88,13 @@ struct fio_listen_args {
   void (*on_finish)(void *udata);
   /** Opaque user data. */
   void *udata;
+  /**
+   * Selects a queue that will be used to schedule a pre-accept task.
+   * May be used to test user thread stress levels before accepting connections.
+   */
+  fio_queue_s *queue_for_accept;
+  /** If the server is forked, should we stop listening? */
+  uint8_t on_root;
 };
 
 /**
@@ -241,7 +249,7 @@ SFUNC void fio_suspend(fio_s *io);
 SFUNC void fio_unsuspend(fio_s *io);
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspend(fio_s *io);
+SFUNC int fio_is_suspended(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
@@ -249,6 +257,29 @@ Task Scheduling
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
 SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
+
+/** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
+SFUNC void fio_run_every(fio_timer_schedule_args_s args);
+/**
+ * Schedules a timer bound task, see `fio_timer_schedule` in the CSTL.
+ *
+ * Possible "named arguments" (fio_timer_schedule_args_s members) include:
+ *
+ * * The timer function. If it returns a non-zero value, the timer stops:
+ *        int (*fn)(void *, void *)
+ * * Opaque user data:
+ *        void *udata1
+ * * Opaque user data:
+ *        void *udata2
+ * * Called when the timer is done (finished):
+ *        void (*on_finish)(void *, void *)
+ * * Timer interval, in milliseconds:
+ *        uint32_t every
+ * * The number of times the timer should be performed. -1 == infinity:
+ *        int32_t repetitions
+ */
+#define fio_run_every(...)                                                     \
+  fio_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
 SFUNC int64_t fio_last_tick(void);
@@ -418,12 +449,47 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
     pr->io_functions.free = io_func_default_free;
 }
 
-fio_protocol_s MOCK_PROTOCOL;
+/* the MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
+static fio_protocol_s MOCK_PROTOCOL;
 
 FIO_IFUNC void fio___srv_init_protocol_test(fio_protocol_s *pr) {
   if (!fio_atomic_or(&pr->reserved.flags, 1))
     fio___srv_init_protocol(pr);
 }
+
+/* *****************************************************************************
+Server / IO environment support
+***************************************************************************** */
+
+// #define FIO_STL_KEEP__     1
+// #define FIO_REF_NAME       fio
+// #define FIO_REF_INIT(o)    fio_s_init(&(o))
+// #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
+// #include __FILE__
+// #undef FIO_STL_KEEP__
+
+/* *****************************************************************************
+IO Validity Map - Type
+***************************************************************************** */
+#ifndef FIO_VALIDITY_MAP_USE
+#define FIO_VALIDITY_MAP_USE 0
+#endif
+
+#if FIO_VALIDITY_MAP_USE
+#define FIO_STL_KEEP__         1
+#define FIO_UMAP_NAME          fio_validity_map
+#define FIO_MAP_TYPE           fio_s *
+#define FIO_MAP_HASH_FN(o)     fio_risky_ptr(o)
+#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#include __FILE__
+#undef FIO_STL_KEEP__
+#ifndef FIO_VALIDATE_IO_MUTEX
+/* mostly for debugging possible threading issues. */
+#define FIO_VALIDATE_IO_MUTEX 0
+#endif
+#else
+typedef void *fio_validity_map_s;
+#endif
 
 /* *****************************************************************************
 Global State
@@ -435,15 +501,31 @@ static void fio___srv_poll_on_close_schd(int fd, void *udata);
 
 static struct {
   FIO_LIST_HEAD protocols;
+#if FIO_VALIDITY_MAP_USE
+  fio_validity_map_s valid;
+#if FIO_VALIDATE_IO_MUTEX
+  fio_thread_mutex_t valid_lock;
+#endif
+#endif /* FIO_VALIDITY_MAP_USE */
   fio_poll_s fds;
   int64_t tick;
+  pid_t root_pid;
+  pid_t pid;
   volatile uint8_t running;
 } fio___srvdata = {
+#if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
+    .valid_lock = FIO_THREAD_MUTEX_INIT,
+#endif
     .fds = FIO_POLL_INIT(fio___srv_poll_on_data_schd,
                          fio___srv_poll_on_ready_schd,
                          fio___srv_poll_on_close_schd),
 };
 
+/* *****************************************************************************
+Server Timers and Task Queues
+***************************************************************************** */
+
+static fio_timer_queue_s fio___srv_timer[1] = {FIO_TIMER_QUEUE_INIT};
 static fio_queue_s fio___srv_tasks[1];
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
@@ -454,6 +536,84 @@ SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2) {
   fio_queue_push(fio___srv_tasks, task, udata1, udata2);
 }
 
+/** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
+SFUNC void fio_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
+  args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;
+  fio_timer_schedule FIO_NOOP(fio___srv_timer, args);
+}
+
+/* *****************************************************************************
+IO Validity Map - Implementation
+***************************************************************************** */
+#if FIO_VALIDITY_MAP_USE
+
+#if FIO_VALIDATE_IO_MUTEX
+#define FIO_VALIDATE_LOCK()   fio_thread_mutex_lock(&fio___srvdata.valid_lock)
+#define FIO_VALIDATE_UNLOCK() fio_thread_mutex_unlock(&fio___srvdata.valid_lock)
+#define FIO_VALIDATE_LOCK_DESTROY()                                            \
+  fio_thread_mutex_destroy(&fio___srvdata.valid_lock)
+#else
+#define FIO_VALIDATE_LOCK()
+#define FIO_VALIDATE_UNLOCK()
+#define FIO_VALIDATE_LOCK_DESTROY()
+#endif
+
+FIO_IFUNC int fio_is_valid(fio_s *io) {
+  FIO_VALIDATE_LOCK();
+  fio_s *r = fio_validity_map_get(&fio___srvdata.valid, fio_risky_ptr(io), io);
+  FIO_VALIDATE_UNLOCK();
+  return r == io;
+}
+
+FIO_IFUNC void fio_set_valid(fio_s *io) {
+  FIO_VALIDATE_LOCK();
+  fio_validity_map_set(&fio___srvdata.valid, fio_risky_ptr(io), io, NULL);
+  FIO_VALIDATE_UNLOCK();
+  FIO_ASSERT_DEBUG(fio_is_valid(io),
+                   "(%d) IO validity set, but map reported as invalid!",
+                   (int)fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
+}
+
+FIO_IFUNC void fio_set_invalid(fio_s *io) {
+  fio_s *old = NULL;
+  FIO_LOG_DEBUG2("(%d) IO %p is no longer valid",
+                 (int)fio___srvdata.pid,
+                 (void *)io);
+  FIO_VALIDATE_LOCK();
+  fio_validity_map_remove(&fio___srvdata.valid, fio_risky_ptr(io), io, &old);
+  FIO_VALIDATE_UNLOCK();
+  FIO_ASSERT_DEBUG(!old || old == io,
+                   "(%d) invalidity map corruption (%p != %p)!",
+                   (int)fio___srvdata.pid,
+                   io,
+                   old);
+  FIO_ASSERT_DEBUG(!fio_is_valid(io),
+                   "(%d) IO validity removed, but map reported as valid!",
+                   (int)fio___srvdata.pid);
+}
+
+FIO_IFUNC void fio_invalidate_all() {
+  FIO_VALIDATE_LOCK();
+  fio_validity_map_destroy(&fio___srvdata.valid);
+  FIO_VALIDATE_UNLOCK();
+  FIO_VALIDATE_LOCK_DESTROY();
+}
+
+/** Returns an approximate number of IO objects attached. */
+SFUNC size_t fio_io_count(void) { /* TODO: remove? */
+  return fio_validity_map_count(&fio___srvdata.valid);
+}
+
+#undef FIO_VALIDATE_LOCK
+#undef FIO_VALIDATE_UNLOCK
+#undef FIO_VALIDATE_LOCK_DESTROY
+#else /* FIO_VALIDITY_MAP_USE */
+#define fio_is_valid(io) 1
+#define fio_set_valid(io)
+#define fio_set_invalid(io)
+#define fio_invalidate_all()
+#endif /* FIO_VALIDITY_MAP_USE */
 /* *****************************************************************************
 IO objects
 ***************************************************************************** */
@@ -493,9 +653,11 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
   FIO_LIST_REMOVE(&MOCK_PROTOCOL.reserved.protocols);
   FIO_LIST_PUSH(&fio___srvdata.protocols, &MOCK_PROTOCOL.reserved.protocols);
+  fio_set_valid(io);
 }
 
 FIO_SFUNC void fio_s_destroy(fio_s *io) {
+  fio_set_invalid(io);
   FIO_LIST_REMOVE(&io->node);
   fio_sock_close(io->fd);
   fio_stream_destroy(&io->stream);
@@ -683,18 +845,24 @@ Event scheduling
 
 static void fio___srv_poll_on_data_schd(int fd, void *io) {
   (void)fd;
+  if (!fio_is_valid(io))
+    return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_data,
                  fio_dup2((fio_s *)io));
 }
 static void fio___srv_poll_on_ready_schd(int fd, void *io) {
   (void)fd;
+  if (!fio_is_valid(io))
+    return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_ready,
                  fio_dup2((fio_s *)io));
 }
 static void fio___srv_poll_on_close_schd(int fd, void *io) {
   (void)fd;
+  if (!fio_is_valid(io))
+    return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_close,
                  fio_dup2((fio_s *)io));
@@ -745,6 +913,7 @@ static void fio___srv_signal_handle(int sig, void *flg) {
 SFUNC void fio_srv_tick(int timeout) {
   fio_poll_review(&fio___srvdata.fds, timeout);
   fio___srvdata.tick = fio_time_milli();
+  fio_timer_push2queue(fio___srv_tasks, fio___srv_timer, fio___srvdata.tick);
   fio_queue_perform_all(fio___srv_tasks);
   if (fio___srv_review_timeouts())
     fio_queue_perform_all(fio___srv_tasks);
@@ -805,11 +974,18 @@ IO API
 /** Returns the socket file descriptor (fd) associated with the IO. */
 SFUNC int fio_fd_get(fio_s *io) { return io->fd; }
 
-/* Resets a socket's timeout counter. */
-SFUNC void fio_touch(fio_s *io) {
+FIO_SFUNC void fio_touch___task(void *io_, void *ignr_) {
+  (void)ignr_;
+  fio_s *io = (fio_s *)io_;
   io->active = fio___srvdata.tick;
   FIO_LIST_REMOVE(&io->node);
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
+  fio_free2(io);
+}
+
+/* Resets a socket's timeout counter. */
+SFUNC void fio_touch(fio_s *io) {
+  fio_queue_push_urgent(fio___srv_tasks, fio_touch___task, fio_dup(io));
 }
 
 /**
@@ -831,6 +1007,22 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
   return 0;
 }
 
+FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
+  fio_s *io = (fio_s *)io_;
+  fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
+  if (!io ||
+      ((io->state & (FIO_STATE_OPEN | FIO_STATE_CLOSING)) ^ FIO_STATE_OPEN))
+    goto io_error;
+  fio_stream_add(&io->stream, packet);
+  fio_queue_push(fio___srv_tasks,
+                 fio___srv_poll_on_ready,
+                 io); /* no dup/undup, already done.*/
+  return;
+io_error:
+  fio_stream_pack_free(packet);
+}
+
+void fio_write2___(void); /* IDE marker*/
 /**
  * Writes data to the outgoing buffer and schedules the buffer to be sent.
  */
@@ -850,10 +1042,10 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   if (!io ||
       ((io->state & (FIO_STATE_OPEN | FIO_STATE_CLOSING)) ^ FIO_STATE_OPEN))
     goto io_error;
-  fio_stream_add(&io->stream, packet);
   fio_queue_push(fio___srv_tasks,
-                 fio___srv_poll_on_ready,
-                 fio_dup2((fio_s *)io));
+                 fio_write2___task,
+                 fio_dup2((fio_s *)io),
+                 packet);
   return;
 error:
   FIO_LOG_ERROR("couldn't create user-packet for IO %p", (void *)io);
@@ -899,7 +1091,7 @@ SFUNC void fio_unsuspend(fio_s *io) {
 }
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspend(fio_s *io) {
+SFUNC int fio_is_suspended(fio_s *io) {
   return (io->state & FIO_STATE_SUSPENDED);
 }
 
@@ -907,9 +1099,29 @@ SFUNC int fio_is_suspend(fio_s *io) {
 Listening
 ***************************************************************************** */
 
+static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
+  (void)ignr_;
+  fio_s *io = (fio_s *)io_;
+  int fd;
+  struct fio_listen_args *s = (struct fio_listen_args *)(io->udata);
+  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
+    s->on_open(fd, s->udata);
+  }
+  fio_free2(io);
+}
+static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
+  fio_queue_push(fio___srv_tasks, fio___srv_listen_on_data_task, io_, ignr_);
+}
+
 static void fio___srv_listen_on_data(fio_s *io) {
   int fd;
   struct fio_listen_args *s = (struct fio_listen_args *)(io->udata);
+  if (s->queue_for_accept) {
+    fio_queue_push(s->queue_for_accept,
+                   fio___srv_listen_on_data_task_reschd,
+                   fio_dup2(io));
+    return;
+  }
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
     s->on_open(fd, s->udata);
   }
@@ -945,15 +1157,21 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (args.url) {
     FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
-    FIO_MEMCPY((void *)(cpy->url), "0.0.0.0:", 8);
-    ((char *)(cpy->url))[fio_ltoa((char *)(cpy->url) + 8, (port++), 10) + 8] =
-        0;
+    fio_str_info_s tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
+    fio_string_write2(&tmp,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("0.0.0.0:", 8),
+                      FIO_STRING_WRITE_UNUM(port));
+    ++port;
   }
   int fd = fio_sock_open2(cpy->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
-  FIO_LOG_DEBUG2("Started listening on %s", cpy->url);
   if (fd == -1)
     goto fd_error;
-  fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
+  if (args.on_root) /* TODO! */
+    fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
+  else
+    fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
+  FIO_LOG_DEBUG2("Started listening on %s", cpy->url);
   return 0;
 fd_error:
   FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
@@ -969,7 +1187,10 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
   fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
 }
+
+FIO_DESTRUCTOR(fio___srv_cleanup) { fio_invalidate_all(); }
 
 /* *****************************************************************************
 Simple Server Testing

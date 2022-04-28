@@ -46,7 +46,9 @@ An example for a `reallocate` callback using the system's `realloc` function (or
 
 ```c
 fio_str_info_s fio_string_realloc_system(fio_str_info_s dest,
-                                         size_t new_capa) {
+                                         size_t len) {
+  /* must allocate at least len + 1 bytes. */
+  const size_t new_capa = fio_string_capa4len(len);
   void *tmp = realloc(dest.buf, new_capa);
   if (!tmp)
     return dest;
@@ -518,7 +520,7 @@ In addition, the following helpers are provided:
 #### `fio_bstr_reallocate`
 
 ```c
-int fio_bstr_reallocate(fio_str_info_s *dest, size_t new_capa);
+int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
 ```
 
 Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.

@@ -9,6 +9,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_POLL_DEV                /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "104 sock.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -31,15 +32,38 @@ Feel free to copy, use and enjoy according to the license provided.
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
 
-#ifndef FIO_POLL_HAS_UDATA_COLLECTION
-/** A unique `udata` per fd (true)? or a global `udata` (false)?*/
-#define FIO_POLL_HAS_UDATA_COLLECTION 1
-#endif
-
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
 #define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
 #endif
+
+/* *****************************************************************************
+System call for polling using a `one-shot` approach
+***************************************************************************** */
+
+#ifndef FIO_SRV_ENGINE_POLL
+/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_POLL` to use `poll` */
+#define FIO_SRV_ENGINE_POLL 1
+#endif
+#ifndef FIO_SRV_ENGINE_EPOLL
+/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_EPOLL` to use `epoll` */
+#define FIO_SRV_ENGINE_EPOLL 2
+#endif
+#ifndef FIO_SRV_ENGINE_KQUEUE
+/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_KQUEUE` to use `kqueue` */
+#define FIO_SRV_ENGINE_KQUEUE 3
+#endif
+
+/* if `FIO_SRV_ENGINE` wasn't define, detect automatically. */
+#if !defined(FIO_SRV_ENGINE)
+#if defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
+#define FIO_SRV_ENGINE FIO_SRV_ENGINE_EPOLL
+#elif (defined(HAVE_KQUEUE) || __has_include("sys/event.h"))
+#define FIO_SRV_ENGINE FIO_SRV_ENGINE_KQUEUE
+#else
+#define FIO_SRV_ENGINE FIO_SRV_ENGINE_POLL
+#endif
+#endif /* FIO_SRV_ENGINE */
 
 /* *****************************************************************************
 Polling API

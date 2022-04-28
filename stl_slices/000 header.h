@@ -394,6 +394,11 @@ FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 Memory Copying Primitives
 ***************************************************************************** */
 
+#ifndef FIO_MEMCPYX_UNROLL
+/** If set, manual unrolling is used for the fio___memcpy7x helper. */
+#define FIO_MEMCPYX_UNROLL 1
+#endif
+
 /* memcpy selectors / overriding */
 #if __has_builtin(__builtin_memcpy)
 #ifndef FIO_MEMCPY
@@ -418,27 +423,6 @@ Memory Copying Primitives
 #define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
 #define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
 
-#if FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
-  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
-    union {                                                                    \
-      const void *ptr;                                                         \
-      uint##bits##_t *u;                                                       \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.u = *s.u;                                                               \
-  }
-#define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
-  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
-    struct fio___memcpy##bytes##_s {                                           \
-      uint64_t data[groups_of_8];                                              \
-    };                                                                         \
-    union {                                                                    \
-      const void *ptr;                                                         \
-      struct fio___memcpy##bytes##_s *grp;                                     \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.grp = *s.grp;                                                           \
-  }
-#else /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 #define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
     struct fio___memcpy##bytes##_s {                                           \
@@ -461,7 +445,6 @@ Memory Copying Primitives
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
   }
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 FIO___MAKE_MEMCPY_SMALL(1, 8)
 FIO___MAKE_MEMCPY_SMALL(2, 16)
@@ -485,15 +468,26 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
   char *d = (char *)d_, *s = (char *)s_;
-  switch (l & 7) {
-  case 7: d[6] = s[6]; /* fall through */
-  case 6: d[5] = s[5]; /* fall through */
-  case 5: d[4] = s[4]; /* fall through */
-  case 4: d[3] = s[3]; /* fall through */
-  case 3: d[2] = s[2]; /* fall through */
-  case 2: d[1] = s[1]; /* fall through */
-  case 1: d[0] = s[0]; /* fall through */
+  size_t i = 0;
+#if FIO_MEMCPYX_UNROLL
+  switch ((l & 7)) {
+  case 7: d[i] = s[i]; ++i; /* fall through */
+  case 6: d[i] = s[i]; ++i; /* fall through */
+  case 5: d[i] = s[i]; ++i; /* fall through */
+  case 4: d[i] = s[i]; ++i; /* fall through */
+  case 3: d[i] = s[i]; ++i; /* fall through */
+  case 2: d[i] = s[i]; ++i; /* fall through */
+  case 1: d[i] = s[i]; ++i; /* fall through */
   }
+#else
+  l &= 7;
+  for (;;) {
+    if (i == l)
+      break;
+    d[i] = s[i];
+    ++i;
+  }
+#endif
 }
 
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
@@ -520,7 +514,12 @@ FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
     dest += 16;
     src += 16;
   }
-  fio___memcpy15x(dest, src, len);
+  if ((len & 8)) {
+    FIO_MEMCPY8(dest, src);
+    dest += 8;
+    src += 8;
+  }
+  fio___memcpy7x(dest, src, len);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
@@ -533,7 +532,17 @@ FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
     dest += 32;
     src += 32;
   }
-  fio___memcpy31x(dest, src, len);
+  if ((len & 16)) {
+    FIO_MEMCPY16(dest, src);
+    dest += 16;
+    src += 16;
+  }
+  if ((len & 8)) {
+    FIO_MEMCPY8(dest, src);
+    dest += 8;
+    src += 8;
+  }
+  fio___memcpy7x(dest, src, len);
 }
 
 /* *****************************************************************************
@@ -1269,30 +1278,40 @@ Common macros
 #endif
 
 /* Modules that require FIO_SOCK */
-#if defined(FIO_POLL)
+#if defined(FIO_POLL) || defined(FIO_SERVER)
+#ifndef FIO_SOCK
 #define FIO_SOCK
+#endif
 #endif
 
 /* Modules that require FIO_URL */
 #if defined(FIO_SOCK)
+#ifndef FIO_URL
 #define FIO_URL
+#endif
 #endif
 
 /* Modules that require Threads data */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
     defined(FIO_USE_THREAD_MUTEX_TMP)
+#ifndef FIO_THREADS
 #define FIO_THREADS
+#endif
 #endif
 
 /* Modules that require the String Core API */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL)
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_SERVER)
+#ifndef FIO_STR
 #define FIO_STR
+#endif
 #endif
 
 /* Modules that require File Utils */
 #if defined(FIO_STR)
+#ifndef FIO_FILES
 #define FIO_FILES
+#endif
 #endif
 
 /* Modules that require randomness */

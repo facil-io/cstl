@@ -106,22 +106,18 @@ Memory Helpers - API
 ***************************************************************************** */
 #ifndef H___FIO_MEM_INCLUDE_ONCE___H
 /**
- * An 8 byte aligned memset (almost) naive implementation.
+ * A somewhat naive implementation of `memset`.
  *
  * Probably slower than the one included with your compiler's C library.
- *
- * Requires BOTH addresses to be 16 bit aligned memory addresses.
  */
-SFUNC void fio_memset_aligned(void *restrict dest, uint64_t data, size_t bytes);
+SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
- * A `size_t` aligned memcpy (almost) naive implementation.
+ * A somewhat naive implementation of `memcpy`.
  *
  * Probably slower than the one included with your compiler's C library.
- *
- * Requires an 8 bit aligned memory address for both source and destination.
  */
-SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
+SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes);
 
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
@@ -476,6 +472,22 @@ Memory Allocation - start implementation
 /* internal workings start here */
 
 /* *****************************************************************************
+memset / memcpy selectors
+***************************************************************************** */
+
+#if FIO_MEMORY_USE_FIO_MEMSET
+#define FIO___MEMSET fio_memset
+#else
+#define FIO___MEMSET memset
+#endif /* FIO_MEMORY_USE_FIO_MEMSET */
+
+#if FIO_MEMORY_USE_FIO_MEMCOPY
+#define FIO___MEMCPY2 fio_memcpy
+#else
+#define FIO___MEMCPY2 FIO_MEMCPY
+#endif /* FIO_MEMORY_USE_FIO_MEMCOPY */
+
+/* *****************************************************************************
 
 
 
@@ -504,26 +516,50 @@ Aligned memory copying
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
-  if ((d == s) | !bytes | !d | !s)
+  if ((d == s) | !bytes | !d | !s) {
+    FIO_LOG_DEBUG2("fio_memcpy null");
     return;
-  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
+  }
+  uintptr_t offset = ((uintptr_t)d - (uintptr_t)s);
+  if (offset >= bytes) {
     /* walk forwards (memcpy) */
     /* 4 word groups */
-    for (; bytes >= 64; bytes -= 64) {
+    char *dstop = d + (bytes & (~(size_t)127ULL));
+    for (; d < dstop;) {
+      FIO_MEMCPY64(d, s);
+      FIO_MEMCPY64(d + 64, s + 64);
+      d += 128;
+      s += 128;
+    }
+    if ((bytes & 64)) {
       FIO_MEMCPY64(d, s);
       d += 64;
       s += 64;
     }
     FIO_MEMCPY63x(d, s, bytes);
     return;
+  } else if (offset >= 64) {
+    char *dstop = d + (bytes & 63);
+    d += bytes;
+    s += bytes;
+    for (; d > dstop;) {
+      d -= 64;
+      s -= 64;
+      FIO_MEMCPY64(d, s);
+    }
+    d -= (bytes & 63);
+    s -= (bytes & 63);
+    FIO_MEMCPY63x(d, s, bytes);
   } else {
     /* some memory overlaps, walk backwards (memmove) */
     d += bytes;
     s += bytes;
+    char FIO_ALIGN(16) tmp[64];
     for (; bytes >= 64;) {
       bytes -= 64;
       d -= 64;
       s -= 64;
+      FIO_MEMCPY64(tmp, s);
       FIO_MEMCPY64(d, s);
     }
     /* the same as FIO_MEMCPY63x, but walking backwards... */
@@ -544,130 +580,28 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     }
     d -= (bytes & 7);
     s -= (bytes & 7);
-    FIO_MEMCPY7x(d, s, bytes);
+    switch ((bytes & 7)) {
+    case 7: d[6] = s[6]; /* fall through */
+    case 6: d[5] = s[5]; /* fall through */
+    case 5: d[4] = s[4]; /* fall through */
+    case 4: d[3] = s[3]; /* fall through */
+    case 3: d[2] = s[2]; /* fall through */
+    case 2: d[1] = s[1]; /* fall through */
+    case 1: d[0] = s[0]; /* fall through */
+    }
   }
 }
 
-/** memcpy / memmove alternative that requires `size_t` aligned memory */
-SFUNC void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes) {
-  char *d = (char *)dest_;
-  const char *s = (const char *)src_;
-  if ((d == s) | !bytes | !d | !s)
-    return;
-  if ((((uintptr_t)s > (uintptr_t)d) | ((s + bytes) <= d))) {
-    /* walk forwards (memcpy) */
-    /* 4 word groups */
-    for (; bytes >= (sizeof(size_t) << 2);) {
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-      ((size_t *)d)[1] = ((size_t *)s)[1];
-      ((size_t *)d)[2] = ((size_t *)s)[2];
-      ((size_t *)d)[3] = ((size_t *)s)[3];
-      (bytes -= (sizeof(size_t) << 2));
-      (d += (sizeof(size_t) << 2));
-      (s += (sizeof(size_t) << 2));
-    }
-    /* 4 word partials */
-    switch (bytes & (sizeof(size_t) | (sizeof(size_t)) << 1)) {
-    case (sizeof(size_t) | (sizeof(size_t)) << 1):
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-      d += sizeof(size_t);
-      s += sizeof(size_t); /* fall through */
-    case (sizeof(size_t) << 1):
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-      d += sizeof(size_t);
-      s += sizeof(size_t); /* fall through */
-    case sizeof(size_t):
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-      d += sizeof(size_t);
-      s += sizeof(size_t);
-    }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7: *(d++) = *(s++); /* fall through */
-    case 6: *(d++) = *(s++); /* fall through */
-    case 5: *(d++) = *(s++); /* fall through */
-    case 4: *(d++) = *(s++); /* fall through */
-    case 3: *(d++) = *(s++); /* fall through */
-    case 2: *(d++) = *(s++); /* fall through */
-    case 1: *(d++) = *(s++); /* fall through */
-    }
-    return;
-  } else {
-    /* walk backwards (memmove) */
-    d += bytes;
-    s += bytes;
-    for (; bytes >= (sizeof(size_t) << 2);) {
-      (bytes -= (sizeof(size_t) << 2));
-      (d -= (sizeof(size_t) << 2));
-      (s -= (sizeof(size_t) << 2));
-      ((size_t *)d)[3] = ((size_t *)s)[3];
-      ((size_t *)d)[2] = ((size_t *)s)[2];
-      ((size_t *)d)[1] = ((size_t *)s)[1];
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-    }
-    switch (bytes & (sizeof(size_t) | (sizeof(size_t)) << 1)) {
-    case (sizeof(size_t) | (sizeof(size_t)) << 1):
-      d -= sizeof(size_t);
-      s -= sizeof(size_t);
-      ((size_t *)d)[0] = ((size_t *)s)[0]; /* fall through */
-    case (sizeof(size_t) << 1):
-      d -= sizeof(size_t);
-      s -= sizeof(size_t);
-      ((size_t *)d)[0] = ((size_t *)s)[0]; /* fall through */
-    case sizeof(size_t):
-      d -= sizeof(size_t);
-      s -= sizeof(size_t);
-      ((size_t *)d)[0] = ((size_t *)s)[0];
-    }
-    switch ((bytes & (sizeof(size_t) - 1))) {
-    case 7: *(--d) = *(--s); /* fall through */
-    case 6: *(--d) = *(--s); /* fall through */
-    case 5: *(--d) = *(--s); /* fall through */
-    case 4: *(--d) = *(--s); /* fall through */
-    case 3: *(--d) = *(--s); /* fall through */
-    case 2: *(--d) = *(--s); /* fall through */
-    case 1: *(--d) = *(--s); /* fall through */
-    }
-  }
-}
 /** an 8 byte aligned memset implementation. */
-SFUNC void fio_memset_aligned(void *restrict dest_,
-                              uint64_t data,
-                              size_t bytes) {
-  uint64_t *dest = (uint64_t *)dest_;
-  while (bytes >= 128) {
-    dest[0] = dest[1] = dest[2] = dest[3] = dest[4] = dest[5] = dest[6] =
-        dest[7] = dest[8] = dest[9] = dest[10] = dest[11] = dest[12] =
-            dest[13] = dest[14] = dest[15] = data;
-    dest += 16;
-    bytes -= 128;
+SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  uint64_t repeated[4] = {data, data, data, data};
+  char *d = (char *)dest_;
+  char *const d_loop = d + (bytes & (~(size_t)31ULL));
+  while (d < d_loop) {
+    FIO_MEMCPY32(d, repeated);
+    d += 32;
   }
-  if (bytes & 64) {
-    dest[0] = dest[1] = dest[2] = dest[3] = dest[4] = dest[5] = dest[6] =
-        dest[7] = data;
-    dest += 8;
-  }
-  if (bytes & 32) {
-    dest[0] = dest[1] = dest[2] = dest[3] = data;
-    dest += 4;
-  }
-  switch (bytes & 24) {
-  case 24: *(dest++) = data; /* fall through */
-  case 16: *(dest++) = data; /* fall through */
-  case 8: *(dest++) = data;  /* fall through */
-  }
-  union {
-    uint64_t u64;
-    uint8_t u8[8];
-  } u = {.u64 = data};
-  switch (bytes & 7) {
-  case 7: ((uint8_t *)dest)[6] = u.u8[6]; /* fall through */
-  case 6: ((uint8_t *)dest)[5] = u.u8[5]; /* fall through */
-  case 5: ((uint8_t *)dest)[4] = u.u8[4]; /* fall through */
-  case 4: ((uint8_t *)dest)[3] = u.u8[3]; /* fall through */
-  case 3: ((uint8_t *)dest)[2] = u.u8[2]; /* fall through */
-  case 2: ((uint8_t *)dest)[1] = u.u8[1]; /* fall through */
-  case 1: ((uint8_t *)dest)[0] = u.u8[0];
-  }
+  FIO_MEMCPY31x(d, repeated, bytes);
 }
 
 /**
@@ -869,8 +803,8 @@ FIO_SFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
       if (!result) {
         return (void *)NULL;
       }
-      fio_memcpy_aligned(result, mem, old_len); /* copy data */
-      munmap(mem, old_len);                     /* free original memory */
+      FIO___MEMCPY2(result, mem, old_len); /* copy data */
+      munmap(mem, old_len);                /* free original memory */
     }
     return result;
   }
@@ -959,7 +893,7 @@ FIO_IFUNC void *FIO_MEM_SYS_REALLOC_def_func(void *mem,
       FIO_LOG_ERROR("sysem realloc failed to allocate memory.");
       return NULL;
     }
-    fio_memcpy_aligned(tmp, mem, old_len);
+    FIO___MEMCPY2(tmp, mem, old_len);
     FIO_MEM_SYS_FREE_def_func(mem, old_len);
     mem = tmp;
   } else if (old_len > new_len) {
@@ -1085,22 +1019,6 @@ SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
 
 ***************************************************************************** */
-
-/* *****************************************************************************
-memset / memcpy selectors
-***************************************************************************** */
-
-#if FIO_MEMORY_USE_FIO_MEMSET
-#define FIO___MEMSET fio_memset_aligned
-#else
-#define FIO___MEMSET memset
-#endif /* FIO_MEMORY_USE_FIO_MEMSET */
-
-#if FIO_MEMORY_USE_FIO_MEMCOPY
-#define FIO___MEMCPY2 fio_memcpy_aligned
-#else
-#define FIO___MEMCPY2 FIO_MEMCPY
-#endif /* FIO_MEMORY_USE_FIO_MEMCOPY */
 
 /* *****************************************************************************
 Lock type choice
@@ -2617,67 +2535,12 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
     dest += 16;
     units -= 16;
   }
-  switch (units) {
-  case 15:
-    FIO_ASSERT(*(dest++) = data,
+  units &= 15;
+  while (units) {
+    FIO_ASSERT(*(dest++) == data,
                "%s memory data was overwritten",
                msg); /* fall through */
-  case 14:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 13:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 12:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 11:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 10:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 9:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 8:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 7:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 6:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 5:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 4:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 3:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 2:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-  case 1:
-    FIO_ASSERT(*(dest++) = data,
-               "%s memory data was overwritten (last 8 bytes)",
-               msg);
+    --units;
   }
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
@@ -2686,6 +2549,41 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
   const int repetitions = 8192;
+
+  { /* test fio_memcpy possible overflow. */
+    uint64_t buf1[64];
+    uint8_t *buf = (uint8_t *)buf1;
+    fio_memset(buf1, ~(uint64_t)0, sizeof(*buf1) * 64);
+    char *data =
+        (char *)"This should be an uneven amount of characters, say 53";
+    fio_memcpy(buf, data, strlen(data));
+    FIO_ASSERT(!memcmp(buf, data, strlen(data)) && buf[strlen(data)] == 0xFF,
+               "fio_memcpy should not overflow or underflow on uneven "
+               "amounts of bytes.");
+  }
+  { /* test fio_memcpy as memmove */
+    fprintf(stderr, "* testing fio_memcpy with overlapping memory (memmove)\n");
+    char *msg =
+        "fio_memcpy should work also as memmove, "
+        "so no undefined behavior should occur. "
+        "Should be true for larger offsets too. At least over 128 Bytes.";
+    size_t len = strlen(msg);
+    char buf[512];
+    for (size_t offset = 0; offset < len; ++offset) {
+      memset(buf, 0, sizeof(buf));
+      memcpy(buf, msg, len);
+      fio_memcpy(buf + offset, buf, len);
+      FIO_ASSERT(!memcmp(buf + offset, msg, len),
+                 "fio_memcpy failed on overlapping data (offset +%d)",
+                 offset);
+      memset(buf, 0, sizeof(buf));
+      memcpy(buf + offset, msg, len);
+      fio_memcpy(buf, buf + offset, len);
+      FIO_ASSERT(!memcmp(buf, msg, len),
+                 "fio_memcpy failed on overlapping data (offset -%d)",
+                 offset);
+    }
+  }
 
   fprintf(stderr,
           "* Speed testing memset (%d repetitions per test):\n",
@@ -2703,16 +2601,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
-      fio_memset_aligned(mem, sig, mem_len);
+      fio_memset(mem, sig, mem_len);
       FIO_COMPILER_GUARD;
     }
     end = fio_time_micro();
     fio___memset_test_aligned(mem,
                               sig,
                               mem_len,
-                              "fio_memset_aligned sanity test FAILED");
+                              "fio_memset sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memset_aligned\t(%zu bytes):\t%zu us\n",
+            "\tfio_memset\t(%zu bytes):\t%zu us\n",
             mem_len,
             (size_t)(end - start));
     start = fio_time_micro();
@@ -2722,7 +2620,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memset\t\t(%zu bytes):\t%zu us\n",
+            "\tsystem memset\t(%zu bytes):\t%zu us\n",
             mem_len,
             (size_t)(end - start));
 
@@ -2742,11 +2640,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     sig ^= sig << 17;
     sig ^= sig << 29;
     sig ^= sig << 31;
-    fio_memset_aligned(mem, sig, mem_len);
+    fio_memset(mem, sig, mem_len);
 
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
-      fio_memcpy_aligned((char *)mem + mem_len, mem, mem_len);
+      fio_memcpy((char *)mem + mem_len, mem, mem_len);
       FIO_COMPILER_GUARD;
     }
     end = fio_time_micro();
@@ -2754,9 +2652,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     fio___memset_test_aligned((char *)mem + mem_len,
                               sig,
                               mem_len,
-                              "fio_memcpy_aligned sanity test FAILED");
+                              "fio_memcpy sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memcpy_aligned\t(%zu bytes):\t%zu us\n",
+            "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
             mem_len,
             (size_t)(end - start));
     start = fio_time_micro();
@@ -2766,7 +2664,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memcpy\t\t(%zu bytes):\t%zu us\n",
+            "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
             mem_len,
             (size_t)(end - start));
 
@@ -2782,9 +2680,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
-    fio_memset_aligned(mem,
-                       ((uint64_t)0x0101010101010101ULL * 0x66),
-                       mem_len + 1);
+    fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x66), mem_len + 1);
     ((char *)mem)[token_index] = 0;
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
@@ -2799,7 +2695,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
 
     fprintf(stderr,
-            "\tfio_memchr\t\t(%zu bytes):\t%zu us\n",
+            "\tfio_memchr\t(%zu bytes):\t%zu us\n",
             token_index,
             (size_t)(end - start));
     start = fio_time_micro();
@@ -2811,27 +2707,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memchr\t\t(%zu bytes):\t%zu us\n",
+            "\tsystem memchr\t(%zu bytes):\t%zu us\n",
             token_index,
             (size_t)(end - start));
 
     free(mem);
-  }
-  {
-    /* test fio_memcpy_aligned as a memmove alternative. */
-    uint64_t buf1[64];
-    uint8_t *buf = (uint8_t *)buf1;
-    fio_memset_aligned(buf1, ~(uint64_t)0, sizeof(*buf1) * 64);
-    char *data =
-        (char *)"This should be an uneven amount of characters, say 53";
-    fio_memcpy_aligned(buf, data, strlen(data));
-    FIO_ASSERT(!memcmp(buf, data, strlen(data)) && buf[strlen(data)] == 0xFF,
-               "fio_memcpy_aligned should not overflow or underflow on uneven "
-               "amounts of bytes.");
-    fio_memcpy_aligned(buf + 8, buf, strlen(data));
-    FIO_ASSERT(!memcmp(buf + 8, data, strlen(data)) &&
-                   buf[strlen(data) + 8] == 0xFF,
-               "fio_memcpy_aligned should not fail as memmove.");
   }
 }
 #endif /* H___FIO_TEST_MEMORY_HELPERS_H */
@@ -2875,7 +2755,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
     FIO_ASSERT(!FIO_MEMORY_INITIALIZE_ALLOCATIONS || !ary[i][0],
                "allocated memory not zero (start): %p",
                (void *)ary[i]);
-    fio_memset_aligned(ary[i], marker[i & 1], (cycles));
+    fio_memset(ary[i], marker[i & 1], (cycles));
   }
   for (size_t i = 0; i < limit; ++i) {
     char *tmp = (char *)FIO_NAME(FIO_MEMORY_NAME,
@@ -2931,22 +2811,22 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
 
       ary[i] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-      fio_memset_aligned(ary[i], mark, cycles);
+      fio_memset(ary[i], mark, cycles);
 
       ary[i + 1] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 1]);
       ary[i + 1] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-      fio_memset_aligned(ary[i + 1], mark, cycles);
+      fio_memset(ary[i + 1], mark, cycles);
 
       ary[i + 2] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-      fio_memset_aligned(ary[i + 2], mark, cycles);
+      fio_memset(ary[i + 2], mark, cycles);
       ary[i + 2] = (char *)FIO_NAME(FIO_MEMORY_NAME,
                                     realloc2)(ary[i + 2], cycles * 2, cycles);
 
       ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
       FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + 3]);
       ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-      fio_memset_aligned(ary[i + 3], mark, cycles);
+      fio_memset(ary[i + 3], mark, cycles);
       ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME,
                                     realloc2)(ary[i + 3], cycles * 2, cycles);
 
@@ -2966,9 +2846,9 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
         ary[i + b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
         if (i) {
           ary[b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
-          fio_memset_aligned(ary[b], mark, cycles);
+          fio_memset(ary[b], mark, cycles);
         }
-        fio_memset_aligned(ary[i + b], mark, cycles);
+        fio_memset(ary[i + b], mark, cycles);
       }
 
       for (int b = 0; b < 4; ++b) {

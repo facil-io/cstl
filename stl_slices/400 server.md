@@ -223,6 +223,7 @@ void fio_suspend(fio_s *io);
 ```
 
 Suspends future "on_data" events for the IO.
+
 #### `fio_unsuspend`
 
 ```c
@@ -230,6 +231,15 @@ void fio_unsuspend(fio_s *io);
 ```
 
 Listens for future "on_data" events related to the IO.
+
+#### `fio_is_suspended`
+
+```c
+int fio_is_suspended(fio_s *io);
+```
+
+Returns non-zero if the IO is suspended (this might not be reliable information).
+
 #### `fio_dup`
 
 ```c
@@ -260,7 +270,7 @@ This function is thread-safe.
 void fio_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
 ```
 
-Schedules a task for delayed execution. This function is thread-safe.
+Schedules a task for delayed execution. This function is thread-safe and schedules the task within the Server's task queue.
 
 
 ### `fio_protocol_s`

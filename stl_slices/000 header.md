@@ -90,11 +90,11 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
 
-* [Polling with `poll`](#basic-io-polling) - defined by `FIO_POLL`
+* [Polling with `epoll` / `kqueue` / `poll`](#basic-io-polling) - defined by `FIO_POLL`
 
 * [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
 
-* [Simple Server using `poll`](#simple-server) - defined by `FIO_SERVER`
+* [Simple Server](#simple-server) - defined by `FIO_SERVER`
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 

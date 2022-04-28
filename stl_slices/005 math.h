@@ -427,7 +427,7 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       len <= 256,
       "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
 #endif
-  memcpy(r, a, sizeof(uint64_t) * len);
+  FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
   memset(q, 0, sizeof(uint64_t) * len);
   size_t rlen;
   uint64_t c;
@@ -460,7 +460,7 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
     q[i] = fio_math_addc64(q[i], 0, c, &c);
   }
   if (dest) {
-    memcpy(dest, q, len * sizeof(uint64_t));
+    FIO_MEMCPY(dest, q, len * sizeof(uint64_t));
   }
   if (reminder) {
     for (size_t i = 0; i < len; ++i) {

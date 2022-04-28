@@ -1049,6 +1049,7 @@ String Core Callbacks - Memory management
 ***************************************************************************** */
 FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
                                                            size_t new_capa) {
+  new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
   if (!tmp)
     return -1;
@@ -1059,6 +1060,7 @@ FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
 FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
                        __default_copy_and_reallocate)(fio_str_info_s *dest,
                                                       size_t new_capa) {
+  new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
     return -1;
