@@ -67,7 +67,7 @@ SFUNC int fio_signal_forget(int sig);
 /* *****************************************************************************
 Signal Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 POSIX implementation

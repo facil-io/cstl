@@ -221,7 +221,7 @@ FIO_IFUNC mode_t fio_fd_type(int fd) {
 /* *****************************************************************************
 File Helper Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /**
  * Opens `filename`, returning the same as values as `open` on POSIX systems.

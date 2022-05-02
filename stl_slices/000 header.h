@@ -398,6 +398,15 @@ Memory Copying Primitives
 /** If set, manual unrolling is used for the fio___memcpy7x helper. */
 #define FIO_MEMCPYX_UNROLL 1
 #endif
+#if __has_builtin(__builtin_memset)
+#ifndef FIO_MEMSET
+#define FIO_MEMSET __builtin_memset
+#endif
+#else
+#ifndef FIO_MEMSET
+#define FIO_MEMSET memset
+#endif
+#endif
 
 /* memcpy selectors / overriding */
 #if __has_builtin(__builtin_memcpy)
@@ -423,18 +432,7 @@ Memory Copying Primitives
 #define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
 #define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
 
-#define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
-  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
-    struct fio___memcpy##bytes##_s {                                           \
-      char data[bytes];                                                        \
-    };                                                                         \
-    union {                                                                    \
-      const void *ptr;                                                         \
-      struct fio___memcpy##bytes##_s *grp;                                     \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.grp = *s.grp;                                                           \
-  }
-#define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
+#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
     struct fio___memcpy##bytes##_s {                                           \
       char data[bytes];                                                        \
@@ -446,14 +444,13 @@ Memory Copying Primitives
     *d.grp = *s.grp;                                                           \
   }
 
-FIO___MAKE_MEMCPY_SMALL(1, 8)
-FIO___MAKE_MEMCPY_SMALL(2, 16)
-FIO___MAKE_MEMCPY_SMALL(4, 32)
-FIO___MAKE_MEMCPY_SMALL(8, 64)
-FIO___MAKE_MEMCPY_FIXED(16, 2)
-FIO___MAKE_MEMCPY_FIXED(32, 4)
-FIO___MAKE_MEMCPY_FIXED(64, 8)
-#undef FIO___MAKE_MEMCPY_SMALL
+FIO___MAKE_MEMCPY_FIXED(1)
+FIO___MAKE_MEMCPY_FIXED(2)
+FIO___MAKE_MEMCPY_FIXED(4)
+FIO___MAKE_MEMCPY_FIXED(8)
+FIO___MAKE_MEMCPY_FIXED(16)
+FIO___MAKE_MEMCPY_FIXED(32)
+FIO___MAKE_MEMCPY_FIXED(64)
 #undef FIO___MAKE_MEMCPY_FIXED
 
 #endif /* __has_builtin(__builtin_memcpy) */
@@ -546,19 +543,8 @@ FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
 }
 
 /* *****************************************************************************
-Macro Stringifier
-***************************************************************************** */
-
-#ifndef FIO_MACRO2STR
-#define FIO_MACRO2STR_STEP2(macro) #macro
-/** Converts a macro's content to a string literal. */
-#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
-#endif
-
-/* *****************************************************************************
 Conditional Likelihood
 ***************************************************************************** */
-
 #if defined(__clang__) || defined(__GNUC__)
 #define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
 #define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
@@ -566,10 +552,19 @@ Conditional Likelihood
 #define FIO_LIKELY(cond)   (cond)
 #define FIO_UNLIKELY(cond) (cond)
 #endif
+
+/* *****************************************************************************
+Macro Stringifier
+***************************************************************************** */
+#ifndef FIO_MACRO2STR
+#define FIO_MACRO2STR_STEP2(macro) #macro
+/** Converts a macro's content to a string literal. */
+#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
+#endif
+
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
-
 /* Used for naming functions and types */
 #define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
 #define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
@@ -603,7 +598,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.2"
+#define FIO_VERSION_BUILD "alpha.3"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -734,9 +729,9 @@ FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
                   "facil.io requires a 32bit wide uint32_t");
 FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
                   "facil.io requires a 64bit wide uint64_t");
-FIO_ASSERT_STATIC(
-    sizeof(fio___padding_char_struct_test_s) == 2,
-    "compiler adds padding to fio___memcpyX, adding memory alignment issues.");
+FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
+                  "compiler adds padding to fio___memcpyX, creating memory "
+                  "alignment issues.");
 
 /* *****************************************************************************
 Miscellaneous helper macros
@@ -783,7 +778,7 @@ Miscellaneous helper macros
   do {                                                                         \
     if (!(cond)) {                                                             \
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -801,7 +796,7 @@ Miscellaneous helper macros
     if (!(cond)) {                                                             \
       FIO_LOG_FATAL("(" FIO__FILE__                                            \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -1015,7 +1010,7 @@ Sleep / Thread Scheduling Macros
 
 #elif FIO_OS_POSIX
 /**
- * Calls nonsleep with the requested nano-second count.
+ * Calls nanonsleep with the requested nano-second count.
  */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
@@ -1154,9 +1149,6 @@ Common macros
 #undef IFUNC
 #define SFUNC_ static __attribute__((unused))
 #define IFUNC_ static inline __attribute__((unused))
-#ifndef FIO_EXTERN_COMPLETE /* force implementation, emitting static data */
-#define FIO_EXTERN_COMPLETE 2
-#endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_EXTERN */
 
 #undef SFUNC
@@ -1378,5 +1370,4 @@ Common macros
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
-
 #endif /* FIO_ATOL */

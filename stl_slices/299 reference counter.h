@@ -143,7 +143,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_REF_NAME, references)(FIO_REF_TYPE_PTR wrapped_) {
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);

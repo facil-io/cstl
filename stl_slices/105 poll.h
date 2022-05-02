@@ -248,7 +248,7 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
 /* *****************************************************************************
 Poll Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifdef FIO_POLL_DEBUG
 #define FIO_POLL_DEBUG_LOG FIO_LOG_DEBUG

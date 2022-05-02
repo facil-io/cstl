@@ -98,15 +98,21 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
-### Compilation Modes
-
-The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
-
-#### Static Functions by Default
+### Static Functions by Default
 
 By default, the Simple Template Library will generate static functions where possible.
 
 To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to generate externally visible code.
+
+### Compilation Modes
+
+The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
+
+#### `FIO_EVERYTHING`
+
+Adds all the code facil.io C STL has to offer. Custom types (templates) can't be created without specific instruction, but all functionality that can be included is included.
+
+Note, `FIO_EVERYTHING` functions will always be `static` unless `FIO_EXTERN` was defined for specific functionality or `FIO_EXTERN` was defined in a persistent way (with a numerical value of `2` or greater).
 
 #### `FIO_EXTERN`
 
@@ -116,7 +122,7 @@ If `FIO_EXTERN` is defined alone, only function declarations and inline function
 
 If `FIO_EXTERN_COMPLETE` is defined, the function definition (the implementation code) will also be generated.
 
-**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Simple Template Library header is included.
+**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
 
 For example, in the header (i.e., `mymem.h`), use:
 
@@ -124,21 +130,23 @@ For example, in the header (i.e., `mymem.h`), use:
 #define FIO_EXTERN
 #define FIO_MALLOC
 #include "fio-stl.h"
+/* FIO_EXTERN automatically undefined in this case */
 ```
 
 Later, in the implementation file, use:
 
 ```c
-#define FIO_EXTERN_COMPLETE 1
+#define FIO_EXTERN_COMPLETE 2
 #include "mymem.h"
 #undef FIO_EXTERN_COMPLETE
+/* FIO_EXTERN_COMPLETE needed to be manually undefined in this case */
 ```
 
 #### `FIO_EXTERN_COMPLETE`
 
 When defined, this macro will force full code generation.
 
-If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
+**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
 
 #### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 

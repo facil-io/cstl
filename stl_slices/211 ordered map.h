@@ -106,7 +106,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
 /* *****************************************************************************
 Ordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifndef FIO_MAP_MEMORY_SIZE
 #define FIO_MAP_MEMORY_SIZE(bits)                                              \
@@ -267,13 +267,13 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
     m->map = tmp;
     m->bits = (uint8_t)bits;
     if (!FIO_MEM_REALLOC_IS_SAFE_)
-      memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
-             0,
-             sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+      FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m),
+                 0,
+                 sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
   } else if (bits == m->bits) {
-    memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
-           0,
-           sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+    FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m),
+               0,
+               sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
   }
 
   /* rehash the map */
@@ -536,7 +536,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map) {
     return;
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, __destroy_all_objects)(m);
-  memset(FIO_NAME(FIO_MAP_NAME, __imap)(m), 0, FIO_MAP_CAPA(m->bits));
+  FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m), 0, FIO_MAP_CAPA(m->bits));
   m->under_attack = 0;
   m->count = m->w = 0;
 #if FIO_MAP_EVICT_LRU
@@ -551,7 +551,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   if (!m)
     return -1;
   FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
-  if (!m->count)
+  if (!m->count || !number_of_elements)
     return -1;
   if (number_of_elements >= m->count) {
     FIO_NAME(FIO_MAP_NAME, clear)(map);
@@ -566,12 +566,13 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   } while (--number_of_elements);
 #else  /* FIO_MAP_EVICT_LRU */
   /* scan map and evict FIFO. */
-  for (FIO_MAP_SIZE_TYPE i = 0; number_of_elements && i < m->w; ++i) {
+  for (FIO_MAP_SIZE_TYPE i = 0; (i < m->w); ++i) {
     /* skip empty groups (test for all bytes == 0 || 255 */
     if (m->map[i].hash) {
       FIO_NAME(FIO_MAP_NAME, remove)
       (map, m->map[i].hash, FIO_MAP_OBJ2KEY(m->map[i].obj), NULL);
-      --number_of_elements; /* stop evicting? */
+      if (!(--number_of_elements))
+        break; /* stop evicting? */
     }
   }
 #endif /* FIO_MAP_EVICT_LRU */

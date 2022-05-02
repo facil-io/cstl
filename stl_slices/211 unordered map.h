@@ -107,7 +107,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
 /* *****************************************************************************
 Unordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifndef FIO_MAP_MEMORY_SIZE
 #define FIO_MAP_MEMORY_SIZE(bits)                                              \
@@ -262,7 +262,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
   if (!tmp)
     return -1;
   if (!FIO_MEM_REALLOC_IS_SAFE_)
-    memset(tmp, 0, FIO_MAP_MEMORY_SIZE(bits));
+    FIO_MEMSET(tmp, 0, FIO_MAP_MEMORY_SIZE(bits));
   /* rehash the map */
   FIO_NAME(FIO_MAP_NAME, s) m2;
   m2 = (FIO_NAME(FIO_MAP_NAME, s)){

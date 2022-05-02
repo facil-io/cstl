@@ -398,6 +398,15 @@ Memory Copying Primitives
 /** If set, manual unrolling is used for the fio___memcpy7x helper. */
 #define FIO_MEMCPYX_UNROLL 1
 #endif
+#if __has_builtin(__builtin_memset)
+#ifndef FIO_MEMSET
+#define FIO_MEMSET __builtin_memset
+#endif
+#else
+#ifndef FIO_MEMSET
+#define FIO_MEMSET memset
+#endif
+#endif
 
 /* memcpy selectors / overriding */
 #if __has_builtin(__builtin_memcpy)
@@ -423,18 +432,7 @@ Memory Copying Primitives
 #define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
 #define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
 
-#define FIO___MAKE_MEMCPY_SMALL(bytes, bits)                                   \
-  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
-    struct fio___memcpy##bytes##_s {                                           \
-      char data[bytes];                                                        \
-    };                                                                         \
-    union {                                                                    \
-      const void *ptr;                                                         \
-      struct fio___memcpy##bytes##_s *grp;                                     \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.grp = *s.grp;                                                           \
-  }
-#define FIO___MAKE_MEMCPY_FIXED(bytes, groups_of_8)                            \
+#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
     struct fio___memcpy##bytes##_s {                                           \
       char data[bytes];                                                        \
@@ -446,14 +444,13 @@ Memory Copying Primitives
     *d.grp = *s.grp;                                                           \
   }
 
-FIO___MAKE_MEMCPY_SMALL(1, 8)
-FIO___MAKE_MEMCPY_SMALL(2, 16)
-FIO___MAKE_MEMCPY_SMALL(4, 32)
-FIO___MAKE_MEMCPY_SMALL(8, 64)
-FIO___MAKE_MEMCPY_FIXED(16, 2)
-FIO___MAKE_MEMCPY_FIXED(32, 4)
-FIO___MAKE_MEMCPY_FIXED(64, 8)
-#undef FIO___MAKE_MEMCPY_SMALL
+FIO___MAKE_MEMCPY_FIXED(1)
+FIO___MAKE_MEMCPY_FIXED(2)
+FIO___MAKE_MEMCPY_FIXED(4)
+FIO___MAKE_MEMCPY_FIXED(8)
+FIO___MAKE_MEMCPY_FIXED(16)
+FIO___MAKE_MEMCPY_FIXED(32)
+FIO___MAKE_MEMCPY_FIXED(64)
 #undef FIO___MAKE_MEMCPY_FIXED
 
 #endif /* __has_builtin(__builtin_memcpy) */
@@ -546,19 +543,8 @@ FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
 }
 
 /* *****************************************************************************
-Macro Stringifier
-***************************************************************************** */
-
-#ifndef FIO_MACRO2STR
-#define FIO_MACRO2STR_STEP2(macro) #macro
-/** Converts a macro's content to a string literal. */
-#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
-#endif
-
-/* *****************************************************************************
 Conditional Likelihood
 ***************************************************************************** */
-
 #if defined(__clang__) || defined(__GNUC__)
 #define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
 #define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
@@ -566,10 +552,19 @@ Conditional Likelihood
 #define FIO_LIKELY(cond)   (cond)
 #define FIO_UNLIKELY(cond) (cond)
 #endif
+
+/* *****************************************************************************
+Macro Stringifier
+***************************************************************************** */
+#ifndef FIO_MACRO2STR
+#define FIO_MACRO2STR_STEP2(macro) #macro
+/** Converts a macro's content to a string literal. */
+#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
+#endif
+
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
-
 /* Used for naming functions and types */
 #define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
 #define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
@@ -603,7 +598,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.2"
+#define FIO_VERSION_BUILD "alpha.3"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -734,9 +729,9 @@ FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
                   "facil.io requires a 32bit wide uint32_t");
 FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
                   "facil.io requires a 64bit wide uint64_t");
-FIO_ASSERT_STATIC(
-    sizeof(fio___padding_char_struct_test_s) == 2,
-    "compiler adds padding to fio___memcpyX, adding memory alignment issues.");
+FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
+                  "compiler adds padding to fio___memcpyX, creating memory "
+                  "alignment issues.");
 
 /* *****************************************************************************
 Miscellaneous helper macros
@@ -783,7 +778,7 @@ Miscellaneous helper macros
   do {                                                                         \
     if (!(cond)) {                                                             \
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -801,7 +796,7 @@ Miscellaneous helper macros
     if (!(cond)) {                                                             \
       FIO_LOG_FATAL("(" FIO__FILE__                                            \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
-      fprintf(stderr, "     errno(%d): %s\n", errno, strerror(errno));         \
+      FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -1015,7 +1010,7 @@ Sleep / Thread Scheduling Macros
 
 #elif FIO_OS_POSIX
 /**
- * Calls nonsleep with the requested nano-second count.
+ * Calls nanonsleep with the requested nano-second count.
  */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
@@ -1154,9 +1149,6 @@ Common macros
 #undef IFUNC
 #define SFUNC_ static __attribute__((unused))
 #define IFUNC_ static inline __attribute__((unused))
-#ifndef FIO_EXTERN_COMPLETE /* force implementation, emitting static data */
-#define FIO_EXTERN_COMPLETE 2
-#endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_EXTERN */
 
 #undef SFUNC
@@ -1378,7 +1370,6 @@ Common macros
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
-
 #endif /* FIO_ATOL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
@@ -1566,7 +1557,7 @@ SFUNC int fio_kill(int pid, int signum);
 /* *****************************************************************************
 Patched functions
 ***************************************************************************** */
-#if FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* based on:
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
@@ -2472,7 +2463,7 @@ FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
 /* *****************************************************************************
 Implementation - Extern
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 struct fio___lock2_wait_s {
   struct fio___lock2_wait_s *next;
@@ -2500,13 +2491,10 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   /* note, we now own the part of the lock */
 
   /* a lock-wide (all groups) lock ID for the waitlist */
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1ULL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)   ? ((size_t)1ULL << 63)
+                            : (sizeof(inner_lock) >= 4) ? ((size_t)1UL << 31)
+                            : (sizeof(inner_lock) >= 2) ? ((size_t)1UL << 15)
+                                                        : ((size_t)1UL << 7);
 
   /* initialize self-waiting node memory (using stack memory) */
   fio___lock2_wait_s self_thread = {
@@ -2564,13 +2552,10 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
  */
 SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
   /* a lock-wide (all groups) lock ID for the waitlist */
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1ULL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)   ? ((size_t)1ULL << 63)
+                            : (sizeof(inner_lock) >= 4) ? ((size_t)1UL << 31)
+                            : (sizeof(inner_lock) >= 2) ? ((size_t)1UL << 15)
+                                                        : ((size_t)1UL << 7);
   fio___lock2_wait_s *waiting;
   if (!group)
     group = 1;
@@ -3640,7 +3625,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   FIO_ASSERT(fio_ct_max(-2, -1) == -1, "fio_ct_max error.");
   {
     uint8_t bitmap[1024];
-    memset(bitmap, 0, 1024);
+    FIO_MEMSET(bitmap, 0, 1024);
     fprintf(stderr, "* Testing bitmap helpers.\n");
     FIO_ASSERT(!fio_bitmap_get(bitmap, 97), "fio_bitmap_get should be 0.");
     fio_bitmap_set(bitmap, 97);
@@ -4168,16 +4153,16 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
 #endif
   FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
-  memset(q, 0, sizeof(uint64_t) * len);
+  FIO_MEMSET(q, 0, sizeof(uint64_t) * len);
   size_t rlen;
   uint64_t c;
   const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
   if (!blen) { /* divide by zero! */
     FIO_LOG_ERROR("divide by zero!");
     if (dest)
-      memset(dest, 0xFFFFFFFF, sizeof(*dest) * len);
+      FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
     if (reminder)
-      memset(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
+      FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
     return;
   }
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
@@ -4542,7 +4527,7 @@ FIO_IFUNC size_t fio_digits16(uint64_t i) {
 /* *****************************************************************************
 Strings to Numbers - Implementation - possibly externed
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 typedef struct {
   uint64_t val;
@@ -5813,7 +5798,7 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 #if FIO_OS_WIN
 #ifndef FIO_THREADS_MUTEX_BYO
 /** Initializes a simple Mutex */
@@ -5942,7 +5927,7 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   return n;
 }
 
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* Risky Hash initialization constants */
 #define FIO_RISKY3_IV0 0x0000001000000001ULL
@@ -6209,7 +6194,7 @@ IFUNC void fio_rand_reseed(void);
 Random - Implementation
 ***************************************************************************** */
 
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #if FIO_OS_POSIX ||                                                            \
     (__has_include("sys/resource.h") && __has_include("sys/time.h"))
@@ -6397,7 +6382,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_offset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_offset;
 
-  memset(buffer, 'T', buffer_len);
+  FIO_MEMSET(buffer, 'T', buffer_len);
   /* warmup */
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
@@ -6630,7 +6615,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   FIO_NAME_TEST(stl, random_buffer)
   (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
 
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   {
     if (RAND_MAX == ~(uint64_t)0ULL) {
       /* RAND_MAX fills all bits */
@@ -6684,7 +6669,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
     FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
   }
 
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   fio_rand64(); /* warmup */
   start = clock();
   for (size_t i = 0; i < test_len; ++i) {
@@ -6692,7 +6677,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   }
   end = clock();
   FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   start = clock();
   fio_rand_bytes(rs, test_len * sizeof(*rs));
   end = clock();
@@ -6781,7 +6766,7 @@ FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s) { return s->digest; }
 /* *****************************************************************************
 Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
@@ -6857,8 +6842,6 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  /* TODO: hash */
-
   fio_sha1_s s = (fio_sha1_s){
       .v =
           {
@@ -6879,7 +6862,7 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
-  memset(vec, 0, sizeof(vec));
+  FIO_MEMSET(vec, 0, sizeof(vec));
   if ((len & 63)) {
     FIO_MEMCPY63x(vec, buf, len);
   }
@@ -6887,7 +6870,7 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
 
   if ((len & 63) > 55) {
     fio___sha1_round512(&s, vec);
-    memset(vec, 0, sizeof(vec));
+    FIO_MEMSET(vec, 0, sizeof(vec));
   }
 
   fio_u2buf64((void *)(vec + 14), (len << 3));
@@ -7093,7 +7076,7 @@ SFUNC int fio_chacha20_poly1305_dec(void *mac,
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
 ***************************************************************************** */
-#if FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 typedef union {
   uint32_t u32[16];
@@ -7487,7 +7470,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
-  memset(dest.u64, 0, 64);
+  FIO_MEMSET(dest.u64, 0, 64);
   FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
   fio___poly_consume_msg(&pl, (uint8_t *)&dest, (len & 63));
@@ -7806,7 +7789,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len);
 /* *****************************************************************************
 FIO_URL - Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /**
  * Parses the URI returning it's components and their lengths (no decoding
@@ -8460,7 +8443,7 @@ Note: static Callacks must be implemented in the C file that uses the parser
 
 Note: a Helper API is provided for the parsing implementation.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** common FIO_JSON callback function properties */
 #define FIO_JSON_CB static inline __attribute__((unused))
@@ -9356,7 +9339,7 @@ Memory Allocation - start implementation
 
 
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* internal workings start here */
 
 /* *****************************************************************************
@@ -9412,7 +9395,6 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   if (offset >= bytes) {
     /* walk forwards (memcpy) */
     /* 4 word groups */
-    FIO_LOG_DEBUG2("normal fio_memcpy");
     char *dstop = d + (bytes & (~(size_t)127ULL));
     for (; d < dstop;) {
       FIO_MEMCPY64(d, s);
@@ -9427,30 +9409,14 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     }
     FIO_MEMCPY63x(d, s, bytes);
     return;
-  } else if (offset >= 64) {
-    FIO_LOG_DEBUG2("fio_memcpy as memmove with more than 64 bytes spacing");
-    char *dstop = d + (bytes & 63);
+  } else {
+    /* some memory overlaps, walk backwards (memmove) */
+    char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
     for (; d > dstop;) {
       d -= 64;
       s -= 64;
-      FIO_MEMCPY64(d, s);
-    }
-    d -= (bytes & 63);
-    s -= (bytes & 63);
-    FIO_MEMCPY63x(d, s, bytes);
-  } else {
-    FIO_LOG_DEBUG2("fio_memcpy as memmove");
-    /* some memory overlaps, walk backwards (memmove) */
-    d += bytes;
-    s += bytes;
-    char FIO_ALIGN(16) tmp[64];
-    for (; bytes >= 64;) {
-      bytes -= 64;
-      d -= 64;
-      s -= 64;
-      FIO_MEMCPY64(tmp, s);
       FIO_MEMCPY64(d, s);
     }
     /* the same as FIO_MEMCPY63x, but walking backwards... */
@@ -9483,7 +9449,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
 }
 
-/** an 8 byte aligned memset implementation. */
+/** an 8 byte memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   uint64_t repeated[4] = {data, data, data, data};
   char *d = (char *)dest_;
@@ -12010,13 +11976,13 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
 
-/** Adds two `struct timespec` objects (TODO: untested). */
+/** Adds two `struct timespec` objects. */
 FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
 
-/** Adds milliseconds to a `struct timespec` object (TODO: untested). */
+/** Adds milliseconds to a `struct timespec` object. */
 FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
 
-/** Compares two `struct timespec` objects (TODO: untested). */
+/** Compares two `struct timespec` objects. */
 FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
 
 /* *****************************************************************************
@@ -12515,16 +12481,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   {
     char buf[48];
     buf[47] = 0;
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc7231(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2109(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2822(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2log(buf, now);
     FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
   }
@@ -12581,6 +12547,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
             (size_t)(stop - start));
     fprintf(stderr, "\n");
   }
+  /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
 }
 #undef FIO___GMTIME_TEST_INTERVAL
 #undef FIO___GMTIME_TEST_RANGE
@@ -12868,7 +12835,7 @@ missing_tq:
 /* *****************************************************************************
 Queue Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
@@ -13715,7 +13682,7 @@ SFUNC void fio_cli_unnamed_set(unsigned int index, char const *value);
 /* *****************************************************************************
 CLI Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 CLI Data Stores
@@ -14430,6 +14397,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_SOCK                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "050 url.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -14439,124 +14407,6 @@ Feel free to copy, use and enjoy according to the license provided.
                         Basic Socket Helpers / IO Polling
 
 
-
-Example:
-********************************************************************************
-
-#define FIO_SOCK
-#define FIO_CLI
-#define FIO_LOG
-#include "fio-stl.h" // __FILE__
-
-typedef struct {
-  int fd;
-  unsigned char is_client;
-} state_s;
-
-static void on_data_server(int fd, size_t index, void *udata) {
-  (void)udata; // unused for server
-  (void)index; // we don't use the array index in this example
-  char buf[65536];
-  FIO_MEMCPY(buf, "echo: ", 6);
-  ssize_t len = 0;
-  struct sockaddr_storage peer;
-  socklen_t peer_addrlen = sizeof(peer);
-  len = recvfrom(fd, buf + 6, (65536 - 7), 0, (struct sockaddr *)&peer,
-                 &peer_addrlen);
-  if (len <= 0)
-    return;
-  buf[len + 6] = 0;
-  fprintf(stderr, "Recieved: %s", buf + 6);
-  // sends all data in UDP, with TCP sending may be partial
-  len =
-      sendto(fd, buf, len + 6, 0, (const struct sockaddr *)&peer, peer_addrlen);
-  if (len < 0)
-    perror("error");
-}
-
-static void on_data_client(int fd, size_t index, void *udata) {
-  state_s *state = (state_s *)udata;
-  fprintf(stderr, "on_data_client %zu\n", index);
-  if (!index) // stdio is index 0 in the fd list
-    goto is_stdin;
-  char buf[65536];
-  ssize_t len = 0;
-  struct sockaddr_storage peer;
-  socklen_t peer_addrlen = sizeof(peer);
-  len = recvfrom(fd, buf, 65535, 0, (struct sockaddr *)&peer, &peer_addrlen);
-  if (len <= 0)
-    return;
-  buf[len] = 0;
-  fprintf(stderr, "%s", buf);
-  return;
-is_stdin:
-  len = read(fd, buf, 65535);
-  if (len <= 0)
-    return;
-  buf[len] = 0;
-  // sends all data in UDP, with TCP sending may be partial
-  len = send(state->fd, buf, len, 0);
-  fprintf(stderr, "Sent: %zd bytes\n", len);
-  if (len < 0)
-    perror("error");
-  return;
-  (void)udata;
-}
-
-int main(int argc, char const *argv[]) {
-  // Using CLI to set address, port and client/server mode.
-  fio_cli_start(
-      argc, argv, 0, 0, "UDP echo server / client example.",
-      FIO_CLI_PRINT_HEADER("Address Binding"),
-      FIO_CLI_STRING("-address -b address to listen / connect to."),
-      FIO_CLI_INT("-port -p port to listen / connect to. Defaults to 3030."),
-      FIO_CLI_PRINT_HEADER("Operation Mode"),
-      FIO_CLI_BOOL("-client -c Client mode."),
-      FIO_CLI_BOOL("-verbose -v verbose mode (debug messages on)."));
-
-  if (fio_cli_get_bool("-v"))
-    FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
-  fio_cli_set_default("-p", "3030");
-
-  // Using FIO_SOCK functions for setting up UDP server / client
-  state_s state = {.is_client = fio_cli_get_bool("-c")};
-  state.fd = fio_sock_open(
-      fio_cli_get("-b"), fio_cli_get("-p"),
-      FIO_SOCK_UDP | FIO_SOCK_NONBLOCK |
-          (fio_cli_get_bool("-c") ? FIO_SOCK_CLIENT : FIO_SOCK_SERVER));
-
-  if (state.fd == -1) {
-    FIO_LOG_FATAL("Couldn't open socket!");
-    exit(1);
-  }
-  FIO_LOG_DEBUG("UDP socket open on fd %d", state.fd);
-
-  if (state.is_client) {
-    int i =
-        send(state.fd, "Client hello... further data will be sent using REPL\n",
-             53, 0);
-    fprintf(stderr, "Sent: %d bytes\n", i);
-    if (i < 0)
-      perror("error");
-    while (fio_sock_poll(.on_data = on_data_client, .udata = (void *)&state,
-                         .timeout = 1000,
-                         .fds = FIO_SOCK_POLL_LIST(
-                             FIO_SOCK_POLL_R(fileno(stdin)),
-                             FIO_SOCK_POLL_R(state.fd))) >= 0)
-      ;
-  } else {
-    while (fio_sock_poll(.on_data = on_data_server, .udata = (void *)&state,
-                         .timeout = 1000,
-                         .fds = FIO_SOCK_POLL_LIST(
-                             FIO_SOCK_POLL_R(state.fd))) >= 0)
-      ;
-  }
-  // we should cleanup, though we'll exit with Ctrl+C, so it's won't matter.
-  fio_cli_end();
-  fio_sock_close(state.fd);
-  return 0;
-  (void)argv;
-}
 
 
 ***************************************************************************** */
@@ -14598,6 +14448,7 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
   return r;
 }
 #define accept fio_sock_accept
+#define poll   WSAPoll
 
 #elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
@@ -14710,119 +14561,8 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
 #define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
 
 /* *****************************************************************************
-Small Poll API
-***************************************************************************** */
-
-typedef struct {
-  /** Called after polling but before any events are processed. */
-  void (*before_events)(void *udata);
-  /** Called when the fd can be written too (available outgoing buffer). */
-  void (*on_ready)(int fd, size_t index, void *udata);
-  /** Called when data iis available to be read from the fd. */
-  void (*on_data)(int fd, size_t index, void *udata);
-  /** Called on error or when the fd was closed. */
-  void (*on_error)(int fd, size_t index, void *udata);
-  /** Called after polling and after all events are processed. */
-  void (*after_events)(void *udata);
-  /** An opaque user data pointer. */
-  void *udata;
-  /** A pointer to the fd pollin array. */
-  struct pollfd *fds;
-  /**
-   * the number of fds to listen to.
-   *
-   * If zero, and `fds` is set, it will be auto-calculated trying to find the
-   * first array member where `events == 0`. Make sure to supply this end
-   * marker, of the buffer may overrun!
-   */
-  uint32_t count;
-  /** timeout for the polling system call. */
-  int timeout;
-} fio_sock_poll_args;
-
-/**
- * The `fio_sock_poll` function uses the `poll` system call to poll a simple IO
- * list.
- *
- * The list must end with a `struct pollfd` with it's `events` set to zero. No
- * other member of the list should have their `events` data set to zero.
- *
- * It is recommended to use the `FIO_SOCK_POLL_LIST(...)` and
- * `FIO_SOCK_POLL_[RW](fd)` macros. i.e.:
- *
- *     int count = fio_sock_poll(.on_ready = on_ready,
- *                         .on_data = on_data,
- *                         .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(io_fd)));
- *
- * NOTE: The `poll` system call should perform reasonably well for light loads
- * (short lists). However, for complex IO needs or heavier loads, use the
- * system's native IO API, such as kqueue or epoll.
- */
-FIO_IFUNC int fio_sock_poll(fio_sock_poll_args args);
-#define fio_sock_poll(...) fio_sock_poll((fio_sock_poll_args){__VA_ARGS__})
-
-/* *****************************************************************************
 IO Poll - Implementation (always static / inlined)
 ***************************************************************************** */
-
-FIO_SFUNC void fio___sock_poll_mock_ev(int fd, size_t index, void *udata) {
-  (void)fd;
-  (void)index;
-  (void)udata;
-}
-
-int fio_sock_poll____(void); /* sublime text marker */
-FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
-  size_t event_count = 0;
-  size_t limit = 0;
-  if (!args.fds)
-    goto empty_list;
-  if (!args.count)
-    while (args.fds[args.count].events)
-      ++args.count;
-  if (!args.count)
-    goto empty_list;
-
-  /* move if statement out of loop using a move callback */
-  if (!args.on_ready)
-    args.on_ready = fio___sock_poll_mock_ev;
-  if (!args.on_data)
-    args.on_data = fio___sock_poll_mock_ev;
-  if (!args.on_error)
-    args.on_error = fio___sock_poll_mock_ev;
-#if FIO_OS_WIN
-  event_count = WSAPoll(args.fds, args.count, args.timeout);
-#else
-  event_count = poll(args.fds, args.count, args.timeout);
-#endif
-  if (args.before_events)
-    args.before_events(args.udata);
-  if (event_count <= 0)
-    goto finish;
-  for (size_t i = 0; i < args.count && limit < event_count; ++i) {
-    if (!args.fds[i].revents)
-      continue;
-    ++limit;
-    if ((args.fds[i].revents & POLLOUT))
-      args.on_ready(args.fds[i].fd, i, args.udata);
-    if ((args.fds[i].revents & POLLIN))
-      args.on_data(args.fds[i].fd, i, args.udata);
-    if ((args.fds[i].revents & (POLLERR | POLLNVAL)))
-      args.on_error(args.fds[i].fd, i, args.udata); /* TODO: POLLHUP ? */
-  }
-finish:
-  if (args.after_events)
-    args.after_events(args.udata);
-  return event_count;
-empty_list:
-  if (args.timeout)
-    FIO_THREAD_WAIT(args.timeout);
-  if (args.before_events)
-    args.before_events(args.udata);
-  if (args.after_events)
-    args.after_events(args.udata);
-  return 0;
-}
 
 /**
  * Creates a new socket according to the provided flags.
@@ -14911,7 +14651,7 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a) { freeaddrinfo(a); }
 /* *****************************************************************************
 FIO_SOCK - Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Creates a new socket, according to the provided flags. */
 SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
@@ -14952,7 +14692,6 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
       FIO_MEMCPY(port, u.port.buf, u.port.len);
       port[u.port.len] = 0;
       if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
-        /* TODO? prefer...? TCP? */
         if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
             (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
           flags |= FIO_SOCK_TCP;
@@ -15148,13 +14887,9 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
   short r;
   struct pollfd pfd = {.fd = fd, .events = events};
-#if FIO_OS_WIN
-  r = (short)WSAPoll(&pfd, 1, timeout);
-#else
   r = (short)poll(&pfd, 1, timeout);
-#endif
   if (r == 1)
-    r = events;
+    r = pfd.revents;
   return r;
 }
 
@@ -15200,7 +14935,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   return capa;
 }
 
-#if FIO_OS_POSIX
+#if FIO_OS_POSIX || defined(AF_UNIX)
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -15262,10 +14997,16 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
 }
 #elif FIO_OS_WIN
 
-/* UNIX Sockets?
+/* TODO: UNIX Sockets?
  * https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
  */
 
+#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+
+/* *****************************************************************************
+WinSock initialization
+***************************************************************************** */
+#if FIO_OS_WIN
 static WSADATA fio___sock_useless_windows_data;
 FIO_CONSTRUCTOR(fio___sock_win_init) {
   static uint8_t flag = 0;
@@ -15278,30 +15019,12 @@ FIO_CONSTRUCTOR(fio___sock_win_init) {
     atexit((void (*)(void))(WSACleanup));
   }
 }
-
-// FIO_DESTRUCTOR void fio___sock_win_cleanup(void) { (); }
 #endif /* FIO_OS_WIN / FIO_OS_POSIX */
 
 /* *****************************************************************************
 Socket helper testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void fio___sock_test_before_events(void *udata) {
-  *(size_t *)udata = 0;
-}
-FIO_SFUNC void fio___sock_test_on_event(int fd, size_t index, void *udata) {
-  *(size_t *)udata += 1;
-  if (errno) {
-    FIO_LOG_WARNING("(possibly expected) %s", strerror(errno));
-    errno = 0;
-  }
-  (void)fd;
-  (void)index;
-}
-FIO_SFUNC void fio___sock_test_after_events(void *udata) {
-  if (*(size_t *)udata)
-    *(size_t *)udata += 1;
-}
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
   fprintf(stderr,
@@ -15333,152 +15056,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
-    size_t flag = (size_t)-1;
+    short ev = (short)-1;
     errno = 0;
     fprintf(stderr, "* Testing %s socket API\n", server_tests[i].msg);
     int srv = fio_sock_open(server_tests[i].address,
                             server_tests[i].port,
                             server_tests[i].flag | FIO_SOCK_SERVER);
     FIO_ASSERT(srv != -1, "server socket failed to open: %s", strerror(errno));
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag);
-    FIO_ASSERT(!flag, "before_events not called for missing list! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST({.fd = -1}));
-    FIO_ASSERT(!flag, "before_events not called for empty list! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-
+    ev = fio_sock_wait_io(-1, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(!ev, "no error should have been returned for IO -1 (%d)", ev);
+    ev = fio_sock_wait_io(srv, POLLIN, 0);
+    FIO_ASSERT(!ev, "no events should have been returned (%d)", ev);
     int cl = fio_sock_open(server_tests[i].address,
                            server_tests[i].port,
                            server_tests[i].flag | FIO_SOCK_CLIENT);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
                "client socket failed to open (%d)",
                cl);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    // // is it possible to write to a still-connecting socket?
-    // fio_sock_poll(.before_events = fio___sock_test_before_events,
-    //               .after_events = fio___sock_test_after_events,
-    //               .on_ready = fio___sock_test_on_event, .on_data = NULL,
-    //               .on_error = NULL, .udata = &flag,
-    //               .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    // FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    FIO_LOG_INFO("error may print when polling server for `write`.");
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(flag == 2, "Event should have occured here! (%zu)", flag);
-    FIO_LOG_INFO("error may have been emitted.");
-
+    ev = fio_sock_wait_io(cl, POLLIN /* | POLLOUT <= OS dependent */, 0);
+    FIO_ASSERT(!ev,
+               "no events should have been returned for connecting client(%d)",
+               ev);
+    ev = fio_sock_wait_io(srv, POLLIN, 100);
+    FIO_ASSERT(ev == POLLIN,
+               "incoming connection should have been detected (%d)",
+               ev);
     intptr_t accepted = accept(srv, NULL, NULL);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
                "accepted socket failed to open (%zd)",
                (ssize_t)accepted);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(accepted)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-
+    ev = fio_sock_wait_io(cl, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(ev == POLLOUT,
+               "POLLOUT should have been returned for connected client(%d)",
+               ev);
+    ev = fio_sock_wait_io(accepted, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(ev == POLLOUT,
+               "POLLOUT should have been returned for connected client 2(%d)",
+               ev);
     if (fio_sock_write(accepted, "hello", 5) > 0) {
       // wait for read
-      FIO_ASSERT(fio_sock_wait_io(cl, POLLIN, 0) != -1 &&
-                     (fio_sock_wait_io(cl, POLLIN, 0) | POLLIN),
-                 "fio_sock_wait_io should have returned a POLLIN event.");
-      fio_sock_poll(.before_events = fio___sock_test_before_events,
-                    .on_ready = NULL,
-                    .on_data = fio___sock_test_on_event,
-                    .on_error = NULL,
-                    .after_events = fio___sock_test_after_events,
-                    .udata = &flag,
-                    .timeout = 100,
-                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_R(cl)));
-      // test read/write
-      fio_sock_poll(.before_events = fio___sock_test_before_events,
-                    .on_ready = fio___sock_test_on_event,
-                    .on_data = fio___sock_test_on_event,
-                    .on_error = NULL,
-                    .after_events = fio___sock_test_after_events,
-                    .udata = &flag,
-                    .timeout = 100,
-                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+      FIO_ASSERT(
+          fio_sock_wait_io(cl, POLLIN, 10) != -1 &&
+              ((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLIN) == POLLIN),
+          "fio_sock_wait_io should have returned a POLLIN event for client.");
       {
         char buf[64];
         errno = 0;
@@ -15487,23 +15107,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                    "error: %s",
                    strerror(errno));
       }
-      FIO_ASSERT(flag == 3, "Event should have occured here! (%zu)", flag);
-    } else
+      FIO_ASSERT(!fio_sock_wait_io(cl, POLLIN, 0),
+                 "No events should have occurred here! (%zu)",
+                 ev);
+    } else {
       FIO_ASSERT(0,
                  "send(fd:%ld) failed! error: %s",
                  accepted,
                  strerror(errno));
+    }
     fio_sock_close(accepted);
     fio_sock_close(cl);
     fio_sock_close(srv);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+    FIO_ASSERT((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLNVAL),
+               "POLLNVAL should have been returned for closed socket (%d & %d) "
+               "(POLLERR == %d)",
+               fio_sock_wait_io(cl, POLLIN | POLLOUT, 0),
+               (int)POLLNVAL,
+               (int)POLLERR);
 #if FIO_OS_POSIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);
@@ -15811,7 +15432,7 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
 /* *****************************************************************************
 Poll Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifdef FIO_POLL_DEBUG
 #define FIO_POLL_DEBUG_LOG FIO_LOG_DEBUG
@@ -16262,7 +15883,7 @@ FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
 /* *****************************************************************************
 Stream Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
 /* Frees any internal data AND the object's container! */
@@ -16362,13 +15983,9 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
   case FIO_PACKET_TYPE_EMBEDDED:
     len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
     return len;
-  case FIO_PACKET_TYPE_EXTERNAL:
-    len = u.ext->length;
-    return len;
+  case FIO_PACKET_TYPE_EXTERNAL: len = u.ext->length; return len;
   case FIO_PACKET_TYPE_FILE: /* fall through */
-  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
-    len = u.f->length;
-    return len;
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE: len = u.f->length; return len;
   }
   return len;
 }
@@ -16943,7 +16560,7 @@ SFUNC int fio_signal_forget(int sig);
 /* *****************************************************************************
 Signal Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 POSIX implementation
@@ -17268,7 +16885,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 /* *****************************************************************************
 Globe Matching Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
  * Glob Matching
@@ -17678,7 +17295,7 @@ FIO_IFUNC mode_t fio_fd_type(int fd) {
 /* *****************************************************************************
 File Helper Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /**
  * Opens `filename`, returning the same as values as `open` on POSIX systems.
@@ -18039,7 +17656,7 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, root)(FIO_LIST_HEAD *ptr);
 /* *****************************************************************************
 Linked Lists (embeded) - Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Returns a non-zero value if there are any linked nodes in the list. */
 IFUNC int FIO_NAME(FIO_LIST_NAME, any)(const FIO_LIST_HEAD *head) {
@@ -18614,10 +18231,8 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->end - ary->start;
-  case 1:
-    return ary->start;
+  case 0: return ary->end - ary->start;
+  case 1: return ary->start;
   }
   return 0;
 }
@@ -18627,10 +18242,8 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->capa;
-  case 1:
-    return FIO_ARRAY_EMBEDDED_CAPA;
+  case 0: return ary->capa;
+  case 1: return FIO_ARRAY_EMBEDDED_CAPA;
   }
   return 0;
 }
@@ -18642,10 +18255,8 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->ary + ary->start;
-  case 1:
-    return FIO_ARRAY2EMBEDDED(ary)->embedded;
+  case 0: return ary->ary + ary->start;
+  case 1: return FIO_ARRAY2EMBEDDED(ary)->embedded;
   }
   return NULL;
 }
@@ -18683,8 +18294,7 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
     a = FIO_ARRAY2EMBEDDED(ary)->embedded;
     count = ary->start;
     break;
-  default:
-    return FIO_ARRAY_TYPE_INVALID;
+  default: return FIO_ARRAY_TYPE_INVALID;
   }
 
   if (index < 0) {
@@ -18715,8 +18325,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
     count = ary->start;
     a = FIO_ARRAY2EMBEDDED(ary)->embedded;
     break;
-  default:
-    return NULL;
+  default: return NULL;
   }
   intptr_t i;
   if (!count || !first)
@@ -18739,7 +18348,7 @@ typedef FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, ____type_t);
 /* *****************************************************************************
 Exported functions
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* *****************************************************************************
 Helper macros
 ***************************************************************************** */
@@ -18886,8 +18495,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
         .ary = tmp,
     };
     return capa;
-  default:
-    return 0;
+  default: return 0;
   }
 }
 
@@ -19029,7 +18637,7 @@ expansion:
     if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_ ||
         !FIO_ARRAY_TYPE_INVALID_SIMPLE) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-      memset(a + count, 0, (index - count) * sizeof(*ary->ary));
+      FIO_MEMSET(a + count, 0, (index - count) * sizeof(*ary->ary));
 #else
       for (size_t i = count; i <= (size_t)index; ++i) {
         FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -19062,7 +18670,7 @@ negative_expansion:
   index = ary->start - index;
   if ((uint32_t)(index + 1) < ary->start) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-    memset(a + index, 0, (ary->start - index) * (sizeof(*a)));
+    FIO_MEMSET(a + index, 0, (ary->start - index) * (sizeof(*a)));
 #else
     for (size_t i = index; i < (size_t)ary->start; ++i) {
       FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -19076,7 +18684,7 @@ negative_expansion_embedded:
   a = FIO_ARRAY2EMBEDDED(ary)->embedded;
   memmove(a + index, a, count * count * sizeof(*a));
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-  memset(a, 0, index * (sizeof(a)));
+  FIO_MEMSET(a, 0, index * (sizeof(a)));
 #else
   for (size_t i = 0; i < (size_t)index; ++i) {
     FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -19230,7 +18838,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
   }
   if (c && FIO_MEM_REALLOC_IS_SAFE_) {
     /* keep memory zeroed out */
-    memset(a + i, 0, sizeof(*a) * c);
+    FIO_MEMSET(a + i, 0, sizeof(*a) * c);
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
     ary->end = ary->start + i;
@@ -19370,9 +18978,9 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
     } else {
       FIO_ARRAY_TYPE_DESTROY(FIO_ARRAY2EMBEDDED(ary)->embedded[ary->start]);
     }
-    memset(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
-           0,
-           sizeof(*ary->ary));
+    FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
+               0,
+               sizeof(*ary->ary));
     return 0;
   }
   if (old)
@@ -19483,9 +19091,9 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
                   FIO_ARRAY2EMBEDDED(ary)->start,
               FIO_ARRAY2EMBEDDED(ary)->start *
                   sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
-    memset(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
-           0,
-           sizeof(*ary->ary));
+    FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
+               0,
+               sizeof(*ary->ary));
     return 0;
   }
   if (old)
@@ -19560,9 +19168,9 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
-  memset(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
+  FIO_MEMSET(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \
-  (!memcmp(&o, memset(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
+  (!memcmp(&o, FIO_MEMSET(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
 
 FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task))(
     FIO_NAME(FIO_ARRAY_NAME, each_s) * i) {
@@ -19882,7 +19490,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
       size_t max_items = 63;
       FIO_ARRAY_TYPE tmp[64];
       for (size_t i = 0; i < max_items; ++i) {
-        memset(tmp + i, i + 1, sizeof(*tmp));
+        FIO_MEMSET(tmp + i, i + 1, sizeof(*tmp));
       }
       for (size_t items = 0; items <= max_items; items = ((items << 1) | 1)) {
         FIO_LOG_DEBUG2("* testing the FIO_ARRAY_EACH macro with %zu items.",
@@ -20674,7 +20282,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
 /* *****************************************************************************
 Ordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifndef FIO_MAP_MEMORY_SIZE
 #define FIO_MAP_MEMORY_SIZE(bits)                                              \
@@ -20835,13 +20443,13 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
     m->map = tmp;
     m->bits = (uint8_t)bits;
     if (!FIO_MEM_REALLOC_IS_SAFE_)
-      memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
-             0,
-             sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+      FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m),
+                 0,
+                 sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
   } else if (bits == m->bits) {
-    memset(FIO_NAME(FIO_MAP_NAME, __imap)(m),
-           0,
-           sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
+    FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m),
+               0,
+               sizeof(FIO_MAP_SIZE_TYPE) * FIO_MAP_CAPA(bits));
   }
 
   /* rehash the map */
@@ -21104,7 +20712,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map) {
     return;
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, __destroy_all_objects)(m);
-  memset(FIO_NAME(FIO_MAP_NAME, __imap)(m), 0, FIO_MAP_CAPA(m->bits));
+  FIO_MEMSET(FIO_NAME(FIO_MAP_NAME, __imap)(m), 0, FIO_MAP_CAPA(m->bits));
   m->under_attack = 0;
   m->count = m->w = 0;
 #if FIO_MAP_EVICT_LRU
@@ -21119,7 +20727,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   if (!m)
     return -1;
   FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
-  if (!m->count)
+  if (!m->count || !number_of_elements)
     return -1;
   if (number_of_elements >= m->count) {
     FIO_NAME(FIO_MAP_NAME, clear)(map);
@@ -21134,12 +20742,13 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   } while (--number_of_elements);
 #else  /* FIO_MAP_EVICT_LRU */
   /* scan map and evict FIFO. */
-  for (FIO_MAP_SIZE_TYPE i = 0; number_of_elements && i < m->w; ++i) {
+  for (FIO_MAP_SIZE_TYPE i = 0; (i < m->w); ++i) {
     /* skip empty groups (test for all bytes == 0 || 255 */
     if (m->map[i].hash) {
       FIO_NAME(FIO_MAP_NAME, remove)
       (map, m->map[i].hash, FIO_MAP_OBJ2KEY(m->map[i].obj), NULL);
-      --number_of_elements; /* stop evicting? */
+      if (!(--number_of_elements))
+        break; /* stop evicting? */
     }
   }
 #endif /* FIO_MAP_EVICT_LRU */
@@ -21445,7 +21054,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
 /* *****************************************************************************
 Unordered Map Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #ifndef FIO_MAP_MEMORY_SIZE
 #define FIO_MAP_MEMORY_SIZE(bits)                                              \
@@ -21600,7 +21209,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
   if (!tmp)
     return -1;
   if (!FIO_MEM_REALLOC_IS_SAFE_)
-    memset(tmp, 0, FIO_MAP_MEMORY_SIZE(bits));
+    FIO_MEMSET(tmp, 0, FIO_MAP_MEMORY_SIZE(bits));
   /* rehash the map */
   FIO_NAME(FIO_MAP_NAME, s) m2;
   m2 = (FIO_NAME(FIO_MAP_NAME, s)){
@@ -23310,7 +22919,7 @@ FIO_SFUNC int fio_bstr_is_greater(char *a, char *b) {
 /* *****************************************************************************
 Extern-ed functions
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 Allocation Helpers
@@ -24559,7 +24168,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                    !memcmp(buf.buf, "I think 42 is t", 16),
                "fio_string_printf failed to truncate!");
 
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,
@@ -24571,7 +24180,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "I think 42 is t", 16),
                "fio_string_write2 failed to truncate!");
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,
@@ -24583,7 +24192,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "I think 2A is t", 16),
                "fio_string_write2 failed to truncate (hex)!");
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,
@@ -25906,7 +25515,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 
 
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Core Callbacks - Memory management
@@ -26983,7 +26592,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_REF_NAME, references)(FIO_REF_TYPE_PTR wrapped_) {
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
@@ -27162,7 +26771,7 @@ FIO_IFUNC void FIO_NAME(FIO_SORT_NAME, sort)(FIO_SORT_TYPE *array,
 /* *****************************************************************************
 Sort Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
 SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
@@ -27780,7 +27389,7 @@ FIO_IFUNC void *fio_tls_get(fio_s *io) { return ((void **)io)[1]; }
 /* *****************************************************************************
 Simple Server Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /*
 REMEMBER:
@@ -28717,7 +28326,7 @@ FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /*
 REMEMBER:
@@ -28778,7 +28387,14 @@ Common cleanup
 ***************************************************************************** */
 #ifndef FIO_STL_KEEP__
 
+/* undefine FIO_EXTERN only if its value indicates it is temporary. */
+#if (!FIO_EXTERN || FIO_EXTERN == 1)
 #undef FIO_EXTERN
+#endif
+#if (!FIO_EXTERN_COMPLETE || FIO_EXTERN_COMPLETE == 1)
+#undef FIO_EXTERN_COMPLETE
+#endif
+
 #undef SFUNC
 #undef IFUNC
 #undef SFUNC_
@@ -28803,12 +28419,6 @@ Common cleanup
 #undef FIO___LOCK_LOCK_TRY
 #undef FIO___LOCK_UNLOCK
 #undef FIO_USE_THREAD_MUTEX_TMP
-
-/* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
-#if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \
-    FIO_EXTERN_COMPLETE == 2
-#undef FIO_EXTERN_COMPLETE
-#endif
 
 #else
 
@@ -28989,10 +28599,10 @@ Dedicated memory allocator for FIOBJ types? (recommended for locality)
 #define FIO_MEMORY_USE_THREAD_MUTEX 1
 #endif
 /* make sure functions are exported if requested */
-#ifdef FIOBJ_EXTERN
+#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
 #define FIO_EXTERN
 #if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE 2
+#define FIO_EXTERN_COMPLETE
 #endif
 #endif
 #include __FILE__
@@ -29244,10 +28854,10 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 /* make sure functions are exported if requested */
-#ifdef FIOBJ_EXTERN
+#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
 #define FIO_EXTERN
 #if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE 2
+#define FIO_EXTERN_COMPLETE
 #endif
 #endif
 #include __FILE__
@@ -29325,10 +28935,10 @@ FIOBJ Strings
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 /* make sure functions are exported if requested */
-#ifdef FIOBJ_EXTERN
+#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
 #define FIO_EXTERN
 #if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE 2
+#define FIO_EXTERN_COMPLETE
 #endif
 #endif
 #include __FILE__
@@ -29460,10 +29070,10 @@ FIOBJ Arrays
 #define FIO_MEM_FREE_            FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
 /* make sure functions are exported if requested */
-#ifdef FIOBJ_EXTERN
+#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
 #define FIO_EXTERN
 #if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE 2
+#define FIO_EXTERN_COMPLETE
 #endif
 #endif
 #include __FILE__
@@ -29502,10 +29112,10 @@ FIOBJ Hash Maps
 #define FIO_MEM_FREE_             FIOBJ_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_  FIOBJ_MEM_REALLOC_IS_SAFE
 /* make sure functions are exported if requested */
-#ifdef FIOBJ_EXTERN
+#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
 #define FIO_EXTERN
 #if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE 2
+#define FIO_EXTERN_COMPLETE
 #endif
 #endif
 #include __FILE__
@@ -32314,7 +31924,7 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 #define FIO___STACK_POISON_LENGTH (1ULL << 16)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
   FIO_COMPILER_GUARD;
-  memset(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
+  FIO_MEMSET(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
   fio_trylock(buf);
 #undef FIO___STACK_POISON_LENGTH
@@ -32472,4 +32082,57 @@ C++ extern end
 /* support C++ */
 #ifdef __cplusplus
 }
+#endif
+
+/* *****************************************************************************
+Everything, and the Kitchen Sink
+***************************************************************************** */
+#if defined(FIO_EVERYTHING) && !defined(H___FIO_EVERYTHING___H)
+#undef FIO_EVERYTHING
+#define H___FIO_EVERYTHING___H
+#define FIO_ATOL
+#define FIO_ATOMIC
+#define FIO_BITMAP
+#define FIO_BITWISE
+#define FIO_CHACHA
+#define FIO_CLI
+#define FIO_FILES
+#define FIO_GLOB_MATCH
+#define FIO_MALLOC
+#define FIO_MATH
+#define FIO_QUEUE
+#define FIO_RAND
+#define FIO_RISKY_HASH
+#define FIO_SHA1
+#define FIO_SIGNAL
+#define FIO_SOCK
+#define FIO_STR_CORE
+#define FIO_STREAM
+#define FIO_THREADS
+#define FIO_TIME
+#define FIO_URL
+
+#define FIO_STATE
+#define FIO_SERVER
+#define FIO_PUBSUB
+
+#include FIO__FILE__
+
+#define FIO_FIOBJ
+#ifdef FIO_EXTERN
+#ifndef FIOBJ_EXTERN
+#define FIOBJ_EXTERN
+#endif
+#ifndef FIOBJ_MALLOC
+#define FIOBJ_MALLOC
+#endif
+#endif
+#ifdef FIO_EXTERN_COMPLETE
+#ifndef FIOBJ_EXTERN_COMPLETE
+#define FIOBJ_EXTERN_COMPLETE
+#endif
+#define FIOBJ_EXTERN_COMPLETE
+#endif
+
+#include FIO__FILE__
 #endif

@@ -100,7 +100,7 @@ SFUNC int fio_chacha20_poly1305_dec(void *mac,
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
 ***************************************************************************** */
-#if FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 typedef union {
   uint32_t u32[16];
@@ -494,7 +494,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
-  memset(dest.u64, 0, 64);
+  FIO_MEMSET(dest.u64, 0, 64);
   FIO_MEMCPY63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
   fio___poly_consume_msg(&pl, (uint8_t *)&dest, (len & 63));

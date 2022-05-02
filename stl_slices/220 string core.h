@@ -713,7 +713,7 @@ FIO_SFUNC int fio_bstr_is_greater(char *a, char *b) {
 /* *****************************************************************************
 Extern-ed functions
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 Allocation Helpers
@@ -1962,7 +1962,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                    !memcmp(buf.buf, "I think 42 is t", 16),
                "fio_string_printf failed to truncate!");
 
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,
@@ -1974,7 +1974,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "I think 42 is t", 16),
                "fio_string_write2 failed to truncate!");
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,
@@ -1986,7 +1986,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
                    !memcmp(buf.buf, "I think 2A is t", 16),
                "fio_string_write2 failed to truncate (hex)!");
-    memset(mem, 0, 16);
+    FIO_MEMSET(mem, 0, 16);
     buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(
         fio_string_write2(&buf,

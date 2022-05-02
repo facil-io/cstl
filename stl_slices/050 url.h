@@ -74,7 +74,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len);
 /* *****************************************************************************
 FIO_URL - Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /**
  * Parses the URI returning it's components and their lengths (no decoding

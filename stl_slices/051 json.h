@@ -65,7 +65,7 @@ Note: static Callacks must be implemented in the C file that uses the parser
 
 Note: a Helper API is provided for the parsing implementation.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** common FIO_JSON callback function properties */
 #define FIO_JSON_CB static inline __attribute__((unused))

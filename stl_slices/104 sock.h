@@ -7,6 +7,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_SOCK                    /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
+#include "050 url.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -16,124 +17,6 @@ Feel free to copy, use and enjoy according to the license provided.
                         Basic Socket Helpers / IO Polling
 
 
-
-Example:
-********************************************************************************
-
-#define FIO_SOCK
-#define FIO_CLI
-#define FIO_LOG
-#include "fio-stl.h" // __FILE__
-
-typedef struct {
-  int fd;
-  unsigned char is_client;
-} state_s;
-
-static void on_data_server(int fd, size_t index, void *udata) {
-  (void)udata; // unused for server
-  (void)index; // we don't use the array index in this example
-  char buf[65536];
-  FIO_MEMCPY(buf, "echo: ", 6);
-  ssize_t len = 0;
-  struct sockaddr_storage peer;
-  socklen_t peer_addrlen = sizeof(peer);
-  len = recvfrom(fd, buf + 6, (65536 - 7), 0, (struct sockaddr *)&peer,
-                 &peer_addrlen);
-  if (len <= 0)
-    return;
-  buf[len + 6] = 0;
-  fprintf(stderr, "Recieved: %s", buf + 6);
-  // sends all data in UDP, with TCP sending may be partial
-  len =
-      sendto(fd, buf, len + 6, 0, (const struct sockaddr *)&peer, peer_addrlen);
-  if (len < 0)
-    perror("error");
-}
-
-static void on_data_client(int fd, size_t index, void *udata) {
-  state_s *state = (state_s *)udata;
-  fprintf(stderr, "on_data_client %zu\n", index);
-  if (!index) // stdio is index 0 in the fd list
-    goto is_stdin;
-  char buf[65536];
-  ssize_t len = 0;
-  struct sockaddr_storage peer;
-  socklen_t peer_addrlen = sizeof(peer);
-  len = recvfrom(fd, buf, 65535, 0, (struct sockaddr *)&peer, &peer_addrlen);
-  if (len <= 0)
-    return;
-  buf[len] = 0;
-  fprintf(stderr, "%s", buf);
-  return;
-is_stdin:
-  len = read(fd, buf, 65535);
-  if (len <= 0)
-    return;
-  buf[len] = 0;
-  // sends all data in UDP, with TCP sending may be partial
-  len = send(state->fd, buf, len, 0);
-  fprintf(stderr, "Sent: %zd bytes\n", len);
-  if (len < 0)
-    perror("error");
-  return;
-  (void)udata;
-}
-
-int main(int argc, char const *argv[]) {
-  // Using CLI to set address, port and client/server mode.
-  fio_cli_start(
-      argc, argv, 0, 0, "UDP echo server / client example.",
-      FIO_CLI_PRINT_HEADER("Address Binding"),
-      FIO_CLI_STRING("-address -b address to listen / connect to."),
-      FIO_CLI_INT("-port -p port to listen / connect to. Defaults to 3030."),
-      FIO_CLI_PRINT_HEADER("Operation Mode"),
-      FIO_CLI_BOOL("-client -c Client mode."),
-      FIO_CLI_BOOL("-verbose -v verbose mode (debug messages on)."));
-
-  if (fio_cli_get_bool("-v"))
-    FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
-  fio_cli_set_default("-p", "3030");
-
-  // Using FIO_SOCK functions for setting up UDP server / client
-  state_s state = {.is_client = fio_cli_get_bool("-c")};
-  state.fd = fio_sock_open(
-      fio_cli_get("-b"), fio_cli_get("-p"),
-      FIO_SOCK_UDP | FIO_SOCK_NONBLOCK |
-          (fio_cli_get_bool("-c") ? FIO_SOCK_CLIENT : FIO_SOCK_SERVER));
-
-  if (state.fd == -1) {
-    FIO_LOG_FATAL("Couldn't open socket!");
-    exit(1);
-  }
-  FIO_LOG_DEBUG("UDP socket open on fd %d", state.fd);
-
-  if (state.is_client) {
-    int i =
-        send(state.fd, "Client hello... further data will be sent using REPL\n",
-             53, 0);
-    fprintf(stderr, "Sent: %d bytes\n", i);
-    if (i < 0)
-      perror("error");
-    while (fio_sock_poll(.on_data = on_data_client, .udata = (void *)&state,
-                         .timeout = 1000,
-                         .fds = FIO_SOCK_POLL_LIST(
-                             FIO_SOCK_POLL_R(fileno(stdin)),
-                             FIO_SOCK_POLL_R(state.fd))) >= 0)
-      ;
-  } else {
-    while (fio_sock_poll(.on_data = on_data_server, .udata = (void *)&state,
-                         .timeout = 1000,
-                         .fds = FIO_SOCK_POLL_LIST(
-                             FIO_SOCK_POLL_R(state.fd))) >= 0)
-      ;
-  }
-  // we should cleanup, though we'll exit with Ctrl+C, so it's won't matter.
-  fio_cli_end();
-  fio_sock_close(state.fd);
-  return 0;
-  (void)argv;
-}
 
 
 ***************************************************************************** */
@@ -175,6 +58,7 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
   return r;
 }
 #define accept fio_sock_accept
+#define poll   WSAPoll
 
 #elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
@@ -287,119 +171,8 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
 #define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
 
 /* *****************************************************************************
-Small Poll API
-***************************************************************************** */
-
-typedef struct {
-  /** Called after polling but before any events are processed. */
-  void (*before_events)(void *udata);
-  /** Called when the fd can be written too (available outgoing buffer). */
-  void (*on_ready)(int fd, size_t index, void *udata);
-  /** Called when data iis available to be read from the fd. */
-  void (*on_data)(int fd, size_t index, void *udata);
-  /** Called on error or when the fd was closed. */
-  void (*on_error)(int fd, size_t index, void *udata);
-  /** Called after polling and after all events are processed. */
-  void (*after_events)(void *udata);
-  /** An opaque user data pointer. */
-  void *udata;
-  /** A pointer to the fd pollin array. */
-  struct pollfd *fds;
-  /**
-   * the number of fds to listen to.
-   *
-   * If zero, and `fds` is set, it will be auto-calculated trying to find the
-   * first array member where `events == 0`. Make sure to supply this end
-   * marker, of the buffer may overrun!
-   */
-  uint32_t count;
-  /** timeout for the polling system call. */
-  int timeout;
-} fio_sock_poll_args;
-
-/**
- * The `fio_sock_poll` function uses the `poll` system call to poll a simple IO
- * list.
- *
- * The list must end with a `struct pollfd` with it's `events` set to zero. No
- * other member of the list should have their `events` data set to zero.
- *
- * It is recommended to use the `FIO_SOCK_POLL_LIST(...)` and
- * `FIO_SOCK_POLL_[RW](fd)` macros. i.e.:
- *
- *     int count = fio_sock_poll(.on_ready = on_ready,
- *                         .on_data = on_data,
- *                         .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(io_fd)));
- *
- * NOTE: The `poll` system call should perform reasonably well for light loads
- * (short lists). However, for complex IO needs or heavier loads, use the
- * system's native IO API, such as kqueue or epoll.
- */
-FIO_IFUNC int fio_sock_poll(fio_sock_poll_args args);
-#define fio_sock_poll(...) fio_sock_poll((fio_sock_poll_args){__VA_ARGS__})
-
-/* *****************************************************************************
 IO Poll - Implementation (always static / inlined)
 ***************************************************************************** */
-
-FIO_SFUNC void fio___sock_poll_mock_ev(int fd, size_t index, void *udata) {
-  (void)fd;
-  (void)index;
-  (void)udata;
-}
-
-int fio_sock_poll____(void); /* sublime text marker */
-FIO_IFUNC int fio_sock_poll FIO_NOOP(fio_sock_poll_args args) {
-  size_t event_count = 0;
-  size_t limit = 0;
-  if (!args.fds)
-    goto empty_list;
-  if (!args.count)
-    while (args.fds[args.count].events)
-      ++args.count;
-  if (!args.count)
-    goto empty_list;
-
-  /* move if statement out of loop using a move callback */
-  if (!args.on_ready)
-    args.on_ready = fio___sock_poll_mock_ev;
-  if (!args.on_data)
-    args.on_data = fio___sock_poll_mock_ev;
-  if (!args.on_error)
-    args.on_error = fio___sock_poll_mock_ev;
-#if FIO_OS_WIN
-  event_count = WSAPoll(args.fds, args.count, args.timeout);
-#else
-  event_count = poll(args.fds, args.count, args.timeout);
-#endif
-  if (args.before_events)
-    args.before_events(args.udata);
-  if (event_count <= 0)
-    goto finish;
-  for (size_t i = 0; i < args.count && limit < event_count; ++i) {
-    if (!args.fds[i].revents)
-      continue;
-    ++limit;
-    if ((args.fds[i].revents & POLLOUT))
-      args.on_ready(args.fds[i].fd, i, args.udata);
-    if ((args.fds[i].revents & POLLIN))
-      args.on_data(args.fds[i].fd, i, args.udata);
-    if ((args.fds[i].revents & (POLLERR | POLLNVAL)))
-      args.on_error(args.fds[i].fd, i, args.udata); /* TODO: POLLHUP ? */
-  }
-finish:
-  if (args.after_events)
-    args.after_events(args.udata);
-  return event_count;
-empty_list:
-  if (args.timeout)
-    FIO_THREAD_WAIT(args.timeout);
-  if (args.before_events)
-    args.before_events(args.udata);
-  if (args.after_events)
-    args.after_events(args.udata);
-  return 0;
-}
 
 /**
  * Creates a new socket according to the provided flags.
@@ -488,7 +261,7 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a) { freeaddrinfo(a); }
 /* *****************************************************************************
 FIO_SOCK - Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Creates a new socket, according to the provided flags. */
 SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
@@ -529,7 +302,6 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
       FIO_MEMCPY(port, u.port.buf, u.port.len);
       port[u.port.len] = 0;
       if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
-        /* TODO? prefer...? TCP? */
         if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
             (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
           flags |= FIO_SOCK_TCP;
@@ -725,13 +497,9 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
   short r;
   struct pollfd pfd = {.fd = fd, .events = events};
-#if FIO_OS_WIN
-  r = (short)WSAPoll(&pfd, 1, timeout);
-#else
   r = (short)poll(&pfd, 1, timeout);
-#endif
   if (r == 1)
-    r = events;
+    r = pfd.revents;
   return r;
 }
 
@@ -777,7 +545,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   return capa;
 }
 
-#if FIO_OS_POSIX
+#if FIO_OS_POSIX || defined(AF_UNIX)
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -839,10 +607,16 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
 }
 #elif FIO_OS_WIN
 
-/* UNIX Sockets?
+/* TODO: UNIX Sockets?
  * https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
  */
 
+#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+
+/* *****************************************************************************
+WinSock initialization
+***************************************************************************** */
+#if FIO_OS_WIN
 static WSADATA fio___sock_useless_windows_data;
 FIO_CONSTRUCTOR(fio___sock_win_init) {
   static uint8_t flag = 0;
@@ -855,30 +629,12 @@ FIO_CONSTRUCTOR(fio___sock_win_init) {
     atexit((void (*)(void))(WSACleanup));
   }
 }
-
-// FIO_DESTRUCTOR void fio___sock_win_cleanup(void) { (); }
 #endif /* FIO_OS_WIN / FIO_OS_POSIX */
 
 /* *****************************************************************************
 Socket helper testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void fio___sock_test_before_events(void *udata) {
-  *(size_t *)udata = 0;
-}
-FIO_SFUNC void fio___sock_test_on_event(int fd, size_t index, void *udata) {
-  *(size_t *)udata += 1;
-  if (errno) {
-    FIO_LOG_WARNING("(possibly expected) %s", strerror(errno));
-    errno = 0;
-  }
-  (void)fd;
-  (void)index;
-}
-FIO_SFUNC void fio___sock_test_after_events(void *udata) {
-  if (*(size_t *)udata)
-    *(size_t *)udata += 1;
-}
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
   fprintf(stderr,
@@ -910,152 +666,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
-    size_t flag = (size_t)-1;
+    short ev = (short)-1;
     errno = 0;
     fprintf(stderr, "* Testing %s socket API\n", server_tests[i].msg);
     int srv = fio_sock_open(server_tests[i].address,
                             server_tests[i].port,
                             server_tests[i].flag | FIO_SOCK_SERVER);
     FIO_ASSERT(srv != -1, "server socket failed to open: %s", strerror(errno));
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag);
-    FIO_ASSERT(!flag, "before_events not called for missing list! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST({.fd = -1}));
-    FIO_ASSERT(!flag, "before_events not called for empty list! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    flag = (size_t)-1;
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-
+    ev = fio_sock_wait_io(-1, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(!ev, "no error should have been returned for IO -1 (%d)", ev);
+    ev = fio_sock_wait_io(srv, POLLIN, 0);
+    FIO_ASSERT(!ev, "no events should have been returned (%d)", ev);
     int cl = fio_sock_open(server_tests[i].address,
                            server_tests[i].port,
                            server_tests[i].flag | FIO_SOCK_CLIENT);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
                "client socket failed to open (%d)",
                cl);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    // // is it possible to write to a still-connecting socket?
-    // fio_sock_poll(.before_events = fio___sock_test_before_events,
-    //               .after_events = fio___sock_test_after_events,
-    //               .on_ready = fio___sock_test_on_event, .on_data = NULL,
-    //               .on_error = NULL, .udata = &flag,
-    //               .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    // FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-    FIO_LOG_INFO("error may print when polling server for `write`.");
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(srv)));
-    FIO_ASSERT(flag == 2, "Event should have occured here! (%zu)", flag);
-    FIO_LOG_INFO("error may have been emitted.");
-
+    ev = fio_sock_wait_io(cl, POLLIN /* | POLLOUT <= OS dependent */, 0);
+    FIO_ASSERT(!ev,
+               "no events should have been returned for connecting client(%d)",
+               ev);
+    ev = fio_sock_wait_io(srv, POLLIN, 100);
+    FIO_ASSERT(ev == POLLIN,
+               "incoming connection should have been detected (%d)",
+               ev);
     intptr_t accepted = accept(srv, NULL, NULL);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
                "accepted socket failed to open (%zd)",
                (ssize_t)accepted);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = fio___sock_test_on_event,
-                  .on_data = NULL,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .timeout = 100,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(accepted)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = fio___sock_test_on_event,
-                  .on_error = NULL,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(!flag, "No event should have occured here! (%zu)", flag);
-
+    ev = fio_sock_wait_io(cl, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(ev == POLLOUT,
+               "POLLOUT should have been returned for connected client(%d)",
+               ev);
+    ev = fio_sock_wait_io(accepted, POLLIN | POLLOUT, 0);
+    FIO_ASSERT(ev == POLLOUT,
+               "POLLOUT should have been returned for connected client 2(%d)",
+               ev);
     if (fio_sock_write(accepted, "hello", 5) > 0) {
       // wait for read
-      FIO_ASSERT(fio_sock_wait_io(cl, POLLIN, 0) != -1 &&
-                     (fio_sock_wait_io(cl, POLLIN, 0) | POLLIN),
-                 "fio_sock_wait_io should have returned a POLLIN event.");
-      fio_sock_poll(.before_events = fio___sock_test_before_events,
-                    .on_ready = NULL,
-                    .on_data = fio___sock_test_on_event,
-                    .on_error = NULL,
-                    .after_events = fio___sock_test_after_events,
-                    .udata = &flag,
-                    .timeout = 100,
-                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_R(cl)));
-      // test read/write
-      fio_sock_poll(.before_events = fio___sock_test_before_events,
-                    .on_ready = fio___sock_test_on_event,
-                    .on_data = fio___sock_test_on_event,
-                    .on_error = NULL,
-                    .after_events = fio___sock_test_after_events,
-                    .udata = &flag,
-                    .timeout = 100,
-                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
+      FIO_ASSERT(
+          fio_sock_wait_io(cl, POLLIN, 10) != -1 &&
+              ((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLIN) == POLLIN),
+          "fio_sock_wait_io should have returned a POLLIN event for client.");
       {
         char buf[64];
         errno = 0;
@@ -1064,23 +717,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                    "error: %s",
                    strerror(errno));
       }
-      FIO_ASSERT(flag == 3, "Event should have occured here! (%zu)", flag);
-    } else
+      FIO_ASSERT(!fio_sock_wait_io(cl, POLLIN, 0),
+                 "No events should have occurred here! (%zu)",
+                 ev);
+    } else {
       FIO_ASSERT(0,
                  "send(fd:%ld) failed! error: %s",
                  accepted,
                  strerror(errno));
+    }
     fio_sock_close(accepted);
     fio_sock_close(cl);
     fio_sock_close(srv);
-    fio_sock_poll(.before_events = fio___sock_test_before_events,
-                  .on_ready = NULL,
-                  .on_data = NULL,
-                  .on_error = fio___sock_test_on_event,
-                  .after_events = fio___sock_test_after_events,
-                  .udata = &flag,
-                  .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(cl)));
-    FIO_ASSERT(flag, "Event should have occured here! (%zu)", flag);
+    FIO_ASSERT((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLNVAL),
+               "POLLNVAL should have been returned for closed socket (%d & %d) "
+               "(POLLERR == %d)",
+               fio_sock_wait_io(cl, POLLIN | POLLOUT, 0),
+               (int)POLLNVAL,
+               (int)POLLERR);
 #if FIO_OS_POSIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);

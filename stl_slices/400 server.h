@@ -383,7 +383,7 @@ FIO_IFUNC void *fio_tls_get(fio_s *io) { return ((void **)io)[1]; }
 /* *****************************************************************************
 Simple Server Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /*
 REMEMBER:

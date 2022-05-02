@@ -595,7 +595,7 @@ FIO_IFUNC uint8_t fio_trylock2(fio_lock2_s *lock, size_t group) {
 /* *****************************************************************************
 Implementation - Extern
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 struct fio___lock2_wait_s {
   struct fio___lock2_wait_s *next;
@@ -623,13 +623,10 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
   /* note, we now own the part of the lock */
 
   /* a lock-wide (all groups) lock ID for the waitlist */
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1ULL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)   ? ((size_t)1ULL << 63)
+                            : (sizeof(inner_lock) >= 4) ? ((size_t)1UL << 31)
+                            : (sizeof(inner_lock) >= 2) ? ((size_t)1UL << 15)
+                                                        : ((size_t)1UL << 7);
 
   /* initialize self-waiting node memory (using stack memory) */
   fio___lock2_wait_s self_thread = {
@@ -687,13 +684,10 @@ SFUNC void fio_lock2(fio_lock2_s *lock, size_t group) {
  */
 SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
   /* a lock-wide (all groups) lock ID for the waitlist */
-  const size_t inner_lock = (sizeof(inner_lock) >= 8)
-                                ? ((size_t)1ULL << 63)
-                                : (sizeof(inner_lock) >= 4)
-                                      ? ((size_t)1UL << 31)
-                                      : (sizeof(inner_lock) >= 2)
-                                            ? ((size_t)1UL << 15)
-                                            : ((size_t)1UL << 7);
+  const size_t inner_lock = (sizeof(inner_lock) >= 8)   ? ((size_t)1ULL << 63)
+                            : (sizeof(inner_lock) >= 4) ? ((size_t)1UL << 31)
+                            : (sizeof(inner_lock) >= 2) ? ((size_t)1UL << 15)
+                                                        : ((size_t)1UL << 7);
   fio___lock2_wait_s *waiting;
   if (!group)
     group = 1;

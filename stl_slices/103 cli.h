@@ -196,7 +196,7 @@ SFUNC void fio_cli_unnamed_set(unsigned int index, char const *value);
 /* *****************************************************************************
 CLI Implementation
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 CLI Data Stores

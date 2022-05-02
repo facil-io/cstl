@@ -196,7 +196,7 @@ FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
 /* *****************************************************************************
 Stream Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
 /* Frees any internal data AND the object's container! */
@@ -296,13 +296,9 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
   case FIO_PACKET_TYPE_EMBEDDED:
     len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
     return len;
-  case FIO_PACKET_TYPE_EXTERNAL:
-    len = u.ext->length;
-    return len;
+  case FIO_PACKET_TYPE_EXTERNAL: len = u.ext->length; return len;
   case FIO_PACKET_TYPE_FILE: /* fall through */
-  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
-    len = u.f->length;
-    return len;
+  case FIO_PACKET_TYPE_FILE_NO_CLOSE: len = u.f->length; return len;
   }
   return len;
 }

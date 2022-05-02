@@ -898,7 +898,7 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 #define FIO___STACK_POISON_LENGTH (1ULL << 16)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
   FIO_COMPILER_GUARD;
-  memset(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
+  FIO_MEMSET(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
   fio_trylock(buf);
 #undef FIO___STACK_POISON_LENGTH

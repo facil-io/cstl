@@ -95,7 +95,7 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   return n;
 }
 
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* Risky Hash initialization constants */
 #define FIO_RISKY3_IV0 0x0000001000000001ULL
@@ -362,7 +362,7 @@ IFUNC void fio_rand_reseed(void);
 Random - Implementation
 ***************************************************************************** */
 
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #if FIO_OS_POSIX ||                                                            \
     (__has_include("sys/resource.h") && __has_include("sys/time.h"))
@@ -550,7 +550,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_MEM_REALLOC(NULL, 0, (buffer_len + mem_alignment_offset) + 64, 0);
   uint8_t *buffer = buffer_mem + mem_alignment_offset;
 
-  memset(buffer, 'T', buffer_len);
+  FIO_MEMSET(buffer, 'T', buffer_len);
   /* warmup */
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
@@ -783,7 +783,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   FIO_NAME_TEST(stl, random_buffer)
   (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
 
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   {
     if (RAND_MAX == ~(uint64_t)0ULL) {
       /* RAND_MAX fills all bits */
@@ -837,7 +837,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
     FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
   }
 
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   fio_rand64(); /* warmup */
   start = clock();
   for (size_t i = 0; i < test_len; ++i) {
@@ -845,7 +845,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   }
   end = clock();
   FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
-  memset(rs, 0, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   start = clock();
   fio_rand_bytes(rs, test_len * sizeof(*rs));
   end = clock();

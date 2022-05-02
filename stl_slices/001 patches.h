@@ -184,7 +184,7 @@ SFUNC int fio_kill(int pid, int signum);
 /* *****************************************************************************
 Patched functions
 ***************************************************************************** */
-#if FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* based on:
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows

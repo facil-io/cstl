@@ -47,7 +47,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 /* *****************************************************************************
 Globe Matching Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
  * Glob Matching

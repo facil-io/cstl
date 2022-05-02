@@ -274,7 +274,7 @@ missing_tq:
 /* *****************************************************************************
 Queue Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {

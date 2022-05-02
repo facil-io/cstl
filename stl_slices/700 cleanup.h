@@ -15,7 +15,14 @@ Common cleanup
 ***************************************************************************** */
 #ifndef FIO_STL_KEEP__
 
+/* undefine FIO_EXTERN only if its value indicates it is temporary. */
+#if (!FIO_EXTERN || FIO_EXTERN == 1)
 #undef FIO_EXTERN
+#endif
+#if (!FIO_EXTERN_COMPLETE || FIO_EXTERN_COMPLETE == 1)
+#undef FIO_EXTERN_COMPLETE
+#endif
+
 #undef SFUNC
 #undef IFUNC
 #undef SFUNC_
@@ -40,12 +47,6 @@ Common cleanup
 #undef FIO___LOCK_LOCK_TRY
 #undef FIO___LOCK_UNLOCK
 #undef FIO_USE_THREAD_MUTEX_TMP
-
-/* undefine FIO_EXTERN_COMPLETE only if it was defined locally */
-#if defined(FIO_EXTERN_COMPLETE) && FIO_EXTERN_COMPLETE &&                     \
-    FIO_EXTERN_COMPLETE == 2
-#undef FIO_EXTERN_COMPLETE
-#endif
 
 #else
 

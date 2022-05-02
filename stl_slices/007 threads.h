@@ -222,7 +222,7 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 #if FIO_OS_WIN
 #ifndef FIO_THREADS_MUTEX_BYO
 /** Initializes a simple Mutex */

@@ -1049,7 +1049,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   FIO_ASSERT(fio_ct_max(-2, -1) == -1, "fio_ct_max error.");
   {
     uint8_t bitmap[1024];
-    memset(bitmap, 0, 1024);
+    FIO_MEMSET(bitmap, 0, 1024);
     fprintf(stderr, "* Testing bitmap helpers.\n");
     FIO_ASSERT(!fio_bitmap_get(bitmap, 97), "fio_bitmap_get should be 0.");
     fio_bitmap_set(bitmap, 97);

@@ -159,7 +159,7 @@ FIO_IFUNC size_t fio_digits16(uint64_t i) {
 /* *****************************************************************************
 Strings to Numbers - Implementation - possibly externed
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 typedef struct {
   uint64_t val;

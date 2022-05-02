@@ -468,7 +468,7 @@ Memory Allocation - start implementation
 
 
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* internal workings start here */
 
 /* *****************************************************************************
@@ -538,28 +538,14 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     }
     FIO_MEMCPY63x(d, s, bytes);
     return;
-  } else if (offset >= 64) {
-    char *dstop = d + (bytes & 63);
+  } else {
+    /* some memory overlaps, walk backwards (memmove) */
+    char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
     for (; d > dstop;) {
       d -= 64;
       s -= 64;
-      FIO_MEMCPY64(d, s);
-    }
-    d -= (bytes & 63);
-    s -= (bytes & 63);
-    FIO_MEMCPY63x(d, s, bytes);
-  } else {
-    /* some memory overlaps, walk backwards (memmove) */
-    d += bytes;
-    s += bytes;
-    char FIO_ALIGN(16) tmp[64];
-    for (; bytes >= 64;) {
-      bytes -= 64;
-      d -= 64;
-      s -= 64;
-      FIO_MEMCPY64(tmp, s);
       FIO_MEMCPY64(d, s);
     }
     /* the same as FIO_MEMCPY63x, but walking backwards... */
@@ -592,7 +578,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
 }
 
-/** an 8 byte aligned memset implementation. */
+/** an 8 byte memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   uint64_t repeated[4] = {data, data, data, data};
   char *d = (char *)dest_;

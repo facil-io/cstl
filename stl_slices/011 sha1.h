@@ -65,7 +65,7 @@ FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s) { return s->digest; }
 /* *****************************************************************************
 Implementation - possibly externed functions.
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
@@ -141,8 +141,6 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  /* TODO: hash */
-
   fio_sha1_s s = (fio_sha1_s){
       .v =
           {
@@ -163,7 +161,7 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
-  memset(vec, 0, sizeof(vec));
+  FIO_MEMSET(vec, 0, sizeof(vec));
   if ((len & 63)) {
     FIO_MEMCPY63x(vec, buf, len);
   }
@@ -171,7 +169,7 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
 
   if ((len & 63) > 55) {
     fio___sha1_round512(&s, vec);
-    memset(vec, 0, sizeof(vec));
+    FIO_MEMSET(vec, 0, sizeof(vec));
   }
 
   fio_u2buf64((void *)(vec + 14), (len << 3));

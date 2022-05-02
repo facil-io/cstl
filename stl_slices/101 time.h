@@ -89,13 +89,13 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
 
-/** Adds two `struct timespec` objects (TODO: untested). */
+/** Adds two `struct timespec` objects. */
 FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
 
-/** Adds milliseconds to a `struct timespec` object (TODO: untested). */
+/** Adds milliseconds to a `struct timespec` object. */
 FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
 
-/** Compares two `struct timespec` objects (TODO: untested). */
+/** Compares two `struct timespec` objects. */
 FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
 
 /* *****************************************************************************
@@ -594,16 +594,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   {
     char buf[48];
     buf[47] = 0;
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc7231(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2109(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2822(buf, now);
     FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
-    memset(buf, 'X', 47);
+    FIO_MEMSET(buf, 'X', 47);
     fio_time2log(buf, now);
     FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
   }
@@ -660,6 +660,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
             (size_t)(stop - start));
     fprintf(stderr, "\n");
   }
+  /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
 }
 #undef FIO___GMTIME_TEST_INTERVAL
 #undef FIO___GMTIME_TEST_RANGE

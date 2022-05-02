@@ -98,15 +98,21 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
-### Compilation Modes
-
-The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
-
-#### Static Functions by Default
+### Static Functions by Default
 
 By default, the Simple Template Library will generate static functions where possible.
 
 To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to generate externally visible code.
+
+### Compilation Modes
+
+The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
+
+#### `FIO_EVERYTHING`
+
+Adds all the code facil.io C STL has to offer. Custom types (templates) can't be created without specific instruction, but all functionality that can be included is included.
+
+Note, `FIO_EVERYTHING` functions will always be `static` unless `FIO_EXTERN` was defined for specific functionality or `FIO_EXTERN` was defined in a persistent way (with a numerical value of `2` or greater).
 
 #### `FIO_EXTERN`
 
@@ -116,7 +122,7 @@ If `FIO_EXTERN` is defined alone, only function declarations and inline function
 
 If `FIO_EXTERN_COMPLETE` is defined, the function definition (the implementation code) will also be generated.
 
-**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Simple Template Library header is included.
+**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
 
 For example, in the header (i.e., `mymem.h`), use:
 
@@ -124,21 +130,23 @@ For example, in the header (i.e., `mymem.h`), use:
 #define FIO_EXTERN
 #define FIO_MALLOC
 #include "fio-stl.h"
+/* FIO_EXTERN automatically undefined in this case */
 ```
 
 Later, in the implementation file, use:
 
 ```c
-#define FIO_EXTERN_COMPLETE 1
+#define FIO_EXTERN_COMPLETE 2
 #include "mymem.h"
 #undef FIO_EXTERN_COMPLETE
+/* FIO_EXTERN_COMPLETE needed to be manually undefined in this case */
 ```
 
 #### `FIO_EXTERN_COMPLETE`
 
 When defined, this macro will force full code generation.
 
-If `FIO_EXTERN_COMPLETE` is set to the value `2`, it will automatically self-destruct (it will undefine itself once used).
+**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
 
 #### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
@@ -3632,90 +3640,6 @@ Uses `poll` to wait until an IO device has one or more of the evens listed in `e
 
 Returns 0 on timeout, -1 on error or the events that are valid.
 
-#### `fio_sock_poll`
-
-```c
-typedef struct {
-  void (*on_ready)(int fd, void *udata);
-  void (*on_data)(int fd, void *udata);
-  void (*on_error)(int fd, void *udata);
-  void *udata;
-  int timeout;
-  struct pollfd *fds;
-} fio_sock_poll_args;
-
-int fio_sock_poll(fio_sock_poll_args args);
-#define fio_sock_poll(...) fio_sock_poll((fio_sock_poll_args){__VA_ARGS__})
-```
-
-The `fio_sock_poll` function is shadowed by the `fio_sock_poll` MACRO, which allows the function to accept the following "named arguments":
-
-* `on_ready`:
-
-    This callback will be called if a socket can be written to and the socket is polled for the **W**rite event.
-
-        // callback example:
-        void on_ready(int fd, void *udata);
-
-* `on_data`:
-
-    This callback will be called if data is available to be read from a socket and the socket is polled for the **R**ead event.
-
-        // callback example:
-        void on_data(int fd, void *udata);
-
-* `on_error`:
-
-    This callback will be called if an error occurred when polling the file descriptor.
-
-        // callback example:
-        void on_error(int fd, void *udata);
-
-* `timeout`:
-
-    Polling timeout in milliseconds.
-
-        // type:
-        int timeout;
-
-* `udata`:
-
-    Opaque user data.
-
-        // type:
-        void *udata;
-
-* `fds`:
-
-    A list of `struct pollfd` with file descriptors to be polled. The list **should** end with a `struct pollfd` containing an empty `events` field (and no empty `events` field should appear in the middle of the list).
-
-    Use the `FIO_SOCK_POLL_LIST(...)`, `FIO_SOCK_POLL_RW(fd)`, `FIO_SOCK_POLL_R(fd)` and `FIO_SOCK_POLL_W(fd)` macros to build the list.
-
-* `count`:
-
-    If supplied, should contain the valid length of the `fds` array.
-
-    If `0` or empty and `fds` isn't `NULL`, the length of the `fds` array will be auto-calculated by seeking through the array for a member in which `events == 0`.
-
-    **Note**: this could cause a buffer overflow, which is why the last member of the `fds` array **should** end with a `struct pollfd` member containing an empty `events` field. Use the `FIO_SOCK_POLL_LIST` macro as a helper.
-
-The `fio_sock_poll` function uses the `poll` system call to poll a simple IO list.
-
-The list must end with a `struct pollfd` with it's `events` set to zero. No other member of the list should have their `events` data set to zero.
-
-It is recommended to use the `FIO_SOCK_POLL_LIST(...)` and
-`FIO_SOCK_POLL_[RW](fd)` macros. i.e.:
-
-```c
-int io_fd = fio_sock_open(NULL, "8888", FIO_SOCK_UDP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
-int count = fio_sock_poll(.on_ready = on_ready,
-                    .on_data = on_data,
-                    .fds = FIO_SOCK_POLL_LIST(FIO_SOCK_POLL_RW(io_fd)));
-```
-
-**Note**: The `poll` system call should perform reasonably well for light loads (short lists). However, for complex IO needs or heavier loads, use the system's native IO API, such as `kqueue` or `epoll`.
-
-
 #### `FIO_SOCK_POLL_RW` (macro)
 
 ```c
@@ -3743,17 +3667,6 @@ This helper macro helps to author a `struct pollfd` member who's set to polling 
 ```
 
 This helper macro helps to author a `struct pollfd` member who's set to polling for space in the outgoing `fd`'s buffer.
-
-#### `FIO_SOCK_POLL_LIST` (macro)
-
-```c
-#define FIO_SOCK_POLL_LIST(...)                                                \
-  (struct pollfd[]) {                                                          \
-    __VA_ARGS__, (struct pollfd) { .fd = -1 }                                  \
-  }
-```
-
-This helper macro helps to author a `struct pollfd` array who's last member has an empty `events` value (for auto-length detection).
 
 #### `fio_sock_address_new`
 

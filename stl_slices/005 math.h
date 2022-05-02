@@ -428,16 +428,16 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
 #endif
   FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
-  memset(q, 0, sizeof(uint64_t) * len);
+  FIO_MEMSET(q, 0, sizeof(uint64_t) * len);
   size_t rlen;
   uint64_t c;
   const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
   if (!blen) { /* divide by zero! */
     FIO_LOG_ERROR("divide by zero!");
     if (dest)
-      memset(dest, 0xFFFFFFFF, sizeof(*dest) * len);
+      FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
     if (reminder)
-      memset(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
+      FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
     return;
   }
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {

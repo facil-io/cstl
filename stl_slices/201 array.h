@@ -485,10 +485,8 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->end - ary->start;
-  case 1:
-    return ary->start;
+  case 0: return ary->end - ary->start;
+  case 1: return ary->start;
   }
   return 0;
 }
@@ -498,10 +496,8 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->capa;
-  case 1:
-    return FIO_ARRAY_EMBEDDED_CAPA;
+  case 0: return ary->capa;
+  case 1: return FIO_ARRAY_EMBEDDED_CAPA;
   }
   return 0;
 }
@@ -513,10 +509,8 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       (FIO_NAME(FIO_ARRAY_NAME, s) *)(FIO_PTR_UNTAG(ary_));
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0:
-    return ary->ary + ary->start;
-  case 1:
-    return FIO_ARRAY2EMBEDDED(ary)->embedded;
+  case 0: return ary->ary + ary->start;
+  case 1: return FIO_ARRAY2EMBEDDED(ary)->embedded;
   }
   return NULL;
 }
@@ -554,8 +548,7 @@ FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
     a = FIO_ARRAY2EMBEDDED(ary)->embedded;
     count = ary->start;
     break;
-  default:
-    return FIO_ARRAY_TYPE_INVALID;
+  default: return FIO_ARRAY_TYPE_INVALID;
   }
 
   if (index < 0) {
@@ -586,8 +579,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
     count = ary->start;
     a = FIO_ARRAY2EMBEDDED(ary)->embedded;
     break;
-  default:
-    return NULL;
+  default: return NULL;
   }
   intptr_t i;
   if (!count || !first)
@@ -610,7 +602,7 @@ typedef FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, ____type_t);
 /* *****************************************************************************
 Exported functions
 ***************************************************************************** */
-#ifdef FIO_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* *****************************************************************************
 Helper macros
 ***************************************************************************** */
@@ -757,8 +749,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
         .ary = tmp,
     };
     return capa;
-  default:
-    return 0;
+  default: return 0;
   }
 }
 
@@ -900,7 +891,7 @@ expansion:
     if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_ ||
         !FIO_ARRAY_TYPE_INVALID_SIMPLE) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-      memset(a + count, 0, (index - count) * sizeof(*ary->ary));
+      FIO_MEMSET(a + count, 0, (index - count) * sizeof(*ary->ary));
 #else
       for (size_t i = count; i <= (size_t)index; ++i) {
         FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -933,7 +924,7 @@ negative_expansion:
   index = ary->start - index;
   if ((uint32_t)(index + 1) < ary->start) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-    memset(a + index, 0, (ary->start - index) * (sizeof(*a)));
+    FIO_MEMSET(a + index, 0, (ary->start - index) * (sizeof(*a)));
 #else
     for (size_t i = index; i < (size_t)ary->start; ++i) {
       FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -947,7 +938,7 @@ negative_expansion_embedded:
   a = FIO_ARRAY2EMBEDDED(ary)->embedded;
   memmove(a + index, a, count * count * sizeof(*a));
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-  memset(a, 0, index * (sizeof(a)));
+  FIO_MEMSET(a, 0, index * (sizeof(a)));
 #else
   for (size_t i = 0; i < (size_t)index; ++i) {
     FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
@@ -1101,7 +1092,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
   }
   if (c && FIO_MEM_REALLOC_IS_SAFE_) {
     /* keep memory zeroed out */
-    memset(a + i, 0, sizeof(*a) * c);
+    FIO_MEMSET(a + i, 0, sizeof(*a) * c);
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
     ary->end = ary->start + i;
@@ -1241,9 +1232,9 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, pop)(FIO_ARRAY_PTR ary_,
     } else {
       FIO_ARRAY_TYPE_DESTROY(FIO_ARRAY2EMBEDDED(ary)->embedded[ary->start]);
     }
-    memset(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
-           0,
-           sizeof(*ary->ary));
+    FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
+               0,
+               sizeof(*ary->ary));
     return 0;
   }
   if (old)
@@ -1354,9 +1345,9 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
                   FIO_ARRAY2EMBEDDED(ary)->start,
               FIO_ARRAY2EMBEDDED(ary)->start *
                   sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
-    memset(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
-           0,
-           sizeof(*ary->ary));
+    FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
+               0,
+               sizeof(*ary->ary));
     return 0;
   }
   if (old)
@@ -1431,9 +1422,9 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
-  memset(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
+  FIO_MEMSET(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \
-  (!memcmp(&o, memset(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
+  (!memcmp(&o, FIO_MEMSET(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
 
 FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task))(
     FIO_NAME(FIO_ARRAY_NAME, each_s) * i) {
@@ -1753,7 +1744,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
       size_t max_items = 63;
       FIO_ARRAY_TYPE tmp[64];
       for (size_t i = 0; i < max_items; ++i) {
-        memset(tmp + i, i + 1, sizeof(*tmp));
+        FIO_MEMSET(tmp + i, i + 1, sizeof(*tmp));
       }
       for (size_t items = 0; items <= max_items; items = ((items << 1) | 1)) {
         FIO_LOG_DEBUG2("* testing the FIO_ARRAY_EACH macro with %zu items.",
