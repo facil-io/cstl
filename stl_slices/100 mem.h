@@ -541,29 +541,34 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     return;
   } else {
     /* some memory overlaps, walk backwards (memmove) */
+    uint64_t tmp_buf[8];
     char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
     for (; d > dstop;) {
       d -= 64;
       s -= 64;
-      FIO_MEMCPY64(d, s);
+      FIO_MEMCPY64(tmp_buf, s);
+      FIO_MEMCPY64(d, tmp_buf);
     }
     /* the same as FIO_MEMCPY63x, but walking backwards... */
     if (bytes & 32) {
       d -= 32;
       s -= 32;
-      FIO_MEMCPY32(d, s);
+      FIO_MEMCPY32(tmp_buf, s);
+      FIO_MEMCPY32(d, tmp_buf);
     }
     if (bytes & 16) {
       d -= 16;
       s -= 16;
-      FIO_MEMCPY16(d, s);
+      FIO_MEMCPY16(tmp_buf, s);
+      FIO_MEMCPY16(d, tmp_buf);
     }
     if (bytes & 8) {
       d -= 8;
       s -= 8;
-      FIO_MEMCPY8(d, s);
+      FIO_MEMCPY8(tmp_buf, s);
+      FIO_MEMCPY8(d, tmp_buf);
     }
     d -= (bytes & 7);
     s -= (bytes & 7);

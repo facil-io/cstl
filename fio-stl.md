@@ -2617,9 +2617,15 @@ If memory was allocator using a different allocator,behavior is undefined... i.e
 void fio_malloc_after_fork(void);
 ```
 
-Never fork a multi-threaded process. Doing so might corrupt the memory allocation system. The risk is more relevant for child processes.
+Never fork a multi-threaded process. Doing so might corrupt the memory allocation system. The risk applies for child processes.
 
-However, if a multi-threaded process, calling this function from the child process would perform a best attempt at mitigating any arising issues (at the expense of possible leaks).
+However, if forking a multi-threaded process, calling this function from the child process would perform a best attempt at mitigating any issues (at the expense of possible leaks).
+
+Instead of calling `fio_malloc_after_fork` for each allocator, it is recommended to call the state callback for all memory allocators by calling withing the child (forked) process:
+
+```c
+fio_state_callback_force(FIO_CALL_IN_CHILD);
+```
 
 **Note**: the prefix `fio` will be different according to the `FIO_MEMORY_NAME` macro, it is used here because this is the prefix defined when using the `FIO_MALLOC` shortcut macro.
 
