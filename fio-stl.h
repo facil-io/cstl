@@ -23562,29 +23562,27 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
 SFUNC int fio_string_write_hex(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
-  int r = -1;
-  char buf[16];
-  size_t len = 0;
-  while (i > 255) {
-    buf[len++] = fio_i2c(i & 15);
-    i >>= 4;
-    buf[len++] = fio_i2c(i & 15);
-    i >>= 4;
-  }
-  buf[len++] = fio_i2c(i & 15);
-  i >>= 4;
-  buf[len++] = fio_i2c(i & 15);
+  int r = 0;
+  size_t len = fio_digits16(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
-    return r; /* no writing of partial numbers. */
-  r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
-  }
+    return (r = -1); /* no writing of partial numbers. */
+  dest->len += len;
+  len = dest->len;
   dest->buf[dest->len] = 0;
+  while (i > 255) {
+    dest->buf[len - 1] = fio_i2c(i & 15);
+    i >>= 4;
+    dest->buf[len - 2] = fio_i2c(i & 15);
+    i >>= 4;
+    len -= 2;
+  }
+  dest->buf[len - 1] = fio_i2c(i & 15);
+  i >>= 4;
+  dest->buf[len - 2] = fio_i2c(i & 15);
   return r;
 }
 
-/* fio_string_write_hex */
+/* fio_string_write_bin */
 SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
