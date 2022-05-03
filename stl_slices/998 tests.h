@@ -57,6 +57,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_SHA1
 #define FIO_SIGNAL
 #define FIO_SOCK
+#define FIO_STATE
 #define FIO_STREAM
 #define FIO_THREADS
 #define FIO_TIME

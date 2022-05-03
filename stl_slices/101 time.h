@@ -176,7 +176,7 @@ FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
 /* *****************************************************************************
 Time Implementation
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE)
+#if !defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE)
 
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.

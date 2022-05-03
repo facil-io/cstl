@@ -32,8 +32,9 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__)
-
+#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__) &&                         \
+    !defined(H___FIO_SERVER___H)
+#define H___FIO_SERVER___H
 /* *****************************************************************************
 Server Settings
 
@@ -356,6 +357,7 @@ struct fio_protocol_s {
    */
   uint32_t timeout;
 };
+
 /* *****************************************************************************
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
@@ -465,7 +467,7 @@ Server / IO environment support
 // #define FIO_REF_NAME       fio
 // #define FIO_REF_INIT(o)    fio_s_init(&(o))
 // #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-// #include __FILE__
+// #include FIO__FILE__
 // #undef FIO_STL_KEEP__
 
 /* *****************************************************************************
@@ -481,7 +483,7 @@ IO Validity Map - Type
 #define FIO_MAP_TYPE           fio_s *
 #define FIO_MAP_HASH_FN(o)     fio_risky_ptr(o)
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
-#include __FILE__
+#include FIO__FILE__
 #undef FIO_STL_KEEP__
 #ifndef FIO_VALIDATE_IO_MUTEX
 /* mostly for debugging possible threading issues. */
@@ -679,7 +681,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#include __FILE__
+#include FIO__FILE__
 #undef FIO_STL_KEEP__
 
 static void fio___protocol_set_task(void *io_, void *old_) {
@@ -1190,7 +1192,10 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srvdata.root_pid = fio___srvdata.pid = getpid();
 }
 
-FIO_DESTRUCTOR(fio___srv_cleanup) { fio_invalidate_all(); }
+FIO_DESTRUCTOR(fio___srv_cleanup) {
+  fio_invalidate_all();
+  fio_queue_perform_all(fio___srv_tasks);
+}
 
 /* *****************************************************************************
 Simple Server Testing

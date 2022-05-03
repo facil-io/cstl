@@ -1269,6 +1269,13 @@ Common macros
 #endif
 #endif
 
+/* Modules that require FIO_STATE */
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_SERVER)
+#ifndef FIO_STATE
+#define FIO_STATE
+#endif
+#endif
+
 /* Modules that require FIO_SOCK */
 #if defined(FIO_POLL) || defined(FIO_SERVER)
 #ifndef FIO_SOCK
@@ -1321,9 +1328,9 @@ Common macros
 #endif /* FIO_QUEUE */
 
 /* Modules that require FIO_RISKY_HASH */
-#if defined(FIO_RAND) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||    \
-    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
-    defined(FIO_POLL)
+#if defined(FIO_RAND) || defined(FIO_STATE) || defined(FIO_STR_NAME) ||        \
+    defined(FIO_STR_SMALL) || defined(FIO_CLI) || defined(FIO_MEMORY_NAME) ||  \
+    defined(FIO_MALLOC) || defined(FIO_POLL)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
@@ -1354,7 +1361,7 @@ Common macros
 
 /* Modules that require FIO_ATOMIC */
 #if defined(FIO_BITMAP) || defined(FIO_REF_NAME) || defined(FIO_LOCK2) ||      \
-    (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||                        \
+    defined(FIO_STATE) || (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||  \
     (defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) ||                       \
     (defined(FIO_QUEUE) && !FIO_USE_THREAD_MUTEX_TMP) || defined(FIO_JSON) ||  \
     defined(FIO_SIGNAL) || defined(FIO_BITMAP) || defined(FIO_THREADS)

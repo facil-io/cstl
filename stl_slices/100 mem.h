@@ -11,6 +11,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "007 threads.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
+#include "090 state callbacks.h"    /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -1491,10 +1492,19 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
 #endif /* DEBUG */
 }
 
+FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME,
+                        __malloc_after_fork_task)(void *ignr_) {
+  (void)ignr_;
+  FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)();
+}
+
 /* initializes (allocates) the arenas and state machine */
 FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         FIO_NAME(FIO_MEMORY_NAME, __malloc_after_fork_task),
+                         NULL);
   /* allocate the state machine */
   {
 #if FIO_MEMORY_ARENA_COUNT > 0
