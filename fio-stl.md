@@ -3396,156 +3396,6 @@ This is due to the fact that the tasks may try to reschedule themselves (if they
 When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
 
 -------------------------------------------------------------------------------
-## CLI (command line interface)
-
-```c
-#define FIO_CLI
-#include "fio-stl.h"
-```
-
-The Simple Template Library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
-
-* Auto-generation of the "help" / usage output.
-
-* Argument type testing (String, boolean, and integer types are supported).
-
-* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
-
-* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
-
-* Array style support and access to unnamed arguments.
-
-
-By defining `FIO_CLI`, the following functions will be defined.
-
-In addition, `FIO_CLI` automatically includes the `FIO_ATOL` flag, since CLI parsing depends on the `fio_atol` function.
-
-#### `fio_cli_start`
-
-```c
-#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
-  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
-                (char const *[]){__VA_ARGS__, (char const *)NULL})
-
-/* the shadowed function: */
-void fio_cli_start   (int argc, char const *argv[],
-                      int unnamed_min, int unnamed_max,
-                      char const *description,
-                      char const **names);
-```
-
-The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
-
-The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
-
-If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
-
-The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
-
-Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
-
-* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_BOOL("-arg [-alias] [(1)] desc.")`
-
-* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
-
-* `FIO_CLI_PRINT("raw text line (printed as is, with same spacing as arguments)")`
-
-* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
-
-**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
-
-```c
-int main(int argc, char const *argv[]) {
-  fio_cli_start(argc, argv, 0, -1,
-                "this is a CLI example for the NAME application.",
-                FIO_CLI_PRINT_HEADER("CLI type validation"),
-                FIO_CLI_STRING("-str -s (my default str (string\\)) any data goes here"),
-                FIO_CLI_INT("-int -i (42) integer data goes here"),
-                FIO_CLI_BOOL("-bool -b (1) flag (boolean) only - no data"),
-                FIO_CLI_PRINT("This example allows for unlimited arguments "
-                              "that will simply pass-through"),
-                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
-                );
-  if (fio_cli_get("-s")) /* always true when default value is provided */
-    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
-
-  fprintf(stderr, "Integer: %d\n", fio_cli_get_i("-i"));
-
-  fprintf(stderr, "Boolean: %d\n", fio_cli_get_i("-b"));
-
-  if (fio_cli_unnamed_count()) {
-    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
-    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
-      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
-    }
-  }
-
-  fio_cli_end();
-  return 0;
-}
-```
-
-#### `fio_cli_end`
-
-```c
-void fio_cli_end(void);
-```
-
-Clears the CLI data storage.
-
-#### `fio_cli_get`
-
-```c
-char const *fio_cli_get(char const *name);
-```
-
-Returns the argument's value as a string, or NULL if the argument wasn't provided.
-
-#### `fio_cli_get_i`
-
-```c
-int fio_cli_get_i(char const *name);
-```
-
-Returns the argument's value as an integer, or 0 if the argument wasn't provided.
-
-#### `fio_cli_get_bool`
-
-```c
-#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
-```
-
-Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
-
-#### `fio_cli_unnamed_count`
-
-```c
-unsigned int fio_cli_unnamed_count(void);
-```
-
-Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
-
-#### `fio_cli_unnamed`
-
-```c
-char const *fio_cli_unnamed(unsigned int index);
-```
-
-Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
-
-#### `fio_cli_set`
-
-```c
-void fio_cli_set(char const *name, char const *value);
-```
-
-Sets a value for the named argument (but **not** it's aliases).
-
--------------------------------------------------------------------------------
 ## Basic Socket / IO Helpers
 
 ```c
@@ -3729,172 +3579,6 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 Creates a new Unix socket and binds it to a local address.
 
 **Note**: available only on POSIX systems.
-
--------------------------------------------------------------------------------
-## Basic IO Polling
-
-```c
-#define FIO_POLL
-#include "fio-stl.h"
-```
-
-IO polling using the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
-
-The facil.io standard library provides a persistent polling container for evented management of small IO (file descriptor) collections using the "one-shot" model.
-
-"One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
-
-There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `poll` system call. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases.
-
-It is recommended to use a system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
-
-By defining `FIO_POLL`, the following functions will be defined.
-
-**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
-
-### `FIO_POLL` API
-
-
-#### `fio_poll_s`
-
-```c
-typedef struct fio_poll_s fio_poll_s;
-```
-
-The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
-
-#### `FIO_POLL_INIT`
-
-```c
-#define FIO_POLL_INIT(...)                                                     \
-  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
-  { .settings = { __VA_ARGS__ }, .lock = FIO_LOCK_INIT }
-```
-
-A `fio_poll_s` object initialization macro.
-
-Static initialization may be limited to POSIX systems.
-
-Use: `FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)`
-
-#### `fio_poll_new`
-
-```c
-fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
-/* named argument support */
-#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
-```
-
-Creates a new polling object / queue.
-
-The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
-
-```c
-typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(int fd, void *udata);
-  /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(int fd, void *udata);
-  /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(int fd, void *udata);
-} fio_poll_settings_s;
-```
-
-Returns NULL on error (no memory).
-
-#### `fio_poll_free`
-
-```c
-int fio_poll_free(fio_poll_s *p);
-```
-
-Frees the polling object and its resources.
-
-#### `fio_poll_destroy`
-
-```c
-void fio_poll_destroy(fio_poll_s *p);
-```
-
-Destroys the polling object, freeing its resources.
-
-**Note**: the monitored file descriptors will remain untouched (possibly open). To close all the monitored file descriptors, call `fio_poll_close_and_destroy` instead.
-
-#### `fio_poll_close_and_destroy`
-
-```c
-void fio_poll_close_all(fio_poll_s *p);
-```
-
-Closes all monitored connections, calling the `on_close` callbacks for all of them.
-
-#### `fio_poll_monitor`
-
-```c
-int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
-```
-
-Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
-
-Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
-
-On systems where `POLLRDHUP` is supported, it is always monitored for.
-
-Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
-
-Returns -1 on error.
-
-#### `fio_poll_review`
-
-```c
-int fio_poll_review(fio_poll_s *p, int timeout);
-```
-
-Reviews if any of the monitored file descriptors has any events.
-
-`timeout` is in milliseconds.
-
-Returns the number of events called.
-
-**Note**:
-
-Polling is thread safe, but has different effects on different threads.
-
-Adding a new file descriptor from one thread while polling in a different thread will not poll that IO untill `fio_poll_review` is called again.
-
-#### `fio_poll_forget`
-
-```c
-void *fio_poll_forget(fio_poll_s *p, int fd);
-```
-
-Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
-
-### `FIO_POLL` Compile Time Macros
-
-#### `FIO_POLL_HAS_UDATA_COLLECTION`
-
-```c
-#ifndef FIO_POLL_HAS_UDATA_COLLECTION
-#define FIO_POLL_HAS_UDATA_COLLECTION 1
-#endif
-```
-
-When set to true (the default value), the `udata` value is unique per file descriptor, using an array of `udata` values.
-
-When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
-
-#### `FIO_POLL_FRAGMENTATION_LIMIT`
-
-```c
-#define FIO_POLL_FRAGMENTATION_LIMIT 63
-```
-
-When the polling array is fragmented by more than the set value, it will be de-fragmented on the idle cycle (if no events occur).
-
-#### `FIO_POLL_DEBUG`
-
-If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.
 
 -------------------------------------------------------------------------------
 ## Data Stream Container
@@ -4267,1308 +3951,6 @@ Parses a file name to folder, base name and extension (zero-copy).
 ```
 
 Selects the folder separation character according to the detected OS.
-
--------------------------------------------------------------------------------
-## Linked Lists
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element 
-typedef struct {
-  char * data;
-  FIO_LIST_NODE node;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-```
-
-Doubly Linked Lists are an incredibly common and useful data structure.
-
-### Linked Lists Performance
-
-Memory overhead (on 64bit machines) is 16 bytes per node (or 8 bytes on 32 bit machines) for the `next` and `prev` pointers.
-
-Linked Lists use pointers in order to provide fast add/remove operations with O(1) speeds. This O(1) operation ignores the object allocation time and suffers from poor memory locality, but it's still very fast.
-
-However, Linked Lists suffer from slow seek/find and iteration operations.
-
-Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
-
-### Linked Lists Macros
-
-Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
-
-#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
-
-```c
-/** A linked list node type */
-#define FIO_LIST_NODE fio_list_node_s
-/** A linked list head type */
-#define FIO_LIST_HEAD fio_list_node_s
-/** A linked list arch-type */
-typedef struct fio_list_node_s {
-  struct fio_list_node_s *next;
-  struct fio_list_node_s *prev;
-} fio_list_node_s;
-
-```
-
-These are the basic core types for a linked list node used by the Linked List macros.
-
-#### `FIO_LIST_INIT(head)`
-
-```c
-#define FIO_LIST_INIT(obj)                                                     \
-  (FIO_LIST_HEAD){ .next = &(obj), .prev = &(obj) }
-```
-
-Initializes a linked list.
-
-#### `FIO_LIST_PUSH`
-
-```c
-#define FIO_LIST_PUSH(head, n)                                                 \
-  do {                                                                         \
-    (n)->prev = (head)->prev;                                                  \
-    (n)->next = (head);                                                        \
-    (head)->prev->next = (n);                                                  \
-    (head)->prev = (n);                                                        \
-  } while (0)
-```
-
-UNSAFE macro for pushing a node to a list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-#### `FIO_LIST_POP`
-
-```c
-#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
-  do {                                                                         \
-    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
-    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
-  } while (0)
-```
-
-UNSAFE macro for popping a node from a list.
-
-* `type` is the underlying `struct` type of the next list member.
-
-* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
-
-* `dest_prt` is the pointer that will accept the next list member.
-
-* `head` is the head of the list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-Note that using this macro with an empty list will produce **undefined behavior**.
-
-#### `FIO_LIST_REMOVE`
-
-```c
-#define FIO_LIST_REMOVE(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-
-#### `FIO_LIST_EACH`
-
-```c
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.next)))
-```
-
-Loops through every node in the linked list except the head.
-
-This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
-
-i.e.,
-
-```c
-typedef struct {
-  void * data;
-  FIO_LIST_HEAD node;
-} ptr_list_s;
-
-FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
-
-/* ... */
-
-FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
-  do_something_with(pos->data);
-}
-```
-
-#### `FIO_LIST_IS_EMPTY`
-
-```c
-#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
-```
-
-Macro for testing if a list is empty.
-
-
-### Indexed Linked Lists Macros (always defined):
-
-
-Indexed linked lists are often used to either save memory or making it easier to reallocate the memory used for the whole list. This is performed by listing pointer offsets instead of the whole pointer, allowing the offsets to use smaller type sizes.
-
-For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, than a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
-
-#### `FIO_INDEXED_LIST32_HEAD` / `FIO_INDEXED_LIST32_NODE`
-
-```c
-/** A 32 bit indexed linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-/** A 16 bit indexed linked list node type */
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-/** An 8 bit indexed linked list node type */
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-
-/** A 32 bit indexed linked list node type */
-typedef struct fio_index32_node_s {
-  uint32_t next;
-  uint32_t prev;
-} fio_index32_node_s;
-
-/** A 16 bit indexed linked list node type */
-typedef struct fio_index16_node_s {
-  uint16_t next;
-  uint16_t prev;
-} fio_index16_node_s;
-
-/** An 8 bit indexed linked list node type */
-typedef struct fio_index8_node_s {
-  uint8_t next;
-  uint8_t prev;
-} fio_index8_node_s;
-```
-
-#### `FIO_INDEXED_LIST_PUSH`
-
-```c
-#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
-    (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
-  } while (0)
-```
-
-UNSAFE macro for pushing a node to a list.
-
-#### `FIO_INDEXED_LIST_REMOVE`
-
-```c
-#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list.
-
-#### `FIO_INDEXED_LIST_EACH`
-
-```c
-#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
-       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
-```
-
-Loops through every index in the indexed list, **assuming `head` is valid**.
-
--------------------------------------------------------------------------------
-
-## Linked List Dynamic Type Definition
-
-### Linked Lists Overview
-
-Before creating linked lists, the library header should be included at least once.
-
-To create a linked list type, create a `struct` that includes a `FIO_LIST_NODE` typed element somewhere within the structure. For example:
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-```
-
-Next define the `FIO_LIST_NAME` macro. The linked list helpers and types will all be prefixed by this name. i.e.:
-
-```c
-#define FIO_LIST_NAME my_list /* defines list functions (example): my_list_push(...) */
-```
-
-Optionally, define the `FIO_LIST_TYPE` macro to point at the correct linked-list structure type. By default, the type for linked lists will be `<FIO_LIST_NAME>_s`.
-
-An example were we need to define the `FIO_LIST_TYPE` macro will follow later on.
-
-Optionally, define the `FIO_LIST_NODE_NAME` macro to point the linked list's node. By default, the node for linked lists will be `node`.
-
-Finally, include the `fio-stl.h` header to create the linked list helpers.
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element 
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-
-void example(void) {
-  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
-  for (int i = 0; i < 10; ++i) {
-    my_list_s *n = malloc(sizeof(*n));
-    n->i = i;
-    my_list_push(&list, n);
-  }
-  int i = 0;
-  while (my_list_any(&list)) {
-    my_list_s *n = my_list_shift(&list);
-    if (i != n->i) {
-      fprintf(stderr, "list error - value mismatch\n"), exit(-1);
-    }
-    free(n);
-    ++i;
-  }
-  if (i != 10) {
-    fprintf(stderr, "list error - count error\n"), exit(-1);
-  }
-}
-```
-
-**Note**:
-
-Each node is limited to a single list (an item can't belong to more then one list, unless it's a list of pointers to that item).
-
-Items with more then a single node can belong to more then one list. i.e.:
-
-```c
-// list element 
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-// list 1 
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-// list 2 
-#define FIO_LIST_NAME my_list2
-#define FIO_LIST_TYPE my_list_s
-#define FIO_LIST_NODE_NAME node2
-#include "fio-stl.h"
-```
-
-### Linked Lists (embeded) - API
-
-
-#### `FIO_LIST_INIT(head)`
-
-```c
-#define FIO_LIST_INIT(obj)                                                     \
-  (FIO_LIST_NODE){ .next = &(obj), .prev = &(obj) }
-```
-
-This macro initializes an uninitialized node (assumes the data in the node is junk). 
-
-#### `LIST_any`
-
-```c
-int LIST_any(FIO_LIST_HEAD *head)
-```
-Returns a non-zero value if there are any linked nodes in the list. 
-
-#### `LIST_is_empty`
-
-```c
-int LIST_is_empty(FIO_LIST_HEAD *head)
-```
-Returns a non-zero value if the list is empty. 
-
-#### `LIST_remove`
-
-```c
-FIO_LIST_TYPE *LIST_remove(FIO_LIST_TYPE *node)
-```
-Removes a node from the list, Returns NULL if node isn't linked. 
-
-#### `LIST_push`
-
-```c
-FIO_LIST_TYPE *LIST_push(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
-```
-Pushes an existing node to the end of the list. Returns node. 
-
-#### `LIST_pop`
-
-```c
-FIO_LIST_TYPE *LIST_pop(FIO_LIST_HEAD *head)
-```
-Pops a node from the end of the list. Returns NULL if list is empty. 
-
-#### `LIST_unshift`
-
-```c
-FIO_LIST_TYPE *LIST_unshift(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
-```
-Adds an existing node to the beginning of the list. Returns node.
-
-#### `LIST_shift`
-
-```c
-FIO_LIST_TYPE *LIST_shift(FIO_LIST_HEAD *head)
-```
-Removed a node from the start of the list. Returns NULL if list is empty. 
-
-#### `LIST_root`
-
-```c
-FIO_LIST_TYPE *LIST_root(FIO_LIST_HEAD *ptr)
-```
-Returns a pointer to a list's element, from a pointer to a node. 
-
-#### `FIO_LIST_EACH`
-
-_Note: macro, name unchanged, works for all lists_
-
-```c
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(type, node_name,                \
-                                               next____p_ls->node_name.next)))
-```
-
-Loops through every node in the linked list (except the head).
-
-The `type` name should reference the list type.
-
-`node_name` should indicate which node should be used for iteration.
-
-`head` should point at the head of the list (usually a `FIO_LIST_HEAD` variable).
-
-`pos` can be any temporary variable name that will contain the current position in the iteration.
-
-The list **can** be mutated during the loop, but this is not recommended. Specifically, removing `pos` is safe, but pushing elements ahead of `pos` might result in an endless loop.
-
-_Note: this macro won't work with pointer tagging_
-
--------------------------------------------------------------------------------
-## Dynamic Arrays
-
-```c
-#define FIO_ARRAY_NAME str_ary
-#define FIO_ARRAY_TYPE char *
-#define FIO_ARRAY_TYPE_CMP(a,b) (!strcmp((a),(b)))
-#include "fio-stl.h"
-```
-
-Dynamic arrays are extremely common and useful data structures.
-
-In essence, Arrays are blocks of memory that contain all their elements "in a row". They grow (or shrink) as more items are added (or removed).
-
-Items are accessed using a numerical `index` indicating the element's position within the array.
-
-Indexes are zero based (first element == 0).
-
-### Dynamic Array Performance
-
-Seeking time is an extremely fast O(1). Arrays are also very fast to iterate since they enjoy high memory locality.
-
-Adding and editing items is also a very fast O(1), especially if enough memory was previously reserved. Otherwise, memory allocation and copying will slow performance.
-
-However, arrays suffer from slow find operations. Find has a worst case scenario O(n) cost.
-
-They also suffer from slow item removal (except, in our case, for `pop` / `unshift` operations), since middle-element removal requires memory copying when fixing the "hole" made in the array.
-
-A common solution is to reserve a value for "empty" elements and `set` the element's value instead of `remove` the element.
-
-**Note**: unlike some dynamic array implementations, this STL implementation doesn't grow exponentially. Using the `ARY_reserve` function is highly encouraged for performance.
-
-
-### Dynamic Array Overview
-
-To create a dynamic array type, define the type name using the `FIO_ARRAY_NAME` macro. i.e.:
-
-```c
-#define FIO_ARRAY_NAME int_ary
-```
-
-Next (usually), define the `FIO_ARRAY_TYPE` macro with the element type. The default element type is `void *`. For example:
-
-```c
-#define FIO_ARRAY_TYPE int
-```
-
-For complex types, define any (or all) of the following macros:
-
-```c
-// set to adjust element copying 
-#define FIO_ARRAY_TYPE_COPY(dest, src)  
-// set for element cleanup 
-#define FIO_ARRAY_TYPE_DESTROY(obj)     
-// set to adjust element comparison 
-#define FIO_ARRAY_TYPE_CMP(a, b)        
-// to be returned when `index` is out of bounds / holes 
-#define FIO_ARRAY_TYPE_INVALID 0 
-// set ONLY if the invalid element is all zero bytes 
-#define FIO_ARRAY_TYPE_INVALID_SIMPLE 1     
-// should the object be destroyed when copied to an `old` pointer?
-#define FIO_ARRAY_DESTROY_AFTER_COPY 1 
-// when array memory grows, how many extra "spaces" should be allocated?
-#define FIO_ARRAY_PADDING 4 
-// should the array growth be exponential? (ignores FIO_ARRAY_PADDING)
-#define FIO_ARRAY_EXPONENTIAL 0 
-// optimizes small arrays (mostly tuplets and single item arrays).
-// note: values larger than 1 add a memory allocation cost to the array container
-#define FIO_ARRAY_ENABLE_EMBEDDED 1
-```
-
-To create the type and helper functions, include the Simple Template Library header.
-
-For example:
-
-```c
-typedef struct {
-  int i;
-  float f;
-} foo_s;
-
-#define FIO_ARRAY_NAME ary
-#define FIO_ARRAY_TYPE foo_s
-#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio-stl.h"
-
-void example(void) {
-  ary_s a = FIO_ARRAY_INIT;
-  foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), (void *)pos, pos->i);
-  }
-  ary_destroy(&a);
-}
-```
-
-### Dynamic Arrays - API
-
-#### The Array Type (`ARY_s`)
-
-```c
-typedef struct {
-  FIO_ARRAY_TYPE *ary;
-  uint32_t capa;
-  uint32_t start;
-  uint32_t end;
-} FIO_NAME(FIO_ARRAY_NAME, s); /* ARY_s in these docs */
-```
-
-The array type should be considered opaque. Use the helper functions to updated the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
-
-#### `FIO_ARRAY_INIT`
-
-````c
-#define FIO_ARRAY_INIT  {0}
-````
-
-This macro initializes an uninitialized array object.
-
-#### `ARY_destroy`
-
-````c
-void ARY_destroy(ARY_s * ary);
-````
-
-Destroys any objects stored in the array and frees the internal state.
-
-#### `ARY_new`
-
-````c
-ARY_s * ARY_new(void);
-````
-
-Allocates a new array object on the heap and initializes it's memory.
-
-#### `ARY_free`
-
-````c
-void ARY_free(ARY_s * ary);
-````
-
-Frees an array's internal data AND it's container!
-
-#### `ARY_count`
-
-````c
-uint32_t ARY_count(ARY_s * ary);
-````
-
-Returns the number of elements in the Array.
-
-#### `ARY_capa`
-
-````c
-uint32_t ARY_capa(ARY_s * ary);
-````
-
-Returns the current, temporary, array capacity (it's dynamic).
-
-#### `ARY_reserve`
-
-```c
-uint32_t ARY_reserve(ARY_s * ary, int32_t capa);
-```
-
-Reserves a minimal capacity for the array.
-
-If `capa` is negative, new memory will be allocated at the beginning of the array rather then it's end.
-
-Returns the array's new capacity.
-
-**Note**: the reserved capacity includes existing data / capacity. If the requested reserved capacity is equal (or less) then the existing capacity, nothing will be done.
-
-#### `ARY_concat`
-
-```c
-ARY_s * ARY_concat(ARY_s * dest, ARY_s * src);
-```
-
-Adds all the items in the `src` Array to the end of the `dest` Array.
-
-The `src` Array remain untouched.
-
-Always returns the destination array (`dest`).
-
-#### `ARY_set`
-
-```c
-FIO_ARRAY_TYPE * ARY_set(ARY_s * ary,
-                       int32_t index,
-                       FIO_ARRAY_TYPE data,
-                       FIO_ARRAY_TYPE *old);
-```
-
-Sets `index` to the value in `data`.
-
-If `index` is negative, it will be counted from the end of the Array (-1 == last element).
-
-If `old` isn't NULL, the existing data will be copied to the location pointed to by `old` before the copy in the Array is destroyed.
-
-Returns a pointer to the new object, or NULL on error.
-
-#### `ARY_get`
-
-```c
-FIO_ARRAY_TYPE ARY_get(ARY_s * ary, int32_t index);
-```
-
-Returns the value located at `index` (no copying is performed).
-
-If `index` is negative, it will be counted from the end of the Array (-1 == last element).
-
-**Reminder**: indexes are zero based (first element == 0).
-
-#### `ARY_find`
-
-```c
-int32_t ARY_find(ARY_s * ary, FIO_ARRAY_TYPE data, int32_t start_at);
-```
-
-Returns the index of the object or -1 if the object wasn't found.
-
-If `start_at` is negative (i.e., -1), than seeking will be performed in reverse, where -1 == last index (-2 == second to last, etc').
-
-#### `ARY_remove`
-```c
-int ARY_remove(ARY_s * ary, int32_t index, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the array, MOVING all the other objects to prevent "holes" in the data.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns 0 on success and -1 on error.
-
-This action is O(n) where n in the length of the array. It could get expensive.
-
-#### `ARY_remove2`
-
-```c
-uint32_t ARY_remove2(ARY_S * ary, FIO_ARRAY_TYPE data);
-```
-
-Removes all occurrences of an object from the array (if any), MOVING all the existing objects to prevent "holes" in the data.
-
-Returns the number of items removed.
-
-This action is O(n) where n in the length of the array. It could get expensive.
-
-#### `ARY_compact`
-```c
-void ARY_compact(ARY_s * ary);
-```
-
-Attempts to lower the array's memory consumption.
-
-#### `ARY_to_a`
-
-```c
-FIO_ARRAY_TYPE * ARY_to_a(ARY_s * ary);
-```
-
-Returns a pointer to the C array containing the objects.
-
-#### `ARY_push`
-
-```c
-FIO_ARRAY_TYPE * ARY_push(ARY_s * ary, FIO_ARRAY_TYPE data);
-```
-
- Pushes an object to the end of the Array. Returns a pointer to the new object or NULL on error.
-
-#### `ARY_pop`
-
-```c
-int ARY_pop(ARY_s * ary, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the end of the Array.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns -1 on error (Array is empty) and 0 on success.
-
-#### `ARY_unshift`
-
-```c
-FIO_ARRAY_TYPE *ARY_unshift(ARY_s * ary, FIO_ARRAY_TYPE data);
-```
-
-Unshifts an object to the beginning of the Array. Returns a pointer to the new object or NULL on error.
-
-This could be expensive, causing `memmove`.
-
-#### `ARY_shift`
-
-```c
-int ARY_shift(ARY_s * ary, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the beginning of the Array.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns -1 on error (Array is empty) and 0 on success.
-
-#### `ARY_each`
-
-```c
-uint32_t ARY_each(ARY_s * ary,
-                  int (*task)(ARY_each_s * info),
-                  void *arg,
-                  int32_t start_at);
-```
-
-Iteration using a callback for each entry in the array.
-
-The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
-
-If the callback returns -1, the loop is broken. Any other value is ignored.
-
-Returns the relative "stop" position (number of items processed + starting point).
-
-The `ARY_each_s` data structure looks like this:
-
-```c
-/** Iteration information structure passed to the callback. */
-typedef ARY_each_s {
-  /** The being iterated. Once set, cannot be safely changed. */
-  FIO_ARRAY_PTR const parent;
-  /** The current object's index */
-  uint64_t index;
-  /** Always 1 and may be used to allow type detection. */
-  const int64_t items_at_index;
-  /** The callback / task called for each index, may be updated mid-cycle. */
-  int (*task)(ARY_each_s * info);
-  /** The argument passed along to the task. */
-  void *arg;
-  /** The object / value at the current index. */
-  FIO_ARRAY_TYPE value;
-} ARY_each_s;
-```
-
-#### `ARY_each_next`
-
-```c
-FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
-                             FIO_ARRAY_TYPE **first,
-                             FIO_ARRAY_TYPE *pos);
-
-```
-
-Used internally by the `FIO_ARRAY_EACH` macro.
-
-Returns a pointer to the first object if `pos == NULL` and there are objects
-in the array.
-
-Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
-
-Returns `NULL` on error or if the array is empty.
-
-**Note**: 
-The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
-
-If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
-
-#### `FIO_ARRAY_EACH`
-
-```c
-#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
-  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
-           first___ = NULL,                                                    \
-           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
-       pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
-```
-
-
-Iterates through the array using a `for` loop.
-
-Access the object with the pointer `pos`. The `pos` variable can be named however you please.
-
-It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
-
-**Note**: this macro supports automatic pointer tagging / untagging.
-
--------------------------------------------------------------------------------
-## Hash Tables and Maps
-
-```c
-/* Create a binary safe String type for Strings that aren't mutated often */
-#define FIO_STR_SMALL str
-#include "fio-stl.h"
-
-/* Set the properties for the key-value Hash Map type called `dict_s` */
-#define FIO_MAP_NAME                 dict
-#define FIO_MAP_ORDERED              0
-#define FIO_MAP_TYPE                 str_s
-#define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
-#define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
-#define FIO_MAP_TYPE_CMP(a, b)       str_is_eq(&(a), &(b))
-#define FIO_MAP_KEY                  FIO_MAP_TYPE
-#define FIO_MAP_KEY_COPY             FIO_MAP_TYPE_COPY
-#define FIO_MAP_KEY_DESTROY          FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
-#include "fio-stl.h"
-/** set helper for consistent hash values */
-FIO_IFUNC str_s *dict_set2(dict_s *m, str_s key, str_s obj) {
-  return dict_set_ptr(m, str_hash(&key, (uint64_t)m), key, obj, NULL, 1);
-}
-/** get helper for consistent hash values */
-FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
-  return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
-}
-```
-
-HashMaps (a.k.a., Hash Tables) and sets are extremely useful and common mapping / dictionary primitives, also sometimes known as "dictionary".
-
-Hash maps use both a `hash` and a `key` to identify a `value`. The `hash` value is calculated by feeding the key's data to a hash function (such as Risky Hash or SipHash).
-
-A hash map without a `key` is known as a Set or a Bag. It uses only a `hash` (often calculated using `value`) to identify the `value` in the Set, sometimes requiring a `value` equality test as well. This approach often promises a collection of unique values (no duplicate values).
-
-Some map implementations support a FIFO limited storage, which could be used for naive limited-space caching (though caching solutions may require a more complex data-storage that's slower).
-
-### Ordered Maps, Unordered Maps, Indexing and Performance
-
-The facil.io library offers both ordered and unordered maps. Unordered maps are often faster and use less memory. If iteration is performed, ordered maps might be better.
-
-Ordered hash maps (or hash tables) are defined using `FIO_OMAP_NAME`.
-
-Unordered hash maps (or hash tables) are defined using `FIO_UMAP_NAME`.
-
-Indexing the map allows LRU (least recently used) eviction, but comes at a performance cost in both memory (due to the extra data per object) and speed (due to out of order memory access and increased cache misses).
-
-To enable LRU indexing on the map, define `FIO_MAP_EVICT_LRU` as `1` (true).
-
-Ordered maps are constructed using an ordered Array + an index map that uses 4 or 8 bytes per array index.
-
-Unordered maps are constructed using an unordered Array + an index map that uses 1 byte per array index.
-
-Indexing is performed using a linked list that uses 4 or 8 byte index values instead of pointers.
-
-In addition, each value stores a copy of the hash data, so hash data doesn't need to be recomputed.
-
-The map implementations have protection features against too many full collisions or non-random hashes. When the map detects a possible "attack", it will start overwriting existing data instead of trying to resolve collisions. This can be adjusted using the `FIO_MAP_MAX_FULL_COLLISIONS` macro.
-
-### Map Overview 
-
-To create a map, define `FIO_MAP_NAME`, `FIO_OMAP_NAME` (ordered) **or** `FIO_UMAP_NAME` (unordered).
-
-To create a hash map (rather then a set), also define `FIO_MAP_KEY` (containing the key's type).
-
-To create an unordered map either use `FIO_UMAP_NAME` or define `FIO_MAP_ORDERED`.
-
-Helpful macros to define might include:
-
-- `FIO_MAP_ORDERED`, if `1`, the map will be ordered if `0` unordered.
-- `FIO_MAP_TYPE`, which defaults to `void *`
-- `FIO_MAP_TYPE_INVALID`, which defaults to `((FIO_MAP_TYPE){0})`
-- `FIO_MAP_TYPE_COPY(dest, src)`, which defaults to `(dest) = (src)`
-- `FIO_MAP_TYPE_DESTROY(obj)`
-- `FIO_MAP_TYPE_CMP(a, b)`, which defaults to `1`
-- `FIO_MAP_KEY`
-- `FIO_MAP_KEY_INVALID`
-- `FIO_MAP_KEY_COPY(dest, src)`
-- `FIO_MAP_KEY_DESTROY(obj)`
-- `FIO_MAP_KEY_CMP(a, b)`
-- `FIO_MAP_MAX_FULL_COLLISIONS`, which defaults to `22`
-
-
-- `FIO_MAP_DESTROY_AFTER_COPY`, uses "smart" defaults to decide if to destroy an object after it was copied (when using `set` / `remove` / `pop` with a pointer to contain `old` object).
-- `FIO_MAP_TYPE_DISCARD(obj)`, handles discarded element data (i.e., insert without overwrite in a Set).
-- `FIO_MAP_KEY_DISCARD(obj)`, handles discarded element data (i.e., when overwriting an existing value in a hash map).
-
-- `FIO_MAP_SHOULD_OVERWRITE(older, newer)`, if set it should return `0` (false) to prevent an overwriting instruction. This can be used to compare timestamps between to items and test that `newer` is actually newer than `older`.
-- `FIO_MAP_EVICT_LRU`, if set to true (`1`), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
-- `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO). By default, no auto-eviction is performed.
-
-- `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
-- `FIO_MAP_HASH_FN(key)`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.
-- `FIO_MAP_BIG`, if defined, the maximum theoretical capacity increases to `(1 << 64) -1`.
-To limit the number of elements in a map (FIFO, ignoring last access time), allowing it to behave similarly to a simple caching primitive, define: `FIO_MAP_MAX_ELEMENTS`.
-- `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when partial/full collisions occur (effects the load factor). Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default either `7` or `13`.
-
-If `FIO_MAP_MAX_ELEMENTS` is `0`, then the theoretical maximum number of elements should be: `(1 << 32) - 1`. In practice, the safe limit should be calculated as `1 << 31` or `1 << 30`. The same is true for `FIO_MAP_BIG`, only relative to 64 bits.
-
-### Hash Map / Set - API (initialization)
-
-#### `MAP_new`
-
-```c
-FIO_MAP_PTR MAP_new(void);
-```
-
-Allocates a new map on the heap.
-
-#### `MAP_free`
-
-```c
-void MAP_free(MAP_PTR m);
-```
-
-Frees a map that was allocated on the heap.
-
-#### `FIO_MAP_INIT`
-
-```c
-#define FIO_MAP_INIT { .map = NULL }
-```
-
-This macro initializes a map object - often used for maps placed on the stack.
-
-#### `MAP_destroy`
-
-```c
-void MAP_destroy(MAP_PTR m);
-```
-
-Destroys the map's internal data and re-initializes it.
-
-
-### Hash Map - API (hash map only)
-
-#### `MAP_get` (hash map)
-
-```c
-FIO_MAP_TYPE MAP_get(FIO_MAP_PTR m,
-                     FIO_MAP_HASH hash,
-                     FIO_MAP_KEY key);
-```
-Returns the object in the hash map (if any) or FIO_MAP_TYPE_INVALID.
-
-#### `MAP_get_ptr` (hash map)
-
-```c
-FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
-                          FIO_MAP_HASH hash,
-                          FIO_MAP_KEY key);
-```
-
-Returns a pointer to the object in the hash map (if any) or NULL.
-
-#### `MAP_set` (hash map)
-
-```c
-FIO_MAP_TYPE MAP_set(FIO_MAP_PTR m,
-                     FIO_MAP_HASH hash,
-                     FIO_MAP_KEY key,
-                     FIO_MAP_TYPE obj,
-                     FIO_MAP_TYPE *old);
-```
-
-
-Inserts an object to the hash map, returning the new object.
-
-If `old` is given, existing data will be copied to that location.
-
-#### `MAP_set_ptr` (hash map)
-
-```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
-                      FIO_MAP_HASH hash,
-                      FIO_MAP_KEY key,
-                      FIO_MAP_TYPE obj,
-                      FIO_MAP_TYPE *old,
-                      uint8_t overwrite);
-```
-
-
-Inserts an object to the hash map, returning the new object.
-
-If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
-
-#### `MAP_remove` (hash map)
-
-```c
-int MAP_remove(FIO_MAP_PTR m,
-               FIO_MAP_HASH hash,
-               FIO_MAP_KEY key,
-               FIO_MAP_TYPE *old);
-```
-
-Removes an object from the hash map.
-
-If `old` is given, existing data will be copied to that location.
-
-Returns 0 on success or -1 if the object couldn't be found.
-
-### Set - API (set only)
-
-#### `MAP_get` (set)
-
-```c
-FIO_MAP_TYPE MAP_get(FIO_MAP_PTR m,
-                     FIO_MAP_HASH hash,
-                     FIO_MAP_TYPE obj);
-```
-
-Returns the object in the hash map (if any) or `FIO_MAP_TYPE_INVALID`.
-
-#### `MAP_get_ptr` (set)
-
-```c
-FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
-                          FIO_MAP_HASH hash,
-                          FIO_MAP_TYPE obj);
-```
-
-Returns a pointer to the object in the hash map (if any) or NULL.
-
-#### `set_if_missing` (set)
-
-```c
-FIO_MAP_TYPE set_if_missing(FIO_MAP_PTR m,
-                            FIO_MAP_HASH hash,
-                            FIO_MAP_TYPE obj);
-```
-
-Inserts an object to the hash map, returning the existing or new object.
-
-If `old` is given, existing data will be copied to that location.
-
-#### `MAP_set` (set)
-
-```c
-FIO_MAP_TYPE MAP_set(FIO_MAP_PTR m,
-                     FIO_MAP_HASH hash,
-                     FIO_MAP_TYPE obj,
-                     FIO_MAP_TYPE *old);
-```
-
-Inserts an object to the hash map, returning the new object.
-
-If `old` is given, existing data will be copied to that location.
-
-#### `MAP_set_ptr` (set)
-
-```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
-                      FIO_MAP_HASH hash,
-                      FIO_MAP_TYPE obj,
-                      FIO_MAP_TYPE *old);
-```
-
-Inserts an object to the hash map, returning the new object.
-
-If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
-
-#### `MAP_remove` (set)
-
-```c
-int MAP_remove(FIO_MAP_PTR m, FIO_MAP_HASH hash,
-               FIO_MAP_TYPE obj, FIO_MAP_TYPE *old);
-```
-
-Removes an object from the hash map.
-
-If `old` is given, existing data will be copied to that location.
-
-Returns 0 on success or -1 if the object couldn't be found.
-
-#### `MAP_clear`
-
-```c
-void MAP_clear(MAP_PTR m);
-```
-
-Removes all elements from the Map without freeing the memory used.
-
-Similar to calling:
-
-```c
-size_t capa_was = MAP_capa(m);
-MAP_destroy(m);
-MAP_reserve(m, capa_was);
-```
-
-#### `MAP_evict` (set)
-
-```c
-int MAP_evict(FIO_MAP_PTR m, size_t number_of_elements);
-```
-
-Evicts (removed) `number_of_elements` from the Map.
-
-Eviction is FIFO based (First In First Out) unless FIO_MAP_EVICT_LRU is defined, in which case the Least Recently Used element will be evicted.
-
-Returns 0 on success or -1 on error (i.e., element number bigger than existing element count).
-
-### Hash Map / Set - API (common)
-
-#### `MAP_count`
-
-```c
-uintptr_t MAP_count(FIO_MAP_PTR m);
-```
-
-Returns the number of objects in the map.
-
-#### `MAP_capa`
-
-```c
-uintptr_t MAP_capa(FIO_MAP_PTR m);
-```
-
-Returns the current map's theoretical capacity.
-
-#### `MAP_reserve`
-
-```c
-uintptr_t MAP_reserve(FIO_MAP_PTR m, uint32_t capa);
-```
-
-Reserves a minimal capacity for the hash map.
-
-#### `MAP_compact`
-
-```c
-void MAP_compact(FIO_MAP_PTR m);
-```
-
-Attempts to lower the map's memory consumption.
-
-#### `MAP_rehash`
-
-```c
-int MAP_rehash(FIO_MAP_PTR m);
-```
-
-Rehashes the Hash Map / Set. Usually this is performed automatically, no need to call the function.
-
-#### `MAP_each_next`
-
-```c
-MAP_node_s * MAP_each_next(FIO_MAP_PTR m, MAP_node_s ** first, MAP_node_s * pos);
-```
-
-Returns a pointer to the (next) object's information in the map.
-
-To access the object information, use:
-
-```c
-MAP_node_s * pos = MAP_each_next(map, NULL);
-```
-
-- `i->hash` to access the hash value.
-
-- `i->obj` to access the object's data.
-
-   For Hash Maps, use `i->obj.key` and `i->obj.value`.
-
-Returns the first object if `pos == NULL` and there are objects in the map.
-
-Returns the next object if `pos` is valid.
-
-Returns NULL if `pos` was the last object or no object exist.
-
-**Note**:
-
-If `pos` is invalid or `NULL`, a pointer to the first object will be returned.
-
-The value of `first` is required and used to revalidate `pos` in cases where object insertion or memory changes occurred while iterating.
-
-The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects, reiterating some objects or exploding the screen.
-
-#### `MAP_each`
-
-```c
-uint32_t MAP_each(FIO_MAP_PTR m,
-                  int32_t start_at,
-                  int (*task)(MAP_each_s * data),
-                  void *arg);
-```
-
-Iteration using a callback for each element in the map.
-
-The callback task function must accept a `MAP_each_s` pointer (actual name matches type name).
-
-When the map is a Hash Map (has both a key and an object), the value can be accessed using `obj->value` and the key using `obj->key`. However, changing or altering the contents of the key might break the Hash Map, so do NOT do that.
-
-If the callback returns -1, the loop is broken. Any other value is ignored.
-
-Returns the relative "stop" position, i.e., the number of items processed + the starting point.
-
-The `MAP_each_s` data structure looks like this:
-
-```c
-/** Iteration information structure passed to the callback. */
-typedef struct MAP_each_s {
-  /** The being iterated. Once set, cannot be safely changed. */
-  FIO_MAP_PTR const parent;
-  /** The current object's index */
-  uint64_t index;
-  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
-  const int64_t items_at_index;
-  /** The callback / task called for each index, may be updated mid-cycle. */
-  int (*task)(struct MAP_each_s * info);
-  /** Opaque user data. */
-  void *udata;
-  /** The object / value at the current index. */
-  FIO_MAP_TYPE value;
-#ifdef FIO_MAP_KEY
-  /** The key used to access the specific value. */
-  FIO_MAP_KEY key;
-#endif
-} MAP_each_s;
-
-/**
- * Iteration using a callback for each element in the map.
- *
- * The callback task function must accept an each_s pointer, see above.
- *
- * If the callback returns -1, the loop is broken. Any other value is ignored.
- *
- * Returns the relative "stop" position, i.e., the number of items processed +
- * the starting point.
- */
-SFUNC FIO_MAP_SIZE_TYPE
-    FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
-                                 int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
-                                 void *udata,
-                                 ssize_t start_at);
-
-```
-
-
-#### `MAP_each_get_key`
-
-```c
-FIO_MAP_KEY MAP_each_get_key(void);
-```
-
-Returns the current `key` within an `each` task.
-
-Only available within an `each` loop.
-
-_Note: For sets, returns the hash value, for hash maps, returns the key value._
-
-#### `FIO_MAP_EACH`
-
-```c
-#define FIO_MAP_EACH(map_type, map_p, pos)                                    \
-  for (FIO_NAME(map_type, node_s) *pos =                                       \
-           FIO_NAME(map_type, each_next)(map_p, NULL);                         \
-       pos;                                                                    \
-       pos = FIO_NAME(map_type, each_next)(map_p, pos))
-```
-
-A macro for a `for` loop that iterates over all the Map's objects (in order).
-
-Use this macro for small Hash Maps / Sets.
-
-- `map_type` is the Map's type name/function prefix, same as FIO_MAP_NAME.
-
-- `map_p` is a pointer to the Hash Map / Set variable.
-
-- `pos` is a temporary variable name to be created for iteration. This
-   variable may SHADOW external variables, be aware.
-
-To access the object information, use:
-
-- `pos->hash` to access the hash value.
-
-- `pos->obj` to access the object's data.
-
-   For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
 
 -------------------------------------------------------------------------------
 ## Binary Safe Core String Helpers
@@ -6826,6 +5208,1308 @@ fio_str_info_s STR_write_unescape(FIO_STR_PTR s,
 Writes an escaped data into the string after unescaping the data.
 
 -------------------------------------------------------------------------------
+## Dynamic Arrays
+
+```c
+#define FIO_ARRAY_NAME str_ary
+#define FIO_ARRAY_TYPE char *
+#define FIO_ARRAY_TYPE_CMP(a,b) (!strcmp((a),(b)))
+#include "fio-stl.h"
+```
+
+Dynamic arrays are extremely common and useful data structures.
+
+In essence, Arrays are blocks of memory that contain all their elements "in a row". They grow (or shrink) as more items are added (or removed).
+
+Items are accessed using a numerical `index` indicating the element's position within the array.
+
+Indexes are zero based (first element == 0).
+
+### Dynamic Array Performance
+
+Seeking time is an extremely fast O(1). Arrays are also very fast to iterate since they enjoy high memory locality.
+
+Adding and editing items is also a very fast O(1), especially if enough memory was previously reserved. Otherwise, memory allocation and copying will slow performance.
+
+However, arrays suffer from slow find operations. Find has a worst case scenario O(n) cost.
+
+They also suffer from slow item removal (except, in our case, for `pop` / `unshift` operations), since middle-element removal requires memory copying when fixing the "hole" made in the array.
+
+A common solution is to reserve a value for "empty" elements and `set` the element's value instead of `remove` the element.
+
+**Note**: unlike some dynamic array implementations, this STL implementation doesn't grow exponentially. Using the `ARY_reserve` function is highly encouraged for performance.
+
+
+### Dynamic Array Overview
+
+To create a dynamic array type, define the type name using the `FIO_ARRAY_NAME` macro. i.e.:
+
+```c
+#define FIO_ARRAY_NAME int_ary
+```
+
+Next (usually), define the `FIO_ARRAY_TYPE` macro with the element type. The default element type is `void *`. For example:
+
+```c
+#define FIO_ARRAY_TYPE int
+```
+
+For complex types, define any (or all) of the following macros:
+
+```c
+// set to adjust element copying 
+#define FIO_ARRAY_TYPE_COPY(dest, src)  
+// set for element cleanup 
+#define FIO_ARRAY_TYPE_DESTROY(obj)     
+// set to adjust element comparison 
+#define FIO_ARRAY_TYPE_CMP(a, b)        
+// to be returned when `index` is out of bounds / holes 
+#define FIO_ARRAY_TYPE_INVALID 0 
+// set ONLY if the invalid element is all zero bytes 
+#define FIO_ARRAY_TYPE_INVALID_SIMPLE 1     
+// should the object be destroyed when copied to an `old` pointer?
+#define FIO_ARRAY_DESTROY_AFTER_COPY 1 
+// when array memory grows, how many extra "spaces" should be allocated?
+#define FIO_ARRAY_PADDING 4 
+// should the array growth be exponential? (ignores FIO_ARRAY_PADDING)
+#define FIO_ARRAY_EXPONENTIAL 0 
+// optimizes small arrays (mostly tuplets and single item arrays).
+// note: values larger than 1 add a memory allocation cost to the array container
+#define FIO_ARRAY_ENABLE_EMBEDDED 1
+```
+
+To create the type and helper functions, include the Simple Template Library header.
+
+For example:
+
+```c
+typedef struct {
+  int i;
+  float f;
+} foo_s;
+
+#define FIO_ARRAY_NAME ary
+#define FIO_ARRAY_TYPE foo_s
+#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
+#include "fio-stl.h"
+
+void example(void) {
+  ary_s a = FIO_ARRAY_INIT;
+  foo_s *p = ary_push(&a, (foo_s){.i = 42});
+  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
+    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), (void *)pos, pos->i);
+  }
+  ary_destroy(&a);
+}
+```
+
+### Dynamic Arrays - API
+
+#### The Array Type (`ARY_s`)
+
+```c
+typedef struct {
+  FIO_ARRAY_TYPE *ary;
+  uint32_t capa;
+  uint32_t start;
+  uint32_t end;
+} FIO_NAME(FIO_ARRAY_NAME, s); /* ARY_s in these docs */
+```
+
+The array type should be considered opaque. Use the helper functions to updated the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
+
+#### `FIO_ARRAY_INIT`
+
+````c
+#define FIO_ARRAY_INIT  {0}
+````
+
+This macro initializes an uninitialized array object.
+
+#### `ARY_destroy`
+
+````c
+void ARY_destroy(ARY_s * ary);
+````
+
+Destroys any objects stored in the array and frees the internal state.
+
+#### `ARY_new`
+
+````c
+ARY_s * ARY_new(void);
+````
+
+Allocates a new array object on the heap and initializes it's memory.
+
+#### `ARY_free`
+
+````c
+void ARY_free(ARY_s * ary);
+````
+
+Frees an array's internal data AND it's container!
+
+#### `ARY_count`
+
+````c
+uint32_t ARY_count(ARY_s * ary);
+````
+
+Returns the number of elements in the Array.
+
+#### `ARY_capa`
+
+````c
+uint32_t ARY_capa(ARY_s * ary);
+````
+
+Returns the current, temporary, array capacity (it's dynamic).
+
+#### `ARY_reserve`
+
+```c
+uint32_t ARY_reserve(ARY_s * ary, int32_t capa);
+```
+
+Reserves a minimal capacity for the array.
+
+If `capa` is negative, new memory will be allocated at the beginning of the array rather then it's end.
+
+Returns the array's new capacity.
+
+**Note**: the reserved capacity includes existing data / capacity. If the requested reserved capacity is equal (or less) then the existing capacity, nothing will be done.
+
+#### `ARY_concat`
+
+```c
+ARY_s * ARY_concat(ARY_s * dest, ARY_s * src);
+```
+
+Adds all the items in the `src` Array to the end of the `dest` Array.
+
+The `src` Array remain untouched.
+
+Always returns the destination array (`dest`).
+
+#### `ARY_set`
+
+```c
+FIO_ARRAY_TYPE * ARY_set(ARY_s * ary,
+                       int32_t index,
+                       FIO_ARRAY_TYPE data,
+                       FIO_ARRAY_TYPE *old);
+```
+
+Sets `index` to the value in `data`.
+
+If `index` is negative, it will be counted from the end of the Array (-1 == last element).
+
+If `old` isn't NULL, the existing data will be copied to the location pointed to by `old` before the copy in the Array is destroyed.
+
+Returns a pointer to the new object, or NULL on error.
+
+#### `ARY_get`
+
+```c
+FIO_ARRAY_TYPE ARY_get(ARY_s * ary, int32_t index);
+```
+
+Returns the value located at `index` (no copying is performed).
+
+If `index` is negative, it will be counted from the end of the Array (-1 == last element).
+
+**Reminder**: indexes are zero based (first element == 0).
+
+#### `ARY_find`
+
+```c
+int32_t ARY_find(ARY_s * ary, FIO_ARRAY_TYPE data, int32_t start_at);
+```
+
+Returns the index of the object or -1 if the object wasn't found.
+
+If `start_at` is negative (i.e., -1), than seeking will be performed in reverse, where -1 == last index (-2 == second to last, etc').
+
+#### `ARY_remove`
+```c
+int ARY_remove(ARY_s * ary, int32_t index, FIO_ARRAY_TYPE *old);
+```
+
+Removes an object from the array, MOVING all the other objects to prevent "holes" in the data.
+
+If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
+
+Returns 0 on success and -1 on error.
+
+This action is O(n) where n in the length of the array. It could get expensive.
+
+#### `ARY_remove2`
+
+```c
+uint32_t ARY_remove2(ARY_S * ary, FIO_ARRAY_TYPE data);
+```
+
+Removes all occurrences of an object from the array (if any), MOVING all the existing objects to prevent "holes" in the data.
+
+Returns the number of items removed.
+
+This action is O(n) where n in the length of the array. It could get expensive.
+
+#### `ARY_compact`
+```c
+void ARY_compact(ARY_s * ary);
+```
+
+Attempts to lower the array's memory consumption.
+
+#### `ARY_to_a`
+
+```c
+FIO_ARRAY_TYPE * ARY_to_a(ARY_s * ary);
+```
+
+Returns a pointer to the C array containing the objects.
+
+#### `ARY_push`
+
+```c
+FIO_ARRAY_TYPE * ARY_push(ARY_s * ary, FIO_ARRAY_TYPE data);
+```
+
+ Pushes an object to the end of the Array. Returns a pointer to the new object or NULL on error.
+
+#### `ARY_pop`
+
+```c
+int ARY_pop(ARY_s * ary, FIO_ARRAY_TYPE *old);
+```
+
+Removes an object from the end of the Array.
+
+If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
+
+Returns -1 on error (Array is empty) and 0 on success.
+
+#### `ARY_unshift`
+
+```c
+FIO_ARRAY_TYPE *ARY_unshift(ARY_s * ary, FIO_ARRAY_TYPE data);
+```
+
+Unshifts an object to the beginning of the Array. Returns a pointer to the new object or NULL on error.
+
+This could be expensive, causing `memmove`.
+
+#### `ARY_shift`
+
+```c
+int ARY_shift(ARY_s * ary, FIO_ARRAY_TYPE *old);
+```
+
+Removes an object from the beginning of the Array.
+
+If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
+
+Returns -1 on error (Array is empty) and 0 on success.
+
+#### `ARY_each`
+
+```c
+uint32_t ARY_each(ARY_s * ary,
+                  int (*task)(ARY_each_s * info),
+                  void *arg,
+                  int32_t start_at);
+```
+
+Iteration using a callback for each entry in the array.
+
+The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
+
+If the callback returns -1, the loop is broken. Any other value is ignored.
+
+Returns the relative "stop" position (number of items processed + starting point).
+
+The `ARY_each_s` data structure looks like this:
+
+```c
+/** Iteration information structure passed to the callback. */
+typedef ARY_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_ARRAY_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Always 1 and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(ARY_each_s * info);
+  /** The argument passed along to the task. */
+  void *arg;
+  /** The object / value at the current index. */
+  FIO_ARRAY_TYPE value;
+} ARY_each_s;
+```
+
+#### `ARY_each_next`
+
+```c
+FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
+                             FIO_ARRAY_TYPE **first,
+                             FIO_ARRAY_TYPE *pos);
+
+```
+
+Used internally by the `FIO_ARRAY_EACH` macro.
+
+Returns a pointer to the first object if `pos == NULL` and there are objects
+in the array.
+
+Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
+
+Returns `NULL` on error or if the array is empty.
+
+**Note**: 
+The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
+
+If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+
+#### `FIO_ARRAY_EACH`
+
+```c
+#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
+  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
+           first___ = NULL,                                                    \
+           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+       pos;                                                                    \
+       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
+```
+
+
+Iterates through the array using a `for` loop.
+
+Access the object with the pointer `pos`. The `pos` variable can be named however you please.
+
+It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
+
+**Note**: this macro supports automatic pointer tagging / untagging.
+
+-------------------------------------------------------------------------------
+## Hash Tables and Maps
+
+```c
+/* Create a binary safe String type for Strings that aren't mutated often */
+#define FIO_STR_SMALL str
+#include "fio-stl.h"
+
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP_NAME                 dict
+#define FIO_MAP_ORDERED              0
+#define FIO_MAP_TYPE                 str_s
+#define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
+#define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
+#define FIO_MAP_TYPE_CMP(a, b)       str_is_eq(&(a), &(b))
+#define FIO_MAP_KEY                  FIO_MAP_TYPE
+#define FIO_MAP_KEY_COPY             FIO_MAP_TYPE_COPY
+#define FIO_MAP_KEY_DESTROY          FIO_MAP_TYPE_DESTROY
+#define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
+#include "fio-stl.h"
+/** set helper for consistent hash values */
+FIO_IFUNC str_s *dict_set2(dict_s *m, str_s key, str_s obj) {
+  return dict_set_ptr(m, str_hash(&key, (uint64_t)m), key, obj, NULL, 1);
+}
+/** get helper for consistent hash values */
+FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
+  return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
+}
+```
+
+HashMaps (a.k.a., Hash Tables) and sets are extremely useful and common mapping / dictionary primitives, also sometimes known as "dictionary".
+
+Hash maps use both a `hash` and a `key` to identify a `value`. The `hash` value is calculated by feeding the key's data to a hash function (such as Risky Hash or SipHash).
+
+A hash map without a `key` is known as a Set or a Bag. It uses only a `hash` (often calculated using `value`) to identify the `value` in the Set, sometimes requiring a `value` equality test as well. This approach often promises a collection of unique values (no duplicate values).
+
+Some map implementations support a FIFO limited storage, which could be used for naive limited-space caching (though caching solutions may require a more complex data-storage that's slower).
+
+### Ordered Maps, Unordered Maps, Indexing and Performance
+
+The facil.io library offers both ordered and unordered maps. Unordered maps are often faster and use less memory. If iteration is performed, ordered maps might be better.
+
+Ordered hash maps (or hash tables) are defined using `FIO_OMAP_NAME`.
+
+Unordered hash maps (or hash tables) are defined using `FIO_UMAP_NAME`.
+
+Indexing the map allows LRU (least recently used) eviction, but comes at a performance cost in both memory (due to the extra data per object) and speed (due to out of order memory access and increased cache misses).
+
+To enable LRU indexing on the map, define `FIO_MAP_EVICT_LRU` as `1` (true).
+
+Ordered maps are constructed using an ordered Array + an index map that uses 4 or 8 bytes per array index.
+
+Unordered maps are constructed using an unordered Array + an index map that uses 1 byte per array index.
+
+Indexing is performed using a linked list that uses 4 or 8 byte index values instead of pointers.
+
+In addition, each value stores a copy of the hash data, so hash data doesn't need to be recomputed.
+
+The map implementations have protection features against too many full collisions or non-random hashes. When the map detects a possible "attack", it will start overwriting existing data instead of trying to resolve collisions. This can be adjusted using the `FIO_MAP_MAX_FULL_COLLISIONS` macro.
+
+### Map Overview 
+
+To create a map, define `FIO_MAP_NAME`, `FIO_OMAP_NAME` (ordered) **or** `FIO_UMAP_NAME` (unordered).
+
+To create a hash map (rather then a set), also define `FIO_MAP_KEY` (containing the key's type).
+
+To create an unordered map either use `FIO_UMAP_NAME` or define `FIO_MAP_ORDERED`.
+
+Helpful macros to define might include:
+
+- `FIO_MAP_ORDERED`, if `1`, the map will be ordered if `0` unordered.
+- `FIO_MAP_TYPE`, which defaults to `void *`
+- `FIO_MAP_TYPE_INVALID`, which defaults to `((FIO_MAP_TYPE){0})`
+- `FIO_MAP_TYPE_COPY(dest, src)`, which defaults to `(dest) = (src)`
+- `FIO_MAP_TYPE_DESTROY(obj)`
+- `FIO_MAP_TYPE_CMP(a, b)`, which defaults to `1`
+- `FIO_MAP_KEY`
+- `FIO_MAP_KEY_INVALID`
+- `FIO_MAP_KEY_COPY(dest, src)`
+- `FIO_MAP_KEY_DESTROY(obj)`
+- `FIO_MAP_KEY_CMP(a, b)`
+- `FIO_MAP_MAX_FULL_COLLISIONS`, which defaults to `22`
+
+
+- `FIO_MAP_DESTROY_AFTER_COPY`, uses "smart" defaults to decide if to destroy an object after it was copied (when using `set` / `remove` / `pop` with a pointer to contain `old` object).
+- `FIO_MAP_TYPE_DISCARD(obj)`, handles discarded element data (i.e., insert without overwrite in a Set).
+- `FIO_MAP_KEY_DISCARD(obj)`, handles discarded element data (i.e., when overwriting an existing value in a hash map).
+
+- `FIO_MAP_SHOULD_OVERWRITE(older, newer)`, if set it should return `0` (false) to prevent an overwriting instruction. This can be used to compare timestamps between to items and test that `newer` is actually newer than `older`.
+- `FIO_MAP_EVICT_LRU`, if set to true (`1`), the `evict` method and the `FIO_MAP_MAX_ELEMENTS` macro will evict members based on the Least Recently Used object.
+- `FIO_MAP_MAX_ELEMENTS`, the maximum number of elements allowed before removing old data (FIFO). By default, no auto-eviction is performed.
+
+- `FIO_MAP_HASH`, defaults to `uint64_t`, may be set to `uint32_t` if hash data is 32 bit wide.
+- `FIO_MAP_HASH_FN(key)`, replace the cached `hash` for unordered maps with a re-hash calculation. This is good if the caching is dirt cheap but can only be used with unordered maps since the ordered maps double the cached hash with a "hole" marker.
+- `FIO_MAP_BIG`, if defined, the maximum theoretical capacity increases to `(1 << 64) -1`.
+To limit the number of elements in a map (FIFO, ignoring last access time), allowing it to behave similarly to a simple caching primitive, define: `FIO_MAP_MAX_ELEMENTS`.
+- `FIO_MAP_MAX_SEEK` , the maximum number of bins to rotate when partial/full collisions occur (effects the load factor). Limited to a maximum of 255 and should be higher than `FIO_MAP_MAX_FULL_COLLISIONS/4`, by default either `7` or `13`.
+
+If `FIO_MAP_MAX_ELEMENTS` is `0`, then the theoretical maximum number of elements should be: `(1 << 32) - 1`. In practice, the safe limit should be calculated as `1 << 31` or `1 << 30`. The same is true for `FIO_MAP_BIG`, only relative to 64 bits.
+
+### Hash Map / Set - API (initialization)
+
+#### `MAP_new`
+
+```c
+FIO_MAP_PTR MAP_new(void);
+```
+
+Allocates a new map on the heap.
+
+#### `MAP_free`
+
+```c
+void MAP_free(MAP_PTR m);
+```
+
+Frees a map that was allocated on the heap.
+
+#### `FIO_MAP_INIT`
+
+```c
+#define FIO_MAP_INIT { .map = NULL }
+```
+
+This macro initializes a map object - often used for maps placed on the stack.
+
+#### `MAP_destroy`
+
+```c
+void MAP_destroy(MAP_PTR m);
+```
+
+Destroys the map's internal data and re-initializes it.
+
+
+### Hash Map - API (hash map only)
+
+#### `MAP_get` (hash map)
+
+```c
+FIO_MAP_TYPE MAP_get(FIO_MAP_PTR m,
+                     FIO_MAP_HASH hash,
+                     FIO_MAP_KEY key);
+```
+Returns the object in the hash map (if any) or FIO_MAP_TYPE_INVALID.
+
+#### `MAP_get_ptr` (hash map)
+
+```c
+FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
+                          FIO_MAP_HASH hash,
+                          FIO_MAP_KEY key);
+```
+
+Returns a pointer to the object in the hash map (if any) or NULL.
+
+#### `MAP_set` (hash map)
+
+```c
+FIO_MAP_TYPE MAP_set(FIO_MAP_PTR m,
+                     FIO_MAP_HASH hash,
+                     FIO_MAP_KEY key,
+                     FIO_MAP_TYPE obj,
+                     FIO_MAP_TYPE *old);
+```
+
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location.
+
+#### `MAP_set_ptr` (hash map)
+
+```c
+FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+                      FIO_MAP_HASH hash,
+                      FIO_MAP_KEY key,
+                      FIO_MAP_TYPE obj,
+                      FIO_MAP_TYPE *old,
+                      uint8_t overwrite);
+```
+
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
+
+#### `MAP_remove` (hash map)
+
+```c
+int MAP_remove(FIO_MAP_PTR m,
+               FIO_MAP_HASH hash,
+               FIO_MAP_KEY key,
+               FIO_MAP_TYPE *old);
+```
+
+Removes an object from the hash map.
+
+If `old` is given, existing data will be copied to that location.
+
+Returns 0 on success or -1 if the object couldn't be found.
+
+### Set - API (set only)
+
+#### `MAP_get` (set)
+
+```c
+FIO_MAP_TYPE MAP_get(FIO_MAP_PTR m,
+                     FIO_MAP_HASH hash,
+                     FIO_MAP_TYPE obj);
+```
+
+Returns the object in the hash map (if any) or `FIO_MAP_TYPE_INVALID`.
+
+#### `MAP_get_ptr` (set)
+
+```c
+FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
+                          FIO_MAP_HASH hash,
+                          FIO_MAP_TYPE obj);
+```
+
+Returns a pointer to the object in the hash map (if any) or NULL.
+
+#### `set_if_missing` (set)
+
+```c
+FIO_MAP_TYPE set_if_missing(FIO_MAP_PTR m,
+                            FIO_MAP_HASH hash,
+                            FIO_MAP_TYPE obj);
+```
+
+Inserts an object to the hash map, returning the existing or new object.
+
+If `old` is given, existing data will be copied to that location.
+
+#### `MAP_set` (set)
+
+```c
+FIO_MAP_TYPE MAP_set(FIO_MAP_PTR m,
+                     FIO_MAP_HASH hash,
+                     FIO_MAP_TYPE obj,
+                     FIO_MAP_TYPE *old);
+```
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location.
+
+#### `MAP_set_ptr` (set)
+
+```c
+FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+                      FIO_MAP_HASH hash,
+                      FIO_MAP_TYPE obj,
+                      FIO_MAP_TYPE *old);
+```
+
+Inserts an object to the hash map, returning the new object.
+
+If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
+
+#### `MAP_remove` (set)
+
+```c
+int MAP_remove(FIO_MAP_PTR m, FIO_MAP_HASH hash,
+               FIO_MAP_TYPE obj, FIO_MAP_TYPE *old);
+```
+
+Removes an object from the hash map.
+
+If `old` is given, existing data will be copied to that location.
+
+Returns 0 on success or -1 if the object couldn't be found.
+
+#### `MAP_clear`
+
+```c
+void MAP_clear(MAP_PTR m);
+```
+
+Removes all elements from the Map without freeing the memory used.
+
+Similar to calling:
+
+```c
+size_t capa_was = MAP_capa(m);
+MAP_destroy(m);
+MAP_reserve(m, capa_was);
+```
+
+#### `MAP_evict` (set)
+
+```c
+int MAP_evict(FIO_MAP_PTR m, size_t number_of_elements);
+```
+
+Evicts (removed) `number_of_elements` from the Map.
+
+Eviction is FIFO based (First In First Out) unless FIO_MAP_EVICT_LRU is defined, in which case the Least Recently Used element will be evicted.
+
+Returns 0 on success or -1 on error (i.e., element number bigger than existing element count).
+
+### Hash Map / Set - API (common)
+
+#### `MAP_count`
+
+```c
+uintptr_t MAP_count(FIO_MAP_PTR m);
+```
+
+Returns the number of objects in the map.
+
+#### `MAP_capa`
+
+```c
+uintptr_t MAP_capa(FIO_MAP_PTR m);
+```
+
+Returns the current map's theoretical capacity.
+
+#### `MAP_reserve`
+
+```c
+uintptr_t MAP_reserve(FIO_MAP_PTR m, uint32_t capa);
+```
+
+Reserves a minimal capacity for the hash map.
+
+#### `MAP_compact`
+
+```c
+void MAP_compact(FIO_MAP_PTR m);
+```
+
+Attempts to lower the map's memory consumption.
+
+#### `MAP_rehash`
+
+```c
+int MAP_rehash(FIO_MAP_PTR m);
+```
+
+Rehashes the Hash Map / Set. Usually this is performed automatically, no need to call the function.
+
+#### `MAP_each_next`
+
+```c
+MAP_node_s * MAP_each_next(FIO_MAP_PTR m, MAP_node_s ** first, MAP_node_s * pos);
+```
+
+Returns a pointer to the (next) object's information in the map.
+
+To access the object information, use:
+
+```c
+MAP_node_s * pos = MAP_each_next(map, NULL);
+```
+
+- `i->hash` to access the hash value.
+
+- `i->obj` to access the object's data.
+
+   For Hash Maps, use `i->obj.key` and `i->obj.value`.
+
+Returns the first object if `pos == NULL` and there are objects in the map.
+
+Returns the next object if `pos` is valid.
+
+Returns NULL if `pos` was the last object or no object exist.
+
+**Note**:
+
+If `pos` is invalid or `NULL`, a pointer to the first object will be returned.
+
+The value of `first` is required and used to revalidate `pos` in cases where object insertion or memory changes occurred while iterating.
+
+The value of `first` is set automatically by the function. Manually changing this value may result in unexpected behavior such as the loop restarting, terminating early, skipping some objects, reiterating some objects or exploding the screen.
+
+#### `MAP_each`
+
+```c
+uint32_t MAP_each(FIO_MAP_PTR m,
+                  int32_t start_at,
+                  int (*task)(MAP_each_s * data),
+                  void *arg);
+```
+
+Iteration using a callback for each element in the map.
+
+The callback task function must accept a `MAP_each_s` pointer (actual name matches type name).
+
+When the map is a Hash Map (has both a key and an object), the value can be accessed using `obj->value` and the key using `obj->key`. However, changing or altering the contents of the key might break the Hash Map, so do NOT do that.
+
+If the callback returns -1, the loop is broken. Any other value is ignored.
+
+Returns the relative "stop" position, i.e., the number of items processed + the starting point.
+
+The `MAP_each_s` data structure looks like this:
+
+```c
+/** Iteration information structure passed to the callback. */
+typedef struct MAP_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_MAP_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** Either 1 (set) or 2 (map), and may be used to allow type detection. */
+  const int64_t items_at_index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct MAP_each_s * info);
+  /** Opaque user data. */
+  void *udata;
+  /** The object / value at the current index. */
+  FIO_MAP_TYPE value;
+#ifdef FIO_MAP_KEY
+  /** The key used to access the specific value. */
+  FIO_MAP_KEY key;
+#endif
+} MAP_each_s;
+
+/**
+ * Iteration using a callback for each element in the map.
+ *
+ * The callback task function must accept an each_s pointer, see above.
+ *
+ * If the callback returns -1, the loop is broken. Any other value is ignored.
+ *
+ * Returns the relative "stop" position, i.e., the number of items processed +
+ * the starting point.
+ */
+SFUNC FIO_MAP_SIZE_TYPE
+    FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
+                                 int (*task)(FIO_NAME(FIO_MAP_NAME, each_s) *),
+                                 void *udata,
+                                 ssize_t start_at);
+
+```
+
+
+#### `MAP_each_get_key`
+
+```c
+FIO_MAP_KEY MAP_each_get_key(void);
+```
+
+Returns the current `key` within an `each` task.
+
+Only available within an `each` loop.
+
+_Note: For sets, returns the hash value, for hash maps, returns the key value._
+
+#### `FIO_MAP_EACH`
+
+```c
+#define FIO_MAP_EACH(map_type, map_p, pos)                                    \
+  for (FIO_NAME(map_type, node_s) *pos =                                       \
+           FIO_NAME(map_type, each_next)(map_p, NULL);                         \
+       pos;                                                                    \
+       pos = FIO_NAME(map_type, each_next)(map_p, pos))
+```
+
+A macro for a `for` loop that iterates over all the Map's objects (in order).
+
+Use this macro for small Hash Maps / Sets.
+
+- `map_type` is the Map's type name/function prefix, same as FIO_MAP_NAME.
+
+- `map_p` is a pointer to the Hash Map / Set variable.
+
+- `pos` is a temporary variable name to be created for iteration. This
+   variable may SHADOW external variables, be aware.
+
+To access the object information, use:
+
+- `pos->hash` to access the hash value.
+
+- `pos->obj` to access the object's data.
+
+   For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
+
+-------------------------------------------------------------------------------
+## Linked Lists
+
+```c
+// initial `include` defines the `FIO_LIST_NODE` macro and type
+#include "fio-stl.h"
+// list element 
+typedef struct {
+  char * data;
+  FIO_LIST_NODE node;
+} my_list_s;
+// create linked list helper functions
+#define FIO_LIST_NAME my_list
+#include "fio-stl.h"
+```
+
+Doubly Linked Lists are an incredibly common and useful data structure.
+
+### Linked Lists Performance
+
+Memory overhead (on 64bit machines) is 16 bytes per node (or 8 bytes on 32 bit machines) for the `next` and `prev` pointers.
+
+Linked Lists use pointers in order to provide fast add/remove operations with O(1) speeds. This O(1) operation ignores the object allocation time and suffers from poor memory locality, but it's still very fast.
+
+However, Linked Lists suffer from slow seek/find and iteration operations.
+
+Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
+
+### Linked Lists Macros
+
+Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
+
+#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
+
+```c
+/** A linked list node type */
+#define FIO_LIST_NODE fio_list_node_s
+/** A linked list head type */
+#define FIO_LIST_HEAD fio_list_node_s
+/** A linked list arch-type */
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+
+```
+
+These are the basic core types for a linked list node used by the Linked List macros.
+
+#### `FIO_LIST_INIT(head)`
+
+```c
+#define FIO_LIST_INIT(obj)                                                     \
+  (FIO_LIST_HEAD){ .next = &(obj), .prev = &(obj) }
+```
+
+Initializes a linked list.
+
+#### `FIO_LIST_PUSH`
+
+```c
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+```
+
+UNSAFE macro for pushing a node to a list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+#### `FIO_LIST_POP`
+
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+```
+
+UNSAFE macro for popping a node from a list.
+
+* `type` is the underlying `struct` type of the next list member.
+
+* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
+
+* `dest_prt` is the pointer that will accept the next list member.
+
+* `head` is the head of the list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+Note that using this macro with an empty list will produce **undefined behavior**.
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+
+#### `FIO_LIST_EACH`
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
+```
+
+Loops through every node in the linked list except the head.
+
+This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
+
+i.e.,
+
+```c
+typedef struct {
+  void * data;
+  FIO_LIST_HEAD node;
+} ptr_list_s;
+
+FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
+
+/* ... */
+
+FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
+  do_something_with(pos->data);
+}
+```
+
+#### `FIO_LIST_IS_EMPTY`
+
+```c
+#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
+```
+
+Macro for testing if a list is empty.
+
+
+### Indexed Linked Lists Macros (always defined):
+
+
+Indexed linked lists are often used to either save memory or making it easier to reallocate the memory used for the whole list. This is performed by listing pointer offsets instead of the whole pointer, allowing the offsets to use smaller type sizes.
+
+For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, than a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
+
+#### `FIO_INDEXED_LIST32_HEAD` / `FIO_INDEXED_LIST32_NODE`
+
+```c
+/** A 32 bit indexed linked list node type */
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+/** A 16 bit indexed linked list node type */
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+/** An 8 bit indexed linked list node type */
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+
+/** A 32 bit indexed linked list node type */
+typedef struct fio_index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio_index32_node_s;
+
+/** A 16 bit indexed linked list node type */
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+
+/** An 8 bit indexed linked list node type */
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
+```
+
+#### `FIO_INDEXED_LIST_PUSH`
+
+```c
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[n__].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
+    (root)[(head)].node_name.prev = n__;                                       \
+  } while (0)
+```
+
+UNSAFE macro for pushing a node to a list.
+
+#### `FIO_INDEXED_LIST_REMOVE`
+
+```c
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list.
+
+#### `FIO_INDEXED_LIST_EACH`
+
+```c
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
+  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
+       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
+```
+
+Loops through every index in the indexed list, **assuming `head` is valid**.
+
+-------------------------------------------------------------------------------
+
+## Linked List Dynamic Type Definition
+
+### Linked Lists Overview
+
+Before creating linked lists, the library header should be included at least once.
+
+To create a linked list type, create a `struct` that includes a `FIO_LIST_NODE` typed element somewhere within the structure. For example:
+
+```c
+// initial `include` defines the `FIO_LIST_NODE` macro and type
+#include "fio-stl.h"
+// list element
+typedef struct {
+  long l;
+  FIO_LIST_NODE node;
+  int i;
+  FIO_LIST_NODE node2;
+  double d;
+} my_list_s;
+```
+
+Next define the `FIO_LIST_NAME` macro. The linked list helpers and types will all be prefixed by this name. i.e.:
+
+```c
+#define FIO_LIST_NAME my_list /* defines list functions (example): my_list_push(...) */
+```
+
+Optionally, define the `FIO_LIST_TYPE` macro to point at the correct linked-list structure type. By default, the type for linked lists will be `<FIO_LIST_NAME>_s`.
+
+An example were we need to define the `FIO_LIST_TYPE` macro will follow later on.
+
+Optionally, define the `FIO_LIST_NODE_NAME` macro to point the linked list's node. By default, the node for linked lists will be `node`.
+
+Finally, include the `fio-stl.h` header to create the linked list helpers.
+
+```c
+// initial `include` defines the `FIO_LIST_NODE` macro and type
+#include "fio-stl.h"
+// list element 
+typedef struct {
+  long l;
+  FIO_LIST_NODE node;
+  int i;
+  FIO_LIST_NODE node2;
+  double d;
+} my_list_s;
+// create linked list helper functions
+#define FIO_LIST_NAME my_list
+#include "fio-stl.h"
+
+void example(void) {
+  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  for (int i = 0; i < 10; ++i) {
+    my_list_s *n = malloc(sizeof(*n));
+    n->i = i;
+    my_list_push(&list, n);
+  }
+  int i = 0;
+  while (my_list_any(&list)) {
+    my_list_s *n = my_list_shift(&list);
+    if (i != n->i) {
+      fprintf(stderr, "list error - value mismatch\n"), exit(-1);
+    }
+    free(n);
+    ++i;
+  }
+  if (i != 10) {
+    fprintf(stderr, "list error - count error\n"), exit(-1);
+  }
+}
+```
+
+**Note**:
+
+Each node is limited to a single list (an item can't belong to more then one list, unless it's a list of pointers to that item).
+
+Items with more then a single node can belong to more then one list. i.e.:
+
+```c
+// list element 
+typedef struct {
+  long l;
+  FIO_LIST_NODE node;
+  int i;
+  FIO_LIST_NODE node2;
+  double d;
+} my_list_s;
+// list 1 
+#define FIO_LIST_NAME my_list
+#include "fio-stl.h"
+// list 2 
+#define FIO_LIST_NAME my_list2
+#define FIO_LIST_TYPE my_list_s
+#define FIO_LIST_NODE_NAME node2
+#include "fio-stl.h"
+```
+
+### Linked Lists (embeded) - API
+
+
+#### `FIO_LIST_INIT(head)`
+
+```c
+#define FIO_LIST_INIT(obj)                                                     \
+  (FIO_LIST_NODE){ .next = &(obj), .prev = &(obj) }
+```
+
+This macro initializes an uninitialized node (assumes the data in the node is junk). 
+
+#### `LIST_any`
+
+```c
+int LIST_any(FIO_LIST_HEAD *head)
+```
+Returns a non-zero value if there are any linked nodes in the list. 
+
+#### `LIST_is_empty`
+
+```c
+int LIST_is_empty(FIO_LIST_HEAD *head)
+```
+Returns a non-zero value if the list is empty. 
+
+#### `LIST_remove`
+
+```c
+FIO_LIST_TYPE *LIST_remove(FIO_LIST_TYPE *node)
+```
+Removes a node from the list, Returns NULL if node isn't linked. 
+
+#### `LIST_push`
+
+```c
+FIO_LIST_TYPE *LIST_push(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
+```
+Pushes an existing node to the end of the list. Returns node. 
+
+#### `LIST_pop`
+
+```c
+FIO_LIST_TYPE *LIST_pop(FIO_LIST_HEAD *head)
+```
+Pops a node from the end of the list. Returns NULL if list is empty. 
+
+#### `LIST_unshift`
+
+```c
+FIO_LIST_TYPE *LIST_unshift(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
+```
+Adds an existing node to the beginning of the list. Returns node.
+
+#### `LIST_shift`
+
+```c
+FIO_LIST_TYPE *LIST_shift(FIO_LIST_HEAD *head)
+```
+Removed a node from the start of the list. Returns NULL if list is empty. 
+
+#### `LIST_root`
+
+```c
+FIO_LIST_TYPE *LIST_root(FIO_LIST_HEAD *ptr)
+```
+Returns a pointer to a list's element, from a pointer to a node. 
+
+#### `FIO_LIST_EACH`
+
+_Note: macro, name unchanged, works for all lists_
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls =                                                    \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls),                                                   \
+            (next____p_ls = FIO_PTR_FROM_FIELD(type, node_name,                \
+                                               next____p_ls->node_name.next)))
+```
+
+Loops through every node in the linked list (except the head).
+
+The `type` name should reference the list type.
+
+`node_name` should indicate which node should be used for iteration.
+
+`head` should point at the head of the list (usually a `FIO_LIST_HEAD` variable).
+
+`pos` can be any temporary variable name that will contain the current position in the iteration.
+
+The list **can** be mutated during the loop, but this is not recommended. Specifically, removing `pos` is safe, but pushing elements ahead of `pos` might result in an endless loop.
+
+_Note: this macro won't work with pointer tagging_
+
+-------------------------------------------------------------------------------
 ## Reference Counting and Type Wrapping
 
 ```c
@@ -7095,6 +6779,322 @@ int main(int argc, char const *argv[]) {
   return 0;
 }
 ```
+
+-------------------------------------------------------------------------------
+## CLI (command line interface)
+
+```c
+#define FIO_CLI
+#include "fio-stl.h"
+```
+
+The Simple Template Library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
+
+* Auto-generation of the "help" / usage output.
+
+* Argument type testing (String, boolean, and integer types are supported).
+
+* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
+
+* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
+
+* Array style support and access to unnamed arguments.
+
+
+By defining `FIO_CLI`, the following functions will be defined.
+
+In addition, `FIO_CLI` automatically includes the `FIO_ATOL` flag, since CLI parsing depends on the `fio_atol` function.
+
+#### `fio_cli_start`
+
+```c
+#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
+  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
+                (char const *[]){__VA_ARGS__, (char const *)NULL})
+
+/* the shadowed function: */
+void fio_cli_start   (int argc, char const *argv[],
+                      int unnamed_min, int unnamed_max,
+                      char const *description,
+                      char const **names);
+```
+
+The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
+
+The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
+
+If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
+
+The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
+
+Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
+
+* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_BOOL("-arg [-alias] [(1)] desc.")`
+
+* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
+
+* `FIO_CLI_PRINT("raw text line (printed as is, with same spacing as arguments)")`
+
+* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
+
+**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
+
+```c
+int main(int argc, char const *argv[]) {
+  fio_cli_start(argc, argv, 0, -1,
+                "this is a CLI example for the NAME application.",
+                FIO_CLI_PRINT_HEADER("CLI type validation"),
+                FIO_CLI_STRING("-str -s (my default str (string\\)) any data goes here"),
+                FIO_CLI_INT("-int -i (42) integer data goes here"),
+                FIO_CLI_BOOL("-bool -b (1) flag (boolean) only - no data"),
+                FIO_CLI_PRINT("This example allows for unlimited arguments "
+                              "that will simply pass-through"),
+                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
+                );
+  if (fio_cli_get("-s")) /* always true when default value is provided */
+    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
+
+  fprintf(stderr, "Integer: %d\n", fio_cli_get_i("-i"));
+
+  fprintf(stderr, "Boolean: %d\n", fio_cli_get_i("-b"));
+
+  if (fio_cli_unnamed_count()) {
+    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
+    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
+      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
+    }
+  }
+
+  fio_cli_end();
+  return 0;
+}
+```
+
+#### `fio_cli_end`
+
+```c
+void fio_cli_end(void);
+```
+
+Clears the CLI data storage.
+
+#### `fio_cli_get`
+
+```c
+char const *fio_cli_get(char const *name);
+```
+
+Returns the argument's value as a string, or NULL if the argument wasn't provided.
+
+#### `fio_cli_get_i`
+
+```c
+int fio_cli_get_i(char const *name);
+```
+
+Returns the argument's value as an integer, or 0 if the argument wasn't provided.
+
+#### `fio_cli_get_bool`
+
+```c
+#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
+```
+
+Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
+
+#### `fio_cli_unnamed_count`
+
+```c
+unsigned int fio_cli_unnamed_count(void);
+```
+
+Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
+
+#### `fio_cli_unnamed`
+
+```c
+char const *fio_cli_unnamed(unsigned int index);
+```
+
+Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
+
+#### `fio_cli_set`
+
+```c
+void fio_cli_set(char const *name, char const *value);
+```
+
+Sets a value for the named argument (but **not** it's aliases).
+
+-------------------------------------------------------------------------------
+## Basic IO Polling
+
+```c
+#define FIO_POLL
+#include "fio-stl.h"
+```
+
+IO polling using the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
+
+The facil.io standard library provides a persistent polling container for evented management of small IO (file descriptor) collections using the "one-shot" model.
+
+"One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
+
+There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `poll` system call. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases.
+
+It is recommended to use a system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
+
+By defining `FIO_POLL`, the following functions will be defined.
+
+**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
+
+### `FIO_POLL` API
+
+
+#### `fio_poll_s`
+
+```c
+typedef struct fio_poll_s fio_poll_s;
+```
+
+The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
+
+#### `FIO_POLL_INIT`
+
+```c
+#define FIO_POLL_INIT(...)                                                     \
+  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
+  { .settings = { __VA_ARGS__ }, .lock = FIO_LOCK_INIT }
+```
+
+A `fio_poll_s` object initialization macro.
+
+Static initialization may be limited to POSIX systems.
+
+Use: `FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)`
+
+#### `fio_poll_new`
+
+```c
+fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
+/* named argument support */
+#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
+```
+
+Creates a new polling object / queue.
+
+The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
+
+```c
+typedef struct {
+  /** callback for when data is availabl in the incoming buffer. */
+  void (*on_data)(int fd, void *udata);
+  /** callback for when the outgoing buffer allows a call to `write`. */
+  void (*on_ready)(int fd, void *udata);
+  /** callback for closed connections and / or connections with errors. */
+  void (*on_close)(int fd, void *udata);
+} fio_poll_settings_s;
+```
+
+Returns NULL on error (no memory).
+
+#### `fio_poll_free`
+
+```c
+int fio_poll_free(fio_poll_s *p);
+```
+
+Frees the polling object and its resources.
+
+#### `fio_poll_destroy`
+
+```c
+void fio_poll_destroy(fio_poll_s *p);
+```
+
+Destroys the polling object, freeing its resources.
+
+**Note**: the monitored file descriptors will remain untouched (possibly open). To close all the monitored file descriptors, call `fio_poll_close_and_destroy` instead.
+
+#### `fio_poll_close_and_destroy`
+
+```c
+void fio_poll_close_all(fio_poll_s *p);
+```
+
+Closes all monitored connections, calling the `on_close` callbacks for all of them.
+
+#### `fio_poll_monitor`
+
+```c
+int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
+```
+
+Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
+
+Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
+
+On systems where `POLLRDHUP` is supported, it is always monitored for.
+
+Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
+
+Returns -1 on error.
+
+#### `fio_poll_review`
+
+```c
+int fio_poll_review(fio_poll_s *p, int timeout);
+```
+
+Reviews if any of the monitored file descriptors has any events.
+
+`timeout` is in milliseconds.
+
+Returns the number of events called.
+
+**Note**:
+
+Polling is thread safe, but has different effects on different threads.
+
+Adding a new file descriptor from one thread while polling in a different thread will not poll that IO untill `fio_poll_review` is called again.
+
+#### `fio_poll_forget`
+
+```c
+void *fio_poll_forget(fio_poll_s *p, int fd);
+```
+
+Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
+
+### `FIO_POLL` Compile Time Macros
+
+#### `FIO_POLL_HAS_UDATA_COLLECTION`
+
+```c
+#ifndef FIO_POLL_HAS_UDATA_COLLECTION
+#define FIO_POLL_HAS_UDATA_COLLECTION 1
+#endif
+```
+
+When set to true (the default value), the `udata` value is unique per file descriptor, using an array of `udata` values.
+
+When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
+
+#### `FIO_POLL_FRAGMENTATION_LIMIT`
+
+```c
+#define FIO_POLL_FRAGMENTATION_LIMIT 63
+```
+
+When the polling array is fragmented by more than the set value, it will be de-fragmented on the idle cycle (if no events occur).
+
+#### `FIO_POLL_DEBUG`
+
+If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.
 
 -------------------------------------------------------------------------------
 ## Simple Server

@@ -8,6 +8,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_STR_NAME fio            /* Development inclusion - ignore line */
 #define FIO_ATOL                    /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
+#include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "108 files.h"              /* Development inclusion - ignore line */
 #include "220 string core.h"        /* Development inclusion - ignore line */
@@ -1102,97 +1103,27 @@ SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               FIO_STR_RESERVE_NAME)(FIO_STR_PTR s_,
                                                     size_t amount) {
-  fio_str_info_s i = {0};
+  fio_str_info_s state = {0};
+  FIO_PTR_TAG_VALID_OR_RETURN(s_, state);
   FIO_NAME(FIO_STR_NAME, s) *const s =
       (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
-  if (!s_ || !s || FIO_STR_IS_FROZEN(s)) {
-    i = FIO_NAME(FIO_STR_NAME, info)(s_);
-    return i;
-  }
-  /* result is an embedded string */
-  if (amount <= FIO_STR_SMALL_CAPA(s)) {
-    if (!FIO_STR_IS_SMALL(s)) {
-      /* shrink from allocated(?) string */
-      FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
-      FIO_NAME(FIO_STR_NAME, init_copy)
-      ((FIO_STR_PTR)FIO_PTR_TAG(&tmp),
-       FIO_STR_BIG_DATA(s),
-       ((FIO_STR_SMALL_CAPA(s) > FIO_STR_BIG_LEN(s)) ? FIO_STR_BIG_LEN(s)
-                                                     : FIO_STR_SMALL_CAPA(s)));
-      if (FIO_STR_BIG_IS_DYNAMIC(s))
-        FIO_STR_BIG_FREE_BUF(s);
-      *s = tmp;
-    }
-    i = (fio_str_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = FIO_STR_SMALL_LEN(s),
-        .capa = FIO_STR_SMALL_CAPA(s),
-    };
-    return i;
-  }
-  /* round up to allocation boundary */
-  amount = fio_string_capa4len(amount);
-  if (FIO_STR_IS_SMALL(s)) {
-    /* from small to big */
-    FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
-    FIO_NAME(FIO_STR_NAME, init_copy)
-    ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), NULL, amount);
-    FIO_MEMCPY(FIO_STR_BIG_DATA(&tmp),
-               FIO_STR_SMALL_DATA(s),
-               FIO_STR_SMALL_CAPA(s));
-    FIO_STR_BIG_LEN_SET(&tmp, FIO_STR_SMALL_LEN(s));
+  state = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (FIO_STR_IS_FROZEN(s))
+    return state;
+  if (state.capa < amount) {
+    FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount);
+    FIO_NAME(FIO_STR_NAME, __info_update)(s_, state);
+  } else if (state.capa > FIO_STR_SMALL_CAPA(s) &&
+             amount <= FIO_STR_SMALL_CAPA(s) &&
+             state.len <= FIO_STR_SMALL_CAPA(s)) {
+    FIO_NAME(FIO_STR_NAME, s) tmp;
+    state = FIO_NAME(FIO_STR_NAME, init_copy)((FIO_STR_PTR)FIO_PTR_TAG(&tmp),
+                                              state.buf,
+                                              state.len);
+    FIO_NAME(FIO_STR_NAME, destroy)(s_);
     *s = tmp;
-    i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
-        .capa = amount,
-    };
-    return i;
-  } else if (FIO_STR_BIG_IS_DYNAMIC(s) && FIO_STR_BIG_CAPA(s) == amount) {
-    i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
-        .capa = amount,
-    };
-  } else {
-    /* from big to big - grow / shrink */
-    const size_t __attribute__((unused)) old_capa = FIO_STR_BIG_CAPA(s);
-    size_t data_len = FIO_STR_BIG_LEN(s);
-    if (data_len > amount) {
-      /* truncate */
-      data_len = amount;
-      FIO_STR_BIG_LEN_SET(s, data_len);
-    }
-    char *tmp = NULL;
-    if (FIO_STR_BIG_IS_DYNAMIC(s)) {
-      tmp = (char *)FIO_MEM_REALLOC_(FIO_STR_BIG_DATA(s),
-                                     old_capa,
-                                     (amount + 1) * sizeof(char),
-                                     data_len);
-      (void)old_capa; /* might not be used by macro */
-    } else {
-      tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, (amount + 1) * sizeof(char), 0);
-      if (tmp) {
-        s->special = 0;
-        tmp[data_len] = 0;
-        if (data_len)
-          FIO_MEMCPY(tmp, FIO_STR_BIG_DATA(s), data_len);
-      }
-    }
-    if (tmp) {
-      tmp[data_len] = 0;
-      FIO_STR_BIG_DATA(s) = tmp;
-      FIO_STR_BIG_CAPA_SET(s, amount);
-    } else {
-      amount = FIO_STR_BIG_CAPA(s);
-    }
-    i = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = data_len,
-        .capa = amount,
-    };
   }
-  return i;
+  return state;
 }
 
 /* *****************************************************************************

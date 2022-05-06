@@ -309,5 +309,6 @@ Module Cleanup
 #undef FIO_SORT_TYPE
 #undef FIO_SORT_TEST
 #undef FIO_SORT_SWAP
+#undef FIO_SORT_IS_BIGGER
 #undef FIO_SORT_NAME
 #endif /* FIO_SORT_NAME */
