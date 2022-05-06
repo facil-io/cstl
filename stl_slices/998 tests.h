@@ -947,7 +947,7 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, sha1)();
+  FIO_NAME_TEST(stl, state)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, string_core_helpers)();
   fprintf(stderr, "===============\n");
@@ -998,6 +998,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, sha1)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, chacha)();
 #if !DEBUG

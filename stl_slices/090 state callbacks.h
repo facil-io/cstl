@@ -52,11 +52,15 @@ typedef enum {
   /** Reserved for internal use. */
   FIO_CALL_RESERVED2,
   /** User state event queue (unused, available for the user). */
-  FIO_CALL_ON_USR,
+  FIO_CALL_ON_USER1,
+  /** User state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2,
   /** Called when facil.io enters idling mode. */
   FIO_CALL_ON_IDLE,
   /** A reversed user state event queue (unused, available for the user). */
-  FIO_CALL_ON_USR_REVERSE,
+  FIO_CALL_ON_USER1_REVERSE,
+  /** A reversed user state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2_REVERSE,
   /** Reserved for internal use. */
   FIO_CALL_RESERVED1_REVERSED,
   /** Reserved for internal use. */
@@ -302,7 +306,7 @@ State Callback Global State and Locks
 static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER];
 static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
-/** a callback type */
+/** a type-to-string map for callback types */
 FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
     [FIO_CALL_PRE_START] = "PRE_START",
@@ -313,9 +317,11 @@ FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_START] = "ON_START",
     [FIO_CALL_RESERVED1] = "RESERVED1",
     [FIO_CALL_RESERVED2] = "RESERVED2",
-    [FIO_CALL_ON_USR] = "ON_USR",
+    [FIO_CALL_ON_USER1] = "ON_USER1",
+    [FIO_CALL_ON_USER2] = "ON_USER2",
     [FIO_CALL_ON_IDLE] = "ON_IDLE",
-    [FIO_CALL_ON_USR_REVERSE] = "ON_USR_REVERSE",
+    [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
+    [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
     [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
     [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
     [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
@@ -458,7 +464,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
-  fprintf(stderr, "* Testing State Callback Map\n");
+  fprintf(stderr, "* testing state callback map\n");
   {
     fio___state_map_s map = {0}, map2 = {0};
     fio___state_map_add(&map, (void (*)(void *))1, (void *)1);
@@ -467,6 +473,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
     FIO_ASSERT(map.w == 1 && map.count == 1 && map.ary &&
                    map.ary[0].arg == (void *)1,
                "map state error");
+    fio___state_map_add(&map, (void (*)(void *))1, (void *)1);
+    FIO_ASSERT(fio___state_map_exists(&map, (void (*)(void *))1, (void *)1),
+               "double add failed? (exists is negative)");
+    FIO_ASSERT(map.w == 1 && map.count == 1 && map.ary &&
+                   map.ary[0].arg == (void *)1,
+               "double add should be a no-op");
     fio___state_map_add(&map, (void (*)(void *))2, (void *)2);
     FIO_ASSERT(fio___state_map_exists(&map, (void (*)(void *))2, (void *)2),
                "add failed? (exists is negative)");

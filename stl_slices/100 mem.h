@@ -541,7 +541,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     return;
   } else {
     /* some memory overlaps, walk backwards (memmove) */
-    uint64_t tmp_buf[8];
+    uint64_t tmp_buf[8] FIO_ALIGN(16);
     char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
@@ -586,6 +586,16 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 
 /** an 8 byte memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+#if 0 /* 64 byte loops seem slower for some reason... */
+  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
+  char *d = (char *)dest_;
+  char *const d_loop = d + (bytes & (~(size_t)63ULL));
+  while (d < d_loop) {
+    FIO_MEMCPY64(d, repeated);
+    d += 64;
+  }
+  FIO_MEMCPY63x(d, repeated, bytes);
+#else /* 32 byte loops work better on my computer */
   uint64_t repeated[4] = {data, data, data, data};
   char *d = (char *)dest_;
   char *const d_loop = d + (bytes & (~(size_t)31ULL));
@@ -594,6 +604,7 @@ SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     d += 32;
   }
   FIO_MEMCPY31x(d, repeated, bytes);
+#endif
 }
 
 /**
@@ -603,76 +614,59 @@ SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-  union {
-    const char *c;
-    const uint64_t *u64;
-    uintptr_t uptr;
-  } u = {.c = (const char *)buffer};
-  const char *const end = (const char *)buffer + len;
-
-  if (len > 7) {
-#if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-    /* align pointer */
-#define FIO___MEMCHR_TEST(i)                                                   \
-  /* fall through */ case i:                                                   \
-    if (*u.c == token)                                                         \
-      return (void *)u.c;                                                      \
-    ++u.c;
-    switch ((u.uptr & 7)) {
-      FIO___MEMCHR_TEST(1); /* fall through */
-      FIO___MEMCHR_TEST(2); /* fall through */
-      FIO___MEMCHR_TEST(3); /* fall through */
-      FIO___MEMCHR_TEST(4); /* fall through */
-      FIO___MEMCHR_TEST(5); /* fall through */
-      FIO___MEMCHR_TEST(6); /* fall through */
-      FIO___MEMCHR_TEST(7);
-#undef FIO___MEMCHR_TEST
+  const char *buf = (const char *)buffer;
+  const char *const end = buf + len;
+  const char *const end32 = buf + (len & (~(size_t)31ULL));
+  /* semi-SIMD approach, working on 8 bytes at a time */
+  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
+  umask |= (umask << 32);
+  umask |= (umask << 16);
+  umask |= (umask << 8);
+  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
+  uint64_t r[4] FIO_ALIGN(16) = {0};
+  while (buf < end32) { // clang-format off
+    FIO_MEMCPY32(r, buf);
+    r[0] ^= umask; r[1] ^= umask; r[2] ^= umask; r[3] ^= umask;                 /* turns token to 0xFF */
+    r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[1] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* turns 0xFF to 0x7F (note existing 0x7F) */
+    r[2] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[3] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[1] += UINT64_C(0x0101010101010101); /* turns 0x7F to 0x80  */
+    r[2] += UINT64_C(0x0101010101010101); r[3] += UINT64_C(0x0101010101010101);
+    r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080); /* keeps only 0x80 - either token or 0x7F bytes */
+    r[2] &= UINT64_C(0x8080808080808080); r[3] &= UINT64_C(0x8080808080808080);
+    if (!(r[0] | r[1] | r[2] | r[3])) {
+      buf += 32; continue;
     }
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
-    {  /* SIMD like approach */
-      uint64_t umask = (uint64_t)((uint8_t)token) & 0xFF;
-      umask |= (umask << 32);
-      umask |= (umask << 16);
-      umask |= (umask << 8);
-      umask = ~umask;
-      uint64_t r[4] FIO_ALIGN(32) = {0};
-      while (u.c + 31 < end) { // clang-format off
-        FIO_MEMCPY32(r, u.u64);
-        // r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
-        r[0] ^= umask; r[1] ^= umask; r[2] ^= umask; r[3] ^= umask;
-        r[0] = fio_has_full_byte64(r[0]);
-        r[1] = fio_has_full_byte64(r[1]);
-        r[2] = fio_has_full_byte64(r[2]);
-        r[3] = fio_has_full_byte64(r[3]);
-        if (!(r[0] | r[1] | r[2] | r[3])) {
-          u.c += 32;
-          continue;
-        }
-        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-        if (r[1]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
-        if (r[2]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[2])) + 16);
-        return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[3])) + 24);
-      }
-      if (u.c + 15 < end) {
-        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask;
-        r[0] = fio_has_full_byte64(r[0]); r[1] = fio_has_full_byte64(r[1]);
-        if(r[0] | r[1]) {
-          if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-          return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
-        }
-        u.c += 16;
-      }
-      if (u.c + 7 < end) {
-        r[0] = u.u64[0] ^ umask; r[0] = fio_has_full_byte64(r[0]);
-        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-        u.c += 8;
-      } // clang-format on
+    for (size_t i_tmp = 0; i_tmp < 8; ++i_tmp)
+    {
+      if(buf[0] == token) return (void*)buf;
+      if(buf[1] == token) return (void*)(buf + 1);
+      if(buf[2] == token) return (void*)(buf + 2);
+      if(buf[3] == token) return (void*)(buf + 3);
+      buf += 4;
     }
+ }
+  if (buf + 15 < end) {
+    FIO_MEMCPY16(r, buf);
+    r[0] ^= umask; r[1] ^= umask;
+    r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[1] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[1] += UINT64_C(0x0101010101010101);
+    r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080);
+    if(r[0]) goto finish;
+    buf += 8;
+    if(r[1]) goto finish;
+    buf += 8;
   }
-  while (u.c < end) {
-    if (u.c[0] == token)
-      return (void *)u.c;
-    ++u.c;
+  if (buf + 7 < end) {
+    FIO_MEMCPY8(r, buf);
+    r[0] ^= umask; r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[0] &= UINT64_C(0x8080808080808080);
+    buf += (!r[0]) << 3; /* skip 8 bytes if there is no chance of positives */
+  } // clang-format on
+finish:
+  while (buf < end) {
+    if (buf[0] == token)
+      return (void *)buf;
+    ++buf;
   }
   return NULL;
 }

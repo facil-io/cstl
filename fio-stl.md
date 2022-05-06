@@ -5899,10 +5899,13 @@ In addition to [`FIO_STR_INFO_IS_EQ(a,b)`](#fio_str_info_is_eq) and [`FIO_BUF_IN
 ```c
 int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 ```
+Equivalent to: `memcmp(a.buf, b.buf, min(a.len, b.len)) > 0 || (!memcmp(a.buf, b.buf, min(a.len, b,len)) && a.len > b.len)`
 
 Compares two strings, returning 1 if the data in string `a` is greater in value than the data in string `b`.
 
-**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal, designed to be used with `FIO_SORT`.
+**Note**: returns 0 if string `b` is bigger than string `a` or if strings are equal, designed to be used with `FIO_SORT_IS_BIGGER(a,b)`.
+
+**Note**: it is often faster to define `FIO_SORT_IS_BIGGER` using a `memcmp` wrapper, however the speed depends on the `clib` implementation and this function provides a good enough fallback that should be very portable.
 
 #### `fio_string_is_greater_buf`
 
@@ -5910,9 +5913,13 @@ Compares two strings, returning 1 if the data in string `a` is greater in value 
 int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b);
 ```
 
+Equivalent to: `memcmp(a.buf, b.buf, min(a.len, b.len)) > 0 || (!memcmp(a.buf, b.buf, min(a.len, b,len)) && a.len > b.len)`
+
 Compares two `fio_buf_info_s`, returning 1 if the data in buffer `a` is greater in value than the data in buffer `b`.
 
-**Note**: returns 0 if data in `b` is greater than **or equal** to `a`, designed to be used with `FIO_SORT`.
+**Note**: returns 0 if data in `b` is greater than **or equal** to `a`, designed to be used with `FIO_SORT_IS_BIGGER(a,b)`.
+
+**Note**: it is often faster to define `FIO_SORT_IS_BIGGER` using a `memcmp` wrapper, however the speed depends on the `clib` implementation and this function provides a good enough fallback that should be very portable.
 
 ### Core String UTF-8 Support
 

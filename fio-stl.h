@@ -8930,11 +8930,15 @@ typedef enum {
   /** Reserved for internal use. */
   FIO_CALL_RESERVED2,
   /** User state event queue (unused, available for the user). */
-  FIO_CALL_ON_USR,
+  FIO_CALL_ON_USER1,
+  /** User state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2,
   /** Called when facil.io enters idling mode. */
   FIO_CALL_ON_IDLE,
   /** A reversed user state event queue (unused, available for the user). */
-  FIO_CALL_ON_USR_REVERSE,
+  FIO_CALL_ON_USER1_REVERSE,
+  /** A reversed user state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2_REVERSE,
   /** Reserved for internal use. */
   FIO_CALL_RESERVED1_REVERSED,
   /** Reserved for internal use. */
@@ -9180,7 +9184,7 @@ State Callback Global State and Locks
 static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER];
 static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
-/** a callback type */
+/** a type-to-string map for callback types */
 FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
     [FIO_CALL_PRE_START] = "PRE_START",
@@ -9191,9 +9195,11 @@ FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_START] = "ON_START",
     [FIO_CALL_RESERVED1] = "RESERVED1",
     [FIO_CALL_RESERVED2] = "RESERVED2",
-    [FIO_CALL_ON_USR] = "ON_USR",
+    [FIO_CALL_ON_USER1] = "ON_USER1",
+    [FIO_CALL_ON_USER2] = "ON_USER2",
     [FIO_CALL_ON_IDLE] = "ON_IDLE",
-    [FIO_CALL_ON_USR_REVERSE] = "ON_USR_REVERSE",
+    [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
+    [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
     [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
     [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
     [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
@@ -9336,7 +9342,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
-  fprintf(stderr, "* Testing State Callback Map\n");
+  fprintf(stderr, "* testing state callback map\n");
   {
     fio___state_map_s map = {0}, map2 = {0};
     fio___state_map_add(&map, (void (*)(void *))1, (void *)1);
@@ -9345,6 +9351,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
     FIO_ASSERT(map.w == 1 && map.count == 1 && map.ary &&
                    map.ary[0].arg == (void *)1,
                "map state error");
+    fio___state_map_add(&map, (void (*)(void *))1, (void *)1);
+    FIO_ASSERT(fio___state_map_exists(&map, (void (*)(void *))1, (void *)1),
+               "double add failed? (exists is negative)");
+    FIO_ASSERT(map.w == 1 && map.count == 1 && map.ary &&
+                   map.ary[0].arg == (void *)1,
+               "double add should be a no-op");
     fio___state_map_add(&map, (void (*)(void *))2, (void *)2);
     FIO_ASSERT(fio___state_map_exists(&map, (void (*)(void *))2, (void *)2),
                "add failed? (exists is negative)");
@@ -9944,7 +9956,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     return;
   } else {
     /* some memory overlaps, walk backwards (memmove) */
-    uint64_t tmp_buf[8];
+    uint64_t tmp_buf[8] FIO_ALIGN(16);
     char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
@@ -9989,6 +10001,16 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 
 /** an 8 byte memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+#if 0 /* 64 byte loops seem slower for some reason... */
+  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
+  char *d = (char *)dest_;
+  char *const d_loop = d + (bytes & (~(size_t)63ULL));
+  while (d < d_loop) {
+    FIO_MEMCPY64(d, repeated);
+    d += 64;
+  }
+  FIO_MEMCPY63x(d, repeated, bytes);
+#else /* 32 byte loops work better on my computer */
   uint64_t repeated[4] = {data, data, data, data};
   char *d = (char *)dest_;
   char *const d_loop = d + (bytes & (~(size_t)31ULL));
@@ -9997,6 +10019,7 @@ SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     d += 32;
   }
   FIO_MEMCPY31x(d, repeated, bytes);
+#endif
 }
 
 /**
@@ -10006,76 +10029,59 @@ SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
-  union {
-    const char *c;
-    const uint64_t *u64;
-    uintptr_t uptr;
-  } u = {.c = (const char *)buffer};
-  const char *const end = (const char *)buffer + len;
-
-  if (len > 7) {
-#if !FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-    /* align pointer */
-#define FIO___MEMCHR_TEST(i)                                                   \
-  /* fall through */ case i:                                                   \
-    if (*u.c == token)                                                         \
-      return (void *)u.c;                                                      \
-    ++u.c;
-    switch ((u.uptr & 7)) {
-      FIO___MEMCHR_TEST(1); /* fall through */
-      FIO___MEMCHR_TEST(2); /* fall through */
-      FIO___MEMCHR_TEST(3); /* fall through */
-      FIO___MEMCHR_TEST(4); /* fall through */
-      FIO___MEMCHR_TEST(5); /* fall through */
-      FIO___MEMCHR_TEST(6); /* fall through */
-      FIO___MEMCHR_TEST(7);
-#undef FIO___MEMCHR_TEST
+  const char *buf = (const char *)buffer;
+  const char *const end = buf + len;
+  const char *const end32 = buf + (len & (~(size_t)31ULL));
+  /* semi-SIMD approach, working on 8 bytes at a time */
+  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
+  umask |= (umask << 32);
+  umask |= (umask << 16);
+  umask |= (umask << 8);
+  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
+  uint64_t r[4] FIO_ALIGN(16) = {0};
+  while (buf < end32) { // clang-format off
+    FIO_MEMCPY32(r, buf);
+    r[0] ^= umask; r[1] ^= umask; r[2] ^= umask; r[3] ^= umask;                 /* turns token to 0xFF */
+    r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[1] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* turns 0xFF to 0x7F (note existing 0x7F) */
+    r[2] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[3] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[1] += UINT64_C(0x0101010101010101); /* turns 0x7F to 0x80  */
+    r[2] += UINT64_C(0x0101010101010101); r[3] += UINT64_C(0x0101010101010101);
+    r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080); /* keeps only 0x80 - either token or 0x7F bytes */
+    r[2] &= UINT64_C(0x8080808080808080); r[3] &= UINT64_C(0x8080808080808080);
+    if (!(r[0] | r[1] | r[2] | r[3])) {
+      buf += 32; continue;
     }
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
-    {  /* SIMD like approach */
-      uint64_t umask = (uint64_t)((uint8_t)token) & 0xFF;
-      umask |= (umask << 32);
-      umask |= (umask << 16);
-      umask |= (umask << 8);
-      umask = ~umask;
-      uint64_t r[4] FIO_ALIGN(32) = {0};
-      while (u.c + 31 < end) { // clang-format off
-        FIO_MEMCPY32(r, u.u64);
-        // r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask; r[2] = u.u64[2] ^ umask; r[3] = u.u64[3] ^ umask;
-        r[0] ^= umask; r[1] ^= umask; r[2] ^= umask; r[3] ^= umask;
-        r[0] = fio_has_full_byte64(r[0]);
-        r[1] = fio_has_full_byte64(r[1]);
-        r[2] = fio_has_full_byte64(r[2]);
-        r[3] = fio_has_full_byte64(r[3]);
-        if (!(r[0] | r[1] | r[2] | r[3])) {
-          u.c += 32;
-          continue;
-        }
-        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-        if (r[1]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
-        if (r[2]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[2])) + 16);
-        return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[3])) + 24);
-      }
-      if (u.c + 15 < end) {
-        r[0] = u.u64[0] ^ umask; r[1] = u.u64[1] ^ umask;
-        r[0] = fio_has_full_byte64(r[0]); r[1] = fio_has_full_byte64(r[1]);
-        if(r[0] | r[1]) {
-          if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-          return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[1])) + 8);
-        }
-        u.c += 16;
-      }
-      if (u.c + 7 < end) {
-        r[0] = u.u64[0] ^ umask; r[0] = fio_has_full_byte64(r[0]);
-        if (r[0]) return (void *)(u.c + fio_bits_lsb_index(fio_has_byte2bitmap(r[0])));
-        u.c += 8;
-      } // clang-format on
+    for (size_t i_tmp = 0; i_tmp < 8; ++i_tmp)
+    {
+      if(buf[0] == token) return (void*)buf;
+      if(buf[1] == token) return (void*)(buf + 1);
+      if(buf[2] == token) return (void*)(buf + 2);
+      if(buf[3] == token) return (void*)(buf + 3);
+      buf += 4;
     }
+ }
+  if (buf + 15 < end) {
+    FIO_MEMCPY16(r, buf);
+    r[0] ^= umask; r[1] ^= umask;
+    r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F); r[1] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[1] += UINT64_C(0x0101010101010101);
+    r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080);
+    if(r[0]) goto finish;
+    buf += 8;
+    if(r[1]) goto finish;
+    buf += 8;
   }
-  while (u.c < end) {
-    if (u.c[0] == token)
-      return (void *)u.c;
-    ++u.c;
+  if (buf + 7 < end) {
+    FIO_MEMCPY8(r, buf);
+    r[0] ^= umask; r[0] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+    r[0] += UINT64_C(0x0101010101010101); r[0] &= UINT64_C(0x8080808080808080);
+    buf += (!r[0]) << 3; /* skip 8 bytes if there is no chance of positives */
+  } // clang-format on
+finish:
+  while (buf < end) {
+    if (buf[0] == token)
+      return (void *)buf;
+    ++buf;
   }
   return NULL;
 }
@@ -23876,82 +23882,59 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(16);
-  uint64_t ub[4] FIO_ALIGN(16);
+  uint64_t ua[4] FIO_ALIGN(16) = {0, 0, 0, 0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0, 0, 0, 0};
   for (size_t i = 31; i < len; i += 32) {
     FIO_MEMCPY32(ua, a.buf);
     FIO_MEMCPY32(ub, b.buf);
-    uint64_t tmp = (ua[0] ^ ub[0]);
-    tmp |= (ua[1] ^ ub[1]);
-    tmp |= (ua[2] ^ ub[2]);
-    tmp |= (ua[3] ^ ub[3]);
-    if (!tmp) {
-      a.buf += 32;
-      b.buf += 32;
-      continue;
-    }
-    if (ua[0] != ub[0]) {
-      ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
-      ub[0] = fio_lton64(ub[0]);
-      return ua[0] > ub[0];
-    }
-    if (ua[1] != ub[1]) {
-      ua[1] = fio_lton64(ua[1]);
-      ub[1] = fio_lton64(ub[1]);
-      return ua[1] > ub[1];
-    }
-    if (ua[2] != ub[2]) {
-      ua[2] = fio_lton64(ua[2]);
-      ub[2] = fio_lton64(ub[2]);
-      return ua[2] > ub[2];
-    }
-    ua[3] = fio_lton64(ua[3]);
-    ub[3] = fio_lton64(ub[3]);
-    return ua[3] > ub[3];
+    if ((ua[0] ^ ub[0]) | (ua[1] ^ ub[1]) | (ua[2] ^ ub[2]) | (ua[3] ^ ub[3]))
+      goto review_dif;
+    a.buf += 32;
+    b.buf += 32;
   }
   if (len & 16) {
     FIO_MEMCPY16(ua, a.buf);
     FIO_MEMCPY16(ub, b.buf);
-    uint64_t tmp = (ua[0] ^ ub[0]);
-    tmp |= (ua[1] ^ ub[1]);
-    if (tmp) {
-      if (ua[0] != ub[0]) {
-        ua[0] = fio_lton64(ua[0]);
-        ub[0] = fio_lton64(ub[0]);
-        return ua[0] > ub[0];
-      }
-      ua[1] = fio_lton64(ua[1]);
-      ub[1] = fio_lton64(ub[1]);
-      return ua[1] > ub[1];
-    }
+    if ((ua[0] ^ ub[0]) | (ua[1] ^ ub[1]))
+      goto review_dif;
     a.buf += 16;
     b.buf += 16;
   }
   if (len & 8) {
     FIO_MEMCPY8(ua, a.buf);
     FIO_MEMCPY8(ub, b.buf);
-    uint64_t tmp = (ua[0] ^ ub[0]);
-    if (tmp) {
-      ua[0] = fio_lton64(ua[0]);
-      ub[0] = fio_lton64(ub[0]);
-      return ua[0] > ub[0];
-    }
+    if ((ua[0] ^ ub[0]))
+      goto review_dif1;
     a.buf += 8;
     b.buf += 8;
   }
   if ((len & 7)) {
-    ua[0] = 0;
-    ub[0] = 0;
     FIO_MEMCPY7x(ua, a.buf, len);
     FIO_MEMCPY7x(ub, b.buf, len);
-    uint64_t tmp = (ua[0] ^ ub[0]);
-    if (tmp) {
-      ua[0] = fio_lton64(ua[0]);
-      ub[0] = fio_lton64(ub[0]);
-      return ua[0] > ub[0];
-    }
+    if ((ua[0] ^ ub[0]))
+      goto review_dif1;
   }
   return a_len_is_bigger;
+review_dif:
+  if (ua[0] != ub[0]) {
+  review_dif1:
+    ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
+    ub[0] = fio_lton64(ub[0]);
+    return ua[0] > ub[0];
+  }
+  if (ua[1] != ub[1]) {
+    ua[1] = fio_lton64(ua[1]);
+    ub[1] = fio_lton64(ub[1]);
+    return ua[1] > ub[1];
+  }
+  if (ua[2] != ub[2]) {
+    ua[2] = fio_lton64(ua[2]);
+    ub[2] = fio_lton64(ub[2]);
+    return ua[2] > ub[2];
+  }
+  ua[3] = fio_lton64(ua[3]);
+  ub[3] = fio_lton64(ub[3]);
+  return ua[3] > ub[3];
 }
 
 /* *****************************************************************************
@@ -24968,11 +24951,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_string_readfile(&sa, NULL, __FILE__, 0, 0);
     fio_string_write(&sb, NULL, sa.buf, sa.len);
     sa.buf[sa.len - 1] += 1;
-    fprintf(stderr, "* Testing comparison speeds:\n");
+    fio_buf_info_s sa_buf = FIO_STR2BUF_INFO(sa);
+    fio_buf_info_s sb_buf = FIO_STR2BUF_INFO(sb);
+    const size_t test_repetitions = (1ULL << 17);
+    fprintf(stderr,
+            "* testing comparison speeds (%zu tests of %zu bytes):\n",
+            test_repetitions,
+            sa.len - 1);
     clock_t start = clock();
-    for (size_t i = 0; i < (1ULL << 17); ++i) {
+    for (size_t i = 0; i < test_repetitions; ++i) {
       FIO_COMPILER_GUARD;
-      int r = fio_string_is_greater(sa, sb);
+      int r = fio_string_is_greater_buf(sa_buf, sb_buf);
       FIO_ASSERT(r > 0, "fio_string_is_greater error?!");
     }
     clock_t end = clock();
@@ -24980,7 +24969,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
             "\t* fio_string_is_greater test cycles:   %zu\n",
             (size_t)(end - start));
     start = clock();
-    for (size_t i = 0; i < (1ULL << 17); ++i) {
+    for (size_t i = 0; i < test_repetitions; ++i) {
       FIO_COMPILER_GUARD;
       int r = memcmp(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
       if (!r)
@@ -24992,7 +24981,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
             "\t* memcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
     start = clock();
-    for (size_t i = 0; i < (1ULL << 17); ++i) {
+    for (size_t i = 0; i < test_repetitions; ++i) {
       FIO_COMPILER_GUARD;
       int r = strcmp(sa.buf, sb.buf);
       FIO_ASSERT(r > 0, "strcmp error?!");
@@ -25001,6 +24990,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
+    fprintf(stderr, "* testing fio_string_write_(i|u|hex) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
      fio_atol,
@@ -32523,7 +32513,7 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, glob_matching)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, sha1)();
+  FIO_NAME_TEST(stl, state)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, string_core_helpers)();
   fprintf(stderr, "===============\n");
@@ -32574,6 +32564,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, sha1)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, chacha)();
 #if !DEBUG
