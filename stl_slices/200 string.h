@@ -1112,6 +1112,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
     return state;
   if (state.capa < amount) {
     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount);
+    state.buf[state.len] = 0;
     FIO_NAME(FIO_STR_NAME, __info_update)(s_, state);
   } else if (state.capa > FIO_STR_SMALL_CAPA(s) &&
              amount <= FIO_STR_SMALL_CAPA(s) &&
