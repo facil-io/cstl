@@ -38,14 +38,6 @@ Helper types
 #define FIO_ARRAY_TYPE_INVALID_SIMPLE 1
 #include "fio-stl.h"
 
-FIO_IFUNC http_sary_s http_sary_tmp(http_sstr_s v) {
-  http_sary_s a = FIO_ARRAY_INIT;
-  http_sstr_s v_tmp = FIO_STR_INIT;
-  http_sary_push(&a, v_tmp); /* avoid string data copy */
-  http_sary2ptr(&a)[0] = v;
-  return a;
-}
-
 #define FIO_MAP_NAME            http_smap
 #define FIO_MAP_TYPE            http_lstr_s
 #define FIO_MAP_TYPE_COPY(a, b) http_lstr_init_copy2(&(a), &(b))
@@ -80,8 +72,8 @@ FIO_IFUNC fio_str_info_s http_smap_get2(http_smap_s *map, fio_str_info_s key) {
 #define FIO_MAP_TYPE_COPY(a, b)                                                \
   do {                                                                         \
     (a) = (http_sary_s)FIO_ARRAY_INIT;                                         \
-    http_sary_push(&(a), http_sary_get((&b), 0));                              \
-  } while (0)
+    (void)(b);                                                                 \
+  } while (0) /*no-op*/
 #define FIO_MAP_TYPE_DESTROY(o) http_sary_destroy(&(o))
 #define FIO_MAP_KEY             http_sstr_s
 #define FIO_MAP_KEY_CMP(a, b)   http_sstr_is_eq(&(a), &(b))
@@ -89,15 +81,15 @@ FIO_IFUNC fio_str_info_s http_smap_get2(http_smap_s *map, fio_str_info_s key) {
 #define FIO_MAP_KEY_DESTROY(o)  http_sstr_destroy(&(o))
 #include "fio-stl.h"
 
+/** set `add` to positive to add multiple values or negative to overwrite. */
 FIO_IFUNC http_sstr_s *http_hmap_set2(http_hmap_s *map,
                                       fio_str_info_s key,
                                       fio_str_info_s val,
-                                      uint8_t add) {
+                                      int add) {
   http_sstr_s *r = NULL;
   http_sary_s *o = NULL;
   http_sstr_s k = {0};
   http_sstr_s v = {0};
-  http_sary_s va = {0};
   if (!key.buf || !key.len || !map)
     return r;
   http_sstr_init_const(&k, key.buf, key.len);
@@ -105,13 +97,12 @@ FIO_IFUNC http_sstr_s *http_hmap_set2(http_hmap_s *map,
   const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
   if (!val.buf || !val.len)
     goto remove_key;
-  va = http_sary_tmp(v);
   o = http_hmap_get_ptr(map, h, k);
   if (!o) {
+    http_sary_s va = {0};
     o = http_hmap_set_ptr(map, h, k, va, NULL, 1);
-    add = 0;
+    add = 1;
   }
-  http_sary_destroy(&va);
   if (FIO_UNLIKELY(!o)) {
     FIO_LOG_ERROR("Couldn't add value to header: %.*s:%.*s",
                   (int)key.len,
@@ -121,7 +112,11 @@ FIO_IFUNC http_sstr_s *http_hmap_set2(http_hmap_s *map,
     return r;
   }
   if (add) {
-    http_sary_push(o, v);
+    if (add < 0) {
+      http_sary_destroy(o);
+    }
+    r = http_sary_push(o, v);
+    return r;
   }
   r = http_sary2ptr(o) + (http_sary_count(o) - 1);
   return r;
@@ -142,10 +137,15 @@ FIO_IFUNC fio_str_info_s http_hmap_get2(http_hmap_s *map,
   if (!a)
     return r;
   const uint32_t count = http_sary_count(a);
-  if (index < 0)
-    index += count;
-  if ((uint32_t)index >= count)
+  if (!count)
     return r;
+  if (index < 0) {
+    index += count;
+    if (index < 0)
+      index = 0;
+  }
+  if ((uint32_t)index >= count)
+    index = count - 1;
   r = http_sstr_info(http_sary2ptr(a) + index);
   return r;
 }
@@ -358,6 +358,13 @@ fio_str_info_s http_request_header_set(http_s *h,
                                        fio_str_info_s name,
                                        fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return http_sstr_info(http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, -1));
+}
+/** Sets the header information associated with the HTTP handle. */
+fio_str_info_s http_request_header_set_if_missing(http_s *h,
+                                                  fio_str_info_s name,
+                                                  fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   return http_sstr_info(http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, 0));
 }
 
@@ -411,6 +418,19 @@ fio_str_info_s http_response_header_get(http_s *h,
 fio_str_info_s http_response_header_set(http_s *h,
                                         fio_str_info_s name,
                                         fio_str_info_s value) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return http_sstr_info(http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, -1));
+}
+
+/**
+ * Sets the header information associated with the HTTP handle.
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+fio_str_info_s http_response_header_set_if_missing(http_s *h,
+                                                   fio_str_info_s name,
+                                                   fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   return http_sstr_info(http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 0));
 }
@@ -918,18 +938,11 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
     /* test if streaming / single body response */
     if (args.finish) {
       /* validate / set Content-Length (not streaming) */
-      http_sstr_s k = {0};
-      http_sstr_s v = {0};
-      http_sary_s va = {0};
-      http_sstr_init_const(&k, "content-length", 14);
-      http_sstr_write_i(&v, args.len);
-      va = http_sary_tmp(v);
-      const uint64_t hash =
-          fio_risky_hash("content-length", 14, (uint64_t)(uintptr_t)(hdrs));
-      http_hmap_remove(hdrs, hash, k, NULL);
-      http_hmap_set_ptr(hdrs, hash, k, va, NULL, 1);
-      http_sary_destroy(&va);
-      http_sstr_destroy(&v);
+      char ibuf[32];
+      fio_str_info_s k = FIO_STR_INFO2("content-length", 14);
+      fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+      fio_string_write_u(&v, NULL, args.len);
+      http_hmap_set2(hdrs, k, v, -1);
     }
     /* start a response, unless status == 0 (which starts a request). */
     (&c->start_response)[h->status == 0](h, h->status, !args.finish);
@@ -1099,7 +1112,9 @@ void http_test FIO_NOOP(void) {
          !memcmp(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf,
                  url.host.buf,
                  url.host.len)),
-        "host header set round-trip error");
+        "host header set round-trip error (%s - %zu bytes)",
+        http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf,
+        http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).len);
     FIO_ASSERT(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf !=
                    url.host.buf,
                "host copy error");

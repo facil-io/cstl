@@ -17,9 +17,10 @@ Note: This is a **TOY** example, with only minimal security features.
 ***************************************************************************** */
 
 /* include some of the modules we use... */
-#define FIO_LOG
-#define FIO_CLI
-#define FIO_SERVER
+// #define FIO_LOG
+// #define FIO_CLI
+// #define FIO_SERVER
+#define FIO_EVERYTHING
 // #define FIO_MEMORY_DISABLE 1
 // #define FIO_USE_THREAD_MUTEX 1
 #include "fio-stl.h"
@@ -27,7 +28,7 @@ Note: This is a **TOY** example, with only minimal security features.
 /* we use local global variables to make the code easier. */
 
 #define HTTP_CLIENT_BUFFER 32768
-#define HTTP_MAX_BODY_SIZE (1 << 27)
+#define HTTP_MAX_BODY_SIZE (1ULL << 27)
 #define HTTP_MAX_HEADERS   16
 #define HTTP_TIMEOUTS      5000
 
@@ -116,22 +117,24 @@ int main(int argc, char const *argv[]) {
   http_test();
 #endif
   /* initialize the CLI options */
-  fio_cli_start(argc,
-                argv,
-                0, /* allow 1 unnamed argument - the address to connect to */
-                1,
-                "A simple HTTP \"hello world\" example, listening on the "
-                "specified URL. i.e.\n"
-                "\tNAME <url>\n\n"
-                "Unix socket examples:\n"
-                "\tNAME unix://./my.sock\n"
-                "\tNAME /full/path/to/my.sock\n"
-                "\nTCP/IP socket examples:\n"
-                "\tNAME tcp://localhost:3000/\n"
-                "\tNAME localhost://3000\n",
-                FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
-                FIO_CLI_PRINT_LINE(
-                    "NOTE: requests are limited to 32Kb and 16 headers each."));
+  fio_cli_start(
+      argc,
+      argv,
+      0, /* allow 1 unnamed argument - the address to connect to */
+      1,
+      "A simple HTTP \"hello world\" / echo example, using " FIO_POLL_ENGINE_STR
+      " and listening on the "
+      "specified URL. i.e.\n"
+      "\tNAME <url>\n\n"
+      "Unix socket examples:\n"
+      "\tNAME unix://./my.sock\n"
+      "\tNAME /full/path/to/my.sock\n"
+      "\nTCP/IP socket examples:\n"
+      "\tNAME tcp://localhost:3000/\n"
+      "\tNAME localhost://3000\n",
+      FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
+      FIO_CLI_PRINT_LINE(
+          "NOTE: requests are limited to 32Kb and 16 headers each."));
 
   /* review CLI for logging */
   if (fio_cli_get_bool("-V")) {
@@ -140,8 +143,9 @@ int main(int argc, char const *argv[]) {
   /* review CLI connection address (in URL format) */
   FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
              "Could not open listening socket as requested.");
-  FIO_LOG_INFO("Starting HTTP echo server. Press ^C to exit.");
-  fio_srv_run();
+  FIO_LOG_INFO("Starting HTTP echo server (" FIO_POLL_ENGINE_STR
+               "). Press ^C to exit.");
+  fio_srv_run(1);
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
   return 0;

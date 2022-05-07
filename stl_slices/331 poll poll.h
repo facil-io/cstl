@@ -5,150 +5,15 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_POLL                    /* Development inclusion - ignore line */
-#define FIO_POLL_DEV                /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "010 riskyhash.h"          /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#include "104 sock.h"               /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
-#ifdef FIO_POLL_DEV                 /* Development inclusion - ignore line */
-#include "201 array.h"              /* Development inclusion - ignore line */
-#include "210 map api.h"            /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
-
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+#include "330 poll api.h" /* Development inclusion - ignore line */
+#endif                    /* Development inclusion - ignore line */
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
 /* *****************************************************************************
-
 
 
 
                         POSIX Portable Polling with `poll`
-
-
-
-
-***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
-#define H___FIO_POLL___H
-
-#ifndef FIO_POLL_POSSIBLE_FLAGS
-/** The user flags IO events recognize */
-#define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
-#endif
-
-/* *****************************************************************************
-System call for polling using a `one-shot` approach
-***************************************************************************** */
-
-#ifndef FIO_SRV_ENGINE_POLL
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_POLL` to use `poll` */
-#define FIO_SRV_ENGINE_POLL 1
-#endif
-#ifndef FIO_SRV_ENGINE_EPOLL
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_EPOLL` to use `epoll` */
-#define FIO_SRV_ENGINE_EPOLL 2
-#endif
-#ifndef FIO_SRV_ENGINE_KQUEUE
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_KQUEUE` to use `kqueue` */
-#define FIO_SRV_ENGINE_KQUEUE 3
-#endif
-
-/* if `FIO_SRV_ENGINE` wasn't define, detect automatically. */
-#if !defined(FIO_SRV_ENGINE)
-#if defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_EPOLL
-#elif (defined(HAVE_KQUEUE) || __has_include("sys/event.h"))
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_KQUEUE
-#else
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_POLL
-#endif
-#endif /* FIO_SRV_ENGINE */
-
-/* *****************************************************************************
-Polling API
-***************************************************************************** */
-
-/** the `fio_poll_s` type should be considered opaque. */
-typedef struct fio_poll_s fio_poll_s;
-
-typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(int fd, void *udata);
-  /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(int fd, void *udata);
-  /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(int fd, void *udata);
-} fio_poll_settings_s;
-
-#if FIO_USE_THREAD_MUTEX_TMP
-#define FIO_POLL_INIT(...)                                                     \
-  { /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */            \
-    .settings = {__VA_ARGS__},                                                 \
-    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
-  }
-#else
-#define FIO_POLL_INIT(...)                                                     \
-  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
-  { .settings = {__VA_ARGS__}, .lock = FIO_LOCK_INIT }
-#endif
-
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/** Creates a new polling object / queue. */
-FIO_IFUNC fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
-#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
-
-/** Frees the polling object and its resources. */
-FIO_IFUNC int fio_poll_free(fio_poll_s *p);
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
-/** Destroys the polling object, freeing its resources. */
-FIO_IFUNC void fio_poll_destroy(fio_poll_s *p);
-
-/**
- * Adds a file descriptor to be monitored, adds events to be monitored or
- * updates the monitored file's `udata`.
- *
- * Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might
- * be ignored.
- *
- * Monitoring mode is always one-shot. If an event if fired, it is removed from
- * the monitoring state.
- *
- * Returns -1 on error.
- */
-SFUNC int fio_poll_monitor(fio_poll_s *p,
-                           int fd,
-                           void *udata,
-                           unsigned short flags);
-
-/**
- * Reviews if any of the monitored file descriptors has any events.
- *
- * `timeout` is in milliseconds.
- *
- * Returns the number of events called.
- *
- * Polling is thread safe, but has different effects on different threads.
- *
- * Adding a new file descriptor from one thread while polling in a different
- * thread will not poll that IO until `fio_poll_review` is called again.
- */
-SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
-
-/**
- * Stops monitoring the specified file descriptor, returning its udata (if any).
- */
-SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
-
-/** Closes all sockets, calling the `on_close`. */
-SFUNC void fio_poll_close_all(fio_poll_s *p);
-
-/* *****************************************************************************
-
-
-
-                          Poll Monitoring Implementation
 
 
 
@@ -215,27 +80,17 @@ FIO_IFUNC void fio___poll_map_remove2(fio___poll_map_s *m, int fd) {
 Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
 
-/* do we have a constructor? */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
-  fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
+/** Initializes the polling object, allocating its resources. */
+FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
   if (p) {
     *p = (fio_poll_s){
-        .settings = settings,
+        .settings = args,
         .map = FIO_MAP_INIT,
         .lock = FIO___LOCK_INIT,
     };
+    FIO_POLL_VALIDATE(p->settings);
   }
-  return p;
 }
-/* Frees any internal data AND the object's container! */
-FIO_IFUNC int fio_poll_free(fio_poll_s *p) {
-  fio_poll_destroy(p);
-  FIO_MEM_FREE_(p, sizeof(*p));
-  return 0;
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /** Destroys the polling object, freeing its resources. */
 FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
@@ -255,28 +110,6 @@ Poll Monitoring Implementation - possibly externed functions.
 #else
 #define FIO_POLL_DEBUG_LOG(...)
 #endif
-
-/* mock event */
-FIO_SFUNC void fio___poll_ev_mock(int fd, void *udata) {
-  (void)fd;
-  (void)udata;
-}
-
-/* validate settings */
-FIO_SFUNC void fio___poll_validate(fio_poll_s *p) {
-  if (!p->settings.on_data)
-    p->settings.on_data = fio___poll_ev_mock;
-  if (!p->settings.on_ready)
-    p->settings.on_ready = fio___poll_ev_mock;
-  if (!p->settings.on_close)
-    p->settings.on_close = fio___poll_ev_mock;
-}
-
-FIO_IFUNC void fio___poll_validate_test(fio_poll_s *p) {
-  if (!(((uintptr_t)p->settings.on_data) & ((uintptr_t)p->settings.on_ready) &
-        ((uintptr_t)p->settings.on_close)))
-    fio___poll_validate(p);
-}
 
 /* handle events, return a mask for possible remaining flags. */
 FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
@@ -335,7 +168,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Adding a new file descriptor from one thread while polling in a different
  * thread will not poll that IO until `fio_poll_review` is called again.
  */
-SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
+SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
   int handled = -1;
   if (!p || !fio___poll_map_count(&p->map)) {
@@ -344,8 +177,6 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     }
     return 0;
   }
-  fio___poll_validate_test(p);
-
   /* handle events in a copy, allowing events / threads to mutate it */
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
@@ -373,9 +204,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   }
 
 #if FIO_OS_WIN
-  events = WSAPoll(pfd, r, timeout);
+  events = WSAPoll(pfd, r, (int)timeout);
 #else
-  events = poll(pfd, r, timeout);
+  events = poll(pfd, r, (int)timeout);
 #endif
 
   if (events > 0) {
@@ -437,18 +268,18 @@ finish:
 /**
  * Stops monitoring the specified file descriptor, returning its udata (if any).
  */
-SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
+SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+  int r = 0;
   fio___poll_i_s *i = NULL;
-  void *udata = NULL;
   FIO___LOCK_LOCK(p->lock);
   i = fio___poll_map_get2(&p->map, fd);
   if (i) {
-    udata = i->udata;
     i->flags = 0;
     i->udata = NULL;
   }
+  r = 0 - (!i);
   FIO___LOCK_UNLOCK(p->lock);
-  return udata;
+  return r;
 }
 
 /** Closes all sockets, calling the `on_close`. */
@@ -474,7 +305,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
+  fio_poll_s p;
+  fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
@@ -500,4 +332,4 @@ Cleanup
 ***************************************************************************** */
 #undef FIO_POLL_EX_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_POLL */
+#endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */

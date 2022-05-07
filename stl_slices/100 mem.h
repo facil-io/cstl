@@ -1118,13 +1118,17 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
               FIO_NAME(FIO_MEMORY_NAME,                                        \
                        malloc)) "):\n          "                               \
                                 "Total memory chunks allocated "               \
-                                "after cleanup (POSSIBLE LEAKS): %zd\n"        \
-                                "\n          malloc / calloc : %zu"            \
-                                "\n          free            : %zu",           \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0],   \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2],   \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]);  \
+                                "after cleanup (POSSIBLE LEAKS): %zd",         \
+          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]);  \
     }                                                                          \
+    FIO_LOG_INFO(                                                              \
+        "(" FIO_MACRO2STR(                                                     \
+            FIO_NAME(FIO_MEMORY_NAME,                                          \
+                     malloc)) ") usage:"                                       \
+                              "\n          malloc / calloc : %zu"              \
+                              "\n          free            : %zu",             \
+        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2],     \
+        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]);    \
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
   fio_atomic_add(                                                              \
@@ -1396,10 +1400,10 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
+void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
-
+  (void)ignr_;
 #if DEBUG
   FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
       FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
@@ -1503,6 +1507,9 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     return;
   fio_state_callback_add(FIO_CALL_IN_CHILD,
                          FIO_NAME(FIO_MEMORY_NAME, __malloc_after_fork_task),
+                         NULL);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup),
                          NULL);
   /* allocate the state machine */
   {

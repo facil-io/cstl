@@ -31,23 +31,30 @@ Everything, and the Kitchen Sink
 #define FIO_CLI
 #define FIO_FILES
 #define FIO_GLOB_MATCH
-#define FIO_MALLOC
+#define FIO_LOG
 #define FIO_MATH
-#define FIO_QUEUE
 #define FIO_RAND
 #define FIO_RISKY_HASH
 #define FIO_SHA1
 #define FIO_SIGNAL
 #define FIO_SOCK
-#define FIO_STR_CORE
-#define FIO_STREAM
+#define FIO_STATE
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
 
-#define FIO_STATE
-#define FIO_SERVER
+#include FIO__FILE__
+
+#define FIO_MALLOC
+#define FIO_QUEUE
+#define FIO_STR_CORE
+
+#include FIO__FILE__
+
+#define FIO_MEMORY_NAME fio__srv_mem
 #define FIO_PUBSUB
+#define FIO_SERVER
+#define FIO_STREAM
 
 #include FIO__FILE__
 

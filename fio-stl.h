@@ -1253,26 +1253,39 @@ Common macros
 #endif
 #endif
 
-/* Modules required by FIO_SERVER */
+/* Modules that require FIO_SERVER */
+#if defined(FIO_PUBSUB)
+#ifndef FIO_SERVER
+#define FIO_SERVER
+#endif
+#endif
+
+/* Modules that require FIO_POLL */
 #if defined(FIO_SERVER)
 #ifndef FIO_POLL
 #define FIO_POLL
 #endif
-#ifndef FIO_STREAM
-#define FIO_STREAM
 #endif
-#ifndef FIO_QUEUE
-#define FIO_QUEUE
-#endif
+
+/* Modules that require FIO_SIGNAL */
+#if defined(FIO_SERVER)
 #ifndef FIO_SIGNAL
 #define FIO_SIGNAL
 #endif
 #endif
 
 /* Modules that require FIO_STATE */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_SERVER)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_POLL) ||    \
+    defined(FIO_SERVER)
 #ifndef FIO_STATE
 #define FIO_STATE
+#endif
+#endif
+
+/* Modules that require FIO_STREAM */
+#if defined(FIO_SERVER)
+#ifndef FIO_STREAM
+#define FIO_STREAM
 #endif
 #endif
 
@@ -1280,6 +1293,13 @@ Common macros
 #if defined(FIO_POLL) || defined(FIO_SERVER)
 #ifndef FIO_SOCK
 #define FIO_SOCK
+#endif
+#endif
+
+/* Modules that require FIO_QUEUE */
+#if defined(FIO_POLL) || defined(FIO_SERVER)
+#ifndef FIO_QUEUE
+#define FIO_QUEUE
 #endif
 #endif
 
@@ -4653,7 +4673,7 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
   }
   /* read overflow */
   errno = E2BIG;
-  return (val = 0x8000000000000000ULL);
+  return (int64_t)(val = 0x8000000000000000ULL);
 }
 
 SFUNC int64_t fio_atol10(char **pstr) {
@@ -10533,13 +10553,17 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
               FIO_NAME(FIO_MEMORY_NAME,                                        \
                        malloc)) "):\n          "                               \
                                 "Total memory chunks allocated "               \
-                                "after cleanup (POSSIBLE LEAKS): %zd\n"        \
-                                "\n          malloc / calloc : %zu"            \
-                                "\n          free            : %zu",           \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0],   \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2],   \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]);  \
+                                "after cleanup (POSSIBLE LEAKS): %zd",         \
+          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]);  \
     }                                                                          \
+    FIO_LOG_INFO(                                                              \
+        "(" FIO_MACRO2STR(                                                     \
+            FIO_NAME(FIO_MEMORY_NAME,                                          \
+                     malloc)) ") usage:"                                       \
+                              "\n          malloc / calloc : %zu"              \
+                              "\n          free            : %zu",             \
+        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2],     \
+        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]);    \
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
   fio_atomic_add(                                                              \
@@ -10811,10 +10835,10 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 
 /* SublimeText marker */
 void fio___mem_state_cleanup___(void);
-FIO_DESTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)) {
+void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
-
+  (void)ignr_;
 #if DEBUG
   FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
       FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
@@ -10918,6 +10942,9 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     return;
   fio_state_callback_add(FIO_CALL_IN_CHILD,
                          FIO_NAME(FIO_MEMORY_NAME, __malloc_after_fork_task),
+                         NULL);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup),
                          NULL);
   /* allocate the state machine */
   {
@@ -14098,6 +14125,21 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 }
 #define accept fio_sock_accept
 #define poll   WSAPoll
+/** Acts as POSIX dup. Use this for portability with WinSock2. */
+FIO_IFUNC int fio_sock_dup(int original) {
+  int fd = -1;
+  SOCKET tmpfd = INVALID_SOCKET;
+  WSAPROTOCOL_INFOA info;
+  if (!WSADuplicateSocketA(original, GetCurrentProcessId(), &info) &&
+      (tmpfd = WSASocketA(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &info, 0, 0)) !=
+          INVALID_SOCKET) {
+    if (FIO_SOCK_FD_ISVALID(tmpfd))
+      fd = (int)tmpfd;
+    else
+      fio_sock_close(tmpfd);
+  }
+  return fd;
+}
 
 #elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
@@ -14119,6 +14161,8 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 #define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd)            close(fd)
+/** Acts as POSIX dup. Use this macro for portability with WinSock2. */
+#define fio_sock_dup(fd)              dup(fd)
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
@@ -26981,6 +27025,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
+#include "102 queue.h"              /* Development inclusion - ignore line */
 #include "104 sock.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 #ifdef FIO_POLL_DEV                 /* Development inclusion - ignore line */
@@ -26993,7 +27038,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-                        POSIX Portable Polling with `poll`
+                            POSIX Portable Polling
 
 
 
@@ -27007,34 +27052,52 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
 #endif
 
+#ifndef FIO_POLL_MAX_EVENTS
+/** relevant only for epoll and kqueue - maximum number of events per review */
+#define FIO_POLL_MAX_EVENTS FIO_QUEUE_TASKS_PER_ALLOC
+#endif
+
 /* *****************************************************************************
-System call for polling using a `one-shot` approach
+Possible polling engine (system call) selection
 ***************************************************************************** */
 
-#ifndef FIO_SRV_ENGINE_POLL
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_POLL` to use `poll` */
-#define FIO_SRV_ENGINE_POLL 1
+#ifndef FIO_POLL_ENGINE_POLL
+/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_POLL` to use `poll` */
+#define FIO_POLL_ENGINE_POLL 1
 #endif
-#ifndef FIO_SRV_ENGINE_EPOLL
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_EPOLL` to use `epoll` */
-#define FIO_SRV_ENGINE_EPOLL 2
+#ifndef FIO_POLL_ENGINE_EPOLL
+/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_EPOLL` to use `epoll` */
+#define FIO_POLL_ENGINE_EPOLL 2
 #endif
-#ifndef FIO_SRV_ENGINE_KQUEUE
-/** define `FIO_SRV_ENGINE` as `FIO_SRV_ENGINE_KQUEUE` to use `kqueue` */
-#define FIO_SRV_ENGINE_KQUEUE 3
+#ifndef FIO_POLL_ENGINE_KQUEUE
+/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_KQUEUE` to use `kqueue` */
+#define FIO_POLL_ENGINE_KQUEUE 3
 #endif
 
-/* if `FIO_SRV_ENGINE` wasn't define, detect automatically. */
-#if !defined(FIO_SRV_ENGINE)
+/* if `FIO_POLL_ENGINE` wasn't define, detect automatically. */
+#if !defined(FIO_POLL_ENGINE)
 #if defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_EPOLL
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL
 #elif (defined(HAVE_KQUEUE) || __has_include("sys/event.h"))
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_KQUEUE
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE
 #else
-#define FIO_SRV_ENGINE FIO_SRV_ENGINE_POLL
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #endif
-#endif /* FIO_SRV_ENGINE */
+#endif /* FIO_POLL_ENGINE */
 
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
+#ifndef FIO_POLL_ENGINE_STR
+#define FIO_POLL_ENGINE_STR "poll"
+#endif
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
+#ifndef FIO_POLL_ENGINE_STR
+#define FIO_POLL_ENGINE_STR "epoll"
+#endif
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
+#ifndef FIO_POLL_ENGINE_STR
+#define FIO_POLL_ENGINE_STR "kqueue"
+#endif
+#endif
 /* *****************************************************************************
 Polling API
 ***************************************************************************** */
@@ -27051,29 +27114,17 @@ typedef struct {
   void (*on_close)(int fd, void *udata);
 } fio_poll_settings_s;
 
-#if FIO_USE_THREAD_MUTEX_TMP
-#define FIO_POLL_INIT(...)                                                     \
-  { /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */            \
-    .settings = {__VA_ARGS__},                                                 \
-    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
-  }
-#else
-#define FIO_POLL_INIT(...)                                                     \
-  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
-  { .settings = {__VA_ARGS__}, .lock = FIO_LOCK_INIT }
-#endif
-
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/** Creates a new polling object / queue. */
-FIO_IFUNC fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
-#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
-
-/** Frees the polling object and its resources. */
-FIO_IFUNC int fio_poll_free(fio_poll_s *p);
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+/** Initializes the polling object, allocating its resources. */
+FIO_IFUNC void fio_poll_init(fio_poll_s *p, fio_poll_settings_s);
+/** Initializes the polling object, allocating its resources. */
+#define fio_poll_init(p, ...)                                                  \
+  fio_poll_init((p), (fio_poll_settings_s){__VA_ARGS__})
 
 /** Destroys the polling object, freeing its resources. */
 FIO_IFUNC void fio_poll_destroy(fio_poll_s *p);
+
+/** returns the system call used for polling as a constant string. */
+FIO_IFUNC const char *fio_poll_engine(void);
 
 /**
  * Adds a file descriptor to be monitored, adds events to be monitored or
@@ -27104,21 +27155,434 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Adding a new file descriptor from one thread while polling in a different
  * thread will not poll that IO until `fio_poll_review` is called again.
  */
-SFUNC int fio_poll_review(fio_poll_s *p, int timeout);
+SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout);
 
-/**
- * Stops monitoring the specified file descriptor, returning its udata (if any).
- */
-SFUNC void *fio_poll_forget(fio_poll_s *p, int fd);
+/** Stops monitoring the specified file descriptor (if monitoring). */
+SFUNC int fio_poll_forget(fio_poll_s *p, int fd);
 
-/** Closes all sockets, calling the `on_close`. */
-SFUNC void fio_poll_close_all(fio_poll_s *p);
+/* *****************************************************************************
+Implementation Helpers
+***************************************************************************** */
 
+/** returns the system call used for polling as a constant string. */
+FIO_IFUNC const char *fio_poll_engine(void) { return FIO_POLL_ENGINE_STR; }
+
+/* validate settings */
+#define FIO_POLL_VALIDATE(settings_dest)                                       \
+  if (!(settings_dest).on_data)                                                \
+    (settings_dest).on_data = fio___poll_ev_mock;                              \
+  if (!(settings_dest).on_ready)                                               \
+    (settings_dest).on_ready = fio___poll_ev_mock;                             \
+  if (!(settings_dest).on_close)                                               \
+    (settings_dest).on_close = fio___poll_ev_mock;
+
+SFUNC void fio___poll_ev_mock(int fd, void *udata);
+
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+/* mock event */
+SFUNC void fio___poll_ev_mock(int fd, void *udata) {
+  (void)fd;
+  (void)udata;
+}
+#endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL
+#include "330 poll api.h" /* Development inclusion - ignore line */
+#endif                    /* Development inclusion - ignore line */
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
 /* *****************************************************************************
 
 
 
-                          Poll Monitoring Implementation
+
+                        POSIX Portable Polling with `epoll`
+
+
+
+
+***************************************************************************** */
+#include <sys/epoll.h>
+
+/* *****************************************************************************
+Polling API
+***************************************************************************** */
+
+/** the `fio_poll_s` type should be considered opaque. */
+struct fio_poll_s {
+  fio_poll_settings_s settings;
+  struct pollfd fds[2];
+  int fd[2];
+};
+
+FIO_SFUNC void fio___epoll_after_fork(void *p_) {
+  fio_poll_s *p = (fio_poll_s *)p_;
+  fio_poll_destroy(p);
+  fio_poll_init FIO_NOOP(p, p->settings);
+}
+
+/** Initializes the polling object, allocating its resources. */
+FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
+  *p = (fio_poll_s){
+      .settings = args,
+      .fds =
+          {
+              {.fd = epoll_create1(0), .events = (POLLIN | POLLOUT)},
+              {.fd = epoll_create1(0), .events = (POLLIN | POLLOUT)},
+          },
+  };
+  FIO_POLL_VALIDATE(p->settings);
+  fio_state_callback_add(FIO_CALL_IN_CHILD, fio___epoll_after_fork, p);
+}
+
+/** Destroys the polling object, freeing its resources. */
+FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
+  for (int i = 0; i < 2; ++i) {
+    if (p->fds[i].fd != -1)
+      close(p->fds[i].fd);
+    p->fds[i].fd = -1;
+  }
+  fio_state_callback_remove(FIO_CALL_IN_CHILD, fio___epoll_after_fork, p);
+}
+
+/* *****************************************************************************
+Poll Monitoring Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO_IFUNC int fio___epoll_add2(int fd,
+                               void *udata,
+                               uint32_t events,
+                               int ep_fd) {
+  int ret = 0;
+  struct epoll_event chevent;
+  do {
+    errno = 0;
+    chevent = (struct epoll_event){
+        .events = events,
+        .data.ptr = udata,
+    };
+    ret = epoll_ctl(ep_fd, EPOLL_CTL_MOD, fd, &chevent);
+    if (ret == -1 && errno == ENOENT) {
+      errno = 0;
+      chevent = (struct epoll_event){
+          .events = events,
+          .data.ptr = udata,
+      };
+      ret = epoll_ctl(ep_fd, EPOLL_CTL_ADD, fd, &chevent);
+    }
+  } while (errno == EINTR);
+
+  return ret;
+}
+
+/**
+ * Adds a file descriptor to be monitored, adds events to be monitored or
+ * updates the monitored file's `udata`.
+ *
+ * Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might
+ * be ignored.
+ *
+ * Monitoring mode is always one-shot. If an event if fired, it is removed from
+ * the monitoring state.
+ *
+ * Returns -1 on error.
+ */
+SFUNC int fio_poll_monitor(fio_poll_s *p,
+                           int fd,
+                           void *udata,
+                           unsigned short flags) {
+  int r = 0;
+  if ((flags & POLLOUT))
+    r |= fio___epoll_add2(fd,
+                          udata,
+                          (EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLONESHOT),
+                          p->fds[0].fd);
+  if ((flags & POLLIN))
+    r |= fio___epoll_add2(fd,
+                          udata,
+                          (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLONESHOT),
+                          p->fds[1].fd);
+  return r;
+}
+
+/**
+ * Stops monitoring the specified file descriptor, returning its udata (if any).
+ */
+SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+  int r = 0;
+  struct epoll_event chevent = {.events = (EPOLLOUT | EPOLLIN)};
+  r |= epoll_ctl(p->fds[0].fd, EPOLL_CTL_DEL, fd, &chevent);
+  r |= epoll_ctl(p->fds[1].fd, EPOLL_CTL_DEL, fd, &chevent);
+  return r;
+}
+
+/**
+ * Reviews if any of the monitored file descriptors has any events.
+ *
+ * `timeout` is in milliseconds.
+ *
+ * Returns the number of events called.
+ *
+ * Polling is thread safe, but has different effects on different threads.
+ *
+ * Adding a new file descriptor from one thread while polling in a different
+ * thread will not poll that IO until `fio_poll_review` is called again.
+ */
+SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
+  int total = 0;
+  struct epoll_event events[FIO_POLL_MAX_EVENTS];
+  /* wait for events and handle them */
+  int internal_count = poll(p->fds, 2, timeout);
+  if (internal_count <= 0)
+    return total;
+  int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
+  if (active_count > 0) {
+    for (int i = 0; i < active_count; i++) {
+      // errors are handled as disconnections (on_close) in the EPOLLIN queue
+      // if no error, try an active event(s)
+      if (events[i].events & EPOLLOUT)
+        p->settings.on_ready(-1, events[i].data.ptr);
+    } // end for loop
+    total += active_count;
+  }
+  active_count = epoll_wait(p->fds[1].fd, events, FIO_POLL_MAX_EVENTS, 0);
+  if (active_count > 0) {
+    for (int i = 0; i < active_count; i++) {
+      // errors are handled as disconnections (on_close), but only once...
+      if (events[i].events & (~(EPOLLIN | EPOLLOUT)))
+        p->settings.on_close(-1, events[i].data.ptr);
+      // no error, then it's an active event(s)
+      else if (events[i].events & EPOLLIN)
+        p->settings.on_data(-1, events[i].data.ptr);
+    } // end for loop
+    total += active_count;
+  }
+  return total;
+}
+
+/* *****************************************************************************
+Poll Monitoring Testing?
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
+  fprintf(stderr,
+          "* skipped testing file descriptor polling (engine: epoll).\n");
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL */
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE
+#include "330 poll api.h" /* Development inclusion - ignore line */
+#endif                    /* Development inclusion - ignore line */
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
+/* *****************************************************************************
+
+
+
+
+                        POSIX Portable Polling with `kqueue`
+
+
+
+
+***************************************************************************** */
+#include <sys/event.h>
+/* *****************************************************************************
+Polling API
+***************************************************************************** */
+
+/** the `fio_poll_s` type should be considered opaque. */
+struct fio_poll_s {
+  fio_poll_settings_s settings;
+  int fd;
+};
+
+FIO_SFUNC void fio___kqueue_after_fork(void *p_) {
+  fio_poll_s *p = (fio_poll_s *)p_;
+  fio_poll_destroy(p);
+  fio_poll_init FIO_NOOP(p, p->settings);
+}
+
+/** Initializes the polling object, allocating its resources. */
+FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
+  *p = (fio_poll_s){
+      .settings = args,
+      .fd = kqueue(),
+  };
+  if (p->fd == -1) {
+    FIO_LOG_FATAL("couldn't open kqueue.\n");
+    exit(errno);
+  }
+  FIO_POLL_VALIDATE(p->settings);
+  fio_state_callback_add(FIO_CALL_IN_CHILD, fio___kqueue_after_fork, p);
+}
+
+/** Destroys the polling object, freeing its resources. */
+FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
+  if (p->fd != -1)
+    close(p->fd);
+  p->fd = -1;
+  fio_state_callback_remove(FIO_CALL_IN_CHILD, fio___kqueue_after_fork, p);
+}
+
+/* *****************************************************************************
+Poll Monitoring Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/**
+ * Adds a file descriptor to be monitored, adds events to be monitored or
+ * updates the monitored file's `udata`.
+ *
+ * Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might
+ * be ignored.
+ *
+ * Monitoring mode is always one-shot. If an event if fired, it is removed from
+ * the monitoring state.
+ *
+ * Returns -1 on error.
+ */
+SFUNC int fio_poll_monitor(fio_poll_s *p,
+                           int fd,
+                           void *udata,
+                           unsigned short flags) {
+  int r = -1;
+  struct kevent chevent[2];
+  int i = 0;
+  if ((flags & POLLIN)) {
+    EV_SET(chevent,
+           fd,
+           EVFILT_READ,
+           EV_ADD | EV_ENABLE | EV_CLEAR | EV_ONESHOT,
+           0,
+           0,
+           udata);
+    ++i;
+  }
+  if ((flags & POLLOUT)) {
+    EV_SET(chevent + i,
+           fd,
+           EVFILT_WRITE,
+           EV_ADD | EV_ENABLE | EV_CLEAR | EV_ONESHOT,
+           0,
+           0,
+           udata);
+    ++i;
+  }
+  do {
+    errno = 0;
+  } while ((r = kevent(p->fd, chevent, i, NULL, 0, NULL)) == -1 &&
+           errno == EINTR);
+  return r;
+}
+
+/**
+ * Reviews if any of the monitored file descriptors has any events.
+ *
+ * `timeout` is in milliseconds.
+ *
+ * Returns the number of events called.
+ *
+ * Polling is thread safe, but has different effects on different threads.
+ *
+ * Adding a new file descriptor from one thread while polling in a different
+ * thread will not poll that IO until `fio_poll_review` is called again.
+ */
+SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
+  if (p->fd < 0)
+    return -1;
+  struct kevent events[FIO_POLL_MAX_EVENTS] = {{0}};
+
+  const struct timespec timeout = {.tv_sec = (timeout_ / 1024),
+                                   .tv_nsec =
+                                       ((timeout_ & (1023UL)) * 1000000)};
+  /* wait for events and handle them */
+  int active_count =
+      kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
+
+  if (active_count > 0) {
+    for (int i = 0; i < active_count; i++) {
+      // test for event(s) type
+      if (events[i].filter == EVFILT_WRITE) {
+        p->settings.on_ready(0, events[i].udata);
+      } else if (events[i].filter == EVFILT_READ) {
+        p->settings.on_data(0, events[i].udata);
+      }
+      if (events[i].flags & (EV_EOF | EV_ERROR)) {
+        p->settings.on_close(0, events[i].udata);
+      }
+    }
+  } else if (active_count < 0) {
+    if (errno == EINTR)
+      return 0;
+    return -1;
+  }
+  return active_count;
+}
+
+/** Stops monitoring the specified file descriptor (if monitoring). */
+SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+  int r = 0;
+  if (p->fd == -1)
+    return (r = -1);
+  struct kevent chevent[2];
+  EV_SET(chevent, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+  EV_SET(chevent + 1, fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+  do {
+    errno = 0;
+    r = kevent(p->fd, chevent, 2, NULL, 0, NULL);
+  } while (errno == EINTR);
+  return r;
+}
+
+/* *****************************************************************************
+Poll Monitoring Testing?
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
+  fprintf(stderr,
+          "* skipped testing file descriptor polling (engine: kqueue).\n");
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE */
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+#include "330 poll api.h" /* Development inclusion - ignore line */
+#endif                    /* Development inclusion - ignore line */
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
+/* *****************************************************************************
+
+
+
+                        POSIX Portable Polling with `poll`
 
 
 
@@ -27185,27 +27649,17 @@ FIO_IFUNC void fio___poll_map_remove2(fio___poll_map_s *m, int fd) {
 Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
 
-/* do we have a constructor? */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC fio_poll_s *fio_poll_new FIO_NOOP(fio_poll_settings_s settings) {
-  fio_poll_s *p = (fio_poll_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
+/** Initializes the polling object, allocating its resources. */
+FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
   if (p) {
     *p = (fio_poll_s){
-        .settings = settings,
+        .settings = args,
         .map = FIO_MAP_INIT,
         .lock = FIO___LOCK_INIT,
     };
+    FIO_POLL_VALIDATE(p->settings);
   }
-  return p;
 }
-/* Frees any internal data AND the object's container! */
-FIO_IFUNC int fio_poll_free(fio_poll_s *p) {
-  fio_poll_destroy(p);
-  FIO_MEM_FREE_(p, sizeof(*p));
-  return 0;
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /** Destroys the polling object, freeing its resources. */
 FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
@@ -27225,28 +27679,6 @@ Poll Monitoring Implementation - possibly externed functions.
 #else
 #define FIO_POLL_DEBUG_LOG(...)
 #endif
-
-/* mock event */
-FIO_SFUNC void fio___poll_ev_mock(int fd, void *udata) {
-  (void)fd;
-  (void)udata;
-}
-
-/* validate settings */
-FIO_SFUNC void fio___poll_validate(fio_poll_s *p) {
-  if (!p->settings.on_data)
-    p->settings.on_data = fio___poll_ev_mock;
-  if (!p->settings.on_ready)
-    p->settings.on_ready = fio___poll_ev_mock;
-  if (!p->settings.on_close)
-    p->settings.on_close = fio___poll_ev_mock;
-}
-
-FIO_IFUNC void fio___poll_validate_test(fio_poll_s *p) {
-  if (!(((uintptr_t)p->settings.on_data) & ((uintptr_t)p->settings.on_ready) &
-        ((uintptr_t)p->settings.on_close)))
-    fio___poll_validate(p);
-}
 
 /* handle events, return a mask for possible remaining flags. */
 FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
@@ -27305,7 +27737,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  * Adding a new file descriptor from one thread while polling in a different
  * thread will not poll that IO until `fio_poll_review` is called again.
  */
-SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
+SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
   int handled = -1;
   if (!p || !fio___poll_map_count(&p->map)) {
@@ -27314,8 +27746,6 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
     }
     return 0;
   }
-  fio___poll_validate_test(p);
-
   /* handle events in a copy, allowing events / threads to mutate it */
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
@@ -27343,9 +27773,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, int timeout) {
   }
 
 #if FIO_OS_WIN
-  events = WSAPoll(pfd, r, timeout);
+  events = WSAPoll(pfd, r, (int)timeout);
 #else
-  events = poll(pfd, r, timeout);
+  events = poll(pfd, r, (int)timeout);
 #endif
 
   if (events > 0) {
@@ -27407,18 +27837,18 @@ finish:
 /**
  * Stops monitoring the specified file descriptor, returning its udata (if any).
  */
-SFUNC void *fio_poll_forget(fio_poll_s *p, int fd) {
+SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+  int r = 0;
   fio___poll_i_s *i = NULL;
-  void *udata = NULL;
   FIO___LOCK_LOCK(p->lock);
   i = fio___poll_map_get2(&p->map, fd);
   if (i) {
-    udata = i->udata;
     i->flags = 0;
     i->udata = NULL;
   }
+  r = 0 - (!i);
   FIO___LOCK_UNLOCK(p->lock);
-  return udata;
+  return r;
 }
 
 /** Closes all sockets, calling the `on_close`. */
@@ -27444,7 +27874,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
       "* testing file descriptor monitoring (poll setup / cleanup only).\n");
-  fio_poll_s p = FIO_POLL_INIT(NULL, NULL, NULL);
+  fio_poll_s p;
+  fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
   for (int i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
@@ -27470,6 +27901,11 @@ Cleanup
 ***************************************************************************** */
 #undef FIO_POLL_EX_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#undef FIO_POLL
 #endif /* FIO_POLL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2022
@@ -27482,6 +27918,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
+#include "090 state callbacks.h"    /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #include "102 queue.h"              /* Development inclusion - ignore line */
 #include "104 sock.h"               /* Development inclusion - ignore line */
@@ -27539,6 +27976,16 @@ typedef struct fio_protocol_s fio_protocol_s;
 
 /** The main IO object type. Should be treated as an opaque pointer. */
 typedef struct fio_s fio_s;
+
+/* *****************************************************************************
+Starting / Stopping the Server
+***************************************************************************** */
+
+/* Stopping the server. */
+SFUNC void fio_srv_stop(void);
+
+/* Starts the server, using optional `workers` processes. This will BLOCK! */
+SFUNC void fio_srv_run(int workers);
 
 /* *****************************************************************************
 Listening to Incoming Connections
@@ -27951,17 +28398,17 @@ IO Validity Map - Type
 #endif
 
 #if FIO_VALIDITY_MAP_USE
-#define FIO_STL_KEEP__         1
 #define FIO_UMAP_NAME          fio_validity_map
 #define FIO_MAP_TYPE           fio_s *
 #define FIO_MAP_HASH_FN(o)     fio_risky_ptr(o)
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
-#include FIO__FILE__
-#undef FIO_STL_KEEP__
 #ifndef FIO_VALIDATE_IO_MUTEX
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
+#define FIO_STL_KEEP__ 1
+#include FIO__FILE__
+#undef FIO_STL_KEEP__
 #else
 typedef void *fio_validity_map_s;
 #endif
@@ -27982,18 +28429,17 @@ static struct {
   fio_thread_mutex_t valid_lock;
 #endif
 #endif /* FIO_VALIDITY_MAP_USE */
-  fio_poll_s fds;
+  fio_poll_s poll_data;
   int64_t tick;
   pid_t root_pid;
   pid_t pid;
-  volatile uint8_t running;
+  volatile uint8_t stop;
 } fio___srvdata = {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
-    .fds = FIO_POLL_INIT(fio___srv_poll_on_data_schd,
-                         fio___srv_poll_on_ready_schd,
-                         fio___srv_poll_on_close_schd),
+    .tick = 0,
+    .stop = 1,
 };
 
 /* *****************************************************************************
@@ -28136,7 +28582,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   FIO_LIST_REMOVE(&io->node);
   fio_sock_close(io->fd);
   fio_stream_destroy(&io->stream);
-  fio_poll_forget(&fio___srvdata.fds, io->fd);
+  fio_poll_forget(&fio___srvdata.poll_data, io->fd);
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d)", (void *)io, io->fd);
   union {
     void (*func)(void *);
@@ -28164,8 +28610,11 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
-  fio_poll_monitor(&fio___srvdata.fds, io->fd, (void *)io, POLLIN | POLLOUT);
-  /* TODO / FIX ? should call `on_close` for old protocol?*/
+  fio_poll_monitor(&fio___srvdata.poll_data,
+                   io->fd,
+                   (void *)io,
+                   POLLIN | POLLOUT);
+  /* TODO / FIX ? should we call `on_close` for old protocol? */
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
     FIO_LIST_REMOVE(&old->reserved.protocols);
   io->pr->on_attach(io);
@@ -28240,10 +28689,10 @@ static void fio___srv_poll_on_data(void *io_, void *ignr_) {
     /* this also tests for the suspended / throttled / closing flags */
     io->pr->on_data(io);
     if (io->state == FIO_STATE_OPEN) {
-      fio_poll_monitor(&fio___srvdata.fds, io->fd, io, POLLIN);
+      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
     }
   } else if ((io->state & FIO_STATE_OPEN)) {
-    fio_poll_monitor(&fio___srvdata.fds, io->fd, io, POLLOUT);
+    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
   }
   fio_free2(io);
   return;
@@ -28283,7 +28732,7 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
       } else {
         if ((io->state & FIO_STATE_THROTTLED)) {
           fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
-          fio_poll_monitor(&fio___srvdata.fds, io->fd, io, POLLIN);
+          fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
         }
         io->pr->on_ready(io);
       }
@@ -28293,7 +28742,7 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
           FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
         fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
       }
-      fio_poll_monitor(&fio___srvdata.fds, io->fd, io, POLLOUT);
+      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
     }
   }
 finish:
@@ -28385,61 +28834,190 @@ static void fio___srv_signal_handle(int sig, void *flg) {
   (void)sig;
 }
 
-SFUNC void fio_srv_tick(int timeout) {
-  fio_poll_review(&fio___srvdata.fds, timeout);
+FIO_SFUNC void fio___srv_tick(int timeout) {
+  fio_poll_review(&fio___srvdata.poll_data, timeout);
   fio___srvdata.tick = fio_time_milli();
   fio_timer_push2queue(fio___srv_tasks, fio___srv_timer, fio___srvdata.tick);
   fio_queue_perform_all(fio___srv_tasks);
   if (fio___srv_review_timeouts())
     fio_queue_perform_all(fio___srv_tasks);
+  fio_signal_review();
 }
 
-SFUNC void fio_srv_shutdown(void) {
-  int64_t shutting_down = fio___srvdata.tick = fio_time_milli();
+FIO_SFUNC void fio_srv_shutdown(void) {
+  /* collect tick for shutdown start, to monitor for possible timeout */
+  int64_t shutdown_start = fio___srvdata.tick = fio_time_milli();
+  /* preform on_shutdown callback for each connection and close */
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
                 &fio___srvdata.protocols,
                 pr) {
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
-      io->pr->on_shutdown(io);
+      io->pr->on_shutdown(io); /* TODO / FIX: skip close on return value? */
       fio_close(io);
     }
   }
-  while (shutting_down + 10000 >= fio___srvdata.tick &&
+  fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
+  /* cycle while connections exist. */
+  while (shutdown_start + 10000 >= fio___srvdata.tick &&
          !FIO_LIST_IS_EMPTY(&fio___srvdata.protocols)) {
-    fio_srv_tick(100);
+    fio___srv_tick(100);
   }
+  /* in case of timeout, force close remaining connections. */
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
                 &fio___srvdata.protocols,
                 pr) {
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) { fio_close_now(io); }
   }
+  /* perform remaining tasks. */
   fio_queue_perform_all(fio___srv_tasks);
-  fio_poll_destroy(&fio___srvdata.fds);
-  fio_queue_destroy(fio___srv_tasks);
 }
 
-SFUNC void fio_srv_run(void) {
-  volatile uint8_t stop = 0;
+FIO_SFUNC void fio___srv_work(int is_worker) {
+  fio_queue_perform_all(fio___srv_tasks);
+  if (is_worker) {
+    fio_state_callback_force(FIO_CALL_ON_START);
+  }
+  while (!fio___srvdata.stop) {
+    fio___srv_tick(500);
+  }
+  fio_srv_shutdown();
+  fio_state_callback_force(FIO_CALL_ON_FINISH);
+  fio_queue_perform_all(fio___srv_tasks);
+  /* if worker, exit */
+  if (fio___srvdata.pid != fio___srvdata.root_pid)
+    exit(0);
+}
+
+/* *****************************************************************************
+Worker Forking
+***************************************************************************** */
+#if 0
+static void fio_spawn_worker(void *ignr_1, void *ignr_2);
+
+static fio_lock_i fio_spawn_GIL = FIO_LOCK_INIT;
+
+/** Worker sentinel */
+static void *fio_worker_sentinel(void *thr_ptr) {
+  pid_t pid = FIO_FUNCTIONS.fork();
+  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  if (pid) {
+    int status = 0;
+    (void)status;
+    fio_state_callback_force(FIO_CALL_AFTER_FORK);
+    fio_state_callback_force(FIO_CALL_IN_MASTER);
+    fio_unlock(&fio_spawn_GIL);
+    if (waitpid(pid, &status, 0) != pid && fio_data.running)
+      FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
+    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+      FIO_LOG_WARNING("abnormal worker exit detected");
+      fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
+    }
+    if (fio_data.running) {
+      FIO_ASSERT_DEBUG(
+          0,
+          "DEBUG mode prevents worker re-spawning, now crashing parent.");
+      if (thr_ptr) {
+        fio_thread_detach(*(fio_thread_t *)thr_ptr);
+        memset(thr_ptr, 0, sizeof(fio_thread_t));
+      }
+      fio_queue_push(FIO_QUEUE_SYSTEM, fio_spawn_worker, thr_ptr);
+    }
+    return NULL;
+  }
+  fio_data.pid = getpid();
+  fio_data.is_master = 0;
+  fio_data.is_worker = 1;
+  fio_unlock(&fio_spawn_GIL);
+  fio___after_fork();
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio_data.pid);
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_CHILD);
+  fio___worker();
+  exit(0);
+  return NULL;
+}
+
+static void fio_spawn_worker(void *thr_ptr, void *ignr_2) {
+  fio_thread_t t;
+  fio_thread_t *pt = thr_ptr;
+  if (!pt)
+    pt = &t;
+  if (!fio_data.is_master)
+    return;
+
+  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
+  /* do not allow master tasks to run in worker */
+  fio_queue_perform_pending();
+
+  fio_lock(&fio_spawn_GIL);
+  if (fio_thread_create(pt, fio_worker_sentinel, thr_ptr)) {
+    fio_unlock(&fio_spawn_GIL);
+    FIO_LOG_FATAL(
+        "sentinel thread creation failed, no worker will be spawned.");
+    fio_stop();
+  }
+  if (!thr_ptr)
+    fio_thread_detach(t);
+  fio_lock(&fio_spawn_GIL);
+  fio_unlock(&fio_spawn_GIL);
+  (void)ignr_2;
+}
+#endif
+/* *****************************************************************************
+Starting the Server
+***************************************************************************** */
+
+/* Stopping the server. */
+SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
+
+/* Starts the server, using optional `workers` processes. This will BLOCK! */
+SFUNC void fio_srv_run(int workers) {
+  fio___srvdata.stop = 0;
   fio_sock_maximize_limits();
-  fio_signal_monitor(SIGINT, fio___srv_signal_handle, (void *)&stop);
-  fio_signal_monitor(SIGTERM, fio___srv_signal_handle, (void *)&stop);
+  fio_state_callback_force(FIO_CALL_PRE_START);
+  fio_queue_perform_all(fio___srv_tasks);
+  fio_signal_monitor(SIGINT,
+                     fio___srv_signal_handle,
+                     (void *)&fio___srvdata.stop);
+  fio_signal_monitor(SIGTERM,
+                     fio___srv_signal_handle,
+                     (void *)&fio___srvdata.stop);
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
   fio___srvdata.tick = fio_time_milli();
-  fio_queue_perform_all(fio___srv_tasks);
-  do {
-    fio_srv_tick(250);
-    fio_signal_review();
-  } while (!stop);
-  fio_srv_shutdown();
+  if (workers < 0) {
+    /* TODO */
+    int cores = -1;
+#ifdef _SC_NPROCESSORS_ONLN
+    cores = sysconf(_SC_NPROCESSORS_ONLN);
+#endif /* _SC_NPROCESSORS_ONLN */
+    if (cores == -1) {
+      cores = 8;
+      FIO_LOG_WARNING("fio_srv_run called with negative value for worker "
+                      "count, but auto-detect failed, assuming %d CPU cores",
+                      cores);
+    }
+    workers = cores / (0 - workers);
+    workers += !workers;
+  }
+  if (workers)
+    FIO_LOG_INFO("* Starting facil.io server using %d workers.", workers);
+  else
+    FIO_LOG_INFO("* Starting facil.io server in single process mode.");
+  for (int i = 0; i < workers; ++i) {
+    /* TODO: spawn workers */
+    workers = 0;
+  }
+  fio___srv_work(!workers);
   fio_signal_forget(SIGINT);
   fio_signal_forget(SIGTERM);
 #ifdef SIGPIPE
   fio_signal_forget(SIGPIPE);
 #endif
+  fio_queue_perform_all(fio___srv_tasks);
 }
 
 /* *****************************************************************************
@@ -28562,7 +29140,7 @@ SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_unsuspend(fio_s *io) {
   if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) & FIO_STATE_SUSPENDED))
-    fio_poll_monitor(&fio___srvdata.fds, io->fd, (void *)io, POLLIN);
+    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
 }
 
 /** Returns 1 if the IO handle was suspended. */
@@ -28578,9 +29156,9 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
   int fd;
-  struct fio_listen_args *s = (struct fio_listen_args *)(io->udata);
+  struct fio_listen_args *l = (struct fio_listen_args *)(io->udata);
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
-    s->on_open(fd, s->udata);
+    l->on_open(fd, l->udata);
   }
   fio_free2(io);
 }
@@ -28590,15 +29168,15 @@ static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
 
 static void fio___srv_listen_on_data(fio_s *io) {
   int fd;
-  struct fio_listen_args *s = (struct fio_listen_args *)(io->udata);
-  if (s->queue_for_accept) {
-    fio_queue_push(s->queue_for_accept,
+  struct fio_listen_args *l = (struct fio_listen_args *)(io->udata);
+  if (l->queue_for_accept) {
+    fio_queue_push(l->queue_for_accept,
                    fio___srv_listen_on_data_task_reschd,
                    fio_dup2(io));
     return;
   }
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
-    s->on_open(fd, s->udata);
+    l->on_open(fd, l->udata);
   }
 }
 static void fio___srv_listen_on_close(void *settings_) {
@@ -28606,15 +29184,34 @@ static void fio___srv_listen_on_close(void *settings_) {
   if (s->on_finish)
     s->on_finish(s->udata);
   FIO_LOG_DEBUG2("Stopped listening on %s", s->url);
-  FIO_MEM_FREE_(s, sizeof(*s) + strlen(s->url) + 1);
 }
 static void fio___srv_listen_on_timeout(fio_s *io) { fio_touch(io); }
+
+FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
+  struct fio_listen_args *l = udata;
+  int *pfd = (int *)(l + 1);
+  close(*pfd);
+  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
+}
 
 static fio_protocol_s FIO___LISTEN_PROTOCOL = {
     .on_data = fio___srv_listen_on_data,
     .on_close = fio___srv_listen_on_close,
     .on_timeout = fio___srv_listen_on_timeout,
 };
+
+FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
+  struct fio_listen_args *l = udata;
+  int *pfd = (int *)(l + 1);
+  int fd = fio_sock_dup(*pfd);
+  FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
+  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
+                 (int)fio___srvdata.pid,
+                 *pfd,
+                 fd);
+  fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+}
 
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   static int64_t port = 3000;
@@ -28623,30 +29220,43 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
     return -1;
   }
   size_t len = args.url ? strlen(args.url) + 1 : 0;
-  len += (!len) << 4;
+  len += (!len) << 6;
   struct fio_listen_args *cpy = (struct fio_listen_args *)
-      FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + len), 0);
+      FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + sizeof(int) + len), 0);
   FIO_ASSERT_ALLOC(cpy);
   *cpy = args;
-  cpy->url = (char *)(cpy + 1);
+  cpy->url = (char *)(cpy + 1) + sizeof(int);
+  int *fd_store = (int *)(cpy + 1);
   if (args.url) {
     FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
+    if (port == 3000) {
+      char *port_env = getenv("PORT");
+      if (port_env)
+        port = fio_atol10(&port_env);
+      if (!port | ((uint64_t)port > 65535))
+        port = 3000;
+    }
     fio_str_info_s tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
+    fio_str_info_s adr;
+    if (!(adr.buf = getenv("ADDRESS")) || (adr.len = strlen(adr.buf)) > 58) {
+      adr = FIO_STR_INFO2("0.0.0.0:", 8);
+    }
     fio_string_write2(&tmp,
                       NULL,
-                      FIO_STRING_WRITE_STR2("0.0.0.0:", 8),
+                      FIO_STRING_WRITE_STR2(adr.buf, adr.len),
                       FIO_STRING_WRITE_UNUM(port));
     ++port;
   }
   int fd = fio_sock_open2(cpy->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
   if (fd == -1)
     goto fd_error;
-  if (args.on_root) /* TODO! */
-    fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
-  else
-    fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, (void *)cpy, NULL);
-  FIO_LOG_DEBUG2("Started listening on %s", cpy->url);
+  *fd_store = fd;
+  fio_state_callback_add(
+      (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
+      fio___srv_listen_attach_task,
+      (void *)cpy);
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_cleanup_task, cpy);
   return 0;
 fd_error:
   FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
@@ -28654,20 +29264,45 @@ fd_error:
 }
 
 /* *****************************************************************************
+Managing data after a fork
+***************************************************************************** */
+FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
+  (void)ignr_;
+  fio___srvdata.pid = getpid();
+  fio_queue_perform_all(fio___srv_tasks);
+  FIO_LIST_EACH(fio_protocol_s,
+                reserved.protocols,
+                &fio___srvdata.protocols,
+                pr) {
+    FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) { fio_close_now(io); }
+  }
+  fio_queue_perform_all(fio___srv_tasks);
+  fio_invalidate_all();
+  fio_queue_perform_all(fio___srv_tasks);
+  fio_queue_destroy(fio___srv_tasks);
+}
+
+FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
+  fio___srv_after_fork(ignr_);
+  fio_poll_destroy(&fio___srvdata.poll_data);
+}
+
+/* *****************************************************************************
 Initializing Server State
 ***************************************************************************** */
 FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
+  fio_poll_init(&fio___srvdata.poll_data,
+                .on_data = fio___srv_poll_on_data_schd,
+                .on_ready = fio___srv_poll_on_ready_schd,
+                .on_close = fio___srv_poll_on_close_schd);
   fio___srv_init_protocol_test(&MOCK_PROTOCOL);
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
   fio___srvdata.tick = fio_time_milli();
   fio___srvdata.root_pid = fio___srvdata.pid = getpid();
-}
-
-FIO_DESTRUCTOR(fio___srv_cleanup) {
-  fio_invalidate_all();
-  fio_queue_perform_all(fio___srv_tasks);
+  fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
 }
 
 /* *****************************************************************************
@@ -32573,23 +33208,30 @@ Everything, and the Kitchen Sink
 #define FIO_CLI
 #define FIO_FILES
 #define FIO_GLOB_MATCH
-#define FIO_MALLOC
+#define FIO_LOG
 #define FIO_MATH
-#define FIO_QUEUE
 #define FIO_RAND
 #define FIO_RISKY_HASH
 #define FIO_SHA1
 #define FIO_SIGNAL
 #define FIO_SOCK
-#define FIO_STR_CORE
-#define FIO_STREAM
+#define FIO_STATE
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
 
-#define FIO_STATE
-#define FIO_SERVER
+#include FIO__FILE__
+
+#define FIO_MALLOC
+#define FIO_QUEUE
+#define FIO_STR_CORE
+
+#include FIO__FILE__
+
+#define FIO_MEMORY_NAME fio__srv_mem
 #define FIO_PUBSUB
+#define FIO_SERVER
+#define FIO_STREAM
 
 #include FIO__FILE__
 

@@ -154,6 +154,11 @@ fio_str_info_s http_request_header_set(http_s *,
                                        fio_str_info_s name,
                                        fio_str_info_s value);
 
+/** Sets the header information associated with the HTTP handle. */
+fio_str_info_s http_request_header_set_if_missing(http_s *,
+                                                  fio_str_info_s name,
+                                                  fio_str_info_s value);
+
 /** Adds to the header information associated with the HTTP handle. */
 fio_str_info_s http_request_header_add(http_s *,
                                        fio_str_info_s name,
@@ -333,6 +338,15 @@ fio_str_info_s http_response_header_get(http_s *,
 fio_str_info_s http_response_header_set(http_s *,
                                         fio_str_info_s name,
                                         fio_str_info_s value);
+/**
+ * Sets the header information associated with the HTTP handle.
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+fio_str_info_s http_response_header_set_if_missing(http_s *,
+                                                   fio_str_info_s name,
+                                                   fio_str_info_s value);
 
 /**
  * Adds to the header information associated with the HTTP handle.

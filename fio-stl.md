@@ -6938,19 +6938,21 @@ Sets a value for the named argument (but **not** it's aliases).
 #include "fio-stl.h"
 ```
 
-IO polling using the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
+IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
 
-The facil.io standard library provides a persistent polling container for evented management of small IO (file descriptor) collections using the "one-shot" model.
+The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
 
 "One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
 
-There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `poll` system call. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases.
+There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
 
-It is recommended to use a system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
+It is recommended to use the system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
 
 By defining `FIO_POLL`, the following functions will be defined.
 
 **Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
+
+**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
 
 ### `FIO_POLL` API
 
@@ -6963,21 +6965,7 @@ typedef struct fio_poll_s fio_poll_s;
 
 The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
 
-#### `FIO_POLL_INIT`
-
-```c
-#define FIO_POLL_INIT(...)                                                     \
-  /* FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func) */              \
-  { .settings = { __VA_ARGS__ }, .lock = FIO_LOCK_INIT }
-```
-
-A `fio_poll_s` object initialization macro.
-
-Static initialization may be limited to POSIX systems.
-
-Use: `FIO_POLL_INIT(on_data_func, on_ready_func, on_close_func)`
-
-#### `fio_poll_new`
+#### `fio_poll_init`
 
 ```c
 fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
@@ -7000,15 +6988,7 @@ typedef struct {
 } fio_poll_settings_s;
 ```
 
-Returns NULL on error (no memory).
-
-#### `fio_poll_free`
-
-```c
-int fio_poll_free(fio_poll_s *p);
-```
-
-Frees the polling object and its resources.
+**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
 
 #### `fio_poll_destroy`
 
@@ -7018,15 +6998,7 @@ void fio_poll_destroy(fio_poll_s *p);
 
 Destroys the polling object, freeing its resources.
 
-**Note**: the monitored file descriptors will remain untouched (possibly open). To close all the monitored file descriptors, call `fio_poll_close_and_destroy` instead.
-
-#### `fio_poll_close_and_destroy`
-
-```c
-void fio_poll_close_all(fio_poll_s *p);
-```
-
-Closes all monitored connections, calling the `on_close` callbacks for all of them.
+**Note**: the monitored file descriptors will remain untouched (possibly open).
 
 #### `fio_poll_monitor`
 
@@ -7071,18 +7043,6 @@ void *fio_poll_forget(fio_poll_s *p, int fd);
 Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
 
 ### `FIO_POLL` Compile Time Macros
-
-#### `FIO_POLL_HAS_UDATA_COLLECTION`
-
-```c
-#ifndef FIO_POLL_HAS_UDATA_COLLECTION
-#define FIO_POLL_HAS_UDATA_COLLECTION 1
-#endif
-```
-
-When set to true (the default value), the `udata` value is unique per file descriptor, using an array of `udata` values.
-
-When false, a global `udata` is used and it is updated whenever a `udata` value is supplied (`NULL` values are ignored).
 
 #### `FIO_POLL_FRAGMENTATION_LIMIT`
 

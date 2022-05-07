@@ -278,7 +278,7 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
   }
   /* read overflow */
   errno = E2BIG;
-  return (val = 0x8000000000000000ULL);
+  return (int64_t)(val = 0x8000000000000000ULL);
 }
 
 SFUNC int64_t fio_atol10(char **pstr) {

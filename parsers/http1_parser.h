@@ -457,10 +457,10 @@ inline /* inline the function if it's short enough */
       (((uint32_t *)(start_value + 3))[0] | 0x20202020) ==
           ((uint32_t *)"nked")[0]
 #else
-      ((start_value[0] | 32) == 'c' & (start_value[1] | 32) == 'h' &
-       (start_value[2] | 32) == 'u' & (start_value[3] | 32) == 'n' &
-       (start_value[4] | 32) == 'k' & (start_value[5] | 32) == 'e' &
-       (start_value[6] | 32) == 'd')
+      (((start_value[0] | 32) == 'c') & ((start_value[1] | 32) == 'h') &
+       ((start_value[2] | 32) == 'u') & ((start_value[3] | 32) == 'n') &
+       ((start_value[4] | 32) == 'k') & ((start_value[5] | 32) == 'e') &
+       ((start_value[6] | 32) == 'd'))
 #endif
   ) {
     /* simple case,only `chunked` as a value */
@@ -472,10 +472,10 @@ inline /* inline the function if it's short enough */
     if (!(end - start_value))
       return 0;
   } else if ((end - start_value) > 7 &&
-             ((end[(-7 + 0)] | 32) == 'c' & (end[(-7 + 1)] | 32) == 'h' &
-              (end[(-7 + 2)] | 32) == 'u' & (end[(-7 + 3)] | 32) == 'n' &
-              (end[(-7 + 4)] | 32) == 'k' & (end[(-7 + 5)] | 32) == 'e' &
-              (end[(-7 + 6)] | 32) == 'd')) {
+             (((end[(-7 + 0)] | 32) == 'c') & ((end[(-7 + 1)] | 32) == 'h') &
+              ((end[(-7 + 2)] | 32) == 'u') & ((end[(-7 + 3)] | 32) == 'n') &
+              ((end[(-7 + 4)] | 32) == 'k') & ((end[(-7 + 5)] | 32) == 'e') &
+              ((end[(-7 + 6)] | 32) == 'd'))) {
     /* simple case,`chunked` at the end of list (RFC required) */
     parser->state.reserved |= HTTP1_P_FLAG_CHUNKED;
     parser->state.content_length = 0;
@@ -499,10 +499,10 @@ inline /* inline the function if it's short enough */
             (((uint32_t *)(start_value + 3))[0] | 0x20202020) ==
                 ((uint32_t *)"nked")[0]
 #else
-            ((start_value[0] | 32) == 'c' && (start_value[1] | 32) == 'h' &&
-             (start_value[2] | 32) == 'u' && (start_value[3] | 32) == 'n' &&
-             (start_value[4] | 32) == 'k' && (start_value[5] | 32) == 'e' &&
-             (start_value[6] | 32) == 'd')
+            (((start_value[0] | 32) == 'c') && ((start_value[1] | 32) == 'h') &&
+             ((start_value[2] | 32) == 'u') && ((start_value[3] | 32) == 'n') &&
+             ((start_value[4] | 32) == 'k') && ((start_value[5] | 32) == 'e') &&
+             ((start_value[6] | 32) == 'd'))
 #endif
 
         ) {
@@ -908,10 +908,8 @@ re_eval:
     {
       int t3 = http1_consume_body(parser, buffer, length, &start);
       switch (t3) {
-      case -1:
-        goto error;
-      case -2:
-        goto re_eval;
+      case -1: goto error;
+      case -2: goto re_eval;
       }
       break;
     }

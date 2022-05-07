@@ -1253,26 +1253,39 @@ Common macros
 #endif
 #endif
 
-/* Modules required by FIO_SERVER */
+/* Modules that require FIO_SERVER */
+#if defined(FIO_PUBSUB)
+#ifndef FIO_SERVER
+#define FIO_SERVER
+#endif
+#endif
+
+/* Modules that require FIO_POLL */
 #if defined(FIO_SERVER)
 #ifndef FIO_POLL
 #define FIO_POLL
 #endif
-#ifndef FIO_STREAM
-#define FIO_STREAM
 #endif
-#ifndef FIO_QUEUE
-#define FIO_QUEUE
-#endif
+
+/* Modules that require FIO_SIGNAL */
+#if defined(FIO_SERVER)
 #ifndef FIO_SIGNAL
 #define FIO_SIGNAL
 #endif
 #endif
 
 /* Modules that require FIO_STATE */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_SERVER)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_POLL) ||    \
+    defined(FIO_SERVER)
 #ifndef FIO_STATE
 #define FIO_STATE
+#endif
+#endif
+
+/* Modules that require FIO_STREAM */
+#if defined(FIO_SERVER)
+#ifndef FIO_STREAM
+#define FIO_STREAM
 #endif
 #endif
 
@@ -1280,6 +1293,13 @@ Common macros
 #if defined(FIO_POLL) || defined(FIO_SERVER)
 #ifndef FIO_SOCK
 #define FIO_SOCK
+#endif
+#endif
+
+/* Modules that require FIO_QUEUE */
+#if defined(FIO_POLL) || defined(FIO_SERVER)
+#ifndef FIO_QUEUE
+#define FIO_QUEUE
 #endif
 #endif
 

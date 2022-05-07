@@ -59,6 +59,21 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 }
 #define accept fio_sock_accept
 #define poll   WSAPoll
+/** Acts as POSIX dup. Use this for portability with WinSock2. */
+FIO_IFUNC int fio_sock_dup(int original) {
+  int fd = -1;
+  SOCKET tmpfd = INVALID_SOCKET;
+  WSAPROTOCOL_INFOA info;
+  if (!WSADuplicateSocketA(original, GetCurrentProcessId(), &info) &&
+      (tmpfd = WSASocketA(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &info, 0, 0)) !=
+          INVALID_SOCKET) {
+    if (FIO_SOCK_FD_ISVALID(tmpfd))
+      fd = (int)tmpfd;
+    else
+      fio_sock_close(tmpfd);
+  }
+  return fd;
+}
 
 #elif FIO_HAVE_UNIX_TOOLS
 #include <fcntl.h>
@@ -80,6 +95,8 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 #define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd)            close(fd)
+/** Acts as POSIX dup. Use this macro for portability with WinSock2. */
+#define fio_sock_dup(fd)              dup(fd)
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
