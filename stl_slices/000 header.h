@@ -863,7 +863,8 @@ typedef struct fio_list_node_s {
   } while (0)
 
 /** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head) ((!(head)) || (head)->next == (head))
+#define FIO_LIST_IS_EMPTY(head)                                                \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types

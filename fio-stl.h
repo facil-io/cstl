@@ -863,7 +863,8 @@ typedef struct fio_list_node_s {
   } while (0)
 
 /** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head) ((!(head)) || (head)->next == (head))
+#define FIO_LIST_IS_EMPTY(head)                                                \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types
@@ -5638,15 +5639,17 @@ developer.
 #include <sched.h>
 typedef pthread_t fio_thread_t;
 typedef pthread_mutex_t fio_thread_mutex_t;
+typedef pthread_cond_t fio_thread_cond_t;
 /** Used this macro for static initialization. */
 #define FIO_THREAD_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
 
 #elif FIO_OS_WIN
 #include <synchapi.h>
 typedef HANDLE fio_thread_t;
-typedef HANDLE fio_thread_mutex_t;
+typedef CRITICAL_SECTION fio_thread_mutex_t;
+typedef CONDITION_VARIABLE fio_thread_cond_t;
 /** Used this macro for static initialization. */
-#define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t)0)
+#define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t){0})
 #else
 #error facil.io Simple Portable Threads require a POSIX system or Windows
 #endif
@@ -5661,6 +5664,12 @@ typedef HANDLE fio_thread_mutex_t;
 #define FIO_IFUNC_M
 #else
 #define FIO_IFUNC_M FIO_IFUNC
+#endif
+
+#ifdef FIO_THREADS_COND_BYO
+#define FIO_IFUNC_C
+#else
+#define FIO_IFUNC_C FIO_IFUNC
 #endif
 
 /* *****************************************************************************
@@ -5709,6 +5718,38 @@ FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 /** Destroys the simple Mutex (cleanup). */
 FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 
+/**
+ * Initializes a simple Mutex.
+ *
+ * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
+ */
+FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
+
+/** Locks a simple Mutex, returning -1 on error. */
+FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
+
+/** Attempts to lock a simple Mutex, returning zero on success. */
+FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
+
+/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
+FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
+
+/** Destroys the simple Mutex (cleanup). */
+FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+
+/** Initializes a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                     fio_thread_mutex_t *m);
+
+/** Signals a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
+
+/** Destroys a simple conditional variable. */
+FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
+
 /* *****************************************************************************
 POSIX Implementation - inlined static functions
 ***************************************************************************** */
@@ -5755,16 +5796,49 @@ FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_d
 
 #endif /* FIO_THREADS_MUTEX_BYO */
 // clang-format on
+
+#ifndef FIO_THREADS_COND_BYO
+/** Initializes a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+  return pthread_cond_init(c, NULL);
+}
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                     fio_thread_mutex_t *m) {
+  return pthread_cond_wait(c, m);
+}
+
+/** Signals a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+  return pthread_cond_signal(c);
+}
+
+/** Destroys a simple conditional variable. */
+FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) {
+  pthread_cond_destroy(c);
+}
+#endif /* FIO_THREADS_COND_BYO */
+
 /* *****************************************************************************
 Windows Implementation - inlined static functions
 ***************************************************************************** */
 #elif FIO_OS_WIN
 #include <process.h>
-#ifndef FIO_THREADS_BYO
 
-// clang-format off
+#ifndef FIO_THREADS_BYO
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { *t = (HANDLE)_beginthreadex(NULL, 0, (unsigned int (*)(void *))(uintptr_t)fn, arg, 0, NULL); return (!!t) - 1; }
+FIO_IFUNC int fio_thread_create(fio_thread_t *t,
+                                void *(*fn)(void *),
+                                void *arg) {
+  *t = (HANDLE)_beginthreadex(NULL,
+                              0,
+                              (_beginthreadex_proc_type)(uintptr_t)fn,
+                              arg,
+                              0,
+                              NULL);
+  return (!!t) - 1;
+}
 
 FIO_IFUNC int fio_thread_join(fio_thread_t t) {
   int r = 0;
@@ -5776,6 +5850,7 @@ FIO_IFUNC int fio_thread_join(fio_thread_t t) {
   return r;
 }
 
+// clang-format off
 /** Detaches the thread, so thread resources are freed automatically. */
 FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
 
@@ -5796,32 +5871,61 @@ FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
 
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
 
-FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return ((*m = CreateMutexW(NULL, FALSE, NULL)) != NULL) - 1; }
-
-/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return ((m && *m) ? ReleaseMutex(*m) : 0) -1; }
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { InitializeCriticalSection(m); return 0; }
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { CloseHandle(*m); *m = FIO_THREAD_MUTEX_INIT; }
-
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { DeleteCriticalSection(m); memset(m,0,sizeof(*m)); }
 // clang-format on
+/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) {
+  if (!m)
+    return -1;
+  LeaveCriticalSection(m);
+  return 0;
+}
 
 /** Locks a simple Mutex, returning -1 on error. */
 FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
-  if (!*m && fio___thread_mutex_lazy_init(m))
+  const fio_thread_mutex_t zero = {0};
+  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
-  return (WaitForSingleObject((*m), INFINITE) == WAIT_OBJECT_0) - 1;
+  EnterCriticalSection(m);
+  return 0;
 }
 
 /** Attempts to lock a simple Mutex, returning zero on success. */
 FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
-  if (!*m && fio___thread_mutex_lazy_init(m))
+  const fio_thread_mutex_t zero = {0};
+  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
-  return (WaitForSingleObject((*m), 0) == WAIT_OBJECT_0) - 1;
+  return TryEnterCriticalSection(m) - 1;
 }
 #endif /* FIO_THREADS_MUTEX_BYO */
-#endif /* FIO_OS_WIN */
 
+#ifndef FIO_THREADS_COND_BYO
+/** Initializes a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+  InitializeConditionVariable(c);
+  return 0;
+}
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                     fio_thread_mutex_t *m) {
+  return 0 - !SleepConditionVariableCS(c, m, INFINITE);
+}
+
+/** Signals a simple conditional variable. */
+FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+  WakeConditionVariable(c);
+  return 0;
+}
+
+/** Destroys a simple conditional variable. */
+FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
+#endif /* FIO_THREADS_COND_BYO */
+
+#endif /* FIO_OS_WIN */
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -5830,14 +5934,18 @@ Module Implementation - possibly externed functions.
 #ifndef FIO_THREADS_MUTEX_BYO
 /** Initializes a simple Mutex */
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
+  int r = 0;
   static fio_lock_i lock = FIO_LOCK_INIT;
   /* lazy initialization */
+  fio_thread_mutex_t zero = {0};
   fio_lock(&lock);
-  if (!*m) { /* retest, as this may chave changed... */
-    *m = CreateMutexW(NULL, FALSE, NULL);
+  if (!memcmp(m,
+              &zero,
+              sizeof(zero))) { /* retest, as this may have changed... */
+    r = fio_thread_mutex_init(m);
   }
   fio_unlock(&lock);
-  return (!!m) - 1;
+  return r;
 }
 #endif /* FIO_THREADS_MUTEX_BYO */
 #endif /* FIO_OS_WIN */
@@ -10556,7 +10664,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
                                 "after cleanup (POSSIBLE LEAKS): %zd",         \
           FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]);  \
     }                                                                          \
-    FIO_LOG_INFO(                                                              \
+    FIO_LOG_DEBUG2(                                                            \
         "(" FIO_MACRO2STR(                                                     \
             FIO_NAME(FIO_MEMORY_NAME,                                          \
                      malloc)) ") usage:"                                       \
@@ -12380,7 +12488,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
 #if DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)();
-  FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)();
+  FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(NULL);
   FIO_ASSERT(
       !FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] &&
           FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2] ==
@@ -13149,6 +13257,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_QUEUE                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "007 threads.h"            /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
@@ -13203,13 +13312,29 @@ typedef struct fio___task_ring_s {
 
 /** The queue object - should be considered opaque (or, at least, read only). */
 typedef struct {
+  /** task read pointer. */
   fio___task_ring_s *r;
+  /** task write pointer. */
   fio___task_ring_s *w;
   /** the number of tasks waiting to be performed. */
-  size_t count;
+  uint32_t count;
+  /** global queue lock. */
   FIO___LOCK_TYPE lock;
+  /** linked lists of consumer threads. */
+  FIO_LIST_NODE consumers;
+  /** main ring buffer associated with the queue. */
   fio___task_ring_s mem;
 } fio_queue_s;
+
+typedef struct {
+  FIO_LIST_NODE node;
+  fio_queue_s *queue;
+  fio_thread_t thread;
+  fio_thread_mutex_t mutex;
+  fio_thread_cond_t cond;
+  size_t workers;
+  volatile int stop;
+} fio___thread_group_s;
 
 /* *****************************************************************************
 Queue API
@@ -13220,12 +13345,16 @@ Queue API
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
   {                                                                            \
     .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .consumers = FIO_LIST_INIT((queue).consumers),                             \
     .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
   }
 #else
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .consumers = FIO_LIST_INIT((queue).consumers), .lock = FIO_LOCK_INIT       \
+  }
 #endif
 
 /** Initializes a fio_queue_s object. */
@@ -13270,7 +13399,16 @@ SFUNC int fio_queue_perform(fio_queue_s *q);
 SFUNC void fio_queue_perform_all(fio_queue_s *q);
 
 /** returns the number of tasks in the queue. */
-FIO_IFUNC size_t fio_queue_count(fio_queue_s *q);
+FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q);
+
+/** Adds worker / consumer threads to perform the jobs in the queue. */
+SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t count);
+
+/** Signals all worker threads to stop performing tasks and terminate. */
+SFUNC void fio_queue_workers_stop(fio_queue_s *q);
+
+/** Signals all worker threads to go back to work (new tasks were). */
+SFUNC void fio_queue_workers_wake(fio_queue_s *q);
 
 /* *****************************************************************************
 Timer Queue Types and API
@@ -13359,7 +13497,7 @@ FIO_IFUNC fio_queue_s *fio_queue_new(void) {
 }
 
 /** returns the number of tasks in the queue. */
-FIO_IFUNC size_t fio_queue_count(fio_queue_s *q) { return q->count; }
+FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q) { return q->count; }
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
@@ -13367,6 +13505,7 @@ FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
   q->r = &q->mem;
   q->w = &q->mem;
   q->count = 0;
+  q->consumers = FIO_LIST_INIT(q->consumers);
   q->lock = FIO___LOCK_INIT;
   q->mem.next = NULL;
   q->mem.r = q->mem.w = q->mem.dir = 0;
@@ -13419,14 +13558,28 @@ Queue Implementation
 
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
-  FIO___LOCK_LOCK(q->lock);
-  while (q->r) {
-    fio___task_ring_s *tmp = q->r;
-    q->r = q->r->next;
-    if (tmp != &q->mem)
-      FIO_MEM_FREE_(tmp, sizeof(*tmp));
+  for (;;) {
+    FIO___LOCK_LOCK(q->lock);
+    while (q->r) {
+      fio___task_ring_s *tmp = q->r;
+      q->r = q->r->next;
+      if (tmp != &q->mem)
+        FIO_MEM_FREE_(tmp, sizeof(*tmp));
+    }
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      pos->stop = 1;
+      fio_thread_cond_signal(&pos->cond);
+    }
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      FIO___LOCK_UNLOCK(q->lock);
+      fio_thread_join(pos->thread);
+      FIO___LOCK_LOCK(q->lock);
+    }
+    FIO___LOCK_UNLOCK(q->lock);
+    if (FIO_LIST_IS_EMPTY(&q->consumers))
+      break;
+    FIO_THREAD_RESCHEDULE();
   }
-  FIO___LOCK_UNLOCK(q->lock);
   FIO___LOCK_DESTROY(q->lock);
   fio_queue_init(q);
 }
@@ -13504,6 +13657,9 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   ++q->count;
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    fio_thread_cond_signal(&pos->cond);
+  }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -13533,6 +13689,9 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   ++q->count;
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    fio_thread_cond_signal(&pos->cond);
+  }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -13588,6 +13747,84 @@ SFUNC void fio_queue_perform_all(fio_queue_s *q) {
   fio_queue_task_s t;
   while ((t = fio_queue_pop(q)).fn)
     t.fn(t.udata1, t.udata2);
+}
+
+/* *****************************************************************************
+Queue Consumer Threads
+***************************************************************************** */
+
+FIO_SFUNC void *fio___queue_worker_task(void *g_) {
+  fio___thread_group_s *grp = (fio___thread_group_s *)g_;
+  while (!grp->stop) {
+    fio_queue_perform_all(grp->queue);
+    fio_thread_mutex_lock(&grp->mutex);
+    if (!grp->stop)
+      fio_thread_cond_wait(&grp->cond, &grp->mutex);
+    fio_thread_mutex_unlock(&grp->mutex);
+    fio_queue_perform(grp->queue);
+    fio_thread_cond_signal(&grp->cond);
+    fio_queue_perform_all(grp->queue);
+  }
+  return NULL;
+}
+FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
+  fio_thread_t threads_buf[256];
+  fio___thread_group_s grp = *(fio___thread_group_s *)g_;
+  FIO_LIST_PUSH(&grp.queue->consumers, &grp.node);
+  grp.stop = 0;
+  fio_thread_t *threads =
+      grp.workers > 256
+          ? ((fio_thread_t *)
+                 FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * grp.workers, 0))
+          : threads_buf;
+  fio_thread_mutex_init(&grp.mutex);
+  fio_thread_cond_init(&grp.cond);
+  for (size_t i = 0; i < grp.workers; ++i) {
+    fio_thread_create(threads + i, fio___queue_worker_task, (void *)&grp);
+  }
+  ((fio___thread_group_s *)g_)->stop = 0;
+  /* from this point on, g_ is invalid! */
+  for (size_t i = 0; i < grp.workers; ++i) {
+    fio_thread_join(threads[i]);
+  }
+  if (threads != threads_buf)
+    FIO_MEM_FREE_(threads, sizeof(*threads) * grp.workers);
+  FIO___LOCK_LOCK(grp.queue->lock);
+  FIO_LIST_REMOVE(&grp.node);
+  FIO___LOCK_UNLOCK(grp.queue->lock);
+  return NULL;
+}
+
+SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
+  FIO___LOCK_LOCK(q->lock);
+  if (!q->consumers.next || !q->consumers.prev) {
+    q->consumers = FIO_LIST_INIT(q->consumers);
+  }
+  fio___thread_group_s grp = {.queue = q, .workers = workers, .stop = 1};
+  if (fio_thread_create(&grp.thread, fio___queue_worker_manager, &grp))
+    return -1;
+  while (grp.stop)
+    FIO_THREAD_RESCHEDULE();
+  FIO___LOCK_UNLOCK(q->lock);
+  return 0;
+}
+
+SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
+  FIO___LOCK_LOCK(q->lock);
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    pos->stop = 1;
+    fio_thread_cond_signal(&pos->cond);
+  }
+  FIO___LOCK_UNLOCK(q->lock);
+}
+
+/** Signals all worker threads to go back to work (new tasks were). */
+SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
+  FIO___LOCK_LOCK(q->lock);
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    fio_thread_cond_signal(&pos->cond);
+  }
+  FIO___LOCK_UNLOCK(q->lock);
 }
 
 /* *****************************************************************************
@@ -13883,22 +14120,36 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     FIO_ASSERT(fio_queue_count(q), "tasks not counted?!");
     {
       const size_t t_count = (i % max_threads) + 1;
-      union {
-        void *(*t)(void *);
-        void (*act)(fio_queue_s *);
-      } thread_tasks;
-      thread_tasks.act = fio_queue_perform_all;
-      fio_thread_t *threads = (fio_thread_t *)
-          FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
-      for (size_t j = 0; j < t_count; ++j) {
-        if (fio_thread_create(threads + j, thread_tasks.t, q)) {
-          abort();
+      if (0) {
+        fio_queue_workers_add(q, t_count);
+        FIO___LOCK_LOCK(q->lock);
+        FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+          FIO___LOCK_UNLOCK(q->lock);
+          while (!(volatile uintptr_t)i_count)
+            FIO_THREAD_RESCHEDULE();
+          fio_queue_workers_stop(q);
+          fio_thread_join(pos->thread);
+          FIO___LOCK_LOCK(q->lock);
         }
+        FIO___LOCK_UNLOCK(q->lock);
+      } else {
+        union {
+          void *(*t)(void *);
+          void (*act)(fio_queue_s *);
+        } thread_tasks;
+        thread_tasks.act = fio_queue_perform_all;
+        fio_thread_t *threads = (fio_thread_t *)
+            FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * t_count, 0);
+        for (size_t j = 0; j < t_count; ++j) {
+          if (fio_thread_create(threads + j, thread_tasks.t, q)) {
+            abort();
+          }
+        }
+        for (size_t j = 0; j < t_count; ++j) {
+          fio_thread_join(threads[j]);
+        }
+        FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
       }
-      for (size_t j = 0; j < t_count; ++j) {
-        fio_thread_join(threads[j]);
-      }
-      FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
     }
 
     end = fio_time_milli();
