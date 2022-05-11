@@ -63,14 +63,9 @@ typedef struct http_controller_s {
   void (*send_headers)(http_s *h);
   /** called by the HTTP handle for each body chunk (or to finish a response. */
   void (*write_body)(http_s *h, http_write_args_s args);
+  /** called once a request / response had finished */
+  void (*on_finish)(http_s *h);
 } http_controller_s;
-
-/* *****************************************************************************
-Helpers (HTTP status to String)
-***************************************************************************** */
-
-/** Returns a human readable string related to the HTTP status number. */
-fio_str_info_s http_status2str(size_t status);
 
 /* *****************************************************************************
 Constructor / Destructor
@@ -402,6 +397,20 @@ void http_write(http_s *, http_write_args_s args);
   http_write(http_handle, (http_write_args_s){__VA_ARGS__})
 #define http_finish(http_handle) http_write(http_handle, .finish = 1)
 #endif
+
+/* *****************************************************************************
+General Helpers
+***************************************************************************** */
+
+/** Returns a human readable string related to the HTTP status number. */
+fio_str_info_s http_status2str(size_t status);
+
+/** Logs an HTTP (response) to STDOUT. */
+void http_write_log(http_s *h, fio_buf_info_s peer_addr);
+
+/* *****************************************************************************
+Testing
+***************************************************************************** */
 
 #ifdef TEST
 void http_test(void);

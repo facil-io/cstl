@@ -91,6 +91,14 @@ FIO_SFUNC void http_respond(http_s *h) {
     str_write(&out, "\r\n", 2);
     str_write(&out, body.buf, body.len);
   }
+  if (1) {
+    uint64_t hash =
+        fio_risky_hash(http_path_get(h).buf, http_path_get(h).len, 0);
+    char hash_buf[18];
+    fio_str_info_s etag = FIO_STR_INFO3(hash_buf, 0, 18);
+    fio_string_write_hex(&etag, NULL, hash);
+    http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
+  }
   size_t len = str_len((&out));
   http_write(h,
              .data = str_detach(&out),
@@ -98,7 +106,6 @@ FIO_SFUNC void http_respond(http_s *h) {
              .dealloc = str_dealloc,
              .copy = 0,
              .finish = 1);
-
 #else
   http_response_header_set(h,
                            FIO_STR_INFO1("server"),
@@ -133,6 +140,7 @@ int main(int argc, char const *argv[]) {
       "\tNAME tcp://localhost:3000/\n"
       "\tNAME localhost://3000\n",
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
+      FIO_CLI_INT("--workers -w (1) number of worker processes to use."),
       FIO_CLI_PRINT_LINE(
           "NOTE: requests are limited to 32Kb and 16 headers each."));
 
@@ -143,9 +151,11 @@ int main(int argc, char const *argv[]) {
   /* review CLI connection address (in URL format) */
   FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
              "Could not open listening socket as requested.");
-  FIO_LOG_INFO("Starting HTTP echo server (" FIO_POLL_ENGINE_STR
-               "). Press ^C to exit.");
-  fio_srv_run(1);
+  FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
+    "\n\tEngine: " FIO_POLL_ENGINE_STR
+    "\n\tWorkers: %d"
+    "\n\tPress ^C to exit.", fio_cli_get_i("-w"));
+  fio_srv_run(fio_cli_get_i("-w"));
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
   return 0;
@@ -317,6 +327,12 @@ void http1_send_headers(http_s *h) {
   http_response_header_each(h, http1___write_header_callback, &buf);
   /* write cookies */
   http_set_cookie_each(h, http1___write_header_callback, &buf);
+  /* add streaming headers? */
+  if (http_is_streaming(h))
+    fio_string_write(&buf,
+                     FIO_STRING_REALLOC,
+                     "transfer-encoding: chunked\r\n",
+                     28);
   fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
   /* send data (move memory ownership) */
   fio_write2(c->io,
@@ -333,6 +349,16 @@ void http1_write_body(http_s *h, http_write_args_s args) {
     return;
   if (http_is_streaming(h)) {
     /* TODO: add streaming wrapper for chunked data */
+    if (!args.len) {
+      FIO_LOG_ERROR("HTTP1 streaming requires a correctly pre-determined "
+                    "length per chunk.");
+    } else {
+      char buf[24];
+      fio_str_info_s i = FIO_STR_INFO3(buf, 0, 24);
+      fio_string_write_hex(&i, NULL, args.len);
+      fio_string_write(&i, NULL, "\r\n", 2);
+      fio_write2(c->io, .buf = (void *)i.buf, .len = i.len, .copy = 1);
+    }
   }
   fio_write2(c->io,
              .buf = (void *)args.data,
@@ -340,9 +366,20 @@ void http1_write_body(http_s *h, http_write_args_s args) {
              .fd = args.fd,
              .dealloc = args.dealloc,
              .copy = args.copy);
-  if (args.finish) {
-    http_free(c->h);
+  if (http_is_streaming(h))
+    fio_write2(c->io, .buf = "\r\n", .len = 2, .copy = 1);
+  return;
+}
+
+void http1_on_finish(http_s *h) {
+  client_s *c = http_controller_data(h);
+  if (!c->io)
+    goto finish;
+  if (http_is_streaming(h)) {
+    fio_write2(c->io, .buf = "0\r\n\r\n", .len = 5, .copy = 1);
   }
+finish:
+  http_free(h);
 }
 
 http_controller_s HTTP1_CONTROLLER = {
@@ -351,6 +388,7 @@ http_controller_s HTTP1_CONTROLLER = {
     .start_request = http1_start_request,
     .send_headers = http1_send_headers,
     .write_body = http1_write_body,
+    .on_finish = http1_on_finish,
 };
 
 /* *****************************************************************************

@@ -1322,6 +1322,8 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   int r = 0;
   if ((!len | !src_ | !dest))
     return r;
+  if (dest->buf + dest->len == (char *)src_)
+    return (r = -1);
   const uint8_t *src = (const uint8_t *)src_;
   size_t at = 0;
   uint8_t set_at = 1;
@@ -1356,7 +1358,6 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
     /* constant time (non-branching) alternative to if(`set_at`) */
     at ^= ((set_at | (0 - set_at)) & (i ^ at));
     set_at = 0;
-
     /* count extra bytes */
     switch (src[i]) {
     case '\b': /* fall through */
@@ -1503,11 +1504,10 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
       if (!escape_pos)
         escape_pos = end;
       const size_t valid_len = escape_pos - src;
-      if (valid_len) {
+      if (writer + at != src && valid_len)
         memmove(writer + at, src, valid_len);
-        at += valid_len;
-        src = escape_pos;
-      }
+      at += valid_len;
+      src = escape_pos;
     }
     if (end - src == 1) {
       writer[at++] = *(src++);

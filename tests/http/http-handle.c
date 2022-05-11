@@ -160,6 +160,7 @@ struct http_s {
   int64_t received_at;
   size_t status;
   size_t state;
+  size_t sent;
   http_sstr_s method;
   http_sstr_s path;
   http_sstr_s query;
@@ -231,6 +232,23 @@ http_s *http_dup(http_s *h) { return http_dup2(h); }
 Linking to a controller
 ***************************************************************************** */
 
+FIO_SFUNC fio_str_info_s http_date(uint64_t now_milli) {
+  static char date_buf[128];
+  static size_t date_len;
+  static uint64_t date_buf_val;
+  const uint64_t now_time = now_milli / 1000;
+  if (date_buf_val != now_time) {
+    date_buf_val = now_time;
+    date_len = fio_time2rfc7231(date_buf, now_time);
+    date_buf[date_len] = 0;
+  }
+  return FIO_STR_INFO2(date_buf, date_len);
+}
+
+/* *****************************************************************************
+Linking to a controller
+***************************************************************************** */
+
 FIO_SFUNC void mock_c_on_unlinked(http_s *h, void *cdata) {
   (void)h;
   (void)cdata;
@@ -252,6 +270,8 @@ FIO_SFUNC void mock_c_write_body(http_s *h, http_write_args_s args) {
   (void)h;
 }
 
+FIO_SFUNC void mock_c_on_finish(http_s *h) { (void)h; }
+
 FIO_SFUNC void http_controller_validate(http_controller_s *c) {
   if (!c->on_unlinked)
     c->on_unlinked = mock_c_on_unlinked;
@@ -263,6 +283,8 @@ FIO_SFUNC void http_controller_validate(http_controller_s *c) {
     c->send_headers = mock_c_send_headers;
   if (!c->write_body)
     c->write_body = mock_c_write_body;
+  if (!c->on_finish)
+    c->on_finish = mock_c_on_finish;
 }
 
 /** Gets the HTTP Controller associated with the HTTP handle. */
@@ -905,7 +927,7 @@ Responding to an HTTP event.
 /** Returns true if the HTTP handle's response was sent. */
 int http_is_finished(http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return h->state & HTTP_STATE_FINISHED;
+  return (HTTP_STATE_STREAMING == (h->state & HTTP_STATE_FINISHED));
 }
 
 /** Returns true if the HTTP handle's response is streaming. */
@@ -923,6 +945,27 @@ size_t http_status_set(http_s *h, size_t status) {
   return (h->status = status);
 }
 
+FIO_IFUNC int http___response_etag_if_none_match(http_s *h) {
+  if (!h->status)
+    return 0;
+  fio_str_info_s method = http_sstr_info(&h->method);
+  if ((method.len < 3) | (method.len > 4))
+    return 0;
+  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 't')) &&
+      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
+    return 0;
+  fio_str_info_s etag =
+      http_hmap_get2(HTTP_HDR_RESPONSE(h), FIO_STR_INFO2("etag", 4), 0);
+  if (!etag.len)
+    return 0;
+  fio_str_info_s cond = http_hmap_get2(HTTP_HDR_REQUEST(h),
+                                       FIO_STR_INFO2("if-none-match", 13),
+                                       0);
+  return FIO_STR_INFO_IS_EQ(etag, cond);
+}
+
 void http_write___(void); /* sublime text marker */
 /**
  * Writes `data` to the response body associated with the HTTP handle after
@@ -933,8 +976,18 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
     goto handle_error;
   const http_controller_s *const c = h->controller;
   http_hmap_s *const hdrs = h->headers + (!!h->status);
-  if (!(h->state & HTTP_STATE_STREAMING)) {
-    h->state |= HTTP_STATE_STREAMING;
+  if (!(h->state & HTTP_STATE_STREAMING)) { /* first call to http_write */
+    /* if response has an `etag` header matching `if-none-match`, skip */
+    if (http___response_etag_if_none_match(h)) {
+      h->status = 304;
+      if (args.fd)
+        close(args.fd);
+      if (args.dealloc && args.data)
+        args.dealloc((void *)args.data);
+      args.len = args.fd = 0;
+      args.data = NULL;
+      args.finish = 1;
+    }
     /* test if streaming / single body response */
     if (args.finish) {
       /* validate / set Content-Length (not streaming) */
@@ -943,13 +996,27 @@ void http_write FIO_NOOP(http_s *h, http_write_args_s args) {
       fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
       fio_string_write_u(&v, NULL, args.len);
       http_hmap_set2(hdrs, k, v, -1);
+    } else {
+      h->state |= HTTP_STATE_STREAMING;
     }
+    /* validate Date header */
+    http_hmap_set2(hdrs,
+                   FIO_STR_INFO2("date", 4),
+                   http_date(http_get_timestump()),
+                   0);
+
     /* start a response, unless status == 0 (which starts a request). */
     (&c->start_response)[h->status == 0](h, h->status, !args.finish);
     c->send_headers(h);
   }
-  c->write_body(h, args);
-  h->state |= HTTP_STATE_FINISHED * (!!args.finish);
+  if (args.data || args.fd) {
+    c->write_body(h, args);
+    h->sent += args.len;
+  }
+  if (args.finish) {
+    h->state |= HTTP_STATE_FINISHED;
+    c->on_finish(h);
+  }
   return;
 
 handle_error:
@@ -959,6 +1026,182 @@ handle_error:
     args.dealloc((void *)args.data);
 }
 
+/* *****************************************************************************
+WebSocket / SSE Helpers
+***************************************************************************** */
+
+// int http_is_upgrade_request(http_s * h);
+
+// void http_request_add_websocket_headers(http_s *h);
+// void http_request_add_sse_headers(http_s *h);
+// int http_response_add_websocket_headers(http_s *h);
+// int http_response_add_sse_headers(http_s *h);
+
+/* *****************************************************************************
+Logging Helper
+***************************************************************************** */
+
+void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
+  char buf_mem[1024];
+  fio_str_info_s buf = FIO_STR_INFO3(buf_mem, 0, 1023);
+  intptr_t bytes_sent = h->sent;
+  uint64_t milli_start, milli_end;
+  milli_start = h->received_at;
+  milli_end = http_get_timestump();
+  fio_str_info_s date = http_date(milli_end);
+
+  { /* try to gather address from request headers */
+    /* TODO Guess IP address from headers (forwarded) where possible */
+    /* if we failed */
+    if (!buf.len) {
+      if (peer_addr.len) {
+        memcpy(buf.buf, peer_addr.buf, peer_addr.len);
+        buf.len = peer_addr.len;
+      } else {
+        memcpy(buf.buf, "[unknown]", 9);
+        buf.len = 9;
+      }
+    }
+  }
+  memcpy(buf.buf + buf.len, " - - [", 6);
+  buf.len += 6;
+  memcpy(buf.buf + buf.len, date.buf, date.len);
+  buf.len += date.len;
+  fio_string_write2(
+      &buf,
+      NULL,
+      FIO_STRING_WRITE_STR2("] \"", 3),
+      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->method),
+                            http_sstr_len(&h->method)),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->path), http_sstr_len(&h->path)),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->version),
+                            http_sstr_len(&h->version)),
+      FIO_STRING_WRITE_STR2("\" ", 2),
+      FIO_STRING_WRITE_NUM(h->status),
+      ((bytes_sent > 0) ? (FIO_STRING_WRITE_UNUM(bytes_sent))
+                        : (FIO_STRING_WRITE_STR2("---", 3))),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      FIO_STRING_WRITE_NUM((milli_end - milli_start)),
+      FIO_STRING_WRITE_STR2("ms\r\n", 4));
+
+  if (buf.buf[buf.len - 1] != '\n')
+    buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
+
+  fwrite(buf.buf, 1, buf.len, stdout);
+}
+
+/* *****************************************************************************
+Mime-Type Lookup Helpers
+***************************************************************************** */
+#if 0
+#define FIO_FORCE_MALLOC_TMP 1 /* use malloc for the mime registry */
+#define FIO_UMAP_NAME        http_mime_set
+#define FIO_MAP_TYPE         http_sstr_s
+
+#include <fio-stl.h>
+
+static http_mime_set_s fio_http_mime_types = FIO_SET_INIT;
+
+#define LONGEST_FILE_EXTENSION_LENGTH 15
+
+/** Registers a Mime-Type to be associated with the file extension. */
+void http_mimetype_register(char *file_ext, size_t file_ext_len,
+                            FIOBJ mime_type_str) {
+  uintptr_t hash = FIO_HASH_FN(file_ext, file_ext_len, 0, 0);
+  if (mime_type_str == FIOBJ_INVALID) {
+    fio_mime_set_remove(&fio_http_mime_types, hash, FIOBJ_INVALID, NULL);
+  } else {
+    FIOBJ old = FIOBJ_INVALID;
+    fio_mime_set_overwrite(&fio_http_mime_types, hash, mime_type_str, &old);
+    if (old != FIOBJ_INVALID) {
+      FIO_LOG_WARNING("mime-type collision: %.*s was %s, now %s",
+                      (int)file_ext_len, file_ext, fiobj_obj2cstr(old).data,
+                      fiobj_obj2cstr(mime_type_str).data);
+      fiobj_free(old);
+    }
+    fiobj_free(mime_type_str); /* move ownership to the registry */
+  }
+}
+
+/** Registers a Mime-Type to be associated with the file extension. */
+void http_mimetype_stats(void) {
+  FIO_LOG_DEBUG("HTTP MIME hash storage count/capa: %zu / %zu",
+                fio_mime_set_count(&fio_http_mime_types),
+                fio_mime_set_capa(&fio_http_mime_types));
+}
+
+/**
+ * Finds the mime-type associated with the file extension.
+ *  Remember to call `fiobj_free`.
+ */
+FIOBJ http_mimetype_find(char *file_ext, size_t file_ext_len) {
+  uintptr_t hash = FIO_HASH_FN(file_ext, file_ext_len, 0, 0);
+  return fiobj_dup(
+      fio_mime_set_find(&fio_http_mime_types, hash, FIOBJ_INVALID));
+}
+
+static pthread_key_t buffer_key;
+static pthread_once_t buffer_once = PTHREAD_ONCE_INIT;
+static void init_buffer_key(void) { pthread_key_create(&buffer_key, free); }
+static void init_buffer_ptr(void) {
+  char *buffer = malloc(sizeof(char) * (LONGEST_FILE_EXTENSION_LENGTH + 1));
+  FIO_ASSERT_ALLOC(buffer);
+  memset(buffer, 0, sizeof(char) * (LONGEST_FILE_EXTENSION_LENGTH + 1));
+  pthread_setspecific(buffer_key, buffer);
+}
+/**
+ * Finds the mime-type associated with the URL.
+ *  Remember to call `fiobj_free`.
+ */
+FIOBJ http_mimetype_find2(FIOBJ url) {
+  pthread_once(&buffer_once, init_buffer_key);
+  char *buffer = pthread_getspecific(buffer_key);
+  if (!buffer) {
+    init_buffer_ptr();
+    buffer = pthread_getspecific(buffer_key);
+  }
+  fio_str_info_s ext = {.data = NULL};
+  FIOBJ mimetype;
+  if (!url)
+    goto finish;
+  fio_str_info_s tmp = fiobj_obj2cstr(url);
+  uint8_t steps = 1;
+  while (tmp.len > steps || steps >= LONGEST_FILE_EXTENSION_LENGTH) {
+    switch (tmp.data[tmp.len - steps]) {
+    case '.':
+      --steps;
+      if (steps) {
+        ext.len = steps;
+        ext.data = buffer;
+        buffer[steps] = 0;
+        for (size_t i = 1; i <= steps; ++i) {
+          buffer[steps - i] = tolower(tmp.data[tmp.len - i]);
+        }
+      }
+    /* fallthrough */
+    case '/':
+      goto finish;
+      break;
+    }
+    ++steps;
+  }
+finish:
+  mimetype = http_mimetype_find(ext.data, ext.len);
+  if (!mimetype)
+    mimetype = fiobj_dup(HTTP_HVALUE_CONTENT_TYPE_DEFAULT);
+  return mimetype;
+}
+
+/** Clears the Mime-Type registry (it will be empty afterthis call). */
+void http_mimetype_clear(void) {
+  fio_mime_set_free(&fio_http_mime_types);
+  fiobj_free(current_date);
+  current_date = FIOBJ_INVALID;
+  last_date_added = 0;
+}
+#endif /* Mime Type Support */
 /* *****************************************************************************
 HTTP Status as String.
 ***************************************************************************** */

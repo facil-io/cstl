@@ -5630,7 +5630,7 @@ Feel free to copy, use and enjoy according to the license provided.
 /* *****************************************************************************
 Module Settings
 
-At this point, define any MACROs and customaizable settings avsailable to the
+At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
@@ -5660,6 +5660,12 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 #define FIO_IFUNC_T FIO_IFUNC
 #endif
 
+#ifdef FIO_THREADS_FORK_BYO
+#define FIO_IFUNC_F
+#else
+#define FIO_IFUNC_F FIO_IFUNC
+#endif
+
 #ifdef FIO_THREADS_MUTEX_BYO
 #define FIO_IFUNC_M
 #else
@@ -5676,22 +5682,25 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 Module API
 ***************************************************************************** */
 
+/** Should behave the same as the POSIX system call `fork`. */
+FIO_IFUNC_F int fio_thread_fork(void);
+
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
                                   void *(*fn)(void *),
                                   void *arg);
 
 /** Waits for the thread to finish. */
-FIO_IFUNC_T int fio_thread_join(fio_thread_t t);
+FIO_IFUNC_T int fio_thread_join(fio_thread_t *t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC_T int fio_thread_detach(fio_thread_t t);
+FIO_IFUNC_T int fio_thread_detach(fio_thread_t *t);
 
 /** Ends the current running thread. */
 FIO_IFUNC_T void fio_thread_exit(void);
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC_T int fio_thread_equal(fio_thread_t a, fio_thread_t b);
+FIO_IFUNC_T int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 
 /** Returns the current thread. */
 FIO_IFUNC_T fio_thread_t fio_thread_current(void);
@@ -5754,21 +5763,28 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
 POSIX Implementation - inlined static functions
 ***************************************************************************** */
 #if FIO_OS_POSIX
+
+#ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `fork`. */
+FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+#endif
+
 #ifndef FIO_THREADS_BYO
 // clang-format off
+
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg); }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) { return pthread_join(t, NULL); }
+FIO_IFUNC int fio_thread_join(fio_thread_t *t) { return pthread_join(*t, NULL); }
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return pthread_detach(t); }
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return pthread_detach(*t); }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { pthread_exit(NULL); }
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return pthread_equal(a, b); }
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return pthread_equal(*a, *b); }
 
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
@@ -5826,6 +5842,15 @@ Windows Implementation - inlined static functions
 #elif FIO_OS_WIN
 #include <process.h>
 
+#ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `fork`. */
+#ifdef fork
+FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+#else
+FIO_IFUNC_F int fio_thread_fork(void) { return -1; }
+#endif
+#endif
+
 #ifndef FIO_THREADS_BYO
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
@@ -5840,25 +5865,25 @@ FIO_IFUNC int fio_thread_create(fio_thread_t *t,
   return (!!t) - 1;
 }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) {
+FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
   int r = 0;
-  if (WaitForSingleObject(t, INFINITE) == WAIT_FAILED) {
+  if (WaitForSingleObject(*t, INFINITE) == WAIT_FAILED) {
     errno = GetLastError();
     r = -1;
   } else
-    CloseHandle(t);
+    CloseHandle(*t);
   return r;
 }
 
 // clang-format off
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return CloseHandle(*t) - 1; }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return GetThreadId(a) == GetThreadId(b); }
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return GetThreadId(*a) == GetThreadId(*b); }
 
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }
@@ -12471,7 +12496,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
       }
       FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
       for (size_t i = 0; i < thread_count; ++i) {
-        fio_thread_join(threads[i]);
+        fio_thread_join(threads + i);
       }
     }
   }
@@ -13566,13 +13591,17 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
       if (tmp != &q->mem)
         FIO_MEM_FREE_(tmp, sizeof(*tmp));
     }
+    if (FIO_LIST_IS_EMPTY(&q->consumers)) {
+      FIO___LOCK_UNLOCK(q->lock);
+      break;
+    }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       pos->stop = 1;
       fio_thread_cond_signal(&pos->cond);
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       FIO___LOCK_UNLOCK(q->lock);
-      fio_thread_join(pos->thread);
+      fio_thread_join(&pos->thread);
       FIO___LOCK_LOCK(q->lock);
     }
     FIO___LOCK_UNLOCK(q->lock);
@@ -13657,8 +13686,10 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   ++q->count;
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    fio_thread_cond_signal(&pos->cond);
+  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      fio_thread_cond_signal(&pos->cond);
+    }
   }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
@@ -13689,8 +13720,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   ++q->count;
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    fio_thread_cond_signal(&pos->cond);
+  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      fio_thread_cond_signal(&pos->cond);
+    }
   }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
@@ -13785,7 +13818,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   ((fio___thread_group_s *)g_)->stop = 0;
   /* from this point on, g_ is invalid! */
   for (size_t i = 0; i < grp.workers; ++i) {
-    fio_thread_join(threads[i]);
+    fio_thread_join(threads + i);
   }
   if (threads != threads_buf)
     FIO_MEM_FREE_(threads, sizeof(*threads) * grp.workers);
@@ -13810,6 +13843,8 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
 }
 
 SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
+  if (FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     pos->stop = 1;
@@ -13820,6 +13855,8 @@ SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
 
 /** Signals all worker threads to go back to work (new tasks were). */
 SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
+  if (FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     fio_thread_cond_signal(&pos->cond);
@@ -14128,7 +14165,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           while (!(volatile uintptr_t)i_count)
             FIO_THREAD_RESCHEDULE();
           fio_queue_workers_stop(q);
-          fio_thread_join(pos->thread);
+          fio_thread_join(&pos->thread);
           FIO___LOCK_LOCK(q->lock);
         }
         FIO___LOCK_UNLOCK(q->lock);
@@ -14146,7 +14183,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           }
         }
         for (size_t j = 0; j < t_count; ++j) {
-          fio_thread_join(threads[j]);
+          fio_thread_join(threads + j);
         }
         FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
       }
@@ -18298,6 +18335,8 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   int r = 0;
   if ((!len | !src_ | !dest))
     return r;
+  if (dest->buf + dest->len == (char *)src_)
+    return (r = -1);
   const uint8_t *src = (const uint8_t *)src_;
   size_t at = 0;
   uint8_t set_at = 1;
@@ -18332,7 +18371,6 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
     /* constant time (non-branching) alternative to if(`set_at`) */
     at ^= ((set_at | (0 - set_at)) & (i ^ at));
     set_at = 0;
-
     /* count extra bytes */
     switch (src[i]) {
     case '\b': /* fall through */
@@ -18479,11 +18517,10 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
       if (!escape_pos)
         escape_pos = end;
       const size_t valid_len = escape_pos - src;
-      if (valid_len) {
+      if (writer + at != src && valid_len)
         memmove(writer + at, src, valid_len);
-        at += valid_len;
-        src = escape_pos;
-      }
+      at += valid_len;
+      src = escape_pos;
     }
     if (end - src == 1) {
       writer[at++] = *(src++);
@@ -28169,8 +28206,10 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_SERVER                  /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
+#include "007 threads.h"            /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "090 state callbacks.h"    /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
 #include "101 time.h"               /* Development inclusion - ignore line */
 #include "102 queue.h"              /* Development inclusion - ignore line */
 #include "104 sock.h"               /* Development inclusion - ignore line */
@@ -28179,6 +28218,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "106 signals.h"            /* Development inclusion - ignore line */
 #include "220 strings core.h"       /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
+#include "330 poll api.h"           /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
 #define SFUNC FIO_SFUNC             /* Development inclusion - ignore line */
 #define IFUNC FIO_IFUNC             /* Development inclusion - ignore line */
@@ -28266,7 +28306,7 @@ struct fio_listen_args {
    * May be used to test user thread stress levels before accepting connections.
    */
   fio_queue_s *queue_for_accept;
-  /** If the server is forked, should we stop listening? */
+  /** If the server is forked - listen on the root process or the workers? */
   uint8_t on_root;
 };
 
@@ -28577,6 +28617,8 @@ static void srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
 static void srv_on_ev_mock(fio_s *io) { (void)(io); }
 static void srv_on_close_mock(void *ptr) { (void)ptr; }
 static void srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
+static void fio___srv_on_timeout_never(fio_s *io) { fio_touch(io); }
+
 /* Called to perform a non-blocking `read`, same as the system call. */
 static ssize_t io_func_default_read(int fd, void *buf, size_t len, void *tls) {
   (void)tls;
@@ -28685,14 +28727,66 @@ static struct {
   int64_t tick;
   pid_t root_pid;
   pid_t pid;
+  fio_s *wakeup;
+  int wakeup_fd;
+  uint8_t is_worker;
   volatile uint8_t stop;
 } fio___srvdata = {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
     .tick = 0,
+    .wakeup_fd = -1,
     .stop = 1,
 };
+
+/* *****************************************************************************
+Wakeup Protocol
+***************************************************************************** */
+
+static void fio___srv_wakeup_cb(fio_s *io) {
+  char buf[512];
+  fio_sock_read(fio_fd_get(io), buf, 512);
+  (void)(io);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
+}
+static void fio___srv_wakeup_on_close(void *ignr_) {
+  (void)ignr_;
+  fio_sock_close(fio___srvdata.wakeup_fd);
+  fio___srvdata.wakeup = NULL;
+  fio___srvdata.wakeup_fd = -1;
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup destroyed", fio___srvdata.pid);
+}
+
+FIO_SFUNC void fio___srv_wakeup(void) {
+  if (!fio___srvdata.wakeup)
+    return;
+  char buf[1] = {~0};
+  fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
+}
+
+FIO_SFUNC fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
+    .on_data = fio___srv_wakeup_cb,
+    .on_close = fio___srv_wakeup_on_close,
+    .on_timeout = fio___srv_on_timeout_never,
+};
+
+FIO_SFUNC void fio___srv_wakeup_init(void) {
+  if (fio___srvdata.wakeup)
+    return;
+  int fds[2];
+  if (pipe(fds)) {
+    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___srv_wakeup disabled.",
+                  fio___srvdata.pid);
+    return;
+  }
+  fio___srvdata.wakeup_fd = fds[1];
+  fio___srvdata.wakeup = fio_attach_fd(fds[0],
+                                       &FIO___SRV_WAKEUP_PROTOCOL,
+                                       (void *)(uintptr_t)fds[1],
+                                       NULL);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup initialized", fio___srvdata.pid);
+}
 
 /* *****************************************************************************
 Server Timers and Task Queues
@@ -28707,6 +28801,7 @@ SFUNC int64_t fio_last_tick(void) { return fio___srvdata.tick; }
 /** Schedules a task for delayed execution. This function is thread-safe. */
 SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2) {
   fio_queue_push(fio___srv_tasks, task, udata1, udata2);
+  fio___srv_wakeup();
 }
 
 /** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
@@ -28928,6 +29023,7 @@ static void fio_undup_task(void *io, void *ignr_) {
  */
 SFUNC void fio_undup(fio_s *io) {
   fio_queue_push(fio___srv_tasks, fio_undup_task, io);
+  fio___srv_wakeup();
 }
 
 /* *****************************************************************************
@@ -29127,96 +29223,100 @@ FIO_SFUNC void fio_srv_shutdown(void) {
 }
 
 FIO_SFUNC void fio___srv_work(int is_worker) {
+  fio___srvdata.is_worker = is_worker;
   fio_queue_perform_all(fio___srv_tasks);
   if (is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
   }
+  fio___srv_wakeup_init();
   while (!fio___srvdata.stop) {
     fio___srv_tick(500);
   }
   fio_srv_shutdown();
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
-  /* if worker, exit */
-  if (fio___srvdata.pid != fio___srvdata.root_pid)
-    exit(0);
 }
 
 /* *****************************************************************************
 Worker Forking
 ***************************************************************************** */
-#if 0
-static void fio_spawn_worker(void *ignr_1, void *ignr_2);
+static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2);
 
-static fio_lock_i fio_spawn_GIL = FIO_LOCK_INIT;
+static void fio___srv_wait_for_worker(void *thr_) {
+  fio_thread_t t = (fio_thread_t)thr_;
+  fio_thread_join(&t);
+}
+
+static fio_lock_i fio___srv_spawn_GIL = FIO_LOCK_INIT;
 
 /** Worker sentinel */
-static void *fio_worker_sentinel(void *thr_ptr) {
-  pid_t pid = FIO_FUNCTIONS.fork();
+static void *fio___srv_worker_sentinel(void *thr_ptr) {
+  (void)thr_ptr;
+  pid_t pid = fio_thread_fork();
   FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
   if (pid) {
     int status = 0;
+    fio_thread_t thr = fio_thread_current();
     (void)status;
-    fio_state_callback_force(FIO_CALL_AFTER_FORK);
     fio_state_callback_force(FIO_CALL_IN_MASTER);
-    fio_unlock(&fio_spawn_GIL);
-    if (waitpid(pid, &status, 0) != pid && fio_data.running)
+    fio_state_callback_add(FIO_CALL_ON_FINISH,
+                           fio___srv_wait_for_worker,
+                           (void *)thr);
+    fio_unlock(&fio___srv_spawn_GIL);
+    if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
       FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
     if (!WIFEXITED(status) || WEXITSTATUS(status)) {
       FIO_LOG_WARNING("abnormal worker exit detected");
       fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
     }
-    if (fio_data.running) {
+    if (!fio___srvdata.stop) {
       FIO_ASSERT_DEBUG(
           0,
           "DEBUG mode prevents worker re-spawning, now crashing parent.");
-      if (thr_ptr) {
-        fio_thread_detach(*(fio_thread_t *)thr_ptr);
-        memset(thr_ptr, 0, sizeof(fio_thread_t));
-      }
-      fio_queue_push(FIO_QUEUE_SYSTEM, fio_spawn_worker, thr_ptr);
+      fio_state_callback_remove(FIO_CALL_ON_FINISH,
+                                fio___srv_wait_for_worker,
+                                (void *)thr);
+      fio_thread_detach(&thr);
+      fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
     }
     return NULL;
   }
-  fio_data.pid = getpid();
-  fio_data.is_master = 0;
-  fio_data.is_worker = 1;
-  fio_unlock(&fio_spawn_GIL);
-  fio___after_fork();
-  FIO_LOG_INFO("(%d) worker starting up.", (int)fio_data.pid);
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_unlock(&fio___srv_spawn_GIL);
+  fio___srvdata.pid = getpid();
+  fio___srvdata.is_worker = 1;
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
-  fio___worker();
+  fio___srv_work(1);
+  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
   exit(0);
   return NULL;
 }
 
-static void fio_spawn_worker(void *thr_ptr, void *ignr_2) {
+static void fio___srv_spawn_worker(void *thr_ptr, void *ignr_2) {
   fio_thread_t t;
-  fio_thread_t *pt = thr_ptr;
+  fio_thread_t *pt = (fio_thread_t *)thr_ptr;
   if (!pt)
     pt = &t;
-  if (!fio_data.is_master)
+  if (fio___srvdata.root_pid != fio___srvdata.pid)
     return;
 
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
-  fio_queue_perform_pending();
+  fio_queue_perform_all(fio___srv_tasks);
 
-  fio_lock(&fio_spawn_GIL);
-  if (fio_thread_create(pt, fio_worker_sentinel, thr_ptr)) {
-    fio_unlock(&fio_spawn_GIL);
+  fio_lock(&fio___srv_spawn_GIL);
+  if (fio_thread_create(pt, fio___srv_worker_sentinel, thr_ptr)) {
+    fio_unlock(&fio___srv_spawn_GIL);
     FIO_LOG_FATAL(
         "sentinel thread creation failed, no worker will be spawned.");
-    fio_stop();
+    fio_srv_stop();
   }
-  if (!thr_ptr)
-    fio_thread_detach(t);
-  fio_lock(&fio_spawn_GIL);
-  fio_unlock(&fio_spawn_GIL);
+  fio_lock(&fio___srv_spawn_GIL);
+  fio_unlock(&fio___srv_spawn_GIL);
   (void)ignr_2;
 }
-#endif
+
 /* *****************************************************************************
 Starting the Server
 ***************************************************************************** */
@@ -29227,6 +29327,7 @@ SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_run(int workers) {
   fio___srvdata.stop = 0;
+  fio___srvdata.is_worker = !workers;
   fio_sock_maximize_limits();
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(fio___srv_tasks);
@@ -29256,12 +29357,11 @@ SFUNC void fio_srv_run(int workers) {
     workers += !workers;
   }
   if (workers)
-    FIO_LOG_INFO("* Starting facil.io server using %d workers.", workers);
+    FIO_LOG_DEBUG("starting facil.io server using %d workers.", workers);
   else
-    FIO_LOG_INFO("* Starting facil.io server in single process mode.");
+    FIO_LOG_DEBUG("starting facil.io server in single process mode.");
   for (int i = 0; i < workers; ++i) {
-    /* TODO: spawn workers */
-    workers = 0;
+    fio___srv_spawn_worker(NULL, NULL);
   }
   fio___srv_work(!workers);
   fio_signal_forget(SIGINT);
@@ -29435,9 +29535,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
   if (s->on_finish)
     s->on_finish(s->udata);
-  FIO_LOG_DEBUG2("Stopped listening on %s", s->url);
+  FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
 }
-static void fio___srv_listen_on_timeout(fio_s *io) { fio_touch(io); }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   struct fio_listen_args *l = udata;
@@ -29449,7 +29548,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
 static fio_protocol_s FIO___LISTEN_PROTOCOL = {
     .on_data = fio___srv_listen_on_data,
     .on_close = fio___srv_listen_on_close,
-    .on_timeout = fio___srv_listen_on_timeout,
+    .on_timeout = fio___srv_on_timeout_never,
 };
 
 FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
@@ -29557,6 +29656,24 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
 }
 
+/* *****************************************************************************
+Simple Server Testing
+***************************************************************************** */
+// #ifdef FIO_TEST_CSTL
+// FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
+//   /*
+//    * test module here
+//    */
+// }
+
+// #endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Simple Server Cleanup
+***************************************************************************** */
+
+// #endif /* FIO_EXTERN_COMPLETE */
+// #undef FIO_SERVER
+// #endif /* FIO_SERVER */
 /* *****************************************************************************
 Simple Server Testing
 ***************************************************************************** */
@@ -33261,7 +33378,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
         fio_thread_create(threads + i, test_funcs[fn].task, &result);
       }
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        fio_thread_join(threads[i]);
+        fio_thread_join(threads + i);
       }
       end = fio_time_micro();
       fprintf(stderr,

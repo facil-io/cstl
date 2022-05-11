@@ -33,14 +33,14 @@ Starts a new thread, returns 0 on success and -1 on failure.
 
 #### `fio_thread_join`
 ```c
-int fio_thread_join(fio_thread_t thread);
+int fio_thread_join(fio_thread_t *thread);
 ```
 
 Waits for the thread to finish.
 
 #### `fio_thread_detach`
 ```c
-int fio_thread_detach(fio_thread_t thread);
+int fio_thread_detach(fio_thread_t *thread);
 ```
 
 Detaches the thread, so thread resources are freed automatically.
@@ -54,7 +54,7 @@ Ends the current running thread.
 
 #### `fio_thread_equal`
 ```c
-int fio_thread_equal(fio_thread_t a, fio_thread_t b);
+int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 ```
 
 Returns non-zero if both threads refer to the same thread.
@@ -124,6 +124,48 @@ void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 
 Destroys the simple Mutex (cleanup).
 
+
+### Conditional Variable Functions
+
+#### `FIO_THREADS_COND_BYO`
+
+* **BYO**: **B**ring **Y**our **O**wn.
+
+If this macro is defined, these conditional variable functions are only declared, but they are **not** defined (implemented).
+
+The implementation expects you to provide your own inline alternatives.
+
+#### `fio_thread_cond_init`
+
+```c
+int fio_thread_cond_init(fio_thread_cond_t *c);
+```
+
+Initializes a simple conditional variable.
+
+#### `fio_thread_cond_wait`
+
+```c
+int fio_thread_cond_wait(fio_thread_cond_t *c, fio_thread_mutex_t *m);
+```
+
+Waits on a conditional variable (MUST be previously locked).
+
+#### `fio_thread_cond_signal`
+
+```c
+int fio_thread_cond_signal(fio_thread_cond_t *c);
+```
+
+Signals a simple conditional variable.
+
+#### `fio_thread_cond_destroy`
+
+```c
+void fio_thread_cond_destroy(fio_thread_cond_t *c);
+```
+
+Destroys a simple conditional variable.
 
 
 -------------------------------------------------------------------------------

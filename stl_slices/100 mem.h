@@ -2928,7 +2928,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
       }
       FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
       for (size_t i = 0; i < thread_count; ++i) {
-        fio_thread_join(threads[i]);
+        fio_thread_join(threads + i);
       }
     }
   }

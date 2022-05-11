@@ -876,7 +876,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
         fio_thread_create(threads + i, test_funcs[fn].task, &result);
       }
       for (size_t i = 0; i < FIO___LOCK2_TEST_THREADS; ++i) {
-        fio_thread_join(threads[i]);
+        fio_thread_join(threads + i);
       }
       end = fio_time_micro();
       fprintf(stderr,

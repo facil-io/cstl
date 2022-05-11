@@ -26,7 +26,7 @@ Feel free to copy, use and enjoy according to the license provided.
 /* *****************************************************************************
 Module Settings
 
-At this point, define any MACROs and customaizable settings avsailable to the
+At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
@@ -56,6 +56,12 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 #define FIO_IFUNC_T FIO_IFUNC
 #endif
 
+#ifdef FIO_THREADS_FORK_BYO
+#define FIO_IFUNC_F
+#else
+#define FIO_IFUNC_F FIO_IFUNC
+#endif
+
 #ifdef FIO_THREADS_MUTEX_BYO
 #define FIO_IFUNC_M
 #else
@@ -72,22 +78,25 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 Module API
 ***************************************************************************** */
 
+/** Should behave the same as the POSIX system call `fork`. */
+FIO_IFUNC_F int fio_thread_fork(void);
+
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
                                   void *(*fn)(void *),
                                   void *arg);
 
 /** Waits for the thread to finish. */
-FIO_IFUNC_T int fio_thread_join(fio_thread_t t);
+FIO_IFUNC_T int fio_thread_join(fio_thread_t *t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC_T int fio_thread_detach(fio_thread_t t);
+FIO_IFUNC_T int fio_thread_detach(fio_thread_t *t);
 
 /** Ends the current running thread. */
 FIO_IFUNC_T void fio_thread_exit(void);
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC_T int fio_thread_equal(fio_thread_t a, fio_thread_t b);
+FIO_IFUNC_T int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 
 /** Returns the current thread. */
 FIO_IFUNC_T fio_thread_t fio_thread_current(void);
@@ -150,21 +159,28 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
 POSIX Implementation - inlined static functions
 ***************************************************************************** */
 #if FIO_OS_POSIX
+
+#ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `fork`. */
+FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+#endif
+
 #ifndef FIO_THREADS_BYO
 // clang-format off
+
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg); }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) { return pthread_join(t, NULL); }
+FIO_IFUNC int fio_thread_join(fio_thread_t *t) { return pthread_join(*t, NULL); }
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return pthread_detach(t); }
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return pthread_detach(*t); }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { pthread_exit(NULL); }
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return pthread_equal(a, b); }
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return pthread_equal(*a, *b); }
 
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
@@ -222,6 +238,15 @@ Windows Implementation - inlined static functions
 #elif FIO_OS_WIN
 #include <process.h>
 
+#ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `fork`. */
+#ifdef fork
+FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+#else
+FIO_IFUNC_F int fio_thread_fork(void) { return -1; }
+#endif
+#endif
+
 #ifndef FIO_THREADS_BYO
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
@@ -236,25 +261,25 @@ FIO_IFUNC int fio_thread_create(fio_thread_t *t,
   return (!!t) - 1;
 }
 
-FIO_IFUNC int fio_thread_join(fio_thread_t t) {
+FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
   int r = 0;
-  if (WaitForSingleObject(t, INFINITE) == WAIT_FAILED) {
+  if (WaitForSingleObject(*t, INFINITE) == WAIT_FAILED) {
     errno = GetLastError();
     r = -1;
   } else
-    CloseHandle(t);
+    CloseHandle(*t);
   return r;
 }
 
 // clang-format off
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t t) { return CloseHandle(t) - 1; }
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return CloseHandle(*t) - 1; }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t a, fio_thread_t b) { return GetThreadId(a) == GetThreadId(b); }
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return GetThreadId(*a) == GetThreadId(*b); }
 
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }

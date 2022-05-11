@@ -317,13 +317,17 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
       if (tmp != &q->mem)
         FIO_MEM_FREE_(tmp, sizeof(*tmp));
     }
+    if (FIO_LIST_IS_EMPTY(&q->consumers)) {
+      FIO___LOCK_UNLOCK(q->lock);
+      break;
+    }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       pos->stop = 1;
       fio_thread_cond_signal(&pos->cond);
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       FIO___LOCK_UNLOCK(q->lock);
-      fio_thread_join(pos->thread);
+      fio_thread_join(&pos->thread);
       FIO___LOCK_LOCK(q->lock);
     }
     FIO___LOCK_UNLOCK(q->lock);
@@ -408,8 +412,10 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   ++q->count;
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    fio_thread_cond_signal(&pos->cond);
+  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      fio_thread_cond_signal(&pos->cond);
+    }
   }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
@@ -440,8 +446,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   ++q->count;
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    fio_thread_cond_signal(&pos->cond);
+  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
+    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+      fio_thread_cond_signal(&pos->cond);
+    }
   }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
@@ -536,7 +544,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   ((fio___thread_group_s *)g_)->stop = 0;
   /* from this point on, g_ is invalid! */
   for (size_t i = 0; i < grp.workers; ++i) {
-    fio_thread_join(threads[i]);
+    fio_thread_join(threads + i);
   }
   if (threads != threads_buf)
     FIO_MEM_FREE_(threads, sizeof(*threads) * grp.workers);
@@ -561,6 +569,8 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
 }
 
 SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
+  if (FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     pos->stop = 1;
@@ -571,6 +581,8 @@ SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
 
 /** Signals all worker threads to go back to work (new tasks were). */
 SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
+  if (FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     fio_thread_cond_signal(&pos->cond);
@@ -879,7 +891,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           while (!(volatile uintptr_t)i_count)
             FIO_THREAD_RESCHEDULE();
           fio_queue_workers_stop(q);
-          fio_thread_join(pos->thread);
+          fio_thread_join(&pos->thread);
           FIO___LOCK_LOCK(q->lock);
         }
         FIO___LOCK_UNLOCK(q->lock);
@@ -897,7 +909,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
           }
         }
         for (size_t j = 0; j < t_count; ++j) {
-          fio_thread_join(threads[j]);
+          fio_thread_join(threads + j);
         }
         FIO_MEM_FREE(threads, sizeof(*threads) * t_count);
       }
