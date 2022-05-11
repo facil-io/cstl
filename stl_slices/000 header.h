@@ -1321,7 +1321,8 @@ Common macros
 #endif
 
 /* Modules that require the String Core API */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_SERVER)
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
+    defined(FIO_MAP_KEY_STR) || defined(FIO_SERVER)
 #ifndef FIO_STR
 #define FIO_STR
 #endif

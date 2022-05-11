@@ -374,7 +374,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b);
 FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 
 /* *****************************************************************************
-Binary String Type - Embedded Strings
+Binary String Type - Embedded Strings optimized for mutability and locality
 ***************************************************************************** */
 
 /* for internal use only */
@@ -472,6 +472,34 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
 /** Writes a `fio_bstr` in `printf` style. */
 FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
 fio_bstr_printf(char *bstr, const char *format, ...);
+
+/* *****************************************************************************
+Key String Type - binary String container for Hash Maps and Arrays
+***************************************************************************** */
+
+/** a semi-opaque type used for the `fio_keystr` functions */
+typedef struct fio_keystr_s fio_keystr_s;
+
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
+
+/** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
+FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len);
+/**
+ * Returns a `fio_keystr_s` constant to be used as a key for a hash map.
+ *
+ * NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of
+ * the value in the map.
+ */
+FIO_IFUNC fio_keystr_s fio_keystr_const(const char *buf, uint32_t len);
+/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_keystr_s org,
+                                       void *(*alloc_func)(size_t len));
+/** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
+                                  void (*free_func)(void *, size_t));
+/** Compares two Key Strings - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 
 /* *****************************************************************************
 
@@ -708,6 +736,99 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
 FIO_SFUNC int fio_bstr_is_greater(char *a, char *b) {
   return fio_string_is_greater_buf(fio_bstr_buf(a), fio_bstr_buf(b));
+}
+
+/* *****************************************************************************
+Key String Type - binary String container for Hash Maps and Arrays
+***************************************************************************** */
+
+/* key string type implementation */
+struct fio_keystr_s {
+  uint8_t info;
+  uint8_t embd[3];
+  uint32_t len;
+  const char *buf;
+};
+
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+fio_buf_info_s fio_keystr_info(fio_keystr_s *str) {
+  fio_buf_info_s r;
+  if ((str->info + 1) > 1) {
+    r = (fio_buf_info_s){.len = str->info, .buf = (char *)str->embd};
+    return r;
+  }
+  r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
+  return r;
+}
+
+/** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
+FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
+  fio_keystr_s r = {0};
+  if (len < sizeof(r)) { /* always embed small strings in container! */
+    r.info = (uint8_t)len;
+    FIO_MEMCPY(r.embd, buf, len);
+    return r;
+  }
+  r.len = len;
+  r.buf = buf;
+  return r;
+}
+
+/**
+ * Returns a `fio_keystr_s` constant to be used as a key for a hash map.
+ *
+ * NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of
+ * the value in the map.
+ */
+FIO_IFUNC fio_keystr_s fio_keystr_const(const char *buf, uint32_t len) {
+  fio_keystr_s r = {0};
+  if (len < sizeof(r)) {
+    r.info = (uint8_t)len;
+    FIO_MEMCPY(r.embd, buf, len);
+    return r;
+  }
+  r.info = 0xFF;
+  r.len = len;
+  r.buf = buf;
+  return r;
+}
+/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_keystr_s org,
+                                       void *(*alloc_func)(size_t len)) {
+  fio_keystr_s r = {0};
+  if (org.info) {
+    r = org;
+    return r;
+  }
+  char *buf;
+  r.len = org.len;
+  r.buf = buf = (char *)alloc_func(org.len);
+  if (!buf)
+    goto no_mem;
+  FIO_MEMCPY(buf, org.buf, org.len);
+  return r;
+no_mem:
+  FIO_LOG_ERROR("fio_keystr_copy allocation failed - results undefined!!!");
+  r = org;
+  r.info = 0xFF;
+  return r;
+}
+/** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
+                                  void (*free_func)(void *, size_t)) {
+  if (key->info)
+    return;
+  free_func((void *)key->buf, key->len);
+}
+
+/** Compares two Key Strings - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b) {
+  if (((a.info != b.info) | (a.len != b.len)))
+    return 0;
+  if ((a.info + 1) > 1) {
+    return !memcmp(&a, &b, sizeof(a));
+  }
+  return !memcmp(a.buf, b.buf, a.len);
 }
 
 /* *****************************************************************************

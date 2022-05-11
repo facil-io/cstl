@@ -69,6 +69,8 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
 #include __FILE__
+#define FIO_SERVER
+#include __FILE__
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
@@ -996,6 +998,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, fiobj)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, server)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");

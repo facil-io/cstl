@@ -42,6 +42,37 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifdef FIO_MAP_NAME
+
+/* *****************************************************************************
+Special support for `FIO_MAP_KEY_STR` maps (short string keys)
+***************************************************************************** */
+/** define FIO_MAP_KEY_STR to use fio_key_str_s as map keys (key.len <= 15)  */
+#ifdef FIO_MAP_KEY_STR
+#ifndef FIO_MAP_KEY
+#define FIO_MAP_KEY fio_keystr_s
+#endif
+#ifndef FIO_MAP_KEY_COPY
+#define FIO_MAP_KEY_COPY(dest, src)                                            \
+  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, ___key_alloc))
+#endif
+#ifndef FIO_MAP_KEY_DESTROY
+#define FIO_MAP_KEY_DESTROY(key)                                               \
+  fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, ___key_free))
+#endif
+#ifndef FIO_MAP_KEY_CMP
+#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq((a), (b))
+#endif
+
+FIO_SFUNC void *FIO_NAME(FIO_MAP_NAME, ___key_alloc)(size_t len) {
+  return FIO_MEM_REALLOC_(NULL, 0, len, 0);
+}
+FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, ___key_free)(void *ptr, size_t len) {
+  FIO_MEM_FREE_(ptr, len);
+  (void)len; /* if unused */
+}
+#undef FIO_MAP_KEY_STR
+#endif /* FIO_MAP_KEY_STR */
+
 /* *****************************************************************************
 The following macros are used to customize the map.
 ***************************************************************************** */
@@ -161,7 +192,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
   (void)c; /* in case where macros do nothing */
 }
 
-/** FIO_MAP_OBJ is either a couplet (for hash maps) or the objet (for sets) */
+/** FIO_MAP_OBJ is either a couplet (for hash maps) or the object (for sets) */
 #define FIO_MAP_OBJ FIO_NAME(FIO_MAP_NAME, couplet_s)
 
 /** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */

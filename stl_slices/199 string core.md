@@ -585,3 +585,127 @@ char * bstr = fio_bstr_len_set(str.buf, str.len);
 ```
 
 -------------------------------------------------------------------------------
+
+## Binary Safe Map Key Strings
+
+It is very common for Hash Maps to contain String keys. When the String keys are usually short, than it could be more efficient to embed the Key String data into the map itself (improve cache locality) rather than allocate memory for each separate Key String.
+
+The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 15` on 64 bit machines or `len <= 11` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
+
+See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEY_STR` MACRO.
+
+#### `FIO_MAP_KEY_STR`
+
+A helper macro for defining Key String keys in Hash Maps.
+
+#### `fio_keystr_s`
+
+```c
+typedef struct fio_keystr_s fio_keystr_s;
+```
+
+a semi-opaque type used for the `fio_keystr` functions
+
+#### `fio_keystr_info`
+
+```c
+fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
+```
+
+returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED!
+
+#### `fio_keystr`
+
+```c
+fio_keystr_s fio_keystr(const char *buf, uint32_t len);
+```
+
+Returns a **temporary** `fio_keystr_s` to be used as a key for a hash map.
+
+Do **not** `fio_keystr_destroy` this key.
+
+#### `fio_keystr_const`
+```c
+fio_keystr_s fio_keystr_const(const char *buf, uint32_t len);
+```
+
+Returns a `fio_keystr_s` constant to be used as a key for a hash map.
+
+NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of the value in the map.
+
+
+```c
+fio_keystr_s fio_keystr_copy(fio_keystr_s org, void *(*alloc_func)(size_t len));
+```
+
+Returns a copy of `fio_keystr_s` - used internally by the hash map.
+
+#### `fio_keystr_destroy`
+
+```c
+void fio_keystr_destroy(fio_keystr_s *key, void (*free_func)(void *, size_t));
+```
+
+Destroys a copy of `fio_keystr_s` - used internally by the hash map.
+
+#### `fio_keystr_is_eq`
+
+```c
+int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
+```
+
+Compares two Key Strings - used internally by the hash map.
+
+### `fio_keystr` Example
+
+This example maps words to numbers. Note that this will work also with binary data and dynamic strings.
+
+```c
+/* map words to numbers. */
+#define FIO_MAP_KEY_STR
+#define FIO_UMAP_NAME umap
+#define FIO_MAP_TYPE  uintptr_t
+#include "fio-stl.h"
+
+/** a helper to calculate hash and set any string as a key. */
+FIO_IFUNC void umap_set2(umap_s *map,
+                         char *key,
+                         size_t key_len,
+                         uintptr_t obj) {
+  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
+  umap_set(map, hash, fio_keystr(key, key_len), obj, NULL);
+}
+/** a helper to calculate hash and set a constant string as a key. */
+FIO_IFUNC void umap_set3(umap_s *map,
+                         char *key,
+                         size_t key_len,
+                         uintptr_t obj) {
+  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
+  umap_set(map, hash, fio_keystr_const(key, key_len), obj, NULL);
+}
+
+/** a helper to calculate hash and get the value of a key. */
+FIO_IFUNC uintptr_t umap_get2(umap_s *map, char *key, size_t key_len) {
+  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
+  return umap_get(map, hash, fio_keystr(key, key_len));
+}
+/* example adding strings to map and printing data. */
+int main(int argc, char const *argv[]) {
+  (void)argc;
+  (void)argv;
+  umap_s map = FIO_MAP_INIT;
+  umap_set2(&map, "One", 3, 1);
+  umap_set2(&map, "Two", 3, 2);
+  umap_set2(&map, "Three", 5, 3);
+  umap_set3(&map, "Infinity", 8, (uintptr_t)-1); /* <- never allocates memory. */
+  FIO_MAP_EACH(umap, &map, pos) {
+    /* note that key strings are NOT nul terminated! */
+    fio_buf_info_s key = fio_keystr_info(&pos->obj.key);
+    uintptr_t value = pos->obj.value;
+    printf("%.*s: %llu\n", (int)key.len, key.buf, (unsigned long long)value);
+  }
+  umap_destroy(&map);
+  return 0;
+}
+```
+-------------------------------------------------------------------------------

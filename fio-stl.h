@@ -1321,7 +1321,8 @@ Common macros
 #endif
 
 /* Modules that require the String Core API */
-#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) || defined(FIO_SERVER)
+#if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
+    defined(FIO_MAP_KEY_STR) || defined(FIO_SERVER)
 #ifndef FIO_STR
 #define FIO_STR
 #endif
@@ -17387,7 +17388,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b);
 FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b);
 
 /* *****************************************************************************
-Binary String Type - Embedded Strings
+Binary String Type - Embedded Strings optimized for mutability and locality
 ***************************************************************************** */
 
 /* for internal use only */
@@ -17485,6 +17486,34 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
 /** Writes a `fio_bstr` in `printf` style. */
 FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
 fio_bstr_printf(char *bstr, const char *format, ...);
+
+/* *****************************************************************************
+Key String Type - binary String container for Hash Maps and Arrays
+***************************************************************************** */
+
+/** a semi-opaque type used for the `fio_keystr` functions */
+typedef struct fio_keystr_s fio_keystr_s;
+
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
+
+/** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
+FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len);
+/**
+ * Returns a `fio_keystr_s` constant to be used as a key for a hash map.
+ *
+ * NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of
+ * the value in the map.
+ */
+FIO_IFUNC fio_keystr_s fio_keystr_const(const char *buf, uint32_t len);
+/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_keystr_s org,
+                                       void *(*alloc_func)(size_t len));
+/** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
+                                  void (*free_func)(void *, size_t));
+/** Compares two Key Strings - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 
 /* *****************************************************************************
 
@@ -17721,6 +17750,99 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
 FIO_SFUNC int fio_bstr_is_greater(char *a, char *b) {
   return fio_string_is_greater_buf(fio_bstr_buf(a), fio_bstr_buf(b));
+}
+
+/* *****************************************************************************
+Key String Type - binary String container for Hash Maps and Arrays
+***************************************************************************** */
+
+/* key string type implementation */
+struct fio_keystr_s {
+  uint8_t info;
+  uint8_t embd[3];
+  uint32_t len;
+  const char *buf;
+};
+
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+fio_buf_info_s fio_keystr_info(fio_keystr_s *str) {
+  fio_buf_info_s r;
+  if ((str->info + 1) > 1) {
+    r = (fio_buf_info_s){.len = str->info, .buf = (char *)str->embd};
+    return r;
+  }
+  r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
+  return r;
+}
+
+/** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
+FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
+  fio_keystr_s r = {0};
+  if (len < sizeof(r)) { /* always embed small strings in container! */
+    r.info = (uint8_t)len;
+    FIO_MEMCPY(r.embd, buf, len);
+    return r;
+  }
+  r.len = len;
+  r.buf = buf;
+  return r;
+}
+
+/**
+ * Returns a `fio_keystr_s` constant to be used as a key for a hash map.
+ *
+ * NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of
+ * the value in the map.
+ */
+FIO_IFUNC fio_keystr_s fio_keystr_const(const char *buf, uint32_t len) {
+  fio_keystr_s r = {0};
+  if (len < sizeof(r)) {
+    r.info = (uint8_t)len;
+    FIO_MEMCPY(r.embd, buf, len);
+    return r;
+  }
+  r.info = 0xFF;
+  r.len = len;
+  r.buf = buf;
+  return r;
+}
+/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_keystr_s org,
+                                       void *(*alloc_func)(size_t len)) {
+  fio_keystr_s r = {0};
+  if (org.info) {
+    r = org;
+    return r;
+  }
+  char *buf;
+  r.len = org.len;
+  r.buf = buf = (char *)alloc_func(org.len);
+  if (!buf)
+    goto no_mem;
+  FIO_MEMCPY(buf, org.buf, org.len);
+  return r;
+no_mem:
+  FIO_LOG_ERROR("fio_keystr_copy allocation failed - results undefined!!!");
+  r = org;
+  r.info = 0xFF;
+  return r;
+}
+/** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
+FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
+                                  void (*free_func)(void *, size_t)) {
+  if (key->info)
+    return;
+  free_func((void *)key->buf, key->len);
+}
+
+/** Compares two Key Strings - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b) {
+  if (((a.info != b.info) | (a.len != b.len)))
+    return 0;
+  if ((a.info + 1) > 1) {
+    return !memcmp(&a, &b, sizeof(a));
+  }
+  return !memcmp(a.buf, b.buf, a.len);
 }
 
 /* *****************************************************************************
@@ -23028,6 +23150,37 @@ Feel free to copy, use and enjoy according to the license provided.
 #endif
 
 #ifdef FIO_MAP_NAME
+
+/* *****************************************************************************
+Special support for `FIO_MAP_KEY_STR` maps (short string keys)
+***************************************************************************** */
+/** define FIO_MAP_KEY_STR to use fio_key_str_s as map keys (key.len <= 15)  */
+#ifdef FIO_MAP_KEY_STR
+#ifndef FIO_MAP_KEY
+#define FIO_MAP_KEY fio_keystr_s
+#endif
+#ifndef FIO_MAP_KEY_COPY
+#define FIO_MAP_KEY_COPY(dest, src)                                            \
+  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, ___key_alloc))
+#endif
+#ifndef FIO_MAP_KEY_DESTROY
+#define FIO_MAP_KEY_DESTROY(key)                                               \
+  fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, ___key_free))
+#endif
+#ifndef FIO_MAP_KEY_CMP
+#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq((a), (b))
+#endif
+
+FIO_SFUNC void *FIO_NAME(FIO_MAP_NAME, ___key_alloc)(size_t len) {
+  return FIO_MEM_REALLOC_(NULL, 0, len, 0);
+}
+FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, ___key_free)(void *ptr, size_t len) {
+  FIO_MEM_FREE_(ptr, len);
+  (void)len; /* if unused */
+}
+#undef FIO_MAP_KEY_STR
+#endif /* FIO_MAP_KEY_STR */
+
 /* *****************************************************************************
 The following macros are used to customize the map.
 ***************************************************************************** */
@@ -23147,7 +23300,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
   (void)c; /* in case where macros do nothing */
 }
 
-/** FIO_MAP_OBJ is either a couplet (for hash maps) or the objet (for sets) */
+/** FIO_MAP_OBJ is either a couplet (for hash maps) or the object (for sets) */
 #define FIO_MAP_OBJ FIO_NAME(FIO_MAP_NAME, couplet_s)
 
 /** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
@@ -28216,7 +28369,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "105 poll.h"               /* Development inclusion - ignore line */
 #include "105 stream.h"             /* Development inclusion - ignore line */
 #include "106 signals.h"            /* Development inclusion - ignore line */
-#include "220 strings core.h"       /* Development inclusion - ignore line */
+#include "199 string core.h"        /* Development inclusion - ignore line */
+#include "210 map api.h"            /* Development inclusion - ignore line */
+#include "219 map finish.h"         /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "330 poll api.h"           /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
@@ -28571,6 +28726,88 @@ struct fio_protocol_s {
 };
 
 /* *****************************************************************************
+Connection Object Links / Environment
+***************************************************************************** */
+
+/** Named arguments for the `fio_env_set` function. */
+typedef struct {
+  /** A numerical type filter. Defaults to 0. Negative values are reserved. */
+  intptr_t type;
+  /** The name for the link. The name and type uniquely identify the object. */
+  fio_str_info_s name;
+  /** The object being linked to the connection. */
+  void *udata;
+  /** A callback that will be called once the connection is closed. */
+  void (*on_close)(void *data);
+  /** Set to true (1) if the name string's life lives as long as the `env` . */
+  uint8_t const_name;
+} fio_env_set_args_s;
+
+/** Named arguments for the `fio_env_unset` function. */
+typedef struct {
+  intptr_t type;
+  fio_str_info_s name;
+} fio_env_unset_args_s;
+
+/**
+ * Links an object to a connection's lifetime / environment.
+ *
+ * The `on_close` callback will be called once the connection has died.
+ *
+ * If the `io` is NULL, the value will be set for the global environment.
+ */
+void fio_env_set(fio_s *io, fio_env_set_args_s);
+
+/**
+ * Links an object to a connection's lifetime, calling the `on_close` callback
+ * once the connection has died.
+ *
+ * If the `io` is NULL, the value will be set for the global environment, in
+ * which case the `on_close` callback will only be called once the process
+ * exits.
+ *
+ * This is a helper MACRO that allows the function to be called using named
+ * arguments.
+ */
+#define fio_env_set(io, ...) fio_env_set(io, (fio_env_set_args_s){__VA_ARGS__})
+
+/**
+ * Un-links an object from the connection's lifetime, so it's `on_close`
+ * callback will NOT be called.
+ *
+ * Returns 0 on success and -1 if the object couldn't be found.
+ */
+int fio_env_unset(fio_s *io, fio_env_unset_args_s);
+
+/**
+ * Un-links an object from the connection's lifetime, so it's `on_close`
+ * callback will NOT be called.
+ *
+ * Returns 0 on success and -1 if the object couldn't be found.
+ *
+ * This is a helper MACRO that allows the function to be called using named
+ * arguments.
+ */
+#define fio_env_unset(io, ...)                                                 \
+  fio_env_unset(io, (fio_env_unset_args_s){__VA_ARGS__})
+
+/**
+ * Removes an object from the connection's lifetime / environment, calling it's
+ * `on_close` callback as if the connection was closed.
+ */
+int fio_env_remove(fio_s *io, fio_env_unset_args_s);
+
+/**
+ * Removes an object from the connection's lifetime / environment, calling it's
+ * `on_close` callback as if the connection was closed.
+ *
+ * This is a helper MACRO that allows the function to be called using named
+ * arguments.
+ */
+#define fio_env_remove(io, ...)                                                \
+  fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
+
+/* *****************************************************************************
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -28674,16 +28911,82 @@ FIO_IFUNC void fio___srv_init_protocol_test(fio_protocol_s *pr) {
 }
 
 /* *****************************************************************************
-Server / IO environment support
+Server / IO environment support (`env`)
 ***************************************************************************** */
 
-// #define FIO_STL_KEEP__     1
-// #define FIO_REF_NAME       fio
-// #define FIO_REF_INIT(o)    fio_s_init(&(o))
-// #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-// #include FIO__FILE__
-// #undef FIO_STL_KEEP__
+/** An object that can be linked to any facil.io connection (fio_s). */
+typedef struct {
+  void (*on_close)(void *data);
+  void *udata;
+} fio___srv_env_obj_s;
 
+/* unordered `env` dictionary style map */
+#define FIO_UMAP_NAME fio___srv_env
+#define FIO_MAP_KEY_STR
+#define FIO_MAP_TYPE fio___srv_env_obj_s
+#define FIO_MAP_TYPE_DESTROY(o)                                                \
+  do {                                                                         \
+    if ((o).on_close)                                                          \
+      (o).on_close((o).udata);                                                 \
+  } while (0)
+#define FIO_MAP_DESTROY_AFTER_COPY 0
+
+#define FIO_STL_KEEP__ 1
+#include __FILE__
+#undef FIO_STL_KEEP__
+
+typedef struct {
+  fio_thread_mutex_t lock;
+  fio___srv_env_s env;
+} fio___srv_env_safe_s;
+
+#define FIO__SRV_ENV_SAFE_INIT                                                 \
+  { .lock = FIO_THREAD_MUTEX_INIT, .env = FIO_MAP_INIT }
+
+FIO_IFUNC void fio___srv_env_safe_set(fio___srv_env_safe_s *e,
+                                      char *key_,
+                                      size_t len,
+                                      intptr_t type_,
+                                      fio___srv_env_obj_s val,
+                                      uint8_t key_is_const) {
+  fio_keystr_s key = (key_is_const ? fio_keystr_const : fio_keystr)(key_, len);
+  const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
+  fio_thread_mutex_lock(&e->lock);
+  fio___srv_env_set(&e->env, hash, key, val, NULL);
+  fio_thread_mutex_unlock(&e->lock);
+}
+
+FIO_IFUNC int fio___srv_env_safe_unset(fio___srv_env_safe_s *e,
+                                       char *key_,
+                                       size_t len,
+                                       intptr_t type_) {
+  int r;
+  fio_keystr_s key = fio_keystr(key_, len);
+  const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
+  fio___srv_env_obj_s old;
+  fio_thread_mutex_lock(&e->lock);
+  r = fio___srv_env_remove(&e->env, hash, key, &old);
+  fio_thread_mutex_unlock(&e->lock);
+  return r;
+}
+
+FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
+                                        char *key_,
+                                        size_t len,
+                                        intptr_t type_) {
+  int r;
+  fio_keystr_s key = fio_keystr(key_, len);
+  const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
+  fio_thread_mutex_lock(&e->lock);
+  r = fio___srv_env_remove(&e->env, hash, key, NULL);
+  fio_thread_mutex_unlock(&e->lock);
+  return r;
+}
+
+FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
+  fio___srv_env_destroy(&e->env);
+  fio_thread_mutex_destroy(&e->lock);
+}
 /* *****************************************************************************
 IO Validity Map - Type
 ***************************************************************************** */
@@ -28723,6 +29026,7 @@ static struct {
   fio_thread_mutex_t valid_lock;
 #endif
 #endif /* FIO_VALIDITY_MAP_USE */
+  fio___srv_env_safe_s env;
   fio_poll_s poll_data;
   int64_t tick;
   pid_t root_pid;
@@ -28735,6 +29039,7 @@ static struct {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
+    .env = FIO__SRV_ENV_SAFE_INIT,
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
@@ -28892,6 +29197,7 @@ struct fio_s {
   fio_protocol_s *pr;
   FIO_LIST_NODE node;
   fio_stream_s stream;
+  fio___srv_env_safe_s env;
   int64_t active;
   uint32_t state;
   int fd;
@@ -28902,18 +29208,12 @@ struct fio_s {
 #define FIO_STATE_THROTTLED ((uint32_t)4U)
 #define FIO_STATE_CLOSING   ((uint32_t)8U)
 
-FIO_SFUNC void fio_s_on_close_task(void *func_, void *udata) {
-  union {
-    void (*func)(void *);
-    void *ptr;
-  } u = {.ptr = func_};
-  u.func(udata);
-}
-
 FIO_SFUNC void fio_s_init(fio_s *io) {
   *io = (fio_s){
       .pr = &MOCK_PROTOCOL,
       .node = FIO_LIST_INIT(io->node),
+      .stream = FIO_STREAM_INIT(io->stream),
+      .env = FIO__SRV_ENV_SAFE_INIT,
       .active = fio___srvdata.tick,
       .state = FIO_STATE_OPEN,
       .fd = -1,
@@ -28931,15 +29231,9 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_stream_destroy(&io->stream);
   fio_poll_forget(&fio___srvdata.poll_data, io->fd);
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d)", (void *)io, io->fd);
-  union {
-    void (*func)(void *);
-    void *ptr;
-  } u;
-  u.func = io->pr->on_close;
-  fio_queue_push(fio___srv_tasks, fio_s_on_close_task, u.ptr, io->udata);
-  u.func = io->pr->io_functions.free;
-  fio_queue_push(fio___srv_tasks, fio_s_on_close_task, u.ptr, io->tls);
-
+  io->pr->on_close(io->udata);
+  io->pr->io_functions.free(io->tls);
+  fio___srv_env_safe_destroy(&io->env);
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE(&io->pr->reserved.protocols);
 }
@@ -29024,6 +29318,48 @@ static void fio_undup_task(void *io, void *ignr_) {
 SFUNC void fio_undup(fio_s *io) {
   fio_queue_push(fio___srv_tasks, fio_undup_task, io);
   fio___srv_wakeup();
+}
+
+/* *****************************************************************************
+Connection Object Links / Environment
+***************************************************************************** */
+
+/**
+ * Links an object to a connection's lifetime / environment.
+ */
+void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
+  fio___srv_env_obj_s val = {
+      .udata = args.udata,
+      .on_close = args.on_close,
+  };
+  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
+  fio___srv_env_safe_s *e = selector[!io];
+  fio___srv_env_safe_set(e,
+                         args.name.buf,
+                         args.name.len,
+                         args.type,
+                         val,
+                         args.const_name);
+}
+
+/**
+ * Un-links an object from the connection's lifetime, so it's `on_close`
+ * callback will NOT be called.
+ */
+int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
+  fio___srv_env_safe_s *e = selector[!io];
+  return fio___srv_env_safe_unset(e, args.name.buf, args.name.len, args.type);
+}
+
+/**
+ * Removes an object from the connection's lifetime / environment, calling it's
+ * `on_close` callback as if the connection was closed.
+ */
+int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
+  fio___srv_env_safe_s *e = selector[!io];
+  return fio___srv_env_safe_remove(e, args.name.buf, args.name.len, args.type);
 }
 
 /* *****************************************************************************
@@ -29425,6 +29761,7 @@ FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   return;
 io_error:
   fio_stream_pack_free(packet);
+  fio_free2(io); /* undup the IO object since it isn't moved to on_ready */
 }
 
 void fio_write2___(void); /* IDE marker*/
@@ -29636,6 +29973,7 @@ FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
 FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
   fio___srv_after_fork(ignr_);
   fio_poll_destroy(&fio___srvdata.poll_data);
+  fio___srv_env_safe_destroy(&fio___srvdata.env);
 }
 
 /* *****************************************************************************
@@ -29657,41 +29995,103 @@ FIO_CONSTRUCTOR(fio___srv) {
 }
 
 /* *****************************************************************************
-Simple Server Testing
+Done with Server code
 ***************************************************************************** */
-// #ifdef FIO_TEST_CSTL
-// FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
-//   /*
-//    * test module here
-//    */
-// }
-
-// #endif /* FIO_TEST_CSTL */
-/* *****************************************************************************
-Simple Server Cleanup
-***************************************************************************** */
-
-// #endif /* FIO_EXTERN_COMPLETE */
-// #undef FIO_SERVER
-// #endif /* FIO_SERVER */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_SERVER */
 /* *****************************************************************************
 Simple Server Testing
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
-  /*
-   * test module here
-   */
+#if defined(FIO_TEST_CSTL) && defined(FIO_SERVER) &&                           \
+    !defined(FIO_STL_KEEP__) && (!defined(FIO_EXTERN) || FIO_EXTERN_COMPLETE)
+
+/* *****************************************************************************
+Test IO ENV support
+***************************************************************************** */
+
+/* State callback test task */
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                             env_on_close)(void *udata) {
+  size_t *p = (size_t *)udata;
+  ++p[0];
 }
 
-#endif /* FIO_TEST_CSTL */
+/* State callback tests */
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
+  fprintf(stderr, "   * testing fio_env.\n");
+  size_t a = 0, b = 0, c = 0;
+  fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
+  fio___srv_env_safe_set(
+      &env,
+      "a_key",
+      5,
+      1,
+      (fio___srv_env_obj_s){
+          .udata = &a,
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+      1);
+  fio___srv_env_safe_set(
+      &env,
+      "a_key",
+      5,
+      2,
+      (fio___srv_env_obj_s){
+          .udata = &a,
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+      2);
+  fio___srv_env_safe_set(
+      &env,
+      "a_key",
+      5,
+      3,
+      (fio___srv_env_obj_s){
+          .udata = &a,
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+      1);
+  fio___srv_env_safe_set(
+      &env,
+      "b_key",
+      5,
+      1,
+      (fio___srv_env_obj_s){
+          .udata = &b,
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+      1);
+  fio___srv_env_safe_set(
+      &env,
+      "c_key",
+      5,
+      1,
+      (fio___srv_env_obj_s){
+          .udata = &c,
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+      1);
+  fio___srv_env_safe_unset(&env, "a_key", 5, 3);
+  FIO_ASSERT(!a,
+             "unset should have removed an object without calling callback.");
+  fio___srv_env_safe_remove(&env, "a_key", 5, 3);
+  FIO_ASSERT(!a, "remove after unset should have no side-effects.");
+  fio___srv_env_safe_remove(&env, "a_key", 5, 2);
+  FIO_ASSERT(a == 1, "remove should call callbacks.");
+  fio___srv_env_safe_destroy(&env);
+  FIO_ASSERT(a == 2 && b == 1 && c == 1, "destroy should call callbacks.");
+}
+
+/* *****************************************************************************
+Test summery
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
+  /* TODO: add more tests */
+  fprintf(stderr, "* testing fio_srv units.\n");
+  FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
+}
+
 /* *****************************************************************************
 Simple Server Cleanup
 ***************************************************************************** */
-
-#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_SERVER
-#endif /* FIO_SERVER */
+#endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
 Copyright: Boaz Segev, 2019-2021
 License: ISC / MIT (choose your license)
@@ -32571,6 +32971,8 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
 
 #include __FILE__
+#define FIO_SERVER
+#include __FILE__
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
@@ -33498,6 +33900,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, sock)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, fiobj)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, server)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
