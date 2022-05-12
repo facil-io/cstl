@@ -165,8 +165,8 @@ struct http_s {
   http_sstr_s path;
   http_sstr_s query;
   http_sstr_s version;
-  http_hmap_s headers[2];
-  http_smap_s cookies[2];
+  http_hmap_s headers[2]; /* request, response */
+  http_smap_s cookies[2]; /* read, write */
   struct {
     char *buf;
     size_t len;
@@ -237,11 +237,11 @@ FIO_SFUNC fio_str_info_s http_date(uint64_t now_milli) {
   static size_t date_len;
   static uint64_t date_buf_val;
   const uint64_t now_time = now_milli / 1000;
-  if (date_buf_val != now_time) {
-    date_buf_val = now_time;
-    date_len = fio_time2rfc7231(date_buf, now_time);
-    date_buf[date_len] = 0;
-  }
+  if (date_buf_val == now_time)
+    return FIO_STR_INFO2(date_buf, date_len);
+  date_buf_val = now_time;
+  date_len = fio_time2rfc7231(date_buf, now_time);
+  date_buf[date_len] = 0;
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
@@ -873,7 +873,8 @@ ptr_error:
 
 /** Returns a cookie value (either received of newly set), if any. */
 fio_str_info_s http_cookie_get(http_s *h, const char *name, size_t len) {
-  if (!fio_atomic_or(&h->state, HTTP_STATE_COOKIES_PARSED))
+  if (!(fio_atomic_or(&h->state, HTTP_STATE_COOKIES_PARSED) &
+        HTTP_STATE_COOKIES_PARSED))
     http_cookie___collect(h);
   return http_smap_get2(h->cookies,
                         (fio_str_info_s){.buf = (char *)name, .len = len});
@@ -1027,7 +1028,7 @@ handle_error:
 }
 
 /* *****************************************************************************
-WebSocket / SSE Helpers
+WebSocket / SSE Helpers - TODO
 ***************************************************************************** */
 
 // int http_is_upgrade_request(http_s * h);
@@ -1053,6 +1054,27 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
   { /* try to gather address from request headers */
     /* TODO Guess IP address from headers (forwarded) where possible */
     /* if we failed */
+    fio_str_info_s forwarded =
+        http_request_header_get(h, FIO_STR_INFO2("forwarded", 9), -1);
+    if (forwarded.len) {
+      forwarded.len &= 1023; /* limit possible attack surface */
+      for (; forwarded.len > 5;) {
+        if (forwarded.buf[0] != 'f' || forwarded.buf[1] != 'o' ||
+            forwarded.buf[2] != 'r' || forwarded.buf[3] != '=') {
+          ++forwarded.buf;
+          --forwarded.len;
+        }
+        forwarded.buf += 4 + (forwarded.buf[4] == '"');
+        char *end = forwarded.buf;
+        while (*end && *end != '"' && *end != ',' && *end != ' ' &&
+               *end != ';' && (end - forwarded.buf) < 48)
+          ++end;
+        buf.len = (size_t)(end - forwarded.buf);
+        if (buf.len)
+          memcpy(buf.buf, forwarded.buf, buf.len);
+        break;
+      }
+    }
     if (!buf.len) {
       if (peer_addr.len) {
         memcpy(buf.buf, peer_addr.buf, peer_addr.len);
@@ -1080,6 +1102,7 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
                             http_sstr_len(&h->version)),
       FIO_STRING_WRITE_STR2("\" ", 2),
       FIO_STRING_WRITE_NUM(h->status),
+      FIO_STRING_WRITE_STR2(" ", 1),
       ((bytes_sent > 0) ? (FIO_STRING_WRITE_UNUM(bytes_sent))
                         : (FIO_STRING_WRITE_STR2("---", 3))),
       FIO_STRING_WRITE_STR2(" ", 1),
@@ -1093,7 +1116,7 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
 }
 
 /* *****************************************************************************
-Mime-Type Lookup Helpers
+Mime-Type Lookup Helpers - TODO
 ***************************************************************************** */
 #if 0
 #define FIO_FORCE_MALLOC_TMP 1 /* use malloc for the mime registry */

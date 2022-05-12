@@ -152,9 +152,9 @@ int main(int argc, char const *argv[]) {
   FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
              "Could not open listening socket as requested.");
   FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
-    "\n\tEngine: " FIO_POLL_ENGINE_STR
-    "\n\tWorkers: %d"
-    "\n\tPress ^C to exit.", fio_cli_get_i("-w"));
+               "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d"
+               "\n\tPress ^C to exit.",
+               fio_cli_get_i("-w"));
   fio_srv_run(fio_cli_get_i("-w"));
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
@@ -378,6 +378,7 @@ void http1_on_finish(http_s *h) {
   if (http_is_streaming(h)) {
     fio_write2(c->io, .buf = "0\r\n\r\n", .len = 5, .copy = 1);
   }
+  http_write_log(h, FIO_BUF_INFO2(NULL, 0));
 finish:
   http_free(h);
 }

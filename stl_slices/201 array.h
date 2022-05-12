@@ -47,6 +47,23 @@ void example(void) {
 
 #ifdef FIO_ARRAY_NAME
 
+#ifdef FIO_ARRAY_TYPE_STR
+#ifndef FIO_ARRAY_TYPE
+#define FIO_ARRAY_TYPE fio_keystr_s
+#endif
+#ifndef FIO_ARRAY_TYPE_COPY
+#define FIO_ARRAY_TYPE_COPY(dest, src) ((dest) = fio_keystr_copy((src)))
+#endif
+#ifndef FIO_ARRAY_TYPE_DESTROY
+#define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj));
+#endif
+#ifndef FIO_ARRAY_TYPE_CMP
+#define FIO_ARRAY_TYPE_CMP(a, b) fio_keystr_is_eq((a), (b))
+#endif
+#undef FIO_ARRAY_DESTROY_AFTER_COPY
+#define FIO_ARRAY_DESTROY_AFTER_COPY 1
+#endif
+
 #ifndef FIO_ARRAY_TYPE
 /** The type for array elements (an array of FIO_ARRAY_TYPE) */
 #define FIO_ARRAY_TYPE void *
