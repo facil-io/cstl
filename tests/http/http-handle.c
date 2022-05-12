@@ -1059,10 +1059,11 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
     if (forwarded.len) {
       forwarded.len &= 1023; /* limit possible attack surface */
       for (; forwarded.len > 5;) {
-        if (forwarded.buf[0] != 'f' || forwarded.buf[1] != 'o' ||
-            forwarded.buf[2] != 'r' || forwarded.buf[3] != '=') {
+        if ((forwarded.buf[0] | 32) != 'f' || (forwarded.buf[1] | 32) != 'o' ||
+            (forwarded.buf[2] | 32) != 'r' || forwarded.buf[3] != '=') {
           ++forwarded.buf;
           --forwarded.len;
+          continue;
         }
         forwarded.buf += 4 + (forwarded.buf[4] == '"');
         char *end = forwarded.buf;

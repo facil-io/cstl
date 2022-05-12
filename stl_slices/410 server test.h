@@ -2,7 +2,8 @@
 Simple Server Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SERVER) &&                           \
-    !defined(FIO_STL_KEEP__) && (!defined(FIO_EXTERN) || FIO_EXTERN_COMPLETE)
+    !defined(FIO_STL_KEEP__) &&                                                \
+    (!defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE))
 
 /* *****************************************************************************
 Test IO ENV support

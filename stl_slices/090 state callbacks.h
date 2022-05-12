@@ -120,7 +120,7 @@ All memory allocations should use:
 
 /* *****************************************************************************
 State Callback Map - I'd use the global mapping types...
-                     but this module can't depend on types.
+                     but we can't depend on types yet, possible collisions.
 ***************************************************************************** */
 
 typedef struct {

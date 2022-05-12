@@ -481,7 +481,7 @@ Key String Type - binary String container for Hash Maps and Arrays
 typedef struct fio_keystr_s fio_keystr_s;
 
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
-fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
+FIO_IFUNC fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
 
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
 FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len);
@@ -751,7 +751,7 @@ struct fio_keystr_s {
 };
 
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
-fio_buf_info_s fio_keystr_info(fio_keystr_s *str) {
+FIO_IFUNC fio_buf_info_s fio_keystr_info(fio_keystr_s *str) {
   fio_buf_info_s r;
   if ((str->info + 1) > 1) {
     r = (fio_buf_info_s){.len = str->info, .buf = (char *)str->embd};
@@ -808,7 +808,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_keystr_s org,
   FIO_MEMCPY(buf, org.buf, org.len);
   return r;
 no_mem:
-  FIO_LOG_ERROR("fio_keystr_copy allocation failed - results undefined!!!");
+  FIO_LOG_FATAL("fio_keystr_copy allocation failed - results undefined!!!");
   r = org;
   r.info = 0xFF;
   return r;

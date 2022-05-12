@@ -33,6 +33,8 @@ developer.
 #if FIO_OS_POSIX
 #include <pthread.h>
 #include <sched.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 typedef pthread_t fio_thread_t;
 typedef pthread_mutex_t fio_thread_mutex_t;
 typedef pthread_cond_t fio_thread_cond_t;

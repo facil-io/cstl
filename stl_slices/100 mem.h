@@ -26,11 +26,13 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 
 /* *****************************************************************************
-Memory Allocation - fast setup for a global allocator
+Memory Allocation - fast setup for a specific global allocators
 ***************************************************************************** */
+/* FIO_MALLOC defines a "global" default memory allocator */
 #if defined(FIO_MALLOC) && !defined(H___FIO_MALLOC___H)
+#ifndef FIO_MEMORY_NAME
 #define FIO_MEMORY_NAME fio
-
+#endif
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
 /* for a general allocator, increase system allocation size to 8Gb */
 #define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 23
@@ -66,7 +68,29 @@ Memory Allocation - fast setup for a global allocator
 /* prevent double declaration of FIO_MALLOC */
 #define H___FIO_MALLOC___H
 #undef FIO_MALLOC
+/* FIOBJ_MALLOC defines a FIOBJ dedicated memory allocator */
+#elif defined (FIOBJ_MALLOC) && !defined (H___FIOBJ_MALLOC___H)
+#define H___FIOBJ_MALLOC___H
+#ifndef FIO_MEMORY_NAME
+#define FIO_MEMORY_NAME fiobj_mem
 #endif
+#ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
+/* 4Mb per system call */
+#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22
+#endif
+#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
+/* fight fragmentation */
+#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4
+#endif
+#ifndef FIO_MEMORY_ALIGN_LOG
+/* align on 8 bytes, it's enough */
+#define FIO_MEMORY_ALIGN_LOG 3
+#endif
+#ifndef FIO_MEMORY_CACHE_SLOTS
+/* cache up to 64Mb */
+#define FIO_MEMORY_CACHE_SLOTS 16
+#endif
+#endif /* FIOBJ_MALLOC */
 
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
@@ -1398,9 +1422,9 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block_free)(void *ptr);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c);
 
-/* SublimeText marker */
+/* IDE marker */
 void fio___mem_state_cleanup___(void);
-void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
+FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
     return;
   (void)ignr_;

@@ -648,7 +648,7 @@ FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
   FIO_MEM_FREE_(t, sizeof(*t));
 }
 
-SFUNC void fio___timer_perform(void *timer_, void *t_) {
+FIO_SFUNC void fio___timer_perform(void *timer_, void *t_) {
   fio_timer_queue_s *tq = (fio_timer_queue_s *)timer_;
   fio___timer_event_s *t = (fio___timer_event_s *)t_;
   if (t->fn(t->udata1, t->udata2))

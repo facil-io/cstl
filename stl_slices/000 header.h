@@ -1137,7 +1137,23 @@ Locking selector
 #endif
 
 /* *****************************************************************************
-Common macros
+Special `extern` support for FIO_EVERYTHING - Everything, and the Kitchen Sink
+***************************************************************************** */
+#if defined(FIO_EVERYTHING) && !defined(H___FIO_EVERYTHING___H) &&             \
+    !defined(FIO_STL_KEEP__)
+#if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
+#undef FIO_EXTERN
+#define FIO_EXTERN                     2
+#define FIO_EVERYTHING___REMOVE_EXTERN 1
+#endif
+#if defined(FIO_EXTERN_COMPLETE) && ((FIO_EXTERN_COMPLETE + 1) < 3)
+#undef FIO_EXTERN_COMPLETE
+#define FIO_EXTERN_COMPLETE                     2
+#define FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE 1
+#endif
+#endif
+/* *****************************************************************************
+Recursive inclusion management
 ***************************************************************************** */
 #ifndef SFUNC_ /* if we aren't in a recursive #include statement */
 
@@ -1157,6 +1173,17 @@ Common macros
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
+#elif !defined(FIO_STL_KEEP__) || (FIO_STL_KEEP__ + 1 != 100)
+/* SFUNC_ - internal helper types are `static` */
+#undef SFUNC
+#undef IFUNC
+#define SFUNC FIO_SFUNC
+#define IFUNC FIO_IFUNC
+#endif /* SFUNC_ vs FIO_STL_KEEP__*/
+
+/* *****************************************************************************
+Pointer Tagging
+***************************************************************************** */
 #ifndef FIO_PTR_TAG
 /**
  * Supports embedded pointer tagging / untagging for the included types.
@@ -1218,14 +1245,6 @@ Common macros
       goto lable;                                                              \
     }                                                                          \
   } while (0)
-
-#else /* SFUNC_ - internal helper types are `static` */
-#undef SFUNC
-#undef IFUNC
-#define SFUNC FIO_SFUNC
-#define IFUNC FIO_IFUNC
-#endif /* SFUNC_ vs FIO_STL_KEEP__*/
-
 /* *****************************************************************************
 
 
@@ -1276,8 +1295,8 @@ Common macros
 #endif
 
 /* Modules that require FIO_STATE */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_POLL) ||    \
-    defined(FIO_SERVER)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
+    defined(FIOBJ_MALLOC) || defined(FIO_POLL) || defined(FIO_SERVER)
 #ifndef FIO_STATE
 #define FIO_STATE
 #endif
@@ -1386,7 +1405,8 @@ Common macros
     defined(FIO_STATE) || (defined(FIO_POLL) && !FIO_USE_THREAD_MUTEX_TMP) ||  \
     (defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC)) ||                       \
     (defined(FIO_QUEUE) && !FIO_USE_THREAD_MUTEX_TMP) || defined(FIO_JSON) ||  \
-    defined(FIO_SIGNAL) || defined(FIO_BITMAP) || defined(FIO_THREADS)
+    defined(FIO_SIGNAL) || defined(FIO_BITMAP) || defined(FIO_THREADS) ||      \
+    defined(FIO_FIOBJ)
 #ifndef FIO_ATOMIC
 #define FIO_ATOMIC
 #endif
@@ -1395,7 +1415,7 @@ Common macros
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR) || defined(FIO_QUEUE) || defined(FIO_TIME) ||             \
     defined(FIO_CLI) || defined(FIO_JSON) || defined(FIO_FILES) ||             \
-    defined(FIO_TEST_CSTL)
+    defined(FIO_FIOBJ) || defined(FIO_TEST_CSTL)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif

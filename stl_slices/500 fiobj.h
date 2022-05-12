@@ -5,19 +5,24 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_FIOBJ                   /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
 #include "003 atomics.h"            /* Development inclusion - ignore line */
 #include "004 bitwise.h"            /* Development inclusion - ignore line */
 #include "006 atol.h"               /* Development inclusion - ignore line */
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "051 json.h"               /* Development inclusion - ignore line */
+#include "090 state callbacks.h"    /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#include "108 files.h"              /* Development inclusion - ignore line */
+#include "199 string core.h"        /* Development inclusion - ignore line */
+#include "200 string.h"             /* Development inclusion - ignore line */
 #include "201 array.h"              /* Development inclusion - ignore line */
 #include "210 map api.h"            /* Development inclusion - ignore line */
-#include "220 string core.h"        /* Development inclusion - ignore line */
-#include "221 string.h"             /* Development inclusion - ignore line */
+#include "211 ordered map.h"        /* Development inclusion - ignore line */
+#include "219 map finish.h"         /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #include "700 cleanup.h"            /* Development inclusion - ignore line */
-#define FIO_FIOBJ                   /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -47,9 +52,9 @@ memory consumption on 64 bit systems and uses 4 bytes on 32 bit systems.
 Note: this code is placed at the end of the STL file, since it leverages most of
 the SLT features and could be affected by their inclusion.
 ***************************************************************************** */
-#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H)
+#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
 #define H___FIOBJ___H
-
+#define FIO_STL_KEEP__ 99 /* a magic value to keep FIO_EXTERN rules */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -101,102 +106,18 @@ Type Naming Macros for FIOBJ types. By default, results in:
 General Requirements / Macros
 ***************************************************************************** */
 
-#define FIO_ATOL   1
-#define FIO_ATOMIC 1
-#include __FILE__
-
-#ifdef FIOBJ_EXTERN
-#define FIOBJ_FUNC
-#define FIOBJ_IFUNC
-#define FIOBJ_EXTERN_OBJ     extern
-#define FIOBJ_EXTERN_OBJ_IMP __attribute__((weak))
-
-#else /* FIO_EXTERN */
-#define FIOBJ_FUNC           static __attribute__((unused))
-#define FIOBJ_IFUNC          static inline __attribute__((unused))
-#define FIOBJ_EXTERN_OBJ     static __attribute__((unused))
-#define FIOBJ_EXTERN_OBJ_IMP static __attribute__((unused))
-#ifndef FIOBJ_EXTERN_COMPLETE /* force implementation, emitting static data */
-#define FIOBJ_EXTERN_COMPLETE 2
-#endif /* FIOBJ_EXTERN_COMPLETE */
-
-#endif /* FIO_EXTERN */
-
-#ifdef FIO_LOG_PRINT__
-#define FIOBJ_LOG_PRINT__(...) FIO_LOG_PRINT__(__VA_ARGS__)
-#else
-#define FIOBJ_LOG_PRINT__(...)
-#endif
-
+#ifdef FIO_EXTERN
 #ifdef __cplusplus /* C++ doesn't allow declarations for static variables */
-#undef FIOBJ_EXTERN_OBJ
-#undef FIOBJ_EXTERN_OBJ_IMP
 #define FIOBJ_EXTERN_OBJ     extern "C"
 #define FIOBJ_EXTERN_OBJ_IMP extern "C" __attribute__((weak))
-#endif
-
-/* *****************************************************************************
-Dedicated memory allocator for FIOBJ types? (recommended for locality)
-***************************************************************************** */
-#ifdef FIOBJ_MALLOC
-#define FIO_MEMORY_NAME fiobj_mem
-#ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
-/* 4Mb per system call */
-#define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 22
-#endif
-#ifndef FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG
-/* fight fragmentation */
-#define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4
-#endif
-#ifndef FIO_MEMORY_ALIGN_LOG
-/* align on 8 bytes, it's enough */
-#define FIO_MEMORY_ALIGN_LOG 3
-#endif
-#ifndef FIO_MEMORY_CACHE_SLOTS
-/* cache up to 64Mb */
-#define FIO_MEMORY_CACHE_SLOTS 16
-#endif
-#ifndef FIO_MEMORY_ENABLE_BIG_ALLOC
-/* for big arrays / maps */
-#define FIO_MEMORY_ENABLE_BIG_ALLOC 1
-#endif
-#ifndef FIO_MEMORY_ARENA_COUNT
-/* CPU core arena count */
-#define FIO_MEMORY_ARENA_COUNT -1
-#endif
-#if FIO_OS_POSIX && !defined(FIO_MEMORY_USE_THREAD_MUTEX)
-/* yes, well... POSIX Mutexes are decent on the machines I tested. */
-#define FIO_MEMORY_USE_THREAD_MUTEX 1
-#endif
-/* make sure functions are exported if requested */
-#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
-#define FIO_EXTERN
-#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE
-#endif
-#endif
-#include __FILE__
-
-#define FIOBJ_MEM_REALLOC(ptr, old_size, new_size, copy_len)                   \
-  FIO_NAME(fiobj_mem, realloc2)((ptr), (new_size), (copy_len))
-#define FIOBJ_MEM_FREE(ptr, size) FIO_NAME(fiobj_mem, free)((ptr))
-#define FIOBJ_MEM_REALLOC_IS_SAFE 0
-
 #else
-
-FIO_IFUNC void *FIO_NAME(fiobj_mem, realloc2)(void *ptr,
-                                              size_t new_size,
-                                              size_t copy_len) {
-  return FIO_MEM_REALLOC(ptr, new_size, new_size, copy_len);
-  (void)copy_len; /* might be unused */
-}
-FIO_IFUNC void FIO_NAME(fiobj_mem, free)(void *ptr) { FIO_MEM_FREE(ptr, -1); }
-
-#define FIOBJ_MEM_REALLOC         FIO_MEM_REALLOC
-#define FIOBJ_MEM_FREE            FIO_MEM_FREE
-#define FIOBJ_MEM_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
-
-#endif /* FIOBJ_MALLOC */
+#define FIOBJ_EXTERN_OBJ     extern
+#define FIOBJ_EXTERN_OBJ_IMP __attribute__((weak))
+#endif
+#else
+#define FIOBJ_EXTERN_OBJ     static __attribute__((unused))
+#define FIOBJ_EXTERN_OBJ_IMP static __attribute__((unused))
+#endif
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
@@ -212,7 +133,7 @@ size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_FREE()                                               \
   fio_atomic_add(&FIOBJ_MARK_MEMORY_FREE_COUNTER, 1)
 #define FIOBJ_MARK_MEMORY_PRINT()                                              \
-  FIOBJ_LOG_PRINT__(                                                           \
+  FIO_LOG_PRINT__(                                                             \
       ((FIOBJ_MARK_MEMORY_ALLOC_COUNTER == FIOBJ_MARK_MEMORY_FREE_COUNTER)     \
            ? 4 /* FIO_LOG_LEVEL_INFO */                                        \
            : 3 /* FIO_LOG_LEVEL_WARNING */),                                   \
@@ -345,9 +266,9 @@ FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
  *
  * Returns the number of elements processed.
  */
-FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
-                                int (*task)(fiobj_each_s *info),
-                                void *udata);
+SFUNC uint32_t fiobj_each2(FIOBJ o,
+                           int (*task)(fiobj_each_s *info),
+                           void *udata);
 
 /* *****************************************************************************
 FIOBJ Primitives (NULL, True, False)
@@ -417,19 +338,9 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)           FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE         FIOBJ
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
-/* make sure functions are exported if requested */
-#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
-#define FIO_EXTERN
-#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE
-#endif
-#endif
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE FIOBJ
 #include __FILE__
 
 /* *****************************************************************************
@@ -446,8 +357,8 @@ FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(FIOBJ i);
 FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), f)(FIOBJ i);
 
 /** Returns a String representation of the number (in base 10). */
-FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
-                                    cstr)(FIOBJ i);
+SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
+                               cstr)(FIOBJ i);
 
 /** Frees a FIOBJ number. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), free)(FIOBJ i);
@@ -468,8 +379,8 @@ FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(FIOBJ i);
 FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i);
 
 /** Returns a String representation of the float. */
-FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
-                                    cstr)(FIOBJ i);
+SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
+                               cstr)(FIOBJ i);
 
 /** Frees a FIOBJ Float. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), free)(FIOBJ i);
@@ -498,19 +409,9 @@ FIOBJ Strings
 #if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
 #define FIO_REF_METADATA uint32_t
 #endif
-#define FIO_PTR_TAG(p)           FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
-#define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE         FIOBJ
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
-/* make sure functions are exported if requested */
-#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
-#define FIO_EXTERN
-#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE
-#endif
-#endif
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
+#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE FIOBJ
 #include __FILE__
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -633,19 +534,9 @@ FIOBJ Arrays
   do {                                                                         \
     dest = fiobj_dup(obj);                                                     \
   } while (0)
-#define FIO_PTR_TAG(p)           FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
-#define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE         FIOBJ
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
-/* make sure functions are exported if requested */
-#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
-#define FIO_EXTERN
-#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE
-#endif
-#endif
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
+#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE FIOBJ
 #include __FILE__
 
 /* *****************************************************************************
@@ -678,16 +569,6 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE          FIOBJ
-#define FIO_MEM_REALLOC_          FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_             FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_  FIOBJ_MEM_REALLOC_IS_SAFE
-/* make sure functions are exported if requested */
-#if defined(FIOBJ_EXTERN) && !defined(FIO_EXTERN)
-#define FIO_EXTERN
-#if defined(FIOBJ_EXTERN_COMPLETE) && !defined(FIO_EXTERN_COMPLETE)
-#define FIO_EXTERN_COMPLETE
-#endif
-#endif
 #include __FILE__
 
 /** Calculates an object's hash value for a specific hash map object. */
@@ -762,8 +643,8 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify);
  * Returns the number of bytes consumed. On Error, 0 is returned and no data is
  * consumed.
  */
-FIOBJ_FUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                           update_json)(FIOBJ hash, fio_str_info_s str);
+SFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                      update_json)(FIOBJ hash, fio_str_info_s str);
 
 /** Helper function, calls `fiobj_hash_update_json` with string information */
 FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
@@ -779,7 +660,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * If the parsing failed (no complete valid JSON data) `FIOBJ_INVALID` is
  * returned.
  */
-FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
+SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
 
 /** Helper macro, calls `fiobj_json_parse` with string information */
 #define fiobj_json_parse2(data_, len_, consumed)                               \
@@ -795,7 +676,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
  *
  * Use `fiobj_dup` to collect an actual reference to the returned object.
  */
-FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
+SFUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
 /**
  * Uses JavaScript style notation to find data in an object structure.
  *
@@ -900,9 +781,9 @@ FIOBJ Data / Info
 ***************************************************************************** */
 
 /** Internal: compares two nestable objects. */
-FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b,
-                                                size_t nesting);
+SFUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
+                                           FIOBJ restrict b,
+                                           size_t nesting);
 
 /** Compares two objects. */
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
@@ -1039,12 +920,9 @@ FIOBJ Integers
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)           FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE         FIOBJ
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE FIOBJ
 #include __FILE__
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
@@ -1115,12 +993,9 @@ FIOBJ Floats
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)           FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p)         FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE         FIOBJ
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE FIOBJ
 #include __FILE__
 
 /** Creates a new Float object. */
@@ -1417,9 +1292,8 @@ typedef struct {
 } fiobj___json_format_internal__s;
 
 /* internal helper function for recursive JSON formatting. */
-FIOBJ_FUNC void fiobj___json_format_internal__(
-    fiobj___json_format_internal__s *,
-    FIOBJ);
+SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *,
+                                          FIOBJ);
 
 /** Helper function, calls `fiobj_hash_update_json` with string information */
 FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
@@ -1443,10 +1317,15 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
   return args.json;
 }
 
+#undef FIO_STL_KEEP__ /* from now on, type helpers are internal */
 /* *****************************************************************************
-FIOBJ - Implementation
+
+
+FIOBJ - Externed Implementation
+
+
 ***************************************************************************** */
-#ifdef FIOBJ_EXTERN_COMPLETE
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 FIOBJ Basic Object vtable
@@ -1473,17 +1352,15 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+#define FIO_STL_KEEP__
 #include __FILE__
+#undef FIO_STL_KEEP__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
-#define FIO_MEM_REALLOC_         FIOBJ_MEM_REALLOC
-#define FIO_MEM_FREE_            FIOBJ_MEM_FREE
-#define FIO_MEM_REALLOC_IS_SAFE_ FIOBJ_MEM_REALLOC_IS_SAFE
+#define FIO_STL_KEEP__
 #include __FILE__
+#undef FIO_STL_KEEP__
 
 typedef struct {
   int (*task)(fiobj_each_s *info);
@@ -1542,9 +1419,7 @@ FIO_SFUNC int fiobj____each2_wrapper_task(fiobj_each_s *e) {
  *
  * Returns the number of elements processed.
  */
-FIOBJ_FUNC uint32_t fiobj_each2(FIOBJ o,
-                                int (*task)(fiobj_each_s *),
-                                void *udata) {
+SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
   /* TODO - move to recursion with nesting limiter? */
   fiobj_____each2_data_s d = {
       .task = task,
@@ -1596,9 +1471,9 @@ FIOBJ Hash / Array / Other (enumerable) Equality test.
 ***************************************************************************** */
 
 /** Internal: compares two nestable objects. */
-FIOBJ_FUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
-                                                FIOBJ restrict b,
-                                                size_t nesting) {
+SFUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
+                                           FIOBJ restrict b,
+                                           size_t nesting) {
   if (a == b)
     return 1;
   if (FIOBJ_TYPE_CLASS(a) != FIOBJ_TYPE_CLASS(b))
@@ -1666,8 +1541,8 @@ FIO_SFUNC uint32_t fiobj___count_noop(FIOBJ o) {
 FIOBJ Integers (bigger numbers)
 ***************************************************************************** */
 
-FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
-                                    cstr)(FIOBJ i) {
+SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
+                               cstr)(FIOBJ i) {
   static char buf[22 * 256];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
@@ -1726,8 +1601,8 @@ FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
   return r;
 }
 
-FIOBJ_FUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
-                                    cstr)(FIOBJ i) {
+SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
+                               cstr)(FIOBJ i) {
   static char buf[32 * 256];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
@@ -1778,9 +1653,8 @@ FIO_IFUNC void fiobj___json_format_internal_beauty_pad(FIOBJ json,
   }
 }
 
-FIOBJ_FUNC void fiobj___json_format_internal__(
-    fiobj___json_format_internal__s *args,
-    FIOBJ o) {
+SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
+                                          FIOBJ o) {
   switch (FIOBJ_TYPE(o)) {
   case FIOBJ_T_TRUE:
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
@@ -1916,7 +1790,9 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
+#define FIO_STL_KEEP__
 #include __FILE__
+#undef FIO_STL_KEEP__
 
 /* FIOBJ JSON parser */
 typedef struct {
@@ -2087,8 +1963,8 @@ static inline void fio_json_on_error(fio_json_parser_s *p) {
  * Returns the number of bytes consumed. On Error, 0 is returned and no data is
  * consumed.
  */
-FIOBJ_FUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                           update_json)(FIOBJ hash, fio_str_info_s str) {
+SFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                      update_json)(FIOBJ hash, fio_str_info_s str) {
   if (hash == FIOBJ_INVALID)
     return 0;
   fiobj_json_parser_s p = {.top = FIOBJ_INVALID, .target = hash};
@@ -2100,7 +1976,7 @@ FIOBJ_FUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
 }
 
 /** Returns a JSON valid FIOBJ String, representing the object. */
-FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
+SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
   fiobj_json_parser_s p = {.top = FIOBJ_INVALID};
   register const size_t consumed = fio_json_parse(&p.p, str.buf, str.len);
   if (consumed_p) {
@@ -2125,7 +2001,7 @@ FIOBJ_FUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
 
 /** Uses JSON (JavaScript) notation to find data in an object structure. Returns
  * a temporary object. */
-FIOBJ_FUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
+SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
   for (;;) {
   top:
     if (!n.len)
@@ -2586,10 +2462,6 @@ FIOBJ cleanup
 ***************************************************************************** */
 
 #endif /* FIOBJ_EXTERN_COMPLETE */
-#undef FIOBJ_FUNC
-#undef FIOBJ_IFUNC
-#undef FIOBJ_EXTERN
-#undef FIOBJ_EXTERN_COMPLETE
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
 #endif /* FIO_FIOBJ */

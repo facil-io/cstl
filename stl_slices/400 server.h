@@ -405,7 +405,7 @@ typedef struct {
  *
  * If the `io` is NULL, the value will be set for the global environment.
  */
-void fio_env_set(fio_s *io, fio_env_set_args_s);
+SFUNC void fio_env_set(fio_s *io, fio_env_set_args_s);
 
 /**
  * Links an object to a connection's lifetime, calling the `on_close` callback
@@ -426,7 +426,7 @@ void fio_env_set(fio_s *io, fio_env_set_args_s);
  *
  * Returns 0 on success and -1 if the object couldn't be found.
  */
-int fio_env_unset(fio_s *io, fio_env_unset_args_s);
+SFUNC int fio_env_unset(fio_s *io, fio_env_unset_args_s);
 
 /**
  * Un-links an object from the connection's lifetime, so it's `on_close`
@@ -444,7 +444,7 @@ int fio_env_unset(fio_s *io, fio_env_unset_args_s);
  * Removes an object from the connection's lifetime / environment, calling it's
  * `on_close` callback as if the connection was closed.
  */
-int fio_env_remove(fio_s *io, fio_env_unset_args_s);
+SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
 
 /**
  * Removes an object from the connection's lifetime / environment, calling it's
@@ -976,7 +976,7 @@ Connection Object Links / Environment
 /**
  * Links an object to a connection's lifetime / environment.
  */
-void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
+SFUNC void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
   fio___srv_env_obj_s val = {
       .udata = args.udata,
       .on_close = args.on_close,
@@ -995,7 +995,7 @@ void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
  * Un-links an object from the connection's lifetime, so it's `on_close`
  * callback will NOT be called.
  */
-int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
   fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
   fio___srv_env_safe_s *e = selector[!io];
   return fio___srv_env_safe_unset(e, args.name.buf, args.name.len, args.type);
@@ -1005,7 +1005,7 @@ int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
  * Removes an object from the connection's lifetime / environment, calling it's
  * `on_close` callback as if the connection was closed.
  */
-int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
   fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
   fio___srv_env_safe_s *e = selector[!io];
   return fio___srv_env_safe_remove(e, args.name.buf, args.name.len, args.type);

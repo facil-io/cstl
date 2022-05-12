@@ -666,9 +666,8 @@ inline static int http1_consume_header(http1_parser_s *parser,
   /* divide header name from data */
   if (!seek2ch(&end_name, end, ':'))
     return -1;
-  if (end_name[-1] == ' ' || end_name[-1] == '\t')
-    return -1;
-  if (forbidden_name_chars[start[0] & 0xFF])
+  if (forbidden_name_chars[start[0] & 0xFF] | (end_name[-1] == ' ') |
+      (end_name[-1] == '\t'))
     return -1;
 #if HTTP_HEADERS_LOWERCASE
   for (uint8_t *t = start; t < end_name; t++)
@@ -682,7 +681,7 @@ inline static int http1_consume_header(http1_parser_s *parser,
   };
   // clear away added white space from value.
   while (start_value < end && ((end[0] == ' ') | (end[0] == '\t'))) {
-    end++;
+    --end;
   };
   return (parser->state.read ? http1_consume_header_trailer
                              : http1_consume_header_top)(parser,

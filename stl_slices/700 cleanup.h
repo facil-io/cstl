@@ -16,10 +16,10 @@ Common cleanup
 #ifndef FIO_STL_KEEP__
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
-#if (!FIO_EXTERN || FIO_EXTERN == 1)
+#if (FIO_EXTERN + 1) < 3
 #undef FIO_EXTERN
 #endif
-#if (!FIO_EXTERN_COMPLETE || FIO_EXTERN_COMPLETE == 1)
+#if (FIO_EXTERN_COMPLETE + 1) < 3
 #undef FIO_EXTERN_COMPLETE
 #endif
 
@@ -27,13 +27,6 @@ Common cleanup
 #undef IFUNC
 #undef SFUNC_
 #undef IFUNC_
-#undef FIO_PTR_TAG
-#undef FIO_PTR_UNTAG
-#undef FIO_PTR_TAG_TYPE
-#undef FIO_PTR_TAG_VALIDATE
-#undef FIO_PTR_TAG_VALID_OR_RETURN
-#undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
-#undef FIO_PTR_TAG_VALID_OR_GOTO
 
 #undef FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEM_REALLOC_

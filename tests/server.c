@@ -20,9 +20,11 @@ Note: This is a **TOY** example, with only minimal security features.
 // #define FIO_LOG
 // #define FIO_CLI
 // #define FIO_SERVER
-#define FIO_EVERYTHING
+// #define FIO_EXTERN
+// #define FIO_EXTERN_COMPLETE
 // #define FIO_MEMORY_DISABLE 1
 // #define FIO_USE_THREAD_MUTEX 1
+#define FIO_EVERYTHING
 #include "fio-stl.h"
 
 /* we use local global variables to make the code easier. */
@@ -47,7 +49,7 @@ FIO_SFUNC void on_data(fio_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *udata);
 
-fio_protocol_s HTTP_PROTOCOL_1 = {
+static fio_protocol_s HTTP_PROTOCOL_1 = {
     .on_data = on_data,
     .on_close = on_close,
 };
@@ -73,6 +75,9 @@ FIO_SFUNC int http_write_headers_to_string(http_s *h,
 }
 
 FIO_SFUNC void http_respond(http_s *h) {
+  http_response_header_set(h,
+                           FIO_STR_INFO1("server"),
+                           FIO_STR_INFO1("fio-stl"));
 #if HTTP_RESPONSE_ECHO
   str_s out = FIO_STR_INIT;
   str_write(&out, http_method_get(h).buf, http_method_get(h).len);
@@ -100,6 +105,7 @@ FIO_SFUNC void http_respond(http_s *h) {
     http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
   }
   size_t len = str_len((&out));
+  // FIO_LOG_DEBUG2("echoing back:\n%s", str2ptr(&out));
   http_write(h,
              .data = str_detach(&out),
              .len = len,
@@ -107,9 +113,6 @@ FIO_SFUNC void http_respond(http_s *h) {
              .copy = 0,
              .finish = 1);
 #else
-  http_response_header_set(h,
-                           FIO_STR_INFO1("server"),
-                           FIO_STR_INFO1("fio-stl"));
   http_write(h, .data = "Hello World!", .len = 12, .finish = 1);
 #endif
 }
@@ -140,6 +143,7 @@ int main(int argc, char const *argv[]) {
       "\tNAME tcp://localhost:3000/\n"
       "\tNAME localhost://3000\n",
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
+      FIO_CLI_BOOL("--log -v log HTTP messages."),
       FIO_CLI_INT("--workers -w (1) number of worker processes to use."),
       FIO_CLI_PRINT_LINE(
           "NOTE: requests are limited to 32Kb and 16 headers each."));
@@ -246,7 +250,7 @@ HTTP/1.1 Protocol Controller
 #include "fio-stl.h"
 
 /** Informs the controller that a request is starting. */
-int http1_start_request(http_s *h, int reserved, int streaming) {
+static int http1_start_request(http_s *h, int reserved, int streaming) {
   (void)reserved;
   (void)streaming;
   client_s *c = http_controller_data(h);
@@ -255,7 +259,7 @@ int http1_start_request(http_s *h, int reserved, int streaming) {
   return -1;
 }
 /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-void http1_on_unlinked(http_s *h, void *c_) {
+static void http1_on_unlinked(http_s *h, void *c_) {
   client_s *c = c_; // client_s *c = http_controller_data(h);
   if (c->h == h)
     c->h = NULL;
@@ -264,7 +268,7 @@ void http1_on_unlinked(http_s *h, void *c_) {
 }
 
 /** Informs the controller that a response is starting. */
-int http1_start_response(http_s *h, int status, int streaming) {
+static int http1_start_response(http_s *h, int status, int streaming) {
   (void)status;
   client_s *c = http_controller_data(h);
   if (!c->io)
@@ -276,10 +280,10 @@ int http1_start_response(http_s *h, int status, int streaming) {
 }
 
 /** called by the HTTP handle for each header. */
-int http1___write_header_callback(http_s *h,
-                                  fio_str_info_s name,
-                                  fio_str_info_s value,
-                                  void *out_) {
+static int http1___write_header_callback(http_s *h,
+                                         fio_str_info_s name,
+                                         fio_str_info_s value,
+                                         void *out_) {
   (void)h;
   /* manually copy, as this is an "all or nothing" copy (no truncation) */
   fio_str_info_s *out = (fio_str_info_s *)out_;
@@ -301,7 +305,7 @@ int http1___write_header_callback(http_s *h,
 }
 
 /** Informs the controller that all headers were provided. */
-void http1_send_headers(http_s *h) {
+static void http1_send_headers(http_s *h) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     return;
@@ -343,7 +347,7 @@ void http1_send_headers(http_s *h) {
 }
 
 /** called by the HTTP handle for each body chunk (or to finish a response. */
-void http1_write_body(http_s *h, http_write_args_s args) {
+static void http1_write_body(http_s *h, http_write_args_s args) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     return;
@@ -371,19 +375,20 @@ void http1_write_body(http_s *h, http_write_args_s args) {
   return;
 }
 
-void http1_on_finish(http_s *h) {
+static void http1_on_finish(http_s *h) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     goto finish;
   if (http_is_streaming(h)) {
     fio_write2(c->io, .buf = "0\r\n\r\n", .len = 5, .copy = 1);
   }
-  http_write_log(h, FIO_BUF_INFO2(NULL, 0));
+  if (fio_cli_get_bool("-v"))
+    http_write_log(h, FIO_BUF_INFO2(NULL, 0));
 finish:
   http_free(h);
 }
 
-http_controller_s HTTP1_CONTROLLER = {
+static http_controller_s HTTP1_CONTROLLER = {
     .on_unlinked = http1_on_unlinked,
     .start_response = http1_start_response,
     .start_request = http1_start_request,

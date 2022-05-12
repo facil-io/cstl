@@ -242,3 +242,13 @@ Reference Counter (Wrapper) Cleanup
 #undef FIO_REF_DUPNAME
 #undef FIO_REF_DESTRUCTOR
 #endif
+/* *****************************************************************************
+Pointer Tagging Cleanup
+***************************************************************************** */
+#undef FIO_PTR_TAG
+#undef FIO_PTR_UNTAG
+#undef FIO_PTR_TAG_TYPE
+#undef FIO_PTR_TAG_VALIDATE
+#undef FIO_PTR_TAG_VALID_OR_RETURN
+#undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
+#undef FIO_PTR_TAG_VALID_OR_GOTO

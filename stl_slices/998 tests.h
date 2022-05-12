@@ -25,6 +25,7 @@ void fio_test_dynamic_types(void);
 #else
 FIO_SFUNC void fio_test_dynamic_types(void);
 #endif
+
 #if !defined(FIO_EXTERN_TEST) || defined(FIO_EXTERN_COMPLETE)
 
 /* Make sure logging and memory leak counters are set. */
@@ -62,14 +63,11 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_THREADS
 #define FIO_TIME
 #define FIO_URL
+#define FIO_SERVER
 #define FIO_SORT_NAME num
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
-
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
-
-#include __FILE__
-#define FIO_SERVER
 #include __FILE__
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
