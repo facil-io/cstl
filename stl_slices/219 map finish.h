@@ -210,7 +210,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     size_t tmp = total;
     FIO_MAP_EACH(FIO_MAP_NAME, &m, i) {
       ++count;
-      tmp -= (size_t)(FIO_MAP_OBJ2TYPE(i->obj));
+      tmp -= (size_t)(FIO_MAP_OBJ2VALUE(i->obj));
     }
     FIO_ASSERT(count + 1 == MEMBERS,
                "FIO_MAP_EACH macro error, repetitions %zu != %zu",
@@ -236,6 +236,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                tmp,
                count);
   }
+  FIO_NAME(FIO_MAP_NAME, clear)(&m);
+  FIO_ASSERT(!FIO_NAME(FIO_MAP_NAME, count)(&m),
+             "count should be zero after map_clear! (pre-attack)");
+
 #if FIO_MAP_HASH_CACHED && !FIO_MAP_TYPE_CMP_SIMPLE
   if (!FIO_MAP_TYPE_CMP((FIO_MAP_TYPE)1, (FIO_MAP_TYPE)2)) {
     fprintf(stderr,
@@ -249,6 +253,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
       FIO_NAME(FIO_MAP_NAME, set)
       (&m, (FIO_MAP_HASH)1, (FIO_MAP_TYPE)(i + 1), NULL);
 #endif
+      FIO_ASSERT_DEBUG(FIO_NAME(FIO_MAP_NAME, count_force)(&m) ==
+                           FIO_NAME(FIO_MAP_NAME, count)(&m),
+                       "broke at i == %zu && items/capacity: %zu/%zu",
+                       i,
+                       FIO_NAME(FIO_MAP_NAME, count)(&m),
+                       FIO_NAME(FIO_MAP_NAME, capa)(&m));
     }
     FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&m) != MEMBERS,
                "full collision protection failed (map)?");
@@ -256,6 +266,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                "full collision test failed to push elements (map)?");
   }
 #endif
+  FIO_NAME(FIO_MAP_NAME, clear)(&m);
+  FIO_ASSERT(!FIO_NAME(FIO_MAP_NAME, count)(&m),
+             "count should be zero after map_clear!");
   FIO_NAME(FIO_MAP_NAME, destroy)(&m);
 }
 #undef FIO_MAP_TEST_KEY
@@ -304,13 +317,10 @@ Map - cleanup
 
 #undef FIO_MAP_OBJ
 #undef FIO_MAP_OBJ2KEY
-#undef FIO_MAP_OBJ2TYPE
-#undef FIO_MAP_OBJ_CMP
-#undef FIO_MAP_OBJ_COPY
+#undef FIO_MAP_OBJ2VALUE
 #undef FIO_MAP_OBJ_DESTROY
 #undef FIO_MAP_OBJ_DESTROY_AFTER
 #undef FIO_MAP_OBJ_DISCARD
-#undef FIO_MAP_OBJ_INVALID
 #undef FIO_MAP_OBJ_KEY
 #undef FIO_MAP_OBJ_KEY_CMP
 
@@ -347,13 +357,10 @@ Map - cleanup
 #undef FIO_MAP_KEY_CMP
 #undef FIO_MAP_OBJ
 #undef FIO_MAP_OBJ_KEY
-#undef FIO_MAP_OBJ_INVALID
-#undef FIO_MAP_OBJ_COPY
 #undef FIO_MAP_OBJ_DESTROY
-#undef FIO_MAP_OBJ_CMP
 #undef FIO_MAP_OBJ_KEY_CMP
 #undef FIO_MAP_OBJ2KEY
-#undef FIO_MAP_OBJ2TYPE
+#undef FIO_MAP_OBJ2VALUE
 #undef FIO_MAP_OBJ_DISCARD
 #undef FIO_MAP_DESTROY_AFTER_COPY
 #undef FIO_MAP_OBJ_DESTROY_AFTER
@@ -364,7 +371,11 @@ Map - cleanup
 #undef FIO_MAP_CAPA
 #undef FIO_MAP_MEMORY_SIZE
 
-#undef FIO_MAP___IMAP_FREE
-#undef FIO_MAP___IMAP_DELETED
+#undef FIO_MAP_TYPE_INTERNAL
+#undef FIO_MAP_TYPE_FROM_INTERNAL
+#undef FIO_MAP_KEY_INTERNAL
+#undef FIO_MAP_KEY_FROM_INTERNAL
+#undef FIO_MAP_TYPE_INTERNAL_INVALID
+
 #undef FIO_MAP_TEST_I2H
 #undef FIO_MAP_TEST

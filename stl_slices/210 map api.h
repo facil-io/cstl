@@ -48,25 +48,20 @@ Special support for `FIO_MAP_KEY_STR` maps (short string keys)
 ***************************************************************************** */
 /** define FIO_MAP_KEY_STR to use fio_key_str_s as map keys (key.len <= 15)  */
 #ifdef FIO_MAP_KEY_STR
-#ifndef FIO_MAP_KEY
-#define FIO_MAP_KEY fio_keystr_s
-#endif
-#ifndef FIO_MAP_KEY_COPY
+#undef FIO_MAP_KEY
+#define FIO_MAP_KEY                  fio_str_info_s
+#define FIO_MAP_KEY_INTERNAL         fio_keystr_s
+#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, ___key_alloc))
-#endif
-#ifndef FIO_MAP_KEY_DESTROY
+  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, __key_alloc));
 #define FIO_MAP_KEY_DESTROY(key)                                               \
-  fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, ___key_free))
-#endif
-#ifndef FIO_MAP_KEY_CMP
-#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq((a), (b))
-#endif
+  fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))
+#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq2info((a), (b))
 
-FIO_SFUNC void *FIO_NAME(FIO_MAP_NAME, ___key_alloc)(size_t len) {
+FIO_SFUNC void *FIO_NAME(FIO_MAP_NAME, __key_alloc)(size_t len) {
   return FIO_MEM_REALLOC_(NULL, 0, len, 0);
 }
-FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, ___key_free)(void *ptr, size_t len) {
+FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
@@ -82,11 +77,6 @@ The following macros are used to customize the map.
 #define FIO_MAP_TYPE void *
 /** An invalid value for that type (if any). */
 #define FIO_MAP_TYPE_INVALID NULL
-#else
-#ifndef FIO_MAP_TYPE_INVALID
-/** An invalid value for that type (if any). */
-#define FIO_MAP_TYPE_INVALID ((FIO_MAP_TYPE){0})
-#endif /* FIO_MAP_TYPE_INVALID */
 #endif /* FIO_MAP_TYPE */
 
 #ifndef FIO_MAP_TYPE_COPY
@@ -99,7 +89,7 @@ The following macros are used to customize the map.
 #ifndef FIO_MAP_TYPE_DESTROY
 /** Handles a destroy / free operation for a map's value. */
 #define FIO_MAP_TYPE_DESTROY(obj)
-/** internal flag - set only if the object desctructor is optional */
+/** internal flag - set only if the object destructor is optional */
 #define FIO_MAP_TYPE_DESTROY_SIMPLE 1
 #else
 #ifndef FIO_MAP_TYPE_DESTROY_SIMPLE
@@ -121,6 +111,32 @@ The following macros are used to customize the map.
 /* internal flag - do not set */
 #define FIO_MAP_TYPE_CMP_SIMPLE 0
 #endif
+
+#ifndef FIO_MAP_TYPE_INVALID
+/** An invalid value for that type (if any). */
+#define FIO_MAP_TYPE_INVALID ((FIO_MAP_TYPE){0})
+#endif /* FIO_MAP_TYPE_INVALID */
+
+#ifndef FIO_MAP_TYPE_INTERNAL
+/** Allows an internal representation type different than the API type */
+#define FIO_MAP_TYPE_INTERNAL    FIO_MAP_TYPE
+#define FIO_MAP_TYPE_INTERNAL_EQ 1
+#endif
+
+#ifndef FIO_MAP_TYPE_FROM_INTERNAL
+/** Converts from internal representation type to external representation type
+ */
+#define FIO_MAP_TYPE_FROM_INTERNAL(o) o
+#endif
+
+#ifndef FIO_MAP_TYPE_INTERNAL_INVALID
+#if FIO_MAP_TYPE_INTERNAL_EQ
+#define FIO_MAP_TYPE_INTERNAL_INVALID FIO_MAP_TYPE_INVALID
+#else
+#define FIO_MAP_TYPE_INTERNAL_INVALID ((FIO_MAP_TYPE_INTERNAL){0})
+#endif /* FIO_MAP_TYPE_INTERNAL_EQ */
+#endif /* FIO_MAP_TYPE_INTERNAL_INVALID */
+#undef FIO_MAP_TYPE_INTERNAL_EQ
 
 /**
  * The FIO_MAP_DESTROY_AFTER_COPY macro should be set if FIO_MAP_TYPE_DESTROY
@@ -172,25 +188,18 @@ Dictionary / Hash Map - a Hash Map is basically a Set of couplets
 #define FIO_MAP_KEY_CMP(a, b) 1
 #endif
 
+#ifndef FIO_MAP_KEY_INTERNAL
+/** Allows an internal representation type different than the API type */
+#define FIO_MAP_KEY_INTERNAL FIO_MAP_KEY
+#endif
+#ifndef FIO_MAP_KEY_FROM_INTERNAL
+#define FIO_MAP_KEY_FROM_INTERNAL(o) o
+#endif
+
 typedef struct {
-  FIO_MAP_KEY key;
-  FIO_MAP_TYPE value;
+  FIO_MAP_KEY_INTERNAL key;
+  FIO_MAP_TYPE_INTERNAL value;
 } FIO_NAME(FIO_MAP_NAME, couplet_s);
-
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, __couplet_copy)(
-    FIO_NAME(FIO_MAP_NAME, couplet_s) * dest,
-    FIO_NAME(FIO_MAP_NAME, couplet_s) * src) {
-  FIO_MAP_KEY_COPY((dest->key), (src->key));
-  FIO_MAP_TYPE_COPY((dest->value), (src->value));
-}
-
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
-                        __couplet_destroy)(FIO_NAME(FIO_MAP_NAME, couplet_s) *
-                                           c) {
-  FIO_MAP_KEY_DESTROY((c->key));
-  FIO_MAP_TYPE_DESTROY((c->value));
-  (void)c; /* in case where macros do nothing */
-}
 
 /** FIO_MAP_OBJ is either a couplet (for hash maps) or the object (for sets) */
 #define FIO_MAP_OBJ FIO_NAME(FIO_MAP_NAME, couplet_s)
@@ -198,20 +207,15 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
 /** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
 #define FIO_MAP_OBJ_KEY FIO_MAP_KEY
 
-#define FIO_MAP_OBJ_INVALID                                                    \
-  ((FIO_NAME(FIO_MAP_NAME, couplet_s)){.key = FIO_MAP_KEY_INVALID,             \
-                                       .value = FIO_MAP_TYPE_INVALID})
+#define FIO_MAP_OBJ_DESTROY(o)                                                 \
+  do {                                                                         \
+    FIO_MAP_TYPE_DESTROY(((o).value));                                         \
+    FIO_MAP_KEY_DESTROY(((o).key));                                            \
+  } while (0);
 
-#define FIO_MAP_OBJ_COPY(dest, src)                                            \
-  FIO_NAME(FIO_MAP_NAME, __couplet_copy)(&(dest), &(src))
-
-#define FIO_MAP_OBJ_DESTROY(obj)                                               \
-  FIO_NAME(FIO_MAP_NAME, __couplet_destroy)(&(obj))
-
-#define FIO_MAP_OBJ_CMP(a, b)        FIO_MAP_KEY_CMP((a).key, (b).key)
 #define FIO_MAP_OBJ_KEY_CMP(a, key_) FIO_MAP_KEY_CMP((a).key, (key_))
 #define FIO_MAP_OBJ2KEY(o)           (o).key
-#define FIO_MAP_OBJ2TYPE(o)          (o).value
+#define FIO_MAP_OBJ2VALUE(o)         (o).value
 
 #define FIO_MAP_OBJ_DISCARD(o)                                                 \
   do {                                                                         \
@@ -234,13 +238,10 @@ Set Map
 #define FIO_MAP_OBJ                FIO_MAP_TYPE
 /** FIO_MAP_OBJ_KEY is FIO_MAP_KEY for hash maps or FIO_MAP_TYPE for sets */
 #define FIO_MAP_OBJ_KEY            FIO_MAP_TYPE
-#define FIO_MAP_OBJ_INVALID        FIO_MAP_TYPE_INVALID
-#define FIO_MAP_OBJ_COPY           FIO_MAP_TYPE_COPY
 #define FIO_MAP_OBJ_DESTROY        FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_OBJ_CMP            FIO_MAP_TYPE_CMP
 #define FIO_MAP_OBJ_KEY_CMP        FIO_MAP_TYPE_CMP
 #define FIO_MAP_OBJ2KEY(o)         (o)
-#define FIO_MAP_OBJ2TYPE(o)        (o)
+#define FIO_MAP_OBJ2VALUE(o)       (o)
 #define FIO_MAP_OBJ_DISCARD        FIO_MAP_TYPE_DISCARD
 #define FIO_MAP_KEY_DISCARD(_ignore)
 #define FIO_MAP_KEY_COPY(_ignore, _ignore2)
@@ -249,6 +250,10 @@ Set Map
 #else
 #define FIO_MAP_OBJ_DESTROY_AFTER(obj)
 #endif /* FIO_MAP_DESTROY_AFTER_COPY */
+
+/** Allows an internal representation type different than the API type */
+#define FIO_MAP_KEY_INTERNAL      FIO_MAP_TYPE_INTERNAL
+#define FIO_MAP_KEY_FROM_INTERNAL FIO_MAP_TYPE_FROM_INTERNAL
 
 #endif /* FIO_MAP_KEY */
 
@@ -317,7 +322,7 @@ FIO_IFUNC FIO_MAP_HASH FIO_NAME(FIO_MAP_NAME, __get_hash)(FIO_MAP_OBJ_KEY k) {
 #define FIO_MAP_HASH_CACHED 0
 #define FIO_MAP_HASH_GET_HASH(map_ptr, index)                                  \
   FIO_NAME(FIO_MAP_NAME, __get_hash)                                           \
-  (FIO_MAP_OBJ2KEY((map_ptr)->map[(index)].obj))
+  (FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY((map_ptr)->map[(index)].obj)))
 #else
 #define FIO_MAP_HASH_GET_HASH(map_ptr, index) (map_ptr)->map[(index)].hash
 #define FIO_MAP_HASH_CACHED                   1
@@ -400,7 +405,7 @@ struct FIO_NAME(FIO_MAP_NAME, node_s) {
 };
 
 /* *****************************************************************************
-Contruction API
+Construction API
 ***************************************************************************** */
 
 /* do we have a constructor? */
@@ -422,19 +427,21 @@ Get / Set / Remove
 ***************************************************************************** */
 
 /** Gets a value from the map, returning a temporary pointer. */
-SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
-                                                    FIO_MAP_HASH hash,
-                                                    FIO_MAP_OBJ_KEY key);
+SFUNC FIO_MAP_TYPE_INTERNAL *FIO_NAME(FIO_MAP_NAME,
+                                      get_ptr)(FIO_MAP_PTR map,
+                                               FIO_MAP_HASH hash,
+                                               FIO_MAP_OBJ_KEY key);
 
 /** Sets a value in the map, returning a temporary pointer. */
-SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
-                                                    FIO_MAP_HASH hash,
+SFUNC FIO_MAP_TYPE_INTERNAL *FIO_NAME(FIO_MAP_NAME,
+                                      set_ptr)(FIO_MAP_PTR map,
+                                               FIO_MAP_HASH hash,
 #ifdef FIO_MAP_KEY
-                                                    FIO_MAP_KEY key,
+                                               FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
-                                                    FIO_MAP_TYPE obj,
-                                                    FIO_MAP_TYPE *old,
-                                                    uint8_t overwrite);
+                                               FIO_MAP_TYPE obj,
+                                               FIO_MAP_TYPE_INTERNAL *old,
+                                               uint8_t overwrite);
 
 /** Gets a value from the map, if exists. */
 FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, get)(FIO_MAP_PTR map,
@@ -448,13 +455,13 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR map,
                                                    FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
                                                    FIO_MAP_TYPE obj,
-                                                   FIO_MAP_TYPE *old);
+                                                   FIO_MAP_TYPE_INTERNAL *old);
 
 /** Removes a value from the map. */
 SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_HASH hash,
                                          FIO_MAP_OBJ_KEY key,
-                                         FIO_MAP_TYPE *old);
+                                         FIO_MAP_TYPE_INTERNAL *old);
 
 /** Sets the object only if missing. Otherwise keeps existing value. */
 FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set_if_missing)(FIO_MAP_PTR map,
@@ -559,10 +566,10 @@ Common Map Implementation - inlined static functions
 FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, get)(FIO_MAP_PTR map,
                                                    FIO_MAP_HASH hash,
                                                    FIO_MAP_OBJ_KEY key) {
-  FIO_MAP_TYPE *r = FIO_NAME(FIO_MAP_NAME, get_ptr)(map, hash, key);
+  FIO_MAP_TYPE_INTERNAL *r = FIO_NAME(FIO_MAP_NAME, get_ptr)(map, hash, key);
   if (!r)
     return FIO_MAP_TYPE_INVALID;
-  return *r;
+  return FIO_MAP_TYPE_FROM_INTERNAL(*r);
 }
 
 FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR map,
@@ -571,18 +578,18 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME, set)(FIO_MAP_PTR map,
                                                    FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
                                                    FIO_MAP_TYPE obj,
-                                                   FIO_MAP_TYPE *old) {
-  FIO_MAP_TYPE *r = FIO_NAME(FIO_MAP_NAME, set_ptr)(map,
-                                                    hash,
+                                                   FIO_MAP_TYPE_INTERNAL *old) {
+  FIO_MAP_TYPE_INTERNAL *r = FIO_NAME(FIO_MAP_NAME, set_ptr)(map,
+                                                             hash,
 #ifdef FIO_MAP_KEY
-                                                    key,
+                                                             key,
 #endif /* FIO_MAP_KEY */
-                                                    obj,
-                                                    old,
-                                                    1);
+                                                             obj,
+                                                             old,
+                                                             1);
   if (!r)
     return FIO_MAP_TYPE_INVALID;
-  return *r;
+  return FIO_MAP_TYPE_FROM_INTERNAL(*r);
 }
 
 FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
@@ -592,17 +599,17 @@ FIO_IFUNC FIO_MAP_TYPE FIO_NAME(FIO_MAP_NAME,
                                                 FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
                                                 FIO_MAP_TYPE obj) {
-  FIO_MAP_TYPE *r = FIO_NAME(FIO_MAP_NAME, set_ptr)(map,
-                                                    hash,
+  FIO_MAP_TYPE_INTERNAL *r = FIO_NAME(FIO_MAP_NAME, set_ptr)(map,
+                                                             hash,
 #ifdef FIO_MAP_KEY
-                                                    key,
+                                                             key,
 #endif /* FIO_MAP_KEY */
-                                                    obj,
-                                                    NULL,
-                                                    0);
+                                                             obj,
+                                                             NULL,
+                                                             0);
   if (!r)
     return FIO_MAP_TYPE_INVALID;
-  return *r;
+  return FIO_MAP_TYPE_FROM_INTERNAL(*r);
 }
 
 /* *****************************************************************************
@@ -626,7 +633,7 @@ Iteration Macro
  *
  * - `pos->hash` to access the hash value.
  *
- * - `pos->obj` to access the object's data.
+ * - `pos->obj` to access the object's data as it is stored in the Map.
  *
  *    For Hash Maps, use `pos->obj.key` and `pos->obj.value`.
  */

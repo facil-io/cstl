@@ -48,7 +48,7 @@ Everything, and the Kitchen Sink
 
 #define FIO_MALLOC
 #define FIO_QUEUE
-#define FIO_STR_CORE
+#define FIO_STR
 #define FIO_PUBSUB
 #define FIO_SERVER
 #define FIO_STREAM

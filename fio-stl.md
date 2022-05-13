@@ -68,7 +68,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
-* [Binary Safe String Helpers](#binary-safe-core-string-helpers) - defined by `FIO_STR_CORE`
+* [Binary Safe String Helpers](#binary-safe-core-string-helpers) - defined by `FIO_STR`
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 
@@ -4606,10 +4606,12 @@ a semi-opaque type used for the `fio_keystr` functions
 #### `fio_keystr_info`
 
 ```c
-fio_buf_info_s fio_keystr_info(fio_keystr_s *str);
+fio_str_info_s fio_keystr_info(fio_keystr_s *str);
 ```
 
-returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED!
+Returns the Key String.
+
+**Note**: Key Strings are **not** automatically `NUL` terminated!
 
 #### `fio_keystr`
 
@@ -4621,15 +4623,7 @@ Returns a **temporary** `fio_keystr_s` to be used as a key for a hash map.
 
 Do **not** `fio_keystr_destroy` this key.
 
-#### `fio_keystr_const`
-```c
-fio_keystr_s fio_keystr_const(const char *buf, uint32_t len);
-```
-
-Returns a `fio_keystr_s` constant to be used as a key for a hash map.
-
-NOTE: use this ONLY if the pointer `buf` will remain valid for lifetime of the value in the map.
-
+#### `fio_keystr_copy`
 
 ```c
 fio_keystr_s fio_keystr_copy(fio_keystr_s org, void *(*alloc_func)(size_t len));
@@ -4670,7 +4664,9 @@ FIO_IFUNC void umap_set2(umap_s *map,
                          size_t key_len,
                          uintptr_t obj) {
   uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  umap_set(map, hash, fio_keystr(key, key_len), obj, NULL);
+  /* since `capa` is 1, the map assumes it's a dynamic string and copies it.
+   * if the string is short (< 15 bytes on 64 bit systems), no memory allocation is performed */
+  umap_set(map, hash, FIO_STR_INFO3(key, key_len, 1), obj, NULL);
 }
 /** a helper to calculate hash and set a constant string as a key. */
 FIO_IFUNC void umap_set3(umap_s *map,
@@ -4678,31 +4674,29 @@ FIO_IFUNC void umap_set3(umap_s *map,
                          size_t key_len,
                          uintptr_t obj) {
   uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  umap_set(map, hash, fio_keystr_const(key, key_len), obj, NULL);
+  /* since `capa` is 0, the map assumes it's a `const` and uses that pointer. */
+  umap_set(map, hash, FIO_STR_INFO3(key, key_len, 0), obj, NULL);
 }
 
 /** a helper to calculate hash and get the value of a key. */
 FIO_IFUNC uintptr_t umap_get2(umap_s *map, char *key, size_t key_len) {
   uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  return umap_get(map, hash, fio_keystr(key, key_len));
+  return umap_get(map, hash, FIO_STR_INFO2(key, key_len));
 }
 /* example adding strings to map and printing data. */
-int main(int argc, char const *argv[]) {
-  (void)argc;
-  (void)argv;
+void example(void) {
   umap_s map = FIO_MAP_INIT;
   umap_set2(&map, "One", 3, 1);
   umap_set2(&map, "Two", 3, 2);
   umap_set2(&map, "Three", 5, 3);
-  umap_set3(&map, "Infinity", 8, (uintptr_t)-1); /* <- never allocates memory. */
+  umap_set3(&map, "Infinity", 8, (uintptr_t)-1);
   FIO_MAP_EACH(umap, &map, pos) {
-    /* note that key strings are NOT nul terminated! */
-    fio_buf_info_s key = fio_keystr_info(&pos->obj.key);
+    /* note that key strings are NOT automatically NUL terminated! */
+    fio_str_info_s key = fio_keystr_info(&pos->obj.key);
     uintptr_t value = pos->obj.value;
     printf("%.*s: %llu\n", (int)key.len, key.buf, (unsigned long long)value);
   }
   umap_destroy(&map);
-  return 0;
 }
 ```
 -------------------------------------------------------------------------------
@@ -5933,16 +5927,16 @@ If `old` is given, existing data will be copied to that location.
 #### `MAP_set_ptr` (hash map)
 
 ```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
-                      FIO_MAP_HASH hash,
-                      FIO_MAP_KEY key,
-                      FIO_MAP_TYPE obj,
-                      FIO_MAP_TYPE *old,
-                      uint8_t overwrite);
+FIO_MAP_TYPE *MAP_set_ptr(FIO_MAP_PTR m,
+                          FIO_MAP_HASH hash,
+                          FIO_MAP_KEY key,
+                          FIO_MAP_TYPE obj,
+                          FIO_MAP_TYPE *old,
+                          uint8_t overwrite);
 ```
 
 
-Inserts an object to the hash map, returning the new object.
+Inserts an object to the hash map, returning a pointer to the new object's representation within the Map.
 
 If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
 
@@ -5981,12 +5975,12 @@ FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
                           FIO_MAP_TYPE obj);
 ```
 
-Returns a pointer to the object in the hash map (if any) or NULL.
+Returns a pointer to the object's representation within the hash map (if any) or NULL.
 
-#### `set_if_missing` (set)
+#### `MAP_set_if_missing` (set)
 
 ```c
-FIO_MAP_TYPE set_if_missing(FIO_MAP_PTR m,
+FIO_MAP_TYPE MAP_set_if_missing(FIO_MAP_PTR m,
                             FIO_MAP_HASH hash,
                             FIO_MAP_TYPE obj);
 ```
@@ -6011,7 +6005,7 @@ If `old` is given, existing data will be copied to that location.
 #### `MAP_set_ptr` (set)
 
 ```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+FIO_MAP_TYPE *MAP_set_ptr(FIO_MAP_PTR m,
                       FIO_MAP_HASH hash,
                       FIO_MAP_TYPE obj,
                       FIO_MAP_TYPE *old);
@@ -6120,7 +6114,7 @@ MAP_node_s * pos = MAP_each_next(map, NULL);
 
 - `i->hash` to access the hash value.
 
-- `i->obj` to access the object's data.
+- `i->obj` to access the object's data as it is represented within the map.
 
    For Hash Maps, use `i->obj.key` and `i->obj.value`.
 
@@ -6197,19 +6191,6 @@ SFUNC FIO_MAP_SIZE_TYPE
                                  ssize_t start_at);
 
 ```
-
-
-#### `MAP_each_get_key`
-
-```c
-FIO_MAP_KEY MAP_each_get_key(void);
-```
-
-Returns the current `key` within an `each` task.
-
-Only available within an `each` loop.
-
-_Note: For sets, returns the hash value, for hash maps, returns the key value._
 
 #### `FIO_MAP_EACH`
 
@@ -7567,6 +7548,70 @@ struct fio_protocol_s {
   uint32_t timeout;
 };
 ```
+
+### `FIO_SERVER` Connection Environment
+
+Each connection object has its own personal environment storage that allows it to store objects that are linked to the connection's lifetime.
+
+#### `fio_env_set`
+```c
+void fio_env_set(fio_s *io, fio_env_set_args_s);
+#define fio_env_set(io, ...) fio_env_set(io, (fio_env_set_args_s){__VA_ARGS__})
+```
+
+Links an object to a connection's lifetime, calling the `on_close` callback once the connection has died.
+
+If the `io` is NULL, the value will be set for the global environment, in which case the `on_close` callback will only be called once the process exits.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments:
+
+```c
+typedef struct {
+  /** A numerical type filter. Defaults to 0. Negative values are reserved. */
+  intptr_t type;
+  /** The name of the object. The name and type uniquely identify the object. */
+  fio_str_info_s name;
+  /** The object being linked to the connection. */
+  void *udata;
+  /** A callback that will be called once the connection is closed. */
+  void (*on_close)(void *data);
+  /** Set to true (1) if the name string's life lives as long as the `env` . */
+  uint8_t const_name;
+} fio_env_set_args_s;
+```
+
+#### `fio_env_unset`
+
+```c
+int fio_env_unset(fio_s *io, fio_env_unset_args_s);
+#define fio_env_unset(io, ...) fio_env_unset(io, (fio_env_unset_args_s){__VA_ARGS__})
+```
+
+Un-links an object from the connection's lifetime, so it's `on_close` callback will **not** be called.
+
+Returns 0 on success and -1 if the object couldn't be found.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
+
+```c
+typedef struct {
+  /** A numerical type filter. Should be the same as used with `fio_env_set` */
+  intptr_t type;
+  /** The name of the object. Should be the same as used with `fio_env_set` */
+  fio_str_info_s name;
+} fio_env_unset_args_s;
+```
+
+#### `fio_env_remove`
+
+```c
+int fio_env_remove(fio_s *io, fio_env_unset_args_s);
+#define fio_env_remove(io, ...) fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
+```
+
+Removes an object from the connection's lifetime / environment, calling it's `on_close` callback as if the connection was closed.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
 
 ### `FIO_SERVER` Compile Time Macros
 

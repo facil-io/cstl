@@ -114,6 +114,20 @@ Ordered Map Implementation - possibly externed functions.
    FIO_MAP_CAPA(bits))
 #endif
 
+#if defined(FIO_MAP_TEST) && FIO_MAP_HASH_CACHED
+/** Returns the maps current object count. */
+FIO_IFUNC size_t FIO_NAME(FIO_MAP_NAME, count_force)(FIO_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  FIO_NAME(FIO_MAP_NAME, s) *m =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  size_t count = 0;
+  for (size_t i = 0; i < m->w; ++i) {
+    count += (m->map[i].hash != 0);
+  }
+  return count;
+}
+#endif
+
 /* *****************************************************************************
 Ordered Map Implementation - helper functions.
 ***************************************************************************** */
@@ -202,7 +216,7 @@ FIO_SFUNC FIO_NAME(FIO_MAP_NAME, __pos_s)
               i.i = index;
               i.a = a_index;
               return i;
-            } else if (++total_collisions >= FIO_MAP_MAX_FULL_COLLISIONS) {
+            } else if (++total_collisions > FIO_MAP_MAX_FULL_COLLISIONS) {
               m->under_attack = 1;
               FIO_LOG_SECURITY("Ordered map under attack?");
             }
@@ -287,9 +301,11 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
       do {
         if (m->map[i].hash) {
           FIO_NAME(FIO_MAP_NAME, __pos_s)
-          pos = FIO_NAME(
-              FIO_MAP_NAME,
-              __index)(m, m->map[i].hash, FIO_MAP_OBJ2KEY(m->map[i].obj), 1);
+          pos = FIO_NAME(FIO_MAP_NAME, __index)(
+              m,
+              m->map[i].hash,
+              FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[i].obj)),
+              1);
           if (pos.i == (FIO_MAP_SIZE_TYPE)-1LL)
             goto error;
           imap[pos.i] |= i;
@@ -314,9 +330,11 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME, __realloc)(FIO_NAME(FIO_MAP_NAME, s) * m,
 #endif /* FIO_MAP_EVICT_LRU */
         if (m->map[r].hash) {
           FIO_NAME(FIO_MAP_NAME, __pos_s)
-          pos = FIO_NAME(
-              FIO_MAP_NAME,
-              __index)(m, m->map[r].hash, FIO_MAP_OBJ2KEY(m->map[r].obj), 1);
+          pos = FIO_NAME(FIO_MAP_NAME, __index)(
+              m,
+              m->map[r].hash,
+              FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[r].obj)),
+              1);
           if (pos.i == (FIO_MAP_SIZE_TYPE)-1)
             goto error;
           imap[pos.i] |= r;
@@ -370,9 +388,10 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
 Get / Set / Remove
 ***************************************************************************** */
 
-SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
-                                                    FIO_MAP_HASH hash,
-                                                    FIO_MAP_OBJ_KEY key) {
+SFUNC FIO_MAP_TYPE_INTERNAL *FIO_NAME(FIO_MAP_NAME,
+                                      get_ptr)(FIO_MAP_PTR map,
+                                               FIO_MAP_HASH hash,
+                                               FIO_MAP_OBJ_KEY key) {
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m)
@@ -390,19 +409,20 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, get_ptr)(FIO_MAP_PTR map,
     m->last_used = pos.a;
   }
 #endif /* FIO_MAP_EVICT_LRU */
-  return &FIO_MAP_OBJ2TYPE(m->map[pos.a].obj);
+  return &FIO_MAP_OBJ2VALUE(m->map[pos.a].obj);
 }
 
-SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
-                                                    FIO_MAP_HASH hash,
+SFUNC FIO_MAP_TYPE_INTERNAL *FIO_NAME(FIO_MAP_NAME,
+                                      set_ptr)(FIO_MAP_PTR map,
+                                               FIO_MAP_HASH hash,
 #ifdef FIO_MAP_KEY
-                                                    FIO_MAP_KEY key,
+                                               FIO_MAP_KEY key,
 #endif /* FIO_MAP_KEY */
-                                                    FIO_MAP_TYPE obj,
-                                                    FIO_MAP_TYPE *old,
-                                                    uint8_t overwrite) {
+                                               FIO_MAP_TYPE obj,
+                                               FIO_MAP_TYPE_INTERNAL *old,
+                                               uint8_t overwrite) {
   if (old)
-    *old = FIO_MAP_TYPE_INVALID;
+    *old = FIO_MAP_TYPE_INTERNAL_INVALID;
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
   if (!m)
@@ -444,7 +464,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     FIO_NAME(FIO_MAP_NAME, __imap)
     (m)[pos.i] |= pos.a;
     m->map[pos.a].hash = hash;
-    FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj), obj);
+    FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj), obj);
     FIO_MAP_KEY_COPY(FIO_MAP_OBJ2KEY(m->map[pos.a].obj), key);
 #if FIO_MAP_EVICT_LRU
     if (m->count) {
@@ -456,19 +476,21 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
 #endif /* FIO_MAP_EVICT_LRU */
     ++m->count;
   } else if (overwrite &&
-             FIO_MAP_SHOULD_OVERWRITE(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj),
+             FIO_MAP_SHOULD_OVERWRITE(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj),
                                       obj)) {
     /* overwrite existing */
     FIO_MAP_KEY_DISCARD(key);
     if (old) {
-      FIO_MAP_TYPE_COPY(old[0], FIO_MAP_OBJ2TYPE(m->map[pos.a].obj));
+      FIO_MAP_TYPE_COPY(
+          old[0],
+          FIO_MAP_TYPE_FROM_INTERNAL(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj)));
       if (FIO_MAP_DESTROY_AFTER_COPY) {
-        FIO_MAP_TYPE_DESTROY(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj));
+        FIO_MAP_TYPE_DESTROY(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj));
       }
     } else {
-      FIO_MAP_TYPE_DESTROY(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj));
+      FIO_MAP_TYPE_DESTROY(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj));
     }
-    FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2TYPE(m->map[pos.a].obj), obj);
+    FIO_MAP_TYPE_COPY(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj), obj);
 #if FIO_MAP_EVICT_LRU
     if (m->last_used != pos.a) {
       FIO_INDEXED_LIST_REMOVE(m->map, node, pos.a);
@@ -480,7 +502,7 @@ SFUNC FIO_MAP_TYPE *FIO_NAME(FIO_MAP_NAME, set_ptr)(FIO_MAP_PTR map,
     FIO_MAP_TYPE_DISCARD(obj);
     FIO_MAP_KEY_DISCARD(key);
   }
-  return &FIO_MAP_OBJ2TYPE(m->map[pos.a].obj);
+  return &FIO_MAP_OBJ2VALUE(m->map[pos.a].obj);
 
 error:
   FIO_MAP_TYPE_DISCARD(obj);
@@ -491,9 +513,9 @@ error:
 SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
                                          FIO_MAP_HASH hash,
                                          FIO_MAP_OBJ_KEY key,
-                                         FIO_MAP_TYPE *old) {
+                                         FIO_MAP_TYPE_INTERNAL *old) {
   if (old)
-    *old = FIO_MAP_TYPE_INVALID;
+    *old = FIO_MAP_TYPE_INTERNAL_INVALID;
   FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
   FIO_NAME(FIO_MAP_NAME, s) *m =
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
@@ -509,7 +531,9 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
   m->map[pos.a].hash = 0;
   --m->count;
   if (old) {
-    FIO_MAP_TYPE_COPY(*old, FIO_MAP_OBJ2TYPE(m->map[pos.a].obj));
+    FIO_MAP_TYPE_COPY(
+        *old,
+        FIO_MAP_TYPE_FROM_INTERNAL(FIO_MAP_OBJ2VALUE(m->map[pos.a].obj)));
     FIO_MAP_OBJ_DESTROY_AFTER(m->map[pos.a].obj);
   } else {
     FIO_MAP_OBJ_DESTROY(m->map[pos.a].obj);
@@ -562,7 +586,10 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   do {
     FIO_MAP_SIZE_TYPE n = m->map[m->last_used].node.prev;
     FIO_NAME(FIO_MAP_NAME, remove)
-    (map, m->map[n].hash, FIO_MAP_OBJ2KEY(m->map[n].obj), NULL);
+    (map,
+     m->map[n].hash,
+     FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[n].obj)),
+     NULL);
   } while (--number_of_elements);
 #else  /* FIO_MAP_EVICT_LRU */
   /* scan map and evict FIFO. */
@@ -570,7 +597,10 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
     /* skip empty groups (test for all bytes == 0 || 255 */
     if (m->map[i].hash) {
       FIO_NAME(FIO_MAP_NAME, remove)
-      (map, m->map[i].hash, FIO_MAP_OBJ2KEY(m->map[i].obj), NULL);
+      (map,
+       m->map[i].hash,
+       FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[i].obj)),
+       NULL);
       if (!(--number_of_elements))
         break; /* stop evicting? */
     }
@@ -683,9 +713,10 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
 
   if (m->w == m->count) {
     while (e.index < m->count) {
-      e.value = FIO_MAP_OBJ2TYPE(m->map[e.index].obj);
+      e.value =
+          FIO_MAP_TYPE_FROM_INTERNAL(FIO_MAP_OBJ2VALUE(m->map[e.index].obj));
 #ifdef FIO_MAP_KEY
-      e.key = FIO_MAP_OBJ2KEY(m->map[e.index].obj);
+      e.key = FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[e.index].obj));
 #endif
       int r = e.task(&e);
       ++e.index;
@@ -708,9 +739,9 @@ FIO_NAME(FIO_MAP_NAME, each)(FIO_MAP_PTR map,
 
   while (e.index < m->count && pos < m->w) {
     if (m->map[pos].hash) {
-      e.value = FIO_MAP_OBJ2TYPE(m->map[pos].obj);
+      e.value = FIO_MAP_TYPE_FROM_INTERNAL(FIO_MAP_OBJ2VALUE(m->map[pos].obj));
 #ifdef FIO_MAP_KEY
-      e.key = FIO_MAP_OBJ2KEY(m->map[pos].obj);
+      e.key = FIO_MAP_KEY_FROM_INTERNAL(FIO_MAP_OBJ2KEY(m->map[pos].obj));
 #endif
       int r = e.task(&e);
       ++e.index;

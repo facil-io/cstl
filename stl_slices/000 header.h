@@ -329,12 +329,11 @@ Function Attributes
 #else
 /** Marks a function as a constructor - if supported. */
 #define FIO_CONSTRUCTOR(fname)                                                 \
-  FIO_SFUNC __attribute__((constructor)) void fname FIO_NOOP(void)
+  static __attribute__((constructor)) void fname(void)
 
 /** Marks a function as a destructor - if supported. Consider using atexit() */
 #define FIO_DESTRUCTOR(fname)                                                  \
-  FIO_SFUNC                                                                    \
-  __attribute__((destructor)) void fname FIO_NOOP(void)
+  static __attribute__((destructor)) void fname(void)
 #endif
 
 /* *****************************************************************************

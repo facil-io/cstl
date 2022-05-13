@@ -69,7 +69,7 @@ Memory Allocation - fast setup for a specific global allocators
 #define H___FIO_MALLOC___H
 #undef FIO_MALLOC
 /* FIOBJ_MALLOC defines a FIOBJ dedicated memory allocator */
-#elif defined (FIOBJ_MALLOC) && !defined (H___FIOBJ_MALLOC___H)
+#elif defined(FIOBJ_MALLOC) && !defined(H___FIOBJ_MALLOC___H)
 #define H___FIOBJ_MALLOC___H
 #ifndef FIO_MEMORY_NAME
 #define FIO_MEMORY_NAME fiobj_mem
@@ -1425,8 +1425,12 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_free)(
 /* IDE marker */
 void fio___mem_state_cleanup___(void);
 FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
-  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
+  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)) {
+    FIO_LOG_DEBUG2(FIO_MACRO2STR(
+        FIO_NAME(FIO_MEMORY_NAME,
+                 __mem_state_cleanup)) "called more than once (NULL state).");
     return;
+  }
   (void)ignr_;
 #if DEBUG
   FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(

@@ -171,16 +171,16 @@ If `old` is given, existing data will be copied to that location.
 #### `MAP_set_ptr` (hash map)
 
 ```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
-                      FIO_MAP_HASH hash,
-                      FIO_MAP_KEY key,
-                      FIO_MAP_TYPE obj,
-                      FIO_MAP_TYPE *old,
-                      uint8_t overwrite);
+FIO_MAP_TYPE *MAP_set_ptr(FIO_MAP_PTR m,
+                          FIO_MAP_HASH hash,
+                          FIO_MAP_KEY key,
+                          FIO_MAP_TYPE obj,
+                          FIO_MAP_TYPE *old,
+                          uint8_t overwrite);
 ```
 
 
-Inserts an object to the hash map, returning the new object.
+Inserts an object to the hash map, returning a pointer to the new object's representation within the Map.
 
 If `old` is given, existing data will be copied to that location unless `overwrite` is false (in which case, old data isn't overwritten).
 
@@ -219,12 +219,12 @@ FIO_MAP_TYPE *MAP_get_ptr(FIO_MAP_PTR m,
                           FIO_MAP_TYPE obj);
 ```
 
-Returns a pointer to the object in the hash map (if any) or NULL.
+Returns a pointer to the object's representation within the hash map (if any) or NULL.
 
-#### `set_if_missing` (set)
+#### `MAP_set_if_missing` (set)
 
 ```c
-FIO_MAP_TYPE set_if_missing(FIO_MAP_PTR m,
+FIO_MAP_TYPE MAP_set_if_missing(FIO_MAP_PTR m,
                             FIO_MAP_HASH hash,
                             FIO_MAP_TYPE obj);
 ```
@@ -249,7 +249,7 @@ If `old` is given, existing data will be copied to that location.
 #### `MAP_set_ptr` (set)
 
 ```c
-FIO_MAP_TYPE *MAP_set(FIO_MAP_PTR m,
+FIO_MAP_TYPE *MAP_set_ptr(FIO_MAP_PTR m,
                       FIO_MAP_HASH hash,
                       FIO_MAP_TYPE obj,
                       FIO_MAP_TYPE *old);
@@ -358,7 +358,7 @@ MAP_node_s * pos = MAP_each_next(map, NULL);
 
 - `i->hash` to access the hash value.
 
-- `i->obj` to access the object's data.
+- `i->obj` to access the object's data as it is represented within the map.
 
    For Hash Maps, use `i->obj.key` and `i->obj.value`.
 
@@ -435,19 +435,6 @@ SFUNC FIO_MAP_SIZE_TYPE
                                  ssize_t start_at);
 
 ```
-
-
-#### `MAP_each_get_key`
-
-```c
-FIO_MAP_KEY MAP_each_get_key(void);
-```
-
-Returns the current `key` within an `each` task.
-
-Only available within an `each` loop.
-
-_Note: For sets, returns the hash value, for hash maps, returns the key value._
 
 #### `FIO_MAP_EACH`
 

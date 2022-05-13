@@ -21,7 +21,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#if defined(FIO_STATE) && !defined(H__FIO_STATE__H)
+#if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO_STL_KEEP__)
 #define H__FIO_STATE__H
 /* *****************************************************************************
 State Callback API
@@ -120,7 +120,7 @@ All memory allocations should use:
 
 /* *****************************************************************************
 State Callback Map - I'd use the global mapping types...
-                     but we can't depend on types yet, possible collisions.
+(Ordered Hash Map)   but we can't depend on types yet, possible collisions.
 ***************************************************************************** */
 
 typedef struct {
@@ -170,18 +170,23 @@ FIO_SFUNC fio___state_map_pos_s fio___state_map_find(fio___state_map_s *map,
       pos.i = map->w;
       return pos;
     }
-    if ((intptr_t)map->imap[ipos] == (intptr_t)-1LL) { /* hole (item removed) */
+    if (map->imap[ipos] == (~(uintptr_t)0ULL)) { /* hole (item removed) */
       pos.map = map->imap + ipos;
       pos.i = map->w;
       continue;
     }
-    if ((map->imap[ipos] & hash_mask) == pos.hash &&
-        map->ary[map->imap[ipos] & index_mask].func == func &&
-        map->ary[map->imap[ipos] & index_mask].arg == arg) { /* exact match */
-      pos.map = map->imap + ipos;
-      pos.i = map->imap[ipos] & index_mask;
+    if ((map->imap[ipos] & hash_mask) != pos.hash)
+      continue;
+    const size_t opos = map->imap[ipos] & index_mask;
+    if (map->ary[opos].func == func &&
+        map->ary[opos].arg == arg) { /* exact match */
+      pos.map = map->imap + ipos;    /* ipos is the index in the index map */
+      pos.i = opos; /* confusing, but pos.i is the index of the object itself */
       return pos;
     }
+    /* this is a partial hash collision... we could count them and test for
+     * attack, but this implementation assumes safe inputs and a good hash
+     * function */
   }
   return pos;
 }
@@ -249,7 +254,7 @@ FIO_IFUNC int fio___state_map_remove(fio___state_map_s *map,
   fio___state_map_pos_s pos = fio___state_map_find(map, func, arg);
   if (!pos.map || pos.i == map->w)
     return -1;
-  pos.map[0] = (intptr_t)-1LL; /* mark hole */
+  pos.map[0] = (~(uintptr_t)0ULL); /* mark hole */
   map->ary[pos.i].func = NULL;
   map->ary[pos.i].arg = NULL;
   --map->count;
@@ -447,13 +452,15 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
 State constructor / destructor
 ***************************************************************************** */
 
-FIO_CONSTRUCTOR(fio___state) {
+FIO_CONSTRUCTOR(fio___state_constructor) {
+  FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
 }
 
 FIO_DESTRUCTOR(fio___state_cleanup) {
   fio_state_callback_force(FIO_CALL_AT_EXIT);
   fio_state_callback_clear_all();
+  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
 }
 
 /* *****************************************************************************

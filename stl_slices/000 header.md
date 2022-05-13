@@ -68,7 +68,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
-* [Binary Safe String Helpers](#binary-safe-core-string-helpers) - defined by `FIO_STR_CORE`
+* [Binary Safe String Helpers](#binary-safe-core-string-helpers) - defined by `FIO_STR`
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 

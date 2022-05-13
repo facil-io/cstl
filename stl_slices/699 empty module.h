@@ -20,7 +20,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-#ifdef FIO_MODULE_NAME
+#if defined(FIO_MODULE_NAME) /* && !defined(FIO_STL_KEEP__) */
 
 /* *****************************************************************************
 Module Settings
@@ -30,7 +30,7 @@ developer.
 ***************************************************************************** */
 
 /* *****************************************************************************
-Pointer Tagging Support
+Pointer Tagging Support: !!! valid only for dynamic types, filename 2xx XXX.h
 ***************************************************************************** */
 
 #ifdef FIO_PTR_TAG_TYPE

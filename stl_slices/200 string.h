@@ -11,7 +11,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "010 riskyhash.h"          /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #include "108 files.h"              /* Development inclusion - ignore line */
-#include "220 string core.h"        /* Development inclusion - ignore line */
+#include "199 string core.h"        /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -670,7 +670,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, __info_update)(const FIO_STR_PTR s_,
   s->buf = info.buf;
 }
 
-/* using not, declared later. */
+/* using now, declared later. */
 
 FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
                                                            size_t new_capa);

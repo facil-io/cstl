@@ -394,7 +394,9 @@ typedef struct {
 
 /** Named arguments for the `fio_env_unset` function. */
 typedef struct {
+  /** A numerical type filter. Should be the same as used with `fio_env_set` */
   intptr_t type;
+  /** The name of the object. Should be the same as used with `fio_env_set` */
   fio_str_info_s name;
 } fio_env_unset_args_s;
 
@@ -598,7 +600,7 @@ FIO_IFUNC void fio___srv_env_safe_set(fio___srv_env_safe_s *e,
                                       intptr_t type_,
                                       fio___srv_env_obj_s val,
                                       uint8_t key_is_const) {
-  fio_keystr_s key = (key_is_const ? fio_keystr_const : fio_keystr)(key_, len);
+  fio_str_info_s key = FIO_STR_INFO3(key_, len, !key_is_const);
   const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
   fio_thread_mutex_lock(&e->lock);
   fio___srv_env_set(&e->env, hash, key, val, NULL);
@@ -610,7 +612,7 @@ FIO_IFUNC int fio___srv_env_safe_unset(fio___srv_env_safe_s *e,
                                        size_t len,
                                        intptr_t type_) {
   int r;
-  fio_keystr_s key = fio_keystr(key_, len);
+  fio_str_info_s key = FIO_STR_INFO3(key_, len, 0);
   const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
   fio___srv_env_obj_s old;
   fio_thread_mutex_lock(&e->lock);
@@ -624,7 +626,7 @@ FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
                                         size_t len,
                                         intptr_t type_) {
   int r;
-  fio_keystr_s key = fio_keystr(key_, len);
+  fio_str_info_s key = FIO_STR_INFO3(key_, len, 0);
   const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
   fio_thread_mutex_lock(&e->lock);
   r = fio___srv_env_remove(&e->env, hash, key, NULL);

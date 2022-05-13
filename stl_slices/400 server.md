@@ -343,6 +343,70 @@ struct fio_protocol_s {
 };
 ```
 
+### `FIO_SERVER` Connection Environment
+
+Each connection object has its own personal environment storage that allows it to store objects that are linked to the connection's lifetime.
+
+#### `fio_env_set`
+```c
+void fio_env_set(fio_s *io, fio_env_set_args_s);
+#define fio_env_set(io, ...) fio_env_set(io, (fio_env_set_args_s){__VA_ARGS__})
+```
+
+Links an object to a connection's lifetime, calling the `on_close` callback once the connection has died.
+
+If the `io` is NULL, the value will be set for the global environment, in which case the `on_close` callback will only be called once the process exits.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments:
+
+```c
+typedef struct {
+  /** A numerical type filter. Defaults to 0. Negative values are reserved. */
+  intptr_t type;
+  /** The name of the object. The name and type uniquely identify the object. */
+  fio_str_info_s name;
+  /** The object being linked to the connection. */
+  void *udata;
+  /** A callback that will be called once the connection is closed. */
+  void (*on_close)(void *data);
+  /** Set to true (1) if the name string's life lives as long as the `env` . */
+  uint8_t const_name;
+} fio_env_set_args_s;
+```
+
+#### `fio_env_unset`
+
+```c
+int fio_env_unset(fio_s *io, fio_env_unset_args_s);
+#define fio_env_unset(io, ...) fio_env_unset(io, (fio_env_unset_args_s){__VA_ARGS__})
+```
+
+Un-links an object from the connection's lifetime, so it's `on_close` callback will **not** be called.
+
+Returns 0 on success and -1 if the object couldn't be found.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
+
+```c
+typedef struct {
+  /** A numerical type filter. Should be the same as used with `fio_env_set` */
+  intptr_t type;
+  /** The name of the object. Should be the same as used with `fio_env_set` */
+  fio_str_info_s name;
+} fio_env_unset_args_s;
+```
+
+#### `fio_env_remove`
+
+```c
+int fio_env_remove(fio_s *io, fio_env_unset_args_s);
+#define fio_env_remove(io, ...) fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
+```
+
+Removes an object from the connection's lifetime / environment, calling it's `on_close` callback as if the connection was closed.
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
+
 ### `FIO_SERVER` Compile Time Macros
 
 

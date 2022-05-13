@@ -60,7 +60,7 @@ The HTTP Response Function
 #define FIO_STR_NAME str
 #define FIO_MEM_NAME str_allocator
 #include "fio-stl.h"
-
+static int http_should_log_responses = 0;
 FIO_SFUNC int http_write_headers_to_string(http_s *h,
                                            fio_str_info_s name,
                                            fio_str_info_s value,
@@ -152,6 +152,7 @@ int main(int argc, char const *argv[]) {
   if (fio_cli_get_bool("-V")) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
+  http_should_log_responses = fio_cli_get_bool("-v");
   /* review CLI connection address (in URL format) */
   FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
              "Could not open listening socket as requested.");
@@ -382,7 +383,7 @@ static void http1_on_finish(http_s *h) {
   if (http_is_streaming(h)) {
     fio_write2(c->io, .buf = "0\r\n\r\n", .len = 5, .copy = 1);
   }
-  if (fio_cli_get_bool("-v"))
+  if (http_should_log_responses)
     http_write_log(h, FIO_BUF_INFO2(NULL, 0));
 finish:
   http_free(h);

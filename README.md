@@ -12,15 +12,19 @@ In other words, some of the most common building blocks one would need in any C 
 
 The header could be included multiple times with different results, creating different types or exposing different functionality.
 
-## OS Support
+### OS Support
 
 The library in written and tested on POSIX systems. Windows support was added afterwards, leaving the library with a POSIX oriented design.
 
 Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
 
+### Installing
+
+Simply copy the `fio-stl.h` file to your project's folder. Done.
+
 ### Running Tests
 
-Testing the STL locally is easy using:
+To test the STL locally you need to first fork the project or download the whole project source code. Then, from the project's root folder run:
 
 ```bash
 make test/stl
@@ -47,18 +51,48 @@ cls && cl /Ox tests\stl.c /I. && stl.exe
 
 ### Binary-Safe Dynamic Strings
 
-Easily construct binary safe String types that are always `NUL` terminated just in case you want to use them as a C String.
+The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar disadvantages):
+
+```c
+/* include Core String functionality */
+#define FIO_STR
+#include <fio-stl.h>
+
+void hello_binary_strings(void){
+  char * bstr = fio_bstr_write(NULL, "Hello World", 11);
+  /* note that `bstr` might be updated, not updating the pointer after a `write` is a bug. */
+  bstr = fio_bstr_write2(bstr,
+                         FIO_STRING_WRITE_STR1("\nThe answer is: "),
+                         FIO_STRING_WRITE_UNUM(42));
+  printf("%s\n", bstr);
+  fio_bstr_free(bstr);
+}
+```
+
+### Reference Counting Binary-Safe Dynamic Strings
+
+Easily use a template to create your own binary safe String type that is always `NUL` terminated. Optionally add reference counting to your type with a single line of code.
+
+Or use a template to create your own String type, much better for reference counting:
 
 ```c
 /* Create a binary safe String type called `my_str_s` */
 #define FIO_STR_NAME my_str
-#include <fio-stl.h>
+/* Use a reference counting for `my_str_s` (using the same name convention) */
+#define FIO_REF_NAME my_str
+/* Make the reference counter the only constructor rather then having it as an additional flavor */
+#define FIO_REF_CONSTRUCTOR_ONLY
+#include "fio-stl.h"
 
 void hello(void){
-  my_str_s msg = FIO_STR_INIT;
-  my_str_write(&msg, "Hello World", 11);
-  printf("%s\n", my_str2ptr(&msg));
-  my_str_destroy(&msg);
+  my_str_s * msg = my_str_new();
+  my_str_write(msg, "Hello World", 11);
+  /* increase reference */
+  my_str_dup(msg);
+  printf("%s\n", my_str2ptr(msg));
+  my_str_free(msg);
+  printf("Still valid, as we had 2 references: %s\n", my_str2ptr(msg));
+  my_str_free(msg);
 }
 ```
 
@@ -84,29 +118,6 @@ void example(void) {
     fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - foo_ary2ptr(&a)), pos->i);
   }
   foo_ary_destroy(&a);
-}
-```
-
-### Reference Counting
-
-```c
-/* Create a binary safe String type called `my_str_s` */
-#define FIO_STR_NAME my_str
-/* Use a reference counting for `my_str_s` (using the same name convention) */
-#define FIO_REF_NAME my_str
-/* Make the reference counter the only constructor */
-#define FIO_REF_CONSTRUCTOR_ONLY
-#include "fio-stl.h"
-
-void hello(void){
-  my_str_s * msg = my_str_new();
-  my_str_write(msg, "Hello World", 11);
-  /* increase reference */
-  my_str_dup(msg);
-  printf("%s\n", my_str2ptr(msg));
-  my_str_free(msg);
-  printf("Still valid, as we had 2 references: %s\n", my_str2ptr(msg));
-  my_str_free(msg);
 }
 ```
 
@@ -151,6 +162,46 @@ void example(void) {
 }
 ```
 
+This same example actually has a shortcut that uses the dedicate `fio_keystr_s` type - a string type that is optimized for Hash Maps that use mostly (but not always) short string keys (less than 15 bytes per key on 64 bit systems):
+
+
+```c
+/* map words to numbers. */
+#define FIO_MAP_KEY_STR
+#define FIO_UMAP_NAME umap
+#define FIO_MAP_TYPE  uintptr_t
+#include "fio-stl.h"
+
+/** a helper to calculate hash and set any string as a key. */
+FIO_IFUNC void umap_set2(umap_s *map, char *key, size_t key_len, uintptr_t obj) {
+  umap_set(map, fio_risky_hash(key, key_len, (uint64_t)map), fio_keystr(key, key_len), obj, NULL);
+}
+/** a helper to calculate hash and set a constant string as a key. */
+FIO_IFUNC void umap_set3(umap_s *map, char *key, size_t key_len, uintptr_t obj) {
+  umap_set(map, fio_risky_hash(key, key_len, (uint64_t)map), fio_keystr_const(key, key_len), obj, NULL);
+}
+
+/** a helper to calculate hash and get the value of a key. */
+FIO_IFUNC uintptr_t umap_get2(umap_s *map, char *key, size_t key_len) {
+  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
+  return umap_get(map, hash, fio_keystr(key, key_len));
+}
+/* example adding strings to map and printing data. */
+void example(void) {
+  umap_s map = FIO_MAP_INIT;
+  umap_set3(&map, "One", 3, 1); /* use `umap_set3` since this is a `const char *` string */
+  umap_set3(&map, "Two", 3, 2);
+  umap_set3(&map, "Three", 5, 3);
+  FIO_MAP_EACH(umap, &map, pos) {
+    /* note that key strings are NOT nul terminated! (minimizes allocations) */
+    fio_buf_info_s key = fio_keystr_info(&pos->obj.key);
+    uintptr_t value = pos->obj.value;
+    printf("%.*s: %llu\n", (int)key.len, key.buf, (unsigned long long)value);
+  }
+  umap_destroy(&map);
+  return 0;
+}
+```
 
 ## Contribution Notice
 
