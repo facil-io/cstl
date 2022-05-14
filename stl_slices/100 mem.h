@@ -1428,7 +1428,7 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
   if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)) {
     FIO_LOG_DEBUG2(FIO_MACRO2STR(
         FIO_NAME(FIO_MEMORY_NAME,
-                 __mem_state_cleanup)) "called more than once (NULL state).");
+                 __mem_state_cleanup)) " called more than once (NULL state).");
     return;
   }
   (void)ignr_;

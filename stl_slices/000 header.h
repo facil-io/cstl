@@ -936,6 +936,17 @@ typedef struct fio_index8_node_s {
     (root)[(head)].node_name.prev = n__;                                       \
   } while (0)
 
+/** UNSAFE macro for adding a node to the begging of the list. */
+#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
+    (root)[n__].node_name.prev = (head);                                       \
+    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
+    (root)[(head)].node_name.next = n__;                                       \
+    (head) = n__;                                                              \
+  } while (0)
+
 /** UNSAFE macro for removing a node from a list. */
 #define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
   do {                                                                         \
@@ -1279,6 +1290,10 @@ Pointer Tagging
       goto lable;                                                              \
     }                                                                          \
   } while (0)
+
+#define FIO_PTR_TAG_GET_UNTAGGED(untagged_type, tagged_ptr)                    \
+  ((untagged_type *)(FIO_PTR_UNTAG(tagged_ptr)))
+
 /* *****************************************************************************
 
 

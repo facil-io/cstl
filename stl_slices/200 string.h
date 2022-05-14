@@ -617,7 +617,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, info)(const FIO_STR_PTR s_) {
   fio_str_info_s r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, r);
   FIO_NAME(FIO_STR_NAME, s) *s =
-      (FIO_NAME(FIO_STR_NAME, s) *)(FIO_PTR_UNTAG(s_));
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s))
     r = (fio_str_info_s){
         .buf = FIO_STR_SMALL_DATA(s),
@@ -639,7 +639,7 @@ FIO_IFUNC fio_buf_info_s FIO_NAME(FIO_STR_NAME, buf)(const FIO_STR_PTR s_) {
   fio_buf_info_s r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, r);
   FIO_NAME(FIO_STR_NAME, s) *s =
-      (FIO_NAME(FIO_STR_NAME, s) *)(FIO_PTR_UNTAG(s_));
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s))
     r = (fio_buf_info_s){
         .buf = FIO_STR_SMALL_DATA(s),
@@ -658,7 +658,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, __info_update)(const FIO_STR_PTR s_,
                                                      fio_str_info_s info) {
   /* internally used function, tagging already validated. */
   FIO_NAME(FIO_STR_NAME, s) *s =
-      (FIO_NAME(FIO_STR_NAME, s) *)(FIO_PTR_UNTAG(s_));
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (info.buf == FIO_STR_SMALL_DATA(s)) {
     s->special |= 1;
     FIO_STR_SMALL_LEN_SET(s, info.len);
@@ -687,7 +687,7 @@ FIO_IFUNC fio_string_realloc_fn FIO_NAME(FIO_STR_NAME,
   };
   /* internally used function, tagging already validated. */
   FIO_NAME(FIO_STR_NAME, s) *s =
-      (FIO_NAME(FIO_STR_NAME, s) *)(FIO_PTR_UNTAG(s_));
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   return options[FIO_STR_IS_SMALL(s) | !FIO_STR_BIG_IS_DYNAMIC(s)];
 }
 
@@ -718,7 +718,7 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
 FIO_IFUNC void FIO_NAME(FIO_STR_NAME, free)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(s_);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (!FIO_STR_IS_SMALL(s) && FIO_STR_BIG_IS_DYNAMIC(s)) {
     FIO_STR_BIG_FREE_BUF(s);
   }
@@ -736,7 +736,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, free)(FIO_STR_PTR s_) {
 FIO_IFUNC void FIO_NAME(FIO_STR_NAME, destroy)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(s_);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (!FIO_STR_IS_SMALL(s) && FIO_STR_BIG_IS_DYNAMIC(s)) {
     FIO_STR_BIG_FREE_BUF(s);
   }
@@ -755,7 +755,7 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
   char *data = NULL;
   FIO_PTR_TAG_VALID_OR_RETURN(s_, data);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
       data =
@@ -794,7 +794,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, compact)(FIO_STR_PTR s_) {
 #else
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(s_);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s) || !FIO_STR_BIG_IS_DYNAMIC(s) ||
       fio_string_capa4len(FIO_NAME(FIO_STR_NAME, len)(s_)) >=
           FIO_NAME(FIO_STR_NAME, capa)(s_))
@@ -827,7 +827,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
   fio_str_info_s i = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, i);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
@@ -860,7 +860,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
   fio_str_info_s i = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, i);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
   if (len < FIO_STR_SMALL_CAPA(s)) {
     FIO_STR_SMALL_LEN_SET(s, len);
@@ -912,7 +912,7 @@ String Information (inline)
 FIO_IFUNC char *FIO_NAME2(FIO_STR_NAME, ptr)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, NULL);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   char *results[] = {(FIO_STR_BIG_DATA(s)), (FIO_STR_SMALL_DATA(s))};
   return results[FIO_STR_IS_SMALL(s)];
 }
@@ -921,7 +921,7 @@ FIO_IFUNC char *FIO_NAME2(FIO_STR_NAME, ptr)(FIO_STR_PTR s_) {
 FIO_IFUNC size_t FIO_NAME(FIO_STR_NAME, len)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, 0);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   size_t results[] = {(FIO_STR_BIG_LEN(s)), (FIO_STR_SMALL_LEN(s))};
   return results[FIO_STR_IS_SMALL(s)];
 }
@@ -930,7 +930,7 @@ FIO_IFUNC size_t FIO_NAME(FIO_STR_NAME, len)(FIO_STR_PTR s_) {
 FIO_IFUNC size_t FIO_NAME(FIO_STR_NAME, capa)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, 0);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s))
     return FIO_STR_SMALL_CAPA(s);
   if (FIO_STR_BIG_IS_DYNAMIC(s))
@@ -971,7 +971,7 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
 FIO_IFUNC void FIO_NAME(FIO_STR_NAME, freeze)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(s_);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   FIO_STR_FREEZE_(s);
 }
 
@@ -981,7 +981,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, freeze)(FIO_STR_PTR s_) {
 FIO_IFUNC uint8_t FIO_NAME_BL(FIO_STR_NAME, frozen)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, 1);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   return FIO_STR_IS_FROZEN(s);
 }
 
@@ -989,7 +989,7 @@ FIO_IFUNC uint8_t FIO_NAME_BL(FIO_STR_NAME, frozen)(FIO_STR_PTR s_) {
 FIO_IFUNC int FIO_NAME_BL(FIO_STR_NAME, allocated)(const FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, 0);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   return (!FIO_STR_IS_SMALL(s) & FIO_STR_BIG_IS_DYNAMIC(s));
 }
 
@@ -1106,7 +1106,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   fio_str_info_s state = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, state);
   FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_PTR_UNTAG(s_);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   state = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (FIO_STR_IS_FROZEN(s))
     return state;
@@ -1644,7 +1644,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
-    FIO_ASSERT(FIO_PTR_UNTAG(s),
+    FIO_ASSERT(FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s),
                "error, string not allocated (%p)!",
                (void *)s);
     fio_str_info_s state = FIO_NAME(FIO_STR_NAME, readfile)(s, __FILE__, 0, 0);

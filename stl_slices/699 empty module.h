@@ -6,7 +6,6 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_MODULE_NAME module      /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
 #include "100 mem.h"                /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -38,6 +37,8 @@ Pointer Tagging Support: !!! valid only for dynamic types, filename 2xx XXX.h
 #else
 #define FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, s) *
 #endif
+
+#define FIO___UNTAG_T FIO_NAME(FIO_MODULE_NAME, s)
 
 /* *****************************************************************************
 Module API
@@ -99,7 +100,7 @@ FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
   FIO_PTR_TAG_VALID_OR_RETURN(obj, 0);
   FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
-      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
   FIO_MEM_FREE_(o, sizeof(*o));
   return 0;
 }
@@ -124,7 +125,7 @@ All memory allocations should use:
 SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
-      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
+      FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
   /* TODO: add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
@@ -149,4 +150,5 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_MODULE_PTR
 #undef FIO_MODULE_NAME
+#undef FIO___UNTAG_T
 #endif /* FIO_MODULE_NAME */

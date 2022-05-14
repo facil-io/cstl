@@ -6686,6 +6686,645 @@ The list **can** be mutated during the loop, but this is not recommended. Specif
 _Note: this macro won't work with pointer tagging_
 
 -------------------------------------------------------------------------------
+## Hash Tables, Maps, Dictionaries, Sets
+
+HashMaps (a.k.a., Hash Tables) and sets are extremely useful and common mapping / dictionary primitives, also sometimes known as "**dictionaries**".
+
+Hash maps use both a `hash` and a `key` to identify a `value`. The `hash` value is calculated by feeding the key's data to a hash function (such as Risky Hash or SipHash).
+
+A hash map without a `value` is known as a Set or a Bag. It uses only a `hash` and a `key` to access the same `key` in the Set. Since Sets promise that all objects in the Set are unique, they offer a pretty powerful tool often used for cache collections or for filtering out duplicates from other data sources.
+
+By default, if not defined differently, facil.io maps use String data as the `key`. If a `FIO_MAP3_VAL` type is not defined, than the default behavior is to create a Set rather than a Dictionary.
+
+```c
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP3_NAME                 dict
+#define FIO_MAP3_VAL_BSTR /* a special macro helper to define binary Strings as values */
+#define FIO_RISKY_HASH /* to provide us with a hash function. */
+#include "fio-stl.h"
+
+/* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
+
+/** set helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
+  return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
+}
+/** conditional set helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_str_info_s key,
+                                              fio_str_info_s obj) {
+  return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
+}
+/** get helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
+  return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
+}
+```
+
+Note that this Map implementation, like all dynamic type templates, supports optional pointer tagging (`FIO_PTR_TAG`) and reference counting (`FIO_REF_NAME`).
+
+### Defining the Map's Keys
+
+Every map / dictionary requires a `key` type that is used for either testing uniqueness (a Set) or accessing a `value` (a Hash Map or Dictionary).
+
+If the `key` type is left undefined, facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
+
+It is also possible to define the helper macro `FIO_MAP3_KEYSTR` in which case the Strings internally will use the `fio_keystr` API, which is optimized to hold up to 15 bytes (on 64bit systems) before allocating memory. These Strings, however, are **not** always `NUL` terminated.
+
+To use a custom `key` type and control its behavior, define any (or all) of the following macros before including the C STL header library (the `FIO_MAP3_KEY` macro is required in order to make changes):
+
+#### `FIO_MAP3_KEY`
+
+```c
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY  fio_str_info_s
+```
+
+The "external" / exposed type used to define the key. The external type is the type used by the API for inputting and reviewing key values. However, `FIO_MAP3_KEY_INTERNAL` may be (optionally) defined in order for the map to use a different type for storage purposes.
+
+#### `FIO_MAP3_KEY_INTERNAL`
+
+```c
+/* default when FIO_MAP3_KEY is defined */
+#define FIO_MAP3_KEY_INTERNAL FIO_MAP3_KEY
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY_INTERNAL char *
+```
+
+The `FIO_MAP3_KEY_INTERNAL`, if defined, allows the map to use an internal key storage type that is different than the type used for its external API, allowing for both a more convenient API and possible internal updates without API changes.
+
+#### `FIO_MAP3_KEY_FROM_INTERNAL`
+
+```c
+/* default when FIO_MAP3_KEY is defined */
+#define FIO_MAP3_KEY_FROM_INTERNAL(k) k
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
+```
+
+This macro converts between the Map's internal `key` storage type and the API representation.
+
+
+#### `FIO_MAP3_KEY_COPY`
+
+```c
+/* default when FIO_MAP3_KEY is defined */
+#define FIO_MAP3_KEY_COPY(dest, src) (dest) = (src)
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY_COPY(dest, src) (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
+```
+
+This macro copies the Map's external representation of the `key` (as defined by the API) into the map's internal `key` storage.
+
+#### `FIO_MAP3_KEY_CMP`
+
+```c
+/* default when FIO_MAP3_KEY is defined */
+#define FIO_MAP3_KEY_CMP(internal, external) (internal) == (external)
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY_CMP(internal, external) fio_bstr_is_eq2info((internal), (external))
+```
+
+This macro compares a Map's external representation of a `key` (as defined by the API) with a `key` stored in the map's internal storage.
+
+#### `FIO_MAP3_KEY_DESTROY`
+
+```c
+/* default when FIO_MAP3_KEY is defined */
+#define FIO_MAP3_KEY_DESTROY(key)
+/* default when FIO_MAP3_KEY is undefined */
+#define FIO_MAP3_KEY_DESTROY(key) fio_bstr_free((key))
+```
+
+This macro destroys a `key` stored in the map's internal storage. This means freeing any allocated resources. The map will ignore any remaining junk data.
+
+#### `FIO_MAP3_KEY_DISCARD`
+
+```c
+/* default does nothing */
+#define FIO_MAP3_KEY_DISCARD(key)
+```
+
+This macro destroys an external representation of a `key` if it didn't make it into the map's internal storage.
+
+This is useful in when the key was pre-allocated, if it's reference was increased in advance for some reason or when "transferring ownership" of the `key` to the map.
+
+### Defining the Map's Values
+
+Most often we want a dictionary or a hash map to retrieve a `value` based on its associated `key`.
+
+Values and their behavior can be controlled using similar macros to the `key` macros.
+
+#### `FIO_MAP3_VAL_BSTR`
+
+```c
+#ifdef FIO_MAP3_VAL_BSTR
+#define FIO_MAP3_VAL                  fio_str_info_s
+#define FIO_MAP3_VAL_INTERNAL         char *
+#define FIO_MAP3_VAL_FROM_INTERNAL(v) fio_bstr_info((v))
+#define FIO_MAP3_VAL_COPY(dest, src)                                     \
+  (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
+#define FIO_MAP3_VAL_DESTROY(v) fio_bstr_free((v))
+#define FIO_MAP3_VAL_DISCARD(v)
+#endif
+```
+
+This is a shortcut macro that sets the values to String objects. The strings are binary safe (may contain multiple `NUL` values) and are always `NUL` terminated (for extra safety).
+
+#### `FIO_MAP3_VAL`
+
+```c
+/* poor example */
+#define FIO_MAP3_VAL void *
+```
+
+Similar to `FIO_MAP3_KEY`, defines the (external) representation of a Map's `value`.
+
+**Note**: a common `value` is the `void *` pointer. However, this does not provide type safety, and so it is better to use a specific type for the `value`.
+
+#### `FIO_MAP3_VAL_INTERNAL`
+
+```c
+/* default when FIO_MAP3_VAL is defined */
+#define FIO_MAP3_VAL_FROM_INTERNAL(o) o
+```
+
+Similar to `FIO_MAP3_KEY_FROM_INTERNAL`, this macro converts between the Map's internal `value` storage type and the API representation.
+
+#### `FIO_MAP3_VAL_COPY`
+
+```c
+/* default when FIO_MAP3_VAL is defined */
+#define FIO_MAP3_VAL_COPY(internal, external) (internal) = (external)
+```
+
+Similar to `FIO_MAP3_KEY_COPY`, this macro copies the Map's external representation of the `value` (as defined by the API) into the map's internal `value` storage.
+
+
+#### `FIO_MAP3_VAL_DESTROY`
+
+```c
+/* default when FIO_MAP3_VAL is defined */
+#define FIO_MAP3_VAL_DESTROY(o)
+#define FIO_MAP3_VAL_DESTROY_SIMPLE 1
+```
+
+Similar to `FIO_MAP3_KEY_DESTROY`, this macro destroys a `value` stored in the map's internal storage. This means freeing any allocated resources. The map will ignore any remaining junk data.
+
+#### `FIO_MAP3_VAL_DISCARD`
+
+```c
+/* default when FIO_MAP3_VAL is defined */
+#define FIO_MAP3_VAL_DISCARD(o)
+```
+
+Similar to `FIO_MAP3_KEY_DISCARD`, this macro destroys the external representation of the `value` if it didn't make it into the map's internal storage.
+
+### Hash Calculations and Security
+
+The map implementation offers protection against too many full collisions or non-random hashes that can occur with poor hash functions or when the Map is attacked. When the map detects a possible "attack", it will start overwriting existing data instead of trying to resolve collisions.
+
+This can be adjusted using the `FIO_MAP3_ATTACK_LIMIT` macro which usually allows up to 16 full hash collisions before assuming the map is being attacked, thus giving leeway for faster yet less secure hashing functions.
+
+When using unsafe input data as the Map `key`, it is still better to manually manage the hashing function by salting it with a map specific value (such as the map's pointer). Then helpers can be used to make sure the code remains DRY.
+
+For example:
+
+```c
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP3_NAME                 dict
+#define FIO_MAP3_VAL_BSTR /* a special macro helper to define binary Strings as values */
+#define FIO_RISKY_HASH /* to provide us with a hash function. */
+#include "fio-stl.h"
+
+/* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
+
+/** set helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
+  return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
+}
+/** conditional set helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_str_info_s key,
+                                              fio_str_info_s obj) {
+  return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
+}
+/** get helper for consistent and secure hash values */
+FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
+  return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
+}
+```
+
+#### `FIO_MAP3_HASH_FN`
+
+However, when using safe input or a secure enough hashing function, it makes sense to simplify the API the template produces by having the template automatically calculate the hash.
+
+We can add a lower level of security to this approach by salting the hash with a runtime constant that changes every time we restart the program, such as the memory address of one of the function in the program.
+
+This can be done using the `FIO_MAP3_HASH_FN(key)` macro i.e.:
+
+```c
+/* Set the properties for the key-value Hash Map type called `dict_s` */
+#define FIO_MAP3_NAME                 dict
+#define FIO_MAP3_VAL_BSTR /* a special macro helper to define binary Strings as values. */
+#define FIO_RISKY_HASH          /* to provide us with a hash function. */
+/* use any non-inlined function (preferably non-static too). Here `dict_destroy` is used. */
+#define FIO_MAP3_HASH_FN(key) fio_risky_hash(key.buf, key.len, (uint64_t)(dict_destroy))
+#include "fio-stl.h"
+```
+
+#### `FIO_MAP3_RECALC_HASH`
+
+```c
+/* default: */
+#define FIO_MAP3_RECALC_HASH 0
+```
+
+Sometimes hashing can be very fast. A good example is when hashing pointer or integer values. In these cases, it makes sense to recalculate the hash rather than spend memory on caching it.
+
+Since the Map always caches an 8 bits permutation of the hash, it is often possible to avoid spending the additional overhead of 8 bytes per-object by setting `FIO_MAP3_RECALC_HASH` to `1` (true).
+
+This, of course, requires that the `FIO_MAP3_HASH_FN(key)` macro be defined, or the map will not know how to recalculate the hash and instead cache the information.
+
+### Ordering and Performance
+
+The facil.io implementation supports FIFO (First In First Out) and LRU (Least Recently Used) ordering scheme, allowing to `map_evict` any number of possibly "stale" elements, offering an initial caching solution that can be expanded upon.
+
+Obviously these additional ordering details require more memory per object (8 additional bytes) and additional CPU cycles for ordering management. Although the performance price isn't big, by default Maps / Dictionaries are unordered.
+
+#### `FIO_MAP3_ORDERED` 
+
+If defined without a value or with a true value, the Set / Map / Dictionary will be ordered (FIFO unless otherwise specified).
+
+A shortcut to define on ordered map would be to use the `FIO_OMAP3_NAME` and `FIO_UMAP3_NAME` naming macros instead of the `FIO_MAP3_NAME` naming macro.
+
+```c
+#if defined(FIO_UMAP3_NAME)
+#define FIO_MAP3_NAME FIO_UMAP3_NAME
+#undef FIO_MAP3_ORDERED
+#define FIO_MAP3_ORDERED 0
+#elif defined(FIO_OMAP3_NAME)
+#define FIO_MAP3_NAME FIO_OMAP3_NAME
+#undef FIO_MAP3_ORDERED
+#define FIO_MAP3_ORDERED 1
+#endif
+```
+
+#### `FIO_MAP3_LRU`
+
+If defined, the Set / Map / Dictionary will be ordered using a Least Recently Used approach. This means that iteration will start with the most important element (most recently used) while eviction will start with the most stale element (least recently used).
+
+
+### The Map Types
+
+Each template implementation defines the following main types (named here assuming `FIO_MAP3_NAME` is defined as `map`).
+
+#### `map_s`
+
+The Map's container (actual type). This should be considered an opaque type and access / mutation should be performed using the published API.
+
+```c
+typedef struct {
+  uint32_t bits;
+  uint32_t count;
+  FIO_NAME(FIO_MAP3_NAME, node_s) * map;
+#if FIO_MAP3_ORDERED
+  FIO_INDEXED_LIST32_HEAD head;
+#endif
+} FIO_NAME(FIO_MAP3_NAME, s);
+```
+
+#### `map_node_s`
+
+This defines the internal object representation and should be considered to be an opaque type.
+
+When a pointer to a node in the internal map is returned (such as when calling `map_get_ptr` or `map_set_ptr`, accessing the data in the type should be performed using the helper functions: `map_node2key(node_ptr)`, `map_node2hash(node_ptr)` and `map_node2val(node_ptr)`.
+
+```c
+typedef struct {
+#if !FIO_MAP3_RECALC_HASH
+  uint64_t hash;
+#endif
+  FIO_MAP3_KEY_INTERNAL key;
+#ifdef FIO_MAP3_VAL
+  FIO_MAP3_VAL_INTERNAL value;
+#endif
+#if FIO_MAP3_ORDERED
+  FIO_INDEXED_LIST32_NODE node;
+#endif
+} FIO_NAME(FIO_MAP3_NAME, node_s);
+```
+
+#### `map_iterator_s`
+
+```c
+typedef struct {
+  /** the key in the current position */
+  FIO_MAP3_KEY key;
+#ifdef FIO_MAP3_VAL
+  /** the value in the current position */
+  FIO_MAP3_VAL value;
+#endif
+#if !FIO_MAP3_RECALC_HASH
+  /** the hash for the current position */
+  uint64_t hash;
+#endif
+  struct {                   /* internal usage, do not access */
+    uint32_t index;          /* the index in the internal map */
+    uint32_t pos;            /* the position in the ordering scheme */
+    uintptr_t map_validator; /* map mutation guard */
+  } private_;
+} FIO_NAME(FIO_MAP3_NAME, iterator_s);
+```
+
+An iterator type represents a specific object and position in the Hash. The object data is valid as long as the object was not removed from the Map and the position is valid for as long as the Map didn't reallocate the internal storage (avoid adding new objects to the map while iterating).
+
+### Construction / Deconstruction
+
+#### `map_new`
+
+```c
+FIO_MAP3_PTR map_new(void);
+```
+
+Allocates a new object on the heap and initializes it's memory.
+
+#### `map_free`
+
+```c
+void map_free(FIO_MAP3_PTR map);
+```
+
+Frees any internal data AND the object's container!
+
+#### `map_destroy`
+
+```c
+void map_destroy(FIO_MAP3_PTR map);
+```
+
+Destroys the object, re-initializing its container.
+
+### Map State
+
+#### `map_capa`
+
+```c
+uint32_t map_capa(FIO_MAP3_PTR map);
+```
+
+Theoretical map capacity.
+
+#### `map_count`
+
+```c
+uint32_t map_count(FIO_MAP3_PTR map);
+```
+
+The number of objects in the map capacity.
+
+#### `map_reserve`
+
+```c
+void map_reserve(FIO_MAP3_PTR map, size_t capa);
+```
+
+Reserves at minimum the capacity requested.
+
+### Adding / Removing Elements from the Map
+
+The signature of some of these functions may change according to the template macors defined. For example, if the `FIO_MAP3_HASH_FN(k)` was already defined than the Map's API will not require it as an argument. Also, since Sets do not have a `value` that is not the same as the `key` (unlike Dictionaries), than there is no reason to require an additional `value` argument.
+
+#### `map_get`
+
+```c
+MAP3_KEY_OR_VAL map_get(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+                                         uint64_t hash,
+#endif
+                                         FIO_MAP3_KEY key);
+```
+
+Gets a value from the map, if exists. For Sets, the `key` is returned (since it is also the value).
+
+#### `map_set`
+
+```c
+MAP3_KEY_OR_VAL map_set(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+                         uint64_t hash,
+#endif
+#ifdef FIO_MAP3_VAL
+                         FIO_MAP3_KEY key,
+                         FIO_MAP3_VAL obj,
+                         FIO_MAP3_VAL_INTERNAL *old
+#else
+                         FIO_MAP3_KEY key
+#endif
+                        );
+```
+
+Sets a value in the map. Maps / Dictionaries will overwrite existing data if any. Sets never overwrite existing data.
+
+#### `map_set_if_missing`
+
+```c
+MAP3_KEY_OR_VAL map_set_if_missing(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+                                    uint64_t hash,
+#endif
+                                    FIO_MAP3_KEY key
+#ifdef FIO_MAP3_VAL
+                                  , FIO_MAP3_VAL obj
+#endif
+);
+```
+
+Sets a value in the map if not set previously.
+
+#### `map_remove`
+
+```c
+int map_remove(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+              uint64_t hash,
+#endif
+              FIO_MAP3_KEY key,
+#ifdef FIO_MAP3_VAL
+              FIO_MAP3_VAL_INTERNAL *old
+#else
+              FIO_MAP3_KEY_INTERNAL *old
+#endif
+              );
+```
+
+Removes an object in the map, returning a pointer to the map data.
+
+#### `map_evict`
+
+```c
+void map_evict(FIO_MAP3_PTR map, size_t number_of_elements);
+```
+
+Evicts elements in the order defined by the template:
+* If `FIO_MAP3_LRU` was defined - evicts the most Least Recently Used (LRU) elements.
+* If `FIO_MAP3_ORDERED` is true - evicts the first elements inserted (FIFO).
+* Otherwise eviction order is undefined. An almost random eviction will occur with neighboring items possibly being evicted together.
+
+#### `map_clear`
+
+```c
+void map_clear(FIO_MAP3_PTR map);
+```
+
+Removes all objects from the map, without releasing the map's resources.
+
+#### `map_compact`
+
+```c
+void map_compact(FIO_MAP3_PTR map);
+```
+
+Attempts to minimize memory use by shrinking the internally allocated memory used for the map.
+
+#### `map_set_ptr`
+
+```c
+map_node_s * map_set_ptr(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+                         uint64_t hash,
+#endif
+#ifdef FIO_MAP3_VAL
+                         FIO_MAP3_KEY key,
+                         FIO_MAP3_VAL val,
+                         FIO_MAP3_VAL_INTERNAL *old,
+                         int overwrite
+#else
+                         FIO_MAP3_KEY key
+#endif
+                        );
+```
+
+The core set function.
+
+This function returns `NULL` on error (errors are logged).
+
+If the map is a hash map, overwriting the value (while keeping the key) is possible. In this case the `old` pointer is optional, and if set than the old data will be copied to over during an overwrite.
+
+**Note**: the function returns the pointer to the map's internal storage, where objects are stored using the internal types.
+
+#### `map_get_ptr`
+
+```c
+map_node_s * map_get_ptr(FIO_MAP3_PTR map,
+#if !defined(FIO_MAP3_HASH_FN)
+                         uint64_t hash,
+#endif
+                         FIO_MAP3_KEY key);
+```
+
+The core get function. This function returns `NULL` if the item is missing.
+
+**Note**: the function returns the pointer to the map's internal storage, where objects are stored using the internal types.
+
+
+### Map Iteration and Traversal
+
+#### `map_get_next`
+
+```c
+map_iterator_s map_get_next(FIO_MAP3_PTR map, map_iterator_s * current_pos);
+```
+
+Returns the next iterator object after `current_pos` or the first if `NULL`.
+
+Note that adding objects to the map or rehashing between iterations could incur performance penalties when re-setting and re-seeking the previous iterator position. Depending on the ordering scheme this may disrupt the percieved order.
+
+Adding objects to, or rehashing, an unordered map could invalidate the iterator object completely as the ordering may have changed and so the "next" object might be any object in the map.
+
+#### `map_get_prev`
+
+```c
+map_iterator_s map_get_prev(FIO_MAP3_PTR map, map_iterator_s * current_pos);
+```
+
+Returns the iterator object **before** `current_pos` or the last iterator if `NULL`.
+
+See notes in `map_get_next`.
+
+#### `map_iterator_is_valid`
+
+```c
+int map_iterator_is_valid( map_iterator_s * iterator);
+```
+
+Returns 1 if the iterator is out of bounds, otherwise returns 0.
+
+#### `FIO_MAP3_EACH`
+
+```c
+#define FIO_MAP3_EACH(map_name, map_ptr, pos)                            \
+  for (FIO_NAME(map_name, iterator_s)                                          \
+           pos = FIO_NAME(map_name, get_next)(map_ptr, NULL);                  \
+       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
+       pos = FIO_NAME(map_name, get_next)(map_ptr, &pos))
+```
+
+Iterates through the map using an iterator object.
+
+#### `FIO_MAP3_EACH_REVERSED`
+
+```c
+#define FIO_MAP3_EACH_REVERSED(map_name, map_ptr, pos)                   \
+  for (FIO_NAME(map_name, iterator_s)                                          \
+           pos = FIO_NAME(map_name, get_prev)(map_ptr, NULL);                  \
+       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
+       pos = FIO_NAME(map_name, get_prev)(map_ptr, &pos))
+#endif
+```
+
+Iterates through the map using an iterator object.
+
+#### `map_each`
+
+```c
+uint32_t map_each(FIO_MAP3_PTR map,
+                  int (*task)(map_each_s *),
+                  void *udata,
+                  ssize_t start_at);
+```
+
+Iterates through the map using a callback for each element in the map.
+
+The callback task function must accept a `map_each_s` pointer, see detail below.
+
+If the callback must return either `0` or `-1`. If `-1` (non-zero) is returned the loop stops.
+
+Returns the relative "stop" position, i.e., the number of items processed + the starting point.
+
+
+```c
+/** Iteration information structure passed to the callback. */
+typedef struct map_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_MAP3_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct map_each_s * info);
+  /** Opaque user data. */
+  void *udata;
+#ifdef FIO_MAP3_VAL
+  /** The object's value at the current index. */
+  FIO_MAP3_VAL value;
+#endif
+  /** The object's key the current index. */
+  FIO_MAP3_KEY key;
+} map_each_s;
+```
+
+-------------------------------------------------------------------------------
+
 ## Reference Counting and Type Wrapping
 
 ```c

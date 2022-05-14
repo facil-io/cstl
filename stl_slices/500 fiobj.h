@@ -21,6 +21,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "210 map api.h"            /* Development inclusion - ignore line */
 #include "211 ordered map.h"        /* Development inclusion - ignore line */
 #include "219 map finish.h"         /* Development inclusion - ignore line */
+#include "230 unsafe map.h"         /* Development inclusion - ignore line */
 #include "299 reference counter.h"  /* Development inclusion - ignore line */
 #endif                              /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -542,6 +543,7 @@ FIOBJ Arrays
 FIOBJ Hash Maps
 ***************************************************************************** */
 
+#if 0
 #define FIO_OMAP_NAME            FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
 #define FIO_REF_CONSTRUCTOR_ONLY 1
@@ -569,7 +571,36 @@ FIOBJ Hash Maps
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE          FIOBJ
 #include __FILE__
-
+#else
+#define FIO_OMAP3_NAME           FIO_NAME(fiobj, FIOBJ___NAME_HASH)
+#define FIO_REF_NAME             FIO_NAME(fiobj, FIOBJ___NAME_HASH)
+#define FIO_REF_CONSTRUCTOR_ONLY 1
+#define FIO_REF_DESTROY(a)                                                     \
+  do {                                                                         \
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), destroy)                      \
+    ((FIOBJ)FIOBJ_PTR_TAG(&(a), FIOBJ_T_HASH));                                \
+    FIOBJ_MARK_MEMORY_FREE();                                                  \
+  } while (0)
+#define FIO_REF_INIT(a)                                                        \
+  do {                                                                         \
+    a = (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), s))FIO_MAP_INIT;         \
+    FIOBJ_MARK_MEMORY_ALLOC();                                                 \
+  } while (0)
+#if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
+#define FIO_REF_METADATA uint32_t
+#endif
+#define FIO_MAP3_KEY               FIOBJ
+#define FIO_MAP3_KEY_CMP(a, b)     FIO_NAME_BL(fiobj, eq)((a), (b))
+#define FIO_MAP3_KEY_COPY(dest, o) (dest = fiobj_dup(o))
+#define FIO_MAP3_KEY_DESTROY(o)    fiobj_free(o)
+#define FIO_MAP3_VAL               FIOBJ
+#define FIO_MAP3_VAL_DESTROY(o)    fiobj_free(o)
+#define FIO_MAP3_VAL_DISCARD(o)    fiobj_free(o)
+#define FIO_PTR_TAG(p)             FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
+#define FIO_PTR_UNTAG(p)           FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_TYPE           FIOBJ
+#include __FILE__
+#endif
 /** Calculates an object's hash value for a specific hash map object. */
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
 
@@ -1128,11 +1159,15 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
     h += fio_risky_hash(&h,
                         sizeof(h),
                         (uint64_t)(uintptr_t)target_hash + FIOBJ_T_HASH);
-    FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
-      h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
-                                  pos->obj.key);
-      h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
-                                  pos->obj.value);
+    // FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, pos) {
+    //   h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
+    //                               pos->obj.key);
+    //   h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++),
+    //                               pos->obj.value);
+    // }
+    FIO_MAP3_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, i) {
+      h += i.hash;
+      h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++), i.value);
     }
     return h;
   }
@@ -1242,31 +1277,66 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
   if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||
       FIOBJ_TYPE_CLASS(src) != FIOBJ_T_HASH)
     return;
-  FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
-    if (i->obj.key == FIOBJ_INVALID ||
-        FIOBJ_TYPE_CLASS(i->obj.key) == FIOBJ_T_NULL) {
+  // FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
+  //   if (i->obj.key == FIOBJ_INVALID ||
+  //       FIOBJ_TYPE_CLASS(i->obj.key) == FIOBJ_T_NULL) {
+  //     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)
+  //     (dest, i->obj.key, NULL);
+  //     continue;
+  //   }
+  //   register FIOBJ tmp;
+  //   switch (FIOBJ_TYPE_CLASS(i->obj.value)) {
+  //   case FIOBJ_T_ARRAY:
+  //     /* TODO? decide if we should merge elements or overwrite...? */
+  //     tmp =
+  //         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest,
+  //         i->obj.key);
+  //     if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
+  //       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
+  //       (tmp, i->obj.value);
+  //       continue;
+  //     }
+  //     break;
+  //   case FIOBJ_T_HASH:
+  //     tmp =
+  //         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest,
+  //         i->obj.key);
+  //     if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
+  //       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
+  //     (dest, i->obj.value);
+  //     else break;
+  //     continue;
+  //   case FIOBJ_T_NUMBER:    /* fall through */
+  //   case FIOBJ_T_PRIMITIVE: /* fall through */
+  //   case FIOBJ_T_STRING:    /* fall through */
+  //   case FIOBJ_T_FLOAT:     /* fall through */
+  //   case FIOBJ_T_OTHER: break;
+  //   }
+  //   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
+  //   (dest, i->obj.key, fiobj_dup(i->obj.value));
+  // }
+  FIO_MAP3_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
+    if (i.key == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(i.key) == FIOBJ_T_NULL) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)
-      (dest, i->obj.key, NULL);
+      (dest, i.key, NULL);
       continue;
     }
     register FIOBJ tmp;
-    switch (FIOBJ_TYPE_CLASS(i->obj.value)) {
+    switch (FIOBJ_TYPE_CLASS(i.value)) {
     case FIOBJ_T_ARRAY:
       /* TODO? decide if we should merge elements or overwrite...? */
-      tmp =
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i.key);
       if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
-        (tmp, i->obj.value);
+        (tmp, i.value);
         continue;
       }
       break;
     case FIOBJ_T_HASH:
-      tmp =
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i->obj.key);
+      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i.key);
       if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
-      (dest, i->obj.value);
+      (dest, i.value);
       else break;
       continue;
     case FIOBJ_T_NUMBER:    /* fall through */
@@ -1276,7 +1346,7 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
     case FIOBJ_T_OTHER: break;
     }
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
-    (dest, i->obj.key, fiobj_dup(i->obj.value));
+    (dest, i.key, fiobj_dup(i.value));
   }
 }
 
@@ -1510,9 +1580,14 @@ SFUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
   case FIOBJ_T_HASH:
     if (!fiobj____each2_element_count(a))
       return 1;
-    FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
-      FIOBJ val = fiobj_hash_get2(b, pos->obj.key);
-      if (!fiobj___test_eq_nested(val, pos->obj.value, nesting))
+    // FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
+    //   FIOBJ val = fiobj_hash_get2(b, pos->obj.key);
+    //   if (!fiobj___test_eq_nested(val, pos->obj.value, nesting))
+    //     return 0;
+    // }
+    FIO_MAP3_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
+      FIOBJ val = fiobj_hash_get2(b, pos.key);
+      if (!fiobj___test_eq_nested(val, pos.value, nesting))
         return 0;
     }
     return 1;
@@ -1740,18 +1815,34 @@ SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
       (args->json, "{", 1);
       ++args->level;
-      FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
+      // FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
+      //   if (args->beautify) {
+      //     fiobj___json_format_internal_beauty_pad(args->json, args->level);
+      //   }
+      //   fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
+      //   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      //   (args->json, "\"", 1);
+      //   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
+      //   (args->json, info.buf, info.len);
+      //   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      //   (args->json, "\":", 2);
+      //   fiobj___json_format_internal__(args, couplet->obj.value);
+      //   if (--i)
+      //     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
+      //   (args->json, ",", 1);
+      // }
+      FIO_MAP3_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
         if (args->beautify) {
           fiobj___json_format_internal_beauty_pad(args->json, args->level);
         }
-        fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet->obj.key);
+        fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet.key);
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
         (args->json, "\"", 1);
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
         (args->json, info.buf, info.len);
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
         (args->json, "\":", 2);
-        fiobj___json_format_internal__(args, couplet->obj.value);
+        fiobj___json_format_internal__(args, couplet.value);
         if (--i)
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
         (args->json, ",", 1);
@@ -2419,7 +2510,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(key, "array", 5);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(h, key, a);
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(h, key) == a,
-               "FIOBJ Hash retrival failed");
+               "FIOBJ Hash retrieval failed");
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(a, key);
     if (0) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
@@ -2445,7 +2536,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       fiobj_free(json);
     }
     fiobj_free(h);
-
+    FIOBJ_MARK_MEMORY_PRINT();
     FIO_ASSERT(FIOBJ_MARK_MEMORY_ALLOC_COUNTER ==
                    FIOBJ_MARK_MEMORY_FREE_COUNTER,
                "FIOBJ leak detected (freed %zu/%zu)",

@@ -112,28 +112,28 @@ static int ary____test_was_destroyed = 0;
 #define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
 #define FIO_MAP_EVICT_LRU      0
-#define FIO_MAP_TEST
+#define FIO_MAP_TEST           umap___test__size_t
 #include __FILE__
 #define FIO_UMAP_NAME     umap___test__size_lru
 #define FIO_MEMORY_NAME   umap___test__size_lru_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
-#define FIO_MAP_TEST
+#define FIO_MAP_TEST      umap___test__size_lru
 #include __FILE__
 #define FIO_OMAP_NAME          omap___test__size_t
 #define FIO_MEMORY_NAME        omap___test__size_t_mem
 #define FIO_MAP_TYPE           size_t
 #define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
 #define FIO_MAP_EVICT_LRU      0
-#define FIO_MAP_TEST
+#define FIO_MAP_TEST           omap___test__size_t
 #include __FILE__
 #define FIO_OMAP_NAME     omap___test__size_lru
 #define FIO_MEMORY_NAME   omap___test__size_lru_mem
 #define FIO_MAP_TYPE      size_t
 #define FIO_MAP_KEY       size_t
 #define FIO_MAP_EVICT_LRU 1
-#define FIO_MAP_TEST
+#define FIO_MAP_TEST      omap___test__size_lru
 #include __FILE__
 
 #define FIO_STR_NAME fio_big_str

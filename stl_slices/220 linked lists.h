@@ -126,14 +126,14 @@ Linked Lists (embeded) - Implementation
 /** Returns a non-zero value if there are any linked nodes in the list. */
 IFUNC int FIO_NAME(FIO_LIST_NAME, any)(const FIO_LIST_HEAD *head) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, 0);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   return head->next != head;
 }
 
 /** Returns a non-zero value if the list is empty. */
 IFUNC int FIO_NAME_BL(FIO_LIST_NAME, empty)(const FIO_LIST_HEAD *head) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, 0);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   return head->next == head;
 }
 
@@ -157,7 +157,7 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
                                        FIO_LIST_TYPE_PTR restrict node_) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
   FIO_PTR_TAG_VALID_OR_RETURN(node_, (FIO_LIST_TYPE_PTR)NULL);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   FIO_LIST_TYPE *restrict node = (FIO_LIST_TYPE *)(FIO_PTR_UNTAG(node_));
   node->FIO_LIST_NODE_NAME.prev = head->prev;
   node->FIO_LIST_NODE_NAME.next = head;
@@ -169,7 +169,7 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
 /** Pops a node from the end of the list. Returns NULL if list is empty. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, pop)(FIO_LIST_HEAD *head) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   return FIO_NAME(FIO_LIST_NAME, remove)(
       FIO_PTR_FROM_FIELD(FIO_LIST_TYPE, FIO_LIST_NODE_NAME, head->prev));
 }
@@ -180,14 +180,14 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME,
                                           FIO_LIST_TYPE_PTR restrict node) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
   FIO_PTR_TAG_VALID_OR_RETURN(node, (FIO_LIST_TYPE_PTR)NULL);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   return FIO_NAME(FIO_LIST_NAME, push)(head->next, node);
 }
 
 /** Removed a node from the start of the list. Returns NULL if list is empty. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, shift)(FIO_LIST_HEAD *head) {
   FIO_PTR_TAG_VALID_OR_RETURN(head, (FIO_LIST_TYPE_PTR)NULL);
-  head = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(head));
+  head = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, head);
   return FIO_NAME(FIO_LIST_NAME, remove)(
       FIO_PTR_FROM_FIELD(FIO_LIST_TYPE, FIO_LIST_NODE_NAME, head->next));
 }
@@ -195,7 +195,7 @@ IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, shift)(FIO_LIST_HEAD *head) {
 /** Removed a node from the start of the list. Returns NULL if list is empty. */
 IFUNC FIO_LIST_TYPE_PTR FIO_NAME(FIO_LIST_NAME, root)(FIO_LIST_HEAD *ptr) {
   FIO_PTR_TAG_VALID_OR_RETURN(ptr, (FIO_LIST_TYPE_PTR)NULL);
-  ptr = (FIO_LIST_HEAD *)(FIO_PTR_UNTAG(ptr));
+  ptr = FIO_PTR_TAG_GET_UNTAGGED(FIO_LIST_HEAD, ptr);
   return FIO_PTR_FROM_FIELD(FIO_LIST_TYPE, FIO_LIST_NODE_NAME, ptr);
 }
 

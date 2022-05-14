@@ -535,6 +535,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
                "map state error (copy)");
 
     fio___state_map_destroy(&map);
+    for (size_t i = 1; i < (1UL << 14); ++i) {
+      fio___state_map_add(&map, (void (*)(void *))i, (void *)i);
+      FIO_ASSERT(fio___state_map_exists(&map, (void (*)(void *))i, (void *)i),
+                 "mass insert to state map - add failed? (exists is negative)");
+      FIO_ASSERT(map.count == i, "mass insert to state map count error");
+    }
+
+    fio___state_map_destroy(&map);
     fio___state_map_destroy(&map2);
   }
 }
