@@ -886,7 +886,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   io->pr->io_functions.free(io->tls);
   fio___srv_env_safe_destroy(&io->env);
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
-    FIO_LIST_REMOVE(&io->pr->reserved.protocols);
+    FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
 }
 #define FIO_STL_KEEP__     1
 #define FIO_REF_NAME       fio
@@ -908,7 +908,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
                    POLLIN | POLLOUT);
   /* TODO / FIX ? should we call `on_close` for old protocol? */
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
-    FIO_LIST_REMOVE(&old->reserved.protocols);
+    FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
   io->pr->on_attach(io);
 }
 

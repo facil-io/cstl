@@ -208,6 +208,11 @@ FIO_SFUNC void fio___state_map_alloc(fio___state_map_s *map) {
       new_capa * (sizeof(map->ary[0]) + sizeof(map->imap[0])),
       0);
   FIO_ASSERT_ALLOC(map->ary);
+  if (!FIO_MEM_REALLOC_IS_SAFE) {
+    FIO_MEMSET(map->ary,
+               0,
+               (new_capa * (sizeof(map->ary[0]) + sizeof(map->imap[0]))));
+  }
   map->imap = (uintptr_t *)(map->ary + new_capa);
   FIO_MEMSET(map->ary, 0, new_capa * sizeof(*map->ary));
   FIO_MEMSET(map->imap, 0, new_capa * sizeof(*map->imap));

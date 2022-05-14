@@ -835,6 +835,17 @@ typedef struct fio_list_node_s {
                  FIO_PTR_FROM_FIELD(type,                                      \
                                     node_name,                                 \
                                     next____p_ls_##pos->node_name.next)))
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.prev)))
 #endif
 
 /** UNSAFE macro for pushing a node to a list. */
@@ -852,6 +863,13 @@ typedef struct fio_list_node_s {
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
     (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_LIST_REMOVE_RESET(n)                                               \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
   } while (0)
 
 /** UNSAFE macro for popping a node to a list. */
@@ -926,6 +944,16 @@ typedef struct fio_index8_node_s {
         (root)[n__].node_name.next;                                            \
     (root)[(root)[n__].node_name.next].node_name.prev =                        \
         (root)[n__].node_name.prev;                                            \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
     (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
   } while (0)
 
@@ -933,6 +961,13 @@ typedef struct fio_index8_node_s {
 #define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
   for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
        stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
+  for (size_t pos = ((root)[head].node_name.prev), stopper___ils___ = 0;       \
+       !stopper___ils___;                                                      \
+       ((stopper___ils___ = (pos == head)),                                    \
+        (pos = (root)[pos].node_name.prev)))
 #endif
 
 /* *****************************************************************************

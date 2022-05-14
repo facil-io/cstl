@@ -122,11 +122,9 @@ All memory allocations should use:
 
 /* Frees any internal data AND the object's container! */
 SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
-  if (!o)
-    return;
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   /* TODO: add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;

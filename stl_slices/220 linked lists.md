@@ -102,7 +102,6 @@ Note that using this macro with an empty list will produce **undefined behavior*
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
   } while (0)
 ```
 
@@ -110,6 +109,21 @@ UNSAFE macro for removing a node from a list.
 
 Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
 #### `FIO_LIST_EACH`
 
@@ -220,11 +234,26 @@ UNSAFE macro for pushing a node to a list.
         (root)[n__].node_name.next;                                            \
     (root)[(root)[n__].node_name.next].node_name.prev =                        \
         (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
   } while (0)
 ```
 
 UNSAFE macro for removing a node from a list.
+
+#### `FIO_INDEXED_LIST_REMOVE_RESET`
+
+```c
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
 
 #### `FIO_INDEXED_LIST_EACH`
 

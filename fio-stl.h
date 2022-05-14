@@ -835,6 +835,17 @@ typedef struct fio_list_node_s {
                  FIO_PTR_FROM_FIELD(type,                                      \
                                     node_name,                                 \
                                     next____p_ls_##pos->node_name.next)))
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.prev)))
 #endif
 
 /** UNSAFE macro for pushing a node to a list. */
@@ -852,6 +863,13 @@ typedef struct fio_list_node_s {
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
     (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_LIST_REMOVE_RESET(n)                                               \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
   } while (0)
 
 /** UNSAFE macro for popping a node to a list. */
@@ -926,6 +944,16 @@ typedef struct fio_index8_node_s {
         (root)[n__].node_name.next;                                            \
     (root)[(root)[n__].node_name.next].node_name.prev =                        \
         (root)[n__].node_name.prev;                                            \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
     (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
   } while (0)
 
@@ -933,6 +961,13 @@ typedef struct fio_index8_node_s {
 #define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
   for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
        stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
+  for (size_t pos = ((root)[head].node_name.prev), stopper___ils___ = 0;       \
+       !stopper___ils___;                                                      \
+       ((stopper___ils___ = (pos == head)),                                    \
+        (pos = (root)[pos].node_name.prev)))
 #endif
 
 /* *****************************************************************************
@@ -9261,6 +9296,11 @@ FIO_SFUNC void fio___state_map_alloc(fio___state_map_s *map) {
       new_capa * (sizeof(map->ary[0]) + sizeof(map->imap[0])),
       0);
   FIO_ASSERT_ALLOC(map->ary);
+  if (!FIO_MEM_REALLOC_IS_SAFE) {
+    FIO_MEMSET(map->ary,
+               0,
+               (new_capa * (sizeof(map->ary[0]) + sizeof(map->imap[0]))));
+  }
   map->imap = (uintptr_t *)(map->ary + new_capa);
   FIO_MEMSET(map->ary, 0, new_capa * sizeof(*map->ary));
   FIO_MEMSET(map->imap, 0, new_capa * sizeof(*map->imap));
@@ -26127,6 +26167,1545 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
+#define FIO_UNSAFE_MAP_NAME map     /* Development inclusion - ignore line */
+#define FIO_STR                     /* Development inclusion - ignore line */
+#define FIO_UNSAFE_MAP_LRU          /* Development inclusion - ignore line */
+#include "100 mem.h"                /* Development inclusion - ignore line */
+#include "199 string core.h"        /* Development inclusion - ignore line */
+#endif                              /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+          An Unsafe(!) Map Implementation (in development - unstable!)
+          this map implementation is untested and used for development
+
+
+
+***************************************************************************** */
+#if defined(FIO_UNSAFE_UMAP_NAME)
+#define FIO_UNSAFE_MAP_NAME FIO_UNSAFE_UMAP_NAME
+#undef FIO_UNSAFE_MAP_ORDERED
+#define FIO_UNSAFE_MAP_ORDERED 0
+#elif defined(FIO_UNSAFE_OMAP_NAME)
+#define FIO_UNSAFE_MAP_NAME FIO_UNSAFE_OMAP_NAME
+#undef FIO_UNSAFE_MAP_ORDERED
+#define FIO_UNSAFE_MAP_ORDERED 1
+#endif
+
+#if defined(FIO_UNSAFE_MAP_NAME)
+/* *****************************************************************************
+Map Settings - Sets have only keys (value == key) - Hash Maps have values
+***************************************************************************** */
+
+#ifndef FIO_UNSAFE_MAP_KEY
+#define FIO_UNSAFE_MAP_KEY                  fio_str_info_s
+#define FIO_UNSAFE_MAP_KEY_INTERNAL         char *
+#define FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
+#define FIO_UNSAFE_MAP_KEY_COPY(dest, src)                                     \
+  (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
+#define FIO_UNSAFE_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2info((a), (b))
+#define FIO_UNSAFE_MAP_KEY_DESTROY(key) fio_bstr_free((key))
+#define FIO_UNSAFE_MAP_KEY_DISCARD(key)
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_INTERNAL
+#define FIO_UNSAFE_MAP_KEY_INTERNAL FIO_UNSAFE_MAP_KEY
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_FROM_INTERNAL
+#define FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o) o
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_COPY
+#define FIO_UNSAFE_MAP_KEY_COPY(dest, src) (dest) = (src)
+#define FIO_UNSAFE_MAP_KEY_COPY_SIMPLE     1
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_CMP
+#define FIO_UNSAFE_MAP_KEY_CMP(a, b) (a) == (b)
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_DESTROY
+#define FIO_UNSAFE_MAP_KEY_DESTROY(o)
+#define FIO_UNSAFE_MAP_KEY_DESTROY_SIMPLE 1
+#endif
+
+#ifndef FIO_UNSAFE_MAP_KEY_DISCARD
+#define FIO_UNSAFE_MAP_KEY_DISCARD(o)
+#endif
+
+/* FIO_UNSAFE_MAP_HASH_FN(key) - used instead of providing a hash value. */
+#ifndef FIO_UNSAFE_MAP_HASH_FN
+#undef FIO_UNSAFE_MAP_RECALC_HASH
+#endif
+
+/* FIO_UNSAFE_MAP_RECALC_HASH - if true, hash values won't be cached. */
+#ifndef FIO_UNSAFE_MAP_RECALC_HASH
+#define FIO_UNSAFE_MAP_RECALC_HASH 0
+#endif
+
+#ifdef FIO_UNSAFE_MAP_VAL_BSTR
+#define FIO_UNSAFE_MAP_VAL                  fio_str_info_s
+#define FIO_UNSAFE_MAP_VAL_INTERNAL         char *
+#define FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(v) fio_bstr_info((v))
+#define FIO_UNSAFE_MAP_VAL_COPY(dest, src)                                     \
+  (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
+#define FIO_UNSAFE_MAP_VAL_DESTROY(v) fio_bstr_free((v))
+#define FIO_UNSAFE_MAP_VAL_DISCARD(v)
+#define FIO_UNSAFE_MAP_DESTROY_AFTER_COPY 1
+#endif
+
+#ifndef FIO_UNSAFE_MAP_VAL_INTERNAL
+#define FIO_UNSAFE_MAP_VAL_INTERNAL FIO_UNSAFE_MAP_VAL
+#endif
+
+#ifndef FIO_UNSAFE_MAP_VAL_FROM_INTERNAL
+#ifdef FIO_UNSAFE_MAP_VAL
+#define FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(o) o
+#else
+#define FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(o)
+#endif
+#endif
+
+#ifndef FIO_UNSAFE_MAP_VAL_COPY
+#ifdef FIO_UNSAFE_MAP_VAL
+#define FIO_UNSAFE_MAP_VAL_COPY(dest, src) (dest) = (src)
+#define FIO_UNSAFE_MAP_VAL_COPY_SIMPLE     1
+#else
+#define FIO_UNSAFE_MAP_VAL_COPY(dest, src)
+#endif
+#endif
+
+#ifndef FIO_UNSAFE_MAP_VAL_DESTROY
+#define FIO_UNSAFE_MAP_VAL_DESTROY(o)
+#define FIO_UNSAFE_MAP_VAL_DESTROY_SIMPLE 1
+#endif
+
+#ifndef FIO_UNSAFE_MAP_VAL_DISCARD
+#define FIO_UNSAFE_MAP_VAL_DISCARD(o)
+#endif
+
+#ifndef FIO_UNSAFE_MAP_DESTROY_AFTER_COPY
+#define FIO_UNSAFE_MAP_DESTROY_AFTER_COPY 1
+#endif
+
+#ifdef FIO_UNSAFE_MAP_LRU
+#undef FIO_UNSAFE_MAP_ORDERED
+#define FIO_UNSAFE_MAP_ORDERED 1 /* required for least recently used order */
+#endif
+
+/* test if FIO_UNSAFE_MAP_ORDERED was defined as an empty macro */
+#if defined(FIO_UNSAFE_MAP_ORDERED) && ((0 - FIO_UNSAFE_MAP_ORDERED - 1) == 1)
+#undef FIO_UNSAFE_MAP_ORDERED
+#define FIO_UNSAFE_MAP_ORDERED 1 /* assume developer's intention */
+#endif
+
+#ifndef FIO_UNSAFE_MAP_ORDERED
+#define FIO_UNSAFE_MAP_ORDERED 0
+#endif
+
+/* *****************************************************************************
+Pointer Tagging Support
+***************************************************************************** */
+
+#ifdef FIO_PTR_TAG_TYPE
+#define FIO_UNSAFE_MAP_PTR FIO_PTR_TAG_TYPE
+#else
+#define FIO_UNSAFE_MAP_PTR FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *
+#endif
+
+/* *****************************************************************************
+Map Types
+***************************************************************************** */
+
+/** internal object data representation */
+typedef struct {
+#if !FIO_UNSAFE_MAP_RECALC_HASH
+  uint64_t hash;
+#endif
+  FIO_UNSAFE_MAP_KEY_INTERNAL key;
+#ifdef FIO_UNSAFE_MAP_VAL
+  FIO_UNSAFE_MAP_VAL_INTERNAL value;
+#endif
+#if FIO_UNSAFE_MAP_ORDERED
+  FIO_INDEXED_LIST32_NODE node;
+#endif
+} FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s);
+
+/** The map type */
+typedef struct {
+  uint32_t bits;
+  uint32_t count;
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * map;
+#if FIO_UNSAFE_MAP_ORDERED
+  FIO_INDEXED_LIST32_HEAD head;
+#endif
+} FIO_NAME(FIO_UNSAFE_MAP_NAME, s);
+
+/** Map iterator type */
+typedef struct {
+  FIO_UNSAFE_MAP_KEY key;
+#ifdef FIO_UNSAFE_MAP_VAL
+  FIO_UNSAFE_MAP_VAL value;
+#endif
+#if !FIO_UNSAFE_MAP_RECALC_HASH
+  uint64_t hash;
+#endif
+  /* internal usage */
+  struct {
+    uint32_t index;
+    uint32_t pos;
+    uintptr_t map_validator;
+  } private_;
+} FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s);
+
+#ifndef FIO_UNSAFE_MAP_INIT
+/* Initialization macro. */
+#define FIO_UNSAFE_MAP_INIT                                                    \
+  { 0 }
+#endif
+
+/* *****************************************************************************
+Construction / Deconstruction
+***************************************************************************** */
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_UNSAFE_MAP_PTR FIO_NAME(FIO_UNSAFE_MAP_NAME, new)(void);
+
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME, free)(FIO_UNSAFE_MAP_PTR map);
+
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/** Destroys the object, reinitializing its container. */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, destroy)(FIO_UNSAFE_MAP_PTR map);
+
+/* *****************************************************************************
+Map State
+***************************************************************************** */
+
+/** Theoretical map capacity. */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME, capa)(FIO_UNSAFE_MAP_PTR map);
+
+/** The number of objects in the map capacity. */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME, count)(FIO_UNSAFE_MAP_PTR map);
+
+/** Reserves at minimum the capacity requested. */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, reserve)(FIO_UNSAFE_MAP_PTR map,
+                                                  size_t capa);
+
+/** Returns the key value associated with the node's pointer (see set_ptr). */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME, node2key)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * node);
+
+/** Returns the hash value associated with the node's pointer (see set_ptr). */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            node2hash)(FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+                                       node);
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Returns the value associated with the node's pointer (see set_ptr). */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME, node2val)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * node);
+#endif
+
+/* *****************************************************************************
+Adding / Removing Elements from the Map
+***************************************************************************** */
+
+/**
+ * The core set function.
+ *
+ * Note that this function returns NULL on removal / error (errors are logged).
+ *
+ * If the map is a hash map, overwriting the value (while keeping the key) is
+ * possible. In this case the `old` pointer is optional, and if set than the old
+ * data will be copied to over during an overwrite.
+ *
+ * NOTE: the function returns the internal representation of objects.
+ */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+#ifdef FIO_UNSAFE_MAP_VAL
+                                           FIO_UNSAFE_MAP_KEY key,
+                                           FIO_UNSAFE_MAP_VAL val,
+                                           FIO_UNSAFE_MAP_VAL_INTERNAL *old,
+                                           int overwrite
+#else
+                                           FIO_UNSAFE_MAP_KEY key
+#endif
+    );
+
+/**
+ * The core get function. This function returns NULL if item is missing.
+ *
+ * NOTE: the function returns the internal representation of objects.
+ */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, get_ptr)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key);
+
+/** Removes an object in the map, returning a pointer to the map data. */
+SFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                   remove)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                           uint64_t hash,
+#endif
+                           FIO_UNSAFE_MAP_KEY key,
+                           FIO_UNSAFE_MAP_KEY_INTERNAL *old);
+
+/** Removes all objects from the map, without releasing the map's resources. */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, clear)(FIO_UNSAFE_MAP_PTR map);
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Gets a value from the map, if exists. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      get)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key);
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Gets a key from the set, if exists. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      get)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key);
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Sets a value in the map, overwriting existing data if any. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key,
+                                           FIO_UNSAFE_MAP_VAL obj,
+                                           FIO_UNSAFE_MAP_VAL_INTERNAL *old);
+
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Sets a value in the map only if doesn't exist (same as `set_if_missing`. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key);
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Sets a value in the map only if doesn't exist. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME, set_if_missing)(
+    FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+    uint64_t hash,
+#endif
+    FIO_UNSAFE_MAP_KEY key,
+    FIO_UNSAFE_MAP_VAL obj,
+    FIO_UNSAFE_MAP_VAL_INTERNAL *old);
+
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Sets a value in the map only if doesn't exist. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set_if_missing)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                      uint64_t hash,
+#endif
+                                                      FIO_UNSAFE_MAP_KEY key);
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+/* *****************************************************************************
+Map Iteration and Traversal
+***************************************************************************** */
+
+/**
+ * Returns the next iterator object after `current_pos` or the first if `NULL`.
+ *
+ * Note that adding objects to the map or rehashing between iterations could
+ * incur performance penalties when re-setting and re-seeking the previous
+ * iterator position.
+ *
+ * Adding objects to, or rehashing, an unordered maps could invalidate the
+ * iterator object completely as the ordering may have changed and so the "next"
+ * object might be any object in the map.
+ */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME,
+             get_next)(FIO_UNSAFE_MAP_PTR map,
+                       FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) * current_pos);
+
+/**
+ * Returns the next iterator object after `current_pos` or the last if `NULL`.
+ *
+ * See notes in `get_next`.
+ */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME,
+             get_prev)(FIO_UNSAFE_MAP_PTR map,
+                       FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) * current_pos);
+
+/** Returns 1 if the iterator is out of bounds, otherwise returns 0. */
+FIO_IFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_is_valid)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) * iterator);
+
+#ifndef FIO_UNSAFE_MAP_EACH
+/**Iterates through the map using an iterator object. */
+#define FIO_UNSAFE_MAP_EACH(map_name, map_ptr, pos)                            \
+  for (FIO_NAME(map_name, iterator_s)                                          \
+           pos = FIO_NAME(map_name, get_next)(map_ptr, NULL);                  \
+       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
+       pos = FIO_NAME(map_name, get_next)(map_ptr, &pos))
+/**Iterates through the map using an iterator object. */
+#define FIO_UNSAFE_MAP_EACH_REVERSED(map_name, map_ptr, pos)                   \
+  for (FIO_NAME(map_name, iterator_s)                                          \
+           pos = FIO_NAME(map_name, get_prev)(map_ptr, NULL);                  \
+       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
+       pos = FIO_NAME(map_name, get_prev)(map_ptr, &pos))
+#endif
+
+/** Iteration information structure passed to the callback. */
+typedef struct FIO_NAME(FIO_UNSAFE_MAP_NAME, each_s) {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIO_UNSAFE_MAP_PTR const parent;
+  /** The current object's index */
+  uint64_t index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct FIO_NAME(FIO_UNSAFE_MAP_NAME, each_s) * info);
+  /** Opaque user data. */
+  void *udata;
+#ifdef FIO_UNSAFE_MAP_VAL
+  /** The object's value at the current index. */
+  FIO_UNSAFE_MAP_VAL value;
+#else
+  /** The object's key the current index. */
+  FIO_UNSAFE_MAP_KEY key;
+#endif
+} FIO_NAME(FIO_UNSAFE_MAP_NAME, each_s);
+
+/**
+ * Iteration using a callback for each element in the map.
+ *
+ * The callback task function must accept an each_s pointer, see above.
+ *
+ * If the callback returns -1, the loop is broken. Any other value is ignored.
+ *
+ * Returns the relative "stop" position, i.e., the number of items processed +
+ * the starting point.
+ */
+SFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                        each)(FIO_UNSAFE_MAP_PTR map,
+                              int (*task)(FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                                   each_s) *),
+                              void *udata,
+                              ssize_t start_at); /* TODO!!! */
+
+// /** TODO
+//  * If `FIO_MAP_EVICT_LRU` is defined, evicts `number_of_elements` least
+//  * recently accessed.
+//  *
+//  * Otherwise, eviction is somewhat random and undefined.
+//  */
+// SFUNC int FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
+//                                         size_t number_of_elements);
+
+// /** Attempts to minimize memory use. TODO */
+// SFUNC void FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR map);
+
+/* *****************************************************************************
+Optional Sorting Support
+***************************************************************************** */
+
+#if defined(FIO_UNSAFE_MAP_KEY_IS_GREATER_THAN) && !defined(FIO_SORT_TYPE) &&  \
+    FIO_UNSAFE_MAP_ORDERED
+#undef FIO_SORT_NAME
+#endif
+
+/* *****************************************************************************
+Map Implementation - inlined static functions
+***************************************************************************** */
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_UNSAFE_MAP_PTR FIO_NAME(FIO_UNSAFE_MAP_NAME, new)(void) {
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  if (!o)
+    return (FIO_UNSAFE_MAP_PTR)NULL;
+  *o = (FIO_NAME(FIO_UNSAFE_MAP_NAME, s))FIO_UNSAFE_MAP_INIT;
+  return (FIO_UNSAFE_MAP_PTR)FIO_PTR_TAG(o);
+}
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME, free)(FIO_UNSAFE_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, destroy)(map);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_MEM_FREE_(o, sizeof(*o));
+  return 0;
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
+/* Theoretical map capacity. */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME, capa)(FIO_UNSAFE_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  return (uint32_t)((size_t)1ULL << (FIO_PTR_UNTAG(map))->bits);
+}
+
+/* The number of objects in the map capacity. */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            count)(FIO_UNSAFE_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  return (FIO_PTR_UNTAG(map))->count;
+}
+
+/** Returns 1 if the iterator points to a valid object, otherwise returns 0. */
+FIO_IFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_is_valid)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) * iterator) {
+  return (iterator && iterator->private_.map_validator);
+}
+
+/** Returns the key value associated with the node's pointer. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME, node2key)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * node) {
+  FIO_UNSAFE_MAP_KEY r = (FIO_UNSAFE_MAP_KEY){0};
+  if (!node)
+    return r;
+  return FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(node->key);
+}
+
+/** Returns the hash value associated with the node's pointer. */
+FIO_IFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            node2hash)(FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+                                       node) {
+  uint32_t r = (uint32_t){0};
+  if (!node)
+    return r;
+#if FIO_UNSAFE_MAP_RECALC_HASH
+  FIO_UNSAFE_MAP_KEY k = FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(node->key);
+  FIO_UNSAFE_MAP_HASH_FN(FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(k));
+#else
+  return node->hash;
+#endif
+}
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Returns the value associated with the node's pointer. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME, node2val)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * node) {
+  FIO_UNSAFE_MAP_VAL r = (FIO_UNSAFE_MAP_VAL){0};
+  if (!node)
+    return r;
+  return FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(node->value);
+}
+#else
+/* If called for a node without a value, returns the key. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME, node2val)(
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * node) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME, node2key)(node);
+}
+#endif
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Gets a value from the map, if exists. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      get)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2val)(FIO_NAME(FIO_UNSAFE_MAP_NAME, get_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key));
+}
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Gets an object from a set, if exists. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      get)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2key)(FIO_NAME(FIO_UNSAFE_MAP_NAME, get_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key));
+}
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Sets a value in the map, overwriting existing data if any. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key,
+                                           FIO_UNSAFE_MAP_VAL obj,
+                                           FIO_UNSAFE_MAP_VAL_INTERNAL *old) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2val)(FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key,
+                                                                   obj,
+                                                                   old,
+                                                                   1));
+}
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Sets a value in the map, overwriting existing data if any. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2key)(FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key));
+}
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+#ifdef FIO_UNSAFE_MAP_VAL
+/** Sets a value in the map only if doesn't exist. */
+FIO_IFUNC FIO_UNSAFE_MAP_VAL FIO_NAME(FIO_UNSAFE_MAP_NAME, set_if_missing)(
+    FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+    uint64_t hash,
+#endif
+    FIO_UNSAFE_MAP_KEY key,
+    FIO_UNSAFE_MAP_VAL obj,
+    FIO_UNSAFE_MAP_VAL_INTERNAL *old) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2val)(FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key,
+                                                                   obj,
+                                                                   old,
+                                                                   0));
+}
+#else /* !FIO_UNSAFE_MAP_VAL */
+/** Sets a value in the map only if doesn't exist. */
+FIO_IFUNC FIO_UNSAFE_MAP_KEY FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                                      set_if_missing)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                      uint64_t hash,
+#endif
+                                                      FIO_UNSAFE_MAP_KEY key) {
+  return FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                  node2key)(FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                                                   hash,
+#endif
+                                                                   key));
+}
+#endif /* FIO_UNSAFE_MAP_VAL */
+
+/* *****************************************************************************
+Map Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Internal Helpers
+***************************************************************************** */
+
+#ifndef FIO_UNSAFE_MAP_ATTACK_LIMIT
+#define FIO_UNSAFE_MAP_ATTACK_LIMIT 16
+#endif
+#ifndef FIO_UNSAFE_MAP_CUCKOO_STEPS
+/* Prime numbers are better */
+#define FIO_UNSAFE_MAP_CUCKOO_STEPS (0x43F82D0BUL) /* a big high prime */
+#endif
+#ifndef FIO_UNSAFE_MAP_SEEK_LIMIT
+#define FIO_UNSAFE_MAP_SEEK_LIMIT 7U
+#endif
+#ifndef FIO_UNSAFE_MAP_ARRAY_LOG_LIMIT
+#define FIO_UNSAFE_MAP_ARRAY_LOG_LIMIT 3
+#endif
+#ifndef FIO_UNSAFE_MAP_CAPA
+#define FIO_UNSAFE_MAP_CAPA(bits) ((size_t)1ULL << bits)
+#endif
+
+#ifndef FIO_UNSAFE_MAP_IS_SPARSE
+#define FIO_UNSAFE_MAP_IS_SPARSE(map)                                          \
+  (o->bits > FIO_UNSAFE_MAP_ARRAY_LOG_LIMIT && ((capa >> 2) > o->count))
+#endif
+
+/* The number of objects in the map capacity. */
+FIO_IFUNC uint8_t *FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            __imap)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * o) {
+  return (uint8_t *)(o->map + FIO_UNSAFE_MAP_CAPA(o->bits));
+}
+
+FIO_IFUNC uint64_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            __byte_hash)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * o,
+                                         uint64_t hash) {
+  hash = (hash >> o->bits);
+  hash += !(hash);
+  hash -= (hash == 255);
+  return hash & 0xFF;
+}
+
+FIO_IFUNC uint64_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            __is_eq)(FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * o,
+                                     FIO_UNSAFE_MAP_KEY key,
+                                     uint64_t hash) {
+#if FIO_UNSAFE_MAP_RECALC_HASH && defined(FIO_UNSAFE_MAP_HASH_FN)
+  const uint64_t khash =
+      FIO_UNSAFE_MAP_HASH_FN(FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o->key));
+#else
+  const uint64_t khash = o->hash;
+#endif
+  return (khash == hash) && FIO_UNSAFE_MAP_KEY_CMP(o->key, key);
+}
+
+FIO_SFUNC uint32_t FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                            __index)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * o,
+                                     FIO_UNSAFE_MAP_KEY key,
+                                     uint64_t hash) {
+  uint32_t r = (uint32_t)-1;
+  if (!o->map)
+    return r;
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  size_t bhash = FIO_NAME(FIO_UNSAFE_MAP_NAME, __byte_hash)(o, hash);
+  size_t guard = FIO_UNSAFE_MAP_ATTACK_LIMIT;
+  if (o->bits > FIO_UNSAFE_MAP_ARRAY_LOG_LIMIT) { /* treat as map */
+    uint64_t bhash64 = bhash | (bhash << 8);
+    bhash64 |= bhash64 << 16;
+    bhash64 |= bhash64 << 32;
+    bhash64 = ~bhash64;
+    const uintptr_t pos_mask = capa - 1;
+    const uint_fast8_t offsets[8] = {0, 5, 13, 19, 31, 41, 49, 61};
+    for (uintptr_t pos = hash, c = 0; c < FIO_UNSAFE_MAP_SEEK_LIMIT;
+         (pos += FIO_UNSAFE_MAP_CUCKOO_STEPS), ++c) {
+      uint64_t comb = imap[(pos + offsets[0]) & pos_mask];
+      comb |= ((uint64_t)imap[(pos + offsets[1]) & pos_mask]) << (1 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[2]) & pos_mask]) << (2 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[3]) & pos_mask]) << (3 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[4]) & pos_mask]) << (4 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[5]) & pos_mask]) << (5 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[6]) & pos_mask]) << (6 * 8);
+      comb |= ((uint64_t)imap[(pos + offsets[7]) & pos_mask]) << (7 * 8);
+      const uint64_t has_possible_match =
+          (((comb ^ bhash64) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) *
+          0x8080808080808080ULL;
+      if (has_possible_match) {
+        /* there was a 7 bit match in one of the bytes in this 8 byte group */
+        for (int i = 0; i < 8; ++i) {
+          const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+          if (imap[tmp] != bhash)
+            continue;
+          /* test key and hash equality */
+          if (FIO_NAME(FIO_UNSAFE_MAP_NAME, __is_eq)(o->map + tmp, key, hash))
+            return (r = tmp);
+          if (!(--guard)) {
+            FIO_LOG_SECURITY("map under attack?");
+            return (r = tmp);
+          }
+        }
+      }
+      const uint64_t has_possible_full_byte =
+          (((comb)&0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) &
+          0x8080808080808080ULL;
+      const uint64_t has_possible_empty_byte =
+          (((~comb) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) &
+          0x8080808080808080ULL;
+      if (!(has_possible_full_byte | has_possible_empty_byte))
+        continue;
+      /* there was a 7 bit match for a possible free space in this group */
+      for (int i = 0; i < 8; ++i) {
+        const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+        if (!imap[tmp])
+          return (r = tmp); /* empty slot always ends search */
+        if (r > pos_mask && imap[tmp] == 255)
+          r = tmp; /* mark hole to be filled */
+      }
+    }
+    return r;
+  } /* treat as array */
+  for (size_t i = 0; i < capa; ++i) {
+    if (!imap[i])
+      return (r = i);
+    if (imap[i] == bhash) {
+      /* test key and hash equality */
+      if (FIO_NAME(FIO_UNSAFE_MAP_NAME, __is_eq)(o->map + i, key, hash))
+        return (r = i);
+      if (!(--guard)) {
+        FIO_LOG_SECURITY("map under attack?");
+        return (r = i);
+      }
+    }
+    if (imap[i] == 0xFF)
+      r = i; /* a free spot is available*/
+  }
+  return r;
+}
+/* deallocate the map's memory. */
+FIO_SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                        __dealloc_map)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * o) {
+  if (!o->bits || !o->map)
+    return;
+  const size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  FIO_MEM_FREE_(o->map, (capa * sizeof(*o->map)) + capa);
+  (void)capa;
+}
+
+/** duplicates an objects between two maps. */
+FIO_IFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                       __copy_obj)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * dest,
+                                   FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) * o,
+                                   uint32_t internal) {
+  FIO_UNSAFE_MAP_KEY key = FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o->key);
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(dest);
+#if FIO_UNSAFE_MAP_RECALC_HASH
+  const uint64_t ohash = FIO_UNSAFE_MAP_HASH_FN(key);
+#else
+  const uint64_t ohash = o->hash;
+#endif
+  uint32_t i = FIO_NAME(FIO_UNSAFE_MAP_NAME, __index)(dest, key, ohash);
+  if (i == (uint32_t)-1 || (imap[i] + 1) > 1)
+    return -1;
+  if (internal) {
+    dest->map[i] = *o;
+    imap[i] = FIO_NAME(FIO_UNSAFE_MAP_NAME, __byte_hash)(dest, ohash);
+#if FIO_UNSAFE_MAP_ORDERED
+    if (dest->count) { /* update ordering */
+      FIO_INDEXED_LIST_PUSH(dest->map, node, dest->head, i);
+    } else { /* set first order */
+      dest->map[i].node.next = dest->map[i].node.prev = i;
+      dest->head = i;
+    }
+#endif
+    ++dest->count;
+    return 0;
+  }
+  imap[i] = FIO_NAME(FIO_UNSAFE_MAP_NAME, __byte_hash)(dest, ohash);
+  FIO_UNSAFE_MAP_KEY_COPY(dest->map[i].key,
+                          FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o->key));
+  FIO_UNSAFE_MAP_VAL_COPY(dest->map[i].value,
+                          FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(o->value));
+#if !FIO_UNSAFE_MAP_RECALC_HASH
+  dest->map[i].hash = o->hash;
+#endif
+#if FIO_UNSAFE_MAP_ORDERED
+  if (dest->count) { /* update ordering */
+    FIO_INDEXED_LIST_PUSH(dest->map, node, dest->head, i);
+  } else { /* set first order */
+    dest->map[i].node.next = dest->map[i].node.prev = i;
+    dest->head = i;
+  }
+#endif
+  ++dest->count;
+  return 0;
+}
+
+/** duplicates a map to a new copy (usually for rehashing / reserving space). */
+FIO_IFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, s)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME,
+             __duplicate)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) * o,
+                          uint32_t bits,
+                          uint32_t internal) {
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) cpy = {0};
+  if (bits > 31)
+    return cpy;
+  size_t capa = FIO_UNSAFE_MAP_CAPA(bits);
+  cpy.map = (FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *)
+      FIO_MEM_REALLOC_(NULL, 0, ((capa * sizeof(*cpy.map)) + capa), 0);
+  if (!cpy.map)
+    return cpy;
+  if (!FIO_MEM_REALLOC_IS_SAFE_) {
+    FIO_MEMSET(cpy.map, 0, ((capa * sizeof(*cpy.map)) + capa));
+  }
+  cpy.bits = bits;
+  if (!o->count)
+    return cpy;
+#if FIO_UNSAFE_MAP_ORDERED
+  /* copy objects in order */
+  FIO_INDEXED_LIST_EACH(o->map, node, o->head, i) {
+    if (FIO_NAME(FIO_UNSAFE_MAP_NAME, __copy_obj)(&cpy, o->map + i, internal))
+      goto error;
+  }
+#else
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) { /* sparsely populated */
+    for (size_t i = 0; i < capa; i += 8) {
+      uint64_t comb = *((uint64_t *)(imap + i));
+      if (!comb || comb == 0xFFFFFFFFFFFFFFFFULL)
+        continue;
+      for (size_t j = 0; j < 8; ++j) {
+        const size_t tmp = j + i;
+        if (!imap[tmp] || imap[tmp] == 0xFF)
+          continue;
+        if (FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                     __copy_obj)(&cpy, o->map + tmp, internal))
+          goto error;
+      }
+    }
+    return cpy;
+  } /* review as array */
+  for (size_t i = 0; i < capa; ++i) {
+    if (!imap[i] || imap[i] == 0xFF)
+      continue;
+    if (FIO_NAME(FIO_UNSAFE_MAP_NAME, __copy_obj)(&cpy, o->map + i, internal))
+      goto error;
+  }
+#endif
+  return cpy;
+error:
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, __dealloc_map)(&cpy);
+  cpy = (FIO_NAME(FIO_UNSAFE_MAP_NAME, s)){0};
+  return cpy;
+}
+
+/* destroys all objects in the map, without(!) resetting the `imap`. */
+FIO_SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                        __destroy_objects)(FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *
+                                           o) {
+#if FIO_UNSAFE_MAP_VAL_DESTROY_SIMPLE && FIO_UNSAFE_MAP_KEY_COPY_SIMPLE
+  (void)o;
+  return;
+#else
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  const size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) {
+    for (size_t i = 0; i < capa; i += 8) {
+      uint64_t comb = *((uint64_t *)(imap + i));
+      if (!comb || comb == 0xFFFFFFFFFFFFFFFFULL)
+        continue;
+      for (size_t j = i; j < i + 8; ++j) {
+        FIO_UNSAFE_MAP_KEY_DESTROY(o->map[j].key);
+        FIO_UNSAFE_MAP_VAL_DESTROY(o->map[j].value);
+      }
+    }
+  } else { /* review as array */
+    for (size_t i = 0; i < capa; ++i) {
+      if (!imap[i] || imap[i] == 0xFF)
+        continue;
+      FIO_UNSAFE_MAP_KEY_DESTROY(o->map[i].key);
+      FIO_UNSAFE_MAP_VAL_DESTROY(o->map[i].value);
+    }
+  }
+#endif /* FIO_UNSAFE_MAP_VAL_DESTROY_SIMPLE */
+}
+
+/* *****************************************************************************
+API implementation
+***************************************************************************** */
+
+/** Reserves at minimum the capacity requested. */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, reserve)(FIO_UNSAFE_MAP_PTR map,
+                                                  size_t capa) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (FIO_UNSAFE_MAP_CAPA(o->bits) >= capa || (capa >> 31))
+    return;
+  uint_fast8_t bits = o->bits + 1;
+  while (FIO_UNSAFE_MAP_CAPA(bits) < capa)
+    ++bits;
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s)
+  cpy = FIO_NAME(FIO_UNSAFE_MAP_NAME, __duplicate)(o, bits, 1);
+  if (!cpy.map)
+    return;
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, __dealloc_map)(o);
+  *o = cpy;
+}
+
+/* Removes all objects from the map, without releasing the map's resources. */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, clear)(FIO_UNSAFE_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (!o->map || !o->count)
+    return;
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, __destroy_objects)(o);
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  const size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  FIO_MEMSET(imap, 0, capa);
+  o->count = 0;
+#if FIO_UNSAFE_MAP_ORDERED
+  o->head = 0;
+#endif
+}
+
+/* Frees any internal data AND the object's container! */
+SFUNC void FIO_NAME(FIO_UNSAFE_MAP_NAME, destroy)(FIO_UNSAFE_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  if (o->map)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, __destroy_objects)(o);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, __dealloc_map)(o);
+  *o = (FIO_NAME(FIO_UNSAFE_MAP_NAME, s))FIO_UNSAFE_MAP_INIT;
+  return;
+}
+
+/** sets / removes an object in the map, returning a pointer to the map data. */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, set_ptr)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+#ifdef FIO_UNSAFE_MAP_VAL
+                                           FIO_UNSAFE_MAP_KEY key,
+                                           FIO_UNSAFE_MAP_VAL val,
+                                           FIO_UNSAFE_MAP_VAL_INTERNAL *old,
+                                           int overwrite
+#else
+                                           FIO_UNSAFE_MAP_KEY key
+#endif
+    ) {
+#ifdef FIO_UNSAFE_MAP_VAL
+  if (old)
+    *old = (FIO_UNSAFE_MAP_VAL_INTERNAL){0};
+#endif
+
+  FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *r = NULL;
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o = FIO_PTR_UNTAG(map);
+#if defined(FIO_UNSAFE_MAP_HASH_FN)
+  uint64_t hash = FIO_UNSAFE_MAP_HASH_FN(key);
+#endif
+  uint32_t pos;
+  uint8_t *imap = NULL;
+  hash += !hash; /* hash is never zero */
+  /* find the object's (potential) position in the array */
+  for (int i = 0;;) {
+    pos = FIO_NAME(FIO_UNSAFE_MAP_NAME, __index)(o, key, hash);
+    if (pos != (uint32_t)-1)
+      goto found_pos;
+    if (i == 2)
+      goto error;
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, s)
+    tmp = FIO_NAME(FIO_UNSAFE_MAP_NAME, __duplicate)(o, o->bits + (++i), 1);
+    if (!tmp.map) /* no memory? something bad? */
+      goto error;
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, __dealloc_map)(o);
+    *o = tmp;
+  }
+  goto error;
+found_pos:
+  /* imap may have been reallocated, collect info now. */
+  imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+
+  if (!imap[pos] || imap[pos] == 0xFF) {
+    /* insert new object */
+    imap[pos] = FIO_NAME(FIO_UNSAFE_MAP_NAME, __byte_hash)(o, hash);
+    r = o->map + pos;
+#if !FIO_UNSAFE_MAP_RECALC_HASH
+    r->hash = hash;
+#endif
+    FIO_UNSAFE_MAP_KEY_COPY(r->key, key);
+    FIO_UNSAFE_MAP_VAL_COPY(r->value, val);
+#if FIO_UNSAFE_MAP_ORDERED
+    if (o->count) { /* update ordering */
+      FIO_INDEXED_LIST_PUSH(o->map, node, o->head, pos);
+#ifdef FIO_UNSAFE_MAP_LRU
+      o->head = pos;
+#endif       /* FIO_UNSAFE_MAP_LRU */
+    } else { /* set first order */
+      o->map[pos].node.next = o->map[pos].node.prev = pos;
+      o->head = pos;
+    }
+#endif /* FIO_UNSAFE_MAP_ORDERED */
+    ++o->count;
+    return r;
+  }
+
+#ifdef FIO_UNSAFE_MAP_VAL
+  if (overwrite) {
+    /* overwrite existing object (only relevant to hash maps */
+    r = o->map + pos;
+#ifdef FIO_UNSAFE_MAP_LRU
+    /* update ordering */
+    if (o->head != pos) {
+      FIO_INDEXED_LIST_REMOVE(o->map, node, pos);
+      FIO_INDEXED_LIST_PUSH(o->map, node, o->head, pos);
+      o->head = pos;
+    }
+#endif
+
+    if (!old) {
+      FIO_UNSAFE_MAP_KEY_DISCARD(key);
+      FIO_UNSAFE_MAP_VAL_DESTROY(o->map[pos].value);
+      FIO_UNSAFE_MAP_VAL_COPY(o->map[pos].value, val);
+      return r;
+    }
+    *old = o->map[pos].value;
+    o->map[pos].value = (FIO_UNSAFE_MAP_VAL_INTERNAL){0};
+    FIO_UNSAFE_MAP_VAL_COPY(o->map[pos].value, val);
+    return r;
+  }
+#endif
+  /* discard attempt */
+  FIO_UNSAFE_MAP_KEY_DISCARD(key);
+  FIO_UNSAFE_MAP_KEY_DISCARD(val);
+  return r;
+
+error:
+  FIO_LOG_ERROR("unknown error occurred trying to add an entry to the map");
+  FIO_ASSERT_DEBUG(0, "these errors shouldn't happen");
+  return r;
+}
+
+/**
+ * The core get function. This function returns NULL if item is missing.
+ *
+ * NOTE: the function returns the internal representation of objects.
+ */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *
+    FIO_NAME(FIO_UNSAFE_MAP_NAME, get_ptr)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                                           uint64_t hash,
+#endif
+                                           FIO_UNSAFE_MAP_KEY key) {
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, node_s) *r = NULL;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, r);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o = FIO_PTR_UNTAG(map);
+#if defined(FIO_UNSAFE_MAP_HASH_FN)
+  uint64_t hash = FIO_UNSAFE_MAP_HASH_FN(key);
+#endif
+  uint32_t pos = FIO_NAME(FIO_UNSAFE_MAP_NAME, __index)(o, key, hash);
+  if (pos == (uint32_t)-1)
+    return r;
+#ifdef FIO_UNSAFE_MAP_LRU
+  if (o->head != pos) {
+    FIO_INDEXED_LIST_REMOVE(o->map, node, pos);
+    FIO_INDEXED_LIST_PUSH(o->map, node, o->head, pos);
+    o->head = pos;
+  }
+#endif
+  r = o->map + pos;
+  return r;
+}
+
+/** Removes an object in the map, returning a pointer to the map data. */
+SFUNC int FIO_NAME(FIO_UNSAFE_MAP_NAME,
+                   remove)(FIO_UNSAFE_MAP_PTR map,
+#if !defined(FIO_UNSAFE_MAP_HASH_FN)
+                           uint64_t hash,
+#endif
+                           FIO_UNSAFE_MAP_KEY key,
+                           FIO_UNSAFE_MAP_KEY_INTERNAL *old) {
+#ifdef FIO_UNSAFE_MAP_VAL
+  if (old)
+    *old = (FIO_UNSAFE_MAP_VAL_INTERNAL){0};
+#else
+  if (old)
+    *old = (FIO_UNSAFE_MAP_KEY_INTERNAL){0};
+#endif
+
+  FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o = FIO_PTR_UNTAG(map);
+#if defined(FIO_UNSAFE_MAP_HASH_FN)
+  uint64_t hash = FIO_UNSAFE_MAP_HASH_FN(key);
+#endif
+  uint32_t pos = FIO_NAME(FIO_UNSAFE_MAP_NAME, __index)(o, key, hash);
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  hash += !hash; /* hash is never zero */
+
+  if (pos == (uint32_t)-1 || !imap[pos] || imap[pos] == 0xFF)
+    return -1;
+
+  imap[pos] = 0xFF; /* mark hole and update count */
+  --o->count;
+
+#if FIO_UNSAFE_MAP_ORDERED
+  /* update ordering */
+  if (o->head == pos)
+    o->head = o->map[pos].node.next;
+  if (o->head == pos)
+    o->head = 0;
+  else {
+    FIO_INDEXED_LIST_REMOVE(o->map, node, pos);
+  }
+#endif
+
+/* destroy data, copy to `old` pointer if necessary. */
+#ifdef FIO_UNSAFE_MAP_VAL
+  FIO_UNSAFE_MAP_KEY_DESTROY(o->map[pos].key);
+  o->map[pos].key = (FIO_UNSAFE_MAP_VAL_INTERNAL){0};
+  if (!old) {
+    FIO_UNSAFE_MAP_VAL_DESTROY(o->map[pos].value);
+  } else {
+    *old = o->map[pos].value;
+  }
+  o->map[pos].value = (FIO_UNSAFE_MAP_VAL_INTERNAL){0};
+#else
+  if (!old) {
+    FIO_UNSAFE_MAP_KEY_DESTROY(o->map[pos].key);
+  } else {
+    *old = o->map[pos].key;
+  }
+  o->map[pos].key = (FIO_UNSAFE_MAP_KEY_INTERNAL){0};
+#endif
+#if !FIO_UNSAFE_MAP_RECALC_HASH && defined(DEBUG)
+  o->map[pos].hash = 0; /* not necessary, but ... good for debugging? */
+#endif
+  return 0;
+}
+/* *****************************************************************************
+Map Iteration
+***************************************************************************** */
+
+/** Returns the next iterator position after `current_pos`, first if `NULL`. */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME,
+             get_next)(FIO_UNSAFE_MAP_PTR map,
+                       FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) *
+                           current_pos) {
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) r = {0};
+  FIO_PTR_TAG_VALID_OR_RETURN(map, r);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o = FIO_PTR_UNTAG(map);
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+  size_t pos_counter = 0;
+  if (!current_pos) {
+    goto find_pos;
+  }
+  if (current_pos->private_.pos + 1 == o->count)
+    return r;
+  r.private_.pos = current_pos->private_.pos + 1;
+  if (current_pos->private_.map_validator != (uintptr_t)o) {
+    goto refind_pos;
+  }
+  r.private_.index = current_pos->private_.index;
+
+#if !FIO_UNSAFE_MAP_RECALC_HASH
+#define FIO_UNSAFE_MAP___EACH_COPY_HASH() r.hash = o->map[r.private_.index].hash
+#else
+#define FIO_UNSAFE_MAP___EACH_COPY_HASH()
+#endif
+
+#ifdef FIO_UNSAFE_MAP_VAL
+#define FIO_UNSAFE_MAP___EACH_COPY_DATA()                                      \
+  FIO_UNSAFE_MAP___EACH_COPY_HASH();                                           \
+  r.private_.map_validator = (uintptr_t)o;                                     \
+  r.key = FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o->map[r.private_.index].key);      \
+  r.value = FIO_UNSAFE_MAP_VAL_FROM_INTERNAL(o->map[r.private_.index].value)
+#else
+#define FIO_UNSAFE_MAP___EACH_COPY_DATA()                                      \
+  FIO_UNSAFE_MAP___EACH_COPY_HASH();                                           \
+  r.private_.map_validator = (uintptr_t)o;                                     \
+  r.key = FIO_UNSAFE_MAP_KEY_FROM_INTERNAL(o->map[r.private_.index].key)
+#endif
+
+/* start seeking at the position inherited from current_pos */
+#if FIO_UNSAFE_MAP_ORDERED
+  (void)imap; /* unused in ordered maps */
+  (void)capa; /* unused in ordered maps */
+  r.private_.index = o->map[r.private_.index].node.next;
+  if (r.private_.index == o->head)
+    goto not_found;
+  FIO_UNSAFE_MAP___EACH_COPY_DATA();
+  return r;
+#else
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) { /* sparsely populated */
+    while ((++r.private_.index) & 7) {
+      if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+        continue;
+      FIO_UNSAFE_MAP___EACH_COPY_DATA();
+      return r;
+    }
+    while (r.private_.index < capa) {
+      uint64_t simd = *(uint64_t *)(imap + r.private_.index);
+      if (!simd || simd == 0xFFFFFFFFFFFFFFFFULL) {
+        r.private_.index += 8;
+        continue;
+      }
+      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+        if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+          continue;
+        FIO_UNSAFE_MAP___EACH_COPY_DATA();
+        return r;
+      }
+    }
+    goto not_found;
+  }
+  /* review as array */
+  while ((++r.private_.index) < capa) {
+    if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+      continue;
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+  goto not_found;
+#endif /* FIO_UNSAFE_MAP_ORDERED */
+
+refind_pos:
+  if (current_pos->private_.index)
+    goto not_found;
+find_pos:
+/* first seek... re-start seeking */
+#if FIO_UNSAFE_MAP_ORDERED
+  /* TODO */
+  FIO_INDEXED_LIST_EACH(o->map, node, o->head, i) {
+    if (pos_counter != r.private_.pos) {
+      ++pos_counter;
+      continue;
+    }
+    r.private_.index = i;
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+  goto not_found;
+#else
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) { /* sparsely populated */
+    while (r.private_.index < capa) {
+      uint64_t simd = *(uint64_t *)(imap + r.private_.index);
+      if (!simd || simd == 0xFFFFFFFFFFFFFFFFULL) {
+        r.private_.index += 8;
+        continue;
+      }
+      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+        if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+          continue;
+        if (pos_counter != r.private_.pos) {
+          ++pos_counter;
+          continue;
+        }
+        FIO_UNSAFE_MAP___EACH_COPY_DATA();
+        return r;
+      }
+    }
+    goto not_found;
+  }
+  /* review as array */
+  while (r.private_.index < capa) {
+    if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF) {
+      ++r.private_.index;
+      continue;
+    }
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+#endif /* FIO_UNSAFE_MAP_ORDERED */
+
+not_found:
+  return (r = (FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)){0});
+  FIO_ASSERT_DEBUG(0, "should this happen? ever?");
+}
+
+/** Returns the next iterator position after `current_pos`, first if `NULL`. */
+SFUNC FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)
+    FIO_NAME(FIO_UNSAFE_MAP_NAME,
+             get_prev)(FIO_UNSAFE_MAP_PTR map,
+                       FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) *
+                           current_pos) {
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s) r = {0};
+  FIO_PTR_TAG_VALID_OR_RETURN(map, r);
+  FIO_NAME(FIO_UNSAFE_MAP_NAME, s) *o = FIO_PTR_UNTAG(map);
+#if !FIO_UNSAFE_MAP_ORDERED
+  uint8_t *imap = FIO_NAME(FIO_UNSAFE_MAP_NAME, __imap)(o);
+  size_t capa = FIO_UNSAFE_MAP_CAPA(o->bits);
+#endif
+  size_t pos_counter = o->count;
+  if (!current_pos) {
+    r.private_.map_validator = (uintptr_t)o;
+    r.private_.pos = o->count;
+    goto find_pos;
+  }
+  if (!current_pos->private_.pos)
+    return r;
+  r.private_.pos = current_pos->private_.pos - 1;
+  r.private_.map_validator = (uintptr_t)o;
+  if (current_pos->private_.map_validator != (uintptr_t)o) {
+    goto refind_pos;
+  }
+  r.private_.index = current_pos->private_.index;
+
+/* start seeking at the position inherited from current_pos */
+#if FIO_UNSAFE_MAP_ORDERED
+  if (r.private_.index == o->head)
+    goto not_found;
+  r.private_.index = o->map[r.private_.index].node.prev;
+  FIO_UNSAFE_MAP___EACH_COPY_DATA();
+  return r;
+#else
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) { /* sparsely populated */
+    while ((--r.private_.index) & 7) {
+      if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+        continue;
+      FIO_UNSAFE_MAP___EACH_COPY_DATA();
+      return r;
+    }
+    while (r.private_.index) {
+      uint64_t simd = *(uint64_t *)(imap + (r.private_.index - 8));
+      if (!simd || simd == 0xFFFFFFFFFFFFFFFFULL) {
+        r.private_.index -= 8;
+        continue;
+      }
+      for (int i = 0; i < 8; ++i) {
+        --r.private_.index;
+        if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+          continue;
+        FIO_UNSAFE_MAP___EACH_COPY_DATA();
+        return r;
+      }
+    }
+    goto not_found;
+  }
+  /* review as array */
+  while (r.private_.index--) {
+    if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+      continue;
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+  goto not_found;
+#endif /* FIO_UNSAFE_MAP_ORDERED */
+
+refind_pos:
+  if (current_pos->private_.index)
+    goto not_found;
+find_pos:
+/* first seek... re-start seeking */
+#if FIO_UNSAFE_MAP_ORDERED
+  /* TODO */
+  FIO_INDEXED_LIST_EACH_REVERSED(o->map, node, o->head, i) {
+    if (pos_counter != r.private_.pos) {
+      --pos_counter;
+      continue;
+    }
+    r.private_.index = i;
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+  goto not_found;
+#else
+  r.private_.index = capa;
+  if (FIO_UNSAFE_MAP_IS_SPARSE(o)) { /* sparsely populated */
+    while (r.private_.index) {
+      uint64_t simd = *(uint64_t *)(imap + r.private_.index);
+      if (!simd || simd == 0xFFFFFFFFFFFFFFFFULL) {
+        r.private_.index -= 8;
+        continue;
+      }
+      for (int i = 0; i < 8; (++i), (--r.private_.index)) {
+        if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+          continue;
+        if (pos_counter != r.private_.pos) {
+          ++pos_counter;
+          continue;
+        }
+        FIO_UNSAFE_MAP___EACH_COPY_DATA();
+        return r;
+      }
+    }
+    goto not_found;
+  }
+  /* review as array */
+  while ((r.private_.index--)) {
+    if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
+      continue;
+    FIO_UNSAFE_MAP___EACH_COPY_DATA();
+    return r;
+  }
+#endif /* FIO_UNSAFE_MAP_ORDERED */
+
+not_found:
+  return (r = (FIO_NAME(FIO_UNSAFE_MAP_NAME, iterator_s)){0});
+  FIO_ASSERT_DEBUG(0, "should this happen? ever?");
+}
+#undef FIO_UNSAFE_MAP___EACH_COPY_HASH
+#undef FIO_UNSAFE_MAP___EACH_COPY_DATA
+/* *****************************************************************************
+Map Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_UNSAFE_MAP_NAME)(void) {
+  /*
+   * TODO: test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Map Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+
+#undef FIO_UNSAFE_MAP_ARRAY_LOG_LIMIT
+#undef FIO_UNSAFE_MAP_ATTACK_LIMIT
+#undef FIO_UNSAFE_MAP_CAPA
+#undef FIO_UNSAFE_MAP_CUCKOO_STEPS
+#undef FIO_UNSAFE_MAP_DESTROY_AFTER_COPY
+#undef FIO_UNSAFE_MAP_HASH_FN
+#undef FIO_UNSAFE_MAP_INIT
+#undef FIO_UNSAFE_MAP_IS_SPARSE
+#undef FIO_UNSAFE_MAP_KEY
+#undef FIO_UNSAFE_MAP_KEY_CMP
+#undef FIO_UNSAFE_MAP_KEY_COPY
+#undef FIO_UNSAFE_MAP_KEY_COPY_SIMPLE
+#undef FIO_UNSAFE_MAP_KEY_DESTROY
+#undef FIO_UNSAFE_MAP_KEY_DESTROY_SIMPLE
+#undef FIO_UNSAFE_MAP_KEY_DISCARD
+#undef FIO_UNSAFE_MAP_KEY_FROM_INTERNAL
+#undef FIO_UNSAFE_MAP_KEY_INTERNAL
+#undef FIO_UNSAFE_MAP_KEY_IS_GREATER_THAN
+#undef FIO_UNSAFE_MAP_LRU
+#undef FIO_UNSAFE_MAP_NAME
+#undef FIO_UNSAFE_MAP_ORDERED
+#undef FIO_UNSAFE_MAP_PTR
+#undef FIO_UNSAFE_MAP_RECALC_HASH
+#undef FIO_UNSAFE_MAP_SEEK_LIMIT
+#undef FIO_UNSAFE_MAP_VAL
+#undef FIO_UNSAFE_MAP_VAL_BSTR
+#undef FIO_UNSAFE_MAP_VAL_COPY
+#undef FIO_UNSAFE_MAP_VAL_COPY_SIMPLE
+#undef FIO_UNSAFE_MAP_VAL_DESTROY
+#undef FIO_UNSAFE_MAP_VAL_DESTROY_SIMPLE
+#undef FIO_UNSAFE_MAP_VAL_DISCARD
+#undef FIO_UNSAFE_MAP_VAL_FROM_INTERNAL
+#undef FIO_UNSAFE_MAP_VAL_INTERNAL
+
+#endif /* FIO_UNSAFE_MAP_NAME */
+/* *****************************************************************************
+Copyright: Boaz Segev, 2019-2021
+License: ISC / MIT (choose your license)
+
+Feel free to copy, use and enjoy according to the license provided.
+***************************************************************************** */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
 #define FIO_REF_NAME long_ref       /* Development inclusion - ignore line */
 #define FIO_REF_TYPE long           /* Development inclusion - ignore line */
 #include "000 header.h"             /* Development inclusion - ignore line */
@@ -29375,7 +30954,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   io->pr->io_functions.free(io->tls);
   fio___srv_env_safe_destroy(&io->env);
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
-    FIO_LIST_REMOVE(&io->pr->reserved.protocols);
+    FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
 }
 #define FIO_STL_KEEP__     1
 #define FIO_REF_NAME       fio
@@ -29397,7 +30976,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
                    POLLIN | POLLOUT);
   /* TODO / FIX ? should we call `on_close` for old protocol? */
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
-    FIO_LIST_REMOVE(&old->reserved.protocols);
+    FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
   io->pr->on_attach(io);
 }
 
@@ -32905,11 +34484,9 @@ All memory allocations should use:
 
 /* Frees any internal data AND the object's container! */
 SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_PTR_UNTAG(obj);
-  if (!o)
-    return;
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(obj);
   /* TODO: add destruction logic */
 
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
