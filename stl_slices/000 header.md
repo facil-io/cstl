@@ -8,7 +8,7 @@ At the core of the [facil.io library](https://facil.io) is its powerful Simple T
 
 The Simple Template Library is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
 
-The Simple Template Library also offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, and a custom memory allocator.
+The Simple Template Library also offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, a custom memory allocator and (of course) the facil.io protocol based server/client.
 
 In other words, all the common building blocks one could need in a C project are placed in this single header file.
 

@@ -8,7 +8,7 @@ At the core of the [facil.io library](https://facil.io) is its powerful Simple T
 
 The Simple Template Library is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
 
-The Simple Template Library also offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, and a custom memory allocator.
+The Simple Template Library also offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, a custom memory allocator and (of course) the facil.io protocol based server/client.
 
 In other words, all the common building blocks one could need in a C project are placed in this single header file.
 
@@ -4573,7 +4573,7 @@ Sets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
 
 Returns `bstr`.
 
-**Note**: the function is mean to be used with the value returned from the Core String API, so no error checking is performed! `bstr` **MUST NOT** be `NULL` and `len` **MUST** be less then the `bstr` capacity.
+**Note**: the function is meant to be used with the value returned from the Core String API, so no error checking is performed! `bstr` **MUST NOT** be `NULL` and `len` **MUST** be less then the `bstr` capacity.
 
 Use:
 
@@ -4585,13 +4585,13 @@ char * bstr = fio_bstr_len_set(str.buf, str.len);
 
 -------------------------------------------------------------------------------
 
-## Binary Safe Map Key Strings
+## Small Key Strings for Maps - Binary Safe
 
 It is very common for Hash Maps to contain String keys. When the String keys are usually short, than it could be more efficient to embed the Key String data into the map itself (improve cache locality) rather than allocate memory for each separate Key String.
 
 The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 14` on 64 bit machines or `len <= 10` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
 
-See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEY_STR` MACRO.
+See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEYSTR` MACRO.
 
 #### `FIO_MAP_KEY_STR`
 
