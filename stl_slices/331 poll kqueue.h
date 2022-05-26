@@ -4,10 +4,10 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE
-#include "330 poll api.h" /* Development inclusion - ignore line */
-#endif                    /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE /* Development inclusion */
+#include "330 poll api.h"                      /* Development inclusion */
+#endif                                         /* Development inclusion */
 #if FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
 /* *****************************************************************************
 

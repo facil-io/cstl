@@ -24,6 +24,8 @@ Note: This is a **TOY** example, with only minimal security features.
 // #define FIO_EXTERN_COMPLETE
 // #define FIO_MEMORY_DISABLE 1
 // #define FIO_USE_THREAD_MUTEX 1
+#define FIO_LEAK_COUNTER 1
+#define FIO_MALLOC
 #define FIO_EVERYTHING
 #include "fio-stl.h"
 
@@ -40,7 +42,7 @@ Note: This is a **TOY** example, with only minimal security features.
 /* *****************************************************************************
 Callbacks and object used by main()
 ***************************************************************************** */
-#include "http/http-handle.h"
+#include "../extras/http/http-handle.h"
 
 /** Called when a new connection is created. */
 FIO_SFUNC void on_open(int fd, void *udata);
@@ -55,22 +57,59 @@ static fio_protocol_s HTTP_PROTOCOL_1 = {
 };
 
 /* *****************************************************************************
+IO "Objects"and helpers
+***************************************************************************** */
+#include "../extras/http/http-handle.c"
+#include "../extras/parsers/http1_parser.h"
+
+typedef struct {
+  http1_parser_s parser;
+  fio_s *io;
+  http_s *h;
+  int buf_pos;
+  int buf_con;
+  char buf[]; /* header and data buffer */
+} client_s;
+
+#define FIO_REF_NAME client
+#define FIO_REF_CONSTRUCTOR_ONLY
+#define FIO_REF_DESTROY(c)                                                     \
+  do {                                                                         \
+    http_free((c).h);                                                          \
+    (c).h = NULL;                                                              \
+  } while (0)
+#define FIO_REF_FLEX_TYPE char
+#include "fio-stl.h"
+
+/** Called when a new connection is created. */
+FIO_SFUNC void on_open(int fd, void *udata) {
+  client_s *c = client_new(HTTP_CLIENT_BUFFER);
+  FIO_ASSERT_ALLOC(c);
+  c->io = fio_attach_fd(fd, &HTTP_PROTOCOL_1, c, udata);
+}
+
+/** Called when the monitored IO is closed or has a fatal error. */
+FIO_SFUNC void on_close(void *c_) {
+  client_s *c = (client_s *)c_;
+  c->io = NULL;
+  http_free(c->h);
+  c->h = NULL;
+  client_free(c);
+}
+/* *****************************************************************************
 The HTTP Response Function
 ***************************************************************************** */
-#define FIO_STR_NAME str
-#define FIO_MEM_NAME str_allocator
-#include "fio-stl.h"
 static int http_should_log_responses = 0;
 FIO_SFUNC int http_write_headers_to_string(http_s *h,
                                            fio_str_info_s name,
                                            fio_str_info_s value,
                                            void *out_) {
-  str_s *out = (str_s *)out_;
+  char **out = (char **)out_;
   (void)h;
-  str_write(out, name.buf, name.len);
-  str_write(out, ": ", 2);
-  str_write(out, value.buf, value.len);
-  str_write(out, "\r\n", 2);
+  *out = fio_bstr_write(*out, name.buf, name.len);
+  *out = fio_bstr_write(*out, ": ", 2);
+  *out = fio_bstr_write(*out, value.buf, value.len);
+  *out = fio_bstr_write(*out, "\r\n", 2);
   return 0;
 }
 
@@ -79,22 +118,28 @@ FIO_SFUNC void http_respond(http_s *h) {
                            FIO_STR_INFO1("server"),
                            FIO_STR_INFO1("fio-stl"));
 #if HTTP_RESPONSE_ECHO
-  str_s out = FIO_STR_INIT;
-  str_write(&out, http_method_get(h).buf, http_method_get(h).len);
-  str_write(&out, " ", 1);
-  str_write(&out, http_path_get(h).buf, http_path_get(h).len);
+  char *out =
+      fio_bstr_write(NULL, http_method_get(h).buf, http_method_get(h).len);
+  out = fio_bstr_write(out, " ", 1);
+  out = fio_bstr_write(out, http_path_get(h).buf, http_path_get(h).len);
   if (http_query_get(h).len) {
-    str_write(&out, "?", 1);
-    str_write(&out, http_query_get(h).buf, http_query_get(h).len);
+    out = fio_bstr_write(out, "?", 1);
+    out = fio_bstr_write(out, http_query_get(h).buf, http_query_get(h).len);
   }
-  str_write(&out, " ", 1);
-  str_write(&out, http_version_get(h).buf, http_version_get(h).len);
-  str_write(&out, "\r\n", 2);
+  out = fio_bstr_write(out, " ", 1);
+  out = fio_bstr_write(out, http_version_get(h).buf, http_version_get(h).len);
+  out = fio_bstr_write(out, "\r\n", 2);
   http_request_header_each(h, http_write_headers_to_string, &out);
   if (http_body_length(h)) {
     fio_str_info_s body = http_body_read(h, -1);
-    str_write(&out, "\r\n", 2);
-    str_write(&out, body.buf, body.len);
+    out = fio_bstr_write(out, "\r\n", 2);
+    out = fio_bstr_write(out, body.buf, body.len);
+  }
+  if (1) {
+    fio_env_set(((client_s *)http_controller_data(h))->io,
+                .name = FIO_STR_INFO2("my key", 6),
+                .udata = fio_bstr_write(NULL, "my env data", 11),
+                .on_close = (void (*)(void *))fio_bstr_free);
   }
   if (1) {
     uint64_t hash =
@@ -104,12 +149,11 @@ FIO_SFUNC void http_respond(http_s *h) {
     fio_string_write_hex(&etag, NULL, hash);
     http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
   }
-  size_t len = str_len((&out));
   // FIO_LOG_DEBUG2("echoing back:\n%s", str2ptr(&out));
   http_write(h,
-             .data = str_detach(&out),
-             .len = len,
-             .dealloc = str_dealloc,
+             .data = out,
+             .len = fio_bstr_len(out),
+             .dealloc = (void (*)(void *))fio_bstr_free,
              .copy = 0,
              .finish = 1);
 #else
@@ -167,39 +211,6 @@ int main(int argc, char const *argv[]) {
 }
 
 /* *****************************************************************************
-IO "Objects"and helpers
-***************************************************************************** */
-#include "../parsers/http1_parser.h"
-
-#include "http/http-handle.c"
-
-typedef struct {
-  http1_parser_s parser;
-  fio_s *io;
-  http_s *h;
-  int buf_pos;
-  int buf_con;
-  char buf[]; /* header and data buffer */
-} client_s;
-
-#define FIO_REF_NAME client
-#define FIO_REF_CONSTRUCTOR_ONLY
-#define FIO_REF_DESTROY(c)                                                     \
-  do {                                                                         \
-    http_free((c).h);                                                          \
-    (c).h = NULL;                                                              \
-  } while (0)
-#define FIO_REF_FLEX_TYPE char
-#include "fio-stl.h"
-
-/** Called when a new connection is created. */
-FIO_SFUNC void on_open(int fd, void *udata) {
-  client_s *c = client_new(HTTP_CLIENT_BUFFER);
-  FIO_ASSERT_ALLOC(c);
-  c->io = fio_attach_fd(fd, &HTTP_PROTOCOL_1, c, udata);
-}
-
-/* *****************************************************************************
 IO callback(s)
 ***************************************************************************** */
 
@@ -231,13 +242,6 @@ FIO_SFUNC void on_data(fio_s *io) {
   if (r > 0)
     c->buf_pos += r;
   on_data__internal(fio_udata_get(io));
-}
-
-/** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(void *c_) {
-  client_s *c = (client_s *)c_;
-  c->io = NULL;
-  client_free(c);
 }
 
 /* *****************************************************************************

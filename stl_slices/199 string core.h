@@ -4,13 +4,13 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_STR                     /*Development inclusion - ignore line */
-#include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "006 atol.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#include "108 files.h"              /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_STR                       /*Development inclusion - ignore line */
+#include "004 bitwise.h"              /* Development inclusion - ignore line */
+#include "006 atol.h"                 /* Development inclusion - ignore line */
+#include "100 mem.h"                  /* Development inclusion - ignore line */
+#include "108 files.h"                /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -162,6 +162,10 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
   ((fio_string_write_s){.klass = 1, .info.str = {.len = (len_), .buf = (str_)}})
 
+/** A macro to add a String with known length to `fio_string_write2`. */
+#define FIO_STRING_WRITE_STR_INFO(str_)                                        \
+  ((fio_string_write_s){.klass = 1, .info.str = str_})
+
 /** A macro to add a signed number to `fio_string_write2`. */
 #define FIO_STRING_WRITE_NUM(num)                                              \
   ((fio_string_write_s){.klass = 2, .info.i = (int64_t)(num)})
@@ -304,10 +308,14 @@ FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
 #define FIO_STRING_ALLOC_COPY fio_string_default_copy_and_reallocate
+/** default allocator for the fio_keystr_s string data.. */
+#define FIO_STRING_ALLOC_KEY fio_string_default_key_alloc
 /** Frees memory that was allocated with the default callbacks. */
 #define FIO_STRING_FREE fio_string_default_free
 /** Frees memory that was allocated with the default callbacks. */
 #define FIO_STRING_FREE2 fio_string_default_free2
+/** Frees memory that was allocated for a key string. */
+#define FIO_STRING_FREE_KEY fio_string_default_free_key
 /** Does nothing. */
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
 /** Does nothing. */
@@ -327,6 +335,10 @@ SFUNC void fio_string_default_free_noop(void *);
 /** does nothing. */
 SFUNC void fio_string_default_free_noop2(fio_str_info_s str);
 
+/** default allocator for the fio_keystr_s string data.. */
+SFUNC void *fio_string_default_key_alloc(size_t len);
+/** frees a fio_keystr_s memory that was allocated with the default callback. */
+SFUNC void fio_string_default_free_key(void *, size_t);
 /* *****************************************************************************
 UTF-8 Support
 ***************************************************************************** */
@@ -493,8 +505,10 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
 /** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
 FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
                                   void (*free_func)(void *, size_t));
-/** Compares two Key Strings - used internally by the hash map. */
+/** Compares two Key Strings. */
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
+/** Compares a Key String to any String - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq2info(fio_keystr_s a_, fio_str_info_s b);
 
 /* *****************************************************************************
 
@@ -565,8 +579,6 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
     return;
   fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
-  if (!meta->capa)
-    return;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
@@ -765,7 +777,7 @@ FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
 FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
   fio_keystr_s r = {0};
-  if (len < sizeof(r)) { /* always embed small strings in container! */
+  if (len + 1 < sizeof(r)) { /* always embed small strings in container! */
     r.info = (uint8_t)len;
     FIO_MEMCPY(r.embd, buf, len);
     return r;
@@ -780,12 +792,12 @@ FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
 FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
-  if (str.len < sizeof(r)) {
+  if (str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
   }
-  if (!str.capa) {
+  if (str.capa == (size_t)-1) {
   no_mem2:
     r.info = 0xFF;
     r.len = str.len;
@@ -810,6 +822,13 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
   if (key->info)
     return;
   free_func((void *)key->buf, key->len);
+}
+
+/** Compares two Key Strings. */
+FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
+  fio_str_info_s a = fio_keystr_info(&a_);
+  fio_str_info_s b = fio_keystr_info(&b_);
+  return FIO_STR_INFO_IS_EQ(a, b);
 }
 
 /** Compares a Key String to any String - used internally by the hash map. */
@@ -849,9 +868,19 @@ SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
   return 0;
 }
 
+SFUNC void *fio_string_default_key_alloc(size_t len) {
+  return FIO_MEM_REALLOC_(NULL, 0, len, 0);
+}
+
 SFUNC void fio_string_default_free(void *ptr) { FIO_MEM_FREE_(ptr, 0); }
 SFUNC void fio_string_default_free2(fio_str_info_s str) {
   FIO_MEM_FREE_(str.buf, str.capa);
+}
+
+/** frees a fio_keystr_s memory that was allocated with the default callback. */
+SFUNC void fio_string_default_free_key(void *buf, size_t capa) {
+  FIO_MEM_FREE_(buf, capa);
+  (void)capa; /* if unused */
 }
 
 SFUNC void fio_string_default_free_noop(void *str) { (void)str; }

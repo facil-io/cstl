@@ -108,11 +108,11 @@ In addition, the `FIO_STR_SMALL` optimization is likely to perform better than t
 #include "fio-stl.h"
 
 #define FIO_OMAP_NAME map
-#define FIO_MAP_TYPE uintptr_t
 #define FIO_MAP_KEY key_s /* the small string type */
 #define FIO_MAP_KEY_COPY(dest, src) key_init_copy2(&(dest), &(src))
 #define FIO_MAP_KEY_DESTROY(k) key_destroy(&k)
 #define FIO_MAP_KEY_CMP(a, b) key_is_eq(&(a), &(b))
+#define FIO_MAP_VALUE uintptr_t
 #include "fio-stl.h"
 
 /* helper for setting values in the map using risky hash with a safe seed */

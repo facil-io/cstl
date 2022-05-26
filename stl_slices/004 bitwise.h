@@ -4,12 +4,12 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#define FIO_BITWISE                 /* Development inclusion - ignore line */
-#define FIO_BITMAP                  /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "003 atomics.h"              /* Development inclusion - ignore line */
+#define FIO_BITWISE                   /* Development inclusion - ignore line */
+#define FIO_BITMAP                    /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -774,44 +774,17 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
                               uint64_t mask,
                               uint64_t nonce) {
   register uint8_t *buf = (uint8_t *)buf_;
-  register uint64_t m = mask;
+  uint64_t tmp;
   for (size_t i = 7; i < len; i += 8) {
-    uint64_t tmp;
-    tmp = FIO_NAME2(fio_buf, u64_local)(buf);
-    tmp ^= m;
-    FIO_NAME2(fio_u, buf64_local)(buf, tmp);
-    m += nonce;
+    FIO_MEMCPY8(&tmp, buf);
+    tmp ^= mask;
+    FIO_MEMCPY8(buf, &tmp);
     buf += 8;
+    mask += nonce;
   }
-  mask = m;
-#if __BIG_ENDIAN__
-  switch ((len & 7)) {
-  case 0: return mask;
-  case 7: buf[6] ^= ((uint8_t *)(&mask))[6]; /* fall through */
-  case 6: buf[5] ^= ((uint8_t *)(&mask))[5]; /* fall through */
-  case 5: buf[4] ^= ((uint8_t *)(&mask))[4]; /* fall through */
-  case 4: buf[3] ^= ((uint8_t *)(&mask))[3]; /* fall through */
-  case 3: buf[2] ^= ((uint8_t *)(&mask))[2]; /* fall through */
-  case 2: buf[1] ^= ((uint8_t *)(&mask))[1]; /* fall through */
-  case 1:
-    buf[0] ^= ((uint8_t *)(&mask))[0];
-    /* fall through */
-  }
-#else
-  switch ((len & 7)) {
-  case 0: return mask;
-  case 7: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 6: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 5: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 4: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 3: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 2: (buf++)[0] ^= m & 0xFF; m >>= 8; /* fall through */
-  case 1:
-    (buf++)[0] ^= m & 0xFF;
-    m >>= 8;
-    /* fall through */
-  }
-#endif
+  FIO_MEMCPY7x(&tmp, buf, len);
+  tmp ^= mask;
+  FIO_MEMCPY7x(buf, &tmp, len);
   return mask;
 }
 
@@ -827,29 +800,23 @@ Byte masking (XOR) - no nonce
  */
 FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   register uint8_t *buf = (uint8_t *)buf_;
-  register uint64_t m = mask;
-  for (size_t i = 7; i < len; i += 8) {
-    uint64_t tmp;
-    tmp = FIO_NAME2(fio_buf, u64_local)(buf);
-    tmp ^= m;
-    FIO_NAME2(fio_u, buf64_local)(buf, tmp);
-    buf += 8;
+  uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
+  uint64_t tmp[4] FIO_ALIGN(16);
+  for (size_t i = 31; i < len; i += 32) {
+    FIO_MEMCPY32(tmp, buf);
+    tmp[0] ^= m[0];
+    tmp[1] ^= m[1];
+    tmp[2] ^= m[2];
+    tmp[3] ^= m[3];
+    FIO_MEMCPY32(buf, tmp);
+    buf += 32;
   }
-  uint64_t t = mask;
-  register union { /* type punning */
-    uint8_t *restrict p8;
-    uint64_t *restrict p64;
-  } pn;
-  pn.p64 = &t;
-  switch ((len & 7)) {
-  case 7: buf[6] ^= pn.p8[6]; /* fall through */
-  case 6: buf[5] ^= pn.p8[5]; /* fall through */
-  case 5: buf[4] ^= pn.p8[4]; /* fall through */
-  case 4: buf[3] ^= pn.p8[3]; /* fall through */
-  case 3: buf[2] ^= pn.p8[2]; /* fall through */
-  case 2: buf[1] ^= pn.p8[1]; /* fall through */
-  case 1: buf[0] ^= pn.p8[0]; /* fall through */
-  }
+  FIO_MEMCPY31x(tmp, buf, len);
+  tmp[0] ^= m[0];
+  tmp[1] ^= m[1];
+  tmp[2] ^= m[2];
+  tmp[3] ^= m[3];
+  FIO_MEMCPY31x(buf, tmp, len);
 }
 
 /* *****************************************************************************

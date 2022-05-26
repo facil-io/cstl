@@ -4,13 +4,13 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_REF_NAME long_ref       /* Development inclusion - ignore line */
-#define FIO_REF_TYPE long           /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_REF_NAME long_ref         /* Development inclusion - ignore line */
+#define FIO_REF_TYPE long             /* Development inclusion - ignore line */
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "003 atomics.h"              /* Development inclusion - ignore line */
+#include "100 mem.h"                  /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -22,7 +22,6 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 ***************************************************************************** */
-
 #ifdef FIO_REF_NAME
 
 #ifndef fio_atomic_add

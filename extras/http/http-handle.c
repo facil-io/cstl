@@ -1,9 +1,23 @@
 /*
 Copyright: Boaz Segev, 2016-2022
 License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
 */
+/* *****************************************************************************
+Includes
+***************************************************************************** */
+#if DEBUG
+/* count leaks. */
+#define FIO_LEAK_COUNTER 1
+#endif /* DEBUG */
+#define FIO_MEMORY_NAME http_mem
+#include "fio-stl.h"
+#undef FIO_MEM_REALLOC
+#undef FIO_MEM_FREE
+#undef FIO_MEM_REALLOC_IS_SAFE
+#define FIO_MEM_REALLOC(p, ol, nl, cl) http_mem_realloc2((p), (nl), (cl))
+#define FIO_MEM_FREE(ptr, size)        http_mem_free((ptr))
+#define FIO_MEM_REALLOC_IS_SAFE        http_mem_realloc_is_safe()
+
 #include "http-handle.h"
 
 #define FIO_TIME
@@ -14,93 +28,51 @@ Feel free to copy, use and enjoy according to the license provided.
 /* *****************************************************************************
 Helper types
 ***************************************************************************** */
-#if DEBUG
-/* use a dedicated allocator when debugging, in order to detect leaks. */
-#define FIO_MEMORY_NAME http_mem
-#include "fio-stl.h"
-#undef FIO_MEM_REALLOC
-#undef FIO_MEM_FREE
-#undef FIO_MEM_REALLOC_IS_SAFE
-#define FIO_MEM_REALLOC(p, ol, nl, cl) http_mem_realloc2((p), (nl), (cl))
-#define FIO_MEM_FREE(ptr, size)        http_mem_free((ptr))
-#define FIO_MEM_REALLOC_IS_SAFE        http_mem_realloc_is_safe()
-#endif /* DEBUG */
 
-#define FIO_STR_SMALL http_sstr
-#include "fio-stl.h"
-#define FIO_STR_NAME http_lstr
-#include "fio-stl.h"
-#define FIO_ARRAY_NAME                http_sary
-#define FIO_ARRAY_TYPE                http_sstr_s
-#define FIO_ARRAY_TYPE_CMP(a, b)      http_sstr_is_eq(&(a), &(b))
-#define FIO_ARRAY_TYPE_COPY(a, b)     http_sstr_init_copy2(&(a), &(b))
-#define FIO_ARRAY_TYPE_DESTROY(s)     http_sstr_destroy(&(s))
-#define FIO_ARRAY_TYPE_INVALID_SIMPLE 1
-#include "fio-stl.h"
-
-#define FIO_MAP_NAME             http_smap
-#define FIO_MAP_VALUE            http_lstr_s
-#define FIO_MAP_VALUE_COPY(a, b) http_lstr_init_copy2(&(a), &(b))
-#define FIO_MAP_VALUE_DESTROY(o) http_lstr_destroy(&(o))
-#define FIO_MAP_KEY              http_sstr_s
-#define FIO_MAP_KEY_CMP(a, b)    http_sstr_is_eq(&(a), &(b))
-#define FIO_MAP_KEY_COPY(a, b)   http_sstr_init_copy2(&(a), &(b))
-#define FIO_MAP_KEY_DESTROY(s)   http_sstr_destroy(&(s))
-#include "fio-stl.h"
-
-FIO_IFUNC http_lstr_s *http_smap_set2(http_smap_s *map,
-                                      fio_str_info_s key,
-                                      fio_str_info_s val,
-                                      uint8_t overwrite) {
-  http_sstr_s k;
-  http_lstr_s v;
-  http_sstr_init_const(&k, key.buf, key.len);
-  http_lstr_init_const(&v, val.buf, val.len);
-  const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
-  return &http_smap_set_ptr(map, h, k, v, NULL, overwrite)->value;
+FIO_SFUNC void http_keystr_free(void *ptr, size_t ignr) {
+  http_mem_free(ptr);
+  (void)ignr;
 }
+FIO_SFUNC void *http_keystr_alloc(size_t capa) { return http_mem_malloc(capa); }
 
-FIO_IFUNC fio_str_info_s http_smap_get2(http_smap_s *map, fio_str_info_s key) {
-  http_sstr_s k;
-  http_sstr_init_const(&k, key.buf, key.len);
-  const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
-  return http_lstr_info(&http_smap_get_ptr(map, h, k)->value);
-}
+#define FIO_ARRAY_NAME              http_sary
+#define FIO_ARRAY_TYPE              fio_keystr_s
+#define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj), http_keystr_free)
+#define FIO_ARRAY_TYPE_CMP(a, b)    fio_keystr_is_eq((a), (b))
+#include "fio-stl.h"
 
-#define FIO_MAP_NAME http_hmap
-#define FIO_MAP_TYPE http_sary_s
-#define FIO_MAP_TYPE_COPY(a, b)                                                \
+#define FIO_MAP_NAME http_cmap
+#define FIO_MAP_VALUE_BSTR
+#define FIO_MAP_HASH_FN(k)                                                     \
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
+#include "fio-stl.h"
+
+#define FIO_MAP_NAME  http_hmap
+#define FIO_MAP_VALUE http_sary_s
+#define FIO_MAP_VALUE_COPY(a, b)                                               \
   do {                                                                         \
     (a) = (http_sary_s)FIO_ARRAY_INIT;                                         \
     (void)(b);                                                                 \
   } while (0) /*no-op*/
-#define FIO_MAP_TYPE_DESTROY(o) http_sary_destroy(&(o))
-#define FIO_MAP_KEY             http_sstr_s
-#define FIO_MAP_KEY_CMP(a, b)   http_sstr_is_eq(&(a), &(b))
-#define FIO_MAP_KEY_COPY(a, b)  http_sstr_init_copy2(&(a), &(b))
-#define FIO_MAP_KEY_DESTROY(o)  http_sstr_destroy(&(o))
+#define FIO_MAP_VALUE_DESTROY(o) http_sary_destroy(&(o))
+#define FIO_MAP_HASH_FN(k)                                                     \
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
 #include "fio-stl.h"
 
 /** set `add` to positive to add multiple values or negative to overwrite. */
-FIO_IFUNC http_sstr_s *http_hmap_set2(http_hmap_s *map,
-                                      fio_str_info_s key,
-                                      fio_str_info_s val,
-                                      int add) {
-  http_sstr_s *r = NULL;
-  http_hmap_node_s *o = NULL;
-  http_sstr_s k = {0};
-  http_sstr_s v = {0};
+FIO_IFUNC fio_str_info_s http_hmap_set2(http_hmap_s *map,
+                                        fio_str_info_s key,
+                                        fio_str_info_s val,
+                                        int add) {
+  fio_str_info_s r = {0};
   if (!key.buf || !key.len || !map)
     return r;
-  http_sstr_init_const(&k, key.buf, key.len);
-  http_sstr_init_const(&v, val.buf, val.len);
-  const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
   if (!val.buf || !val.len)
     goto remove_key;
-  o = http_hmap_get_ptr(map, h, k);
+  http_sary_s *o = http_hmap_node2val_ptr(http_hmap_get_ptr(map, key));
   if (!o) {
     http_sary_s va = {0};
-    o = http_hmap_set_ptr(map, h, k, va, NULL, 1);
+    o = http_hmap_node2val_ptr(http_hmap_set_ptr(map, key, va, NULL, 1));
     add = 1;
   }
   if (FIO_UNLIKELY(!o)) {
@@ -115,14 +87,14 @@ FIO_IFUNC http_sstr_s *http_hmap_set2(http_hmap_s *map,
     if (add < 0) {
       http_sary_destroy(o);
     }
-    r = http_sary_push(o, v);
-    return r;
+    return (r = fio_keystr_info(
+                http_sary_push(o, fio_keystr_copy(val, http_keystr_alloc))));
   }
-  r = http_sary2ptr(o) + (http_sary_count(o) - 1);
+  r = fio_keystr_info(http_sary2ptr(o) + (http_sary_count(o) - 1));
   return r;
 
 remove_key:
-  http_hmap_remove(map, h, k, NULL);
+  http_hmap_remove(map, key, NULL);
   return r;
 }
 
@@ -130,10 +102,7 @@ FIO_IFUNC fio_str_info_s http_hmap_get2(http_hmap_s *map,
                                         fio_str_info_s key,
                                         int index) {
   fio_str_info_s r = {0};
-  http_sstr_s k;
-  http_sstr_init_const(&k, key.buf, key.len);
-  const uint64_t h = fio_risky_hash(key.buf, key.len, (uint64_t)(uintptr_t)map);
-  http_sary_s *a = http_hmap_get_ptr(map, h, k);
+  http_sary_s *a = http_hmap_node2val_ptr(http_hmap_get_ptr(map, key));
   if (!a)
     return r;
   const uint32_t count = http_sary_count(a);
@@ -146,7 +115,7 @@ FIO_IFUNC fio_str_info_s http_hmap_get2(http_hmap_s *map,
   }
   if ((uint32_t)index >= count)
     index = count - 1;
-  r = http_sstr_info(http_sary2ptr(a) + index);
+  r = fio_keystr_info(http_sary2ptr(a) + index);
   return r;
 }
 
@@ -161,12 +130,12 @@ struct http_s {
   size_t status;
   size_t state;
   size_t sent;
-  http_sstr_s method;
-  http_sstr_s path;
-  http_sstr_s query;
-  http_sstr_s version;
+  fio_keystr_s method;
+  fio_keystr_s path;
+  fio_keystr_s query;
+  fio_keystr_s version;
   http_hmap_s headers[2]; /* request, response */
-  http_smap_s cookies[2]; /* read, write */
+  http_cmap_s cookies[2]; /* read, write */
   struct {
     char *buf;
     size_t len;
@@ -199,14 +168,14 @@ void http_destroy(http_s *h) {
     return;
   if (h->controller)
     h->controller->on_unlinked(h, h->cdata);
-  http_sstr_destroy(&h->method);
-  http_sstr_destroy(&h->path);
-  http_sstr_destroy(&h->query);
-  http_sstr_destroy(&h->version);
+  fio_keystr_destroy(&h->method, http_keystr_free);
+  fio_keystr_destroy(&h->path, http_keystr_free);
+  fio_keystr_destroy(&h->query, http_keystr_free);
+  fio_keystr_destroy(&h->version, http_keystr_free);
   http_hmap_destroy(h->headers);
   http_hmap_destroy(h->headers + 1);
-  http_smap_destroy(h->cookies);
-  http_smap_destroy(h->cookies + 1);
+  http_cmap_destroy(h->cookies);
+  http_cmap_destroy(h->cookies + 1);
   FIO_MEM_FREE(h->body.buf, h->body.capa);
   if (h->body.fd != -1)
     close(h->body.fd);
@@ -320,13 +289,14 @@ Short String Property Set / Get
 #define HTTP___MAKE_GET_SET(property)                                          \
   fio_str_info_s http_##property##_get(http_s *h) {                            \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
-    return http_sstr_info(&h->property);                                       \
+    return fio_keystr_info(&h->property);                                      \
   }                                                                            \
                                                                                \
   fio_str_info_s http_##property##_set(http_s *h, fio_str_info_s value) {      \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
-    http_sstr_destroy(&h->property);                                           \
-    return http_sstr_init_copy(&h->property, value.buf, value.len);            \
+    fio_keystr_destroy(&h->property, http_keystr_free);                        \
+    h->property = fio_keystr_copy(value, http_keystr_alloc);                   \
+    return fio_keystr_info(&h->property);                                      \
   }
 
 HTTP___MAKE_GET_SET(method)
@@ -347,9 +317,9 @@ typedef struct {
 
 FIO_SFUNC int http___h_each_task_wrapper(http_hmap_each_s *e) {
   http___h_each_data_s *data = e->udata;
-  fio_str_info_s k = http_sstr_info(&e->key);
   FIO_ARRAY_EACH(http_sary, &e->value, pos) {
-    if (data->callback(data->h, k, http_sstr_info(pos), data->udata) == -1)
+    if (data->callback(data->h, e->key, fio_keystr_info(pos), data->udata) ==
+        -1)
       return -1;
   }
   return 0;
@@ -380,14 +350,14 @@ fio_str_info_s http_request_header_set(http_s *h,
                                        fio_str_info_s name,
                                        fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, -1));
+  return http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, -1);
 }
 /** Sets the header information associated with the HTTP handle. */
 fio_str_info_s http_request_header_set_if_missing(http_s *h,
                                                   fio_str_info_s name,
                                                   fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, 0));
+  return http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, 0);
 }
 
 /** Adds to the header information associated with the HTTP handle. */
@@ -395,7 +365,7 @@ fio_str_info_s http_request_header_add(http_s *h,
                                        fio_str_info_s name,
                                        fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, 1));
+  return http_hmap_set2(HTTP_HDR_REQUEST(h), name, value, 1);
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -441,7 +411,7 @@ fio_str_info_s http_response_header_set(http_s *h,
                                         fio_str_info_s name,
                                         fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, -1));
+  return http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, -1);
 }
 
 /**
@@ -454,7 +424,7 @@ fio_str_info_s http_response_header_set_if_missing(http_s *h,
                                                    fio_str_info_s name,
                                                    fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 0));
+  return http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 0);
 }
 
 /**
@@ -467,7 +437,7 @@ fio_str_info_s http_response_header_add(http_s *h,
                                         fio_str_info_s name,
                                         fio_str_info_s value) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return http_sstr_info(http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 1));
+  return http_hmap_set2(HTTP_HDR_RESPONSE(h), name, value, 1);
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -650,9 +620,8 @@ move2file:
 Cookies
 ***************************************************************************** */
 
-FIO_IFUNC void http_cookie___parse_cookie(http_s *h, http_sstr_s *c) {
+FIO_IFUNC void http_cookie___parse_cookie(http_s *h, fio_str_info_s s) {
   /* loop and read Cookie: name=value; name2=value2; name3=value3 */
-  fio_str_info_s s = http_sstr_info(c);
   while (s.len) {
     fio_str_info_s k = {0}, v = {0};
     /* remove white-space */
@@ -679,22 +648,21 @@ FIO_IFUNC void http_cookie___parse_cookie(http_s *h, http_sstr_s *c) {
     /* skip the ';' if exists (if len is not zero, !!s.len == 1). */
     s.buf += !!s.len;
     s.len -= !!s.len;
-    http_smap_set2(h->cookies, k, v, 0);
+    http_cmap_set_if_missing(h->cookies, k, v);
   }
 }
 
 FIO_SFUNC void http_cookie___collect(http_s *h) {
   http_sary_s *header = NULL;
   {
-    http_sstr_s k = {0};
-    http_sstr_init_const(&k, "cookie", 6);
-    uint64_t hash =
-        fio_risky_hash("cookie", 6, (uint64_t)(uintptr_t)(h->headers));
-    header = http_hmap_get_ptr(h->headers, hash, k);
+    header = http_hmap_node2val_ptr(
+        http_hmap_get_ptr(h->headers, FIO_STR_INFO2("cookie", 6)));
   }
   if (!header)
     return;
-  FIO_ARRAY_EACH(http_sary, header, pos) { http_cookie___parse_cookie(h, pos); }
+  FIO_ARRAY_EACH(http_sary, header, pos) {
+    http_cookie___parse_cookie(h, fio_keystr_info(pos));
+  }
   return;
 }
 
@@ -745,25 +713,27 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   /* write name and value while auto-correcting encoding issues */
-  size_t len = 0;
-  http_lstr_s c = FIO_STR_INIT;
-  fio_str_info_s t =
-      http_lstr_reserve(&c,
-                        cookie.name_len + cookie.value_len + cookie.domain_len +
-                            cookie.path_len + 128);
+  if ((cookie.name_len + cookie.value_len + cookie.domain_len +
+       cookie.path_len + 128) > 5119) {
+    FIO_LOG_ERROR("cookie data too long!");
+  }
+  char tmp_buf[5120];
+  fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
 #define copy_cookie_ch(ch_var)                                                 \
-  if (invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var[tmp]]) {           \
-    need2warn |= 1;                                                            \
-    t.buf[len++] = '%';                                                        \
-    t.buf[len++] = fio_i2c(((uint8_t)cookie.ch_var[tmp] >> 4) & 0x0F);         \
-    t.buf[len++] = fio_i2c((uint8_t)cookie.ch_var[tmp] & 0x0F);                \
+  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var[tmp]]) {          \
+    t.buf[t.len++] = cookie.ch_var[tmp];                                       \
   } else {                                                                     \
-    t.buf[len++] = cookie.ch_var[tmp];                                         \
+    need2warn |= 1;                                                            \
+    t.buf[t.len++] = '%';                                                      \
+    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var[tmp] >> 4) & 0x0F);       \
+    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var[tmp] & 0x0F);              \
   }                                                                            \
   tmp += 1;                                                                    \
-  if (t.capa <= len + 3) {                                                     \
-    t = http_lstr_reserve(&c, t.capa + 32);                                    \
+  if (t.capa <= t.len + 3) {                                                   \
+    ((t.buf == tmp_buf)                                                        \
+         ? FIO_STRING_ALLOC_COPY                                               \
+         : FIO_STRING_REALLOC)(&t, fio_string_capa4len(t.len + 3));            \
   }
 
   if (cookie.name) {
@@ -785,7 +755,7 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
                       cookie.name);
     }
   }
-  t.buf[len++] = '=';
+  t.buf[t.len++] = '=';
   if (cookie.value) {
     size_t tmp = 0;
     if (cookie.value_len) {
@@ -809,66 +779,89 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
 #undef copy_cookie_ch
 
   /* server cookie data */
-  t.buf[len++] = ';';
-  t.buf[len++] = ' ';
-  t = http_lstr_resize(&c, len);
+  t.buf[t.len++] = ';';
+  t.buf[t.len++] = ' ';
 
   if (cookie.max_age) {
-    http_lstr_reserve(&c, t.len + 40);
-    http_lstr_write(&c, "Max-Age=", 8);
-    http_lstr_write_i(&c, cookie.max_age);
-    t = http_lstr_write(&c, "; ", 2);
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"Max-Age=", 8),
+        FIO_STRING_WRITE_NUM(cookie.max_age),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
 
   if (cookie.domain && cookie.domain_len) {
-    http_lstr_reserve(&c, t.len + 7 + 1 + cookie.domain_len);
-    http_lstr_write(&c, "domain=", 7);
-    http_lstr_write(&c, cookie.domain, cookie.domain_len);
-    http_lstr_write(&c, ";", 1);
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"domain=", 7),
+        FIO_STRING_WRITE_STR2((char *)cookie.domain, cookie.domain_len),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
   if (cookie.path && cookie.path_len) {
-    http_lstr_reserve(&c, t.len + 5 + 1 + cookie.path_len);
-    http_lstr_write(&c, "path=", 5);
-    http_lstr_write(&c, cookie.path, cookie.path_len);
-    t = http_lstr_write(&c, ";", 1);
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"path=", 5),
+        FIO_STRING_WRITE_STR2((char *)cookie.path, cookie.path_len),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
   if (cookie.http_only) {
-    http_lstr_write(&c, "HttpOnly;", 9);
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "HttpOnly; ",
+        10);
   }
   if (cookie.secure) {
-    http_lstr_write(&c, "secure;", 7);
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "secure; ",
+        8);
   }
   switch (cookie.same_site) {
   case HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT: /* fall through */
   default: break;
   case HTTP_COOKIE_SAME_SITE_NONE:
-    http_lstr_write(&c, "SameSite=None;", 14);
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=None;",
+        14);
     break;
   case HTTP_COOKIE_SAME_SITE_LAX:
-    http_lstr_write(&c, "SameSite=Lax;", 13);
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=Lax;",
+        13);
     break;
   case HTTP_COOKIE_SAME_SITE_STRICT:
-    http_lstr_write(&c, "SameSite=Strict;", 16);
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=Strict;",
+        16);
     break;
   }
-  http_lstr_s *ptr =
-      http_smap_set2(h->cookies + 1,
-                     FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                     http_lstr_info(&c),
-                     1);
-  if (!ptr)
-    goto ptr_error;
-  *ptr = c;
-  /* set the "read" cookie store data */
-  http_smap_set2(h->cookies,
-                 FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                 FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
-                 1);
-  return 0;
+  if (t.buf[t.len - 1] == ' ')
+    --t.len;
 
-ptr_error:
-  http_lstr_destroy(&c);
-  return -1;
+  /* set the "write" cookie store data */
+  http_cmap_set(h->cookies + 1,
+                FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+                t,
+                NULL);
+  /* set the "read" cookie store data */
+  http_cmap_set(h->cookies,
+                FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+                FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
+                NULL);
+  if (t.buf != tmp_buf)
+    FIO_STRING_FREE2(t);
+  return 0;
 }
 
 /** Returns a cookie value (either received of newly set), if any. */
@@ -876,8 +869,7 @@ fio_str_info_s http_cookie_get(http_s *h, const char *name, size_t len) {
   if (!(fio_atomic_or(&h->state, HTTP_STATE_COOKIES_PARSED) &
         HTTP_STATE_COOKIES_PARSED))
     http_cookie___collect(h);
-  return http_smap_get2(h->cookies,
-                        (fio_str_info_s){.buf = (char *)name, .len = len});
+  return http_cmap_get(h->cookies, FIO_STR_INFO2((char *)name, len));
 }
 
 /** Iterates through all cookies. A non-zero return will stop iteration. */
@@ -888,12 +880,9 @@ size_t http_cookie_each(http_s *h,
                                         void *udata),
                         void *udata) {
   size_t i = 0;
-  FIO_MAP_EACH(http_smap, h->cookies, pos) {
+  FIO_MAP_EACH(http_cmap, h->cookies, pos) {
     ++i;
-    if (callback(h,
-                 http_sstr_info(&pos->obj.key),
-                 http_lstr_info(&pos->obj.value),
-                 udata))
+    if (callback(h, pos.key, pos.value, udata))
       return i;
   }
   return i;
@@ -911,11 +900,11 @@ size_t http_set_cookie_each(http_s *h,
                                             void *udata),
                             void *udata) {
   size_t i = 0;
-  http_smap_s *set_cookies = h->cookies + 1;
+  http_cmap_s *set_cookies = h->cookies + 1;
   fio_str_info_s header_name = FIO_STR_INFO2("set-cookie", 10);
-  FIO_MAP_EACH(http_smap, set_cookies, pos) {
+  FIO_MAP_EACH(http_cmap, set_cookies, pos) {
     ++i;
-    if (callback(h, header_name, http_lstr_info(&pos->obj.value), udata))
+    if (callback(h, header_name, pos.value, udata))
       return i;
   }
   return i;
@@ -949,7 +938,7 @@ size_t http_status_set(http_s *h, size_t status) {
 FIO_IFUNC int http___response_etag_if_none_match(http_s *h) {
   if (!h->status)
     return 0;
-  fio_str_info_s method = http_sstr_info(&h->method);
+  fio_str_info_s method = fio_keystr_info(&h->method);
   if ((method.len < 3) | (method.len > 4))
     return 0;
   if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
@@ -1090,25 +1079,22 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
   buf.len += 6;
   memcpy(buf.buf + buf.len, date.buf, date.len);
   buf.len += date.len;
-  fio_string_write2(
-      &buf,
-      NULL,
-      FIO_STRING_WRITE_STR2("] \"", 3),
-      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->method),
-                            http_sstr_len(&h->method)),
-      FIO_STRING_WRITE_STR2(" ", 1),
-      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->path), http_sstr_len(&h->path)),
-      FIO_STRING_WRITE_STR2(" ", 1),
-      FIO_STRING_WRITE_STR2(http_sstr2ptr(&h->version),
-                            http_sstr_len(&h->version)),
-      FIO_STRING_WRITE_STR2("\" ", 2),
-      FIO_STRING_WRITE_NUM(h->status),
-      FIO_STRING_WRITE_STR2(" ", 1),
-      ((bytes_sent > 0) ? (FIO_STRING_WRITE_UNUM(bytes_sent))
-                        : (FIO_STRING_WRITE_STR2("---", 3))),
-      FIO_STRING_WRITE_STR2(" ", 1),
-      FIO_STRING_WRITE_NUM((milli_end - milli_start)),
-      FIO_STRING_WRITE_STR2("ms\r\n", 4));
+  fio_string_write2(&buf,
+                    NULL,
+                    FIO_STRING_WRITE_STR2("] \"", 3),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
+                    FIO_STRING_WRITE_STR2(" ", 1),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
+                    FIO_STRING_WRITE_STR2(" ", 1),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->version)),
+                    FIO_STRING_WRITE_STR2("\" ", 2),
+                    FIO_STRING_WRITE_NUM(h->status),
+                    FIO_STRING_WRITE_STR2(" ", 1),
+                    ((bytes_sent > 0) ? (FIO_STRING_WRITE_UNUM(bytes_sent))
+                                      : (FIO_STRING_WRITE_STR2("---", 3))),
+                    FIO_STRING_WRITE_STR2(" ", 1),
+                    FIO_STRING_WRITE_NUM((milli_end - milli_start)),
+                    FIO_STRING_WRITE_STR2("ms\r\n", 4));
 
   if (buf.buf[buf.len - 1] != '\n')
     buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */

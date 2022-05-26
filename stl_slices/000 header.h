@@ -148,8 +148,8 @@ extern "C" {
 
 
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H
-#define H___FIO_CSTL_INCLUDE_ONCE_H
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H
+#define H___FIO_CSTL_INCLUDE_ONCE___H
 
 /* *****************************************************************************
 Aligned Memory Access
@@ -1080,7 +1080,7 @@ Sleep / Thread Scheduling Macros
 /* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */
-#endif /* H___FIO_CSTL_INCLUDE_ONCE_H */
+#endif /* H___FIO_CSTL_INCLUDE_ONCE___H */
 
 /* *****************************************************************************
 
@@ -1311,15 +1311,6 @@ Pointer Tagging
 #ifndef FIO_LOG
 #define FIO_LOG
 #endif
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
-#endif
-#ifndef FIO_RAND
-#define FIO_RAND
-#endif
-#ifndef FIO_BITMAP
-#define FIO_BITMAP
-#endif
 #endif
 
 /* Modules that require FIO_SERVER */
@@ -1390,7 +1381,8 @@ Pointer Tagging
 
 /* Modules that require the String Core API */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
-    defined(FIO_MAP_KEY_STR) || defined(FIO_SERVER)
+    defined(FIO_MAP_KEYSTR) || !defined(FIO_MAP_KEY) ||                        \
+    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER)
 #ifndef FIO_STR
 #define FIO_STR
 #endif
@@ -1404,7 +1396,8 @@ Pointer Tagging
 #endif
 
 /* Modules that require randomness */
-#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES) ||   \
+    defined(FIO_TEST_CSTL)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
@@ -1420,7 +1413,7 @@ Pointer Tagging
 /* Modules that require FIO_RISKY_HASH */
 #if defined(FIO_RAND) || defined(FIO_STATE) || defined(FIO_STR_NAME) ||        \
     defined(FIO_STR_SMALL) || defined(FIO_CLI) || defined(FIO_MEMORY_NAME) ||  \
-    defined(FIO_MALLOC) || defined(FIO_POLL)
+    defined(FIO_MALLOC) || defined(FIO_POLL) || defined(FIO_TEST_CSTL)
 #ifndef FIO_RISKY_HASH
 #define FIO_RISKY_HASH
 #endif
@@ -1434,11 +1427,18 @@ Pointer Tagging
 #endif
 
 /* Modules that require FIO_BITMAP */
-#if defined(FIO_JSON)
+#if defined(FIO_JSON) || defined(FIO_TEST_CSTL)
 #ifndef FIO_BITMAP
 #define FIO_BITMAP
 #endif
 #endif /* FIO_BITMAP */
+
+/* Modules that require FIO_IMAP_CORE */
+#if defined(FIO_STATE)
+#ifndef FIO_IMAP_CORE
+#define FIO_IMAP_CORE
+#endif
+#endif /* FIO_IMAP_CORE */
 
 /* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
 #if defined(FIO_STR_NAME) || defined(FIO_RISKY_HASH) || defined(FIO_JSON) ||   \

@@ -4,29 +4,31 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_SERVER                  /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "007 threads.h"            /* Development inclusion - ignore line */
-#include "010 riskyhash.h"          /* Development inclusion - ignore line */
-#include "090 state callbacks.h"    /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#include "101 time.h"               /* Development inclusion - ignore line */
-#include "102 queue.h"              /* Development inclusion - ignore line */
-#include "104 sock.h"               /* Development inclusion - ignore line */
-#include "105 poll.h"               /* Development inclusion - ignore line */
-#include "105 stream.h"             /* Development inclusion - ignore line */
-#include "106 signals.h"            /* Development inclusion - ignore line */
-#include "199 string core.h"        /* Development inclusion - ignore line */
-#include "210 map api.h"            /* Development inclusion - ignore line */
-#include "219 map finish.h"         /* Development inclusion - ignore line */
-#include "299 reference counter.h"  /* Development inclusion - ignore line */
-#include "330 poll api.h"           /* Development inclusion - ignore line */
-#include "700 cleanup.h"            /* Development inclusion - ignore line */
-#define SFUNC FIO_SFUNC             /* Development inclusion - ignore line */
-#define IFUNC FIO_IFUNC             /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_SERVER                    /* Development inclusion - ignore line */
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "003 atomics.h"              /* Development inclusion - ignore line */
+#include "004 bitwise.h"              /* Development inclusion - ignore line */
+#include "007 threads.h"              /* Development inclusion - ignore line */
+#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "090 state callbacks.h"      /* Development inclusion - ignore line */
+#include "100 mem.h"                  /* Development inclusion - ignore line */
+#include "101 time.h"                 /* Development inclusion - ignore line */
+#include "102 queue.h"                /* Development inclusion - ignore line */
+#include "104 sock.h"                 /* Development inclusion - ignore line */
+#include "105 stream.h"               /* Development inclusion - ignore line */
+#include "106 signals.h"              /* Development inclusion - ignore line */
+#include "199 string core.h"          /* Development inclusion - ignore line */
+#include "210 map api.h"              /* Development inclusion - ignore line */
+#include "219 map finish.h"           /* Development inclusion - ignore line */
+#include "299 reference counter.h"    /* Development inclusion - ignore line */
+#include "330 poll api.h"             /* Development inclusion - ignore line */
+#include "330 poll.h"                 /* Development inclusion - ignore line */
+#include "339 poll finish.h"          /* Development inclusion - ignore line */
+#include "700 cleanup.h"              /* Development inclusion - ignore line */
+#define SFUNC FIO_SFUNC               /* Development inclusion - ignore line */
+#define IFUNC FIO_IFUNC               /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -82,6 +84,9 @@ SFUNC void fio_srv_stop(void);
 
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_run(int workers);
+
+/* Returns true if server running and 0 if server stopped or shutting down. */
+SFUNC int fio_srv_is_running();
 
 /* *****************************************************************************
 Listening to Incoming Connections
@@ -356,6 +361,8 @@ struct fio_protocol_s {
    * system calls.
    */
   struct {
+    /** called once the IO was attached and the TLS object was set. */
+    void (*start)(fio_s *io);
     /** Called to perform a non-blocking `read`, same as the system call. */
     ssize_t (*read)(int fd, void *buf, size_t len, void *tls);
     /** Called to perform a non-blocking `write`, same as the system call. */
@@ -543,6 +550,8 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
     pr->on_shutdown = srv_on_ev_mock;
   if (!pr->on_timeout)
     pr->on_timeout = srv_on_ev_on_timeout;
+  if (!pr->io_functions.start)
+    pr->io_functions.start = srv_on_ev_mock;
   if (!pr->io_functions.read)
     pr->io_functions.read = io_func_default_read;
   if (!pr->io_functions.write)
@@ -573,9 +582,9 @@ typedef struct {
 
 /* unordered `env` dictionary style map */
 #define FIO_UMAP_NAME fio___srv_env
-#define FIO_MAP_KEY_STR
-#define FIO_MAP_TYPE fio___srv_env_obj_s
-#define FIO_MAP_TYPE_DESTROY(o)                                                \
+#define FIO_MAP_KEYSTR
+#define FIO_MAP_VALUE fio___srv_env_obj_s
+#define FIO_MAP_VALUE_DESTROY(o)                                               \
   do {                                                                         \
     if ((o).on_close)                                                          \
       (o).on_close((o).udata);                                                 \
@@ -646,10 +655,10 @@ IO Validity Map - Type
 #endif
 
 #if FIO_VALIDITY_MAP_USE
-#define FIO_UMAP_NAME          fio_validity_map
-#define FIO_MAP_TYPE           fio_s *
-#define FIO_MAP_HASH_FN(o)     fio_risky_ptr(o)
-#define FIO_MAP_TYPE_CMP(a, b) ((a) == (b))
+#define FIO_UMAP_NAME         fio_validity_map
+#define FIO_MAP_KEY           fio_s *
+#define FIO_MAP_HASH_FN(o)    fio_risky_ptr(o)
+#define FIO_MAP_KEY_CMP(a, b) ((a) == (b))
 #ifndef FIO_VALIDATE_IO_MUTEX
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
@@ -684,6 +693,7 @@ static struct {
   pid_t pid;
   fio_s *wakeup;
   int wakeup_fd;
+  uint16_t workers;
   uint8_t is_worker;
   volatile uint8_t stop;
 } fio___srvdata = {
@@ -910,6 +920,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
     FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
   io->pr->on_attach(io);
+  io->pr->io_functions.start(io);
 }
 
 /** Sets a new protocol object, returning the old protocol. */
@@ -934,22 +945,28 @@ SFUNC fio_s *fio_attach_fd(int fd,
                            fio_protocol_s *protocol,
                            void *udata,
                            void *tls) {
-  if (fd == -1)
-    return NULL;
+  fio_s *io = NULL;
+  fio_protocol_s *old = NULL;
   if (!protocol)
     protocol = &MOCK_PROTOCOL;
   fio___srv_init_protocol_test(protocol);
-  fio_s *io = fio_new2();
+  if (fd == -1)
+    goto error;
+  io = fio_new2();
   FIO_ASSERT_ALLOC(io);
   FIO_LOG_DDEBUG2("attaching fd %d to IO object %p", fd, (void *)io);
   fio_sock_set_non_block(fd);
-  fio_protocol_s *old = io->pr;
+  old = io->pr;
   io->fd = fd;
   io->pr = protocol;
   io->udata = udata;
   io->tls = tls;
   fio_queue_push(fio___srv_tasks, fio___protocol_set_task, io, old);
   return io;
+error:
+  protocol->on_close(udata);
+  protocol->io_functions.free(tls);
+  return NULL;
 }
 
 /**
@@ -1222,6 +1239,7 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   fio_srv_shutdown();
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
+  fio___srvdata.workers = 0;
 }
 
 /* *****************************************************************************
@@ -1311,9 +1329,13 @@ Starting the Server
 /* Stopping the server. */
 SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
 
+/* Returns true if server running and 0 if server stopped or shutting down. */
+SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }
+
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_run(int workers) {
   fio___srvdata.stop = 0;
+  fio___srvdata.workers = (uint16_t)workers;
   fio___srvdata.is_worker = !workers;
   fio_sock_maximize_limits();
   fio_state_callback_force(FIO_CALL_PRE_START);

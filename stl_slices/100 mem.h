@@ -4,15 +4,15 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_MEMORY_NAME fio         /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "007 threads.h"            /* Development inclusion - ignore line */
-#include "010 riskyhash.h"          /* Development inclusion - ignore line */
-#include "090 state callbacks.h"    /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_MEMORY_NAME fio           /* Development inclusion - ignore line */
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "003 atomics.h"              /* Development inclusion - ignore line */
+#include "004 bitwise.h"              /* Development inclusion - ignore line */
+#include "007 threads.h"              /* Development inclusion - ignore line */
+#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "090 state callbacks.h"      /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -468,11 +468,12 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 /* *****************************************************************************
 Temporarily (at least) set memory allocation macros to use this allocator
 ***************************************************************************** */
+#ifndef FIO_MALLOC_TMP_USE_SYSTEM
+
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
 
-#ifndef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))

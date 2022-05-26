@@ -4,20 +4,21 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_POLL                    /* Development inclusion - ignore line */
-#define FIO_POLL_DEV                /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "003 atomics.h"            /* Development inclusion - ignore line */
-#include "010 riskyhash.h"          /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#include "102 queue.h"              /* Development inclusion - ignore line */
-#include "104 sock.h"               /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
-#ifdef FIO_POLL_DEV                 /* Development inclusion - ignore line */
-#include "201 array.h"              /* Development inclusion - ignore line */
-#include "210 map api.h"            /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line   \
+                                       */
+#define FIO_POLL                      /* Development inclusion - ignore line */
+#define FIO_POLL_DEV                  /* Development inclusion - ignore line */
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "003 atomics.h"              /* Development inclusion - ignore line */
+#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                  /* Development inclusion - ignore line */
+#include "102 queue.h"                /* Development inclusion - ignore line */
+#include "104 sock.h"                 /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
+#ifdef FIO_POLL_DEV                   /* Development inclusion - ignore line */
+#include "201 array.h"                /* Development inclusion - ignore line */
+#include "210 map api.h"              /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 
 /* *****************************************************************************
 

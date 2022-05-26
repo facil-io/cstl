@@ -472,6 +472,8 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds).
 
+This String storage paradigm can be very effective and it is used as the default String key implementation in Maps when `FIO_MAP_KEY` is undefined.
+
 To create a new String simply write to `NULL` and a new `char *` pointer will be returned, pointing to the first byte of the new string.
 
 All `fio_bstr` functions that mutate the string return a pointer to the new string (**make sure to update the pointer!**).
@@ -590,7 +592,7 @@ char * bstr = fio_bstr_len_set(str.buf, str.len);
 
 It is very common for Hash Maps to contain String keys. When the String keys are usually short, than it could be more efficient to embed the Key String data into the map itself (improve cache locality) rather than allocate memory for each separate Key String.
 
-The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 15` on 64 bit machines or `len <= 11` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
+The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 14` on 64 bit machines or `len <= 10` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
 
 See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEY_STR` MACRO.
 
@@ -613,8 +615,6 @@ fio_str_info_s fio_keystr_info(fio_keystr_s *str);
 ```
 
 Returns the Key String.
-
-**Note**: Key Strings are **not** automatically `NUL` terminated!
 
 #### `fio_keystr`
 
@@ -656,48 +656,25 @@ This example maps words to numbers. Note that this will work also with binary da
 
 ```c
 /* map words to numbers. */
-#define FIO_MAP_KEY_STR
 #define FIO_UMAP_NAME umap
-#define FIO_MAP_TYPE  uintptr_t
+#define FIO_MAP_KEYSTR
+#define FIO_MAP_VALUE uintptr_t
+#define FIO_MAP_HASH_FN(k)                                                     \
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)&umap_destroy)
 #include "fio-stl.h"
 
-/** a helper to calculate hash and set any string as a key. */
-FIO_IFUNC void umap_set2(umap_s *map,
-                         char *key,
-                         size_t key_len,
-                         uintptr_t obj) {
-  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  /* since `capa` is 1, the map assumes it's a dynamic string and copies it.
-   * if the string is short (< 15 bytes on 64 bit systems), no memory allocation is performed */
-  umap_set(map, hash, FIO_STR_INFO3(key, key_len, 1), obj, NULL);
-}
-/** a helper to calculate hash and set a constant string as a key. */
-FIO_IFUNC void umap_set3(umap_s *map,
-                         char *key,
-                         size_t key_len,
-                         uintptr_t obj) {
-  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  /* since `capa` is 0, the map assumes it's a `const` and uses that pointer. */
-  umap_set(map, hash, FIO_STR_INFO3(key, key_len, 0), obj, NULL);
-}
-
-/** a helper to calculate hash and get the value of a key. */
-FIO_IFUNC uintptr_t umap_get2(umap_s *map, char *key, size_t key_len) {
-  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  return umap_get(map, hash, FIO_STR_INFO2(key, key_len));
-}
 /* example adding strings to map and printing data. */
 void example(void) {
   umap_s map = FIO_MAP_INIT;
-  umap_set2(&map, "One", 3, 1);
-  umap_set2(&map, "Two", 3, 2);
-  umap_set2(&map, "Three", 5, 3);
-  umap_set3(&map, "Infinity", 8, (uintptr_t)-1);
-  FIO_MAP_EACH(umap, &map, pos) {
-    /* note that key strings are NOT automatically NUL terminated! */
-    fio_str_info_s key = fio_keystr_info(&pos->obj.key);
-    uintptr_t value = pos->obj.value;
-    printf("%.*s: %llu\n", (int)key.len, key.buf, (unsigned long long)value);
+  umap_set(&map, FIO_STR_INFO1("One"), 1, NULL);
+  umap_set(&map, FIO_STR_INFO1("Two"), 2, NULL);
+  umap_set(&map, FIO_STR_INFO1("Three"), 3, NULL);
+  umap_set(&map, FIO_STR_INFO1("Infinity"), (uintptr_t)-1, NULL);
+  FIO_MAP_EACH(umap, &map, i) {
+    printf("%s: %llu\n",
+           (int)i.key.len,
+           i.key.buf,
+           (unsigned long long)i.value);
   }
   umap_destroy(&map);
 }

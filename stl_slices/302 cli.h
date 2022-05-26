@@ -4,17 +4,15 @@ License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE_H /* Development inclusion - ignore line */
-#define FIO_CLI                     /* Development inclusion - ignore line */
-#include "000 header.h"             /* Development inclusion - ignore line */
-#include "004 bitwise.h"            /* Development inclusion - ignore line */
-#include "006 atol.h"               /* Development inclusion - ignore line */
-#include "010 riskyhash.h"          /* Development inclusion - ignore line */
-#include "100 mem.h"                /* Development inclusion - ignore line */
-#include "210 map api.h"            /* Development inclusion - ignore line */
-#include "211 ordered map.h"        /* Development inclusion - ignore line */
-#include "211 unordered map.h"      /* Development inclusion - ignore line */
-#endif                              /* Development inclusion - ignore line */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
+#define FIO_CLI                       /* Development inclusion - ignore line */
+#include "000 header.h"               /* Development inclusion - ignore line */
+#include "004 bitwise.h"              /* Development inclusion - ignore line */
+#include "006 atol.h"                 /* Development inclusion - ignore line */
+#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "100 mem.h"                  /* Development inclusion - ignore line */
+#include "210 map.h"                  /* Development inclusion - ignore line */
+#endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -208,13 +206,17 @@ typedef struct {
 } fio___cli_cstr_s;
 
 #define FIO_RISKY_HASH
-#define FIO_MAP_TYPE const char *
-#define FIO_MAP_KEY  fio___cli_cstr_s
+#define FIO_UMAP_NAME fio___cli_hash
+#define FIO_MAP_VALUE const char *
+#define FIO_MAP_KEY   fio___cli_cstr_s
 #define FIO_MAP_KEY_CMP(o1, o2)                                                \
   (o1.len == o2.len &&                                                         \
    (!o1.len || o1.buf == o2.buf ||                                             \
     (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
-#define FIO_UMAP_NAME fio___cli_hash
+#define FIO_MAP_HASH_FN(s)                                                     \
+  ((s).buf                                                                     \
+       ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
+       : ((s).len ^ ((s).len << 19)))
 #define FIO_STL_KEEP__
 #include __FILE__
 #undef FIO_STL_KEEP__
@@ -233,9 +235,6 @@ typedef struct {
   char const *description;
   char const **names;
 } fio_cli_parser_data_s;
-
-#define FIO_CLI_HASH_VAL(s)                                                    \
-  fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)
 
 /* *****************************************************************************
 Default parameter storage
@@ -319,17 +318,9 @@ FIO_SFUNC void fio___cli_map_line2alias(char const *line) {
       ++n.len;
     }
     const char *old = NULL;
-    fio___cli_hash_set(&fio___cli_aliases,
-                       FIO_CLI_HASH_VAL(n),
-                       n,
-                       (char const *)line,
-                       &old);
+    fio___cli_hash_set(&fio___cli_aliases, n, (char const *)line, &old);
     if (def.buf) {
-      fio___cli_hash_set(&fio___cli_values,
-                         FIO_CLI_HASH_VAL(n),
-                         n,
-                         def.buf,
-                         NULL);
+      fio___cli_hash_set(&fio___cli_values, n, def.buf, NULL);
     }
 #ifdef FIO_LOG_ERROR
     if (old) {
@@ -421,14 +412,14 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
       goto print_help;
     }
     fio___cli_cstr_s n = {.len = (size_t)++parser->unnamed_count};
-    fio___cli_hash_set(&fio___cli_values, n.len, n, value, NULL);
+    fio___cli_hash_set(&fio___cli_values, n, value, NULL);
     if (parser->unnamed_max >= 0 &&
         parser->unnamed_count > parser->unnamed_max) {
       arg.len = 0;
       goto error;
     }
     FIO_LOG_DEBUG2("(CLI) set an unnamed argument: %s", value);
-    FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values, n.len, n) == value,
+    FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values, n) == value,
                      "(CLI) set argument failed!");
     return;
   }
@@ -445,8 +436,7 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
 
         fio___cli_cstr_s a = {.buf = bf, .len = 2};
 
-        const char *l =
-            fio___cli_hash_get(&fio___cli_aliases, FIO_CLI_HASH_VAL(a), a);
+        const char *l = fio___cli_hash_get(&fio___cli_aliases, a);
         if (!l) {
           if (bf[1] == ',')
             continue;
@@ -487,15 +477,9 @@ FIO_SFUNC void fio___cli_set_arg(fio___cli_cstr_s arg,
       while (n.buf[n.len] && n.buf[n.len] != ' ' && n.buf[n.len] != ',') {
         ++n.len;
       }
-      fio___cli_hash_set(&fio___cli_values,
-                         FIO_CLI_HASH_VAL(n),
-                         n,
-                         value,
-                         NULL);
+      fio___cli_hash_set(&fio___cli_values, n, value, NULL);
       FIO_LOG_DEBUG2("(CLI) set argument %.*s = %s", (int)n.len, n.buf, value);
-      FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values,
-                                          FIO_CLI_HASH_VAL(n),
-                                          n) == value,
+      FIO_ASSERT_DEBUG(fio___cli_hash_get(&fio___cli_values, n) == value,
                        "(CLI) set argument failed!");
       while (n.buf[n.len] && (n.buf[n.len] == ' ' || n.buf[n.len] == ',')) {
         ++n.len;
@@ -739,9 +723,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       value = argv[parser.pos + 1];
     }
     const char *l = NULL;
-    while (
-        n.len &&
-        !(l = fio___cli_hash_get(&fio___cli_aliases, FIO_CLI_HASH_VAL(n), n))) {
+    while (n.len && !(l = fio___cli_hash_get(&fio___cli_aliases, n))) {
       --n.len;
       value = n.buf + n.len;
     }
@@ -788,8 +770,7 @@ SFUNC char const *fio_cli_get(char const *name) {
   if (!fio___cli_hash_count(&fio___cli_values)) {
     return NULL;
   }
-  char const *val =
-      fio___cli_hash_get(&fio___cli_values, FIO_CLI_HASH_VAL(n), n);
+  char const *val = fio___cli_hash_get(&fio___cli_values, n);
   return val;
 }
 
@@ -810,7 +791,7 @@ SFUNC char const *fio_cli_unnamed(unsigned int index) {
     return NULL;
   }
   fio___cli_cstr_s n = {.buf = NULL, .len = index + 1};
-  return fio___cli_hash_get(&fio___cli_values, index + 1, n);
+  return fio___cli_hash_get(&fio___cli_values, n);
 }
 
 /**
@@ -821,13 +802,13 @@ SFUNC char const *fio_cli_unnamed(unsigned int index) {
  */
 SFUNC void fio_cli_set(char const *name, char const *value) {
   fio___cli_cstr_s n = (fio___cli_cstr_s){.buf = name, .len = strlen(name)};
-  fio___cli_hash_set(&fio___cli_values, FIO_CLI_HASH_VAL(n), n, value, NULL);
+  fio___cli_hash_set(&fio___cli_values, n, value, NULL);
 }
 
 /** Sets an unrecognized argument at a 0 based `index`. */
 SFUNC void fio_cli_unnamed_set(unsigned int index, char const *value) {
   fio___cli_cstr_s n = {.buf = NULL, .len = index + 1};
-  fio___cli_hash_set(&fio___cli_values, n.len, n, value, NULL);
+  fio___cli_hash_set(&fio___cli_values, n, value, NULL);
   if (fio___cli_unnamed_count < n.len)
     fio___cli_unnamed_count = n.len;
 }
