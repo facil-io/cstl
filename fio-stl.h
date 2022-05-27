@@ -6635,6 +6635,19 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+   {
+    char * str = "testing that risky hash is always the same hash";
+    const size_t len = strlen(str);
+    uint64_t org_hash = fio_risky_hash(str, len, 0);
+    for (int i = 0; i < 8; ++i) {
+       char buf[128];
+       char * tmp = buf + i;
+       memcpy(tmp,str, len);
+       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
+       FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0), "hash should be consistent!");
+       FIO_ASSERT(tmp_hash == org_hash, "memory address shouldn't effect hash!");
+     }
+   }
   for (int i = 0; i < 8; ++i) {
     char buf[128];
     uint64_t nonce = fio_rand64();
