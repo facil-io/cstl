@@ -6269,7 +6269,7 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[2] += w[2];                                                                \
   v[3] += w[3]
 
-FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest FIO_ALIGN(16),
+FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
                                        const void *restrict data_,
                                        size_t len,
                                        uint64_t seed) {
@@ -8212,7 +8212,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
                "imap array get failed for %zu (2)!",
                val);
     fio_imap_tester_remove(&a, val);
-    FIO_ASSERT(a.count + 1 == val,
+    FIO_ASSERT((size_t)(a.count + 1) == val,
                "imap array count failed at remove %zu!",
                val);
     FIO_ASSERT(!fio_imap_tester_get(&a, val),

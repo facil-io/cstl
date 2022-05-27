@@ -296,7 +296,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
                "imap array get failed for %zu (2)!",
                val);
     fio_imap_tester_remove(&a, val);
-    FIO_ASSERT(a.count + 1 == val,
+    FIO_ASSERT((size_t)(a.count + 1) == val,
                "imap array count failed at remove %zu!",
                val);
     FIO_ASSERT(!fio_imap_tester_get(&a, val),
