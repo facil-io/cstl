@@ -620,7 +620,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
       err += (tmp[b] == str[b]);
     }
     fio_risky_mask(tmp, strlen(str), (uint64_t)(uintptr_t)tmp, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, strlen(str)), "Risky Hash masking RT failed");
+    FIO_ASSERT(!memcmp(tmp, str, strlen(str)),
+               "Risky Hash masking RT failed @ %d",
+               i);
   }
   const uint8_t alignment_test_offset = 0;
   if (alignment_test_offset)
