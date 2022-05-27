@@ -4361,7 +4361,7 @@ Returns 1 if the String is UTF-8 valid and 0 if not.
 size_t fio_string_utf8_len(fio_str_info_s str);
 ```
 
-Returns the String's length in UTF-8 characters.
+Returns the String's length in UTF-8 characters or 0 on either an error or an empty string.
 
 #### `fio_string_utf8_select`
 
