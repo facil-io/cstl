@@ -6267,9 +6267,9 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   v[0] += w[0];                                                                \
   v[1] += w[1];                                                                \
   v[2] += w[2];                                                                \
-  v[3] += w[3];
+  v[3] += w[3]
 
-FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
+FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest FIO_ALIGN(16),
                                        const void *restrict data_,
                                        size_t len,
                                        uint64_t seed) {
@@ -6277,35 +6277,37 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
-  seed ^= FIO_STABLE_HASH_PRIME0;
-  seed |= (seed == 0);
-  typedef uint64_t fio___shash_vec_u[4] FIO_ALIGN(32);
+  seed ^= FIO_STABLE_HASH_PRIME4;
+  typedef uint64_t fio___shash_vec_u[4] FIO_ALIGN(16);
   fio___shash_vec_u w, v = {seed, seed, seed, seed};
-  fio___shash_vec_u prime = {FIO_STABLE_HASH_PRIME0,
-                             FIO_STABLE_HASH_PRIME1,
-                             FIO_STABLE_HASH_PRIME2,
-                             FIO_STABLE_HASH_PRIME3};
+  fio___shash_vec_u const prime = {FIO_STABLE_HASH_PRIME0,
+                                   FIO_STABLE_HASH_PRIME1,
+                                   FIO_STABLE_HASH_PRIME2,
+                                   FIO_STABLE_HASH_PRIME3};
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
     FIO_MEMCPY32(w, data);
-    w[0] = fio_ltole64(w[0]);
+    w[0] = fio_ltole64(w[0]); /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
     w[3] = fio_ltole64(w[3]);
-    data += 32;
     seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
+    data += 32;
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w[0] = w[1] = w[2] = w[3] = 0;
-    FIO_MEMCPY31x(w, data, len); /* copies `len & 31` bytes */
+    w[0] = w[1] = w[2] = w[3] = 0; /* sets padding */
+    FIO_MEMCPY31x(w, data, len);   /* copies `len & 31` bytes */
+    w[0] = fio_ltole64(w[0]);      /* make sure we're using little endien */
+    w[1] = fio_ltole64(w[1]);
+    w[2] = fio_ltole64(w[2]);
+    w[3] = fio_ltole64(w[3]);
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector avalanche */
   FIO_STABLE_HASH_MUL_PRIME(w);
-
   v[0] ^= fio_lrot64(w[0], 7);
   v[1] ^= fio_lrot64(w[1], 11);
   v[2] ^= fio_lrot64(w[2], 13);
@@ -6320,7 +6322,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *FIO_ALIGN(16) dest,
 /*  Computes a facil.io Stable Hash. */
 SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   uint64_t r;
-  uint64_t FIO_ALIGN(16) v[4];
+  uint64_t v[4] FIO_ALIGN(16);
   fio_stable_hash___inner(v, data_, len, seed);
   /* summing avalanche */
   r = v[0] + v[1] + v[2] + v[3];
@@ -6348,7 +6350,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
   FIO_MEMCPY16(dest, r);
 }
 
-#undef FIO_STABLE_HASH_AVA
+#undef FIO_STABLE_HASH_MUL_PRIME
 #undef FIO_STABLE_HASH_ROUND_FULL
 
 /* *****************************************************************************
@@ -8113,11 +8115,11 @@ iMap Creation Macro
   }                                                                            \
   /** Sets an object in the Array. Optionally overwrites existing data if any. \
    */                                                                          \
-  FIO_IFUNC void FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a,        \
-                                           array_type obj,                     \
-                                           int overwrite) {                    \
+  FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
+                                                  array_type obj,              \
+                                                  int overwrite) {             \
     if (!a || !is_valid_fn(&obj))                                              \
-      return;                                                                  \
+      return NULL;                                                             \
     size_t capa = FIO_NAME(array_name, capa)(a);                               \
     if (a->w == capa)                                                          \
       FIO_NAME(array_name, __expand)(a);                                       \
@@ -8134,12 +8136,12 @@ iMap Creation Macro
         ++a->w;                                                                \
         ++a->count;                                                            \
         FIO_NAME(array_name, imap)(a)[s.ipos] = s.set_val;                     \
-        return;                                                                \
+        return a->ary + s.pos;                                                 \
       }                                                                        \
       if (!overwrite)                                                          \
-        return;                                                                \
+        return a->ary + s.pos;                                                 \
       a->ary[s.pos] = obj;                                                     \
-      return;                                                                  \
+      return a->ary + s.pos;                                                   \
     }                                                                          \
   }                                                                            \
   /** Finds an object in the Array using the index map. */                     \

@@ -199,11 +199,11 @@ iMap Creation Macro
   }                                                                            \
   /** Sets an object in the Array. Optionally overwrites existing data if any. \
    */                                                                          \
-  FIO_IFUNC void FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a,        \
-                                           array_type obj,                     \
-                                           int overwrite) {                    \
+  FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
+                                                  array_type obj,              \
+                                                  int overwrite) {             \
     if (!a || !is_valid_fn(&obj))                                              \
-      return;                                                                  \
+      return NULL;                                                             \
     size_t capa = FIO_NAME(array_name, capa)(a);                               \
     if (a->w == capa)                                                          \
       FIO_NAME(array_name, __expand)(a);                                       \
@@ -220,12 +220,12 @@ iMap Creation Macro
         ++a->w;                                                                \
         ++a->count;                                                            \
         FIO_NAME(array_name, imap)(a)[s.ipos] = s.set_val;                     \
-        return;                                                                \
+        return a->ary + s.pos;                                                 \
       }                                                                        \
       if (!overwrite)                                                          \
-        return;                                                                \
+        return a->ary + s.pos;                                                 \
       a->ary[s.pos] = obj;                                                     \
-      return;                                                                  \
+      return a->ary + s.pos;                                                   \
     }                                                                          \
   }                                                                            \
   /** Finds an object in the Array using the index map. */                     \
