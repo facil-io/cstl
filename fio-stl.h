@@ -3761,6 +3761,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     for (uint8_t i = 0; i < 16; ++i) {
       FIO_MEMCPY(buf + i, data, 128);
       fio_xmask(buf + i, 128, mask);
+      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask masking error");
       fio_xmask(buf + i, 128, mask);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
       fio_xmask(buf + i, 128, mask);
@@ -3772,6 +3773,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     for (uint8_t i = 0; i < 16; ++i) {
       FIO_MEMCPY(buf + i, data, 128);
       fio_xmask2(buf + i, 128, mask, counter);
+      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask2 CM masking error");
       fio_xmask2(buf + i, 128, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 CM rountrip error");
       fio_xmask2(buf + i, 128, mask, counter);
@@ -6222,10 +6224,10 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
  */
 IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
   { /* avoid zero nonce, make sure nonce is effective and odd */
-    nonce |= 1;
+    nonce += !nonce;
     nonce *= 0xDB1DD478B9E93B1ULL;
     nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce |= 1;
+    nonce += !nonce;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
   fio_xmask2(buf, len, hash, nonce);

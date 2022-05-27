@@ -191,10 +191,10 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
  */
 IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
   { /* avoid zero nonce, make sure nonce is effective and odd */
-    nonce |= 1;
+    nonce += !nonce;
     nonce *= 0xDB1DD478B9E93B1ULL;
     nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce |= 1;
+    nonce += !nonce;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
   fio_xmask2(buf, len, hash, nonce);
