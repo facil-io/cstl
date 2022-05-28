@@ -131,27 +131,26 @@ typedef struct {
 
 FIO_IFUNC uint64_t fio___state_callback_hash_fn(fio___state_task_s *t) {
   uint64_t hash = fio_risky_ptr((void *)(uintptr_t)(t->func));
-  hash ^= hash + fio_risky_ptr((void *)(uintptr_t)(t->arg));
+  hash ^= hash + fio_risky_ptr(t->arg);
   return hash;
 }
-FIO_IFUNC uint64_t fio___state_callback_cmp_fn(fio___state_task_s *a,
-                                               fio___state_task_s *b) {
-  return (a->func == b->func && a->arg == b->arg);
-}
-FIO_IFUNC int fio___state_callback_valid_fn(fio___state_task_s *t) {
-  return t->func != NULL;
-}
+
+#define FIO_STATE_CALLBACK_IS_VALID(pobj) ((pobj)->func)
+#define FIO_STATE_CALLBACK_CMP(a, b)                                           \
+  ((a)->func == (b)->func && (a)->arg == (b)->arg)
 FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
                        fio___state_task_s,
-                       uint64_t,
+                       uint32_t,
                        fio___state_callback_hash_fn,
-                       fio___state_callback_cmp_fn,
-                       fio___state_callback_valid_fn)
+                       FIO_STATE_CALLBACK_CMP,
+                       FIO_STATE_CALLBACK_IS_VALID)
+#undef FIO_STATE_CALLBACK_CMP
+#undef FIO_STATE_CALLBACK_IS_VALID
 
 /* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
-static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER];
+static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
 static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
@@ -194,7 +193,7 @@ SFUNC void fio_state_callback_add(fio_state_event_type_e e,
     return;
   fio___state_task_s t = {.func = func, .arg = arg};
   fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  fio___state_map_set(fio___state_tasks_array + (uintptr_t)e, t, 1);
+  fio___state_map_set(fio___state_tasks_array + (uintptr_t)e, t, 0);
   fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
   if (e == FIO_CALL_ON_INITIALIZE &&
       fio___state_tasks_array_lock[FIO_CALL_NEVER]) {
@@ -313,11 +312,52 @@ FIO_DESTRUCTOR(fio___state_cleanup) {
 Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+static size_t FIO_NAME_TEST(stl, state_task_counter) = 0;
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task)(void *arg) {
+  size_t *i = (size_t *)arg;
+  ++i[0];
+}
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task_global)(void *arg) {
+  (void)arg;
+  ++FIO_NAME_TEST(stl, state_task_counter);
+}
 FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
   fprintf(stderr, "* testing state callback API (TODO)\n");
+  size_t count = 0;
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task),
+                           &count);
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task_global),
+                           (void *)i);
+  }
+  FIO_ASSERT(!count && !FIO_NAME_TEST(stl, state_task_counter),
+             "callbacks should NOT have been called yet");
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1, "count error for local counter callback (%zu)", count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu)",
+             FIO_NAME_TEST(stl, state_task_counter));
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task),
+                              &count);
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task_global),
+                              (void *)i);
+  }
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1,
+             "count error for local counter callback (%zu) - not removed?",
+             count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu) - not removed?",
+             FIO_NAME_TEST(stl, state_task_counter));
 }
 
 #endif /* FIO_TEST_CSTL */

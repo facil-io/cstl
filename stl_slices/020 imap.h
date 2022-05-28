@@ -64,13 +64,14 @@ iMap Creation Macro
   } FIO_NAME(array_name, seeker_s);                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC int FIO_NAME(array_name, is_valid)(array_type * pobj) {            \
-    return is_valid_fn(pobj);                                                  \
+    return !!is_valid_fn(pobj);                                                \
   }                                                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC imap_type FIO_NAME(array_name,                                     \
                                capa)(FIO_NAME(array_name, s) * a) {            \
-    imap_type r[2] = {((imap_type)1ULL << a->capa_bits), 0};                   \
-    return r[!a || !a->capa_bits];                                             \
+    if (!a || !a->capa_bits)                                                   \
+      return 0;                                                                \
+    return ((imap_type)1ULL << a->capa_bits);                                  \
   }                                                                            \
   /** Returns a pointer to the index map. */                                   \
   FIO_IFUNC imap_type *FIO_NAME(array_name,                                    \
@@ -88,43 +89,42 @@ iMap Creation Macro
   /** Allocates dynamic memory. */                                             \
   FIO_IFUNC int FIO_NAME(array_name, __alloc)(FIO_NAME(array_name, s) * a,     \
                                               size_t bits) {                   \
-    if (!bits || bits > ((sizeof(imap_type) << 3) - 1))                        \
+    if (!bits || bits > ((sizeof(imap_type) << 3) - 2))                        \
       return -1;                                                               \
     size_t capa = 1ULL << bits;                                                \
     size_t old_capa = FIO_NAME(array_name, capa)(a);                           \
     array_type *tmp = (array_type *)FIO_MEM_REALLOC(                           \
         a->ary,                                                                \
-        (a->bits ? (old_capa * (sizeof(*a->ary)) +                             \
+        (a->bits ? (old_capa * (sizeof(array_type)) +                          \
                     (old_capa * (sizeof(imap_type))))                          \
                  : 0),                                                         \
-        (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))),             \
-        (a->w * (sizeof(*a->ary))));                                           \
+        (capa * (sizeof(array_type)) + (capa * (sizeof(imap_type)))),          \
+        (a->w * (sizeof(array_type))));                                        \
     (void)old_capa; /* if unused */                                            \
     if (!tmp)                                                                  \
       return -1;                                                               \
     a->capa_bits = bits;                                                       \
     a->ary = tmp;                                                              \
     if (!FIO_MEM_REALLOC_IS_SAFE)                                              \
-      FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));            \
+      FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
     return 0;                                                                  \
   }                                                                            \
-  /** Returns the index map position and array position of a value (if any).   \
-   */                                                                          \
+  /** Returns the index map position and array position of a value, if any. */ \
   FIO_SFUNC FIO_NAME(array_name, seeker_s)                                     \
       FIO_NAME(array_name, seek)(FIO_NAME(array_name, s) * a,                  \
                                  array_type * pobj) {                          \
     FIO_NAME(array_name, seeker_s) r = {0, (~(imap_type)0), (~(imap_type)0)};  \
-    if (!a || !a->capa_bits)                                                   \
+    if (!a || ((!a->capa_bits) | (!a->ary)))                                   \
       return r;                                                                \
     r.pos = a->w;                                                              \
-    imap_type capa = FIO_NAME(array_name, capa)(a);                            \
-    imap_type *imap = FIO_NAME(array_name, imap)(a);                           \
+    imap_type capa = (imap_type)1UL << a->capa_bits;                           \
+    imap_type *imap = (imap_type *)(a->ary + capa);                            \
     const imap_type pos_mask = capa - 1;                                       \
     const imap_type hash_mask = ~pos_mask;                                     \
     const imap_type hash = hash_fn(pobj);                                      \
     imap_type tester = hash & hash_mask;                                       \
     tester += (!tester) << a->capa_bits;                                       \
-    tester -= (hash_mask == tester);                                           \
+    tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
@@ -153,6 +153,7 @@ iMap Creation Macro
         if (mini_steps == 2)                                                   \
           break;                                                               \
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
+        pos &= pos_mask;                                                       \
         ++mini_steps;                                                          \
       }                                                                        \
       pos += 0x43F82D0BUL; /* big step */                                      \
@@ -204,14 +205,19 @@ iMap Creation Macro
                                                   int overwrite) {             \
     if (!a || !is_valid_fn(&obj))                                              \
       return NULL;                                                             \
-    size_t capa = FIO_NAME(array_name, capa)(a);                               \
-    if (a->w == capa)                                                          \
-      FIO_NAME(array_name, __expand)(a);                                       \
-    else if (a->count != a->w && a->w + 1 == FIO_NAME(array_name, capa)(a))    \
-      FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));            \
+    {                                                                          \
+      size_t capa = FIO_NAME(array_name, capa)(a);                             \
+      if (a->w == capa)                                                        \
+        FIO_NAME(array_name, __expand)(a);                                     \
+      else if (a->count != a->w &&                                             \
+               (a->w + (a->w >> 1)) > FIO_NAME(array_name, capa)(a)) {         \
+        FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));          \
+        FIO_NAME(array_name, __fill_imap)(a);                                  \
+      }                                                                        \
+    }                                                                          \
     for (;;) {                                                                 \
       FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);  \
-      if (s.ipos == (imap_type)(~(imap_type)0)) {                              \
+      if (s.ipos == (imap_type)(~(imap_type)0)) { /* no room in the imap */    \
         FIO_NAME(array_name, __expand)(a);                                     \
         continue;                                                              \
       }                                                                        \
@@ -222,6 +228,8 @@ iMap Creation Macro
         FIO_NAME(array_name, imap)(a)[s.ipos] = s.set_val;                     \
         return a->ary + s.pos;                                                 \
       }                                                                        \
+      FIO_ASSERT_DEBUG(s.pos < a->w && s.ipos < FIO_NAME(array_name, capa)(a), \
+                       "WTF?");                                                \
       if (!overwrite)                                                          \
         return a->ary + s.pos;                                                 \
       a->ary[s.pos] = obj;                                                     \
@@ -270,7 +278,7 @@ iMap Testing
 #define FIO_IMAP_TESTER_IMAP_VALID(n)  ((n)[0])
 FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
                        size_t,
-                       uint16_t, /* good for up to 256 objects */
+                       uint32_t, /* good for up to 65K objects */
                        FIO_IMAP_TESTER_IMAP_HASH,
                        FIO_IMAP_TESTER_IMAP_CMP,
                        FIO_IMAP_TESTER_IMAP_VALID)
@@ -282,15 +290,19 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
   fprintf(stderr, "* testing core indexed array type (imap)\n");
   fio_imap_tester_s a = {0};
-  for (size_t val = 1; val < 64; ++val) {
+  for (size_t val = 1; val < 4096; ++val) {
     fio_imap_tester_set(&a, val, 1);
     FIO_ASSERT(a.count == val, "imap array count failed at set %zu!", val);
+    fio_imap_tester_set(&a, val, 0);
+    fio_imap_tester_set(&a, val, 0);
+    fio_imap_tester_set(&a, val, 0);
+    FIO_ASSERT(a.count == val, "imap array double-set error %zu!", val);
     FIO_ASSERT(fio_imap_tester_get(&a, val) &&
                    fio_imap_tester_get(&a, val)[0] == val,
                "imap array get failed for %zu!",
                val);
   }
-  for (size_t val = 64; --val;) {
+  for (size_t val = 4096; --val;) {
     FIO_ASSERT(fio_imap_tester_get(&a, val) &&
                    fio_imap_tester_get(&a, val)[0] == val,
                "imap array get failed for %zu (2)!",

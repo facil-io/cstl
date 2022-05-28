@@ -107,9 +107,9 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t FIO_ALIGN(32)
-      v[4] = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
-  uint64_t FIO_ALIGN(32) w[4];
+  uint64_t v[4] FIO_ALIGN(
+      32) = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
+  uint64_t w[4] FIO_ALIGN(32);
   const uint8_t *data = (const uint8_t *)data_;
 
 #define FIO_RISKY3_ROUND64(vi, w_)                                             \
@@ -194,7 +194,7 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
     nonce += !nonce;
     nonce *= 0xDB1DD478B9E93B1ULL;
     nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce += !nonce;
+    nonce |= 1;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
   fio_xmask2(buf, len, hash, nonce);
@@ -621,12 +621,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce = fio_rand64();
     uint64_t mask = fio_risky_ptr(&buf);
     const char *str = "this is a short text, to test risky masking";
+    const size_t len = strlen(str);
     char *tmp = buf + i;
-    FIO_MEMCPY(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), mask, nonce);
-    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
+    FIO_MEMCPY(tmp, str, len);
+    fio_risky_mask(tmp, len, mask, nonce);
+    FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
     size_t err = 0;
-    for (size_t b = 0; b < strlen(str); ++b) {
+    for (size_t b = 0; b < len; ++b) {
       FIO_ASSERT(tmp[b] != str[b] || (err < 2),
                  "Risky Hash masking didn't mask buf[%zu] on offset "
                  "%d (statistical deviation?)",
@@ -634,10 +635,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, strlen(str), mask, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, strlen(str)),
-               "Risky Hash masking RT failed @ %d",
-               i);
+    fio_risky_mask(tmp, len, mask, nonce);
+    FIO_ASSERT(!memcmp(tmp, str, len), "Risky Hash masking RT failed @ %d", i);
   }
   const uint8_t alignment_test_offset = 0;
   if (alignment_test_offset)

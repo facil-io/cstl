@@ -6140,9 +6140,9 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t FIO_ALIGN(32)
-      v[4] = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
-  uint64_t FIO_ALIGN(32) w[4];
+  uint64_t v[4] FIO_ALIGN(
+      32) = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
+  uint64_t w[4] FIO_ALIGN(32);
   const uint8_t *data = (const uint8_t *)data_;
 
 #define FIO_RISKY3_ROUND64(vi, w_)                                             \
@@ -6227,7 +6227,7 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
     nonce += !nonce;
     nonce *= 0xDB1DD478B9E93B1ULL;
     nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce += !nonce;
+    nonce |= 1;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
   fio_xmask2(buf, len, hash, nonce);
@@ -6635,30 +6635,32 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
-   {
-    char * str = "testing that risky hash is always the same hash";
+  {
+    char *str = "testing that risky hash is always the same hash";
     const size_t len = strlen(str);
     uint64_t org_hash = fio_risky_hash(str, len, 0);
     for (int i = 0; i < 8; ++i) {
-       char buf[128];
-       char * tmp = buf + i;
-       memcpy(tmp,str, len);
-       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
-       FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0), "hash should be consistent!");
-       FIO_ASSERT(tmp_hash == org_hash, "memory address shouldn't effect hash!");
-     }
-   }
+      char buf[128];
+      char *tmp = buf + i;
+      memcpy(tmp, str, len);
+      uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
+      FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0),
+                 "hash should be consistent!");
+      FIO_ASSERT(tmp_hash == org_hash, "memory address shouldn't effect hash!");
+    }
+  }
   for (int i = 0; i < 8; ++i) {
     char buf[128];
     uint64_t nonce = fio_rand64();
     uint64_t mask = fio_risky_ptr(&buf);
     const char *str = "this is a short text, to test risky masking";
+    const size_t len = strlen(str);
     char *tmp = buf + i;
-    FIO_MEMCPY(tmp, str, strlen(str));
-    fio_risky_mask(tmp, strlen(str), mask, nonce);
-    FIO_ASSERT(memcmp(tmp, str, strlen(str)), "Risky Hash masking failed");
+    FIO_MEMCPY(tmp, str, len);
+    fio_risky_mask(tmp, len, mask, nonce);
+    FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
     size_t err = 0;
-    for (size_t b = 0; b < strlen(str); ++b) {
+    for (size_t b = 0; b < len; ++b) {
       FIO_ASSERT(tmp[b] != str[b] || (err < 2),
                  "Risky Hash masking didn't mask buf[%zu] on offset "
                  "%d (statistical deviation?)",
@@ -6666,10 +6668,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, strlen(str), mask, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, strlen(str)),
-               "Risky Hash masking RT failed @ %d",
-               i);
+    fio_risky_mask(tmp, len, mask, nonce);
+    FIO_ASSERT(!memcmp(tmp, str, len), "Risky Hash masking RT failed @ %d", i);
   }
   const uint8_t alignment_test_offset = 0;
   if (alignment_test_offset)
@@ -7998,13 +7998,14 @@ iMap Creation Macro
   } FIO_NAME(array_name, seeker_s);                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC int FIO_NAME(array_name, is_valid)(array_type * pobj) {            \
-    return is_valid_fn(pobj);                                                  \
+    return !!is_valid_fn(pobj);                                                \
   }                                                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC imap_type FIO_NAME(array_name,                                     \
                                capa)(FIO_NAME(array_name, s) * a) {            \
-    imap_type r[2] = {((imap_type)1ULL << a->capa_bits), 0};                   \
-    return r[!a || !a->capa_bits];                                             \
+    if (!a || !a->capa_bits)                                                   \
+      return 0;                                                                \
+    return ((imap_type)1ULL << a->capa_bits);                                  \
   }                                                                            \
   /** Returns a pointer to the index map. */                                   \
   FIO_IFUNC imap_type *FIO_NAME(array_name,                                    \
@@ -8022,43 +8023,42 @@ iMap Creation Macro
   /** Allocates dynamic memory. */                                             \
   FIO_IFUNC int FIO_NAME(array_name, __alloc)(FIO_NAME(array_name, s) * a,     \
                                               size_t bits) {                   \
-    if (!bits || bits > ((sizeof(imap_type) << 3) - 1))                        \
+    if (!bits || bits > ((sizeof(imap_type) << 3) - 2))                        \
       return -1;                                                               \
     size_t capa = 1ULL << bits;                                                \
     size_t old_capa = FIO_NAME(array_name, capa)(a);                           \
     array_type *tmp = (array_type *)FIO_MEM_REALLOC(                           \
         a->ary,                                                                \
-        (a->bits ? (old_capa * (sizeof(*a->ary)) +                             \
+        (a->bits ? (old_capa * (sizeof(array_type)) +                          \
                     (old_capa * (sizeof(imap_type))))                          \
                  : 0),                                                         \
-        (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))),             \
-        (a->w * (sizeof(*a->ary))));                                           \
+        (capa * (sizeof(array_type)) + (capa * (sizeof(imap_type)))),          \
+        (a->w * (sizeof(array_type))));                                        \
     (void)old_capa; /* if unused */                                            \
     if (!tmp)                                                                  \
       return -1;                                                               \
     a->capa_bits = bits;                                                       \
     a->ary = tmp;                                                              \
     if (!FIO_MEM_REALLOC_IS_SAFE)                                              \
-      FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));            \
+      FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
     return 0;                                                                  \
   }                                                                            \
-  /** Returns the index map position and array position of a value (if any).   \
-   */                                                                          \
+  /** Returns the index map position and array position of a value, if any. */ \
   FIO_SFUNC FIO_NAME(array_name, seeker_s)                                     \
       FIO_NAME(array_name, seek)(FIO_NAME(array_name, s) * a,                  \
                                  array_type * pobj) {                          \
     FIO_NAME(array_name, seeker_s) r = {0, (~(imap_type)0), (~(imap_type)0)};  \
-    if (!a || !a->capa_bits)                                                   \
+    if (!a || ((!a->capa_bits) | (!a->ary)))                                   \
       return r;                                                                \
     r.pos = a->w;                                                              \
-    imap_type capa = FIO_NAME(array_name, capa)(a);                            \
-    imap_type *imap = FIO_NAME(array_name, imap)(a);                           \
+    imap_type capa = (imap_type)1UL << a->capa_bits;                           \
+    imap_type *imap = (imap_type *)(a->ary + capa);                            \
     const imap_type pos_mask = capa - 1;                                       \
     const imap_type hash_mask = ~pos_mask;                                     \
     const imap_type hash = hash_fn(pobj);                                      \
     imap_type tester = hash & hash_mask;                                       \
     tester += (!tester) << a->capa_bits;                                       \
-    tester -= (hash_mask == tester);                                           \
+    tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
@@ -8087,6 +8087,7 @@ iMap Creation Macro
         if (mini_steps == 2)                                                   \
           break;                                                               \
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
+        pos &= pos_mask;                                                       \
         ++mini_steps;                                                          \
       }                                                                        \
       pos += 0x43F82D0BUL; /* big step */                                      \
@@ -8138,14 +8139,19 @@ iMap Creation Macro
                                                   int overwrite) {             \
     if (!a || !is_valid_fn(&obj))                                              \
       return NULL;                                                             \
-    size_t capa = FIO_NAME(array_name, capa)(a);                               \
-    if (a->w == capa)                                                          \
-      FIO_NAME(array_name, __expand)(a);                                       \
-    else if (a->count != a->w && a->w + 1 == FIO_NAME(array_name, capa)(a))    \
-      FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));            \
+    {                                                                          \
+      size_t capa = FIO_NAME(array_name, capa)(a);                             \
+      if (a->w == capa)                                                        \
+        FIO_NAME(array_name, __expand)(a);                                     \
+      else if (a->count != a->w &&                                             \
+               (a->w + (a->w >> 1)) > FIO_NAME(array_name, capa)(a)) {         \
+        FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));          \
+        FIO_NAME(array_name, __fill_imap)(a);                                  \
+      }                                                                        \
+    }                                                                          \
     for (;;) {                                                                 \
       FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);  \
-      if (s.ipos == (imap_type)(~(imap_type)0)) {                              \
+      if (s.ipos == (imap_type)(~(imap_type)0)) { /* no room in the imap */    \
         FIO_NAME(array_name, __expand)(a);                                     \
         continue;                                                              \
       }                                                                        \
@@ -8156,6 +8162,8 @@ iMap Creation Macro
         FIO_NAME(array_name, imap)(a)[s.ipos] = s.set_val;                     \
         return a->ary + s.pos;                                                 \
       }                                                                        \
+      FIO_ASSERT_DEBUG(s.pos < a->w && s.ipos < FIO_NAME(array_name, capa)(a), \
+                       "WTF?");                                                \
       if (!overwrite)                                                          \
         return a->ary + s.pos;                                                 \
       a->ary[s.pos] = obj;                                                     \
@@ -8204,7 +8212,7 @@ iMap Testing
 #define FIO_IMAP_TESTER_IMAP_VALID(n)  ((n)[0])
 FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
                        size_t,
-                       uint16_t, /* good for up to 256 objects */
+                       uint32_t, /* good for up to 65K objects */
                        FIO_IMAP_TESTER_IMAP_HASH,
                        FIO_IMAP_TESTER_IMAP_CMP,
                        FIO_IMAP_TESTER_IMAP_VALID)
@@ -8216,15 +8224,19 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
   fprintf(stderr, "* testing core indexed array type (imap)\n");
   fio_imap_tester_s a = {0};
-  for (size_t val = 1; val < 64; ++val) {
+  for (size_t val = 1; val < 4096; ++val) {
     fio_imap_tester_set(&a, val, 1);
     FIO_ASSERT(a.count == val, "imap array count failed at set %zu!", val);
+    fio_imap_tester_set(&a, val, 0);
+    fio_imap_tester_set(&a, val, 0);
+    fio_imap_tester_set(&a, val, 0);
+    FIO_ASSERT(a.count == val, "imap array double-set error %zu!", val);
     FIO_ASSERT(fio_imap_tester_get(&a, val) &&
                    fio_imap_tester_get(&a, val)[0] == val,
                "imap array get failed for %zu!",
                val);
   }
-  for (size_t val = 64; --val;) {
+  for (size_t val = 4096; --val;) {
     FIO_ASSERT(fio_imap_tester_get(&a, val) &&
                    fio_imap_tester_get(&a, val)[0] == val,
                "imap array get failed for %zu (2)!",
@@ -9535,27 +9547,26 @@ typedef struct {
 
 FIO_IFUNC uint64_t fio___state_callback_hash_fn(fio___state_task_s *t) {
   uint64_t hash = fio_risky_ptr((void *)(uintptr_t)(t->func));
-  hash ^= hash + fio_risky_ptr((void *)(uintptr_t)(t->arg));
+  hash ^= hash + fio_risky_ptr(t->arg);
   return hash;
 }
-FIO_IFUNC uint64_t fio___state_callback_cmp_fn(fio___state_task_s *a,
-                                               fio___state_task_s *b) {
-  return (a->func == b->func && a->arg == b->arg);
-}
-FIO_IFUNC int fio___state_callback_valid_fn(fio___state_task_s *t) {
-  return t->func != NULL;
-}
+
+#define FIO_STATE_CALLBACK_IS_VALID(pobj) ((pobj)->func)
+#define FIO_STATE_CALLBACK_CMP(a, b)                                           \
+  ((a)->func == (b)->func && (a)->arg == (b)->arg)
 FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
                        fio___state_task_s,
-                       uint64_t,
+                       uint32_t,
                        fio___state_callback_hash_fn,
-                       fio___state_callback_cmp_fn,
-                       fio___state_callback_valid_fn)
+                       FIO_STATE_CALLBACK_CMP,
+                       FIO_STATE_CALLBACK_IS_VALID)
+#undef FIO_STATE_CALLBACK_CMP
+#undef FIO_STATE_CALLBACK_IS_VALID
 
 /* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
-static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER];
+static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
 static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
@@ -9598,7 +9609,7 @@ SFUNC void fio_state_callback_add(fio_state_event_type_e e,
     return;
   fio___state_task_s t = {.func = func, .arg = arg};
   fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  fio___state_map_set(fio___state_tasks_array + (uintptr_t)e, t, 1);
+  fio___state_map_set(fio___state_tasks_array + (uintptr_t)e, t, 0);
   fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
   if (e == FIO_CALL_ON_INITIALIZE &&
       fio___state_tasks_array_lock[FIO_CALL_NEVER]) {
@@ -9717,11 +9728,52 @@ FIO_DESTRUCTOR(fio___state_cleanup) {
 Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+static size_t FIO_NAME_TEST(stl, state_task_counter) = 0;
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task)(void *arg) {
+  size_t *i = (size_t *)arg;
+  ++i[0];
+}
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task_global)(void *arg) {
+  (void)arg;
+  ++FIO_NAME_TEST(stl, state_task_counter);
+}
 FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
   fprintf(stderr, "* testing state callback API (TODO)\n");
+  size_t count = 0;
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task),
+                           &count);
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task_global),
+                           (void *)i);
+  }
+  FIO_ASSERT(!count && !FIO_NAME_TEST(stl, state_task_counter),
+             "callbacks should NOT have been called yet");
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1, "count error for local counter callback (%zu)", count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu)",
+             FIO_NAME_TEST(stl, state_task_counter));
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task),
+                              &count);
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task_global),
+                              (void *)i);
+  }
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1,
+             "count error for local counter callback (%zu) - not removed?",
+             count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu) - not removed?",
+             FIO_NAME_TEST(stl, state_task_counter));
 }
 
 #endif /* FIO_TEST_CSTL */
