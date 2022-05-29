@@ -186,9 +186,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   return r;
 }
 
-/**
- * Masks data using a Risky Hash and a counter mode nonce.
- */
+/** Masks data using a Risky Hash and a counter mode nonce. */
 IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
   { /* avoid zero nonce, make sure nonce is effective and odd */
     nonce += !nonce;
@@ -619,11 +617,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   for (int i = 0; i < 8; ++i) {
     char buf[128];
     uint64_t nonce = fio_rand64();
-    uint64_t mask = fio_risky_ptr(&buf);
+    uint64_t nonce2 = nonce;
+    uint64_t mask = fio_risky_ptr(buf);
     const char *str = "this is a short text, to test risky masking";
     const size_t len = 43; // strlen(str);
     char *tmp = buf + i;
     FIO_MEMCPY(tmp, str, len);
+    FIO_ASSERT(!memcmp(tmp, str, len),
+               "Risky Hash test failed to copy String?!");
     fio_risky_mask(tmp, len, mask, nonce);
     FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
     size_t err = 0;
@@ -636,7 +637,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
       err += (tmp[b] == str[b]);
     }
     fio_risky_mask(tmp, len, mask, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, len), "Risky Hash masking RT failed @ %d", i);
+    FIO_ASSERT(nonce == nonce2 && mask == fio_risky_ptr(buf),
+               "Risky Hash test failed - unexpected error!");
+    FIO_ASSERT(!memcmp(tmp, str, len),
+               "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
+               i,
+               (int)len,
+               tmp,
+               str);
   }
   const uint8_t alignment_test_offset = 0;
   if (alignment_test_offset)
