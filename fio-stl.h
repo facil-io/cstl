@@ -3569,12 +3569,13 @@ SFUNC uint64_t fio_rand64(void);
 SFUNC void fio_rand_bytes(void *target, size_t len);
 
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
-  fprintf(stderr, "* Testing memcpy primitives.\n");
+  fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
     char buf[128];
     const char *str = "This string should be 39 chars long, ok";
     size_t len = strlen(str);
     for (size_t i = 0; i < 31; ++i) {
+      buf[i + len] = '\xFF';
       FIO_MEMCPY63x(buf + i, str, len);
       FIO_ASSERT(!memcmp(buf + i, str, len),
                  "FIO_MEMCPY63x failed @ %zu\n\t%.*s != %s",
@@ -3582,6 +3583,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                  (int)len,
                  buf + i,
                  str);
+      FIO_ASSERT(buf[i + len] == '\xFF', "FIO_MEMCPY63x overflow?");
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
@@ -6669,7 +6671,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t mask = fio_risky_ptr(buf);
     const char *str = "this is a short text, to test risky masking";
     const size_t len = 43; // strlen(str);
-    char *tmp = buf + i;
+    char *const tmp = buf + i;
     FIO_MEMCPY(tmp, str, len);
     FIO_ASSERT(!memcmp(tmp, str, len),
                "Risky Hash test failed to copy String?!");
@@ -6684,9 +6686,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, len, mask, nonce);
     FIO_ASSERT(nonce == nonce2 && mask == fio_risky_ptr(buf),
                "Risky Hash test failed - unexpected error!");
+    fio_risky_mask(tmp, len, mask, nonce);
     FIO_ASSERT(!memcmp(tmp, str, len),
                "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
                i,
@@ -23923,9 +23925,10 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  return (
-      uint32_t)((size_t)1ULL
-                << (((FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map)))->bits);
+  FIO_MAP_T *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (o->map)
+    return (uint32_t)((size_t)1ULL << o->bits);
+  return 0;
 }
 
 /* The number of objects in the map capacity. */

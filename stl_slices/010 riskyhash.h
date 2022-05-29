@@ -621,7 +621,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t mask = fio_risky_ptr(buf);
     const char *str = "this is a short text, to test risky masking";
     const size_t len = 43; // strlen(str);
-    char *tmp = buf + i;
+    char *const tmp = buf + i;
     FIO_MEMCPY(tmp, str, len);
     FIO_ASSERT(!memcmp(tmp, str, len),
                "Risky Hash test failed to copy String?!");
@@ -636,9 +636,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  i);
       err += (tmp[b] == str[b]);
     }
-    fio_risky_mask(tmp, len, mask, nonce);
     FIO_ASSERT(nonce == nonce2 && mask == fio_risky_ptr(buf),
                "Risky Hash test failed - unexpected error!");
+    fio_risky_mask(tmp, len, mask, nonce);
     FIO_ASSERT(!memcmp(tmp, str, len),
                "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
                i,

@@ -513,9 +513,10 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  return (
-      uint32_t)((size_t)1ULL
-                << (((FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map)))->bits);
+  FIO_MAP_T *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (o->map)
+    return (uint32_t)((size_t)1ULL << o->bits);
+  return 0;
 }
 
 /* The number of objects in the map capacity. */

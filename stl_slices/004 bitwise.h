@@ -895,12 +895,13 @@ SFUNC uint64_t fio_rand64(void);
 SFUNC void fio_rand_bytes(void *target, size_t len);
 
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
-  fprintf(stderr, "* Testing memcpy primitives.\n");
+  fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
     char buf[128];
     const char *str = "This string should be 39 chars long, ok";
     size_t len = strlen(str);
     for (size_t i = 0; i < 31; ++i) {
+      buf[i + len] = '\xFF';
       FIO_MEMCPY63x(buf + i, str, len);
       FIO_ASSERT(!memcmp(buf + i, str, len),
                  "FIO_MEMCPY63x failed @ %zu\n\t%.*s != %s",
@@ -908,6 +909,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                  (int)len,
                  buf + i,
                  str);
+      FIO_ASSERT(buf[i + len] == '\xFF', "FIO_MEMCPY63x overflow?");
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
