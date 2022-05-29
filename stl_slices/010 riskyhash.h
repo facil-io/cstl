@@ -621,7 +621,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce = fio_rand64();
     uint64_t mask = fio_risky_ptr(&buf);
     const char *str = "this is a short text, to test risky masking";
-    const size_t len = strlen(str);
+    const size_t len = 43; // strlen(str);
     char *tmp = buf + i;
     FIO_MEMCPY(tmp, str, len);
     fio_risky_mask(tmp, len, mask, nonce);
