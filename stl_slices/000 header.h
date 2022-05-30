@@ -691,7 +691,7 @@ Pointer Math
 #define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
   ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
 
-/** Find the root object (of a struct) from it's field. */
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
   FIO_PTR_MATH_SUB(T_type,                                                     \
                    ptr,                                                        \

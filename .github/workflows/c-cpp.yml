@@ -13,11 +13,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Test STL in debug mode
+      run: make test/db/stl
     - name: Test STL
       run: make test/stl
     - name: Test fio_mallc speed
       run: make test/malloc
     - name: clean
       run: make clean
-    - name: Test STL in debug mode
-      run: make test/db/stl
