@@ -4092,13 +4092,21 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
   bits &= 63;
   uint64_t c = 0, trash;
   uint64_t *p_select[] = {dest + offset, &trash};
+  if (bits) {
+    for (size_t i = 0; i < len; (++i), ++p_select[0]) {
+      uint64_t ntmp = n[i];
+      uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+      ;
+      dest[i] &= (uint64_t)0ULL - (i >= offset);
+      p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
+      c = ctmp;
+    }
+    return;
+  }
   for (size_t i = 0; i < len; (++i), ++p_select[0]) {
     uint64_t ntmp = n[i];
-    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
-    ;
     dest[i] &= (uint64_t)0ULL - (i >= offset);
-    p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
-    c = ctmp;
+    p_select[p_select[0] >= (dest + len)][0] = ntmp;
   }
 }
 
@@ -17175,6 +17183,7 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
   if (!filename || !filename[0])
     return r;
   const char *pos = filename;
+  r.basename.buf = (char *)filename;
   for (;;) {
     switch (*pos) {
     case 0:
@@ -17185,11 +17194,8 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
           r.ext.buf = NULL;
           r.ext.len = 0;
         }
-      } else if (r.basename.buf) {
-        r.basename.len = pos - r.basename.buf;
       } else {
-        r.basename.buf = (char *)filename;
-        r.basename.len = (size_t)(pos - filename);
+        r.basename.len = (size_t)(pos - r.basename.buf);
       }
       if (!r.folder.len)
         r.folder.buf = NULL;
@@ -17208,8 +17214,6 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
     case '.':
       if (!r.ext.buf) {
         r.ext.buf = (char *)pos + 1;
-        if (!r.basename.buf)
-          r.basename.buf = (char *)filename;
         r.basename.len = (char *)pos - r.basename.buf;
       }
       break;
@@ -19290,16 +19294,16 @@ Binary String Type - Embedded Strings
 ***************************************************************************** */
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
-  fio___bstr_meta_s *bstr_m = ((fio___bstr_meta_s *)dest->buf) - 1;
+  fio___bstr_meta_s *bstr_m = NULL;
   const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
   if (!dest->capa)
     bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   else
-    bstr_m =
-        (fio___bstr_meta_s *)FIO_MEM_REALLOC_(bstr_m,
-                                              sizeof(bstr_m[0]) + bstr_m->capa,
-                                              new_capa,
-                                              bstr_m->len + sizeof(bstr_m[0]));
+    bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
+        ((fio___bstr_meta_s *)dest->buf - 1),
+        sizeof(bstr_m[0]) + dest->capa,
+        new_capa,
+        ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
   dest->buf = (char *)(bstr_m + 1);
@@ -24120,6 +24124,7 @@ Internal Helpers
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
                             __imap)(FIO_NAME(FIO_MAP_NAME, s) * o) {
+  // FIO_ASSERT(o && o->map, "shouldn't have been called.");
   return (uint8_t *)(o->map + FIO_MAP_CAPA(o->bits));
 }
 
@@ -24548,6 +24553,8 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
   FIO_NAME(FIO_MAP_NAME, node_s) *r = NULL;
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->count)
+    return r;
 #if defined(FIO_MAP_HASH_FN)
   uint64_t hash = FIO_MAP_HASH_FN(key);
 #endif
@@ -24904,6 +24911,8 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->count)
+    return r;
 #if !FIO_MAP_ORDERED
   uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   size_t capa = FIO_MAP_CAPA(o->bits);

@@ -700,6 +700,7 @@ Internal Helpers
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
                             __imap)(FIO_NAME(FIO_MAP_NAME, s) * o) {
+  // FIO_ASSERT(o && o->map, "shouldn't have been called.");
   return (uint8_t *)(o->map + FIO_MAP_CAPA(o->bits));
 }
 
@@ -1128,6 +1129,8 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
   FIO_NAME(FIO_MAP_NAME, node_s) *r = NULL;
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->count)
+    return r;
 #if defined(FIO_MAP_HASH_FN)
   uint64_t hash = FIO_MAP_HASH_FN(key);
 #endif
@@ -1484,6 +1487,8 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->count)
+    return r;
 #if !FIO_MAP_ORDERED
   uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   size_t capa = FIO_MAP_CAPA(o->bits);

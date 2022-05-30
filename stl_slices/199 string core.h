@@ -2004,16 +2004,16 @@ Binary String Type - Embedded Strings
 ***************************************************************************** */
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
-  fio___bstr_meta_s *bstr_m = ((fio___bstr_meta_s *)dest->buf) - 1;
+  fio___bstr_meta_s *bstr_m = NULL;
   const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
   if (!dest->capa)
     bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   else
-    bstr_m =
-        (fio___bstr_meta_s *)FIO_MEM_REALLOC_(bstr_m,
-                                              sizeof(bstr_m[0]) + bstr_m->capa,
-                                              new_capa,
-                                              bstr_m->len + sizeof(bstr_m[0]));
+    bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
+        ((fio___bstr_meta_s *)dest->buf - 1),
+        sizeof(bstr_m[0]) + dest->capa,
+        new_capa,
+        ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
   dest->buf = (char *)(bstr_m + 1);

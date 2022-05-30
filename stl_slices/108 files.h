@@ -351,6 +351,7 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
   if (!filename || !filename[0])
     return r;
   const char *pos = filename;
+  r.basename.buf = (char *)filename;
   for (;;) {
     switch (*pos) {
     case 0:
@@ -361,11 +362,8 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
           r.ext.buf = NULL;
           r.ext.len = 0;
         }
-      } else if (r.basename.buf) {
-        r.basename.len = pos - r.basename.buf;
       } else {
-        r.basename.buf = (char *)filename;
-        r.basename.len = (size_t)(pos - filename);
+        r.basename.len = (size_t)(pos - r.basename.buf);
       }
       if (!r.folder.len)
         r.folder.buf = NULL;
@@ -384,8 +382,6 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
     case '.':
       if (!r.ext.buf) {
         r.ext.buf = (char *)pos + 1;
-        if (!r.basename.buf)
-          r.basename.buf = (char *)filename;
         r.basename.len = (char *)pos - r.basename.buf;
       }
       break;

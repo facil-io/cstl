@@ -281,13 +281,21 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
   bits &= 63;
   uint64_t c = 0, trash;
   uint64_t *p_select[] = {dest + offset, &trash};
+  if (bits) {
+    for (size_t i = 0; i < len; (++i), ++p_select[0]) {
+      uint64_t ntmp = n[i];
+      uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
+      ;
+      dest[i] &= (uint64_t)0ULL - (i >= offset);
+      p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
+      c = ctmp;
+    }
+    return;
+  }
   for (size_t i = 0; i < len; (++i), ++p_select[0]) {
     uint64_t ntmp = n[i];
-    uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
-    ;
     dest[i] &= (uint64_t)0ULL - (i >= offset);
-    p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
-    c = ctmp;
+    p_select[p_select[0] >= (dest + len)][0] = ntmp;
   }
 }
 
