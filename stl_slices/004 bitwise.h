@@ -961,8 +961,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
 #define FIO___BITMAP_TEST_BITS(itype, utype, bits)                             \
-  for (size_t i = 0; i <= (bits); ++i) {                                       \
-    char tmp_buf[16];                                                          \
+  for (size_t i = 0; i < (bits); ++i) {                                        \
+    char tmp_buf[32];                                                          \
     itype n = ((utype)1 << i);                                                 \
     FIO_NAME2(fio_u, buf##bits##_local)(tmp_buf, n);                           \
     itype r = FIO_NAME2(fio_buf, u##bits##_local)(tmp_buf);                    \

@@ -253,13 +253,22 @@ FIO_IFUNC void fio_math_shr(uint64_t *dest,
   // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu bits", len - offset, bits);
   uint64_t c = 0, trash;
   uint64_t *p_select[] = {dest + offset, &trash};
+  if (bits) {
+    while (len--) {
+      --p_select[0];
+      uint64_t ntmp = n[len];
+      uint64_t ctmp = (ntmp << (64 - bits));
+      dest[len] &= (uint64_t)0ULL - (len < offset);
+      p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
+      c = ctmp;
+    }
+    return;
+  }
   while (len--) {
     --p_select[0];
     uint64_t ntmp = n[len];
-    uint64_t ctmp = (ntmp << (64 - bits)) & ((uint64_t)0ULL - (!!bits));
     dest[len] &= (uint64_t)0ULL - (len < offset);
-    p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
-    c = ctmp;
+    p_select[p_select[0] < dest][0] = ntmp;
   }
 }
 

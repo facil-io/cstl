@@ -259,8 +259,9 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
     w[3] = fio_ltole64(w[3]);
-    seed ^= w[0] + w[1] + w[2] + w[3];
+    uint64_t sum = w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
+    seed ^= sum;
     data += 32;
   }
   /* copy bytes to the word block in little endian */
@@ -273,17 +274,18 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
     w[3] = fio_ltole64(w[3]);
     FIO_STABLE_HASH_ROUND_FULL();
   }
-  /* inner vector avalanche */
-  FIO_STABLE_HASH_MUL_PRIME(w);
-  v[0] ^= fio_lrot64(w[0], 7);
-  v[1] ^= fio_lrot64(w[1], 11);
-  v[2] ^= fio_lrot64(w[2], 13);
-  v[3] ^= fio_lrot64(w[3], 17);
+  /* inner vector mini-avalanche */
+  FIO_STABLE_HASH_MUL_PRIME(v);
+  v[0] ^= fio_lrot64(v[0], 7);
+  v[1] ^= fio_lrot64(v[1], 11);
+  v[2] ^= fio_lrot64(v[2], 13);
+  v[3] ^= fio_lrot64(v[3], 17);
 
   dest[0] = v[0];
   dest[1] = v[1];
   dest[2] = v[2];
   dest[3] = v[3];
+  return;
 }
 
 /*  Computes a facil.io Stable Hash. */

@@ -578,14 +578,17 @@ Binary String Type - Embedded Strings
 FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
     return;
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
+  fio___bstr_meta_s *meta_map[2] = {
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
+      mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   if (FIO_LIKELY(meta->len <= meta->capa))
     return FIO_STR_INFO3(bstr, meta->len, meta->capa);
@@ -595,13 +598,15 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
 
 /** Gets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC size_t fio_bstr_len(char *bstr) {
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   return meta->len;
 }
 
 /** Sets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   meta->len = len;
   bstr[len] = 0;
   return bstr;
@@ -610,7 +615,9 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
+  fio___bstr_meta_s *meta_map[2] = {
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
+      mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   if (FIO_LIKELY(meta->len <= meta->capa))
     return FIO_BUF_INFO2(bstr, meta->len);

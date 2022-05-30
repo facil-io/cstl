@@ -283,30 +283,12 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
 
 SFUNC int64_t fio_atol10(char **pstr) {
   int64_t r;
-  const uint64_t loop_limit = ((~(uint64_t)0ULL) / 10000) + 1;
   const uint64_t add_limit = (~(uint64_t)0ULL) - 8;
   char *pos = *pstr;
   const size_t inv = (pos[0] == '-');
   pos += inv;
   uint64_t val = 0;
-  uint64_t r0, r1, r2, r3;
-  for (;;) {
-    r0 = pos[0] - '0';
-    r1 = pos[1] - '0';
-    r2 = pos[2] - '0';
-    r3 = pos[3] - '0';
-    if ((r0 < 10UL) & (r1 < 10UL) & (r2 < 10UL) & (r3 < 10UL)) {
-      val *= 10000ULL;
-      r0 *= 1000ULL;
-      r1 *= 100ULL;
-      r2 *= 10ULL;
-      val += r0 + r1 + r2 + r3;
-      pos += 4;
-      if (val < loop_limit)
-        continue;
-    }
-    break;
-  }
+  uint64_t r0;
   while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
     val *= 10;
     val += r0;

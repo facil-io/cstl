@@ -3635,8 +3635,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
 #define FIO___BITMAP_TEST_BITS(itype, utype, bits)                             \
-  for (size_t i = 0; i <= (bits); ++i) {                                       \
-    char tmp_buf[16];                                                          \
+  for (size_t i = 0; i < (bits); ++i) {                                        \
+    char tmp_buf[32];                                                          \
     itype n = ((utype)1 << i);                                                 \
     FIO_NAME2(fio_u, buf##bits##_local)(tmp_buf, n);                           \
     itype r = FIO_NAME2(fio_buf, u##bits##_local)(tmp_buf);                    \
@@ -4062,13 +4062,22 @@ FIO_IFUNC void fio_math_shr(uint64_t *dest,
   // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu bits", len - offset, bits);
   uint64_t c = 0, trash;
   uint64_t *p_select[] = {dest + offset, &trash};
+  if (bits) {
+    while (len--) {
+      --p_select[0];
+      uint64_t ntmp = n[len];
+      uint64_t ctmp = (ntmp << (64 - bits));
+      dest[len] &= (uint64_t)0ULL - (len < offset);
+      p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
+      c = ctmp;
+    }
+    return;
+  }
   while (len--) {
     --p_select[0];
     uint64_t ntmp = n[len];
-    uint64_t ctmp = (ntmp << (64 - bits)) & ((uint64_t)0ULL - (!!bits));
     dest[len] &= (uint64_t)0ULL - (len < offset);
-    p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
-    c = ctmp;
+    p_select[p_select[0] < dest][0] = ntmp;
   }
 }
 
@@ -4735,30 +4744,12 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
 
 SFUNC int64_t fio_atol10(char **pstr) {
   int64_t r;
-  const uint64_t loop_limit = ((~(uint64_t)0ULL) / 10000) + 1;
   const uint64_t add_limit = (~(uint64_t)0ULL) - 8;
   char *pos = *pstr;
   const size_t inv = (pos[0] == '-');
   pos += inv;
   uint64_t val = 0;
-  uint64_t r0, r1, r2, r3;
-  for (;;) {
-    r0 = pos[0] - '0';
-    r1 = pos[1] - '0';
-    r2 = pos[2] - '0';
-    r3 = pos[3] - '0';
-    if ((r0 < 10UL) & (r1 < 10UL) & (r2 < 10UL) & (r3 < 10UL)) {
-      val *= 10000ULL;
-      r0 *= 1000ULL;
-      r1 *= 100ULL;
-      r2 *= 10ULL;
-      val += r0 + r1 + r2 + r3;
-      pos += 4;
-      if (val < loop_limit)
-        continue;
-    }
-    break;
-  }
+  uint64_t r0;
   while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
     val *= 10;
     val += r0;
@@ -6309,8 +6300,9 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
     w[3] = fio_ltole64(w[3]);
-    seed ^= w[0] + w[1] + w[2] + w[3];
+    uint64_t sum = w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
+    seed ^= sum;
     data += 32;
   }
   /* copy bytes to the word block in little endian */
@@ -6323,17 +6315,18 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
     w[3] = fio_ltole64(w[3]);
     FIO_STABLE_HASH_ROUND_FULL();
   }
-  /* inner vector avalanche */
-  FIO_STABLE_HASH_MUL_PRIME(w);
-  v[0] ^= fio_lrot64(w[0], 7);
-  v[1] ^= fio_lrot64(w[1], 11);
-  v[2] ^= fio_lrot64(w[2], 13);
-  v[3] ^= fio_lrot64(w[3], 17);
+  /* inner vector mini-avalanche */
+  FIO_STABLE_HASH_MUL_PRIME(v);
+  v[0] ^= fio_lrot64(v[0], 7);
+  v[1] ^= fio_lrot64(v[1], 11);
+  v[2] ^= fio_lrot64(v[2], 13);
+  v[3] ^= fio_lrot64(v[3], 17);
 
   dest[0] = v[0];
   dest[1] = v[1];
   dest[2] = v[2];
   dest[3] = v[3];
+  return;
 }
 
 /*  Computes a facil.io Stable Hash. */
@@ -10353,6 +10346,7 @@ Aligned memory copying
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
+  uint64_t tmp_buf[8] FIO_ALIGN(16);
   if ((d == s) | !bytes | !d | !s) {
     FIO_LOG_DEBUG2("fio_memcpy null");
     return;
@@ -10363,21 +10357,25 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     /* 4 word groups */
     char *dstop = d + (bytes & (~(size_t)127ULL));
     for (; d < dstop;) {
-      FIO_MEMCPY64(d, s);
-      FIO_MEMCPY64(d + 64, s + 64);
+      FIO_MEMCPY64(tmp_buf, s);
+      FIO_MEMCPY64(d, tmp_buf);
+      FIO_MEMCPY64(tmp_buf, s + 64);
+      FIO_MEMCPY64(d + 64, tmp_buf);
+      // FIO_MEMCPY64(d + 64, s + 64);
       d += 128;
       s += 128;
     }
     if ((bytes & 64)) {
-      FIO_MEMCPY64(d, s);
+      FIO_MEMCPY64(tmp_buf, s);
+      FIO_MEMCPY64(d, tmp_buf);
       d += 64;
       s += 64;
     }
-    FIO_MEMCPY63x(d, s, bytes);
+    FIO_MEMCPY63x(tmp_buf, s, bytes);
+    FIO_MEMCPY63x(d, tmp_buf, bytes);
     return;
   } else {
     /* some memory overlaps, walk backwards (memmove) */
-    uint64_t tmp_buf[8] FIO_ALIGN(16);
     char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
@@ -17863,14 +17861,17 @@ Binary String Type - Embedded Strings
 FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
     return;
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
+  fio___bstr_meta_s *meta_map[2] = {
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
+      mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   if (FIO_LIKELY(meta->len <= meta->capa))
     return FIO_STR_INFO3(bstr, meta->len, meta->capa);
@@ -17880,13 +17881,15 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
 
 /** Gets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC size_t fio_bstr_len(char *bstr) {
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   return meta->len;
 }
 
 /** Sets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
-  fio___bstr_meta_s *meta = (((fio___bstr_meta_s *)bstr) - 1);
+  fio___bstr_meta_s *meta =
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
   meta->len = len;
   bstr[len] = 0;
   return bstr;
@@ -17895,7 +17898,9 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {(((fio___bstr_meta_s *)bstr) - 1), mem};
+  fio___bstr_meta_s *meta_map[2] = {
+      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
+      mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   if (FIO_LIKELY(meta->len <= meta->capa))
     return FIO_BUF_INFO2(bstr, meta->len);

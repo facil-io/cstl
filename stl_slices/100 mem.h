@@ -542,6 +542,7 @@ Aligned memory copying
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
+  uint64_t tmp_buf[8] FIO_ALIGN(16);
   if ((d == s) | !bytes | !d | !s) {
     FIO_LOG_DEBUG2("fio_memcpy null");
     return;
@@ -552,21 +553,25 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     /* 4 word groups */
     char *dstop = d + (bytes & (~(size_t)127ULL));
     for (; d < dstop;) {
-      FIO_MEMCPY64(d, s);
-      FIO_MEMCPY64(d + 64, s + 64);
+      FIO_MEMCPY64(tmp_buf, s);
+      FIO_MEMCPY64(d, tmp_buf);
+      FIO_MEMCPY64(tmp_buf, s + 64);
+      FIO_MEMCPY64(d + 64, tmp_buf);
+      // FIO_MEMCPY64(d + 64, s + 64);
       d += 128;
       s += 128;
     }
     if ((bytes & 64)) {
-      FIO_MEMCPY64(d, s);
+      FIO_MEMCPY64(tmp_buf, s);
+      FIO_MEMCPY64(d, tmp_buf);
       d += 64;
       s += 64;
     }
-    FIO_MEMCPY63x(d, s, bytes);
+    FIO_MEMCPY63x(tmp_buf, s, bytes);
+    FIO_MEMCPY63x(d, tmp_buf, bytes);
     return;
   } else {
     /* some memory overlaps, walk backwards (memmove) */
-    uint64_t tmp_buf[8] FIO_ALIGN(16);
     char *const dstop = d + (bytes & 63);
     d += bytes;
     s += bytes;
