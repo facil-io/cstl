@@ -691,7 +691,7 @@ Pointer Math
 #define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
   ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
 
-/** Find the root object (of a struct) from it's field. */
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
   FIO_PTR_MATH_SUB(T_type,                                                     \
                    ptr,                                                        \
@@ -17178,43 +17178,41 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
   for (;;) {
     switch (*pos) {
     case 0:
-      if (r.folder.buf) {
-        r.basename.buf = r.folder.buf + r.folder.len;
-        r.basename.len = (size_t)(pos - (r.folder.buf + r.folder.len));
+      if (r.ext.buf) {
+        r.ext.len = pos - r.ext.buf;
+        if (!r.basename.len) {
+          r.basename = FIO_BUF_INFO2(--r.ext.buf, ++r.ext.len);
+          r.ext.buf = NULL;
+          r.ext.len = 0;
+        }
+      } else if (r.basename.buf) {
+        r.basename.len = pos - r.basename.buf;
       } else {
         r.basename.buf = (char *)filename;
         r.basename.len = (size_t)(pos - filename);
       }
-      if (pos == r.folder.buf + r.folder.len) {
-        r.basename.buf = 0;
-        r.basename.len = 0;
-        r.ext.buf = 0;
-        r.ext.len = 0;
-        return r;
-      }
-      if (r.ext.buf) {
-        r.ext.len = pos - r.ext.buf;
-        if (FIO_UNLIKELY(filename + r.folder.len == r.ext.buf)) {
-          r.basename.buf = r.ext.buf;
-          r.basename.len = r.ext.len;
-          r.ext.buf = 0;
-          r.ext.len = 0;
-        } else if (r.ext.len > 1) {
-          r.basename.len -= r.ext.len;
-          ++r.ext.buf; /* skip the '.' */
-          --r.ext.len;
-        } else {
-          r.ext.buf = 0;
-          r.ext.len = 0;
-        }
-      }
+      if (!r.folder.len)
+        r.folder.buf = NULL;
+      if (!r.basename.len)
+        r.basename.buf = NULL;
+      if (!r.ext.len)
+        r.ext.buf = NULL;
       return r;
     case FIO_FOLDER_SEPARATOR:
       r.folder.buf = (char *)filename;
       r.folder.len = (size_t)(pos - filename) + 1;
+      r.basename.buf = (char *)pos + 1;
       r.ext.buf = NULL;
+      r.basename.len = 0;
       break;
-    case '.': r.ext.buf = (char *)pos; break;
+    case '.':
+      if (!r.ext.buf) {
+        r.ext.buf = (char *)pos + 1;
+        if (!r.basename.buf)
+          r.basename.buf = (char *)filename;
+        r.basename.len = (char *)pos - r.basename.buf;
+      }
+      break;
     }
     ++pos;
   }
@@ -17259,19 +17257,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
              r.ext.buf == (filename_test[i].str +
                            (size_t)filename_test[i].result.ext.buf)),
         "fio_filename_parse error for %s"
-        "\n\t folder:    (%zu) %.*s"
-        "\n\t basename:  (%zu) %.*s"
-        "\n\t extension: (%zu) %.*s",
+        "\n\t folder:    (%zu) %.*s (%p)"
+        "\n\t basename:  (%zu) %.*s (%p)"
+        "\n\t extension: (%zu) %.*s (%p)",
         filename_test[i].str,
         r.folder.len,
         (int)r.folder.len,
         (r.folder.buf ? r.folder.buf : "null"),
+        r.folder.buf,
         r.basename.len,
         (int)r.basename.len,
         (r.basename.buf ? r.basename.buf : "null"),
+        r.basename.buf,
         r.ext.len,
         (int)r.ext.len,
-        (r.ext.buf ? r.ext.buf : "null"));
+        (r.ext.buf ? r.ext.buf : "null"),
+        r.ext.buf);
   }
 }
 
@@ -24765,11 +24766,11 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->count)
+    return r;
   uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   size_t capa = FIO_MAP_CAPA(o->bits);
   size_t pos_counter = 0;
-  if (!o->count)
-    return r;
   if (!current_pos || !current_pos->private_.map_validator) {
     goto find_pos;
   }
