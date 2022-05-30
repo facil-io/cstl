@@ -273,7 +273,7 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
     return val;
   }
   if (!(val & 0x8000000000000000ULL)) {
-    val = (int64_t)0LL - val;
+    val = (int64_t)0LL - (int64_t)val;
     return val;
   }
   /* read overflow */
@@ -557,13 +557,13 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       int64_t t = num / 10;
       uint64_t l = 0;
       if (num < 0) {
-        num = 0 - num; /* might fail due to overflow, but fixed with tail
-        (t) */
-        t = (int64_t)0 - t;
+        /* may fail due to overflow, fixed with tail (t) */
+        num = (uint64_t)0 - (uint64_t)num;
+        t = (int64_t)((uint64_t)((uint64_t)0 - (uint64_t)t));
         dest[len++] = '-';
       }
       while (num) {
-        buf[l++] = '0' + (num - (t * 10));
+        buf[l++] = '0' + ((uint64_t)num - (uint64_t)(t * 10));
         num = t;
         t = num / 10;
       }

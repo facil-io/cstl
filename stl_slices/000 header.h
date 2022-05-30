@@ -693,7 +693,9 @@ Pointer Math
 
 /** Find the root object (of a struct) from it's field. */
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type, ptr, (&((T_type *)0)->field))
+  FIO_PTR_MATH_SUB(T_type,                                                     \
+                   ptr,                                                        \
+                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 
 /* *****************************************************************************
 Security Related macros

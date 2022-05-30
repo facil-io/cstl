@@ -112,9 +112,9 @@ else
   LINKER_LIBS=pthread m
 endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
-OPTIMIZATION=-O3 
-# optimization level in debug mode.
-OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=thread -fsanitize=undefined -fno-omit-frame-pointer
+OPTIMIZATION=-O3
+# optimization level in debug mode. i.e.: -fsanitize=thread
+OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
@@ -683,7 +683,7 @@ run: | build
 
 .PHONY : set_debug_flags___
 set_debug_flags___:
-	$(eval OPTIMIZATION=$($(OPTIMIZATION_DEBUG)))
+	$(eval OPTIMIZATION=$(OPTIMIZATION_DEBUG))
 	$(eval CFLAGS+=-coverage -DDEBUG=1)
 	$(eval CXXFLAGS+=-coverage -DDEBUG=1)
 	$(eval LINKER_FLAGS=-coverage -DDEBUG=1 $(LINKER_FLAGS))

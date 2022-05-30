@@ -169,7 +169,7 @@ FIO_IFUNC const char *fio___json_consume_string(fio_json_parser_s *p,
     buffer = (const char *)memchr(buffer, '\"', stop - buffer);
     if (!buffer)
       return NULL;
-    size_t escaped = 1;
+    int escaped = 1;
     while (buffer[0 - escaped] == '\\')
       ++escaped;
     if (escaped & 1)
