@@ -83,7 +83,8 @@ Test summery
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
   /* TODO: add more tests */
-  fprintf(stderr, "* testing fio_srv units.\n");
+  fprintf(stderr, "* testing fio_srv units (TODO).\n");
+  return;
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
 }
 

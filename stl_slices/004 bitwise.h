@@ -785,6 +785,7 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
   FIO_MEMCPY7x(&tmp, buf, len);
   tmp ^= mask;
   FIO_MEMCPY7x(buf, &tmp, len);
+  mask += nonce;
   return mask;
 }
 
