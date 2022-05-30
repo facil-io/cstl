@@ -1103,7 +1103,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     fio_rand_bytes(data, 128);
     for (uint8_t i = 0; i < 16; ++i) {
       FIO_MEMCPY(buf + i, data, 128);
+      buf[128 + i] = '\xFF';
       fio_xmask(buf + i, 128, mask);
+      FIO_ASSERT(buf[128 + i] == '\xFF', "fio_xmask overflow?");
       FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask masking error");
       fio_xmask(buf + i, 128, mask);
       FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
@@ -1115,15 +1117,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     }
     for (uint8_t i = 0; i < 16; ++i) {
       FIO_MEMCPY(buf + i, data, 128);
+      buf[128 + i] = '\xFF';
       fio_xmask2(buf + i, 128, mask, counter);
-      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask2 CM masking error");
+      FIO_ASSERT(buf[128 + i] == '\xFF', "fio_xmask2 overflow?");
+      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask2 (CM) masking error");
       fio_xmask2(buf + i, 128, mask, counter);
-      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 CM rountrip error");
+      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 rountrip error");
       fio_xmask2(buf + i, 128, mask, counter);
       memmove(buf + i + 1, buf + i, 128);
       fio_xmask2(buf + i + 1, 128, mask, counter);
-      FIO_ASSERT(!memcmp(buf + i + 1, data, 128),
-                 "fio_xmask2 CM rountrip (with move) error");
+      FIO_ASSERT(!memcmp(buf + i + 1, data, 128), "fio_xmask2 with move error");
     }
   }
 }

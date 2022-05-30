@@ -259,9 +259,8 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
     w[3] = fio_ltole64(w[3]);
-    uint64_t sum = w[0] + w[1] + w[2] + w[3];
+    seed ^= w[0] + w[1] + w[2] + w[3];
     FIO_STABLE_HASH_ROUND_FULL();
-    seed ^= sum;
     data += 32;
   }
   /* copy bytes to the word block in little endian */
@@ -622,7 +621,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce2 = nonce;
     uint64_t mask = fio_risky_ptr(buf);
     const char *str = "this is a short text, to test risky masking";
-    const size_t len = 43; // strlen(str);
+    const size_t len = strlen(str);
     char *const tmp = buf + i;
     FIO_MEMCPY(tmp, str, len);
     FIO_ASSERT(!memcmp(tmp, str, len),
