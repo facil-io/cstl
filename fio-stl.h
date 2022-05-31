@@ -6656,6 +6656,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+  fprintf(stderr, "* Testing Risky Hash and Risky Mask (sanity).\n");
   {
     char *str = "testing that risky hash is always the same hash";
     const size_t len = strlen(str);
@@ -6670,37 +6671,38 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
       FIO_ASSERT(tmp_hash == org_hash, "memory address shouldn't effect hash!");
     }
   }
-  for (int i = 0; i < 8; ++i) {
+  {
     char buf[128];
+    const char *str = "this is a short text, to test risky masking, ok";
+    const size_t len = strlen(str); /* 47 */
     uint64_t nonce = fio_rand64();
-    uint64_t nonce2 = nonce;
     uint64_t mask = fio_risky_ptr(buf);
-    const char *str = "this is a short text, to test risky masking";
-    const size_t len = strlen(str);
-    char *const tmp = buf + i;
-    FIO_MEMCPY(tmp, str, len);
-    FIO_ASSERT(!memcmp(tmp, str, len),
-               "Risky Hash test failed to copy String?!");
-    fio_risky_mask(tmp, len, mask, nonce);
-    FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
-    size_t err = 0;
-    for (size_t b = 0; b < len; ++b) {
-      FIO_ASSERT(tmp[b] != str[b] || (err < 2),
-                 "Risky Hash masking didn't mask buf[%zu] on offset "
-                 "%d (statistical deviation?)",
-                 b,
-                 i);
-      err += (tmp[b] == str[b]);
+    for (int i = 0; i < 8; ++i) {
+      char *const tmp = buf + i;
+      FIO_MEMCPY(tmp, str, len);
+      tmp[len] = '\xFF';
+      FIO_ASSERT(!memcmp(tmp, str, len),
+                 "Risky Hash test failed to copy String?!");
+      fio_risky_mask(tmp, len, mask, nonce);
+      FIO_ASSERT(tmp[len] == '\xFF', "Risky Hash overflow corruption!");
+      FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
+      // size_t err = 0;
+      // for (size_t b = 0; b < len; ++b) {
+      //   FIO_ASSERT(tmp[b] != str[b] || (err < 2),
+      //              "Risky Hash masking didn't mask buf[%zu] on offset "
+      //              "%d (statistical deviation?)",
+      //              b,
+      //              i);
+      //   err += (tmp[b] == str[b]);
+      // }
+      fio_risky_mask(tmp, len, mask, nonce);
+      FIO_ASSERT(!memcmp(tmp, str, len),
+                 "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
+                 i,
+                 (int)len,
+                 tmp,
+                 str);
     }
-    FIO_ASSERT(nonce == nonce2 && mask == fio_risky_ptr(buf),
-               "Risky Hash test failed - unexpected error!");
-    fio_risky_mask(tmp, len, mask, nonce);
-    FIO_ASSERT(!memcmp(tmp, str, len),
-               "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
-               i,
-               (int)len,
-               tmp,
-               str);
   }
   const uint8_t alignment_test_offset = 0;
   if (alignment_test_offset)
@@ -29574,7 +29576,7 @@ Test summery
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
   /* TODO: add more tests */
-  fprintf(stderr, "* testing fio_srv units.\n");
+  fprintf(stderr, "* testing fio_srv units (TODO).\n");
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
 }
 
