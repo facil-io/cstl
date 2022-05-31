@@ -464,25 +464,20 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
   char *d = (char *)d_, *s = (char *)s_;
-  size_t i = 0;
 #if FIO_MEMCPYX_UNROLL
   switch ((l & 7)) {
-  case 7: d[i] = s[i]; ++i; /* fall through */
-  case 6: d[i] = s[i]; ++i; /* fall through */
-  case 5: d[i] = s[i]; ++i; /* fall through */
-  case 4: d[i] = s[i]; ++i; /* fall through */
-  case 3: d[i] = s[i]; ++i; /* fall through */
-  case 2: d[i] = s[i]; ++i; /* fall through */
-  case 1: d[i] = s[i]; ++i; /* fall through */
+  case 7: *(d++) = *(s++); /* fall through */
+  case 6: *(d++) = *(s++); /* fall through */
+  case 5: *(d++) = *(s++); /* fall through */
+  case 4: *(d++) = *(s++); /* fall through */
+  case 3: *(d++) = *(s++); /* fall through */
+  case 2: *(d++) = *(s++); /* fall through */
+  case 1: *(d++) = *(s++); /* fall through */
   }
 #else
   l &= 7;
-  for (;;) {
-    if (i == l)
-      break;
-    d[i] = s[i];
-    ++i;
-  }
+  while(l--)
+    *(d++) = *(s++);
 #endif
 }
 

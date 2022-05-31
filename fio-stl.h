@@ -464,25 +464,20 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
   char *d = (char *)d_, *s = (char *)s_;
-  size_t i = 0;
 #if FIO_MEMCPYX_UNROLL
   switch ((l & 7)) {
-  case 7: d[i] = s[i]; ++i; /* fall through */
-  case 6: d[i] = s[i]; ++i; /* fall through */
-  case 5: d[i] = s[i]; ++i; /* fall through */
-  case 4: d[i] = s[i]; ++i; /* fall through */
-  case 3: d[i] = s[i]; ++i; /* fall through */
-  case 2: d[i] = s[i]; ++i; /* fall through */
-  case 1: d[i] = s[i]; ++i; /* fall through */
+  case 7: *(d++) = *(s++); /* fall through */
+  case 6: *(d++) = *(s++); /* fall through */
+  case 5: *(d++) = *(s++); /* fall through */
+  case 4: *(d++) = *(s++); /* fall through */
+  case 3: *(d++) = *(s++); /* fall through */
+  case 2: *(d++) = *(s++); /* fall through */
+  case 1: *(d++) = *(s++); /* fall through */
   }
 #else
   l &= 7;
-  for (;;) {
-    if (i == l)
-      break;
-    d[i] = s[i];
-    ++i;
-  }
+  while(l--)
+    *(d++) = *(s++);
 #endif
 }
 
@@ -3449,7 +3444,7 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
                               size_t len,
                               uint64_t mask,
                               uint64_t nonce) {
-  register uint8_t *buf = (uint8_t *)buf_;
+  register char *buf = (char *)buf_;
   uint64_t tmp;
   for (size_t i = 7; i < len; i += 8) {
     FIO_MEMCPY8(&tmp, buf);
@@ -3476,7 +3471,7 @@ Byte masking (XOR) - no nonce
  * better.
  */
 FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
-  register uint8_t *buf = (uint8_t *)buf_;
+  register char *buf = (char *)buf_;
   uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
   uint64_t tmp[4] FIO_ALIGN(16);
   for (size_t i = 31; i < len; i += 32) {
@@ -3778,32 +3773,41 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       counter = fio_rand64();
     } while (!mask || !counter);
     fio_rand_bytes(data, 128);
+    const size_t len = 127;
     for (uint8_t i = 0; i < 16; ++i) {
-      FIO_MEMCPY(buf + i, data, 128);
-      buf[128 + i] = '\xFF';
-      fio_xmask(buf + i, 128, mask);
-      FIO_ASSERT(buf[128 + i] == '\xFF', "fio_xmask overflow?");
-      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask masking error");
-      fio_xmask(buf + i, 128, mask);
-      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask rountrip error");
-      fio_xmask(buf + i, 128, mask);
-      memmove(buf + i + 1, buf + i, 128);
-      fio_xmask(buf + i + 1, 128, mask);
-      FIO_ASSERT(!memcmp(buf + i + 1, data, 128),
+      FIO_MEMCPY(buf + i, data, len);
+      buf[len + i] = '\xFF';
+      fio_xmask(buf + i, len, mask);
+      FIO_ASSERT(buf[len + i] == '\xFF', "fio_xmask overflow?");
+      FIO_ASSERT(memcmp(buf + i, data, len), "fio_xmask masking error");
+      FIO_ASSERT(
+          !(len & 7) ||
+              memcmp(buf + i + (len & (~7U)), data + (len & (~7U)), (len & 7)),
+          "fio_xmask mask didn't mask data's tail?");
+      fio_xmask(buf + i, len, mask);
+      FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask rountrip error");
+      fio_xmask(buf + i, len, mask);
+      memmove(buf + i + 1, buf + i, len);
+      fio_xmask(buf + i + 1, len, mask);
+      FIO_ASSERT(!memcmp(buf + i + 1, data, len),
                  "fio_xmask rountrip (with move) error");
     }
     for (uint8_t i = 0; i < 16; ++i) {
-      FIO_MEMCPY(buf + i, data, 128);
-      buf[128 + i] = '\xFF';
-      fio_xmask2(buf + i, 128, mask, counter);
-      FIO_ASSERT(buf[128 + i] == '\xFF', "fio_xmask2 overflow?");
-      FIO_ASSERT(memcmp(buf + i, data, 128), "fio_xmask2 (CM) masking error");
-      fio_xmask2(buf + i, 128, mask, counter);
-      FIO_ASSERT(!memcmp(buf + i, data, 128), "fio_xmask2 rountrip error");
-      fio_xmask2(buf + i, 128, mask, counter);
-      memmove(buf + i + 1, buf + i, 128);
-      fio_xmask2(buf + i + 1, 128, mask, counter);
-      FIO_ASSERT(!memcmp(buf + i + 1, data, 128), "fio_xmask2 with move error");
+      FIO_MEMCPY(buf + i, data, len);
+      buf[len + i] = '\xFF';
+      fio_xmask2(buf + i, len, mask, counter);
+      FIO_ASSERT(buf[len + i] == '\xFF', "fio_xmask2 overflow?");
+      FIO_ASSERT(memcmp(buf + i, data, len), "fio_xmask2 (CM) masking error");
+      FIO_ASSERT(
+          !(len & 7) ||
+              memcmp(buf + i + (len & (~7U)), data + (len & (~7U)), (len & 7)),
+          "fio_xmask2 mask didn't mask string tail?");
+      fio_xmask2(buf + i, len, mask, counter);
+      FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask2 rountrip error");
+      fio_xmask2(buf + i, len, mask, counter);
+      memmove(buf + i + 1, buf + i, len);
+      fio_xmask2(buf + i + 1, len, mask, counter);
+      FIO_ASSERT(!memcmp(buf + i + 1, data, len), "fio_xmask2 with move error");
     }
   }
 }
@@ -6686,6 +6690,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
       fio_risky_mask(tmp, len, mask, nonce);
       FIO_ASSERT(tmp[len] == '\xFF', "Risky Hash overflow corruption!");
       FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
+      FIO_ASSERT(!(len & 7) || memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
+                 "Risky Hash mask didn't mask string tail?");
       // size_t err = 0;
       // for (size_t b = 0; b < len; ++b) {
       //   FIO_ASSERT(tmp[b] != str[b] || (err < 2),
