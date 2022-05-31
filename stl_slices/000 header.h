@@ -463,7 +463,7 @@ FIO___MAKE_MEMCPY_FIXED(64)
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-  char *d = (char *)d_, *s = (char *)s_;
+  char *restrict d = (char *)d_, *restrict s = (char *)s_;
 #if FIO_MEMCPYX_UNROLL
   switch ((l & 7)) {
   case 7: *(d++) = *(s++); /* fall through */
@@ -476,7 +476,7 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
   }
 #else
   l &= 7;
-  while(l--)
+  while (l--)
     *(d++) = *(s++);
 #endif
 }

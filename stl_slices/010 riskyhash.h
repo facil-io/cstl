@@ -625,7 +625,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     uint64_t nonce = fio_rand64();
     uint64_t mask = fio_risky_ptr(buf);
     for (int i = 0; i < 8; ++i) {
-      char *const tmp = buf + i;
+      char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
       tmp[len] = '\xFF';
       FIO_ASSERT(!memcmp(tmp, str, len),
