@@ -605,9 +605,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   {
     char *str = "testing that risky hash is always the same hash";
     const size_t len = strlen(str);
-    uint64_t org_hash = fio_risky_hash(str, len, 0);
+    char buf[128];
+    memcpy(buf, str, len);
+    uint64_t org_hash = fio_risky_hash(buf, len, 0);
+    FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
     for (int i = 0; i < 8; ++i) {
-      char buf[128];
       char *tmp = buf + i;
       memcpy(tmp, str, len);
       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
@@ -631,8 +633,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
       fio_risky_mask(tmp, len, mask, nonce);
       FIO_ASSERT(tmp[len] == '\xFF', "Risky Hash overflow corruption!");
       FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
-      FIO_ASSERT(!(len & 7) || memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
-                 "Risky Hash mask didn't mask string tail?");
+      FIO_ASSERT(memcmp(tmp, str, 8),
+                 "Risky Hash masking failed for head of data");
+      FIO_ASSERT(
+          !(len & 7) ||
+              memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
+          "Risky Hash mask didn't mask string tail?");
       // size_t err = 0;
       // for (size_t b = 0; b < len; ++b) {
       //   FIO_ASSERT(tmp[b] != str[b] || (err < 2),
