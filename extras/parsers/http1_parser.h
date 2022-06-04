@@ -245,9 +245,9 @@ finish:
   return 0;
 }
 
-#else
+#else /* FIO_MEMCHAR */
 
-/* a helper that seeks any char, converts it to NUL and returns 1 if found. */
+/* a helper that seeks any char, returns 1 if found. */
 inline static uint8_t seek2ch(uint8_t **pos, uint8_t *const limit, uint8_t ch) {
   /* This is library based alternative that is sometimes slower  */
   if (*pos >= limit)

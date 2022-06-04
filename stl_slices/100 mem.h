@@ -557,7 +557,6 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
       FIO_MEMCPY64(d, tmp_buf);
       FIO_MEMCPY64(tmp_buf, s + 64);
       FIO_MEMCPY64(d + 64, tmp_buf);
-      // FIO_MEMCPY64(d + 64, s + 64);
       d += 128;
       s += 128;
     }

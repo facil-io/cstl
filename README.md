@@ -167,7 +167,7 @@ This same example actually has a shortcut that uses the dedicate `fio_keystr_s` 
 
 ```c
 /* map words to numbers. */
-#define FIO_MAP_KEY_STR
+#define FIO_MAP_KEYSTR
 #define FIO_UMAP_NAME umap
 #define FIO_MAP_TYPE  uintptr_t
 #include "fio-stl.h"

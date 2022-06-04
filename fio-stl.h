@@ -463,21 +463,28 @@ FIO___MAKE_MEMCPY_FIXED(64)
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-  char *restrict d = (char *)d_, *restrict s = (char *)s_;
+  char *restrict d = (char *)d_;
+  char *restrict s = (char *)s_;
 #if FIO_MEMCPYX_UNROLL
-  switch ((l & 7)) {
-  case 7: *(d++) = *(s++); /* fall through */
-  case 6: *(d++) = *(s++); /* fall through */
-  case 5: *(d++) = *(s++); /* fall through */
-  case 4: *(d++) = *(s++); /* fall through */
-  case 3: *(d++) = *(s++); /* fall through */
-  case 2: *(d++) = *(s++); /* fall through */
-  case 1: *(d++) = *(s++); /* fall through */
+
+  if (l & 4) {
+    FIO_MEMCPY4(d, s);
+    d += 4;
+    s += 4;
+  }
+  if (l & 2) {
+    FIO_MEMCPY2(d, s);
+    d += 2;
+    s += 2;
+  }
+  if (l & 1) {
+    *d = *s;
   }
 #else
   l &= 7;
-  while (l--)
+  while (l--) {
     *(d++) = *(s++);
+  }
 #endif
 }
 
@@ -10390,7 +10397,6 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
       FIO_MEMCPY64(d, tmp_buf);
       FIO_MEMCPY64(tmp_buf, s + 64);
       FIO_MEMCPY64(d + 64, tmp_buf);
-      // FIO_MEMCPY64(d + 64, s + 64);
       d += 128;
       s += 128;
     }
