@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_STR_NAME fio              /* Development inclusion - ignore line */
 #define FIO_ATOL                      /* Development inclusion - ignore line */
@@ -22,7 +17,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_STR_SMALL
 #ifndef FIO_STR_NAME

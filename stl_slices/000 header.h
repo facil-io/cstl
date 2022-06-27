@@ -6,7 +6,7 @@ Feel free to copy, use and enjoy according to the license provided.
 ********************************************************************************
 
 ********************************************************************************
-NOTE: this file is auto-generated from: https://github.com/facil-io/cstl
+NOTE: fio-stl.h is auto-generated from: https://github.com/facil-io/cstl
 ***************************************************************************** */
 
 /** ****************************************************************************
@@ -376,13 +376,13 @@ Static Endian Test
 #endif /* predefined / test endianess */
 
 /* *****************************************************************************
-Dynamic Endian Test
+Dynamic Endian Testing
 ***************************************************************************** */
 
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
     unsigned long ul;
-    unsigned char u8[sizeof(size_t)];
+    unsigned char u8[sizeof(unsigned long)];
   } u = {.ul = 1};
   return (unsigned int)u.u8[0];
 }

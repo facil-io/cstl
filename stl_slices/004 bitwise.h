@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
@@ -11,6 +6,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_BITMAP                    /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
+More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
 
 
@@ -19,7 +15,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-More joyful ideas at:       https://graphics.stanford.edu/~seander/bithacks.html
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)

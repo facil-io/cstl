@@ -1,7 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_IMAP_CORE                 /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
@@ -16,6 +13,7 @@ License: ISC / MIT (choose your license)
 
 
 
+Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 ***************************************************************************** */
 #if defined(FIO_IMAP_CORE) && !defined(H___FIO_IMAP_CORE___H)
 #define H___FIO_IMAP_CORE___H

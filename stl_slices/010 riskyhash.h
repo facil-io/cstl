@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "005 math.h"                 /* Development inclusion - ignore line */
@@ -17,7 +12,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) / top of file
 ***************************************************************************** */
 #if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
 #define H___FIO_RISKY_HASH_H

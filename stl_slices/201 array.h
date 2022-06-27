@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_ARRAY_NAME ary            /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -19,30 +14,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-Example:
-
-```c
-typedef struct {
-  int i;
-  float f;
-} foo_s;
-
-#define FIO_ARRAY_NAME ary
-#define FIO_ARRAY_TYPE foo_s
-#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio_cstl.h"
-
-void example(void) {
-  ary_s a = FIO_ARRAY_INIT;
-  foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), pos->i);
-  }
-  ary_destroy(&a);
-}
-```
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #ifdef FIO_ARRAY_NAME

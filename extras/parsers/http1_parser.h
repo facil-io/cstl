@@ -1696,66 +1696,18 @@ static void http1_parser_test(void) {
     long long num;
     long long (*fn)(const uint8_t *, const uint8_t **);
   } atol_test[] = {
-      {
-          .str = "0",
-          .num = 0,
-          .fn = http1_atol,
-      },
-      {
-          .str = "-0",
-          .num = 0,
-          .fn = http1_atol,
-      },
-      {
-          .str = "1",
-          .num = 1,
-          .fn = http1_atol,
-      },
-      {
-          .str = "-1",
-          .num = -1,
-          .fn = http1_atol,
-      },
-      {
-          .str = "123456789",
-          .num = 123456789,
-          .fn = http1_atol,
-      },
-      {
-          .str = "-123456789",
-          .num = -123456789,
-          .fn = http1_atol,
-      },
-      {
-          .str = "0x0",
-          .num = 0,
-          .fn = http1_atol16,
-      },
-      {
-          .str = "-0x0",
-          .num = 0,
-          .fn = http1_atol16,
-      },
-      {
-          .str = "-0x1",
-          .num = -1,
-          .fn = http1_atol16,
-      },
-      {
-          .str = "-f",
-          .num = -15,
-          .fn = http1_atol16,
-      },
-      {
-          .str = "-20",
-          .num = -32,
-          .fn = http1_atol16,
-      },
-      {
-          .str = "0xf0EAf9ff",
-          .num = 0xf0eaf9ff,
-          .fn = http1_atol16,
-      },
+      {.str = "0", .num = 0, .fn = http1_atol},
+      {.str = "-0", .num = 0, .fn = http1_atol},
+      {.str = "1", .num = 1, .fn = http1_atol},
+      {.str = "-1", .num = -1, .fn = http1_atol},
+      {.str = "123456789", .num = 123456789, .fn = http1_atol},
+      {.str = "-123456789", .num = -123456789, .fn = http1_atol},
+      {.str = "0x0", .num = 0, .fn = http1_atol16},
+      {.str = "-0x0", .num = 0, .fn = http1_atol16},
+      {.str = "-0x1", .num = -1, .fn = http1_atol16},
+      {.str = "-f", .num = -15, .fn = http1_atol16},
+      {.str = "-20", .num = -32, .fn = http1_atol16},
+      {.str = "0xf0EAf9ff", .num = 0xf0eaf9ff, .fn = http1_atol16},
       /* stop marker */
       {
           .str = NULL,

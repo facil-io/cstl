@@ -1,18 +1,12 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_PATCHES_H
 #define H___FIO_CSTL_PATCHES_H
-
 /* *****************************************************************************
 
 
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if (defined(__MACH__) && !defined(CLOCK_REALTIME))
 #warning fio_time functions defined using gettimeofday patch.

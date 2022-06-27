@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -21,44 +16,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-Example:
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  double d;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-
-void example(void) {
-  FIO_LIST_HEAD FIO_LIST_INIT(list);
-  for (int i = 0; i < 10; ++i) {
-    my_list_s *n = malloc(sizeof(*n));
-    n->i = i;
-    my_list_push(&list, n);
-  }
-  int i = 0;
-  while (my_list_any(&list)) {
-    my_list_s *n = my_list_shift(&list);
-    if (i != n->i) {
-      fprintf(stderr, "list error - value mismatch\n"), exit(-1);
-    }
-    free(n);
-    ++i;
-  }
-  if (i != 10) {
-    fprintf(stderr, "list error - count error\n"), exit(-1);
-  }
-}
-```
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************

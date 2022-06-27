@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_MEMORY_NAME fio           /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -22,7 +17,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************
@@ -534,10 +529,6 @@ Helpers and System Memory Allocation
   (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
    ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
 
-/* *****************************************************************************
-Aligned memory copying
-***************************************************************************** */
-
 /** memcpy / memmove alternative that should work with unaligned memory */
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
@@ -932,7 +923,7 @@ Unknown OS... Unsupported?
 
 
 ***************************************************************************** */
-#else /* FIO_OS_POSIX / FIO_OS_WIN */
+#else /* FIO_OS_POSIX / FIO_OS_WIN => unknown...? */
 
 FIO_IFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
                                            uint8_t alignment_log) {

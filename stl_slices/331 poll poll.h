@@ -1,9 +1,4 @@
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #include "330 poll api.h" /* Development inclusion - ignore line */
@@ -16,7 +11,7 @@ Feel free to copy, use and enjoy according to the license provided.
                         POSIX Portable Polling with `poll`
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef POLLRDHUP
 #define FIO_POLL_EX_FLAGS POLLRDHUP
