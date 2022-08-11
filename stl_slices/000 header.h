@@ -434,7 +434,7 @@ Memory Copying Primitives
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
     struct fio___memcpy##bytes##_s {                                           \
-      char data[bytes];                                                        \
+      unsigned char data[bytes];                                               \
     };                                                                         \
     union {                                                                    \
       const void *ptr;                                                         \

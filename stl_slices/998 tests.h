@@ -347,6 +347,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
   for (size_t i = 0; i < 64; ++i) {
     n = (n << 7) ^ 0xAA;
     uint64_t q = 0, r = 0;
+    FIO_COMPILER_GUARD;
     for (size_t j = 0; j < 64; ++j) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
@@ -361,6 +362,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
   for (size_t i = 0; i < 64; ++i) {
     n = (n << 7) ^ 0xAA;
     uint64_t q = 0;
+    FIO_COMPILER_GUARD;
     for (size_t j = 0; j < 64; ++j) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;

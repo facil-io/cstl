@@ -6,7 +6,7 @@ Feel free to copy, use and enjoy according to the license provided.
 ********************************************************************************
 
 ********************************************************************************
-NOTE: this file is auto-generated from: https://github.com/facil-io/cstl
+NOTE: fio-stl.h is auto-generated from: https://github.com/facil-io/cstl
 ***************************************************************************** */
 
 /** ****************************************************************************
@@ -376,13 +376,13 @@ Static Endian Test
 #endif /* predefined / test endianess */
 
 /* *****************************************************************************
-Dynamic Endian Test
+Dynamic Endian Testing
 ***************************************************************************** */
 
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
     unsigned long ul;
-    unsigned char u8[sizeof(size_t)];
+    unsigned char u8[sizeof(unsigned long)];
   } u = {.ul = 1};
   return (unsigned int)u.u8[0];
 }
@@ -434,7 +434,7 @@ Memory Copying Primitives
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
     struct fio___memcpy##bytes##_s {                                           \
-      char data[bytes];                                                        \
+      unsigned char data[bytes];                                               \
     };                                                                         \
     union {                                                                    \
       const void *ptr;                                                         \
@@ -1473,21 +1473,15 @@ Pointer Tagging
 #define FIO_ATOL
 #endif
 #endif /* FIO_ATOL */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_PATCHES_H
 #define H___FIO_CSTL_PATCHES_H
-
 /* *****************************************************************************
 
 
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if (defined(__MACH__) && !defined(CLOCK_REALTIME))
 #warning fio_time functions defined using gettimeofday patch.
@@ -1838,12 +1832,7 @@ Patches for POSIX
 Done
 ***************************************************************************** */
 #endif /* H___FIO_CSTL_PATCHES_H */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -1868,6 +1857,7 @@ int i = 3;
 FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 ```
 
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 /**
@@ -1968,12 +1958,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
 #endif /* FIO_LOG */
 #undef FIO_LOG
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #define FIO_LOCK2                     /* Development inclusion - ignore line */
@@ -1988,7 +1973,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_ATOMIC) && !defined(H___FIO_ATOMIC___H)
@@ -2676,12 +2661,7 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
 
 #endif /* FIO_LOCK2 */
 #undef FIO_LOCK2
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
@@ -2689,6 +2669,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_BITMAP                    /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
+More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
 
 
@@ -2697,7 +2678,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-More joyful ideas at:       https://graphics.stanford.edu/~seander/bithacks.html
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)
@@ -3826,12 +3807,7 @@ Bit-Byte operations - cleanup
 ***************************************************************************** */
 #endif /* FIO_BITMAP */
 #undef FIO_BITMAP
-/* *****************************************************************************
-Copyright: Boaz Segev, 2022
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_MATH                      /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -3847,7 +3823,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
 #define H___FIO_MATH___H 1
@@ -4486,12 +4462,7 @@ Math - cleanup
 ***************************************************************************** */
 #endif /* FIO_MATH */
 #undef FIO_MATH
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_ATOL                      /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -4506,7 +4477,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_ATOL) && !defined(H___FIO_ATOL_H)
 #define H___FIO_ATOL_H
@@ -5676,12 +5647,7 @@ Numbers <=> Strings - Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_ATOL */
 #undef FIO_ATOL
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_THREADS                   /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -5696,7 +5662,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_THREADS) && !defined(H___FIO_THREADS___H)
 #define H___FIO_THREADS___H
@@ -6066,12 +6032,7 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "005 math.h"                 /* Development inclusion - ignore line */
@@ -6085,7 +6046,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) / top of file
 ***************************************************************************** */
 #if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
 #define H___FIO_RISKY_HASH_H
@@ -6687,11 +6648,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     }
   }
   {
-    char buf[128];
+    char buf[64];
     const char *str = "this is a short text, to test risky masking, ok";
     const size_t len = strlen(str); /* 47 */
-    uint64_t nonce = fio_rand64();
-    uint64_t mask = fio_risky_ptr(buf);
+    const uint64_t nonce = fio_rand64();
+    const uint64_t mask = fio_risky_ptr(buf);
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
@@ -6707,15 +6668,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
           !(len & 7) ||
               memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
           "Risky Hash mask didn't mask string tail?");
-      // size_t err = 0;
-      // for (size_t b = 0; b < len; ++b) {
-      //   FIO_ASSERT(tmp[b] != str[b] || (err < 2),
-      //              "Risky Hash masking didn't mask buf[%zu] on offset "
-      //              "%d (statistical deviation?)",
-      //              b,
-      //              i);
-      //   err += (tmp[b] == str[b]);
-      // }
       fio_risky_mask(tmp, len, mask, nonce);
       FIO_ASSERT(!memcmp(tmp, str, len),
                  "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
@@ -6972,12 +6924,7 @@ Random - Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_RAND */
 #undef FIO_RAND
-/* *****************************************************************************
-Copyright: Boaz Segev, 2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_BITWISE                   /* Development inclusion - ignore line */
 #define FIO_SHA1                      /* Development inclusion - ignore line */
@@ -6994,7 +6941,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_SHA1
 /* *****************************************************************************
@@ -7247,12 +7194,7 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SHA1 */
 #undef FIO_SHA1
-/* *****************************************************************************
-Copyright: Boaz Segev, 2022
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_CHACHA                    /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -7269,7 +7211,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_CHACHA) && !defined(H___FIO_CHACHA___H)
 #define H___FIO_CHACHA___H 1
@@ -7986,10 +7928,7 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_CHACHA
 #endif /* FIO_CHACHA */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_IMAP_CORE                 /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
@@ -8004,6 +7943,7 @@ License: ISC / MIT (choose your license)
 
 
 
+Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 ***************************************************************************** */
 #if defined(FIO_IMAP_CORE) && !defined(H___FIO_IMAP_CORE___H)
 #define H___FIO_IMAP_CORE___H
@@ -8312,12 +8252,7 @@ iMap Cleanup
 ***************************************************************************** */
 #endif /* FIO_IMAP_CORE */
 #undef FIO_IMAP_CORE
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -8330,7 +8265,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 ***************************************************************************** */
 #if (defined(FIO_URL) || defined(FIO_URI)) && !defined(H___FIO_URL___H)
 #define H___FIO_URL___H
@@ -8975,12 +8910,7 @@ FIO_URL - Cleanup
 #endif /* FIO_URL || FIO_URI */
 #undef FIO_URL
 #undef FIO_URI
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
@@ -8994,7 +8924,7 @@ Feel free to copy, use and enjoy according to the license provided.
                                 JSON Parsing
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_JSON) && !defined(H___FIO_JSON_H)
 #define H___FIO_JSON_H
@@ -9468,12 +9398,7 @@ failed:
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_JSON
 #endif /* FIO_JSON */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_STATE                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -9490,7 +9415,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO_STL_KEEP__)
 #define H__FIO_STATE__H
@@ -9838,12 +9763,7 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STATE
 #endif /* FIO_STATE */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_MEMORY_NAME fio           /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -9862,7 +9782,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************
@@ -10374,10 +10294,6 @@ Helpers and System Memory Allocation
   (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
    ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
 
-/* *****************************************************************************
-Aligned memory copying
-***************************************************************************** */
-
 /** memcpy / memmove alternative that should work with unaligned memory */
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
@@ -10772,7 +10688,7 @@ Unknown OS... Unsupported?
 
 
 ***************************************************************************** */
-#else /* FIO_OS_POSIX / FIO_OS_WIN */
+#else /* FIO_OS_POSIX / FIO_OS_WIN => unknown...? */
 
 FIO_IFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
                                            uint8_t alignment_log) {
@@ -12903,12 +12819,7 @@ Memory management macros
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_TIME                      /* Development inclusion - ignore line */
 #define FIO_ATOL                      /* Development inclusion - ignore line */
@@ -12925,7 +12836,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_TIME) && !defined(H___FIO_TIME___H)
 #define H___FIO_TIME___H
@@ -13577,12 +13488,7 @@ Time Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_TIME
 #endif /* FIO_TIME */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_QUEUE                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -13601,7 +13507,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_QUEUE) && !defined(H___FIO_QUEUE___H)
 #define H___FIO_QUEUE___H
@@ -14657,12 +14563,7 @@ Queue/Timer Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_QUEUE
 #endif /* FIO_QUEUE */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_SOCK                      /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -14673,11 +14574,11 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-                        Basic Socket Helpers / IO Polling
+                            Basic Socket Helpers
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
 
@@ -15468,12 +15369,7 @@ FIO_SOCK - cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_SOCK
 #endif
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_STREAM                    /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -15488,7 +15384,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STREAM) && !defined(H___FIO_STREAM___H)
 #define H___FIO_STREAM___H
@@ -16274,12 +16170,7 @@ Module Cleanup
 #undef FIO_STREAM___EMBD_BIT_OFFSET
 #endif /* FIO_STREAM */
 #undef FIO_STREAM
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_ATOMIC                    /* Development inclusion - ignore line */
 #define FIO_SIGNAL                    /* Development inclusion - ignore line */
@@ -16296,7 +16187,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SIGNAL) && !defined(H___FIO_SIGNAL___H)
 #define H___FIO_SIGNAL___H
@@ -16619,12 +16510,7 @@ Module Cleanup
 #undef FIO_SIGNAL_MONITOR_MAX
 #endif /* FIO_SIGNAL */
 #undef FIO_SIGNAL
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_ATOMIC                    /* Development inclusion - ignore line */
 #define FIO_GLOB_MATCH                /* Development inclusion - ignore line */
@@ -16641,7 +16527,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_GLOB_MATCH) && !defined(H___FIO_GLOB_MATCH___H)
 #define H___FIO_GLOB_MATCH___H
@@ -16855,12 +16741,7 @@ Module Cleanup
 #undef FIO_GLOB_MATCH_MONITOR_MAX
 #endif /* FIO_GLOB_MATCH */
 #undef FIO_GLOB_MATCH
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_FILES                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -16877,7 +16758,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FILES) && !defined(H___FIO_FILES___H)
 #define H___FIO_FILES___H
@@ -17313,12 +17194,7 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_FILES */
 #undef FIO_FILES
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_STR                       /*Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
@@ -17335,7 +17211,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STR) && !defined(H__FIO_STR__H)
 #define H__FIO_STR__H
@@ -19706,12 +19582,7 @@ String Core Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STR
 #endif /* H__FIO_STR__H */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_STR_NAME fio              /* Development inclusion - ignore line */
 #define FIO_ATOL                      /* Development inclusion - ignore line */
@@ -19730,7 +19601,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_STR_SMALL
 #ifndef FIO_STR_NAME
@@ -21614,12 +21485,7 @@ String Cleanup
 #undef FIO_STR_RESERVE_NAME
 
 #endif /* FIO_STR_NAME */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_ARRAY_NAME ary            /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -21635,30 +21501,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
-Example:
-
-```c
-typedef struct {
-  int i;
-  float f;
-} foo_s;
-
-#define FIO_ARRAY_NAME ary
-#define FIO_ARRAY_TYPE foo_s
-#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio_cstl.h"
-
-void example(void) {
-  ary_s a = FIO_ARRAY_INIT;
-  foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), pos->i);
-  }
-  ary_destroy(&a);
-}
-```
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #ifdef FIO_ARRAY_NAME
@@ -23447,12 +23290,7 @@ Dynamic Arrays - cleanup
 #undef FIO_ARRAY_IS_EMBEDDED_PTR
 #undef FIO_ARRAY_EMBEDDED_CAPA
 #undef FIO_ARRAY2EMBEDDED
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_MAP_NAME map              /* Development inclusion - ignore line */
 #define FIO_STR                       /* Development inclusion - ignore line */
@@ -23470,7 +23308,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_UMAP_NAME)
 #define FIO_MAP_NAME FIO_UMAP_NAME
@@ -25285,12 +25123,7 @@ Map Cleanup
 #undef FIO_MAP_TEST
 
 #endif /* FIO_MAP_NAME */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -25308,44 +25141,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-Example:
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  double d;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-
-void example(void) {
-  FIO_LIST_HEAD FIO_LIST_INIT(list);
-  for (int i = 0; i < 10; ++i) {
-    my_list_s *n = malloc(sizeof(*n));
-    n->i = i;
-    my_list_push(&list, n);
-  }
-  int i = 0;
-  while (my_list_any(&list)) {
-    my_list_s *n = my_list_shift(&list);
-    if (i != n->i) {
-      fprintf(stderr, "list error - value mismatch\n"), exit(-1);
-    }
-    free(n);
-    ++i;
-  }
-  if (i != 10) {
-    fprintf(stderr, "list error - count error\n"), exit(-1);
-  }
-}
-```
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************
@@ -25496,12 +25292,7 @@ Linked Lists (embeded) - cleanup
 #undef FIO_LIST_NODE_NAME
 #undef FIO_LIST_TYPE_PTR
 #endif
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_REF_NAME long_ref         /* Development inclusion - ignore line */
 #define FIO_REF_TYPE long             /* Development inclusion - ignore line */
@@ -25518,7 +25309,7 @@ Feel free to copy, use and enjoy according to the license provided.
                    (must be placed after all type macros)
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_REF_NAME
 
@@ -25749,12 +25540,7 @@ Pointer Tagging Cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_SORT_NAME num             /* Development inclusion - ignore line */
 #define FIO_SORT_TYPE size_t          /* Development inclusion - ignore line */
@@ -25769,7 +25555,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_SORT_NAME
 
@@ -26063,12 +25849,7 @@ Module Cleanup
 #undef FIO_SORT_IS_BIGGER
 #undef FIO_SORT_NAME
 #endif /* FIO_SORT_NAME */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_CLI                       /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -26086,7 +25867,7 @@ Feel free to copy, use and enjoy according to the license provided.
                   CLI helpers - command line interface parsing
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_CLI___H 1
@@ -26948,14 +26729,8 @@ CLI - cleanup
 #endif /* FIO_EXTERN_COMPLETE*/
 #endif /* FIO_CLI */
 #undef FIO_CLI
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line   \
-                                       */
+/* ************************************************************************* */
+#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_POLL                      /* Development inclusion - ignore line */
 #define FIO_POLL_DEV                  /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -26969,7 +26744,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "201 array.h"                /* Development inclusion - ignore line */
 #include "210 map api.h"              /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
-
 /* *****************************************************************************
 
 
@@ -26979,7 +26753,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL___H
@@ -27122,12 +26896,7 @@ SFUNC void fio___poll_ev_mock(int fd, void *udata) {
   (void)udata;
 }
 #endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL /* Development inclusion */
 #include "330 poll api.h"                     /* Development inclusion */
@@ -27142,7 +26911,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #include <sys/epoll.h>
 
@@ -27318,12 +27087,7 @@ Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE /* Development inclusion */
 #include "330 poll api.h"                      /* Development inclusion */
@@ -27338,7 +27102,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #include <sys/event.h>
 /* *****************************************************************************
@@ -27504,12 +27268,7 @@ Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #include "330 poll api.h" /* Development inclusion - ignore line */
@@ -27522,7 +27281,7 @@ Feel free to copy, use and enjoy according to the license provided.
                         POSIX Portable Polling with `poll`
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #ifdef POLLRDHUP
 #define FIO_POLL_EX_FLAGS POLLRDHUP
@@ -27837,12 +27596,7 @@ Cleanup
 ***************************************************************************** */
 #undef FIO_POLL
 #endif /* FIO_POLL */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2022
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_SERVER                    /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -27877,7 +27631,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__) &&                         \
     !defined(H___FIO_SERVER___H)
@@ -29605,12 +29359,7 @@ Simple Server Cleanup
 ***************************************************************************** */
 #undef FIO_SERVER
 #endif /* FIO_TEST_CSTL */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_PUBSUB                    /* Development inclusion - ignore line */
 #include "400 server.h"               /* Development inclusion - ignore line */
@@ -29625,6 +29374,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
     !defined(FIO_STL_KEEP__)
@@ -31505,12 +31255,7 @@ Pub/Sub Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_PUBSUB
 #endif /* FIO_PUBSUB */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_FIOBJ                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
@@ -31525,10 +31270,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "199 string core.h"          /* Development inclusion - ignore line */
 #include "200 string.h"               /* Development inclusion - ignore line */
 #include "201 array.h"                /* Development inclusion - ignore line */
-#include "210 map api.h"              /* Development inclusion - ignore line */
-#include "211 ordered map.h"          /* Development inclusion - ignore line */
-#include "219 map finish.h"           /* Development inclusion - ignore line */
-#include "230 unsafe map.h"           /* Development inclusion - ignore line */
+#include "210 map.h"                  /* Development inclusion - ignore line */
 #include "299 reference counter.h"    /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -31558,6 +31300,8 @@ memory consumption on 64 bit systems and uses 4 bytes on 32 bit systems.
 
 Note: this code is placed at the end of the STL file, since it leverages most of
 the SLT features and could be affected by their inclusion.
+
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
 #define H___FIOBJ___H
@@ -33968,12 +33712,7 @@ FIOBJ cleanup
 #undef FIOBJ_EXTERN_OBJ_IMP
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #define FIO_MODULE_NAME module        /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
@@ -33988,6 +33727,7 @@ Feel free to copy, use and enjoy according to the license provided.
 
 
 
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_MODULE_NAME) /* && !defined(FIO_STL_KEEP__) */
 
@@ -34173,12 +33913,7 @@ Common cleanup
 #define IFUNC IFUNC_
 
 #endif /* !FIO_STL_KEEP__ */
-/* *****************************************************************************
-Copyright: Boaz Segev, 2019-2021
-License: ISC / MIT (choose your license)
-
-Feel free to copy, use and enjoy according to the license provided.
-***************************************************************************** */
+/* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
 #include "000 header.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -34189,7 +33924,7 @@ Feel free to copy, use and enjoy according to the license provided.
                                 Testing
 
 
-
+Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 
 #if !defined(FIO_FIO_TEST_CSTL_ONLY_ONCE) && (defined(FIO_TEST_CSTL))
@@ -34527,6 +34262,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
   for (size_t i = 0; i < 64; ++i) {
     n = (n << 7) ^ 0xAA;
     uint64_t q = 0, r = 0;
+    FIO_COMPILER_GUARD;
     for (size_t j = 0; j < 64; ++j) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
@@ -34541,6 +34277,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math_speed)(void) {
   for (size_t i = 0; i < 64; ++i) {
     n = (n << 7) ^ 0xAA;
     uint64_t q = 0;
+    FIO_COMPILER_GUARD;
     for (size_t j = 0; j < 64; ++j) {
       d = (d << 3) ^ 0xAA;
       FIO_COMPILER_GUARD;
@@ -34911,10 +34648,6 @@ Testing cleanup
 #define FIO_FIO_TEST_CSTL_ONLY_ONCE 1
 #endif
 /* *****************************************************************************
-
-
-
-
 
 
 

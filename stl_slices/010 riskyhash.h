@@ -614,11 +614,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     }
   }
   {
-    char buf[128];
+    char buf[64];
     const char *str = "this is a short text, to test risky masking, ok";
     const size_t len = strlen(str); /* 47 */
-    uint64_t nonce = fio_rand64();
-    uint64_t mask = fio_risky_ptr(buf);
+    const uint64_t nonce = fio_rand64();
+    const uint64_t mask = fio_risky_ptr(buf);
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
@@ -634,15 +634,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
           !(len & 7) ||
               memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
           "Risky Hash mask didn't mask string tail?");
-      // size_t err = 0;
-      // for (size_t b = 0; b < len; ++b) {
-      //   FIO_ASSERT(tmp[b] != str[b] || (err < 2),
-      //              "Risky Hash masking didn't mask buf[%zu] on offset "
-      //              "%d (statistical deviation?)",
-      //              b,
-      //              i);
-      //   err += (tmp[b] == str[b]);
-      // }
       fio_risky_mask(tmp, len, mask, nonce);
       FIO_ASSERT(!memcmp(tmp, str, len),
                  "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
