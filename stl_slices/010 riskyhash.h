@@ -190,6 +190,7 @@ IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
     nonce |= 1;
   }
   uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
+  hash |= (0ULL - (!hash)) & FIO_RISKY3_PRIME0; /* avoid a zero initial key */
   fio_xmask2(buf, len, hash, nonce);
 }
 
@@ -260,7 +261,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
   }
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w[0] = w[1] = w[2] = w[3] = 0; /* sets padding */
+    w[0] = w[1] = w[2] = w[3] = 0; /* sets padding to 0 */
     FIO_MEMCPY31x(w, data, len);   /* copies `len & 31` bytes */
     w[0] = fio_ltole64(w[0]);      /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);

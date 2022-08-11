@@ -432,13 +432,14 @@ Memory Copying Primitives
 #define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
 
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio___memcpy##bytes(void *dest, const void *src) {            \
+  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
+                                     const void *restrict src) {               \
     struct fio___memcpy##bytes##_s {                                           \
       unsigned char data[bytes];                                               \
     };                                                                         \
     union {                                                                    \
-      const void *ptr;                                                         \
-      struct fio___memcpy##bytes##_s *grp;                                     \
+      const void *restrict ptr;                                                \
+      struct fio___memcpy##bytes##_s *restrict grp;                            \
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
   }
@@ -492,8 +493,8 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
 FIO_IFUNC void fio___memcpy15x(void *restrict dest_,
                                const void *restrict src_,
                                size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
+  char *restrict dest = (char *)dest_;
+  const char *restrict src = (const char *)src_;
   if ((len & 8)) {
     FIO_MEMCPY8(dest, src);
     dest += 8;
@@ -505,8 +506,8 @@ FIO_IFUNC void fio___memcpy15x(void *restrict dest_,
 FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
                                const void *restrict src_,
                                size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
+  char *restrict dest = (char *)dest_;
+  const char *restrict src = (const char *)src_;
   if ((len & 16)) {
     FIO_MEMCPY16(dest, src);
     dest += 16;
@@ -523,8 +524,8 @@ FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
 FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
                                const void *restrict src_,
                                size_t len) {
-  char *dest = (char *)dest_;
-  const char *src = (const char *)src_;
+  char *restrict dest = (char *)dest_;
+  const char *restrict src = (const char *)src_;
   if ((len & 32)) {
     FIO_MEMCPY32(dest, src);
     dest += 32;
