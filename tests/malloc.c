@@ -378,7 +378,7 @@ int main(int argc, char const *argv[]) {
                  "Couldn't spawn thread.");
     }
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(fio_thread_join(threads[i]) == 0,
+      FIO_ASSERT(fio_thread_join(threads + i) == 0,
                  "Couldn't join thread %zu. errno: %d",
                  i,
                  errno);
@@ -391,7 +391,7 @@ int main(int argc, char const *argv[]) {
                "Couldn't spawn thread.");
   }
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(fio_thread_join(threads[i]) == 0,
+    FIO_ASSERT(fio_thread_join(threads + i) == 0,
                "Couldn't join thread %zu. errno: %d",
                i,
                errno);
@@ -410,7 +410,7 @@ int main(int argc, char const *argv[]) {
                  "Couldn't spawn thread.");
     }
     for (size_t i = 0; i < thread_count; ++i) {
-      FIO_ASSERT(fio_thread_join(threads[i]) == 0,
+      FIO_ASSERT(fio_thread_join(threads + i) == 0,
                  "Couldn't join thread %zu. errno: %d",
                  i,
                  errno);
@@ -422,7 +422,7 @@ int main(int argc, char const *argv[]) {
                "Couldn't spawn thread.");
   }
   for (size_t i = 0; i < thread_count; ++i) {
-    FIO_ASSERT(fio_thread_join(threads[i]) == 0,
+    FIO_ASSERT(fio_thread_join(threads + i) == 0,
                "Couldn't join thread %zu. errno: %d",
                i,
                errno);
