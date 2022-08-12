@@ -1283,6 +1283,7 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(
 
 /* SublimeText marker */
 void fio___mem_arena_lock___(void);
+
 /** Locks and returns the thread's arena. */
 FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)(void) {
@@ -1291,9 +1292,6 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
   return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena;
 
 #else /* FIO_MEMORY_ARENA_COUNT != 1 */
-
-  /* TODO: change from heuristically assigned arena to deterministic...
-   *       possibly use round-robin assignment per thread (arena stores id) */
 
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
   static size_t warning_printed = 0;
@@ -1309,7 +1307,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     arena_index = fio_risky_ptr(u.p) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if defined(DEBUG)
+#if 0 && defined(DEBUG)
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
