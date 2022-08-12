@@ -1375,7 +1375,7 @@ Pointer Tagging
 #endif
 #endif
 
-/* Modules that require Threads data */
+/* Modules that require Threads API */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
     defined(FIO_USE_THREAD_MUTEX_TMP)
@@ -1402,7 +1402,9 @@ Pointer Tagging
 
 /* Modules that require randomness */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES) ||   \
-    defined(FIO_TEST_CSTL)
+    defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
@@ -1414,15 +1416,6 @@ Pointer Tagging
 #define FIO_TIME
 #endif
 #endif /* FIO_QUEUE */
-
-/* Modules that require Risky Hash / Random */
-#if defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
-    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
-    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
-#ifndef FIO_RAND
-#define FIO_RAND
-#endif
-#endif /* FIO_RAND */
 
 /* Modules that require FIO_MATH */
 #if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
@@ -7154,7 +7147,7 @@ Module Cleanup
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "005 math.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
 
@@ -9357,7 +9350,7 @@ failed:
 #define FIO_STATE                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "020 imap.h"                 /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -9724,7 +9717,7 @@ Module Cleanup
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "007 threads.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "090 state callbacks.h"      /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -10024,7 +10017,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * NOTE: if FIO_MEMORY_ARENA_COUNT is negative, dynamic arena calculation is
  * performed using CPU core calculation.
  */
-#define FIO_MEMORY_ARENA_COUNT_FALLBACK 8
+#define FIO_MEMORY_ARENA_COUNT_FALLBACK 24
 #endif
 
 #ifndef FIO_MEMORY_ARENA_COUNT_MAX
@@ -10034,7 +10027,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  * NOTE: if FIO_MEMORY_ARENA_COUNT is negative, dynamic arena calculation is
  * performed using CPU core calculation.
  */
-#define FIO_MEMORY_ARENA_COUNT_MAX 32
+#define FIO_MEMORY_ARENA_COUNT_MAX 64
 #endif
 
 #ifndef FIO_MEMORY_WARMUP
@@ -11011,39 +11004,47 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
 
 #else /* FIO_MEMORY_ARENA_COUNT != 1 */
 
+  /* TODO: change from heuristically assigned arena to deterministic...
+   *       possibly use round-robin assignment per thread (arena stores id) */
+
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
   static size_t warning_printed = 0;
 #endif
   /** thread arena value */
-  size_t thread_default_arena;
+  size_t arena_index;
+  size_t loop_count = 0;
   {
     /* select the default arena selection using a thread ID. */
     union {
       void *p;
       fio_thread_t t;
     } u = {.t = fio_thread_current()};
-    thread_default_arena = (size_t)fio_risky_ptr(u.p) %
-                           FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-    // FIO_LOG_DEBUG("thread %p (%p) associated with arena %zu / %zu",
-    //               u.p,
-    //               (void *)fio_risky_ptr(u.p),
-    //               thread_default_arena,
-    //               (size_t)FIO_NAME(FIO_MEMORY_NAME,
-    //               __mem_state)->arena_count);
+    arena_index = fio_risky_ptr(u.p) %
+                  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
+#if defined(DEBUG)
+    static void *pthread_last = NULL;
+    if (pthread_last != u.p) {
+      FIO_LOG_DEBUG(
+          "thread %p (%p) associated with arena %zu / %zu",
+          u.p,
+          (void *)fio_risky_ptr(u.p),
+          arena_index,
+          (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
+      pthread_last = u.p;
+    }
+#endif
   }
   for (;;) {
     /* rotate all arenas to find one that's available */
-    for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-         ++i) {
-      /* first attempt is the last used arena, then cycle with offset */
-      size_t index = i + thread_default_arena;
-      index %= FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-
-      if (FIO_MEMORY_TRYLOCK(
-              FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[index].lock))
-        continue;
-      return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + index);
-    }
+    if (!FIO_MEMORY_TRYLOCK(
+            FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
+      return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
+    ++arena_index;
+    if (arena_index == FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
+      arena_index = 0;
+    if (++loop_count <
+        (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count << 1))
+      continue;
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
     if (!warning_printed)
       FIO_LOG_WARNING(FIO_MACRO2STR(
@@ -11053,13 +11054,12 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     warning_printed = 1;
 #endif /* DEBUG */
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
-    /* slow wait for last arena used by the thread */
-    FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)
-                        ->arena[thread_default_arena]
-                        .lock);
-    return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + thread_default_arena;
+    /* slow wait for last arena */
+    FIO_MEMORY_LOCK(
+        FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
+    return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
 #else
-    // FIO_THREAD_RESCHEDULE();
+      // FIO_THREAD_RESCHEDULE();
 #endif /* FIO_MEMORY_USE_THREAD_MUTEX */
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */
@@ -11264,6 +11264,8 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     arean_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (arean_count == (size_t)-1UL)
       arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
+    else
+      arean_count += (arean_count << 2); /* arenas !> threads (birthday) */
 #else
 #if _MSC_VER
 #pragma message(                                                               \
@@ -16700,7 +16702,7 @@ Module Cleanup
 #define FIO_FILES                     /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -19541,7 +19543,7 @@ String Core Cleanup
 #define FIO_STR_NAME fio              /* Development inclusion - ignore line */
 #define FIO_ATOL                      /* Development inclusion - ignore line */
 #include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "108 files.h"                /* Development inclusion - ignore line */
 #include "199 string core.h"          /* Development inclusion - ignore line */
@@ -25809,7 +25811,7 @@ Module Cleanup
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "210 map.h"                  /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
@@ -26689,7 +26691,7 @@ CLI - cleanup
 #define FIO_POLL_DEV                  /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "102 queue.h"                /* Development inclusion - ignore line */
 #include "104 sock.h"                 /* Development inclusion - ignore line */
@@ -27557,7 +27559,7 @@ Cleanup
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "007 threads.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "090 state callbacks.h"      /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "101 time.h"                 /* Development inclusion - ignore line */
@@ -31216,7 +31218,7 @@ Pub/Sub Cleanup
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "051 json.h"                 /* Development inclusion - ignore line */
 #include "090 state callbacks.h"      /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
