@@ -1375,7 +1375,7 @@ Pointer Tagging
 #endif
 #endif
 
-/* Modules that require Threads data */
+/* Modules that require Threads API */
 #if (defined(FIO_QUEUE) && defined(FIO_TEST_CSTL)) ||                          \
     defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
     defined(FIO_USE_THREAD_MUTEX_TMP)
@@ -1402,7 +1402,9 @@ Pointer Tagging
 
 /* Modules that require randomness */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIO_FILES) ||   \
-    defined(FIO_TEST_CSTL)
+    defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
 #ifndef FIO_RAND
 #define FIO_RAND
 #endif
@@ -1414,15 +1416,6 @@ Pointer Tagging
 #define FIO_TIME
 #endif
 #endif /* FIO_QUEUE */
-
-/* Modules that require Risky Hash / Random */
-#if defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
-    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
-    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
-#ifndef FIO_RAND
-#define FIO_RAND
-#endif
-#endif /* FIO_RAND */
 
 /* Modules that require FIO_MATH */
 #if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)

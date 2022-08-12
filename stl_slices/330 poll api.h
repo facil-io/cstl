@@ -4,7 +4,7 @@
 #define FIO_POLL_DEV                  /* Development inclusion - ignore line */
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "102 queue.h"                /* Development inclusion - ignore line */
 #include "104 sock.h"                 /* Development inclusion - ignore line */

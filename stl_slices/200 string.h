@@ -3,7 +3,7 @@
 #define FIO_STR_NAME fio              /* Development inclusion - ignore line */
 #define FIO_ATOL                      /* Development inclusion - ignore line */
 #include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "108 files.h"                /* Development inclusion - ignore line */
 #include "199 string core.h"          /* Development inclusion - ignore line */

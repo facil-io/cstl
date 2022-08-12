@@ -5,7 +5,7 @@
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "004 bitwise.h"              /* Development inclusion - ignore line */
 #include "007 threads.h"              /* Development inclusion - ignore line */
-#include "010 riskyhash.h"            /* Development inclusion - ignore line */
+#include "010 random.h"               /* Development inclusion - ignore line */
 #include "090 state callbacks.h"      /* Development inclusion - ignore line */
 #endif                                /* Development inclusion - ignore line */
 /* *****************************************************************************
