@@ -1125,10 +1125,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       FIO_ASSERT(buf[len + i] == '\xFF', "fio_xmask2 overflow?");
       FIO_ASSERT(memcmp(buf + i, data, len), "fio_xmask2 (CM) masking error");
       FIO_ASSERT(memcmp(buf + i, data, 8), "fio_xmask2 didn't mask data head?");
-      FIO_ASSERT(
-          !(len & 7) ||
-              memcmp(buf + i + (len & (~7U)), data + (len & (~7U)), (len & 7)),
-          "fio_xmask2 mask didn't mask string tail?");
+      FIO_ASSERT(memcmp(buf + i + (len - 8), data + (len - 8), 8),
+                 "fio_xmask2 mask didn't mask string tail?");
       fio_xmask2(buf + i, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask2 rountrip error");
       fio_xmask2(buf + i, len, mask, counter);

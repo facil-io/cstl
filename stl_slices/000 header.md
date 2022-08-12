@@ -60,7 +60,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Glob Matching](#globe-matching) - defined by `FIO_GLOB_MATCH`
 
-* [Data Hashing (Risky Hash / Stable Hash)](#risky-hash--stable-hash-data-hashing) - defined by `FIO_RISKY_HASH`
+* [Data Hashing (Risky Hash / Stable Hash)](#risky-hash--stable-hash-data-hashing) - defined by `FIO_RAND`
 
 * [SHA1](#sha1) and [ChaCha20 Poly1305](#chacha20--poly1305)- defined by `FIO_SHA1` and `FIO_CHACHA`
 

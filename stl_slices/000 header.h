@@ -57,7 +57,7 @@ This file also contains common helper macros / primitives, such as:
 
 * Bit-Byte Operations - defined by `FIO_BITWISE` and `FIO_BITMAP` (adds atomic)
 
-* Data Hashing (using Risky Hash) - defined by `FIO_RISKY_HASH`
+* Data Hashing (using Risky Hash) - defined by `FIO_RAND`
 
 * Psedo Random Generation - defined by `FIO_RAND`
 
@@ -1415,17 +1415,17 @@ Pointer Tagging
 #endif
 #endif /* FIO_QUEUE */
 
-/* Modules that require FIO_RISKY_HASH */
-#if defined(FIO_RAND) || defined(FIO_STATE) || defined(FIO_STR_NAME) ||        \
-    defined(FIO_STR_SMALL) || defined(FIO_CLI) || defined(FIO_MEMORY_NAME) ||  \
-    defined(FIO_MALLOC) || defined(FIO_POLL) || defined(FIO_TEST_CSTL)
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
+/* Modules that require Risky Hash / Random */
+#if defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
+#ifndef FIO_RAND
+#define FIO_RAND
 #endif
-#endif /* FIO_RISKY_HASH */
+#endif /* FIO_RAND */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_RISKY_HASH) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
 #endif
@@ -1445,8 +1445,8 @@ Pointer Tagging
 #endif
 #endif /* FIO_IMAP_CORE */
 
-/* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
-#if defined(FIO_STR_NAME) || defined(FIO_RISKY_HASH) || defined(FIO_JSON) ||   \
+/* Modules that require FIO_BITWISE (includes FIO_RAND requirements) */
+#if defined(FIO_STR_NAME) || defined(FIO_RAND) || defined(FIO_JSON) ||         \
     defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
     defined(FIO_MATH) || defined(FIO_CHACHA)
 #ifndef FIO_BITWISE

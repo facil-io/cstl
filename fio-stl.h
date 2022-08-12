@@ -57,7 +57,7 @@ This file also contains common helper macros / primitives, such as:
 
 * Bit-Byte Operations - defined by `FIO_BITWISE` and `FIO_BITMAP` (adds atomic)
 
-* Data Hashing (using Risky Hash) - defined by `FIO_RISKY_HASH`
+* Data Hashing (using Risky Hash) - defined by `FIO_RAND`
 
 * Psedo Random Generation - defined by `FIO_RAND`
 
@@ -1415,17 +1415,17 @@ Pointer Tagging
 #endif
 #endif /* FIO_QUEUE */
 
-/* Modules that require FIO_RISKY_HASH */
-#if defined(FIO_RAND) || defined(FIO_STATE) || defined(FIO_STR_NAME) ||        \
-    defined(FIO_STR_SMALL) || defined(FIO_CLI) || defined(FIO_MEMORY_NAME) ||  \
-    defined(FIO_MALLOC) || defined(FIO_POLL) || defined(FIO_TEST_CSTL)
-#ifndef FIO_RISKY_HASH
-#define FIO_RISKY_HASH
+/* Modules that require Risky Hash / Random */
+#if defined(FIO_STATE) || defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||   \
+    defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||     \
+    defined(FIO_POLL) || defined(FIO_TEST_CSTL)
+#ifndef FIO_RAND
+#define FIO_RAND
 #endif
-#endif /* FIO_RISKY_HASH */
+#endif /* FIO_RAND */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_RISKY_HASH) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
 #endif
@@ -1445,8 +1445,8 @@ Pointer Tagging
 #endif
 #endif /* FIO_IMAP_CORE */
 
-/* Modules that require FIO_BITWISE (includes FIO_RISKY_HASH requirements) */
-#if defined(FIO_STR_NAME) || defined(FIO_RISKY_HASH) || defined(FIO_JSON) ||   \
+/* Modules that require FIO_BITWISE (includes FIO_RAND requirements) */
+#if defined(FIO_STR_NAME) || defined(FIO_RAND) || defined(FIO_JSON) ||         \
     defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
     defined(FIO_MATH) || defined(FIO_CHACHA)
 #ifndef FIO_BITWISE
@@ -3789,10 +3789,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       FIO_ASSERT(buf[len + i] == '\xFF', "fio_xmask2 overflow?");
       FIO_ASSERT(memcmp(buf + i, data, len), "fio_xmask2 (CM) masking error");
       FIO_ASSERT(memcmp(buf + i, data, 8), "fio_xmask2 didn't mask data head?");
-      FIO_ASSERT(
-          !(len & 7) ||
-              memcmp(buf + i + (len & (~7U)), data + (len & (~7U)), (len & 7)),
-          "fio_xmask2 mask didn't mask string tail?");
+      FIO_ASSERT(memcmp(buf + i + (len - 8), data + (len - 8), 8),
+                 "fio_xmask2 mask didn't mask string tail?");
       fio_xmask2(buf + i, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask2 rountrip error");
       fio_xmask2(buf + i, len, mask, counter);
@@ -6043,16 +6041,34 @@ Module Cleanup
 
 
 
-                        Risky Hash - a fast and simple hash
+                      Psedo-Random Generator Functions
+                    and friends - risky hash / stable hash
 
 
 
 Copyright and License: see header file (000 header.h) / top of file
 ***************************************************************************** */
-#if defined(FIO_RISKY_HASH) && !defined(H___FIO_RISKY_HASH_H)
-#define H___FIO_RISKY_HASH_H
+#if defined(FIO_RAND) && !defined(H___FIO_RAND_H)
+#define H___FIO_RAND_H
+
 /* *****************************************************************************
-Risky Hash - API
+Random - API
+***************************************************************************** */
+
+/** Returns 64 psedo-random bits. Probably not cryptographically safe. */
+SFUNC uint64_t fio_rand64(void);
+
+/** Writes `len` bytes of psedo-random bits to the target buffer. */
+SFUNC void fio_rand_bytes(void *target, size_t len);
+
+/** Feeds up to 1023 bytes of entropy to the random state. */
+IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
+
+/** Reseeds the random engin using system state (rusage / jitter). */
+IFUNC void fio_rand_reseed(void);
+
+/* *****************************************************************************
+Risky / Stable Hash - API
 ***************************************************************************** */
 
 /** Computes a facil.io Stable Hash (will not be updated, even if broken). */
@@ -6071,28 +6087,25 @@ SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
- * Masks data using a Risky Hash and a counter mode nonce.
+ * Masks data using using `fio_xmask2` with sensible defaults for the key and
+ * the counter mode nonce.
  *
  * Used for mitigating memory access attacks when storing "secret" information
  * in memory.
  *
- * Keep the nonce information in a different memory address then the secret. For
- * example, if the secret is on the stack, store the nonce on the heap or using
- * a static variable.
- *
- * Don't use the same nonce-secret combination for other data.
- *
  * This is NOT a cryptographically secure encryption. Even if the algorithm was
- * secure, it would provide no more then a 32bit level encryption, which isn't
- * strong enough for any cryptographic use-case.
+ * secure, it would provide no more then a 32bit level encryption for a small
+ * amount of data, which isn't strong enough for any cryptographic use-case.
  *
  * However, this could be used to mitigate memory probing attacks. Secrets
  * stored in the memory might remain accessible after the program exists or
  * through core dump information. By storing "secret" information masked in this
  * way, it mitigates the risk of secret information being recognized or
  * deciphered.
+ *
+ * NOTE: uses the pointer as part of the key, so masked data can't be moved.
  */
-IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce);
+FIO_IFUNC void fio_risky_mask(char *buf, size_t len);
 
 /* *****************************************************************************
 Risky Hash - Implementation
@@ -6114,6 +6127,13 @@ Here's a few resources about hashes that might explain more:
 #define FIO_RISKY3_PRIME3 0x84B56B93C869EA0FULL
 #define FIO_RISKY3_PRIME4 0x8EE38D13E0D95A8DULL
 
+/* Stable Hash primes */
+#define FIO_STABLE_HASH_PRIME0 0x39664DEECA23D825ULL /* 32 set bits & prime */
+#define FIO_STABLE_HASH_PRIME1 0x48644F7B3959621FULL /* 32 set bits & prime */
+#define FIO_STABLE_HASH_PRIME2 0x613A19F5CB0D98D5ULL /* 32 set bits & prime */
+#define FIO_STABLE_HASH_PRIME3 0x84B56B93C869EA0FULL /* 32 set bits & prime */
+#define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* 32 set bits & prime */
+
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   uint64_t n = (uint64_t)(uintptr_t)ptr;
@@ -6125,6 +6145,9 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   return n;
 }
 
+/* *****************************************************************************
+Possibly `extern` Implementation
+***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* Risky Hash initialization constants */
@@ -6132,8 +6155,8 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 #define FIO_RISKY3_IV1 0x0000010000000010ULL
 #define FIO_RISKY3_IV2 0x0000100000000100ULL
 #define FIO_RISKY3_IV3 0x0001000000001000ULL
-/* read u64 in little endian */
-#define FIO_RISKY_BUF2U64 fio_buf2u64_little
+/* read u64 in local endian */
+#define FIO_RISKY_BUF2U64 fio_buf2u64_local
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
@@ -6217,31 +6240,31 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 }
 
 /** Masks data using a Risky Hash and a counter mode nonce. */
-IFUNC void fio_risky_mask(char *buf, size_t len, uint64_t key, uint64_t nonce) {
-  { /* avoid zero nonce, make sure nonce is effective and odd */
-    nonce += !nonce;
-    nonce *= 0xDB1DD478B9E93B1ULL;
-    nonce ^= ((nonce << 24) | (nonce >> 40));
-    nonce |= 1;
+IFUNC void fio_risky_mask(char *buf, size_t len) {
+  static uint64_t key1 = 0, key2 = 0;
+  if (!key1) { /* initialize keys on first use */
+    do {
+      key1 = fio_rand64();
+      key2 = fio_rand64();
+    } while (((!key1) | (!key2)));
+    key2 >>= ((key2 + 1) & 1); /* make sure it's an odd random number */
   }
-  uint64_t hash = fio_risky_hash(&key, sizeof(key), nonce);
+  uint64_t hash = fio_risky_ptr(buf) + key1;
   hash |= (0ULL - (!hash)) & FIO_RISKY3_PRIME0; /* avoid a zero initial key */
-  fio_xmask2(buf, len, hash, nonce);
+  fio_xmask2(buf, len, hash, key2);
 }
 
-#undef FIO_STABLE_HASH_ROUND64
-#undef FIO_STABLE_HASH_ROUND128
+#undef FIO_RISKY3_IV0
+#undef FIO_RISKY3_IV1
+#undef FIO_RISKY3_IV2
+#undef FIO_RISKY3_IV3
+#undef FIO_RISKY_BUF2U64
+#undef FIO_RISKY3_ROUND64
+#undef FIO_RISKY3_ROUND256
 
 /* *****************************************************************************
 Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
-
-/* Stable Hash primes */
-#define FIO_STABLE_HASH_PRIME0 0x39664DEECA23D825ULL /* prime 32 set bits */
-#define FIO_STABLE_HASH_PRIME1 0x48644F7B3959621FULL /* prime 32 set bits */
-#define FIO_STABLE_HASH_PRIME2 0x613A19F5CB0D98D5ULL /* prime 32 set bits */
-#define FIO_STABLE_HASH_PRIME3 0x84B56B93C869EA0FULL /* prime 32 set bits */
-#define FIO_STABLE_HASH_PRIME4 0x8EE38D13E0D95A8DULL /* prime 32 set bits */
 
 #define FIO_STABLE_HASH_MUL_PRIME(dest)                                        \
   (dest)[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                    \
@@ -6353,48 +6376,8 @@ SFUNC void fio_stable_hash128(void *restrict dest,
 #undef FIO_STABLE_HASH_ROUND_FULL
 
 /* *****************************************************************************
-Risky Hash - Cleanup
-***************************************************************************** */
-#undef FIO_RISKY_BUF2U64
-
-#endif /* FIO_EXTERN_COMPLETE */
-#endif
-#undef FIO_RISKY_HASH
-
-/* *****************************************************************************
-
-
-
-
-                      Psedo-Random Generator Functions
-
-
-
-
-***************************************************************************** */
-#if defined(FIO_RAND) && !defined(H___FIO_RAND_H)
-#define H___FIO_RAND_H
-/* *****************************************************************************
-Random - API
-***************************************************************************** */
-
-/** Returns 64 psedo-random bits. Probably not cryptographically safe. */
-SFUNC uint64_t fio_rand64(void);
-
-/** Writes `len` bytes of psedo-random bits to the target buffer. */
-SFUNC void fio_rand_bytes(void *target, size_t len);
-
-/** Feeds up to 1023 bytes of entropy to the random state. */
-IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
-
-/** Reseeds the random engin using system state (rusage / jitter). */
-IFUNC void fio_rand_reseed(void);
-
-/* *****************************************************************************
 Random - Implementation
 ***************************************************************************** */
-
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 #if FIO_OS_POSIX ||                                                            \
     (__has_include("sys/resource.h") && __has_include("sys/time.h"))
@@ -6496,53 +6479,25 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
   if (!data_ || !len)
     return;
   uint8_t *data = (uint8_t *)data_;
-
-  if (len < 8)
-    goto small_random;
-
-  if ((uintptr_t)data & 7) {
-    /* align pointer to 64 bit word */
-    size_t offset = 8 - ((uintptr_t)data & 7);
-    fio_rand_bytes(data_, offset); /* perform small_random */
-    data += offset;
-    len -= offset;
+  for (unsigned i = 31; i < len; i += 32) {
+    uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
+    FIO_MEMCPY32(data, rv);
+    data += 32;
   }
-
-  /* 128 random bits at a time */
-  for (size_t i = (len >> 4); i; --i) {
-    uint64_t t0 = fio_rand64();
-    uint64_t t1 = fio_rand64();
-    FIO_NAME2(fio_u, buf64_local)(data, t0);
-    FIO_NAME2(fio_u, buf64_local)(data + 8, t1);
-    data += 16;
-  }
-  /* 64 random bits at tail */
-  if ((len & 8)) {
-    uint64_t t0 = fio_rand64();
-    FIO_NAME2(fio_u, buf64_local)(data, t0);
-  }
-
-small_random:
-  if ((len & 7)) {
-    /* leftover bits */
-    uint64_t tmp = fio_rand64();
-    /* leftover bytes */
-    switch ((len & 7)) {
-    case 7: data[6] = (tmp >> 8) & 0xFF;  /* fall through */
-    case 6: data[5] = (tmp >> 16) & 0xFF; /* fall through */
-    case 5: data[4] = (tmp >> 24) & 0xFF; /* fall through */
-    case 4: data[3] = (tmp >> 32) & 0xFF; /* fall through */
-    case 3: data[2] = (tmp >> 40) & 0xFF; /* fall through */
-    case 2: data[1] = (tmp >> 48) & 0xFF; /* fall through */
-    case 1: data[0] = (tmp >> 56) & 0xFF;
-    }
+  if (len & 31) {
+    uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
+    FIO_MEMCPY31x(data, rv, len);
   }
 }
 
 /* *****************************************************************************
-Hashing speed test
+FIO_RAND Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
+
+/* *****************************************************************************
+Hashing speed test
+***************************************************************************** */
 #include <math.h>
 
 typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
@@ -6622,7 +6577,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
                                                            size_t len) {
-  fio_risky_mask(buf, len, 0, 0);
+  fio_risky_mask(buf, len);
   return len;
 }
 
@@ -6631,6 +6586,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
   return len;
 }
 
+/* tests Risky Hash and Stable Hash... takes a while (speed tests as well) */
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fprintf(stderr, "* Testing Risky Hash and Risky Mask (sanity).\n");
   {
@@ -6653,24 +6609,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     char buf[64];
     const char *str = "this is a short text, to test risky masking, ok";
     const size_t len = strlen(str); /* 47 */
-    const uint64_t nonce = fio_rand64();
-    const uint64_t mask = fio_risky_ptr(buf);
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
       tmp[len] = '\xFF';
       FIO_ASSERT(!memcmp(tmp, str, len),
                  "Risky Hash test failed to copy String?!");
-      fio_risky_mask(tmp, len, mask, nonce);
+      fio_risky_mask(tmp, len);
       FIO_ASSERT(tmp[len] == '\xFF', "Risky Hash overflow corruption!");
       FIO_ASSERT(memcmp(tmp, str, len), "Risky Hash masking failed");
       FIO_ASSERT(memcmp(tmp, str, 8),
                  "Risky Hash masking failed for head of data");
-      FIO_ASSERT(
-          !(len & 7) ||
-              memcmp(tmp + (len & (~7U)), str + (len & (~7U)), (len & 7)),
-          "Risky Hash mask didn't mask string tail?");
-      fio_risky_mask(tmp, len, mask, nonce);
+      FIO_ASSERT(memcmp(tmp + (len - 8), str + (len - 8), 8),
+                 "Risky Hash mask didn't mask string tail?");
+      fio_risky_mask(tmp, len);
       FIO_ASSERT(!memcmp(tmp, str, len),
                  "Risky Hash masking RT failed @ %d\n\t%.*s != %s",
                  i,
