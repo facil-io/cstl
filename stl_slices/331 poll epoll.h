@@ -155,7 +155,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       // errors are handled as disconnections (on_close) in the EPOLLIN queue
       // if no error, try an active event(s)
       if (events[i].events & EPOLLOUT)
-        p->settings.on_ready(-1, events[i].data.ptr);
+        p->settings.on_ready(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }
@@ -164,10 +164,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     for (int i = 0; i < active_count; i++) {
       // errors are handled as disconnections (on_close), but only once...
       if (events[i].events & (~(EPOLLIN | EPOLLOUT)))
-        p->settings.on_close(-1, events[i].data.ptr);
+        p->settings.on_close(events[i].data.ptr);
       // no error, then it's an active event(s)
       else if (events[i].events & EPOLLIN)
-        p->settings.on_data(-1, events[i].data.ptr);
+        p->settings.on_data(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }

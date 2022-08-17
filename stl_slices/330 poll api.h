@@ -5,6 +5,7 @@
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "010 random.h"               /* Development inclusion - ignore line */
+#include "020 imap.h"                 /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "102 queue.h"                /* Development inclusion - ignore line */
 #include "104 sock.h"                 /* Development inclusion - ignore line */
@@ -87,11 +88,11 @@ typedef struct fio_poll_s fio_poll_s;
 
 typedef struct {
   /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(int fd, void *udata);
+  void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(int fd, void *udata);
+  void (*on_ready)(void *udata);
   /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(int fd, void *udata);
+  void (*on_close)(void *udata);
 } fio_poll_settings_s;
 
 /** Initializes the polling object, allocating its resources. */
@@ -156,12 +157,9 @@ FIO_IFUNC const char *fio_poll_engine(void) { return FIO_POLL_ENGINE_STR; }
   if (!(settings_dest).on_close)                                               \
     (settings_dest).on_close = fio___poll_ev_mock;
 
-SFUNC void fio___poll_ev_mock(int fd, void *udata);
+SFUNC void fio___poll_ev_mock(void *udata);
 
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* mock event */
-SFUNC void fio___poll_ev_mock(int fd, void *udata) {
-  (void)fd;
-  (void)udata;
-}
+SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 #endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */

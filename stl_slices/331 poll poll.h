@@ -25,47 +25,24 @@ typedef struct {
   unsigned short flags;
 } fio___poll_i_s;
 
-FIO_IFUNC uint64_t fio___poll_i_hash(fio___poll_i_s o) {
-  return fio_risky_ptr((void *)(uintptr_t)(o.fd));
-}
-#define FIO_STL_KEEP__
-#define FIO_RISKY_HASH
-#define FIO_UMAP_NAME         fio___poll_map
-#define FIO_MAP_KEY           fio___poll_i_s
-#define FIO_MAP_KEY_CMP(a, b) ((a).fd == (b).fd)
-#define FIO_MAP_KEY_COPY(d, s)                                                 \
-  do {                                                                         \
-    (d).udata = (s).udata;                                                     \
-    (d).flags = ((d).flags * ((d).fd == (s).fd)) | (s).flags;                  \
-    (d).fd = (s).fd;                                                           \
-  } while (0)
-#define FIO_MAP_HASH_FN(o) fio___poll_i_hash(o)
-#include __FILE__
-
-#ifdef FIO_STL_KEEP__
-#undef FIO_STL_KEEP__
-#endif
+#define FIO___POLL_IMAP_CMP(a, b) ((a)->fd == (b)->fd)
+#define FIO___POLL_IMAP_VALID(o)  (1)
+#define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)(uintptr_t)((o)->fd)))
+FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
+                       fio___poll_i_s,
+                       uint64_t,
+                       FIO___POLL_IMAP_HASH,
+                       FIO___POLL_IMAP_CMP,
+                       FIO___POLL_IMAP_VALID)
+#undef FIO___POLL_IMAP_CMP
+#undef FIO___POLL_IMAP_VALID
+#undef FIO___POLL_IMAP_HASH
 
 struct fio_poll_s {
   fio_poll_settings_s settings;
   fio___poll_map_s map;
   FIO___LOCK_TYPE lock;
 };
-
-FIO_IFUNC fio___poll_i_s *fio___poll_map_get2(fio___poll_map_s *m, int fd) {
-  fio___poll_i_s o = {.fd = fd};
-  return fio___poll_map_node2key_ptr(fio___poll_map_get_ptr(m, o));
-}
-
-FIO_IFUNC void fio___poll_map_remove2(fio___poll_map_s *m, int fd) {
-  fio___poll_i_s *i = fio___poll_map_get2(m, fd);
-  if (i) {
-    i->flags = 0;
-    i->udata = NULL;
-    return;
-  }
-  fio___poll_map_set(m, (fio___poll_i_s){.fd = fd});
-}
 
 /* *****************************************************************************
 Poll Monitoring Implementation - inline static functions
@@ -76,7 +53,7 @@ FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
   if (p) {
     *p = (fio_poll_s){
         .settings = args,
-        .map = FIO_MAP_INIT,
+        .map = {0},
         .lock = FIO___LOCK_INIT,
     };
     FIO_POLL_VALIDATE(p->settings);
@@ -104,15 +81,14 @@ Poll Monitoring Implementation - possibly externed functions.
 
 /* handle events, return a mask for possible remaining flags. */
 FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
-                                                  int fd,
                                                   void *udata,
                                                   unsigned short flags) {
   if ((flags & POLLOUT))
-    p->settings.on_ready(fd, udata);
+    p->settings.on_ready(udata);
   if ((flags & (POLLIN | POLLPRI)))
-    p->settings.on_data(fd, udata);
+    p->settings.on_data(udata);
   if ((flags & (POLLHUP | POLLERR | POLLNVAL | FIO_POLL_EX_FLAGS))) {
-    p->settings.on_close(fd, udata);
+    p->settings.on_close(udata);
     return 0;
   }
   return ~flags;
@@ -142,7 +118,8 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   flags |= FIO_POLL_EX_FLAGS;
   fio___poll_i_s i = {.udata = udata, .fd = fd, .flags = flags};
   FIO___LOCK_LOCK(p->lock);
-  fio___poll_map_set(&p->map, i);
+  fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  ptr->flags |= flags;
   FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
@@ -162,7 +139,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
   int handled = -1;
-  if (!p || !fio___poll_map_count(&p->map)) {
+  if (!p || !(p->map.count)) {
     if (timeout) {
       FIO_THREAD_WAIT((timeout * 1000000));
     }
@@ -171,10 +148,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   /* handle events in a copy, allowing events / threads to mutate it */
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
-  p->map = (fio___poll_map_s)FIO_MAP_INIT;
+  p->map = (fio___poll_map_s){0};
   FIO___LOCK_UNLOCK(p->lock);
 
-  const size_t max = fio___poll_map_count(&cpy.map);
+  const size_t max = cpy.map.count;
   const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
 
   int w = 0, r = 0, i = 0;
@@ -185,11 +162,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       0);
   void **uary = (void **)(pfd + max);
 
-  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    if (!(pos.key.flags & flag_mask))
+  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if (!(cpy.map.ary[pos].flags & flag_mask))
       continue;
-    pfd[r] = (struct pollfd){.fd = pos.key.fd, .events = (short)pos.key.flags};
-    uary[r] = pos.key.udata;
+    pfd[r] = (struct pollfd){.fd = cpy.map.ary[pos].fd,
+                             .events = (short)cpy.map.ary[pos].flags};
+    uary[r] = cpy.map.ary[pos].udata;
     ++r;
   }
 
@@ -205,7 +183,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       if (pfd[i].revents) {
         ++handled;
         pfd[i].events &=
-            fio___poll_handle_events(&cpy, pfd[i].fd, uary[i], pfd[i].revents);
+            fio___poll_handle_events(&cpy, uary[i], pfd[i].revents);
       }
       if ((pfd[i].events & (~(FIO_POLL_EX_FLAGS)))) {
         if (i != w) {
@@ -224,17 +202,18 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   i = 0;
 
   FIO___LOCK_LOCK(p->lock);
-  if (!fio___poll_map_count(&p->map) && events <= 0) {
+  if (!p->map.count && events <= 0) {
     p->map = cpy.map;
     i = 1;
     goto finish;
   }
   if (w) {
-    fio___poll_map_reserve(&p->map, w);
+    fio___poll_map_reserve(&p->map, w + p->map.count);
     for (i = 0; i < w; ++i) {
-      fio___poll_i_s *existing = fio___poll_map_get2(&p->map, pfd[i].fd);
-      if (existing && existing->fd == pfd[i].fd) {
-        existing->flags |= (!!existing->flags) * (pfd[i].events);
+      fio___poll_i_s *existing =
+          fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = pfd[i].fd});
+      if (existing) {
+        existing->flags |= existing->flags ? pfd[i].events : 0;
         continue;
       }
       fio___poll_map_set(&p->map,
@@ -242,7 +221,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
                              .fd = pfd[i].fd,
                              .flags = (unsigned short)pfd[i].events,
                              .udata = uary[i],
-                         });
+                         },
+                         1);
     }
   }
   i = 0;
@@ -260,14 +240,10 @@ finish:
  */
 SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
   int r = 0;
-  fio___poll_i_s *i = NULL;
+  fio___poll_i_s i = {.fd = fd};
   FIO___LOCK_LOCK(p->lock);
-  i = fio___poll_map_get2(&p->map, fd);
-  if (i) {
-    i->flags = 0;
-    i->udata = NULL;
-  }
-  r = 0 - (!i);
+  fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  ptr->flags = 0;
   FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
@@ -276,13 +252,13 @@ SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
 SFUNC void fio_poll_close_all(fio_poll_s *p) {
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
-  p->map = (fio___poll_map_s)FIO_MAP_INIT;
+  p->map = (fio___poll_map_s){0};
   FIO___LOCK_UNLOCK(p->lock);
   const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
-  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    if ((pos.key.flags & flag_mask)) {
-      cpy.settings.on_close(pos.key.fd, pos.key.udata);
-      fio_sock_close(pos.key.fd);
+  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if ((cpy.map.ary[pos].flags & flag_mask)) {
+      cpy.settings.on_close(cpy.map.ary[pos].udata);
+      fio_sock_close(cpy.map.ary[pos].fd);
     }
   }
   fio___poll_map_destroy(&cpy.map);

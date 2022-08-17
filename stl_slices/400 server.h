@@ -14,8 +14,7 @@
 #include "105 stream.h"               /* Development inclusion - ignore line */
 #include "106 signals.h"              /* Development inclusion - ignore line */
 #include "199 string core.h"          /* Development inclusion - ignore line */
-#include "210 map api.h"              /* Development inclusion - ignore line */
-#include "219 map finish.h"           /* Development inclusion - ignore line */
+#include "210 map.h"                  /* Development inclusion - ignore line */
 #include "299 reference counter.h"    /* Development inclusion - ignore line */
 #include "330 poll api.h"             /* Development inclusion - ignore line */
 #include "330 poll.h"                 /* Development inclusion - ignore line */
@@ -669,9 +668,9 @@ typedef void *fio_validity_map_s;
 Global State
 ***************************************************************************** */
 
-static void fio___srv_poll_on_data_schd(int fd, void *udata);
-static void fio___srv_poll_on_ready_schd(int fd, void *udata);
-static void fio___srv_poll_on_close_schd(int fd, void *udata);
+static void fio___srv_poll_on_data_schd(void *udata);
+static void fio___srv_poll_on_ready_schd(void *udata);
+static void fio___srv_poll_on_close_schd(void *udata);
 
 static struct {
   FIO_LIST_HEAD protocols;
@@ -1114,24 +1113,21 @@ static void fio___srv_poll_on_timeout(void *io_, void *ignr_) {
 Event scheduling
 ***************************************************************************** */
 
-static void fio___srv_poll_on_data_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_data_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_data,
                  fio_dup2((fio_s *)io));
 }
-static void fio___srv_poll_on_ready_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_ready_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_ready,
                  fio_dup2((fio_s *)io));
 }
-static void fio___srv_poll_on_close_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_close_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,

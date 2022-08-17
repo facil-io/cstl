@@ -47,15 +47,13 @@ The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
 ```c
 typedef struct {
   /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(int fd, void *udata);
+  void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(int fd, void *udata);
+  void (*on_ready)(void *udata);
   /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(int fd, void *udata);
+  void (*on_close)(void *udata);
 } fio_poll_settings_s;
 ```
-
-**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
 
 #### `fio_poll_destroy`
 

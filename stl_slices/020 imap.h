@@ -36,12 +36,15 @@ iMap Creation Macro
  * indicates a free slot. The reserved value `~0` indicates a freed item (a free
  * slot that was previously used).
  *
- * - `array_name_s` will be the main array container (.ary is the array itself)
+ * - `array_name_s`        the main array container (.ary is the array itself)
  * - `array_name_seeker_s` is a seeker type that finds objects.
- * - `array_name_seek` is the seeking function finds an object or its future pos
- * - `array_name_set` writes or overwrites data to the array.
- * - `array_name_get` returns a pointer to the object within the array.
- * - `array_name_remove` removes an object and resets its memory to zero.
+ * - `array_name_seek`     finds an object or its future position.
+ *
+ * - `array_name_capa`     the imap's theoretical storage capacity.
+ * - `array_name_set`      writes or overwrites data to the array.
+ * - `array_name_get`      returns a pointer to the object within the array.
+ * - `array_name_remove`   removes an object and resets its memory to zero.
+ * - `array_name_reserve`  reserves a minimum imap storage capacity.
  */
 #define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
                                array_type,                                     \
@@ -62,7 +65,7 @@ iMap Creation Macro
   } FIO_NAME(array_name, seeker_s);                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC int FIO_NAME(array_name, is_valid)(array_type * pobj) {            \
-    return !!is_valid_fn(pobj);                                                \
+    return pobj && (!!is_valid_fn(pobj));                                      \
   }                                                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC imap_type FIO_NAME(array_name,                                     \
@@ -126,32 +129,31 @@ iMap Creation Macro
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
-      pos &= pos_mask;                                                         \
       /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
       for (int mini_steps = 0;;) {                                             \
+        pos &= pos_mask;                                                       \
         const uint32_t pos_hash = imap[pos] & hash_mask;                       \
         const uint32_t pos_index = imap[pos] & pos_mask;                       \
         if ((pos_hash == tester) && cmp_fn((a->ary + pos_index), pobj)) {      \
           r.ipos = pos;                                                        \
-          r.pos = imap[pos] & pos_mask;                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.pos = pos_index;                                                   \
+          r.set_val = tester | pos_index;                                      \
           return r;                                                            \
         }                                                                      \
         if (!pos_hash) {                                                       \
           r.ipos = pos;                                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.set_val = tester | r.pos; /* r.pos == a->w */                      \
           return r;                                                            \
         }                                                                      \
         if (imap[pos] == (imap_type)(~(imap_type)0)) {                         \
           r.ipos = pos;                                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.set_val = tester | r.pos; /* r.pos == a->w */                      \
         }                                                                      \
         if (!((--attempts)))                                                   \
           goto done;                                                           \
         if (mini_steps == 2)                                                   \
           break;                                                               \
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
-        pos &= pos_mask;                                                       \
         ++mini_steps;                                                          \
       }                                                                        \
       pos += 0x43F82D0BUL; /* big step */                                      \
@@ -162,6 +164,10 @@ iMap Creation Macro
   /** fills an empty imap with the info about existing elements. */            \
   FIO_SFUNC int FIO_NAME(array_name,                                           \
                          __fill_imap)(FIO_NAME(array_name, s) * a) {           \
+    if (!a->count) {                                                           \
+      a->w = 0;                                                                \
+      return 0;                                                                \
+    }                                                                          \
     imap_type *imap = FIO_NAME(array_name, imap)(a);                           \
     if (a->count != a->w) {                                                    \
       a->count = 0;                                                            \
@@ -177,7 +183,7 @@ iMap Creation Macro
       a->w = i;                                                                \
       FIO_NAME(array_name, seeker_s)                                           \
       s = FIO_NAME(array_name, seek)(a, a->ary + i);                           \
-      if (s.pos != i) {                                                        \
+      if (s.pos != i || s.ipos == (~(imap_type)0)) {                           \
         a->w = a->count;                                                       \
         return -1; /* destination not big enough to contain collisions! */     \
       }                                                                        \
@@ -196,8 +202,23 @@ iMap Creation Macro
         return 0;                                                              \
     }                                                                          \
   }                                                                            \
-  /** Sets an object in the Array. Optionally overwrites existing data if any. \
-   */                                                                          \
+  /** Reserves a minimum imap storage capacity. */                             \
+  FIO_IFUNC int FIO_NAME(array_name, reserve)(FIO_NAME(array_name, s) * a,     \
+                                              imap_type min) {                 \
+    imap_type bits = 2;                                                        \
+    if (min > ((imap_type)~0ULL) >> 1)                                         \
+      return -1;                                                               \
+    while ((1ULL << bits) < min)                                               \
+      ++bits;                                                                  \
+    if (bits <= a->capa_bits)                                                  \
+      return 0;                                                                \
+    if (FIO_NAME(array_name, __alloc)(a, bits))                                \
+      return -1;                                                               \
+    if (!FIO_NAME(array_name, __fill_imap)(a))                                 \
+      return 0;                                                                \
+    return FIO_NAME(array_name, __expand)(a);                                  \
+  }                                                                            \
+  /** Sets an object in the Array. Optionally overwrites existing data. */     \
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
@@ -288,6 +309,10 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
   fprintf(stderr, "* testing core indexed array type (imap)\n");
   fio_imap_tester_s a = {0};
+  fio_imap_tester_reserve(&a, 1024);
+  FIO_ASSERT(fio_imap_tester_capa(&a) >= 1024 &&
+                 fio_imap_tester_capa(&a) < 4096,
+             "fio_imap_tester_reserve failed");
   for (size_t val = 1; val < 4096; ++val) {
     fio_imap_tester_set(&a, val, 1);
     FIO_ASSERT(a.count == val, "imap array count failed at set %zu!", val);

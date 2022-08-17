@@ -7913,12 +7913,15 @@ iMap Creation Macro
  * indicates a free slot. The reserved value `~0` indicates a freed item (a free
  * slot that was previously used).
  *
- * - `array_name_s` will be the main array container (.ary is the array itself)
+ * - `array_name_s`        the main array container (.ary is the array itself)
  * - `array_name_seeker_s` is a seeker type that finds objects.
- * - `array_name_seek` is the seeking function finds an object or its future pos
- * - `array_name_set` writes or overwrites data to the array.
- * - `array_name_get` returns a pointer to the object within the array.
- * - `array_name_remove` removes an object and resets its memory to zero.
+ * - `array_name_seek`     finds an object or its future position.
+ *
+ * - `array_name_capa`     the imap's theoretical storage capacity.
+ * - `array_name_set`      writes or overwrites data to the array.
+ * - `array_name_get`      returns a pointer to the object within the array.
+ * - `array_name_remove`   removes an object and resets its memory to zero.
+ * - `array_name_reserve`  reserves a minimum imap storage capacity.
  */
 #define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
                                array_type,                                     \
@@ -7939,7 +7942,7 @@ iMap Creation Macro
   } FIO_NAME(array_name, seeker_s);                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC int FIO_NAME(array_name, is_valid)(array_type * pobj) {            \
-    return !!is_valid_fn(pobj);                                                \
+    return pobj && (!!is_valid_fn(pobj));                                      \
   }                                                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
   FIO_IFUNC imap_type FIO_NAME(array_name,                                     \
@@ -8003,32 +8006,31 @@ iMap Creation Macro
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
-      pos &= pos_mask;                                                         \
       /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
       for (int mini_steps = 0;;) {                                             \
+        pos &= pos_mask;                                                       \
         const uint32_t pos_hash = imap[pos] & hash_mask;                       \
         const uint32_t pos_index = imap[pos] & pos_mask;                       \
         if ((pos_hash == tester) && cmp_fn((a->ary + pos_index), pobj)) {      \
           r.ipos = pos;                                                        \
-          r.pos = imap[pos] & pos_mask;                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.pos = pos_index;                                                   \
+          r.set_val = tester | pos_index;                                      \
           return r;                                                            \
         }                                                                      \
         if (!pos_hash) {                                                       \
           r.ipos = pos;                                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.set_val = tester | r.pos; /* r.pos == a->w */                      \
           return r;                                                            \
         }                                                                      \
         if (imap[pos] == (imap_type)(~(imap_type)0)) {                         \
           r.ipos = pos;                                                        \
-          r.set_val = tester | r.pos;                                          \
+          r.set_val = tester | r.pos; /* r.pos == a->w */                      \
         }                                                                      \
         if (!((--attempts)))                                                   \
           goto done;                                                           \
         if (mini_steps == 2)                                                   \
           break;                                                               \
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
-        pos &= pos_mask;                                                       \
         ++mini_steps;                                                          \
       }                                                                        \
       pos += 0x43F82D0BUL; /* big step */                                      \
@@ -8039,6 +8041,10 @@ iMap Creation Macro
   /** fills an empty imap with the info about existing elements. */            \
   FIO_SFUNC int FIO_NAME(array_name,                                           \
                          __fill_imap)(FIO_NAME(array_name, s) * a) {           \
+    if (!a->count) {                                                           \
+      a->w = 0;                                                                \
+      return 0;                                                                \
+    }                                                                          \
     imap_type *imap = FIO_NAME(array_name, imap)(a);                           \
     if (a->count != a->w) {                                                    \
       a->count = 0;                                                            \
@@ -8054,7 +8060,7 @@ iMap Creation Macro
       a->w = i;                                                                \
       FIO_NAME(array_name, seeker_s)                                           \
       s = FIO_NAME(array_name, seek)(a, a->ary + i);                           \
-      if (s.pos != i) {                                                        \
+      if (s.pos != i || s.ipos == (~(imap_type)0)) {                           \
         a->w = a->count;                                                       \
         return -1; /* destination not big enough to contain collisions! */     \
       }                                                                        \
@@ -8073,8 +8079,23 @@ iMap Creation Macro
         return 0;                                                              \
     }                                                                          \
   }                                                                            \
-  /** Sets an object in the Array. Optionally overwrites existing data if any. \
-   */                                                                          \
+  /** Reserves a minimum imap storage capacity. */                             \
+  FIO_IFUNC int FIO_NAME(array_name, reserve)(FIO_NAME(array_name, s) * a,     \
+                                              imap_type min) {                 \
+    imap_type bits = 2;                                                        \
+    if (min > ((imap_type)~0ULL) >> 1)                                         \
+      return -1;                                                               \
+    while ((1ULL << bits) < min)                                               \
+      ++bits;                                                                  \
+    if (bits <= a->capa_bits)                                                  \
+      return 0;                                                                \
+    if (FIO_NAME(array_name, __alloc)(a, bits))                                \
+      return -1;                                                               \
+    if (!FIO_NAME(array_name, __fill_imap)(a))                                 \
+      return 0;                                                                \
+    return FIO_NAME(array_name, __expand)(a);                                  \
+  }                                                                            \
+  /** Sets an object in the Array. Optionally overwrites existing data. */     \
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
@@ -8165,6 +8186,10 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
   fprintf(stderr, "* testing core indexed array type (imap)\n");
   fio_imap_tester_s a = {0};
+  fio_imap_tester_reserve(&a, 1024);
+  FIO_ASSERT(fio_imap_tester_capa(&a) >= 1024 &&
+                 fio_imap_tester_capa(&a) < 4096,
+             "fio_imap_tester_reserve failed");
   for (size_t val = 1; val < 4096; ++val) {
     fio_imap_tester_set(&a, val, 1);
     FIO_ASSERT(a.count == val, "imap array count failed at set %zu!", val);
@@ -26690,6 +26715,7 @@ CLI - cleanup
 #include "000 header.h"               /* Development inclusion - ignore line */
 #include "003 atomics.h"              /* Development inclusion - ignore line */
 #include "010 random.h"               /* Development inclusion - ignore line */
+#include "020 imap.h"                 /* Development inclusion - ignore line */
 #include "100 mem.h"                  /* Development inclusion - ignore line */
 #include "102 queue.h"                /* Development inclusion - ignore line */
 #include "104 sock.h"                 /* Development inclusion - ignore line */
@@ -26772,11 +26798,11 @@ typedef struct fio_poll_s fio_poll_s;
 
 typedef struct {
   /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(int fd, void *udata);
+  void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(int fd, void *udata);
+  void (*on_ready)(void *udata);
   /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(int fd, void *udata);
+  void (*on_close)(void *udata);
 } fio_poll_settings_s;
 
 /** Initializes the polling object, allocating its resources. */
@@ -26841,14 +26867,11 @@ FIO_IFUNC const char *fio_poll_engine(void) { return FIO_POLL_ENGINE_STR; }
   if (!(settings_dest).on_close)                                               \
     (settings_dest).on_close = fio___poll_ev_mock;
 
-SFUNC void fio___poll_ev_mock(int fd, void *udata);
+SFUNC void fio___poll_ev_mock(void *udata);
 
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 /* mock event */
-SFUNC void fio___poll_ev_mock(int fd, void *udata) {
-  (void)fd;
-  (void)udata;
-}
+SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 #endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */
 /* ************************************************************************* */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
@@ -27007,7 +27030,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       // errors are handled as disconnections (on_close) in the EPOLLIN queue
       // if no error, try an active event(s)
       if (events[i].events & EPOLLOUT)
-        p->settings.on_ready(-1, events[i].data.ptr);
+        p->settings.on_ready(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }
@@ -27016,10 +27039,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     for (int i = 0; i < active_count; i++) {
       // errors are handled as disconnections (on_close), but only once...
       if (events[i].events & (~(EPOLLIN | EPOLLOUT)))
-        p->settings.on_close(-1, events[i].data.ptr);
+        p->settings.on_close(events[i].data.ptr);
       // no error, then it's an active event(s)
       else if (events[i].events & EPOLLIN)
-        p->settings.on_data(-1, events[i].data.ptr);
+        p->settings.on_data(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }
@@ -27176,12 +27199,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
     for (int i = 0; i < active_count; i++) {
       // test for event(s) type
       if (events[i].filter == EVFILT_WRITE) {
-        p->settings.on_ready(0, events[i].udata);
+        p->settings.on_ready(events[i].udata);
       } else if (events[i].filter == EVFILT_READ) {
-        p->settings.on_data(0, events[i].udata);
+        p->settings.on_data(events[i].udata);
       }
       if (events[i].flags & (EV_EOF | EV_ERROR)) {
-        p->settings.on_close(0, events[i].udata);
+        p->settings.on_close(events[i].udata);
       }
     }
   } else if (active_count < 0) {
@@ -27249,47 +27272,24 @@ typedef struct {
   unsigned short flags;
 } fio___poll_i_s;
 
-FIO_IFUNC uint64_t fio___poll_i_hash(fio___poll_i_s o) {
-  return fio_risky_ptr((void *)(uintptr_t)(o.fd));
-}
-#define FIO_STL_KEEP__
-#define FIO_RISKY_HASH
-#define FIO_UMAP_NAME         fio___poll_map
-#define FIO_MAP_KEY           fio___poll_i_s
-#define FIO_MAP_KEY_CMP(a, b) ((a).fd == (b).fd)
-#define FIO_MAP_KEY_COPY(d, s)                                                 \
-  do {                                                                         \
-    (d).udata = (s).udata;                                                     \
-    (d).flags = ((d).flags * ((d).fd == (s).fd)) | (s).flags;                  \
-    (d).fd = (s).fd;                                                           \
-  } while (0)
-#define FIO_MAP_HASH_FN(o) fio___poll_i_hash(o)
-#include __FILE__
-
-#ifdef FIO_STL_KEEP__
-#undef FIO_STL_KEEP__
-#endif
+#define FIO___POLL_IMAP_CMP(a, b) ((a)->fd == (b)->fd)
+#define FIO___POLL_IMAP_VALID(o)  (1)
+#define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)(uintptr_t)((o)->fd)))
+FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
+                       fio___poll_i_s,
+                       uint64_t,
+                       FIO___POLL_IMAP_HASH,
+                       FIO___POLL_IMAP_CMP,
+                       FIO___POLL_IMAP_VALID)
+#undef FIO___POLL_IMAP_CMP
+#undef FIO___POLL_IMAP_VALID
+#undef FIO___POLL_IMAP_HASH
 
 struct fio_poll_s {
   fio_poll_settings_s settings;
   fio___poll_map_s map;
   FIO___LOCK_TYPE lock;
 };
-
-FIO_IFUNC fio___poll_i_s *fio___poll_map_get2(fio___poll_map_s *m, int fd) {
-  fio___poll_i_s o = {.fd = fd};
-  return fio___poll_map_node2key_ptr(fio___poll_map_get_ptr(m, o));
-}
-
-FIO_IFUNC void fio___poll_map_remove2(fio___poll_map_s *m, int fd) {
-  fio___poll_i_s *i = fio___poll_map_get2(m, fd);
-  if (i) {
-    i->flags = 0;
-    i->udata = NULL;
-    return;
-  }
-  fio___poll_map_set(m, (fio___poll_i_s){.fd = fd});
-}
 
 /* *****************************************************************************
 Poll Monitoring Implementation - inline static functions
@@ -27300,7 +27300,7 @@ FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
   if (p) {
     *p = (fio_poll_s){
         .settings = args,
-        .map = FIO_MAP_INIT,
+        .map = {0},
         .lock = FIO___LOCK_INIT,
     };
     FIO_POLL_VALIDATE(p->settings);
@@ -27328,15 +27328,14 @@ Poll Monitoring Implementation - possibly externed functions.
 
 /* handle events, return a mask for possible remaining flags. */
 FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
-                                                  int fd,
                                                   void *udata,
                                                   unsigned short flags) {
   if ((flags & POLLOUT))
-    p->settings.on_ready(fd, udata);
+    p->settings.on_ready(udata);
   if ((flags & (POLLIN | POLLPRI)))
-    p->settings.on_data(fd, udata);
+    p->settings.on_data(udata);
   if ((flags & (POLLHUP | POLLERR | POLLNVAL | FIO_POLL_EX_FLAGS))) {
-    p->settings.on_close(fd, udata);
+    p->settings.on_close(udata);
     return 0;
   }
   return ~flags;
@@ -27366,7 +27365,8 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
   flags |= FIO_POLL_EX_FLAGS;
   fio___poll_i_s i = {.udata = udata, .fd = fd, .flags = flags};
   FIO___LOCK_LOCK(p->lock);
-  fio___poll_map_set(&p->map, i);
+  fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  ptr->flags |= flags;
   FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
@@ -27386,7 +27386,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
   int handled = -1;
-  if (!p || !fio___poll_map_count(&p->map)) {
+  if (!p || !(p->map.count)) {
     if (timeout) {
       FIO_THREAD_WAIT((timeout * 1000000));
     }
@@ -27395,10 +27395,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   /* handle events in a copy, allowing events / threads to mutate it */
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
-  p->map = (fio___poll_map_s)FIO_MAP_INIT;
+  p->map = (fio___poll_map_s){0};
   FIO___LOCK_UNLOCK(p->lock);
 
-  const size_t max = fio___poll_map_count(&cpy.map);
+  const size_t max = cpy.map.count;
   const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
 
   int w = 0, r = 0, i = 0;
@@ -27409,11 +27409,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       0);
   void **uary = (void **)(pfd + max);
 
-  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    if (!(pos.key.flags & flag_mask))
+  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if (!(cpy.map.ary[pos].flags & flag_mask))
       continue;
-    pfd[r] = (struct pollfd){.fd = pos.key.fd, .events = (short)pos.key.flags};
-    uary[r] = pos.key.udata;
+    pfd[r] = (struct pollfd){.fd = cpy.map.ary[pos].fd,
+                             .events = (short)cpy.map.ary[pos].flags};
+    uary[r] = cpy.map.ary[pos].udata;
     ++r;
   }
 
@@ -27429,7 +27430,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       if (pfd[i].revents) {
         ++handled;
         pfd[i].events &=
-            fio___poll_handle_events(&cpy, pfd[i].fd, uary[i], pfd[i].revents);
+            fio___poll_handle_events(&cpy, uary[i], pfd[i].revents);
       }
       if ((pfd[i].events & (~(FIO_POLL_EX_FLAGS)))) {
         if (i != w) {
@@ -27448,17 +27449,18 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   i = 0;
 
   FIO___LOCK_LOCK(p->lock);
-  if (!fio___poll_map_count(&p->map) && events <= 0) {
+  if (!p->map.count && events <= 0) {
     p->map = cpy.map;
     i = 1;
     goto finish;
   }
   if (w) {
-    fio___poll_map_reserve(&p->map, w);
+    fio___poll_map_reserve(&p->map, w + p->map.count);
     for (i = 0; i < w; ++i) {
-      fio___poll_i_s *existing = fio___poll_map_get2(&p->map, pfd[i].fd);
-      if (existing && existing->fd == pfd[i].fd) {
-        existing->flags |= (!!existing->flags) * (pfd[i].events);
+      fio___poll_i_s *existing =
+          fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = pfd[i].fd});
+      if (existing) {
+        existing->flags |= existing->flags ? pfd[i].events : 0;
         continue;
       }
       fio___poll_map_set(&p->map,
@@ -27466,7 +27468,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
                              .fd = pfd[i].fd,
                              .flags = (unsigned short)pfd[i].events,
                              .udata = uary[i],
-                         });
+                         },
+                         1);
     }
   }
   i = 0;
@@ -27484,14 +27487,10 @@ finish:
  */
 SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
   int r = 0;
-  fio___poll_i_s *i = NULL;
+  fio___poll_i_s i = {.fd = fd};
   FIO___LOCK_LOCK(p->lock);
-  i = fio___poll_map_get2(&p->map, fd);
-  if (i) {
-    i->flags = 0;
-    i->udata = NULL;
-  }
-  r = 0 - (!i);
+  fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  ptr->flags = 0;
   FIO___LOCK_UNLOCK(p->lock);
   return r;
 }
@@ -27500,13 +27499,13 @@ SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
 SFUNC void fio_poll_close_all(fio_poll_s *p) {
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
-  p->map = (fio___poll_map_s)FIO_MAP_INIT;
+  p->map = (fio___poll_map_s){0};
   FIO___LOCK_UNLOCK(p->lock);
   const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
-  FIO_MAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    if ((pos.key.flags & flag_mask)) {
-      cpy.settings.on_close(pos.key.fd, pos.key.udata);
-      fio_sock_close(pos.key.fd);
+  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
+    if ((cpy.map.ary[pos].flags & flag_mask)) {
+      cpy.settings.on_close(cpy.map.ary[pos].udata);
+      fio_sock_close(cpy.map.ary[pos].fd);
     }
   }
   fio___poll_map_destroy(&cpy.map);
@@ -27566,8 +27565,7 @@ Cleanup
 #include "105 stream.h"               /* Development inclusion - ignore line */
 #include "106 signals.h"              /* Development inclusion - ignore line */
 #include "199 string core.h"          /* Development inclusion - ignore line */
-#include "210 map api.h"              /* Development inclusion - ignore line */
-#include "219 map finish.h"           /* Development inclusion - ignore line */
+#include "210 map.h"                  /* Development inclusion - ignore line */
 #include "299 reference counter.h"    /* Development inclusion - ignore line */
 #include "330 poll api.h"             /* Development inclusion - ignore line */
 #include "330 poll.h"                 /* Development inclusion - ignore line */
@@ -28221,9 +28219,9 @@ typedef void *fio_validity_map_s;
 Global State
 ***************************************************************************** */
 
-static void fio___srv_poll_on_data_schd(int fd, void *udata);
-static void fio___srv_poll_on_ready_schd(int fd, void *udata);
-static void fio___srv_poll_on_close_schd(int fd, void *udata);
+static void fio___srv_poll_on_data_schd(void *udata);
+static void fio___srv_poll_on_ready_schd(void *udata);
+static void fio___srv_poll_on_close_schd(void *udata);
 
 static struct {
   FIO_LIST_HEAD protocols;
@@ -28666,24 +28664,21 @@ static void fio___srv_poll_on_timeout(void *io_, void *ignr_) {
 Event scheduling
 ***************************************************************************** */
 
-static void fio___srv_poll_on_data_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_data_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_data,
                  fio_dup2((fio_s *)io));
 }
-static void fio___srv_poll_on_ready_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_ready_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,
                  fio___srv_poll_on_ready,
                  fio_dup2((fio_s *)io));
 }
-static void fio___srv_poll_on_close_schd(int fd, void *io) {
-  (void)fd;
+static void fio___srv_poll_on_close_schd(void *io) {
   if (!fio_is_valid(io))
     return;
   fio_queue_push(fio___srv_tasks,
