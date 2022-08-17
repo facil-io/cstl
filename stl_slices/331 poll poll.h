@@ -27,10 +27,10 @@ typedef struct {
 
 #define FIO___POLL_IMAP_CMP(a, b) ((a)->fd == (b)->fd)
 #define FIO___POLL_IMAP_VALID(o)  (1)
-#define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)(uintptr_t)((o)->fd)))
+#define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)((uintptr_t)((o)->fd))))
 FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
                        fio___poll_i_s,
-                       uint64_t,
+                       size_t,
                        FIO___POLL_IMAP_HASH,
                        FIO___POLL_IMAP_CMP,
                        FIO___POLL_IMAP_VALID)
@@ -235,9 +235,7 @@ finish:
   return events;
 }
 
-/**
- * Stops monitoring the specified file descriptor, returning -1 on error.
- */
+/** Stops monitoring the specified file descriptor, returning -1 on error. */
 SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
   int r = 0;
   fio___poll_i_s i = {.fd = fd};

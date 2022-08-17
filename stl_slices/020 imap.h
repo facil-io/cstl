@@ -132,15 +132,15 @@ iMap Creation Macro
       /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
       for (int mini_steps = 0;;) {                                             \
         pos &= pos_mask;                                                       \
-        const uint32_t pos_hash = imap[pos] & hash_mask;                       \
-        const uint32_t pos_index = imap[pos] & pos_mask;                       \
+        const imap_type pos_hash = imap[pos] & hash_mask;                      \
+        const imap_type pos_index = imap[pos] & pos_mask;                      \
         if ((pos_hash == tester) && cmp_fn((a->ary + pos_index), pobj)) {      \
           r.ipos = pos;                                                        \
           r.pos = pos_index;                                                   \
           r.set_val = tester | pos_index;                                      \
           return r;                                                            \
         }                                                                      \
-        if (!pos_hash) {                                                       \
+        if (!imap[pos]) {                                                      \
           r.ipos = pos;                                                        \
           r.set_val = tester | r.pos; /* r.pos == a->w */                      \
           return r;                                                            \
@@ -150,16 +150,14 @@ iMap Creation Macro
           r.set_val = tester | r.pos; /* r.pos == a->w */                      \
         }                                                                      \
         if (!((--attempts)))                                                   \
-          goto done;                                                           \
+          return r;                                                            \
         if (mini_steps == 2)                                                   \
           break;                                                               \
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
         ++mini_steps;                                                          \
       }                                                                        \
       pos += 0x43F82D0BUL; /* big step */                                      \
-    };                                                                         \
-  done:                                                                        \
-    return r;                                                                  \
+    }                                                                          \
   }                                                                            \
   /** fills an empty imap with the info about existing elements. */            \
   FIO_SFUNC int FIO_NAME(array_name,                                           \
@@ -179,11 +177,10 @@ iMap Creation Macro
         ++a->count;                                                            \
       }                                                                        \
     }                                                                          \
-    for (size_t i = 0; i < a->count; ++i) {                                    \
-      a->w = i;                                                                \
+    for (a->w = 0; a->w < a->count; ++(a->w)) {                                \
       FIO_NAME(array_name, seeker_s)                                           \
-      s = FIO_NAME(array_name, seek)(a, a->ary + i);                           \
-      if (s.pos != i || s.ipos == (~(imap_type)0)) {                           \
+      s = FIO_NAME(array_name, seek)(a, a->ary + a->w);                        \
+      if (s.pos != a->w || s.ipos == (~(imap_type)0)) {                        \
         a->w = a->count;                                                       \
         return -1; /* destination not big enough to contain collisions! */     \
       }                                                                        \
@@ -314,15 +311,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
                  fio_imap_tester_capa(&a) < 4096,
              "fio_imap_tester_reserve failed");
   for (size_t val = 1; val < 4096; ++val) {
-    fio_imap_tester_set(&a, val, 1);
+    size_t *pobj = fio_imap_tester_set(&a, val, 1);
     FIO_ASSERT(a.count == val, "imap array count failed at set %zu!", val);
-    fio_imap_tester_set(&a, val, 0);
-    fio_imap_tester_set(&a, val, 0);
-    fio_imap_tester_set(&a, val, 0);
+    size_t *ptmp = fio_imap_tester_set(&a, val, 0);
+    FIO_ASSERT(ptmp == pobj,
+               "fio_imap_tester_set should return pointer to existing item");
+    ptmp = fio_imap_tester_set(&a, val, 0);
+    FIO_ASSERT(ptmp == pobj,
+               "fio_imap_tester_set should return pointer to existing item");
+    ptmp = fio_imap_tester_set(&a, val, 0);
+    FIO_ASSERT(ptmp == pobj,
+               "fio_imap_tester_set should return pointer to existing item");
     FIO_ASSERT(a.count == val, "imap array double-set error %zu!", val);
-    FIO_ASSERT(fio_imap_tester_get(&a, val) &&
+    FIO_ASSERT(fio_imap_tester_get(&a, val) == pobj &&
                    fio_imap_tester_get(&a, val)[0] == val,
                "imap array get failed for %zu!",
+               val);
+  }
+  for (size_t val = 1; val < 4096; ++val) {
+    FIO_ASSERT(fio_imap_tester_get(&a, val) &&
+                   fio_imap_tester_get(&a, val)[0] == val,
+               "imap array get failed for %zu (2)!",
                val);
   }
   for (size_t val = 4096; --val;) {

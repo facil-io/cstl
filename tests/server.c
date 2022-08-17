@@ -24,6 +24,7 @@ Note: This is a **TOY** example, with only minimal security features.
 // #define FIO_EXTERN_COMPLETE
 // #define FIO_MEMORY_DISABLE 1
 // #define FIO_USE_THREAD_MUTEX 1
+// #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #define FIO_LEAK_COUNTER 1
 #define FIO_MALLOC
 #define FIO_EVERYTHING
