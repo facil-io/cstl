@@ -109,16 +109,35 @@ Stops monitoring the specified file descriptor even if some of it's event's hadn
 
 ### `FIO_POLL` Compile Time Macros
 
-#### `FIO_POLL_FRAGMENTATION_LIMIT`
+#### `FIO_POLL_ENGINE`
 
 ```c
-#define FIO_POLL_FRAGMENTATION_LIMIT 63
+#define FIO_POLL_ENGINE_POLL   1
+#define FIO_POLL_ENGINE_EPOLL  2
+#define FIO_POLL_ENGINE_KQUEUE 3
 ```
 
-When the polling array is fragmented by more than the set value, it will be de-fragmented on the idle cycle (if no events occur).
+Allows for both the detection and the manual selection (override) of the underlying IO multiplexing API.
 
-#### `FIO_POLL_DEBUG`
+When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses less system calls.
 
-If defined before the first time `FIO_POLL` is included, this will add debug messages to the polling logic.
+```c
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+```
+
+#### `FIO_POLL_ENGINE_STR`
+
+```c
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
+#define FIO_POLL_ENGINE_STR "poll"
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
+#define FIO_POLL_ENGINE_STR "epoll"
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
+#define FIO_POLL_ENGINE_STR "kqueue"
+#endif
+
+```
+
+A string MACRO representing the used IO multiplexing "engine".
 
 -------------------------------------------------------------------------------

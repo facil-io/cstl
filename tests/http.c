@@ -24,7 +24,7 @@ Note: This is a **TOY** example, with only minimal security.
 #define FIO_CLI
 #define FIO_TIME
 #define FIO_POLL
-// #define FIO_POLL_DEBUG
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 // #define FIO_MEMORY_DISABLE 1
 // #define FIO_USE_THREAD_MUTEX 1
 #include "fio-stl.h"
@@ -54,11 +54,11 @@ Callbacks and object used by main()
 ***************************************************************************** */
 
 /** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(int fd, void *arg);
+FIO_SFUNC void on_ready(void *arg);
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(int fd, void *arg);
+FIO_SFUNC void on_data(void *arg);
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(int fd, void *arg);
+FIO_SFUNC void on_close(void *arg);
 /* Signal review callback. */
 FIO_SFUNC void on_signal(int sig, void *udata);
 
@@ -68,7 +68,7 @@ FIO_SFUNC void review_timeouts(void);
 FIO_SFUNC void clear_timeouts(void);
 
 /** The IO polling object - it keeps a one-shot list of monitored IOs. */
-static fio_poll_s *monitor;
+static fio_poll_s monitor;
 /** Time tick, the now of the moment. */
 static int64_t fio_now;
 /** Timeout management using a linked list. */
@@ -87,7 +87,8 @@ int main(int argc, char const *argv[]) {
                 argv,
                 0, /* allow 1 unnamed argument - the address to connect to */
                 1,
-                "A simple HTTP \"hello world\" example, listening on the "
+                "A simple HTTP example using " FIO_POLL_ENGINE_STR
+                ", listening on the "
                 "specified URL. i.e.\n"
                 "\tNAME <url>\n\n"
                 "Unix socket examples:\n"
@@ -157,18 +158,22 @@ int main(int argc, char const *argv[]) {
 #endif
 
   /* select IO objects to be monitored */
-  monitor = fio_poll_new(.on_data = on_data,
-                         .on_ready = on_ready,
-                         .on_close = on_close);
-  fio_poll_monitor(monitor, srv_fd, NULL, POLLIN);
-  FIO_LOG_INFO("Listening for HTTP echo @ %s", url);
+  fio_poll_init(&monitor,
+                .on_data = on_data,
+                .on_ready = on_ready,
+                .on_close = on_close);
+  fio_poll_monitor(&monitor,
+                   srv_fd,
+                   (void *)(((uintptr_t)srv_fd << 1) | 1),
+                   POLLIN);
+  FIO_LOG_INFO("Listening for HTTP echo (" FIO_POLL_ENGINE_STR ") @ %s", url);
 
   /* loop until the stop flag is raised */
   int64_t last_timeout_review = fio_time_milli();
   /* loop until the stop flag is raised */
   while (!server_stop_flag) {
     /* review IO events (calls the registered callbacks) */
-    fio_poll_review(monitor, 1000);
+    fio_poll_review(&monitor, 1000);
     /* review signals (calls the registered callback) */
     fio_signal_review();
     /* review timeouts */
@@ -180,9 +185,8 @@ int main(int argc, char const *argv[]) {
   }
 
   /* cleanup */
-  fio_poll_close_all(monitor);
   clear_timeouts();
-  fio_poll_free(monitor);
+  fio_poll_destroy(&monitor);
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
   return 0;
@@ -207,7 +211,7 @@ FIO_SFUNC void on_signal(int sig, void *udata) {
 /* *****************************************************************************
 IO "Objects"and helpers
 ***************************************************************************** */
-#include "../parsers/http1_parser.h"
+#include "../extras/parsers/http1_parser.h"
 
 typedef struct {
   http1_parser_s parser;
@@ -248,15 +252,18 @@ static void http_send_response(client_s *c,
 #define FIO_REF_FLEX_TYPE char
 #define FIO_REF_INIT(c)                                                        \
   do {                                                                         \
-    (c).timeouts = FIO_LIST_INIT(c.timeouts);                                  \
-    (c).active = fio_now;                                                      \
+    (c) = (client_s){                                                          \
+        .out = FIO_STREAM_INIT((c).out),                                       \
+        .timeouts = FIO_LIST_INIT((c).timeouts),                               \
+        .active = fio_now,                                                     \
+    };                                                                         \
   } while (0)
 #define FIO_REF_DESTROY(c)                                                     \
   do {                                                                         \
     fio_stream_destroy(&(c).out);                                              \
     FIO_LIST_REMOVE(&(c).timeouts);                                            \
-    fio_poll_forget(monitor, (c).fd);                                          \
     fio_sock_close((c).fd);                                                    \
+    fio_poll_forget(&monitor, (c).fd);                                         \
   } while (0)
 #include "fio-stl.h"
 
@@ -265,8 +272,8 @@ IO callback(s)
 ***************************************************************************** */
 
 /** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(int fd, void *arg) {
-  if (!arg)
+FIO_SFUNC void on_ready(void *arg) {
+  if ((((uintptr_t)arg) & 1))
     return;
   client_s *c = arg;
   char mem[32768];
@@ -281,13 +288,13 @@ FIO_SFUNC void on_ready(int fd, void *arg) {
     /* read from the stream, copy might not be required. updates buf and len. */
     fio_stream_read(&c->out, &buf, &len);
     /* write to the IO object */
-    if (!len || (sent = fio_sock_write(fd, buf, len)) <= 0)
+    if (!len || (sent = fio_sock_write(c->fd, buf, len)) <= 0)
       goto finish;
     total += sent;
     /* advance the stream by the amount actually written to the IO (partial?) */
     fio_stream_advance(&c->out, len);
     /* log */
-    FIO_LOG_DEBUG2("on_ready send %zu bytes to fd %d.", len, fd);
+    FIO_LOG_DEBUG2("on_ready send %zu bytes to fd %d.", len, c->fd);
   } while (len);
 finish:
   /* reinsert to timeout list */
@@ -298,31 +305,32 @@ finish:
   }
   /* if there's data left to write, monitor the outgoing buffer. */
   if (fio_stream_any(&c->out)) {
-    fio_poll_monitor(monitor, fd, arg, POLLOUT);
+    fio_poll_monitor(&monitor, c->fd, arg, POLLOUT);
   } else if (c->throttle) {
     c->throttle = 0;
-    fio_poll_monitor(monitor, fd, arg, POLLIN);
+    fio_poll_monitor(&monitor, c->fd, arg, POLLIN);
   }
   return;
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(int fd, void *arg) {
+FIO_SFUNC void on_data(void *arg) {
   client_s *c = arg;
-  if (!arg)
+  if ((((uintptr_t)arg) & 1))
     goto accept_new_connections;
   /* test that a client isn't flooding us with requests */
   if (!c->throttle && fio_stream_length(&c->out) >= 131072) {
     FIO_LOG_SECURITY("Throttling client %p @ fd %d for security concerns",
                      (void *)c,
-                     fd);
+                     c->fd);
     c->throttle = 1;
   }
   /* do not process or monitor throttled clients for incoming data */
   if (c->throttle)
     return;
-  ssize_t r =
-      fio_sock_read(fd, c->buf + c->buf_pos, HTTP_CLIENT_BUFFER - c->buf_pos);
+  ssize_t r = fio_sock_read(c->fd,
+                            c->buf + c->buf_pos,
+                            HTTP_CLIENT_BUFFER - c->buf_pos);
   if (r > 0) {
     c->active = fio_now;
     c->buf_pos += r;
@@ -345,36 +353,37 @@ FIO_SFUNC void on_data(int fd, void *arg) {
   }
 
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(monitor, fd, arg, POLLIN);
+  fio_poll_monitor(&monitor, c->fd, arg, POLLIN);
   return;
 
 accept_new_connections : {
   /* accept is a macro for fio_sock_accept, which int Windows safe. */
-  int cfd = accept(fd, NULL, NULL);
+  int cfd = accept((int)(((uintptr_t)arg) >> 1), NULL, NULL);
   if (cfd == -1)
     goto accept_error;
   fio_sock_set_non_block(cfd);
   c = client_new(HTTP_CLIENT_BUFFER + 1);
   c->fd = cfd;
   FIO_LIST_PUSH(&timeouts, &c->timeouts);
-  fio_poll_monitor(monitor, cfd, c, POLLIN | POLLOUT);
+  fio_poll_monitor(&monitor, cfd, c, POLLIN | POLLOUT);
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(monitor, fd, NULL, POLLIN);
+  fio_poll_monitor(&monitor, (int)(((uintptr_t)arg) >> 1), arg, POLLIN);
   return;
 }
 
 accept_error:
   FIO_LOG_ERROR("Couldn't accept connection? %s", strerror(errno));
   /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(monitor, fd, NULL, POLLIN);
+  fio_poll_monitor(&monitor, (int)(((uintptr_t)arg) >> 1), arg, POLLIN);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(int fd, void *arg) {
-  if (arg) {
+FIO_SFUNC void on_close(void *arg) {
+  if (!(((uintptr_t)arg) & 1)) {
     client_free(arg);
   } else {
-    FIO_LOG_DEBUG2("on_close callback called for %d, stopping.", fd);
+    FIO_LOG_DEBUG2("on_close callback called for %d, stopping.",
+                   (int)(((uintptr_t)arg) >> 1));
     server_stop_flag = 1;
   }
 }
@@ -436,14 +445,14 @@ static int http1_on_request(http1_parser_s *parser) {
   c->headers_len = 0;
   c->body_len = 0;
 
-  fio_poll_monitor(monitor, c->fd, c, POLLOUT);
+  fio_poll_monitor(&monitor, c->fd, c, POLLOUT);
   return 0;
 }
 
 /** called when a response was received. */
 static int http1_on_response(http1_parser_s *parser) {
   (void)parser;
-  FIO_LOG_ERROR("response receieved instead of a request. Silently ignored.");
+  FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
   return -1;
 }
 /** called when a request method is parsed. */

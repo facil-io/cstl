@@ -5,15 +5,13 @@
 #include "fio-stl.h"
 ```
 
-A simple server - `poll` based, evented and single-threaded - is included when `FIO_SERVER` is defined.
+An IO multiplexing server - evented and single-threaded - is included when `FIO_SERVER` is defined.
 
-All API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for `fio_defer`, `fio_dup`, `fio_undup`, and `fio_udata_get`.
+All server API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for functions specifically noted as thread safe, such as `fio_defer`, `fio_dup` and `fio_undup`.
 
-To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any information to an external thread (possibly using a queue), then call `fio_defer` to schedule a task where a response can be written to the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new events from occurring.
+To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any information to an external thread (possibly using a queue). Once the external thread has completed its work, call `fio_defer` to schedule a task in which the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new `on_data` related events from occurring.
 
-**Note**: the `poll` system call becomes slow with only a few thousand sockets... if you expect thousands or more concurrent connections, please use the facil.io IO library (that uses `epoll` / `kqueue`).
-
-**Note**: this will automatically include the API and features provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
+**Note**: this will automatically include a large amount of the facil.io STL modules, such as once provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
 ### `FIO_SERVER` API
 
@@ -25,6 +23,8 @@ typedef struct fio_protocol_s fio_protocol_s;
 /** The main IO object type. Should be treated as an opaque pointer. */
 typedef struct fio_s fio_s;
 ```
+
+#### `fio_listen`
 
 ```c
 SFUNC int fio_listen(struct fio_listen_args args);
@@ -95,6 +95,8 @@ void *fio_udata_get(fio_s *io);
 
 Returns the `udata` pointer associated with the IO.
 
+This is thread safe only on CPUs that read / write pointer sized words in a single operations.
+
 #### `fio_read`
 
 ```c
@@ -102,11 +104,10 @@ size_t fio_read(fio_s *io, void *buf, size_t len);
 ```
 
 Reads data to the buffer, if any data exists. Returns the number of bytes read.
-NOTE: zero (`0`) is a valid return value meaning no data was available.
 
+**Note**: zero (`0`) is a valid return value meaning no data was available.
 
 #### `fio_write2`
-
 
 ```c
 void fio_write2(fio_s *io, fio_write_args_s args);
@@ -152,6 +153,8 @@ typedef struct {
 } fio_write_args_s;
 ```
 
+**Note**: these functions are thread safe except that message ordering isn't guarantied - i.e., multiple `fio_write2` calls from different threads will not corrupt the underlying data structure and each `write` will appear atomic, but the order in which the different `write` calls isn't guaranteed.
+
 #### `fio_close`
 
 ```c
@@ -160,6 +163,8 @@ void fio_close(fio_s *io);
 
 Marks the IO for closure as soon as scheduled data was sent.
 
+**Note**: this function is thread-safe.
+
 #### `fio_close_now`
 
 ```c
@@ -167,6 +172,8 @@ void fio_close_now(fio_s *io);
 ```
 
 Marks the IO for immediate closure.
+
+**Note**: unlike `fio_close` this function is **NOT** thread-safe.
 
 #### `fio_tls_set`
 
@@ -232,6 +239,8 @@ void fio_unsuspend(fio_s *io);
 
 Listens for future "on_data" events related to the IO.
 
+**Note**: this function is thread safe (though `fio_suspend` is **NOT**).
+
 #### `fio_is_suspended`
 
 ```c
@@ -239,6 +248,8 @@ int fio_is_suspended(fio_s *io);
 ```
 
 Returns non-zero if the IO is suspended (this might not be reliable information).
+
+**Note**: this function is thread safe (though `fio_suspend` is **NOT**).
 
 #### `fio_dup`
 
@@ -250,7 +261,7 @@ Increases a IO's reference count, so it won't be automatically destroyed when al
 
 Use this function in order to use the IO outside of a scheduled task.
 
-This function is thread-safe.
+**Note**: this function is thread-safe.
 
 #### `fio_undup`
 
@@ -262,7 +273,7 @@ Decreases a IO's reference count, so it could be automatically destroyed when al
 
 Use this function once finished with a IO that was `dup`-ed.
 
-This function is thread-safe.
+**Note**: this function is thread-safe.
 
 #### `fio_defer`
 
@@ -270,8 +281,9 @@ This function is thread-safe.
 void fio_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
 ```
 
-Schedules a task for delayed execution. This function is thread-safe and schedules the task within the Server's task queue.
+Schedules a task for delayed execution. This function schedules the task within the Server's task queue, so the task will execute within the server's thread, allowing all API calls to be made.
 
+**Note**: this function is thread-safe.
 
 ### `fio_protocol_s`
 
@@ -374,6 +386,8 @@ typedef struct {
 } fio_env_set_args_s;
 ```
 
+**Note**: this function is thread-safe.
+
 #### `fio_env_unset`
 
 ```c
@@ -396,6 +410,8 @@ typedef struct {
 } fio_env_unset_args_s;
 ```
 
+**Note**: this function is thread-safe.
+
 #### `fio_env_remove`
 
 ```c
@@ -406,6 +422,8 @@ int fio_env_remove(fio_s *io, fio_env_unset_args_s);
 Removes an object from the connection's lifetime / environment, calling it's `on_close` callback as if the connection was closed.
 
 The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
+
+**Note**: this function is thread-safe.
 
 ### `FIO_SERVER` Compile Time Macros
 

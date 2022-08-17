@@ -986,6 +986,7 @@ SFUNC void fio_undup(fio_s *io) {
 Connection Object Links / Environment
 ***************************************************************************** */
 
+void fio_env_set___(void); /* IDE marker */
 /**
  * Links an object to a connection's lifetime / environment.
  */
@@ -1004,6 +1005,7 @@ SFUNC void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
                          args.const_name);
 }
 
+void fio_env_unset___(void); /* IDE marker */
 /**
  * Un-links an object from the connection's lifetime, so it's `on_close`
  * callback will NOT be called.

@@ -30,7 +30,7 @@ typedef struct {
 #define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)((uintptr_t)((o)->fd))))
 FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
                        fio___poll_i_s,
-                       size_t,
+                       uint32_t,
                        FIO___POLL_IMAP_HASH,
                        FIO___POLL_IMAP_CMP,
                        FIO___POLL_IMAP_VALID)
@@ -72,12 +72,6 @@ FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
 Poll Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-#ifdef FIO_POLL_DEBUG
-#define FIO_POLL_DEBUG_LOG FIO_LOG_DEBUG
-#else
-#define FIO_POLL_DEBUG_LOG(...)
-#endif
 
 /* handle events, return a mask for possible remaining flags. */
 FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
