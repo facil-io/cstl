@@ -16,29 +16,26 @@ Benchmark with keep-alive:
 Note: This is a **TOY** example, with only minimal security features.
 ***************************************************************************** */
 
-/* include some of the modules we use... */
-// #define FIO_LOG
-// #define FIO_CLI
-// #define FIO_SERVER
-// #define FIO_EXTERN
-// #define FIO_EXTERN_COMPLETE
-// #define FIO_MEMORY_DISABLE 1
-// #define FIO_USE_THREAD_MUTEX 1
-// #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
-#define FIO_LEAK_COUNTER 1
-#define FIO_MALLOC
-#define FIO_EVERYTHING
-#include "fio-stl.h"
-
 /* we use local global variables to make the code easier. */
 
 #define HTTP_CLIENT_BUFFER 32768
 #define HTTP_MAX_BODY_SIZE (1ULL << 27)
 #define HTTP_MAX_HEADERS   16
-#define HTTP_TIMEOUTS      5000
+#define HTTP_TIMEOUT       (60 * 100)
 
 /* an echo response (vs. Hello World). */
 #define HTTP_RESPONSE_ECHO 1
+
+/* *****************************************************************************
+Used facil.io Modules
+***************************************************************************** */
+
+// #define FIO_MEMORY_DISABLE 1
+// #define FIO_USE_THREAD_MUTEX 1
+// #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+#define FIO_LEAK_COUNTER 1
+#define FIO_EVERYTHING
+#include "fio-stl.h"
 
 /* *****************************************************************************
 Callbacks and object used by main()
@@ -55,6 +52,7 @@ FIO_SFUNC void on_close(void *udata);
 static fio_protocol_s HTTP_PROTOCOL_1 = {
     .on_data = on_data,
     .on_close = on_close,
+    .timeout = HTTP_TIMEOUT,
 };
 
 /* *****************************************************************************
@@ -204,7 +202,7 @@ int main(int argc, char const *argv[]) {
   FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
                "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d"
                "\n\tPress ^C to exit.",
-               fio_cli_get_i("-w"));
+               fio_srv_workers(fio_cli_get_i("-w")));
   fio_srv_run(fio_cli_get_i("-w"));
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
@@ -248,12 +246,6 @@ FIO_SFUNC void on_data(fio_s *io) {
 /* *****************************************************************************
 HTTP/1.1 Protocol Controller
 ***************************************************************************** */
-/* Use fio_malloc. */
-#undef FIO_MEM_REALLOC
-#undef FIO_MEM_FREE
-#undef FIO_MEM_REALLOC_IS_SAFE
-#define FIO_MALLOC
-#include "fio-stl.h"
 
 /** Informs the controller that a request is starting. */
 static int http1_start_request(http_s *h, int reserved, int streaming) {

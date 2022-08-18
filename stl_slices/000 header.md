@@ -94,7 +94,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
 
-* [Simple Server](#simple-server) - defined by `FIO_SERVER`
+* [IO Multiplexing Server](#server) - defined by `FIO_SERVER`
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 

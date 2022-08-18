@@ -867,7 +867,6 @@ typedef struct fio_list_node_s {
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
   } while (0)
 
 /** UNSAFE macro for removing a node from a list. Resets node data. */
@@ -875,6 +874,7 @@ typedef struct fio_list_node_s {
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
   } while (0)
 
 /** UNSAFE macro for popping a node to a list. */

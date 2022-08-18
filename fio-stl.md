@@ -94,7 +94,7 @@ In addition, the core Simple Template Library (STL) includes helpers for common 
 
 * [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
 
-* [Simple Server](#simple-server) - defined by `FIO_SERVER`
+* [IO Multiplexing Server](#server) - defined by `FIO_SERVER`
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
@@ -7394,7 +7394,7 @@ When multiplexing a small number of IO sockets, using the `poll` engine might be
 A string MACRO representing the used IO multiplexing "engine".
 
 -------------------------------------------------------------------------------
-## Simple Server
+## Server
 
 ```c
 #define FIO_SERVER
@@ -7405,7 +7405,7 @@ An IO multiplexing server - evented and single-threaded - is included when `FIO_
 
 All server API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for functions specifically noted as thread safe, such as `fio_defer`, `fio_dup` and `fio_undup`.
 
-To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any information to an external thread (possibly using a queue). Once the external thread has completed its work, call `fio_defer` to schedule a task in which the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new `on_data` related events from occurring.
+To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any additional information to an external thread (possibly using a queue). Once the external thread has completed its work, call `fio_defer` to schedule a task in which the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new `on_data` related events from occurring.
 
 **Note**: this will automatically include a large amount of the facil.io STL modules, such as once provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
@@ -7423,11 +7423,11 @@ typedef struct fio_s fio_s;
 #### `fio_listen`
 
 ```c
-SFUNC int fio_listen(struct fio_listen_args args);
+int fio_listen(struct fio_listen_args args);
 #define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
 ```
 
-Sets up a network service / listening socket. The listening service will be destroyed when the server stops (unlike the listening service created using the facil.io IO library).
+Sets up a network service / listening socket that will persist until the program exists (even if the server is restarted).
 
 Returns 0 on success or -1 on error.
 
@@ -7458,10 +7458,10 @@ struct fio_listen_args {
 #### `fio_attach_fd`
 
 ```c
-SFUNC fio_s *fio_attach_fd(int fd,
-                           fio_protocol_s *protocol,
-                           void *udata,
-                           void *tls);
+fio_s *fio_attach_fd(int fd,
+                     fio_protocol_s *protocol,
+                     void *udata,
+                     void *tls);
 ```
 Attaches the socket in `fd` to the facio.io engine (reactor).
 
@@ -7549,7 +7549,7 @@ typedef struct {
 } fio_write_args_s;
 ```
 
-**Note**: these functions are thread safe except that message ordering isn't guarantied - i.e., multiple `fio_write2` calls from different threads will not corrupt the underlying data structure and each `write` will appear atomic, but the order in which the different `write` calls isn't guaranteed.
+**Note**: these functions are thread safe except that message ordering isn't guarantied if writing from multiple threads - i.e., multiple `fio_write2` calls from different threads will not corrupt the underlying data structure and each `write` will appear atomic, but the order in which the different `write` calls isn't guaranteed.
 
 #### `fio_close`
 
@@ -7667,28 +7667,17 @@ void fio_undup(fio_s *io);
 
 Decreases a IO's reference count, so it could be automatically destroyed when all other tasks have completed.
 
-Use this function once finished with a IO that was `dup`-ed.
+Use this function once finished with an IO that was `fio_dup`-ed.
 
 **Note**: this function is thread-safe.
 
-#### `fio_defer`
+### Protocol Callbacks and Settings
 
-```c
-void fio_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
-```
-
-Schedules a task for delayed execution. This function schedules the task within the Server's task queue, so the task will execute within the server's thread, allowing all API calls to be made.
-
-**Note**: this function is thread-safe.
-
-### `fio_protocol_s`
-
-The Protocol struct defines the callbacks used for a family of connections and sets their behavior. The Protocol struct is part of facil.io's core design both for the Simple Server and the fully featured IO library.
+The Protocol struct (`fio_protocol_s`) defines the callbacks used for a family of connections and sets their behavior. The Protocol struct is part of facil.io's core Server design.
 
 Protocols are usually global objects and the same protocol can be assigned to multiple IO handles.
 
-All the callbacks receive an IO handle (except `on_close`), which is used instead of the system's file descriptor and protects callbacks and IO operations from sending data to incorrect clients (possible `fd` "recycling").
-
+All the callbacks (except `on_close`) receive an IO handle, which is used instead of the system's file descriptor and protects callbacks and IO operations from sending data to incorrect clients (possible `fd` "recycling").
 
 ```c
 struct fio_protocol_s {
@@ -7710,9 +7699,7 @@ struct fio_protocol_s {
   void (*on_data)(fio_s *io);
   /** called once all pending `fio_write` calls are finished. */
   void (*on_ready)(fio_s *io);
-  /**
-   * Called when the connection was closed, and all pending tasks are complete.
-   */
+  /** Called after the connection was closed, and pending tasks completed. */
   void (*on_close)(void *udata);
   /**
    * Called when the server is shutting down, immediately before closing the
@@ -7744,8 +7731,9 @@ struct fio_protocol_s {
   /**
    * The timeout value in seconds for all connections using this protocol.
    *
-   * Limited to FIO_SRV_TIMEOUT_MAX seconds. The value 0 will be the same as the
-   * timeout limit.
+   * Limited to FIO_SRV_TIMEOUT_MAX seconds.
+   * 
+   * The zero value (0) is the same as the timeout limit (FIO_SRV_TIMEOUT_MAX).
    */
   uint32_t timeout;
 };
@@ -7753,7 +7741,7 @@ struct fio_protocol_s {
 
 ### `FIO_SERVER` Connection Environment
 
-Each connection object has its own personal environment storage that allows it to store objects that are linked to the connection's lifetime.
+Each connection object has its own personal environment storage that allows it to store named objects that are linked to the connection's lifetime.
 
 #### `fio_env_set`
 ```c
@@ -7821,6 +7809,114 @@ The function is shadowed by the helper MACRO that allows the function to be call
 
 **Note**: this function is thread-safe.
 
+### Sarting / Stopping the Server
+
+#### `fio_srv_run`
+
+```c
+void fio_srv_run(int workers);
+```
+
+Starts the server, using optional `workers` processes.
+
+The function returns after the server stops either through a signal (`SIGINT` / `SIGTERM`) or by a call to `fio_srv_stop`.
+
+**Note**: this function will block the current thread, using it as the main thread for the server.
+
+Note: worker processes can be stopped and re-spawned by send the workers a `SIGINT` / `SIGTERM` or calling `fio_srv_stop` within the workers (i.e., by using a timer or sending a pub/sub message).
+
+#### `fio_srv_stop`
+
+```c
+void fio_srv_stop(void);
+```
+
+Stopping the server.
+
+#### `fio_srv_is_running`
+
+```c
+int fio_srv_is_running();
+```
+
+Returns true if server running and 0 if server stopped or shutting down.
+
+#### `fio_srv_workers`
+
+```c
+uint16_t fio_srv_workers(int workers_requested);
+```
+
+Returns the number or workers the server will actually run.
+
+
+### Server Task Scheduling
+
+#### `fio_defer`
+
+```c
+void fio_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
+```
+
+Schedules a task for delayed execution. This function schedules the task within the Server's task queue, so the task will execute within the server's thread, allowing all API calls to be made.
+
+**Note**: this function is thread-safe.
+
+#### `fio_run_every`
+
+```c
+void fio_run_every(fio_timer_schedule_args_s args);
+#define fio_run_every(...)                                                     \
+  fio_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
+```
+
+Schedules a timer bound task, see [`fio_timer_schedule`](#fio_timer_schedule).
+
+Possible "named arguments" (`fio_timer_schedule_args_s` members) include:
+
+* The timer function. If it returns a non-zero value, the timer stops:
+
+    ```c
+    int (*fn)(void *, void *)
+    ```
+
+* Opaque user data:
+
+    ```c
+    void *udata1
+    ```
+
+* Opaque user data:
+
+    ```c
+    void *udata2
+    ```
+
+* Called when the timer is done (finished):
+
+    ```c
+    void (*on_finish)(void *, void *)
+    ```
+
+* Timer interval, in milliseconds:
+
+    ```c
+    uint32_t every
+    ```
+
+* The number of times the timer should be performed. -1 == infinity:
+
+    ```c
+    int32_t repetitions
+    ```
+
+#### `fio_last_tick`
+
+```c
+int64_t fio_last_tick(void);
+```
+Returns the last millisecond when the server reviewed pending IO events.
+
 ### `FIO_SERVER` Compile Time Macros
 
 
@@ -7843,11 +7939,18 @@ IO will be throttled (no `on_data` events) if outgoing buffer is large.
 #### `FIO_SRV_TIMEOUT_MAX`
 
 ```c
-#define FIO_SRV_TIMEOUT_MAX 300
+#define FIO_SRV_TIMEOUT_MAX 300000
 ```
 
-Controls the maximum timeout in seconds (i.e., when timeout is not set).
+Controls the maximum timeout in milliseconds, as well as the default timeout when it isn't set.
 
+#### `FIO_SRV_SHUTDOWN_TIMEOUT`
+
+```c
+#define FIO_SRV_SHUTDOWN_TIMEOUT 10000
+```
+
+Sets the hard timeout (in milliseconds) for the server's shutdown loop.
 
 -------------------------------------------------------------------------------
 ## Pub/Sub 

@@ -55,8 +55,13 @@ developer.
 #endif
 
 #ifndef FIO_SRV_TIMEOUT_MAX
-/** Controls the maximum timeout in seconds (i.e., when timeout is not set). */
-#define FIO_SRV_TIMEOUT_MAX 300
+/** Controls the maximum and default timeout in milliseconds. */
+#define FIO_SRV_TIMEOUT_MAX 300000
+#endif
+
+#ifndef FIO_SRV_SHUTDOWN_TIMEOUT
+/* Sets the hard timeout (in milliseconds) for the server's shutdown loop. */
+#define FIO_SRV_SHUTDOWN_TIMEOUT 10000
 #endif
 
 /* *****************************************************************************
@@ -81,6 +86,9 @@ SFUNC void fio_srv_run(int workers);
 
 /* Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running();
+
+/* Returns the number or workers the server will actually run. */
+SFUNC uint16_t fio_srv_workers(int workers_requested);
 
 /* *****************************************************************************
 Listening to Incoming Connections
@@ -274,10 +282,10 @@ Task Scheduling
 /** Schedules a task for delayed execution. This function is thread-safe. */
 SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
 
-/** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
+/** Schedules a timer bound task, see `fio_timer_schedule`. */
 SFUNC void fio_run_every(fio_timer_schedule_args_s args);
 /**
- * Schedules a timer bound task, see `fio_timer_schedule` in the CSTL.
+ * Schedules a timer bound task, see `fio_timer_schedule`.
  *
  * Possible "named arguments" (fio_timer_schedule_args_s members) include:
  *
@@ -333,9 +341,7 @@ struct fio_protocol_s {
   void (*on_data)(fio_s *io);
   /** called once all pending `fio_write` calls are finished. */
   void (*on_ready)(fio_s *io);
-  /**
-   * Called when the connection was closed, and all pending tasks are complete.
-   */
+  /** Called after the connection was closed, and pending tasks completed. */
   void (*on_close)(void *udata);
   /**
    * Called when the server is shutting down, immediately before closing the
@@ -369,8 +375,7 @@ struct fio_protocol_s {
   /**
    * The timeout value in seconds for all connections using this protocol.
    *
-   * Limited to FIO_SRV_TIMEOUT_MAX seconds. The value 0 will be the same as the
-   * timeout limit.
+   * Limited to FIO_SRV_TIMEOUT_MAX seconds. Zero (0) == FIO_SRV_TIMEOUT_MAX
    */
   uint32_t timeout;
 };
@@ -903,16 +908,15 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
   fio_protocol_s *old = (fio_protocol_s *)old_;
   FIO_LIST_REMOVE(&io->node);
-  if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
-    FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
+  if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
+    FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
+  if (io->node.next == io->node.prev) /* list was empty before IO was added */
+    FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
   fio_poll_monitor(&fio___srvdata.poll_data,
                    io->fd,
                    (void *)io,
                    POLLIN | POLLOUT);
-  /* TODO / FIX ? should we call `on_close` for old protocol? */
-  if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
-    FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
   io->pr->on_attach(io);
   io->pr->io_functions.start(io);
 }
@@ -921,10 +925,10 @@ static void fio___protocol_set_task(void *io_, void *old_) {
 SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   if (!pr)
     pr = &MOCK_PROTOCOL;
+  fio___srv_init_protocol_test(pr);
   fio_protocol_s *old = io->pr;
   if (pr == old)
     return NULL;
-  fio___srv_init_protocol_test(pr);
   io->pr = pr;
   // fio_queue_push(fio___srv_tasks, fio___protocol_set_task, io, old);
   fio___protocol_set_task((void *)io, (void *)old);
@@ -1158,7 +1162,7 @@ static int fio___srv_review_timeouts(void) {
     FIO_ASSERT_DEBUG(pr->reserved.flags, "protocol object flags unmarked?!");
     if (!pr->timeout || pr->timeout > FIO_SRV_TIMEOUT_MAX)
       pr->timeout = FIO_SRV_TIMEOUT_MAX;
-    int64_t limit = now_milli - ((int64_t)pr->timeout * 1000);
+    int64_t limit = now_milli - ((int64_t)pr->timeout);
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
       FIO_ASSERT_DEBUG(io->pr == pr, "IO protocol ownership error");
       if (io->active >= limit)
@@ -1192,29 +1196,38 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
 FIO_SFUNC void fio_srv_shutdown(void) {
   /* collect tick for shutdown start, to monitor for possible timeout */
   int64_t shutdown_start = fio___srvdata.tick = fio_time_milli();
+  size_t connected = 0;
+  /* first notify that shutdown is starting */
+  fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
   /* preform on_shutdown callback for each connection and close */
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
                 &fio___srvdata.protocols,
                 pr) {
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
-      io->pr->on_shutdown(io); /* TODO / FIX: skip close on return value? */
-      fio_close(io);
+      pr->on_shutdown(io); /* TODO / FIX: movie callback to task? */
+      fio_close(io);       /* TODO / FIX: skip close on return value? */
+      ++connected;
     }
   }
-  fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
+  FIO_LOG_DEBUG("Server shutting down with %zu connected clients", connected);
   /* cycle while connections exist. */
-  while (shutdown_start + 10000 >= fio___srvdata.tick &&
+  while (shutdown_start + FIO_SRV_SHUTDOWN_TIMEOUT >= fio___srvdata.tick &&
          !FIO_LIST_IS_EMPTY(&fio___srvdata.protocols)) {
     fio___srv_tick(100);
   }
   /* in case of timeout, force close remaining connections. */
+  connected = 0;
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
                 &fio___srvdata.protocols,
                 pr) {
-    FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) { fio_close_now(io); }
+    FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
+      fio_close_now(io);
+      ++connected;
+    }
   }
+  FIO_LOG_DEBUG("Server shutdown timed out with %zu clients", connected);
   /* perform remaining tasks. */
   fio_queue_perform_all(fio___srv_tasks);
 }
@@ -1325,10 +1338,30 @@ SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
 /* Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }
 
+/* Returns the number or workers the server will actually run. */
+SFUNC uint16_t fio_srv_workers(int workers) {
+  if (workers < 0) {
+    int cores = -1;
+#ifdef _SC_NPROCESSORS_ONLN
+    cores = sysconf(_SC_NPROCESSORS_ONLN);
+#endif /* _SC_NPROCESSORS_ONLN */
+    if (cores == -1) {
+      cores = 8;
+      FIO_LOG_WARNING("fio_srv_run called with negative value for worker "
+                      "count, but auto-detect failed, assuming %d CPU cores",
+                      cores);
+    }
+    workers = cores / (0 - workers);
+    workers += !workers;
+  }
+  return workers;
+}
+
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_run(int workers) {
   fio___srvdata.stop = 0;
-  fio___srvdata.workers = (uint16_t)workers;
+  fio___srvdata.workers = fio_srv_workers(workers);
+  workers = (int)fio___srvdata.workers;
   fio___srvdata.is_worker = !workers;
   fio_sock_maximize_limits();
   fio_state_callback_force(FIO_CALL_PRE_START);
@@ -1343,21 +1376,6 @@ SFUNC void fio_srv_run(int workers) {
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
   fio___srvdata.tick = fio_time_milli();
-  if (workers < 0) {
-    /* TODO */
-    int cores = -1;
-#ifdef _SC_NPROCESSORS_ONLN
-    cores = sysconf(_SC_NPROCESSORS_ONLN);
-#endif /* _SC_NPROCESSORS_ONLN */
-    if (cores == -1) {
-      cores = 8;
-      FIO_LOG_WARNING("fio_srv_run called with negative value for worker "
-                      "count, but auto-detect failed, assuming %d CPU cores",
-                      cores);
-    }
-    workers = cores / (0 - workers);
-    workers += !workers;
-  }
   if (workers)
     FIO_LOG_DEBUG("starting facil.io server using %d workers.", workers);
   else
@@ -1480,11 +1498,11 @@ SFUNC void fio_close(fio_s *io) {
 
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
-  io->state |= FIO_STATE_CLOSING;
-  fio_stream_destroy(&io->stream);
-  fio_queue_push(fio___srv_tasks,
-                 fio___srv_poll_on_ready,
-                 fio_dup2((fio_s *)io));
+  fio_atomic_or(&io->state, FIO_STATE_CLOSING);
+  // fio_stream_destroy(&io->stream);
+  // fio_queue_push(fio___srv_tasks,
+  //                fio___srv_poll_on_ready,
+  //                fio_dup2((fio_s *)io));
   if ((fio_atomic_and(&io->state, ~FIO_STATE_OPEN) & FIO_STATE_OPEN))
     fio_free2(io);
 }
