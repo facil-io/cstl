@@ -20,7 +20,9 @@ Please note I cannot continually test the windows support as I avoid the OS... h
 
 ### Installing
 
-Simply copy the `fio-stl.h` file to your project's folder. Done.
+Simply copy the `fio-stl.h` file to your project's folder (using a single header file). Done.
+
+Or... copy the `fio-stl` folder to your project's folder (using multiple header files). Done.
 
 ### Running Tests
 
@@ -56,7 +58,7 @@ The fecil.io C STL provides a builtin solution similar in approach to the [Simpl
 ```c
 /* include Core String functionality */
 #define FIO_STR
-#include <fio-stl.h>
+#include "fio-stl.h" /* or "fio-stl/include.h" */
 
 void hello_binary_strings(void){
   char * bstr = fio_bstr_write(NULL, "Hello World", 11);
@@ -82,7 +84,7 @@ Or use a template to create your own String type, much better for reference coun
 #define FIO_REF_NAME my_str
 /* Make the reference counter the only constructor rather then having it as an additional flavor */
 #define FIO_REF_CONSTRUCTOR_ONLY
-#include "fio-stl.h"
+#include "fio-stl.h" /* or "fio-stl/include.h" */
 
 void hello(void){
   my_str_s * msg = my_str_new();
@@ -128,7 +130,7 @@ This is an example for a key-value String Hash Map, also sometimes called a "dic
 ```c
 /* Create a binary safe String type for Strings that aren't mutated often */
 #define FIO_STR_SMALL str
-#include "fio-stl.h"
+#include "fio-stl.h" /* or "fio-stl/include.h" */
 
 /* Set the properties for the key-value Unordered Map type called `dict_s` */
 #define FIO_MAP_NAME                 dict
@@ -170,7 +172,7 @@ This same example actually has a shortcut that uses the dedicate `fio_keystr_s` 
 #define FIO_MAP_KEYSTR
 #define FIO_UMAP_NAME umap
 #define FIO_MAP_TYPE  uintptr_t
-#include "fio-stl.h"
+#include "fio-stl.h" /* or "fio-stl/include.h" */
 
 /** a helper to calculate hash and set any string as a key. */
 FIO_IFUNC void umap_set2(umap_s *map, char *key, size_t key_len, uintptr_t obj) {

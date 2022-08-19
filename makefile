@@ -1,7 +1,7 @@
 #############################################################################
 # This makefile was composed for facil.io
 #
-# Copyright (c) 2016-2021 Boaz Segev
+# Copyright (c) 2016-2022 Boaz Segev
 # License MIT / ISC (choose whichever you like)
 #
 # This makefile SHOULD be easily portable and Should work on any POSIX system
@@ -73,7 +73,7 @@ LIB_PRIVATE_SUBFOLDERS=
 # a folder containing code that should be unified into a single file
 #
 # Note: files will be unified in the same order the system provides (usually, file name)
-LIB_CONCAT_FOLDER?=stl_slices
+LIB_CONCAT_FOLDER?=fio-stl
 
 # the path and file name to use when unifying *.c, *.h, and *.md files (without extension).
 LIB_CONCAT_TARGET?=fio-stl

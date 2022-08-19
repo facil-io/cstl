@@ -120,7 +120,12 @@ macro in a single translation unit (.c file) **before** including this STL
 library for the first time.
 
 ***************************************************************************** */
-
+#ifndef H___FIO_CSTL_COMBINED___H
+#define H___FIO_CSTL_COMBINED___H
+#endif /* H___FIO_CSTL_COMBINED___H */
+#ifndef FIO___INCLUDE_FILE
+#define FIO___INCLUDE_FILE __FILE__
+#endif
 /* *****************************************************************************
 C++ extern start
 ***************************************************************************** */
@@ -1083,6 +1088,368 @@ Sleep / Thread Scheduling Macros
 #endif
 
 /* *****************************************************************************
+
+
+Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
+
+Copyright and License: see header file (000 header.h) or top of file
+***************************************************************************** */
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
+#warning fio_time functions defined using gettimeofday patch.
+#include <sys/time.h>
+#define CLOCK_REALTIME 0
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 0
+#endif
+#define clock_gettime fio_clock_gettime
+// clock_gettime is not implemented on older versions of OS X (< 10.12).
+// If implemented, CLOCK_MONOTONIC will have already been defined.
+FIO_IFUNC int fio_clock_gettime(int clk_id, struct timespec *t) {
+  struct timeval now;
+  int rv = gettimeofday(&now, NULL);
+  if (rv)
+    return rv;
+  t->tv_sec = now.tv_sec;
+  t->tv_nsec = now.tv_usec * 1000;
+  return 0;
+  (void)clk_id;
+}
+
+#endif
+/* *****************************************************************************
+
+
+
+
+Patches for Windows
+
+
+
+
+***************************************************************************** */
+#if FIO_OS_WIN
+#if _MSC_VER
+#pragma message("warning: some functionality is enabled by patchwork.")
+#else
+#warning some functionality is enabled by patchwork.
+#endif
+#include <fcntl.h>
+#include <io.h>
+#include <processthreadsapi.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
+/* *****************************************************************************
+Windows initialization
+***************************************************************************** */
+
+/* Enable console colors */
+FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
+  HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
+  }
+  c = GetStdHandle(STD_ERROR_HANDLE);
+  if (c) {
+    DWORD mode = 0;
+    if (GetConsoleMode(c, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(c, mode);
+    }
+  }
+}
+
+/* *****************************************************************************
+Inlined patched and MACRO statements
+***************************************************************************** */
+
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  struct tm *t = gmtime(timep);
+  if (t && result)
+    *result = *t;
+  return result;
+}
+
+FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
+  return _stricmp(s1, s2);
+}
+
+FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
+  return _write(fd, b, l);
+}
+
+FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
+  return _read(fd, b, l);
+}
+
+#if !defined(fstat)
+#define fstat _fstat
+#endif /* fstat */
+#if !defined(stat)
+#define stat _stat
+#endif /* stat */
+
+#define O_APPEND      _O_APPEND
+#define O_BINARY      _O_BINARY
+#define O_CREAT       _O_CREAT
+#define O_CREAT       _O_CREAT
+#define O_SHORT_LIVED _O_SHORT_LIVED
+#define O_CREAT       _O_CREAT
+#define O_TEMPORARY   _O_TEMPORARY
+#define O_CREAT       _O_CREAT
+#define O_EXCL        _O_EXCL
+#define O_NOINHERIT   _O_NOINHERIT
+#define O_RANDOM      _O_RANDOM
+#define O_RDONLY      _O_RDONLY
+#define O_RDWR        _O_RDWR
+#define O_SEQUENTIAL  _O_SEQUENTIAL
+#define O_TEXT        _O_TEXT
+#define O_TRUNC       _O_TRUNC
+#define O_WRONLY      _O_WRONLY
+#define O_U16TEXT     _O_U16TEXT
+#define O_U8TEXT      _O_U8TEXT
+#define O_WTEXT       _O_WTEXT
+#define S_IREAD       _S_IREAD
+#define S_IWRITE      _S_IWRITE
+#define S_IRUSR       _S_IREAD
+#define S_IWUSR       _S_IWRITE
+
+#ifndef O_TMPFILE
+#define O_TMPFILE O_TEMPORARY
+#endif
+
+#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
+    CLOCK_REALTIME == CLOCK_MONOTONIC
+#undef CLOCK_MONOTONIC
+#undef CLOCK_REALTIME
+#endif
+
+#ifndef CLOCK_REALTIME
+#ifdef CLOCK_MONOTONIC
+#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
+#else
+#define CLOCK_REALTIME 0
+#endif
+#endif
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+/** patch for clock_gettime */
+FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv);
+/** patch for pread */
+FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset);
+/** patch for pwrite */
+FIO_SFUNC ssize_t fio_pwrite(int fd,
+                             const void *buf,
+                             size_t count,
+                             off_t offset);
+FIO_SFUNC int fio_kill(int pid, int signum);
+
+#define kill   fio_kill
+#define pread  fio_pread
+#define pwrite fio_pwrite
+
+#if !FIO_HAVE_UNIX_TOOLS
+/* patch clock_gettime */
+#define clock_gettime fio_clock_gettime
+#define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
+#endif
+
+/* *****************************************************************************
+Patched functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* based on:
+ * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
+ */
+/** patch for clock_gettime */
+FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
+  if (!tv)
+    return -1;
+  static union {
+    uint64_t u;
+    LARGE_INTEGER li;
+  } freq = {.u = 0};
+  static double tick2n = 0;
+  union {
+    uint64_t u;
+    FILETIME ft;
+    LARGE_INTEGER li;
+  } tu;
+
+  switch (clk_type) {
+  case CLOCK_REALTIME:
+  realtime_clock:
+    GetSystemTimePreciseAsFileTime(&tu.ft);
+    tv->tv_sec = tu.u / 10000000;
+    tv->tv_nsec = tu.u - (tv->tv_sec * 10000000);
+    return 0;
+
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+  case CLOCK_PROCESS_CPUTIME_ID:
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+  case CLOCK_THREAD_CPUTIME_ID:
+#endif
+  case CLOCK_MONOTONIC:
+    if (!QueryPerformanceCounter(&tu.li))
+      goto realtime_clock;
+    if (!freq.u)
+      QueryPerformanceFrequency(&freq.li);
+    if (!freq.u) {
+      tick2n = 0;
+      freq.u = 1;
+    } else {
+      tick2n = (double)1000000000 / freq.u;
+    }
+    tv->tv_sec = tu.u / freq.u;
+    tv->tv_nsec =
+        (uint64_t)(0ULL + ((double)(tu.u - (tv->tv_sec * freq.u)) * tick2n));
+    return 0;
+  }
+  return -1;
+}
+
+/** patch for pread */
+FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset) {
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  ssize_t bytes_read = 0;
+  HANDLE handle = (HANDLE)_get_osfhandle(fd);
+  if (handle == INVALID_HANDLE_VALUE)
+    goto bad_file;
+  OVERLAPPED overlapped = {0};
+  if (offset > 0)
+    overlapped.Offset = offset;
+  if (ReadFile(handle, buf, count, (u_long *)&bytes_read, &overlapped))
+    return bytes_read;
+  if (GetLastError() == ERROR_HANDLE_EOF)
+    return bytes_read;
+  errno = EIO;
+  return -1;
+bad_file:
+  errno = EBADF;
+  return -1;
+}
+
+/** patch for pwrite */
+FIO_SFUNC ssize_t fio_pwrite(int fd,
+                             const void *buf,
+                             size_t count,
+                             off_t offset) {
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  ssize_t bytes_written = 0;
+  HANDLE handle = (HANDLE)_get_osfhandle(fd);
+  if (handle == INVALID_HANDLE_VALUE)
+    goto bad_file;
+  OVERLAPPED overlapped = {0};
+  if (offset > 0)
+    overlapped.Offset = offset;
+  if (WriteFile(handle, buf, count, (u_long *)&bytes_written, &overlapped))
+    return bytes_written;
+  errno = EIO;
+  return -1;
+bad_file:
+  errno = EBADF;
+  return -1;
+}
+
+/** patch for kill */
+FIO_SFUNC int fio_kill(int pid, int sig) {
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  HANDLE handle;
+  DWORD status;
+  if (sig < 0 || sig >= NSIG) {
+    errno = EINVAL;
+    return -1;
+  }
+#ifdef SIGCONT
+  if (sig == SIGCONT) {
+    errno = ENOSYS;
+    return -1;
+  }
+#endif
+
+  if (pid == -1)
+    pid = 0;
+
+  if (!pid)
+    handle = GetCurrentProcess();
+  else
+    handle =
+        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
+  if (!handle)
+    goto something_went_wrong;
+
+  switch (sig) {
+#ifdef SIGKILL
+  case SIGKILL:
+#endif
+  case SIGTERM:
+  case SIGINT: /* terminate */
+    if (!TerminateProcess(handle, 1))
+      goto something_went_wrong;
+    break;
+  case 0: /* check status */
+    if (!GetExitCodeProcess(handle, &status))
+      goto something_went_wrong;
+    if (status != STILL_ACTIVE) {
+      errno = ESRCH;
+      goto cleanup_after_error;
+    }
+    break;
+  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
+  }
+
+  if (pid) {
+    CloseHandle(handle);
+  }
+  return 0;
+
+something_went_wrong:
+
+  switch (GetLastError()) {
+  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
+  case ERROR_ACCESS_DENIED:
+    errno = EPERM;
+    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
+      errno = ESRCH;
+    break;
+  default: errno = GetLastError();
+  }
+cleanup_after_error:
+  if (handle && pid)
+    CloseHandle(handle);
+  return -1;
+}
+
+#endif /* FIO_EXTERN_COMPLETE */
+
+/* *****************************************************************************
+
+
+
+Patches for POSIX
+
+
+
+***************************************************************************** */
+#elif FIO_OS_POSIX /* POSIX patches */
+#endif
+/* *****************************************************************************
+Done with Patches
+***************************************************************************** */
+
+/* *****************************************************************************
 End persistent segment (end include-once guard)
 ***************************************************************************** */
 #endif /* H___FIO_CSTL_INCLUDE_ONCE___H */
@@ -1468,368 +1835,12 @@ Pointer Tagging
 #endif
 #endif /* FIO_ATOL */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_PATCHES_H
-#define H___FIO_CSTL_PATCHES_H
-/* *****************************************************************************
-
-
-Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
-
-Copyright and License: see header file (000 header.h) or top of file
-***************************************************************************** */
-#if (defined(__MACH__) && !defined(CLOCK_REALTIME))
-#warning fio_time functions defined using gettimeofday patch.
-#include <sys/time.h>
-#define CLOCK_REALTIME 0
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 0
-#endif
-#define clock_gettime fio_clock_gettime
-// clock_gettime is not implemented on older versions of OS X (< 10.12).
-// If implemented, CLOCK_MONOTONIC will have already been defined.
-FIO_IFUNC int fio_clock_gettime(int clk_id, struct timespec *t) {
-  struct timeval now;
-  int rv = gettimeofday(&now, NULL);
-  if (rv)
-    return rv;
-  t->tv_sec = now.tv_sec;
-  t->tv_nsec = now.tv_usec * 1000;
-  return 0;
-  (void)clk_id;
-}
-
-#endif
-/* *****************************************************************************
-
-
-
-
-Patches for Windows
-
-
-
-
-***************************************************************************** */
-#if FIO_OS_WIN
-#if _MSC_VER
-#pragma message("warning: some functionality is enabled by patchwork.")
-#else
-#warning some functionality is enabled by patchwork.
-#endif
-#include <fcntl.h>
-#include <io.h>
-#include <processthreadsapi.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sysinfoapi.h>
-#include <time.h>
-#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
-
-/* *****************************************************************************
-Windows initialization
-***************************************************************************** */
-
-/* Enable console colors */
-FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
-  HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (c) {
-    DWORD mode = 0;
-    if (GetConsoleMode(c, &mode)) {
-      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      SetConsoleMode(c, mode);
-    }
-  }
-  c = GetStdHandle(STD_ERROR_HANDLE);
-  if (c) {
-    DWORD mode = 0;
-    if (GetConsoleMode(c, &mode)) {
-      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      SetConsoleMode(c, mode);
-    }
-  }
-}
-
-/* *****************************************************************************
-Inlined patched and MACRO statements
-***************************************************************************** */
-
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  struct tm *t = gmtime(timep);
-  if (t && result)
-    *result = *t;
-  return result;
-}
-
-FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
-  return _stricmp(s1, s2);
-}
-
-FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
-  return _write(fd, b, l);
-}
-
-FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
-  return _read(fd, b, l);
-}
-
-#if !defined(fstat)
-#define fstat _fstat
-#endif /* fstat */
-#if !defined(stat)
-#define stat _stat
-#endif /* stat */
-
-#define O_APPEND      _O_APPEND
-#define O_BINARY      _O_BINARY
-#define O_CREAT       _O_CREAT
-#define O_CREAT       _O_CREAT
-#define O_SHORT_LIVED _O_SHORT_LIVED
-#define O_CREAT       _O_CREAT
-#define O_TEMPORARY   _O_TEMPORARY
-#define O_CREAT       _O_CREAT
-#define O_EXCL        _O_EXCL
-#define O_NOINHERIT   _O_NOINHERIT
-#define O_RANDOM      _O_RANDOM
-#define O_RDONLY      _O_RDONLY
-#define O_RDWR        _O_RDWR
-#define O_SEQUENTIAL  _O_SEQUENTIAL
-#define O_TEXT        _O_TEXT
-#define O_TRUNC       _O_TRUNC
-#define O_WRONLY      _O_WRONLY
-#define O_U16TEXT     _O_U16TEXT
-#define O_U8TEXT      _O_U8TEXT
-#define O_WTEXT       _O_WTEXT
-#define S_IREAD       _S_IREAD
-#define S_IWRITE      _S_IWRITE
-#define S_IRUSR       _S_IREAD
-#define S_IWUSR       _S_IWRITE
-
-#ifndef O_TMPFILE
-#define O_TMPFILE O_TEMPORARY
-#endif
-
-#if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
-    CLOCK_REALTIME == CLOCK_MONOTONIC
-#undef CLOCK_MONOTONIC
-#undef CLOCK_REALTIME
-#endif
-
-#ifndef CLOCK_REALTIME
-#ifdef CLOCK_MONOTONIC
-#define CLOCK_REALTIME (CLOCK_MONOTONIC + 1)
-#else
-#define CLOCK_REALTIME 0
-#endif
-#endif
-
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
-
-/** patch for clock_gettime */
-SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv);
-/** patch for pread */
-SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset);
-/** patch for pwrite */
-SFUNC ssize_t fio_pwrite(int fd, const void *buf, size_t count, off_t offset);
-SFUNC int fio_kill(int pid, int signum);
-
-#define kill   fio_kill
-#define pread  fio_pread
-#define pwrite fio_pwrite
-
-#if !FIO_HAVE_UNIX_TOOLS
-/* patch clock_gettime */
-#define clock_gettime fio_clock_gettime
-#define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
-#endif
-
-/* *****************************************************************************
-Patched functions
-***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-/* based on:
- * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
- */
-/** patch for clock_gettime */
-SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
-  if (!tv)
-    return -1;
-  static union {
-    uint64_t u;
-    LARGE_INTEGER li;
-  } freq = {.u = 0};
-  static double tick2n = 0;
-  union {
-    uint64_t u;
-    FILETIME ft;
-    LARGE_INTEGER li;
-  } tu;
-
-  switch (clk_type) {
-  case CLOCK_REALTIME:
-  realtime_clock:
-    GetSystemTimePreciseAsFileTime(&tu.ft);
-    tv->tv_sec = tu.u / 10000000;
-    tv->tv_nsec = tu.u - (tv->tv_sec * 10000000);
-    return 0;
-
-#ifdef CLOCK_PROCESS_CPUTIME_ID
-  case CLOCK_PROCESS_CPUTIME_ID:
-#endif
-#ifdef CLOCK_THREAD_CPUTIME_ID
-  case CLOCK_THREAD_CPUTIME_ID:
-#endif
-  case CLOCK_MONOTONIC:
-    if (!QueryPerformanceCounter(&tu.li))
-      goto realtime_clock;
-    if (!freq.u)
-      QueryPerformanceFrequency(&freq.li);
-    if (!freq.u) {
-      tick2n = 0;
-      freq.u = 1;
-    } else {
-      tick2n = (double)1000000000 / freq.u;
-    }
-    tv->tv_sec = tu.u / freq.u;
-    tv->tv_nsec =
-        (uint64_t)(0ULL + ((double)(tu.u - (tv->tv_sec * freq.u)) * tick2n));
-    return 0;
-  }
-  return -1;
-}
-
-/** patch for pread */
-SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  ssize_t bytes_read = 0;
-  HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == INVALID_HANDLE_VALUE)
-    goto bad_file;
-  OVERLAPPED overlapped = {0};
-  if (offset > 0)
-    overlapped.Offset = offset;
-  if (ReadFile(handle, buf, count, (u_long *)&bytes_read, &overlapped))
-    return bytes_read;
-  if (GetLastError() == ERROR_HANDLE_EOF)
-    return bytes_read;
-  errno = EIO;
-  return -1;
-bad_file:
-  errno = EBADF;
-  return -1;
-}
-
-/** patch for pwrite */
-SFUNC ssize_t fio_pwrite(int fd, const void *buf, size_t count, off_t offset) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  ssize_t bytes_written = 0;
-  HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == INVALID_HANDLE_VALUE)
-    goto bad_file;
-  OVERLAPPED overlapped = {0};
-  if (offset > 0)
-    overlapped.Offset = offset;
-  if (WriteFile(handle, buf, count, (u_long *)&bytes_written, &overlapped))
-    return bytes_written;
-  errno = EIO;
-  return -1;
-bad_file:
-  errno = EBADF;
-  return -1;
-}
-
-/** patch for kill */
-SFUNC int fio_kill(int pid, int sig) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  HANDLE handle;
-  DWORD status;
-  if (sig < 0 || sig >= NSIG) {
-    errno = EINVAL;
-    return -1;
-  }
-#ifdef SIGCONT
-  if (sig == SIGCONT) {
-    errno = ENOSYS;
-    return -1;
-  }
-#endif
-
-  if (pid == -1)
-    pid = 0;
-
-  if (!pid)
-    handle = GetCurrentProcess();
-  else
-    handle =
-        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if (!handle)
-    goto something_went_wrong;
-
-  switch (sig) {
-#ifdef SIGKILL
-  case SIGKILL:
-#endif
-  case SIGTERM:
-  case SIGINT: /* terminate */
-    if (!TerminateProcess(handle, 1))
-      goto something_went_wrong;
-    break;
-  case 0: /* check status */
-    if (!GetExitCodeProcess(handle, &status))
-      goto something_went_wrong;
-    if (status != STILL_ACTIVE) {
-      errno = ESRCH;
-      goto cleanup_after_error;
-    }
-    break;
-  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
-  }
-
-  if (pid) {
-    CloseHandle(handle);
-  }
-  return 0;
-
-something_went_wrong:
-
-  switch (GetLastError()) {
-  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
-  case ERROR_ACCESS_DENIED:
-    errno = EPERM;
-    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
-      errno = ESRCH;
-    break;
-  default: errno = GetLastError();
-  }
-cleanup_after_error:
-  if (handle && pid)
-    CloseHandle(handle);
-  return -1;
-}
-
-#endif /* FIO_EXTERN_COMPLETE */
-
-/* *****************************************************************************
-
-
-
-Patches for POSIX
-
-
-
-***************************************************************************** */
-#elif FIO_OS_POSIX /* POSIX patches */
-#endif
-/* *****************************************************************************
-Done
-***************************************************************************** */
-#endif /* H___FIO_CSTL_PATCHES_H */
-/* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_LOG        /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -1953,11 +1964,13 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #endif /* FIO_LOG */
 #undef FIO_LOG
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#define FIO_LOCK2                     /* Development inclusion - ignore line */
-#define FIO_ATOMIC                    /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_LOCK2      /* Development inclusion - ignore line */
+#define FIO_ATOMIC     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -2656,12 +2669,13 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
 #endif /* FIO_LOCK2 */
 #undef FIO_LOCK2
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#define FIO_BITWISE                   /* Development inclusion - ignore line */
-#define FIO_BITMAP                    /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_BITWISE    /* Development inclusion - ignore line */
+#define FIO_BITMAP     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
@@ -3800,11 +3814,12 @@ Bit-Byte operations - cleanup
 #endif /* FIO_BITMAP */
 #undef FIO_BITMAP
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_MATH                      /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_MATH       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -4455,11 +4470,12 @@ Math - cleanup
 #endif /* FIO_MATH */
 #undef FIO_MATH
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_ATOL                      /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#define FIO_TEST_CSTL                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_ATOL       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -5640,11 +5656,12 @@ Numbers <=> Strings - Cleanup
 #endif /* FIO_ATOL */
 #undef FIO_ATOL
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_THREADS                   /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_THREADS    /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -6025,10 +6042,12 @@ Module Cleanup
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "005 math.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_RAND       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -6872,13 +6891,12 @@ Random - Cleanup
 #endif /* FIO_RAND */
 #undef FIO_RAND
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_BITWISE                   /* Development inclusion - ignore line */
-#define FIO_SHA1                      /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_SHA1       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -7142,13 +7160,12 @@ Module Cleanup
 #endif /* FIO_SHA1 */
 #undef FIO_SHA1
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_CHACHA                    /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "005 math.h"                 /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_CHACHA     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -7876,10 +7893,12 @@ Module Cleanup
 #undef FIO_CHACHA
 #endif /* FIO_CHACHA */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_IMAP_CORE                 /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_IMAP_CORE  /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -8234,9 +8253,12 @@ iMap Cleanup
 #endif /* FIO_IMAP_CORE */
 #undef FIO_IMAP_CORE
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_URL        /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -8892,11 +8914,12 @@ FIO_URL - Cleanup
 #undef FIO_URL
 #undef FIO_URI
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_JSON       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -9380,13 +9403,12 @@ failed:
 #undef FIO_JSON
 #endif /* FIO_JSON */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_STATE                     /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "020 imap.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_STATE      /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -9745,15 +9767,12 @@ Module Cleanup
 #undef FIO_STATE
 #endif /* FIO_STATE */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_MEMORY_NAME fio           /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "007 threads.h"              /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "090 state callbacks.h"      /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___        /* Development inclusion - ignore line */
+#define FIO_MEMORY_NAME fio /* Development inclusion - ignore line */
+#include "./include.h"      /* Development inclusion - ignore line */
+#endif                      /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -12808,13 +12827,12 @@ Memory management macros
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_TIME                      /* Development inclusion - ignore line */
-#define FIO_ATOL                      /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_TIME       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -13477,14 +13495,12 @@ Time Cleanup
 #undef FIO_TIME
 #endif /* FIO_TIME */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_QUEUE                     /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "007 threads.h"              /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "101 time.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_QUEUE      /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -14552,11 +14568,12 @@ Queue/Timer Cleanup
 #undef FIO_QUEUE
 #endif /* FIO_QUEUE */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_SOCK                      /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "050 url.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_SOCK       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -15358,11 +15375,12 @@ FIO_SOCK - cleanup
 #undef FIO_SOCK
 #endif
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_STREAM                    /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_STREAM     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -16159,13 +16177,12 @@ Module Cleanup
 #endif /* FIO_STREAM */
 #undef FIO_STREAM
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_ATOMIC                    /* Development inclusion - ignore line */
-#define FIO_SIGNAL                    /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_SIGNAL     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -16499,13 +16516,12 @@ Module Cleanup
 #endif /* FIO_SIGNAL */
 #undef FIO_SIGNAL
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_ATOMIC                    /* Development inclusion - ignore line */
-#define FIO_GLOB_MATCH                /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_GLOB_MATCH /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -16730,13 +16746,12 @@ Module Cleanup
 #endif /* FIO_GLOB_MATCH */
 #undef FIO_GLOB_MATCH
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_FILES                     /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_FILES      /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -17183,13 +17198,12 @@ Module Cleanup
 #endif /* FIO_FILES */
 #undef FIO_FILES
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_STR                       /*Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "108 files.h"                /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_STR        /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -19571,15 +19585,12 @@ String Core Cleanup
 #undef FIO_STR
 #endif /* H__FIO_STR__H */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_STR_NAME fio              /* Development inclusion - ignore line */
-#define FIO_ATOL                      /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "108 files.h"                /* Development inclusion - ignore line */
-#include "199 string core.h"          /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___     /* Development inclusion - ignore line */
+#define FIO_STR_NAME fio /* Development inclusion - ignore line */
+#include "./include.h"   /* Development inclusion - ignore line */
+#endif                   /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -21474,12 +21485,12 @@ String Cleanup
 
 #endif /* FIO_STR_NAME */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_ARRAY_NAME ary            /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#define FIO_TEST_CSTL                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___       /* Development inclusion - ignore line */
+#define FIO_ARRAY_NAME ary /* Development inclusion - ignore line */
+#include "./include.h"     /* Development inclusion - ignore line */
+#endif                     /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -23279,14 +23290,14 @@ Dynamic Arrays - cleanup
 #undef FIO_ARRAY_EMBEDDED_CAPA
 #undef FIO_ARRAY2EMBEDDED
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_MAP_NAME map              /* Development inclusion - ignore line */
-#define FIO_STR                       /* Development inclusion - ignore line */
-#define FIO_MAP_TEST                  /* Development inclusion - ignore line */
-#define FIO_MAP_KEY  size_t           /* Development inclusion - ignore line */
-#include "001 patches.h"              /* Development inclusion - ignore line */
-#include "199 string core.h"          /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___        /* Development inclusion - ignore line */
+#define FIO_MAP_NAME map    /* Development inclusion - ignore line */
+#define FIO_MAP_TEST        /* Development inclusion - ignore line */
+#define FIO_MAP_KEY  size_t /* Development inclusion - ignore line */
+#include "./include.h"      /* Development inclusion - ignore line */
+#endif                      /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -25112,9 +25123,12 @@ Map Cleanup
 
 #endif /* FIO_MAP_NAME */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___       /* Development inclusion - ignore line */
+#define FIO_LIST_NAME list /* Development inclusion - ignore line */
+#include "./include.h"     /* Development inclusion - ignore line */
+#endif                     /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -25281,13 +25295,13 @@ Linked Lists (embeded) - cleanup
 #undef FIO_LIST_TYPE_PTR
 #endif
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_REF_NAME long_ref         /* Development inclusion - ignore line */
-#define FIO_REF_TYPE long             /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___          /* Development inclusion - ignore line */
+#define FIO_REF_NAME long_ref /* Development inclusion - ignore line */
+#define FIO_REF_TYPE long     /* Development inclusion - ignore line */
+#include "./include.h"        /* Development inclusion - ignore line */
+#endif                        /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -25529,11 +25543,13 @@ Pointer Tagging Cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_SORT_NAME num             /* Development inclusion - ignore line */
-#define FIO_SORT_TYPE size_t          /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___         /* Development inclusion - ignore line */
+#define FIO_SORT_NAME num    /* Development inclusion - ignore line */
+#define FIO_SORT_TYPE size_t /* Development inclusion - ignore line */
+#include "./include.h"       /* Development inclusion - ignore line */
+#endif                       /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -25838,15 +25854,12 @@ Module Cleanup
 #undef FIO_SORT_NAME
 #endif /* FIO_SORT_NAME */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_CLI                       /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "210 map.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_CLI        /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -26052,7 +26065,7 @@ typedef struct {
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
        : ((s).len ^ ((s).len << 19)))
 #define FIO_STL_KEEP__
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
@@ -26718,21 +26731,12 @@ CLI - cleanup
 #endif /* FIO_CLI */
 #undef FIO_CLI
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_POLL                      /* Development inclusion - ignore line */
-#define FIO_POLL_DEV                  /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "020 imap.h"                 /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "102 queue.h"                /* Development inclusion - ignore line */
-#include "104 sock.h"                 /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
-#ifdef FIO_POLL_DEV                   /* Development inclusion - ignore line */
-#include "201 array.h"                /* Development inclusion - ignore line */
-#include "210 map api.h"              /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_POLL       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -26883,10 +26887,14 @@ SFUNC void fio___poll_ev_mock(void *udata);
 SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 #endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL /* Development inclusion */
-#include "330 poll api.h"                     /* Development inclusion */
-#endif                                        /* Development inclusion */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL   /* Dev */
+#define FIO___DEV___    /* Development inclusion - ignore line */
+#define FIO_POLL        /* Development inclusion - ignore line */
+#include "./include.h"  /* Development inclusion - ignore line */
+#endif                  /* Development inclusion - ignore line */
+
 #if FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
 /* *****************************************************************************
 
@@ -27074,10 +27082,14 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE /* Development inclusion */
-#include "330 poll api.h"                      /* Development inclusion */
-#endif                                         /* Development inclusion */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE  /* Dev */
+#define FIO___DEV___    /* Development inclusion - ignore line */
+#define FIO_POLL        /* Development inclusion - ignore line */
+#include "./include.h"  /* Development inclusion - ignore line */
+#endif                  /* Development inclusion - ignore line */
+
 #if FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
 /* *****************************************************************************
 
@@ -27255,10 +27267,14 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
-#include "330 poll api.h" /* Development inclusion - ignore line */
-#endif                    /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL    /* Dev */
+#define FIO___DEV___    /* Development inclusion - ignore line */
+#define FIO_POLL        /* Development inclusion - ignore line */
+#include "./include.h"  /* Development inclusion - ignore line */
+#endif                  /* Development inclusion - ignore line */
+
 #if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
 /* *****************************************************************************
 
@@ -27551,30 +27567,12 @@ Cleanup
 #undef FIO_POLL
 #endif /* FIO_POLL */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_SERVER                    /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "007 threads.h"              /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "090 state callbacks.h"      /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "101 time.h"                 /* Development inclusion - ignore line */
-#include "102 queue.h"                /* Development inclusion - ignore line */
-#include "104 sock.h"                 /* Development inclusion - ignore line */
-#include "105 stream.h"               /* Development inclusion - ignore line */
-#include "106 signals.h"              /* Development inclusion - ignore line */
-#include "199 string core.h"          /* Development inclusion - ignore line */
-#include "210 map.h"                  /* Development inclusion - ignore line */
-#include "299 reference counter.h"    /* Development inclusion - ignore line */
-#include "330 poll api.h"             /* Development inclusion - ignore line */
-#include "330 poll.h"                 /* Development inclusion - ignore line */
-#include "339 poll finish.h"          /* Development inclusion - ignore line */
-#include "700 cleanup.h"              /* Development inclusion - ignore line */
-#define SFUNC FIO_SFUNC               /* Development inclusion - ignore line */
-#define IFUNC FIO_IFUNC               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_SERVER     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -28143,7 +28141,7 @@ typedef struct {
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
 #define FIO_STL_KEEP__ 1
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -29330,10 +29328,12 @@ Simple Server Cleanup
 #undef FIO_SERVER
 #endif /* FIO_TEST_CSTL */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_PUBSUB                    /* Development inclusion - ignore line */
-#include "400 server.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_PUBSUB     /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -29832,7 +29832,7 @@ typedef struct {
 #define FIO_REF_NAME      letter
 #define FIO_REF_FLEX_TYPE char
 #define FIO_STL_KEEP__    1
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* allocates a new letter. */
@@ -30301,7 +30301,7 @@ FIO_SFUNC void postoffice_on_channel_removed(channel_s *);
     channel_free((ch));                                                        \
   } while (0)
 #define FIO_STL_KEEP__ 1
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The postoffice data store */
@@ -31226,23 +31226,12 @@ Pub/Sub Cleanup
 #undef FIO_PUBSUB
 #endif /* FIO_PUBSUB */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_FIOBJ                     /* Development inclusion - ignore line */
-#include "000 header.h"               /* Development inclusion - ignore line */
-#include "003 atomics.h"              /* Development inclusion - ignore line */
-#include "004 bitwise.h"              /* Development inclusion - ignore line */
-#include "006 atol.h"                 /* Development inclusion - ignore line */
-#include "010 random.h"               /* Development inclusion - ignore line */
-#include "051 json.h"                 /* Development inclusion - ignore line */
-#include "090 state callbacks.h"      /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#include "108 files.h"                /* Development inclusion - ignore line */
-#include "199 string core.h"          /* Development inclusion - ignore line */
-#include "200 string.h"               /* Development inclusion - ignore line */
-#include "201 array.h"                /* Development inclusion - ignore line */
-#include "210 map.h"                  /* Development inclusion - ignore line */
-#include "299 reference counter.h"    /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_FIOBJ      /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -31562,7 +31551,7 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Integers
@@ -31633,7 +31622,7 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
@@ -31758,7 +31747,7 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Hash Maps
@@ -31791,7 +31780,7 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE          FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 /** Calculates an object's hash value for a specific hash map object. */
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
 
@@ -32144,7 +32133,7 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -32217,7 +32206,7 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /** Creates a new Float object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(double i) {
@@ -32569,13 +32558,13 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
 #define FIO_STL_KEEP__
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
 #define FIO_STL_KEEP__
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -33007,7 +32996,7 @@ FIOBJ JSON parsing
 
 #define FIO_JSON
 #define FIO_STL_KEEP__
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* FIOBJ JSON parser */
@@ -33683,10 +33672,12 @@ FIOBJ cleanup
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#define FIO_MODULE_NAME module        /* Development inclusion - ignore line */
-#include "100 mem.h"                  /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MODULE_NAME module /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -33884,9 +33875,12 @@ Common cleanup
 
 #endif /* !FIO_STL_KEEP__ */
 /* ************************************************************************* */
-#ifndef H___FIO_CSTL_INCLUDE_ONCE___H /* Development inclusion - ignore line*/
-#include "000 header.h"               /* Development inclusion - ignore line */
-#endif                                /* Development inclusion - ignore line */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_TEST_CSTL  /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -33920,7 +33914,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
 #define FIO_TIME
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
@@ -33948,7 +33942,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
@@ -33971,7 +33965,7 @@ static int ary____test_was_destroyed = 0;
   } while (0)
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_ARRAY_NAME                 ary2____test
 #define FIO_ARRAY_TYPE                 uint8_t
@@ -33981,61 +33975,61 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
 #define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* test all defaults */
 #define FIO_ARRAY_NAME ary3____test
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_UMAP_NAME   uset___test_size_t
 #define FIO_MEMORY_NAME uset___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_TEST
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #define FIO_UMAP_NAME   umap___test_size
 #define FIO_MEMORY_NAME umap___test_size_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_TEST
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_t
 #define FIO_MEMORY_NAME omap___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_ORDERED 1
 #define FIO_MAP_TEST
-#include __FILE__
+#include FIO___INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_lru
 #define FIO_MEMORY_NAME omap___test_size_lru_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_LRU     1
 #define FIO_MAP_TEST
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_STR_NAME fio_big_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_STR_SMALL fio_small_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_FIOBJ
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 /* *****************************************************************************
 Linked List - Test
@@ -34050,7 +34044,7 @@ typedef struct {
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 
-#include __FILE__
+#include FIO___INCLUDE_FILE
 
 FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
@@ -34684,3 +34678,130 @@ Everything, and the Kitchen Sink
 #endif
 
 #endif /* FIO_EVERYTHING */
+/* ************************************************************************* */
+#if !defined(H___FIO_CSTL_COMBINED___H)
+/* *****************************************************************************
+                    Including requested facil.io C STL modules
+***************************************************************************** */
+#ifndef FIO___INCLUDE_FILE
+#define FIO___INCLUDE_FILE "./include.h"
+#endif
+#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
+#define FIO___CSTL_NON_COMBINED_INCLUSION
+#endif
+#include "001 header.h"
+
+#ifdef FIO_LOG
+#include "002 logging.h"
+#endif
+#ifdef FIO_ATOMIC
+#include "003 atomics.h"
+#endif
+#if defined(FIO_BITWISE) || defined(FIO_BITMAP)
+#include "004 bitwise.h"
+#endif
+#ifdef FIO_MATH
+#include "005 math.h"
+#endif
+#ifdef FIO_ATOL
+#include "006 atol.h"
+#endif
+#ifdef FIO_THREADS
+#include "007 threads.h"
+#endif
+#ifdef FIO_RAND
+#include "010 random.h"
+#endif
+#ifdef FIO_SHA1
+#include "011 sha1.h"
+#endif
+#ifdef FIO_CHACHA
+#include "012 chacha20poly1305.h"
+#endif
+#ifdef FIO_IMAP_CORE
+#include "020 imap.h"
+#endif
+#if defined(FIO_URL) || defined(FIO_URI)
+#include "050 url.h"
+#endif
+#ifdef FIO_JSON
+#include "051 json.h"
+#endif
+#ifdef FIO_STATE
+#include "090 state callbacks.h"
+#endif
+
+#include "100 mem.h" /* later files rely on macros from here. */
+
+#ifdef FIO_TIME
+#include "101 time.h"
+#endif
+#ifdef FIO_QUEUE
+#include "102 queue.h"
+#endif
+#ifdef FIO_SOCK
+#include "104 sock.h"
+#endif
+#ifdef FIO_STREAM
+#include "105 stream.h"
+#endif
+#ifdef FIO_SIGNAL
+#include "106 signals.h"
+#endif
+#ifdef FIO_GLOB_MATCH
+#include "107 glob matching.h"
+#endif
+#ifdef FIO_FILES
+#include "108 files.h"
+#endif
+#ifdef FIO_STR
+#include "199 string core.h"
+#endif
+#if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
+#include "200 string.h"
+#endif
+#ifdef FIO_ARRAY_NAME
+#include "201 array.h"
+#endif
+#if defined(FIO_UMAP_NAME) || defined(FIO_OMAP_NAME) || defined(FIO_MAP_NAME)
+#include "210 map.h"
+#endif
+#ifdef FIO_LIST_NAME
+#include "220 linked lists.h"
+#endif
+
+#include "299 reference counter.h" /* pointer tagging cleanup is here */
+
+#ifdef FIO_SORT_NAME
+#include "301 sort.h"
+#endif
+#ifdef FIO_CLI
+#include "302 cli.h"
+#endif
+#ifdef FIO_POLL
+#include "330 poll api.h"
+#include "331 poll epoll.h"
+#include "331 poll kqueue.h"
+#include "331 poll poll.h"
+#include "339 poll finish.h"
+#endif
+#ifdef FIO_SERVER
+#include "400 server.h"
+#endif
+#ifdef FIO_PUBSUB
+#include "410 pubsub.h"
+#endif
+#ifdef FIO_FIOBJ
+#include "500 fiobj.h"
+#endif
+
+#ifndef FIO___DEV___
+#include "700 cleanup.h"
+#endif
+#include "999 footer.h"
+
+#ifndef FIO_STL_KEEP__
+#undef FIO___CSTL_NON_COMBINED_INCLUSION
+#endif
+#endif /* !H___FIO_CSTL_COMBINED___H && !FIO___CSTL_NON_COMBINED_INCLUSION */
+/* ************************************************************************* */
