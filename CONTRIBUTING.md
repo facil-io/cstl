@@ -119,19 +119,11 @@ This allows me to circumvent any future licensing concerns and prevent contribut
 
     The module in comprised of a single file (**amalgamation**) header library `fio-stl.h` that's automatically generated using the [facil.io/cstl repository](https://github.com/facil-io/cstl).
 
-    Contributions to this module should be made to the corresponding code slice(s) in the [facil.io/cstl repository](https://github.com/facil-io/cstl).
+    Contributions to this library should be made to the corresponding module(s) in the [facil.io/cstl repository](https://github.com/facil-io/cstl).
 
     Note: the `fio-stl.h` file can be included more then once and offers some core types and features, such as binary String support, Arrays, Hash Maps, atomic operations, etc' (see documentation).
 
     For example, this module contains the code for the Dynamic Types (`FIOBJ`), the code for the built-in JSON support features, the code for the CLI parser and the code for the custom memory allocator.
-
-* The IO Core Library:
-
-    This module comprises `facil.io`'s IO core and requires the STL Core module.
-
-    Contributions to this module should be made to the corresponding code slice(s) in the [facil.io/io-core repository](https://github.com/facil-io/io-core).
-
-    The module in comprised of two (**amalgamation**) files: `fio.h` and `fio.c` and uses the `fio-stl.h` file.
 
 * `FIOBJ` Extensions:
 

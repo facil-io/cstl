@@ -22,7 +22,7 @@ Please note I cannot continually test the windows support as I avoid the OS... h
 
 Simply copy the `fio-stl.h` file to your project's folder (using a single header file). Done.
 
-Or... copy the `fio-stl` folder to your project's folder (using multiple header files). Done.
+Or... copy the `fio-stl` folder to your project's folder (using `"fio-stl/include.h"`). Done.
 
 ### Running Tests
 
