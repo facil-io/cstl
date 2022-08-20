@@ -28985,8 +28985,7 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
 FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   fio_s *io = (fio_s *)io_;
   fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
-  if (!io ||
-      ((io->state & (FIO_STATE_OPEN | FIO_STATE_CLOSING)) ^ FIO_STATE_OPEN))
+  if (!io || !(io->state & FIO_STATE_OPEN))
     goto io_error;
   fio_stream_add(&io->stream, packet);
   fio_queue_push(fio___srv_tasks,

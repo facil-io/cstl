@@ -1,19 +1,22 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2022
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 
 /* *****************************************************************************
-This is a simple HTTP "Hello World" / echo server example using `poll`.
+This is a simple HTTP "Hello World" / echo server example.
+
+This example provides only a minimal number of security features such as timeout
+management and throttling of busy / slow clients.
 
 Benchmark with keep-alive:
 
     ab -c 200 -t 4 -n 1000000 -k http://127.0.0.1:3000/
     wrk -c200 -d4 -t2 http://localhost:3000/
 
-Note: This is a **TOY** example, with only minimal security features.
+
 ***************************************************************************** */
 
 /* we use local global variables to make the code easier. */
