@@ -20,34 +20,6 @@ Copyright and License: see header file (000 header.h) or top of file
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
     !defined(FIO_STL_KEEP__)
 #define H___FIO_PUBSUB___H
-/* *****************************************************************************
-Pub/Sub - defaults and builtin pub/sub engines
-***************************************************************************** */
-
-/** A pub/sub engine data structure. See details later on. */
-typedef struct fio_pubsub_engine_s fio_pubsub_engine_s;
-
-/** Used to publish the message exclusively to the root / master process. */
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_ROOT;
-/** Used to publish the message only within the current process. */
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_PROCESS;
-/** Used to publish the message except within the current process. */
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_SIBLINGS;
-/** Used to publish the message for this process, its siblings and root. */
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_LOCAL;
-
-/** The default engine (settable). Initial default is FIO_PUBSUB_LOCAL. */
-extern const fio_pubsub_engine_s *FIO_PUBSUB_DEFAULT;
-
-/**
- * The pattern matching callback used for pattern matching.
- *
- * Returns 1 on a match or 0 if the string does not match the pattern.
- *
- * By default, the value is set to `fio_glob_match` (see facil.io's C STL).
- */
-extern uint8_t (*FIO_PUBSUB_PATTERN_MATCH)(fio_str_info_s pattern,
-                                           fio_str_info_s channel);
 
 /* *****************************************************************************
 Pub/Sub - message format
@@ -178,6 +150,9 @@ int fio_unsubscribe(subscribe_args_s args);
 Pub/Sub - Publish
 ***************************************************************************** */
 
+/** A pub/sub engine data structure. See details later on. */
+typedef struct fio_pubsub_engine_s fio_pubsub_engine_s;
+
 /** Publishing and on_message callback arguments. */
 typedef struct fio_publish_args_s {
   /** The pub/sub engine that should be used to forward this message. */
@@ -243,6 +218,32 @@ void fio_publish(fio_publish_args_s args);
  * After calling this function, the `msg` object must NOT be accessed again.
  */
 void fio_message_defer(fio_msg_s *msg);
+
+/* *****************************************************************************
+Pub/Sub - defaults and builtin pub/sub engines
+***************************************************************************** */
+
+/** Used to publish the message exclusively to the root / master process. */
+extern const fio_pubsub_engine_s *const FIO_PUBSUB_ROOT;
+/** Used to publish the message only within the current process. */
+extern const fio_pubsub_engine_s *const FIO_PUBSUB_PROCESS;
+/** Used to publish the message except within the current process. */
+extern const fio_pubsub_engine_s *const FIO_PUBSUB_SIBLINGS;
+/** Used to publish the message for this process, its siblings and root. */
+extern const fio_pubsub_engine_s *const FIO_PUBSUB_LOCAL;
+
+/** The default engine (settable). Initial default is FIO_PUBSUB_LOCAL. */
+extern const fio_pubsub_engine_s *FIO_PUBSUB_DEFAULT;
+
+/**
+ * The pattern matching callback used for pattern matching.
+ *
+ * Returns 1 on a match or 0 if the string does not match the pattern.
+ *
+ * By default, the value is set to `fio_glob_match` (see facil.io's C STL).
+ */
+extern uint8_t (*FIO_PUBSUB_PATTERN_MATCH)(fio_str_info_s pattern,
+                                           fio_str_info_s channel);
 
 /* *****************************************************************************
  * Message metadata (advance usage API)
@@ -412,221 +413,239 @@ Pub/Sub Implementation - static functions
 
 
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
 
 /* *****************************************************************************
 Pub/Sub Implementation - externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
-
 /* *****************************************************************************
-Minimal WebSocket Header Support
-***************************************************************************** */
-FIO_IFUNC size_t fio___websocket_header_len(uint64_t len) {
-  if (len < 126)
-    return len + 2;
-  if (len < (1UL << 16))
-    return len + 4;
-  return len + 10;
-}
 
-FIO_IFUNC size_t fio___websocket_header_cpy(void *dest,
-                                            uint64_t len,
-                                            unsigned char is_binary,
-                                            unsigned char rsv) {
-  ((uint8_t *)dest)[0] = (1U << (!!is_binary)) | ((rsv & 7) << 4) | (1 << 7);
-  if (len < 126) {
-    /* head is 2 bytes */
-    ((uint8_t *)dest)[1] = len;
-    return 2;
-  } else if (len < (1UL << 16)) {
-    /* head is 4 bytes */
-    ((uint8_t *)dest)[1] = 126;
-    fio_u2buf16(((uint8_t *)dest + 2), len);
-    return 4;
-  }
-  /* head is 10 bytes */
-  ((uint8_t *)dest)[1] = 127;
-  fio_u2buf64(((uint8_t *)dest + 2), len);
-  return 10;
-}
+
+
+                          The Letter Object & Protocol
+
+
+
+This internal protocol implements a letter exchange protocol and API.
+
+Letter network format in bytes:
+| 4 bytes little endian channel length       |
+| 4 bytes little endian message length       |
+| 8 bytes Message ID                                                     |
+| 2 Bytes numerical Filter |
+| 1 Bytes flags            |
+| X bytes (channel length + 1 NUL terminator) |
+| Y bytes (message length + 1 NUL terminator) |
+
+***************************************************************************** */
+
+typedef struct fio_letter_s fio_letter_s;
+
+/** allocates a new letter wrapper to be filled from an existing buffer. */
+FIO_IFUNC fio_letter_s *fio_letter_new_empty(const char *head);
+/** allocates a new letter, writing all necessary data. */
+FIO_IFUNC fio_letter_s *fio_letter_new_complete(fio_s *from,
+                                                uint32_t channel_len,
+                                                char *channel,
+                                                uint32_t message_len,
+                                                char *message,
+                                                int16_t filter,
+                                                uint8_t flags);
+/** frees a letter's reference. */
+FIO_SFUNC void fio_letter_free(fio_letter_s *);
+/** returns a letter's message length (if any) */
+FIO_IFUNC size_t fio_letter_message_len(fio_letter_s *l);
+/** returns a letter's channel length (if any) */
+FIO_IFUNC size_t fio_letter_channel_len(fio_letter_s *l);
+/** returns a letter's channel. */
+FIO_IFUNC fio_str_info_s fio_letter_channel(fio_letter_s *l);
+/** returns a letter's message. */
+FIO_IFUNC fio_str_info_s fio_letter_message(fio_letter_s *l);
+/** returns a letter's numerical filter. */
+FIO_IFUNC int16_t fio_letter_filter(fio_letter_s *l);
+/** returns the letter's flags (8 bits allowing for 8 distinct flags). */
+FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l);
+/** returns a letter's ID (8 bytes random number) */
+FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l);
+/** returns a letter's length */
+FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
+
+/** write a letter to a specific IO object */
+FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
+
+/** delivers the letter according to its flags (callback, IPC, cluster...). */
+FIO_IFUNC void fio_letter_deliver(fio_letter_s *l);
+
+/** returns a protocol in which letters are tested for single delivery. */
+FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void);
+/** returns a protocol suitable for IPC - letter validation is skipped. */
+FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc(void);
+
+/** the final callback called by the letter protocol when a letter arrives. */
+FIO_SFUNC void fio_letter_on_recieved(fio_letter_s *letter);
 
 /* *****************************************************************************
 Letter / Message Object
 ***************************************************************************** */
 
-/*
-Letter network format in bytes:
-| 1 Byte Reserved | 1 Scope / type flags | 2 Bytes numerical Filter
-| 4 bytes little endian channel length | 4 bytes little endian message length |
-| 16 bytes UUID (8 + 8 byte values) |
-| X bytes (channel length + 1 NUL terminator) |
-| WebSocket Header (optimize cases where Message is sent using WebSockets)
-| Y bytes (message length + 1 NUL terminator) |
-*/
-
-#define LETTER_HEADER_LENGTH 28 /* without NUL terminators */
+#define FIO___LETTER_HEADER_LENGTH 19 /* without NUL terminators */
 
 enum {
-  FIO_PUBSUB_PROCESS_BIT = 1,
-  FIO_PUBSUB_ROOT_BIT = 2,
-  FIO_PUBSUB_SIBLINGS_BIT = 4,
-  FIO_PUBSUB_CLUSTER_BIT = 8,
-  FIO_PUBSUB_PING_BIT = 64,
-  FIO_PUBSUB_JSON_BIT = 128,
-} letter_info_bits_e;
+  FIO___PUBSUB_PROCESS_BIT = 1,
+  FIO___PUBSUB_ROOT_BIT = 2,
+  FIO___PUBSUB_SIBLINGS_BIT = 4,
+  FIO___PUBSUB_CLUSTER_BIT = 8,
+  FIO___PUBSUB_PING_BIT = 64,
+  FIO___PUBSUB_JSON_BIT = 128,
+} fio___letter_flag_bits_e;
 
-typedef struct {
+struct fio_letter_s {
   fio_s *from;
   void *metadata[FIO_PUBSUB_METADATA_LIMIT];
   char buf[];
-} letter_s;
+};
 
-#define FIO_REF_NAME      letter
+#define FIO_REF_NAME      fio_letter
 #define FIO_REF_FLEX_TYPE char
 #define FIO_STL_KEEP__    1
 #include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
-/* allocates a new letter. */
-FIO_IFUNC letter_s *letter_new(fio_s *from,
-                               int16_t filter,
-                               uint32_t channel_len,
-                               uint32_t message_len) {
-  size_t len = (LETTER_HEADER_LENGTH + 2) + message_len + channel_len;
-  letter_s *l = letter_new2(len);
+FIO_SFUNC void fio_letter_free(fio_letter_s *l) { fio_letter_free2(l); }
+/* allocates a new letter wrapper to be filled from an existing buffer. */
+FIO_IFUNC fio_letter_s *fio_letter_new_empty(const char *head) {
+  fio_letter_s *l = NULL;
+  uint32_t channel_len = fio_buf2u32_little(head);
+  uint32_t message_len = fio_buf2u32_little(head + 4);
+  size_t len = (FIO___LETTER_HEADER_LENGTH + 2) + channel_len + message_len;
+  if (((channel_len | message_len) & 0xFF000000))
+    return NULL;
+  l = fio_letter_new2(len);
   FIO_ASSERT_ALLOC(l);
-  l->from = from;
-  filter = fio_ltole16(filter);
-  channel_len = fio_ltole32(channel_len);
-  message_len = fio_ltole32(message_len);
-  FIO_MEMCPY16(l->buf + 2, &filter);
-  FIO_MEMCPY32(l->buf + 4, &channel_len);
-  FIO_MEMCPY32(l->buf + 8, &message_len);
   return l;
 }
 
-/* allocates a new letter, and writes data to header */
-FIO_IFUNC letter_s *letter_author(fio_s *from,
-                                  uint64_t server_id,
-                                  int32_t filter,
-                                  char *channel,
-                                  uint32_t channel_len,
-                                  char *message,
-                                  uint32_t message_len,
-                                  uint8_t flags) {
-  static uint64_t counter = 0;
-  letter_s *l = NULL;
-  if ((channel_len >> 24) || (message_len >> 27))
+/* allocates a new letter, writing all necessary data. */
+FIO_IFUNC fio_letter_s *fio_letter_new_complete(fio_s *from,
+                                                uint32_t channel_len,
+                                                char *channel,
+                                                uint32_t message_len,
+                                                char *message,
+                                                int16_t filter,
+                                                uint8_t flags) {
+  fio_letter_s *l = NULL;
+  size_t len = (FIO___LETTER_HEADER_LENGTH + 2) + channel_len + message_len;
+  uint64_t message_id = fio_rand64();
+  if (((channel_len | message_len) & 0xFF000000))
     goto len_error;
-  if (!counter)
-    counter = (fio_rand64() << 24);
-  l = letter_new(from, filter, channel_len, message_len);
+
+  l = fio_letter_new2(len);
   FIO_ASSERT_ALLOC(l);
-  l->buf[0] = flags;
-  FIO_MEMCPY8(l->buf + 12, &server_id);
-  FIO_MEMCPY8(l->buf + 20, &counter);
-  ++counter;
+  channel_len = fio_ltole32(channel_len);
+  message_len = fio_ltole32(message_len);
+  filter = fio_ltole16(filter);
+  flags = fio_ltole16(flags);
+  FIO_MEMCPY32(l->buf + 0, &channel_len);
+  FIO_MEMCPY32(l->buf + 4, &message_len);
+  FIO_MEMCPY64(l->buf + 8, &message_id);
+  FIO_MEMCPY16(l->buf + 16, &filter);
+  FIO_MEMCPY16(l->buf + 18, &flags);
   if (channel_len && channel) {
-    memcpy(l->buf + LETTER_HEADER_LENGTH, channel, channel_len);
+    FIO_MEMCPY(l->buf + FIO___LETTER_HEADER_LENGTH, channel, channel_len);
   }
-  l->buf[LETTER_HEADER_LENGTH + channel_len] = 0;
+  l->buf[FIO___LETTER_HEADER_LENGTH + channel_len] = 0;
   if (message_len && message) {
-    memcpy(l->buf + LETTER_HEADER_LENGTH + 1 + channel_len,
-           message,
-           message_len);
+    FIO_MEMCPY(l->buf + FIO___LETTER_HEADER_LENGTH + 1 + channel_len,
+               message,
+               message_len);
   }
-  l->buf[(LETTER_HEADER_LENGTH + 1) + channel_len + message_len] = 0;
+  l->buf[(FIO___LETTER_HEADER_LENGTH + 1) + channel_len + message_len] = 0;
   return l;
 
 len_error:
-  FIO_LOG_ERROR("(pubsub) payload too big (channel length of %u bytes, message "
-                "length of %u bytes)",
+  FIO_LOG_ERROR("(pubsub) payload too big - exceeds the 16Mb limit!\n\t"
+                "Channel name length: %u bytes\n\t"
+                "Message data length: %u bytes",
                 (unsigned int)channel_len,
                 (unsigned int)message_len);
   return NULL;
 }
 
 /* frees a letter's reference. */
-#define letter_free letter_free2
-
-/* returns 1 if a letter is bound to a filter, otherwise 0. */
-FIO_IFUNC int16_t letter_is_filter(letter_s *l) {
-  return !!(*(int16_t *)(l->buf + 2));
-}
-
-/* returns a letter's ID (may be 0 for internal letters) */
-FIO_IFUNC uint64_t letter_id(letter_s *l) {
-  return fio_buf2u64_little(l->buf + 12);
-}
-
-/* returns a letter's channel (if none, returns the filter's address) */
-FIO_IFUNC char *letter_channel(letter_s *l) {
-  return l->buf + LETTER_HEADER_LENGTH;
-}
+#define fio_letter_free fio_letter_free2
 
 /* returns a letter's message length (if any) */
-FIO_IFUNC size_t letter_message_len(letter_s *l) { return l->message_len; }
+FIO_IFUNC size_t fio_letter_message_len(fio_letter_s *l) {
+  return (size_t)(fio_buf2u32_little(l->buf + 4) & 0x00FFFFFFULL);
+}
 
 /* returns a letter's channel length (if any) */
-FIO_IFUNC size_t letter_channel_len(letter_s *l) { return l->channel_len; }
+FIO_IFUNC size_t fio_letter_channel_len(fio_letter_s *l) {
+  return (size_t)(fio_buf2u32_little(l->buf) & 0x00FFFFFFULL);
+}
 
-/* returns a letter's filter (if any) */
-FIO_IFUNC int32_t letter_filter(letter_s *l) { return l->filter; }
+/* returns a letter's channel. */
+FIO_IFUNC fio_str_info_s fio_letter_channel(fio_letter_s *l) {
+  return (fio_str_info_s){.buf = (l->buf + FIO___LETTER_HEADER_LENGTH),
+                          .len = fio_letter_channel_len(l)};
+}
 
-/* returns a letter's message */
-FIO_IFUNC char *letter_message(letter_s *l) {
-  return l->buf + LETTER_HEADER_LENGTH + 1 + l->channel_len;
+/* returns a letter's message. */
+FIO_IFUNC fio_str_info_s fio_letter_message(fio_letter_s *l) {
+  return (fio_str_info_s){.buf = (l->buf + FIO___LETTER_HEADER_LENGTH + 1 +
+                                  fio_letter_channel_len(l)),
+                          .len = fio_letter_message_len(l)};
+}
+
+/* returns a letter's numerical filter. */
+FIO_IFUNC int16_t fio_letter_filter(fio_letter_s *l) {
+  return (int16_t)fio_ltole16(*(uint16_t *)(l->buf + 16));
+}
+
+/* returns the letter's flags (8 bits allowing for 8 distinct flags). */
+FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l) {
+  return (uint8_t)(l->buf[18]);
+}
+
+/* returns a letter's ID (8 bytes random number) */
+FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l) {
+  return fio_buf2u32_little(l->buf + 8);
 }
 
 /* returns a letter's length */
-FIO_IFUNC size_t letter_len(letter_s *l) {
-  return LETTER_HEADER_LENGTH + 2 + l->channel_len + l->message_len;
+FIO_IFUNC size_t fio_letter_len(fio_letter_s *l) {
+  return FIO___LETTER_HEADER_LENGTH + 2 + fio_letter_message_len(l) +
+         fio_letter_channel_len(l);
 }
 
 /* write a letter to an IO object */
-FIO_IFUNC void letter_write(fio_s *io, letter_s *l) {
+FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
   if (io == l->from)
     return;
   fio_write2(io,
-             .buf = (char *)letter_dup2(l),
-             .offset = (uintptr_t)(((letter_s *)0)->buf),
-             .len = letter_len(l),
-             .dealloc = (void (*)(void *))letter_free2);
+             .buf = (char *)fio_letter_dup2(l),
+             .offset = (uintptr_t)(((fio_letter_s *)0)->buf),
+             .len = fio_letter_len(l),
+             .dealloc = (void (*)(void *))fio_letter_free2);
 }
 
 /* *****************************************************************************
 Letter Reading, Parsing and Sending
 ***************************************************************************** */
 
+#define FIO___LETTER_MINIMAL_LEN (FIO___LETTER_HEADER_LENGTH + 2)
 /* a letter parser object */
 typedef struct {
-  letter_s *letter;
+  fio_letter_s *letter;
   size_t pos;
-  char buf[LETTER_HEADER_LENGTH + 2]; /* minimal message length */
-} letter_parser_s;
+  char buf[FIO___LETTER_MINIMAL_LEN]; /* minimal message length */
+} fio_letter_parser_s;
 
 /* a new letter parser */
-FIO_IFUNC letter_parser_s *letter_parser_new(void) {
-  letter_parser_s *p = fio_malloc(sizeof(*p));
+FIO_IFUNC fio_letter_parser_s *fio_letter_parser_new(void) {
+  fio_letter_parser_s *p =
+      (fio_letter_parser_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   FIO_ASSERT_ALLOC(p);
   p->letter = NULL;
   p->pos = 0;
@@ -634,55 +653,185 @@ FIO_IFUNC letter_parser_s *letter_parser_new(void) {
 }
 
 /* free a letter parser */
-FIO_IFUNC void letter_parser_free(letter_parser_s *parser) {
-  letter_free(parser->letter);
-  fio_free(parser);
+FIO_IFUNC void fio_letter_parser_free(fio_letter_parser_s *p) {
+  if (!p)
+    return;
+  fio_letter_free(p->letter);
+  FIO_MEM_FREE_(p, sizeof(*p));
 }
 
 /* pings are ignored (no pong required) */
-FIO_SFUNC void letter_read_ping_callback(letter_s *letter) { (void)letter; }
+FIO_SFUNC void fio___letter_read_ping_callback(fio_letter_s *l) {
+  /* pings MUST have an empty message */
+  if (l->from && (fio_letter_channel_len(l) | fio_letter_message_len(l)))
+    fio_close(l->from);
+}
 
 /* forwards letters to callback, returns 0. Returns -1 on error. */
-FIO_IFUNC int letter_read(fio_s *io,
-                          letter_parser_s *parser,
-                          void (*callback)(letter_s *)) {
-  void (*callbacks[2])(letter_s *) = {callback, letter_read_ping_callback};
+FIO_IFUNC int fio___letter_read(fio_s *io, void (*callback)(fio_letter_s *)) {
+  void (*callbacks[2])(fio_letter_s *) = {callback,
+                                          fio___letter_read_ping_callback};
+  fio_letter_parser_s *parser = (fio_letter_parser_s *)fio_udata_get(io);
   for (;;) {
     ssize_t r;
     if (parser->letter) {
-      letter_s *const letter = parser->letter;
-      const size_t to_read = letter_len(parser->letter);
+      fio_letter_s *const letter = parser->letter;
+      const size_t to_read = fio_letter_len(parser->letter);
       while (parser->pos < to_read) {
         r = fio_read(io, letter->buf + parser->pos, to_read - parser->pos);
         if (r <= 0)
           return 0;
         parser->pos += r;
       }
-      callbacks[((letter->buf[0] & FIO_PUBSUB_PING_BIT) / FIO_PUBSUB_PING_BIT)](
-          letter);
-      letter_free(letter);
+      callbacks[!!(fio_letter_flags(letter) & FIO___PUBSUB_PING_BIT)](letter);
+      fio_letter_free(letter);
       parser->letter = NULL;
       parser->pos = 0;
     }
     r = fio_read(io,
                  parser->buf + parser->pos,
-                 (LETTER_HEADER_LENGTH + 2) - parser->pos);
+                 FIO___LETTER_MINIMAL_LEN - parser->pos);
     if (r <= 0)
       return 0;
     parser->pos += r;
-    if (parser->pos < LETTER_HEADER_LENGTH)
+    if (parser->pos < FIO___LETTER_HEADER_LENGTH)
       return 0;
-    uint32_t channel_len = fio_buf2u32_little(parser->buf + 4);
-    channel_len &= 0xFFFFFF;
-    uint32_t message_len = fio_buf2u32_little(parser->buf + 8);
-    message_len &= 0xFFFFFFF;
-    int32_t filter = fio_buf2u32_little(parser->buf + 8);
-    parser->letter = letter_new(io, filter, channel_len, message_len);
-    if (!parser->letter) {
-      return -1;
-    }
-    memcpy(parser->letter->buf, parser->buf, parser->pos);
+    parser->letter = fio_letter_new_empty(parser->buf);
+    if (!parser->letter)
+      goto error;
+    parser->letter->from = io;
+    FIO_MEMCPY(parser->letter->buf, parser->buf, parser->pos);
   }
+
+error:
+  fio_close(io);
+  return -1;
+}
+
+/* *****************************************************************************
+Letter Processing - IPC - processes a letter according to its flags
+***************************************************************************** */
+
+FIO_SFUNC void fio___send_letter_task(fio_s *io, void *l) {
+  fio_letter_write(io, (fio_letter_s *)l);
+}
+
+FIO_SFUNC void fio___on_letter_ipc(fio_letter_s *l) {
+  const uint8_t flags = fio_letter_flags(l);
+  if ((flags & FIO___PUBSUB_SIBLINGS_BIT)) {
+    fio_protocol_each(fio_letter_protocol_ipc(), fio___send_letter_task, l);
+  }
+  if ((flags & FIO___PUBSUB_CLUSTER_BIT)) {
+    fio_protocol_each(fio_letter_protocol_remote(), fio___send_letter_task, l);
+  }
+  if ((flags & FIO___PUBSUB_ROOT_BIT)) {
+    fio_letter_on_recieved(l);
+  }
+}
+
+FIO_SFUNC void fio___on_letter_ipc_worker(fio_letter_s *l) {
+  const uint8_t flags = fio_letter_flags(l);
+  if ((flags & (FIO___PUBSUB_ROOT_BIT | FIO___PUBSUB_SIBLINGS_BIT))) {
+    fio_protocol_each(fio_letter_protocol_ipc(), fio___send_letter_task, l);
+  }
+  if ((flags & FIO___PUBSUB_PROCESS_BIT)) {
+    fio_letter_on_recieved(l);
+  }
+}
+
+FIO_SFUNC void (*fio___letter_deliver_fn)(fio_letter_s *) = fio___on_letter_ipc;
+/** delivers the letter according to its flags (callback, IPC, cluster...). */
+FIO_IFUNC void fio_letter_deliver(fio_letter_s *l) {
+  fio___letter_deliver_fn(l);
+}
+
+/* *****************************************************************************
+Letter Processing - Remove - validates that a letter is not double-delivered.
+***************************************************************************** */
+
+#define FIO_OMAP_NAME fio___letter_map
+#define FIO_MAP_KEY   uint64_t
+#define FIO_MAP_LRU   (1ULL << 16)
+#include FIO___INCLUDE_FILE
+
+FIO_SFUNC struct {
+  fio___letter_map_s map;
+} fio___letter_validation = {
+    .map = FIO_MAP_INIT,
+};
+
+FIO_SFUNC void fio___on_letter_remote(fio_letter_s *l) {
+  const uint64_t hash = fio_risky_hash(l->buf, fio_letter_len(l), 0);
+  const uint64_t letter_id = fio_letter_id(l);
+  if (letter_id ==
+      fio___letter_map_get(&fio___letter_validation.map, hash, letter_id))
+    return;
+  fio___letter_map_set(&fio___letter_validation.map, hash, letter_id);
+  fio___on_letter_ipc(l);
+}
+
+/* *****************************************************************************
+Letter Protocol Callbacks
+***************************************************************************** */
+
+void fio___letter_on_attach(fio_s *io) {
+  fio_letter_parser_s *p = fio_letter_parser_new();
+  if (!p) {
+    fio_close(io);
+    return;
+  }
+  fio_udata_set(io, p);
+}
+void fio___letter_on_data_ipc_master(fio_s *io) {
+  fio___letter_read(io, fio___on_letter_ipc);
+}
+void fio___letter_on_data_ipc_worker(fio_s *io) {
+  fio___letter_read(io, fio___on_letter_ipc_worker);
+}
+void fio___letter_on_data_remote(fio_s *io);
+void fio___letter_on_close(void *p) {
+  fio_letter_parser_free((fio_letter_parser_s *)p);
+}
+void fio___letter_on_timeout(fio_s *io) {
+  char buf[FIO___LETTER_MINIMAL_LEN] = {0};
+  buf[18] = FIO___PUBSUB_PING_BIT;
+  fio_write(io, buf, FIO___LETTER_MINIMAL_LEN);
+}
+
+static fio_protocol_s FIO_LETTER_PROTOCOL_REMOTE = {
+    .on_attach = fio___letter_on_attach,
+    .on_data = fio___letter_on_data_remote,
+    .on_close = fio___letter_on_close,
+    .on_timeout = fio___letter_on_timeout,
+};
+static fio_protocol_s FIO_LETTER_PROTOCOL_IPC = {
+    .on_attach = fio___letter_on_attach,
+    .on_data = fio___letter_on_data_ipc_master,
+    .on_close = fio___letter_on_close,
+    .on_timeout = fio___letter_on_timeout,
+};
+/** returns a protocol in which letters are tested for single delivery. */
+FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void) {
+  return &FIO_LETTER_PROTOCOL_REMOTE;
+}
+/** returns a protocol suitable for IPC - letter validation is skipped. */
+FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc(void) {
+  return &FIO_LETTER_PROTOCOL_IPC;
+}
+
+FIO_SFUNC void fio___letter_protocol_callback_switch(void *p_) {
+  fio_protocol_s *p = (fio_protocol_s *)p_;
+  p->on_data = fio___letter_on_data_ipc_worker;
+  fio___letter_deliver_fn = fio___on_letter_ipc_worker;
+}
+
+FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         fio___letter_protocol_callback_switch,
+                         &FIO_LETTER_PROTOCOL_IPC);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         (void (*)(void *))fio___letter_map_destroy,
+                         (void *)(&fio___letter_validation.map));
 }
 
 /* *****************************************************************************
@@ -691,26 +840,28 @@ Pub/Sub - defaults and builtin pub/sub engines
 
 /** Used to publish the message exclusively to the root / master process. */
 const fio_pubsub_engine_s *const FIO_PUBSUB_ROOT =
-    (fio_pubsub_engine_s *)FIO_PUBSUB_ROOT_BIT;
+    (fio_pubsub_engine_s *)FIO___PUBSUB_ROOT_BIT;
 /** Used to publish the message only within the current process. */
 const fio_pubsub_engine_s *const FIO_PUBSUB_PROCESS =
-    (fio_pubsub_engine_s *)FIO_PUBSUB_PROCESS_BIT;
+    (fio_pubsub_engine_s *)FIO___PUBSUB_PROCESS_BIT;
 /** Used to publish the message except within the current process. */
 const fio_pubsub_engine_s *const FIO_PUBSUB_SIBLINGS =
-    (fio_pubsub_engine_s *)FIO_PUBSUB_SIBLINGS_BIT;
+    (fio_pubsub_engine_s *)FIO___PUBSUB_SIBLINGS_BIT;
 /** Used to publish the message for this process, its siblings and root. */
 const fio_pubsub_engine_s *const FIO_PUBSUB_LOCAL =
-    (fio_pubsub_engine_s *)(FIO_PUBSUB_SIBLINGS_BIT | FIO_PUBSUB_PROCESS_BIT |
-                            FIO_PUBSUB_ROOT_BIT);
+    (fio_pubsub_engine_s *)(FIO___PUBSUB_SIBLINGS_BIT |
+                            FIO___PUBSUB_PROCESS_BIT | FIO___PUBSUB_ROOT_BIT);
 /** Used to publish the message to any possible publishers. */
 const fio_pubsub_engine_s *const FIO_PUBSUB_CLUSTER =
-    (fio_pubsub_engine_s *)(FIO_PUBSUB_CLUSTER_BIT | FIO_PUBSUB_SIBLINGS_BIT |
-                            FIO_PUBSUB_PROCESS_BIT | FIO_PUBSUB_ROOT_BIT);
+    (fio_pubsub_engine_s *)(FIO___PUBSUB_CLUSTER_BIT |
+                            FIO___PUBSUB_SIBLINGS_BIT |
+                            FIO___PUBSUB_PROCESS_BIT | FIO___PUBSUB_ROOT_BIT);
 
 /** The default engine (settable). Initial default is FIO_PUBSUB_LOCAL. */
 const fio_pubsub_engine_s *FIO_PUBSUB_DEFAULT =
-    (fio_pubsub_engine_s *)(FIO_PUBSUB_CLUSTER_BIT | FIO_PUBSUB_SIBLINGS_BIT |
-                            FIO_PUBSUB_PROCESS_BIT | FIO_PUBSUB_ROOT_BIT);
+    (fio_pubsub_engine_s *)(FIO___PUBSUB_CLUSTER_BIT |
+                            FIO___PUBSUB_SIBLINGS_BIT |
+                            FIO___PUBSUB_PROCESS_BIT | FIO___PUBSUB_ROOT_BIT);
 
 /**
  * The pattern matching callback used for pattern matching.

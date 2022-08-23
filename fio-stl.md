@@ -6015,6 +6015,13 @@ A shortcut to define on ordered map would be to use the `FIO_OMAP_NAME` and `FIO
 
 If defined, the Set / Map / Dictionary will be ordered using a Least Recently Used approach. This means that iteration will start with the most important element (most recently used) while eviction will start with the most stale element (least recently used).
 
+Auto eviction will be performed once the map reaches `FIO_MAP_LRU` elements.
+
+i.e.,
+
+```c
+#define FIO_MAP_LRU (1ULL << 16) /* limits the map to 65,536 elements. */
+```
 
 ### The Map Types
 
@@ -7603,6 +7610,43 @@ fio_protocol_s *fio_protocol_get(fio_s *io);
 
 Returns a pointer to the current protocol object.
 
+#### `fio_protocol_each`
+
+```c
+size_t fio_protocol_each(fio_protocol_s *protocol,
+                         void (*task)(fio_s *, void *udata2),
+                         void *udata2);
+```
+
+Performs a task for each IO in the stated protocol, returning the number of tasks performed.
+
+If the task is more then a short action (such as more than a single `fio_write`), please consider scheduling the task using `fio_defer` while properly wrapping the task with calls to `fio_dup` and `fio_undup`.
+
+i.e.:
+
+
+```c
+static my_long_task_wrapper_finish(fio_s *io, void * info) {
+  // ... write results to IO and possibly free info pointer?
+  fio_undup(io);
+}
+
+static my_long_task(fio_s *io, void * info) {
+  // ... perform action in main thread or in a worker thread (CPU heavy?)
+  fio_defer(my_long_task_wrapper_finish, io, info);
+}
+
+static my_long_task_wrapper_start(fio_s *io, void * info) {
+  fio_defer(my_long_task, fio_dup(io), info);
+}
+
+void some_callback(fio_s *io) {
+  void * info = NULL;
+  // ...
+  fio_protocol_each(&my_protocol, my_long_task_wrapper_start, info);
+}
+```
+
 #### `fio_fd_get`
 
 ```c
@@ -7849,6 +7893,22 @@ uint16_t fio_srv_workers(int workers_requested);
 
 Returns the number or workers the server will actually run.
 
+
+#### `fio_srv_is_master`
+
+```c
+int fio_srv_is_master();
+```
+
+Returns true if the current process is the server's master process.
+
+#### `fio_srv_is_worker`
+
+```c
+int fio_srv_is_worker();
+```
+
+Returns true if the current process is a server's worker process (it may, if not using any workers, also be the master process).
 
 ### Server Task Scheduling
 

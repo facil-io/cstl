@@ -126,7 +126,7 @@ static int ary____test_was_destroyed = 0;
 #define FIO_MEMORY_NAME omap___test_size_lru_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
-#define FIO_MAP_LRU     1
+#define FIO_MAP_LRU     (1UL << 24)
 #define FIO_MAP_TEST
 #include FIO___INCLUDE_FILE
 

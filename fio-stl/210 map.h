@@ -1208,7 +1208,15 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
     if (o->count) { /* update ordering */
       FIO_INDEXED_LIST_PUSH(o->map, node, o->head, pos);
 #ifdef FIO_MAP_LRU
-      o->head = pos;
+      o->head = pos;                 /* update LRU head */
+      if (FIO_MAP_LRU == o->count) { /* limit reached - evict 1 LRU element */
+        uint32_t to_evict = o->map[pos].node.prev;
+        FIO_MAP_KEY_DESTROY(o->map[to_evict].key);
+        FIO_MAP_VALUE_DESTROY(o->map[to_evict].value);
+        FIO_INDEXED_LIST_REMOVE(o->map, node, to_evict);
+        imap[to_evict] = 0xFF;
+        --o->count;
+      }
 #endif       /* FIO_MAP_LRU */
     } else { /* set first order */
       o->map[pos].node.next = o->map[pos].node.prev = pos;
@@ -1230,7 +1238,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
 
 #ifdef FIO_MAP_VALUE
   if (overwrite) {
-    /* overwrite existing object (only relevant to hash maps */
+    /* overwrite existing object (only relevant for hash maps) */
     r = o->map + pos;
 
     FIO_MAP_KEY_DISCARD(key);

@@ -69,6 +69,12 @@ SFUNC void fio_srv_run(int workers);
 /* Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running();
 
+/* Returns true if the current process is the server's master process. */
+SFUNC int fio_srv_is_master();
+
+/* Returns true if the current process is a server's worker process. */
+SFUNC int fio_srv_is_worker();
+
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
 
@@ -361,6 +367,11 @@ struct fio_protocol_s {
    */
   uint32_t timeout;
 };
+
+/** Performs a task for each IO in the stated protocol. */
+FIO_SFUNC size_t fio_protocol_each(fio_protocol_s *protocol,
+                                   void (*task)(fio_s *, void *udata2),
+                                   void *udata2);
 
 /* *****************************************************************************
 Connection Object Links / Environment
@@ -968,6 +979,22 @@ SFUNC void fio_undup(fio_s *io) {
   fio___srv_wakeup();
 }
 
+/** Performs a task for each IO in the stated protocol. */
+FIO_SFUNC size_t fio_protocol_each(fio_protocol_s *protocol,
+                                   void (*task)(fio_s *, void *),
+                                   void *udata) {
+  size_t count = 0;
+  if (!protocol || !protocol->reserved.ios.next || !protocol->reserved.ios.prev)
+    return count;
+  FIO_LIST_EACH(fio_s, node, &protocol->reserved.ios, io) {
+    if (!(io->state & FIO_STATE_OPEN))
+      continue;
+    task(io, udata);
+    ++count;
+  }
+  return count;
+}
+
 /* *****************************************************************************
 Connection Object Links / Environment
 ***************************************************************************** */
@@ -1319,6 +1346,14 @@ SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
 
 /* Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }
+
+/* Returns true if the current process is the server's master process. */
+SFUNC int fio_srv_is_master() {
+  return fio___srvdata.root_pid == fio___srvdata.pid;
+}
+
+/* Returns true if the current process is a server's worker process. */
+SFUNC int fio_srv_is_worker() { return !fio___srvdata.is_worker; }
 
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
