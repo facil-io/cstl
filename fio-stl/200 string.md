@@ -62,7 +62,7 @@ The default optimization stores information about the allocated memory's capacit
 /* this is NOT thread safe... just an example */
 void example_task(void *str_, void *ignore_) {
   fio_str_s *str = (fio_str_s *)str_; /* C++ style cast */
-  fprintf(stderr, "%s\n", fio_str2ptr(str));
+  fprintf(stderr, "%s\n", fio_str_ptr(str));
   fio_str_write(str, ".", 1); /* write will sporadically allocate memory if required. */
   fio_str_free(str);          /* decreases reference count or frees object */
   (void)ignore_;
@@ -152,7 +152,7 @@ void example(void) {
     fprintf(stderr,
             "[%d] %s - memory allocated: %s\n",
             (int)pos->obj.value,
-            key2ptr(&pos->obj.key),
+            key_ptr(&pos->obj.key),
             (key_is_allocated(&pos->obj.key) ? "yes" : "no"));
   }
   map_destroy(&m);
@@ -172,14 +172,14 @@ The core type, created by the macro, is the `STR_s` type - where `STR` is replac
 void hello(void){
   my_str_s msg = FIO_STR_INIT;
   my_str_write(&msg, "Hello World", 11);
-  printf("%s\n", my_str2ptr(&msg));
+  printf("%s\n", my_str_ptr(&msg));
   my_str_destroy(&msg);
 }
 ```
 
 The type should be considered **opaque** and **must never be accessed directly**.
 
-The type's attributes should be accessed ONLY through the accessor functions: `STR_info`, `STR_len`, `STR2ptr`, `STR_capa`, etc'.
+The type's attributes should be accessed ONLY through the accessor functions: `STR_info`, `STR_len`, `STR_ptr`, `STR_capa`, etc'.
 
 This is because: Small strings that fit into the type directly use the type itself for memory (except the first and last bytes). Larger strings use the type fields for the string's meta-data. Depending on the string's data, the type behaves differently.
 
@@ -385,10 +385,10 @@ size_t STR_len(FIO_STR_PTR s);
 
 Returns the String's length in bytes.
 
-#### `STR2ptr`
+#### `STR_ptr`
 
 ```c
-char *STR2ptr(FIO_STR_PTR s);
+char *STR_ptr(FIO_STR_PTR s);
 ```
 
 Returns a pointer (`char *`) to the String's content (first character in the string).

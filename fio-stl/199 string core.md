@@ -470,7 +470,7 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 ## C Strings with Binary Data
 
-The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds).
+The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds) while providing copy-on-write reference counting.
 
 This String storage paradigm can be very effective and it is used as the default String key implementation in Maps when `FIO_MAP_KEY` is undefined.
 
@@ -486,13 +486,14 @@ fprintf(stdout, "%s\n", str);
 fio_bstr_free(str);
 ```
 
-To copy of a `fio_bstr` String simply write its content to `NULL`:
+To copy a `fio_bstr` String use `fio_bstr_dup` - this uses a *copy-on-write* approach which can increase performance:
 
 ```c
-char * str_org = fio_bstr_write(NULL, "Hello World!", 12);
-char * str_cpy = fio_bstr_write(NULL, str_org, fio_bstr_len(str_org));
+char * str_org = fio_bstr_write(NULL, "Hello World", 11);
+char * str_cpy = fio_bstr_dup(str_org);    /* str_cpy == str_org : only a reference count increase. */
+str_cpy = fio_bstr_write(str_cpy, "!", 1); /* str_cpy != str_org : copy-on-write, data copied here. */
+fprintf(stdout, "Original:    %s\nEdited Copy: %s\n", str_org, str_cpy);
 fio_bstr_free(str_org);
-fprintf(stdout, "%s\n", str_cpy);
 fio_bstr_free(str_cpy);
 ```
 
@@ -526,13 +527,21 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 
 In addition, the following helpers are provided:
 
-#### `fio_bstr_reallocate`
+#### `fio_bstr_dup`
 
 ```c
-int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
+char *fio_bstr_dup(char *bstr);
 ```
 
-Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.
+Returns a copy-on-write copy of the original `bstr`, increasing the original's reference count.
+
+**Note**: This reference counter will automatically make a copy if more than 2 billion (2,147,483,648) references are counted.
+
+**Note**: To avoid the Copy-on-Write logic, use:
+
+```c
+char *copy = fio_bstr_write(NULL, original, fio_bstr_len(original));
+```
 
 #### `fio_bstr_free`
 
@@ -540,7 +549,7 @@ Default reallocation callback implementation. The new `fio_bstr` pointer will re
 void fio_bstr_free(char *bstr);
 ```
 
-Frees a binary string allocated by a `fio_bstr` function.
+Frees a binary string allocated by a `fio_bstr` function (or decreases its reference count).
 
 #### `fio_bstr_info`
 
@@ -564,7 +573,7 @@ Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
 size_t fio_bstr_len(char *bstr);
 ```
 
-Gets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+Gets the length of the `fio_bstr`.
 
 #### `fio_bstr_len_set`
 
@@ -572,19 +581,19 @@ Gets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
 char *fio_bstr_len_set(char *bstr, size_t len);
 ```
 
-Sets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+Sets the length of the `fio_bstr`.
+
+**Note**: `len` **must** be less then the capacity of the `bstr`, or the function call will quietly fail.
 
 Returns `bstr`.
 
-**Note**: the function is meant to be used with the value returned from the Core String API, so no error checking is performed! `bstr` **MUST NOT** be `NULL` and `len` **MUST** be less then the `bstr` capacity.
-
-Use:
+#### `fio_bstr_reallocate`
 
 ```c
-fio_str_info_s str = {0};
-fio_string_write(&str, fio_bstr_reallocate, "Hello World!", 12);
-char * bstr = fio_bstr_len_set(str.buf, str.len);
+int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
 ```
+
+Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.
 
 -------------------------------------------------------------------------------
 

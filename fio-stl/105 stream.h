@@ -218,12 +218,12 @@ typedef enum {
   FIO_PACKET_TYPE_FILE = 2,
   FIO_PACKET_TYPE_FILE_NO_CLOSE = 3,
 } fio_stream_packet_type_e;
+#define FIO_STREAM___TYPE_BITS 2
 
 typedef struct fio_stream_packet_embd_s {
   uint32_t type;
   char buf[];
 } fio_stream_packet_embd_s;
-#define FIO_STREAM___EMBD_BIT_OFFSET 4
 
 typedef struct fio_stream_packet_extrn_s {
   uint32_t type;
@@ -249,12 +249,12 @@ FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
     fio_stream_packet_extrn_s *ext;
     fio_stream_packet_fd_s *f;
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
-  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  switch ((fio_stream_packet_type_e)(u.em->type &
+                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
   case FIO_PACKET_TYPE_EMBEDDED:
-    FIO_MEM_FREE_(
-        p,
-        sizeof(*p) + sizeof(*u.em) +
-            (sizeof(char) * (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET)));
+    FIO_MEM_FREE_(p,
+                  sizeof(*p) + sizeof(*u.em) +
+                      (sizeof(char) * (u.em->type >> FIO_STREAM___TYPE_BITS)));
     break;
   case FIO_PACKET_TYPE_EXTERNAL:
     if (u.ext->dealloc)
@@ -288,9 +288,10 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
     fio_stream_packet_fd_s *f;
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
 
-  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  switch ((fio_stream_packet_type_e)(u.em->type &
+                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
   case FIO_PACKET_TYPE_EMBEDDED:
-    len = u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET;
+    len = u.em->type >> FIO_STREAM___TYPE_BITS;
     return len;
   case FIO_PACKET_TYPE_EXTERNAL: len = u.ext->length; return len;
   case FIO_PACKET_TYPE_FILE: /* fall through */
@@ -305,7 +306,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 uint8_t copy_buffer,
                                                 void (*dealloc_func)(void *)) {
   fio_stream_packet_s *p = NULL;
-  if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___EMBD_BIT_OFFSET))))
+  if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___TYPE_BITS))))
     goto error;
   if (copy_buffer || len <= 14) {
     while (len) {
@@ -323,7 +324,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
-                 (uint32_t)(slice << FIO_STREAM___EMBD_BIT_OFFSET);
+                 (uint32_t)(slice << FIO_STREAM___TYPE_BITS);
       FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;
@@ -446,17 +447,17 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
   size_t written = 0;
 
-  switch ((fio_stream_packet_type_e)(u.em->type & 3)) {
+  switch ((fio_stream_packet_type_e)(u.em->type &
+                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
   case FIO_PACKET_TYPE_EMBEDDED:
     if (!buf[0] || !len[0] ||
-        (!must_copy &&
-         (!p->next ||
-          (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) >= len[0] + offset))) {
+        (!must_copy && (!p->next || (u.em->type >> FIO_STREAM___TYPE_BITS) >=
+                                        len[0] + offset))) {
       buf[0] = u.em->buf + offset;
-      len[0] = (size_t)(u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) - offset;
+      len[0] = (size_t)(u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
       return;
     }
-    written = (u.em->type >> FIO_STREAM___EMBD_BIT_OFFSET) - offset;
+    written = (u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
     if (written > len[0])
       written = len[0];
     if (written) {
@@ -797,6 +798,6 @@ Module Cleanup
 #endif
 
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_STREAM___EMBD_BIT_OFFSET
+#undef FIO_STREAM___TYPE_BITS
 #endif /* FIO_STREAM */
 #undef FIO_STREAM

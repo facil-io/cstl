@@ -60,6 +60,7 @@ Memory Allocation - fast setup for a specific global allocators
 /* prevent double declaration of FIO_MALLOC */
 #define H___FIO_MALLOC___H
 #undef FIO_MALLOC
+
 /* FIOBJ_MALLOC defines a FIOBJ dedicated memory allocator */
 #elif defined(FIOBJ_MALLOC) && !defined(H___FIOBJ_MALLOC___H)
 #define H___FIOBJ_MALLOC___H

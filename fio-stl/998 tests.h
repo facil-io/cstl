@@ -62,6 +62,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_TIME
 #define FIO_URL
 #define FIO_SERVER
+#define FIO_PUBSUB
 #define FIO_SORT_NAME num
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
@@ -150,9 +151,6 @@ static int ary____test_was_destroyed = 0;
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include FIO___INCLUDE_FILE
-
-#define FIO_FIOBJ
 #include FIO___INCLUDE_FILE
 
 /* *****************************************************************************
@@ -689,6 +687,7 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, server)();
+  FIO_NAME_TEST(stl, pubsub)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");

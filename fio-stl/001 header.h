@@ -1418,7 +1418,7 @@ Locking selector
 #else
 #define FIO___LOCK_NAME          "facil.io spinlocks"
 #define FIO___LOCK_TYPE          fio_lock_i
-#define FIO___LOCK_INIT          (FIO_LOCK_INIT)
+#define FIO___LOCK_INIT          ((FIO___LOCK_TYPE)FIO_LOCK_INIT)
 #define FIO___LOCK_DESTROY(lock) ((lock) = FIO___LOCK_INIT)
 #define FIO___LOCK_LOCK(lock)    fio_lock(&(lock))
 #define FIO___LOCK_TRYLOCK(lock) fio_trylock(&(lock))
@@ -1463,7 +1463,7 @@ Recursive inclusion management
 #define IFUNC IFUNC_
 
 #elif !defined(FIO_STL_KEEP__) || (FIO_STL_KEEP__ + 1 != 100)
-/* SFUNC_ - internal helper types are `static` */
+/* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
 #define SFUNC FIO_SFUNC
@@ -1564,6 +1564,13 @@ Pointer Tagging
 #endif
 #endif
 
+/* Modules that require FIO_GLOB_MATCH */
+#if defined(FIO_PUBSUB)
+#ifndef FIO_GLOB_MATCH
+#define FIO_GLOB_MATCH
+#endif
+#endif
+
 /* Modules that require FIO_POLL */
 #if defined(FIO_SERVER)
 #ifndef FIO_POLL
@@ -1580,7 +1587,7 @@ Pointer Tagging
 
 /* Modules that require FIO_STATE */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
-    defined(FIOBJ_MALLOC) || defined(FIO_POLL) || defined(FIO_SERVER)
+    defined(FIOBJ_MALLOC) || defined(FIO_POLL)
 #ifndef FIO_STATE
 #define FIO_STATE
 #endif
@@ -1594,14 +1601,14 @@ Pointer Tagging
 #endif
 
 /* Modules that require FIO_SOCK */
-#if defined(FIO_POLL) || defined(FIO_SERVER)
+#if defined(FIO_POLL)
 #ifndef FIO_SOCK
 #define FIO_SOCK
 #endif
 #endif
 
 /* Modules that require FIO_QUEUE */
-#if defined(FIO_POLL) || defined(FIO_SERVER)
+#if defined(FIO_POLL)
 #ifndef FIO_QUEUE
 #define FIO_QUEUE
 #endif
@@ -1626,7 +1633,7 @@ Pointer Tagging
 /* Modules that require the String Core API */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
     defined(FIO_MAP_KEYSTR) || !defined(FIO_MAP_KEY) ||                        \
-    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER)
+    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER) || defined(FIO_FIOBJ)
 #ifndef FIO_STR
 #define FIO_STR
 #endif

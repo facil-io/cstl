@@ -4463,7 +4463,7 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 ## C Strings with Binary Data
 
-The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds).
+The facil.io C STL provides a very simple String library (`fio_bstr`) that wraps around the *Binary Safe Core String Helpers*, emulating (to some effect and degree) the behavior of the famous [Simple Dynamic Strings library](https://github.com/antirez/sds) while providing copy-on-write reference counting.
 
 This String storage paradigm can be very effective and it is used as the default String key implementation in Maps when `FIO_MAP_KEY` is undefined.
 
@@ -4479,13 +4479,14 @@ fprintf(stdout, "%s\n", str);
 fio_bstr_free(str);
 ```
 
-To copy of a `fio_bstr` String simply write its content to `NULL`:
+To copy a `fio_bstr` String use `fio_bstr_dup` - this uses a *copy-on-write* approach which can increase performance:
 
 ```c
-char * str_org = fio_bstr_write(NULL, "Hello World!", 12);
-char * str_cpy = fio_bstr_write(NULL, str_org, fio_bstr_len(str_org));
+char * str_org = fio_bstr_write(NULL, "Hello World", 11);
+char * str_cpy = fio_bstr_dup(str_org);    /* str_cpy == str_org : only a reference count increase. */
+str_cpy = fio_bstr_write(str_cpy, "!", 1); /* str_cpy != str_org : copy-on-write, data copied here. */
+fprintf(stdout, "Original:    %s\nEdited Copy: %s\n", str_org, str_cpy);
 fio_bstr_free(str_org);
-fprintf(stdout, "%s\n", str_cpy);
 fio_bstr_free(str_cpy);
 ```
 
@@ -4519,13 +4520,21 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 
 In addition, the following helpers are provided:
 
-#### `fio_bstr_reallocate`
+#### `fio_bstr_dup`
 
 ```c
-int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
+char *fio_bstr_dup(char *bstr);
 ```
 
-Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.
+Returns a copy-on-write copy of the original `bstr`, increasing the original's reference count.
+
+**Note**: This reference counter will automatically make a copy if more than 2 billion (2,147,483,648) references are counted.
+
+**Note**: To avoid the Copy-on-Write logic, use:
+
+```c
+char *copy = fio_bstr_write(NULL, original, fio_bstr_len(original));
+```
 
 #### `fio_bstr_free`
 
@@ -4533,7 +4542,7 @@ Default reallocation callback implementation. The new `fio_bstr` pointer will re
 void fio_bstr_free(char *bstr);
 ```
 
-Frees a binary string allocated by a `fio_bstr` function.
+Frees a binary string allocated by a `fio_bstr` function (or decreases its reference count).
 
 #### `fio_bstr_info`
 
@@ -4557,7 +4566,7 @@ Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
 size_t fio_bstr_len(char *bstr);
 ```
 
-Gets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+Gets the length of the `fio_bstr`.
 
 #### `fio_bstr_len_set`
 
@@ -4565,19 +4574,19 @@ Gets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
 char *fio_bstr_len_set(char *bstr, size_t len);
 ```
 
-Sets the length of the `fio_bstr`. **Note**: `bstr` **MUST NOT** be `NULL`.
+Sets the length of the `fio_bstr`.
+
+**Note**: `len` **must** be less then the capacity of the `bstr`, or the function call will quietly fail.
 
 Returns `bstr`.
 
-**Note**: the function is meant to be used with the value returned from the Core String API, so no error checking is performed! `bstr` **MUST NOT** be `NULL` and `len` **MUST** be less then the `bstr` capacity.
-
-Use:
+#### `fio_bstr_reallocate`
 
 ```c
-fio_str_info_s str = {0};
-fio_string_write(&str, fio_bstr_reallocate, "Hello World!", 12);
-char * bstr = fio_bstr_len_set(str.buf, str.len);
+int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
 ```
+
+Default reallocation callback implementation. The new `fio_bstr` pointer will replace the old one in `dest->buf`.
 
 -------------------------------------------------------------------------------
 
@@ -4737,7 +4746,7 @@ The default optimization stores information about the allocated memory's capacit
 /* this is NOT thread safe... just an example */
 void example_task(void *str_, void *ignore_) {
   fio_str_s *str = (fio_str_s *)str_; /* C++ style cast */
-  fprintf(stderr, "%s\n", fio_str2ptr(str));
+  fprintf(stderr, "%s\n", fio_str_ptr(str));
   fio_str_write(str, ".", 1); /* write will sporadically allocate memory if required. */
   fio_str_free(str);          /* decreases reference count or frees object */
   (void)ignore_;
@@ -4827,7 +4836,7 @@ void example(void) {
     fprintf(stderr,
             "[%d] %s - memory allocated: %s\n",
             (int)pos->obj.value,
-            key2ptr(&pos->obj.key),
+            key_ptr(&pos->obj.key),
             (key_is_allocated(&pos->obj.key) ? "yes" : "no"));
   }
   map_destroy(&m);
@@ -4847,14 +4856,14 @@ The core type, created by the macro, is the `STR_s` type - where `STR` is replac
 void hello(void){
   my_str_s msg = FIO_STR_INIT;
   my_str_write(&msg, "Hello World", 11);
-  printf("%s\n", my_str2ptr(&msg));
+  printf("%s\n", my_str_ptr(&msg));
   my_str_destroy(&msg);
 }
 ```
 
 The type should be considered **opaque** and **must never be accessed directly**.
 
-The type's attributes should be accessed ONLY through the accessor functions: `STR_info`, `STR_len`, `STR2ptr`, `STR_capa`, etc'.
+The type's attributes should be accessed ONLY through the accessor functions: `STR_info`, `STR_len`, `STR_ptr`, `STR_capa`, etc'.
 
 This is because: Small strings that fit into the type directly use the type itself for memory (except the first and last bytes). Larger strings use the type fields for the string's meta-data. Depending on the string's data, the type behaves differently.
 
@@ -5060,10 +5069,10 @@ size_t STR_len(FIO_STR_PTR s);
 
 Returns the String's length in bytes.
 
-#### `STR2ptr`
+#### `STR_ptr`
 
 ```c
-char *STR2ptr(FIO_STR_PTR s);
+char *STR_ptr(FIO_STR_PTR s);
 ```
 
 Returns a pointer (`char *`) to the String's content (first character in the string).
@@ -7804,7 +7813,7 @@ typedef struct {
   /** A numerical type filter. Defaults to 0. Negative values are reserved. */
   intptr_t type;
   /** The name of the object. The name and type uniquely identify the object. */
-  fio_str_info_s name;
+  fio_buf_info_s name;
   /** The object being linked to the connection. */
   void *udata;
   /** A callback that will be called once the connection is closed. */
@@ -7834,7 +7843,7 @@ typedef struct {
   /** A numerical type filter. Should be the same as used with `fio_env_set` */
   intptr_t type;
   /** The name of the object. Should be the same as used with `fio_env_set` */
-  fio_str_info_s name;
+  fio_buf_info_s name;
 } fio_env_unset_args_s;
 ```
 
@@ -7855,10 +7864,10 @@ The function is shadowed by the helper MACRO that allows the function to be call
 
 ### Sarting / Stopping the Server
 
-#### `fio_srv_run`
+#### `fio_srv_start`
 
 ```c
-void fio_srv_run(int workers);
+void fio_srv_start(int workers);
 ```
 
 Starts the server, using optional `workers` processes.
@@ -8015,7 +8024,31 @@ Sets the hard timeout (in milliseconds) for the server's shutdown loop.
 -------------------------------------------------------------------------------
 ## Pub/Sub 
 
-A Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
+By defining `FIO_PUBSUB`, a Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
+
+The [pub/sub paradigm](https://en.wikipedia.org/wiki/Publish–subscribe_pattern) allows for any number of real-time applications, including message-bus backends, chat applications (private / group chats), broadcasting, games, etc'.
+
+### Paradigm
+
+Publishers publish messages to delivery Channels, without any information about the potential recipients (if any).
+
+Subscribers "listen" to messages from specific delivery Channels without any information about the publishers (if any).
+
+Messages are broadcasted through delivery Channels to the different Subscribers.
+
+Delivery Channels in facil.io are a combination of a named channel and a 16 bit numerical filter, allowing for 32,768 namespaces of named channels (negative numbers are reserved).
+
+### Limitations
+
+The internal Pub/Sub Letter Exchange Protocol imposes the following limitations on message exchange:
+
+* Distribution Channel Names are limited to 2^16 bytes (65,536 bytes).
+
+* Message payload is limited to 2^24 bytes (16,777,216 bytes == about 16Mb).
+
+* Empty messages (no numerical filters, no channel, no message payload, no flags) are ignored.
+
+* Subscriptions match delivery interests by both channel name (or pattern) and a numerical filter.
 
 ### Subscriptions - Receiving Messages
 
@@ -8052,7 +8085,7 @@ typedef struct {
    *
    * Subscriptions require a match by both channel name and filter.
    */
-  fio_str_info_s channel;
+  fio_buf_info_s channel;
   /**
    * The callback to be called for each message forwarded to the subscription.
    */
@@ -8074,14 +8107,14 @@ typedef struct {
    */
   uintptr_t *subscription_handle_ptr;
   /**
-   * An additional numerical `filter` subscribers need to match.
+   * A numerical namespace `filter` subscribers need to match.
    *
    * Negative values are reserved for facil.io framework extensions.
    *
    * Filer channels are bound to the processes and workers, they are NOT
    * forwarded to engines and can be used for inter process communication (IPC).
    */
-  int32_t filter;
+  int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
 } subscribe_args_s;
@@ -8108,7 +8141,7 @@ typedef struct fio_msg_s {
   /** The `udata` argument associated with the subscription. */
   void *udata;
   /** A unique message type. Negative values are reserved, 0 == pub/sub. */
-  int32_t filter;
+  int16_t filter;
   /** flag indicating if the message is JSON data or binary/text. */
   uint8_t is_json;
 } fio_msg_s;
@@ -8184,11 +8217,11 @@ typedef struct fio_publish_args_s {
   /** If `from` is specified, it will be skipped (won't receive message). */
   fio_s *from;
   /** The target named channel. Only published when filter == 0. */
-  fio_str_info_s channel;
+  fio_buf_info_s channel;
   /** The message body / content. */
-  fio_str_info_s message;
+  fio_buf_info_s message;
   /** A numeral / internal channel. Negative values are reserved. */
-  int32_t filter;
+  int16_t filter;
   /** A flag indicating if the message is JSON data or not. */
   uint8_t is_json;
 } fio_publish_args_s;

@@ -30,7 +30,8 @@ Copyright and License: see header file (000 header.h) or top of file
 #ifndef FIO_REF_INIT
 #define FIO_REF_INIT(obj)                                                      \
   do {                                                                         \
-    (obj) = (FIO_REF_TYPE){0};                                                 \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (obj) = (FIO_REF_TYPE){0};                                               \
   } while (0)
 #endif
 
@@ -145,8 +146,8 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 #define FIO_REF_ON_FREE()                                                      \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
-static void __attribute__((destructor))
-FIO_NAME(FIO_REF_NAME, ___leak_test)(void) {
+
+FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
     FIO_LOG_ERROR(
         "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "

@@ -1,6 +1,30 @@
 ## Pub/Sub 
 
-A Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
+By defining `FIO_PUBSUB`, a Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
+
+The [pub/sub paradigm](https://en.wikipedia.org/wiki/Publish–subscribe_pattern) allows for any number of real-time applications, including message-bus backends, chat applications (private / group chats), broadcasting, games, etc'.
+
+### Paradigm
+
+Publishers publish messages to delivery Channels, without any information about the potential recipients (if any).
+
+Subscribers "listen" to messages from specific delivery Channels without any information about the publishers (if any).
+
+Messages are broadcasted through delivery Channels to the different Subscribers.
+
+Delivery Channels in facil.io are a combination of a named channel and a 16 bit numerical filter, allowing for 32,768 namespaces of named channels (negative numbers are reserved).
+
+### Limitations
+
+The internal Pub/Sub Letter Exchange Protocol imposes the following limitations on message exchange:
+
+* Distribution Channel Names are limited to 2^16 bytes (65,536 bytes).
+
+* Message payload is limited to 2^24 bytes (16,777,216 bytes == about 16Mb).
+
+* Empty messages (no numerical filters, no channel, no message payload, no flags) are ignored.
+
+* Subscriptions match delivery interests by both channel name (or pattern) and a numerical filter.
 
 ### Subscriptions - Receiving Messages
 
@@ -37,7 +61,7 @@ typedef struct {
    *
    * Subscriptions require a match by both channel name and filter.
    */
-  fio_str_info_s channel;
+  fio_buf_info_s channel;
   /**
    * The callback to be called for each message forwarded to the subscription.
    */
@@ -59,14 +83,14 @@ typedef struct {
    */
   uintptr_t *subscription_handle_ptr;
   /**
-   * An additional numerical `filter` subscribers need to match.
+   * A numerical namespace `filter` subscribers need to match.
    *
    * Negative values are reserved for facil.io framework extensions.
    *
    * Filer channels are bound to the processes and workers, they are NOT
    * forwarded to engines and can be used for inter process communication (IPC).
    */
-  int32_t filter;
+  int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
 } subscribe_args_s;
@@ -93,7 +117,7 @@ typedef struct fio_msg_s {
   /** The `udata` argument associated with the subscription. */
   void *udata;
   /** A unique message type. Negative values are reserved, 0 == pub/sub. */
-  int32_t filter;
+  int16_t filter;
   /** flag indicating if the message is JSON data or binary/text. */
   uint8_t is_json;
 } fio_msg_s;
@@ -169,11 +193,11 @@ typedef struct fio_publish_args_s {
   /** If `from` is specified, it will be skipped (won't receive message). */
   fio_s *from;
   /** The target named channel. Only published when filter == 0. */
-  fio_str_info_s channel;
+  fio_buf_info_s channel;
   /** The message body / content. */
-  fio_str_info_s message;
+  fio_buf_info_s message;
   /** A numeral / internal channel. Negative values are reserved. */
-  int32_t filter;
+  int16_t filter;
   /** A flag indicating if the message is JSON data or not. */
   uint8_t is_json;
 } fio_publish_args_s;

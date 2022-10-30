@@ -60,29 +60,29 @@ typedef struct fio_s fio_s;
 Starting / Stopping the Server
 ***************************************************************************** */
 
-/* Stopping the server. */
+/** Stopping the server. */
 SFUNC void fio_srv_stop(void);
 
-/* Starts the server, using optional `workers` processes. This will BLOCK! */
-SFUNC void fio_srv_run(int workers);
+/** Starts the server, using optional `workers` processes. This will BLOCK! */
+SFUNC void fio_srv_start(int workers);
 
-/* Returns true if server running and 0 if server stopped or shutting down. */
+/** Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running();
 
-/* Returns true if the current process is the server's master process. */
+/** Returns true if the current process is the server's master process. */
 SFUNC int fio_srv_is_master();
 
-/* Returns true if the current process is a server's worker process. */
+/** Returns true if the current process is a server's worker process. */
 SFUNC int fio_srv_is_worker();
 
-/* Returns the number or workers the server will actually run. */
+/** Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
 
 /* *****************************************************************************
 Listening to Incoming Connections
 ***************************************************************************** */
 
-/* Arguments for the fio_listen function */
+/** Arguments for the fio_listen function */
 struct fio_listen_args {
   /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
   const char *url;
@@ -118,6 +118,16 @@ struct fio_listen_args {
  */
 SFUNC int fio_listen(struct fio_listen_args args);
 #define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
+
+/* *****************************************************************************
+Connecting as a Client
+***************************************************************************** */
+
+/** Connects to a specific URL, returning 0 on success and -1 on error. */
+FIO_IFUNC int fio_connect(const char *url,
+                          fio_protocol_s *protocol,
+                          void *udata,
+                          void *tls);
 
 /* *****************************************************************************
 IO Operations
@@ -348,7 +358,7 @@ struct fio_protocol_s {
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls.
    */
-  struct {
+  struct fio_io_functions {
     /** called once the IO was attached and the TLS object was set. */
     void (*start)(fio_s *io);
     /** Called to perform a non-blocking `read`, same as the system call. */
@@ -382,7 +392,7 @@ typedef struct {
   /** A numerical type filter. Defaults to 0. Negative values are reserved. */
   intptr_t type;
   /** The name for the link. The name and type uniquely identify the object. */
-  fio_str_info_s name;
+  fio_buf_info_s name;
   /** The object being linked to the connection. */
   void *udata;
   /** A callback that will be called once the connection is closed. */
@@ -396,7 +406,7 @@ typedef struct {
   /** A numerical type filter. Should be the same as used with `fio_env_set` */
   intptr_t type;
   /** The name of the object. Should be the same as used with `fio_env_set` */
-  fio_str_info_s name;
+  fio_buf_info_s name;
 } fio_env_unset_args_s;
 
 /**
@@ -461,40 +471,40 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
-/** Associates a new `udata` pointer with the IO, returning the old `udata` */
-FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata) {
-  void *old = ((void **)io)[0];
-  ((void **)io)[0] = udata;
-  return old;
+/** Defines a get / set function for the property. */
+#define FIO_SERVER_GETSET_FUNC(property, index)                                \
+  FIO_IFUNC void *fio_##property##_set(fio_s *io, void *property) {            \
+    void *old = ((void **)io)[index];                                          \
+    ((void **)io)[index] = property;                                           \
+    return old;                                                                \
+  }                                                                            \
+  FIO_IFUNC void *fio_##property##_get(fio_s *io) {                            \
+    return ((void **)io)[index];                                               \
+  }
+FIO_SERVER_GETSET_FUNC(udata, 0)
+FIO_SERVER_GETSET_FUNC(tls, 1)
+
+/** Connects to a specific URL, returning 0 on success and -1 on error. */
+FIO_IFUNC int fio_connect(const char *url,
+                          fio_protocol_s *protocol,
+                          void *udata,
+                          void *tls) {
+  int fd = fio_sock_open2(url, FIO_SOCK_CLIENT);
+  if (fd == -1)
+    return -1;
+  return (0 - !fio_attach_fd(fd, protocol, udata, tls));
 }
-
-/** Returns the `udata` pointer associated with the IO. */
-FIO_IFUNC void *fio_udata_get(fio_s *io) { return ((void **)io)[0]; }
-
-/** Associates a new `tls` pointer with the IO, returning the old `tls` */
-FIO_IFUNC void *fio_tls_set(fio_s *io, void *tls) {
-  void *old = ((void **)io)[1];
-  ((void **)io)[1] = tls;
-  return old;
-}
-
-/** Returns the `tls` pointer associated with the IO. */
-FIO_IFUNC void *fio_tls_get(fio_s *io) { return ((void **)io)[1]; }
 
 /* *****************************************************************************
-Simple Server Implementation - possibly externed functions.
+
+
+
+          Simple Server Implementation - possibly externed functions.
+
+
+REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
 
 /* *****************************************************************************
 Protocol validation
@@ -639,6 +649,7 @@ FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
   fio___srv_env_destroy(&e->env);
   fio_thread_mutex_destroy(&e->lock);
 }
+
 /* *****************************************************************************
 IO Validity Map - Type
 ***************************************************************************** */
@@ -656,7 +667,7 @@ IO Validity Map - Type
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
 #define FIO_STL_KEEP__ 1
-#include FIO__FILE__
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #else
 typedef void *fio_validity_map_s;
@@ -890,11 +901,11 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
 }
-#define FIO_STL_KEEP__     1
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#include FIO__FILE__
+#define FIO_STL_KEEP__     1
+#include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static void fio___protocol_set_task(void *io_, void *old_) {
@@ -1008,9 +1019,7 @@ SFUNC void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
       .udata = args.udata,
       .on_close = args.on_close,
   };
-  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
-  fio___srv_env_safe_s *e = selector[!io];
-  fio___srv_env_safe_set(e,
+  fio___srv_env_safe_set((io ? &io->env : &fio___srvdata.env),
                          args.name.buf,
                          args.name.len,
                          args.type,
@@ -1024,9 +1033,10 @@ void fio_env_unset___(void); /* IDE marker */
  * callback will NOT be called.
  */
 SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
-  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
-  fio___srv_env_safe_s *e = selector[!io];
-  return fio___srv_env_safe_unset(e, args.name.buf, args.name.len, args.type);
+  return fio___srv_env_safe_unset((io ? &io->env : &fio___srvdata.env),
+                                  args.name.buf,
+                                  args.name.len,
+                                  args.type);
 }
 
 /**
@@ -1034,7 +1044,7 @@ SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
  * `on_close` callback as if the connection was closed.
  */
 SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
-  fio___srv_env_safe_s *selector[2] = {&fio___srvdata.env, &io->env};
+  fio___srv_env_safe_s *const selector[2] = {&fio___srvdata.env, &io->env};
   fio___srv_env_safe_s *e = selector[!io];
   return fio___srv_env_safe_remove(e, args.name.buf, args.name.len, args.type);
 }
@@ -1364,7 +1374,7 @@ SFUNC uint16_t fio_srv_workers(int workers) {
 #endif /* _SC_NPROCESSORS_ONLN */
     if (cores == -1) {
       cores = 8;
-      FIO_LOG_WARNING("fio_srv_run called with negative value for worker "
+      FIO_LOG_WARNING("fio_srv_start called with negative value for worker "
                       "count, but auto-detect failed, assuming %d CPU cores",
                       cores);
     }
@@ -1375,7 +1385,7 @@ SFUNC uint16_t fio_srv_workers(int workers) {
 }
 
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
-SFUNC void fio_srv_run(int workers) {
+SFUNC void fio_srv_start(int workers) {
   fio___srvdata.stop = 0;
   fio___srvdata.workers = fio_srv_workers(workers);
   workers = (int)fio___srvdata.workers;
@@ -1452,7 +1462,7 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
 FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   fio_s *io = (fio_s *)io_;
   fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
-  if (!io || !(io->state & FIO_STATE_OPEN))
+  if (!(io->state & FIO_STATE_OPEN))
     goto io_error;
   fio_stream_add(&io->stream, packet);
   fio_queue_push(fio___srv_tasks,
@@ -1470,6 +1480,8 @@ void fio_write2___(void); /* IDE marker*/
  */
 SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   fio_stream_packet_s *packet = NULL;
+  if (!io)
+    goto io_error_null;
   if (args.buf) {
     packet = fio_stream_pack_data(args.buf,
                                   args.len,
@@ -1481,24 +1493,25 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   }
   if (!packet)
     goto error;
-  if (!io ||
-      ((io->state & (FIO_STATE_OPEN | FIO_STATE_CLOSING)) ^ FIO_STATE_OPEN))
-    goto io_error;
-  fio_queue_push(fio___srv_tasks,
-                 fio_write2___task,
-                 fio_dup2((fio_s *)io),
-                 packet);
+  if (io && (io->state & FIO_STATE_CLOSING))
+    goto write_called_after_close;
+  fio_queue_push(fio___srv_tasks, fio_write2___task, fio_dup2(io), packet);
   return;
-error:
-  FIO_LOG_ERROR("couldn't create user-packet for IO %p", (void *)io);
+error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
+  FIO_LOG_ERROR("couldn't create %zu bytes long user-packet for IO %p (%d)",
+                args.len,
+                (void *)io,
+                (io ? io->fd : -1));
+  return;
+write_called_after_close:
+  FIO_LOG_WARNING("`write` called after `close` was called for IO.");
+  fio_stream_pack_free(packet);
+  return;
+io_error_null:
+  FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)",
+                fio___srvdata.pid);
   if (args.dealloc)
     args.dealloc(args.buf);
-  return;
-io_error:
-  fio_stream_pack_free(packet);
-  if (!io)
-    FIO_LOG_ERROR("Invalid IO (NULL) for user-packet");
-  return;
 }
 
 /** Marks the IO for closure as soon as scheduled data was sent. */
@@ -1515,10 +1528,6 @@ SFUNC void fio_close(fio_s *io) {
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
   fio_atomic_or(&io->state, FIO_STATE_CLOSING);
-  // fio_stream_destroy(&io->stream);
-  // fio_queue_push(fio___srv_tasks,
-  //                fio___srv_poll_on_ready,
-  //                fio_dup2((fio_s *)io));
   if ((fio_atomic_and(&io->state, ~FIO_STATE_OPEN) & FIO_STATE_OPEN))
     fio_free2(io);
 }
@@ -1576,7 +1585,7 @@ static void fio___srv_listen_on_close(void *settings_) {
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
-  struct fio_listen_args *l = udata;
+  struct fio_listen_args *l = (struct fio_listen_args *)udata;
   int *pfd = (int *)(l + 1);
   close(*pfd);
   FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
@@ -1589,7 +1598,7 @@ static fio_protocol_s FIO___LISTEN_PROTOCOL = {
 };
 
 FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
-  struct fio_listen_args *l = udata;
+  struct fio_listen_args *l = (struct fio_listen_args *)udata;
   int *pfd = (int *)(l + 1);
   int fd = fio_sock_dup(*pfd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
@@ -1601,20 +1610,25 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
+void fio_listen___(void); /* IDE Marker */
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   static int64_t port = 3000;
+  size_t len = args.url ? strlen(args.url) + 1 : 0;
+  struct fio_listen_args *cpy = NULL;
+  fio_str_info_s adr, tmp;
+  int *fd_store;
+  int fd;
   if (!args.on_open) {
     FIO_LOG_ERROR("fio_listen missing `on_open` callback.");
-    return -1;
+    goto other_error;
   }
-  size_t len = args.url ? strlen(args.url) + 1 : 0;
   len += (!len) << 6;
-  struct fio_listen_args *cpy = (struct fio_listen_args *)
+  cpy = (struct fio_listen_args *)
       FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + sizeof(int) + len), 0);
   FIO_ASSERT_ALLOC(cpy);
   *cpy = args;
   cpy->url = (char *)(cpy + 1) + sizeof(int);
-  int *fd_store = (int *)(cpy + 1);
+  fd_store = (int *)(cpy + 1);
   if (args.url) {
     FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
@@ -1625,10 +1639,9 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
       if (!port | ((uint64_t)port > 65535))
         port = 3000;
     }
-    fio_str_info_s tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
-    fio_str_info_s adr;
+    tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
     if (!(adr.buf = getenv("ADDRESS")) || (adr.len = strlen(adr.buf)) > 58) {
-      adr = FIO_STR_INFO2("0.0.0.0:", 8);
+      adr = FIO_STR_INFO2((char *)"0.0.0.0:", 8);
     }
     fio_string_write2(&tmp,
                       NULL,
@@ -1636,7 +1649,7 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
                       FIO_STRING_WRITE_UNUM(port));
     ++port;
   }
-  int fd = fio_sock_open2(cpy->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  fd = fio_sock_open2(cpy->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
   if (fd == -1)
     goto fd_error;
   *fd_store = fd;
@@ -1644,10 +1657,16 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
       (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
       fio___srv_listen_attach_task,
       (void *)cpy);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         (void (*)(void *))fio___srv_env_safe_destroy,
+                         (void *)&fio___srvdata.env);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_cleanup_task, cpy);
   return 0;
 fd_error:
   FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
+other_error:
+  if (args.on_finish)
+    args.on_finish(args.udata);
   return -1;
 }
 

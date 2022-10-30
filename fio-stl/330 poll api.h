@@ -154,3 +154,8 @@ SFUNC void fio___poll_ev_mock(void *udata);
 /* mock event */
 SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 #endif /* defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#undef FIO_POLL
+#endif /* FIO_POLL */

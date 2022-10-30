@@ -40,20 +40,20 @@ Everything, and the Kitchen Sink
 #define FIO_TIME
 #define FIO_URL
 
-#include FIO__FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIO_MALLOC
+#define FIO_PUBSUB
 #define FIO_QUEUE
-#define FIO_STR
-// #define FIO_PUBSUB
 #define FIO_SERVER
+#define FIO_STR
 #define FIO_STREAM
 
-#include FIO__FILE__
+#include FIO___INCLUDE_FILE
 
 #define FIOBJ_MALLOC
 #define FIO_FIOBJ
-#include FIO__FILE__
+#include FIO___INCLUDE_FILE
 
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN

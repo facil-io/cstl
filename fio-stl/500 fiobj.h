@@ -1330,7 +1330,7 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO_STL_KEEP__
+#define FIO_STL_KEEP__           1
 #include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
@@ -2207,7 +2207,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                    strlen(json + 61),
                "JSON roundtrip failed (length error).");
     FIO_ASSERT(!memcmp(json + 61,
-                       FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
+                       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
                        strlen(json + 61)),
                "JSON roundtrip failed (data error).");
     fiobj_free(o);
@@ -2267,35 +2267,35 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                   strlen("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
               !memcmp(
                   "number: " FIO_MACRO2STR(FIO_TEST_REPEAT),
-                  FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
+                  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped)),
           "Object popped from Array lost it's value %s",
-          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped));
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped));
       FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(shifted) ==
                          9 &&
                      !memcmp("number: 1",
-                             FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
-                                       ptr)(shifted),
+                             FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
+                                      ptr)(shifted),
                              9),
                  "Object shifted from Array lost it's value %s",
-                 FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(shifted));
+                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(shifted));
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set) == 9 &&
               !memcmp("number: 3",
-                      FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
+                      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
                       9),
           "Object retrieved from Array using fiobj_array_set() lost it's "
           "value %s",
-          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set));
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set));
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed) == 9 &&
               !memcmp(
                   "number: 4",
-                  FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
+                  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
                   9),
           "Object retrieved from Array using fiobj_array_set() lost it's "
           "value %s",
-          FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
     }
     fiobj_free(shifted);
     fiobj_free(popped);
@@ -2324,8 +2324,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
           "string length zeroed out - string freed?");
       FIO_ASSERT(
           !memcmp(
-              FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(tmp),
-              FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(tmp),
+              FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a2, i)),
               FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(tmp)),
           "string data error - string freed?");
@@ -2365,18 +2365,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                 strlen("number: 1") &&
             !memcmp(
                 "number: 1",
-                FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
+                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed)),
         "Object removed from Hash lost it's value %s",
-        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set) ==
                 strlen("number: 2") &&
             !memcmp("number: 2",
-                    FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
+                    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set)),
         "Object removed from Hash lost it's value %s",
-        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set));
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set));
 
     fiobj_free(removed);
     fiobj_free(set);
@@ -2418,7 +2418,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
            << 1); /* prevent memory realloc */
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
       (json,
-       FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(json),
+       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(json),
        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json) - 1);
       fprintf(stderr, "%s\n", FIO_NAME2(fiobj, cstr)(json).buf);
       fiobj_free(json);

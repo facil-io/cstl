@@ -413,6 +413,12 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
                        iterator_is_valid)(FIO_NAME(FIO_MAP_NAME, iterator_s) *
                                           iterator);
 
+/** Returns a pointer to the node object in the internal map. */
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+    FIO_NAME(FIO_MAP_NAME,
+             iterator2node)(FIO_MAP_PTR map,
+                            FIO_NAME(FIO_MAP_NAME, iterator_s) * iterator);
+
 #ifndef FIO_MAP_EACH
 /** Iterates through the map using an iterator object. */
 #define FIO_MAP_EACH(map_name, map_ptr, i)                                     \
@@ -659,6 +665,20 @@ FIO_IFUNC FIO_MAP_GET_T FIO_NAME(FIO_MAP_NAME, set_if_missing)(FIO_MAP_PTR map,
                                                                           0
 #endif
                                                                           ));
+}
+
+/** Returns a pointer to the node object in the internal map. */
+FIO_IFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
+    FIO_NAME(FIO_MAP_NAME,
+             iterator2node)(FIO_MAP_PTR map,
+                            FIO_NAME(FIO_MAP_NAME, iterator_s) * iterator) {
+  FIO_NAME(FIO_MAP_NAME, node_s) *node = NULL;
+  if (!iterator || !iterator->private_.map_validator)
+    return node;
+  FIO_PTR_TAG_VALID_OR_RETURN(map, node);
+  FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  node = o->map + iterator->private_.index;
+  return node;
 }
 
 /* *****************************************************************************
@@ -1194,11 +1214,12 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
   }
   /* imap may have been reallocated, collect info now. */
   imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
+  /* set return value */
+  r = o->map + pos;
 
   if (!imap[pos] || imap[pos] == 0xFF) {
     /* insert new object */
     imap[pos] = FIO_NAME(FIO_MAP_NAME, __byte_hash)(o, hash);
-    r = o->map + pos;
 #if !FIO_MAP_RECALC_HASH
     r->hash = hash;
 #endif
@@ -1239,8 +1260,6 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
 #ifdef FIO_MAP_VALUE
   if (overwrite) {
     /* overwrite existing object (only relevant for hash maps) */
-    r = o->map + pos;
-
     FIO_MAP_KEY_DISCARD(key);
     if (!old) {
       FIO_MAP_VALUE_DESTROY(o->map[pos].value);

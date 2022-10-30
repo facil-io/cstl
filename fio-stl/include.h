@@ -95,33 +95,43 @@
 #ifdef FIO_SORT_NAME
 #include "301 sort.h"
 #endif
-#ifdef FIO_CLI
+#if defined(FIO_CLI) && !defined(FIO_STL_KEEP__)
 #include "302 cli.h"
 #endif
-#ifdef FIO_POLL
+#if defined(FIO_POLL) && !defined(FIO_STL_KEEP__)
 #include "330 poll api.h"
 #include "331 poll epoll.h"
 #include "331 poll kqueue.h"
 #include "331 poll poll.h"
-#include "339 poll finish.h"
 #endif
-#ifdef FIO_SERVER
+#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__)
 #include "400 server.h"
+#if defined(FIO_TEST_CSTL)
+#include "409 server test.h"
 #endif
-#ifdef FIO_PUBSUB
-#include "410 pubsub.h"
 #endif
-#ifdef FIO_FIOBJ
+#if defined(FIO_PUBSUB) && !defined(FIO_STL_KEEP__)
+#include "420 pubsub.h"
+#endif
+#if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
 #include "500 fiobj.h"
 #endif
 
 #ifndef FIO___DEV___
 #include "700 cleanup.h"
 #endif
+
+#if defined(FIO_TEST_CSTL) && !defined(FIO_FIO_TEST_CSTL_ONLY_ONCE) &&         \
+    !defined(FIO_STL_KEEP__)
+#include "998 tests.h"
+#endif
+
 #include "999 footer.h"
 
 #ifndef FIO_STL_KEEP__
 #undef FIO___CSTL_NON_COMBINED_INCLUSION
 #endif
-#endif /* !H___FIO_CSTL_COMBINED___H && !FIO___CSTL_NON_COMBINED_INCLUSION */
-/* ************************************************************************* */
+
+#endif /* !H___FIO_CSTL_COMBINED___H */
+/* *************************************************************************
+ */

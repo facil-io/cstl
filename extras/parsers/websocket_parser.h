@@ -103,6 +103,9 @@ static void websocket_on_protocol_pong(void *udata, void *msg, uint64_t len);
 static void websocket_on_protocol_close(void *udata);
 static void websocket_on_protocol_error(void *udata);
 
+#ifndef WEBSOCKET_CLIENT_MUST_MASK
+#define WEBSOCKET_CLIENT_MUST_MASK 1
+#endif
 /* *****************************************************************************
 API - Parsing (unwrapping)
 ***************************************************************************** */
@@ -181,7 +184,7 @@ void websocket_xmask(void *msg, uint64_t len, uint32_t mask) {
       }
     }
 #if UINTPTR_MAX <= 0xFFFFFFFF
-    /* handle  4 byte XOR alignment in 32 bit mnachine*/
+    /* handle  4 byte XOR alignment in 32 bit machine*/
     while (len >= 4) {
       *((uint32_t *)msg) ^= mask;
       len -= 4;
@@ -470,11 +473,16 @@ static uint64_t websocket_consume(void *buffer,
       ((uint8_t *)(&mask))[2] = ((uint8_t *)(payload))[-2];
       ((uint8_t *)(&mask))[3] = ((uint8_t *)(payload))[-1];
       websocket_xmask(payload, info.packet_length, mask);
+#if WEBSOCKET_CLIENT_MUST_MASK
     } else if (require_masking && info.packet_length) {
 #if DEBUG
       fprintf(stderr, "ERROR: WebSocket protocol error - unmasked data.\n");
 #endif
       websocket_on_protocol_error(udata);
+      return 0; /* assume disconnection? */
+#else
+      (void)require_masking;
+#endif
     }
     /* call callback */
     switch (pos[0] & 15) {

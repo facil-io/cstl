@@ -139,7 +139,7 @@ FIO_SFUNC void http_respond(http_s *h) {
   }
   if (1) {
     fio_env_set(((client_s *)http_controller_data(h))->io,
-                .name = FIO_STR_INFO2("my key", 6),
+                .name = FIO_BUF_INFO2("my key", 6),
                 .udata = fio_bstr_write(NULL, "my env data", 11),
                 .on_close = (void (*)(void *))fio_bstr_free);
   }
@@ -206,7 +206,7 @@ int main(int argc, char const *argv[]) {
                "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d"
                "\n\tPress ^C to exit.",
                fio_srv_workers(fio_cli_get_i("-w")));
-  fio_srv_run(fio_cli_get_i("-w"));
+  fio_srv_start(fio_cli_get_i("-w"));
   FIO_LOG_INFO("Shutdown complete.");
   fio_cli_end();
   return 0;

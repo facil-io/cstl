@@ -401,7 +401,7 @@ typedef struct {
   /** A numerical type filter. Defaults to 0. Negative values are reserved. */
   intptr_t type;
   /** The name of the object. The name and type uniquely identify the object. */
-  fio_str_info_s name;
+  fio_buf_info_s name;
   /** The object being linked to the connection. */
   void *udata;
   /** A callback that will be called once the connection is closed. */
@@ -431,7 +431,7 @@ typedef struct {
   /** A numerical type filter. Should be the same as used with `fio_env_set` */
   intptr_t type;
   /** The name of the object. Should be the same as used with `fio_env_set` */
-  fio_str_info_s name;
+  fio_buf_info_s name;
 } fio_env_unset_args_s;
 ```
 
@@ -452,10 +452,10 @@ The function is shadowed by the helper MACRO that allows the function to be call
 
 ### Sarting / Stopping the Server
 
-#### `fio_srv_run`
+#### `fio_srv_start`
 
 ```c
-void fio_srv_run(int workers);
+void fio_srv_start(int workers);
 ```
 
 Starts the server, using optional `workers` processes.
