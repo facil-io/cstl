@@ -16,7 +16,8 @@
 
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
+#if defined(FIO_SOCK) && !defined(H___FIO_SOCK___H)
+#define H___FIO_SOCK___H
 
 /* *****************************************************************************
 OS specific patches.
@@ -98,27 +99,20 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #endif
 
 /* *****************************************************************************
-IO Poll - API
+Socket OS abstraction - API
 ***************************************************************************** */
-#define FIO_SOCK_POLL_RW(fd_)                                                  \
-  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
-#define FIO_SOCK_POLL_R(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLIN }
-#define FIO_SOCK_POLL_W(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLOUT }
-#define FIO_SOCK_POLL_LIST(...)                                                \
-  (struct pollfd[]) {                                                          \
-    __VA_ARGS__, (struct pollfd) { .fd = -1 }                                  \
-  }
 
+/** Socket type flags */
 typedef enum {
   FIO_SOCK_SERVER = 0,
   FIO_SOCK_CLIENT = 1,
   FIO_SOCK_NONBLOCK = 2,
   FIO_SOCK_TCP = 4,
   FIO_SOCK_UDP = 8,
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   FIO_SOCK_UNIX = 16,
+#else
+#define FIO_SOCK_UNIX 0
 #endif
 } fio_sock_open_flags_e;
 
@@ -155,7 +149,7 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 #endif
@@ -198,7 +192,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
   struct addrinfo *addr = NULL;
   int fd;
   switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
                     | (uint16_t)FIO_SOCK_UNIX
 #endif
                     ))) {
@@ -236,7 +230,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     fio_sock_address_free(addr);
     return fd;
 
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   case FIO_SOCK_UNIX:
     return fio_sock_open_unix(address,
                               (flags & FIO_SOCK_CLIENT),
@@ -285,14 +279,17 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
 
   /* parse URL */
   fio_url_s u = fio_url_parse(url, strlen(url));
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* unix socket */
     flags &= FIO_SOCK_SERVER | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK;
     flags |= FIO_SOCK_UNIX;
     if (u.path.len >= 2048) {
       errno = EINVAL;
-      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      FIO_LOG_ERROR(
+          "Couldn't open unix socket to %s - host name too long (%zu).",
+          url,
+          u.path.len);
       return -1;
     }
     FIO_MEMCPY(buf, u.path.buf, u.path.len);
@@ -558,7 +555,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   return capa;
 }
 
-#if FIO_OS_POSIX || defined(AF_UNIX)
+#ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -663,20 +660,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     const char *msg;
     uint16_t flag;
   } server_tests[] = {
-    {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
-#if FIO_OS_POSIX
+      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+#ifdef AF_UNIX
 #ifdef P_tmpdir
-    {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
-     NULL,
-     "Unix",
-     FIO_SOCK_UNIX},
+      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
+       NULL,
+       "Unix",
+       FIO_SOCK_UNIX},
 #else
-    {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
 #endif
 #endif
-    /* accept doesn't work with UDP, not like this... UDP test is seperate */
-    // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
-    {.address = NULL},
+      /* accept doesn't work with UDP, not like this... UDP test is seperate */
+      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+      {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
@@ -748,7 +745,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                fio_sock_wait_io(cl, POLLIN | POLLOUT, 0),
                (int)POLLNVAL,
                (int)POLLERR);
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);
 #endif

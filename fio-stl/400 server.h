@@ -1363,7 +1363,7 @@ SFUNC int fio_srv_is_master() {
 }
 
 /* Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker() { return !fio___srvdata.is_worker; }
+SFUNC int fio_srv_is_worker() { return fio___srvdata.is_worker; }
 
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
@@ -1581,7 +1581,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
   if (s->on_finish)
     s->on_finish(s->udata);
-  FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
+  if (!s->on_root || fio___srvdata.pid == fio___srvdata.root_pid)
+    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -1610,9 +1611,14 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
+FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
+  (void)ignr_;
+  fio___srv_listen_attach_task(udata);
+}
+
 void fio_listen___(void); /* IDE Marker */
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
-  static int64_t port = 3000;
+  static int64_t port = 0;
   size_t len = args.url ? strlen(args.url) + 1 : 0;
   struct fio_listen_args *cpy = NULL;
   fio_str_info_s adr, tmp;
@@ -1632,7 +1638,7 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (args.url) {
     FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
-    if (port == 3000) {
+    if (!port) {
       char *port_env = getenv("PORT");
       if (port_env)
         port = fio_atol10(&port_env);
@@ -1653,10 +1659,14 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (fd == -1)
     goto fd_error;
   *fd_store = fd;
-  fio_state_callback_add(
-      (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
-      fio___srv_listen_attach_task,
-      (void *)cpy);
+  if (fio_srv_is_running()) {
+    fio_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
+  } else {
+    fio_state_callback_add(
+        (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
+        fio___srv_listen_attach_task,
+        (void *)cpy);
+  }
   fio_state_callback_add(FIO_CALL_AT_EXIT,
                          (void (*)(void *))fio___srv_env_safe_destroy,
                          (void *)&fio___srvdata.env);

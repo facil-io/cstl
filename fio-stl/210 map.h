@@ -1049,7 +1049,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR map) {
 SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
-  if (o->map)
+  if (o->map && o->count)
     FIO_NAME(FIO_MAP_NAME, __destroy_objects)(o);
   FIO_NAME(FIO_MAP_NAME, __dealloc_map)(o);
   *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;

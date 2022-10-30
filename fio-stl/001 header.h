@@ -344,7 +344,6 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
   char *restrict d = (char *)d_;
   char *restrict s = (char *)s_;
 #if FIO_MEMCPYX_UNROLL
-
   if (l & 4) {
     FIO_MEMCPY4(d, s);
     d += 4;

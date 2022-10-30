@@ -105,6 +105,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   [schema://][user[:]][password[@]][host.com[:/]][:port/][/path][?quary][#target]
   */
   const char *end = url + len;
+  const char *quary_start = end;
   const char *pos = url;
   fio_url_s r = {.scheme = {.buf = (char *)url}};
   if (len == 0) {
@@ -138,6 +139,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto start_path;
   case '?':
     /* host?[query] */
+    quary_start = pos;
     r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_query;
@@ -303,9 +305,14 @@ finish:
         (r.scheme.buf[2] | 32) == 'l' && (r.scheme.buf[3] | 32) == 'e') ||
        ((r.scheme.buf[0] | 32) == 'u' && (r.scheme.buf[1] | 32) == 'n' &&
         (r.scheme.buf[2] | 32) == 'i' && (r.scheme.buf[3] | 32) == 'x'))) {
-    r.path.len += (r.path.buf - (r.scheme.buf + 7));
+    r.path.len = quary_start - (r.scheme.buf + 7);
     r.path.buf = r.scheme.buf + 7;
     r.user.len = r.password.len = r.port.len = r.host.len = 0;
+  } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
+    r.path.len = quary_start - r.host.buf;
+    r.path.buf = r.host.buf;
+    r.host.buf = NULL;
+    r.host.len = 0;
   }
 
   /* set any empty values to NULL */

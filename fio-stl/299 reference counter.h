@@ -240,6 +240,7 @@ Reference Counter (Wrapper) Cleanup
 /* *****************************************************************************
 Pointer Tagging Cleanup
 ***************************************************************************** */
+#ifndef FIO___DEV___
 #undef FIO_PTR_TAG
 #undef FIO_PTR_UNTAG
 #undef FIO_PTR_TAG_TYPE
@@ -247,3 +248,4 @@ Pointer Tagging Cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
+#endif

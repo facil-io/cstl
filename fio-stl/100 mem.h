@@ -602,7 +602,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
 }
 
-/** an 8 byte memset implementation. */
+/** an 8 byte value memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 #if 0 /* 64 byte loops seem slower for some reason... */
   uint64_t repeated[8] = {data, data, data, data, data, data, data, data};

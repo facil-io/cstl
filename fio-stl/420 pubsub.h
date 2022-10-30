@@ -544,6 +544,7 @@ static struct FIO_POSTOFFICE {
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
+  char ipc_url[256];
 } FIO_POSTOFFICE = {
 #if FIO_POSTOFFICE_THREAD_LOCK
     .lock = FIO___LOCK_INIT,
@@ -556,7 +557,7 @@ static struct FIO_POSTOFFICE {
 };
 
 /** Callback called when entering a child processes. */
-FIO_SFUNC void fio___postoffice_on_enter_child(void);
+FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
 
 /* *****************************************************************************
 
@@ -631,6 +632,8 @@ Letter Protocol API & Callbacks
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *letter);
 /** Callback called by the letter protocol when a letter arrives @ child. */
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *letter);
+/** Starts listening to IPC connections on a local socket. */
+FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_);
 
 /** Write a letter to a specific IO object */
 FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
@@ -641,15 +644,6 @@ FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 FIO_IFUNC int fio_letter_remote_listen(const char *url);
 /** Connect to remote letter exchange server (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_connect(const char *url);
-/** Inter Process Communication (IPC) letter exchange. */
-FIO_IFUNC int fio_letter_local_ipc_listen(const char *url);
-
-/** Returns a protocol in which letters are tested for single delivery. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void);
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_master(void);
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_child(void);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
@@ -671,10 +665,7 @@ Subscription Type API
 ***************************************************************************** */
 
 /* unsubscribes and defers the callback. */
-FIO_IFUNC void fio_subscription_unsubscribe(fio_subscription_s *s);
-
-/* delivers a letter to all of a channel's subscribers */
-FIO_SFUNC void fio_subscription_deliver(fio_channel_s *ch, fio_letter_s *l);
+FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 
 /* *****************************************************************************
 Subscription Management Tasks
@@ -689,6 +680,8 @@ FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_);
 /** Delivers a letter to a subscription */
 FIO_IFUNC void fio___subscription_on_message_task(void *s, void *l);
 
+/** publishes a letter to the expecting processes by letter flags. */
+FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_);
 /* *****************************************************************************
 
 
@@ -1047,10 +1040,12 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
+  fio___publish_letter_task(l, NULL);
   (void)l; /* TODO! */
 }
 
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *l) {
+  fio___channel_deliver(l);
   (void)l; /* TODO! */
 }
 
@@ -1100,19 +1095,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_timeout = fio___letter_on_timeout,
 };
 
-/** returns a protocol in which letters are tested for single delivery. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void) {
-  return &FIO_LETTER_PROTOCOL_REMOTE;
-}
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_master(void) {
-  return &FIO_LETTER_PROTOCOL_IPC_MASTER;
-}
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_child(void) {
-  return &FIO_LETTER_PROTOCOL_IPC_CHILD;
-}
-
 FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
   fio_state_callback_add(FIO_CALL_AT_EXIT,
                          (void (*)(void *))fio___letter_map_destroy,
@@ -1123,32 +1105,22 @@ FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
-/** Allows remote connections to extend the local letter exchange (cluster). */
-FIO_IFUNC void fio_letter_local_ipc_connect(const char *url) {
-  fio___postoffice_on_enter_child();
-  fio_connect(url, &FIO_LETTER_PROTOCOL_IPC_CHILD, NULL, NULL);
-}
-
 FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
-/** Allows remote connections to extend the local letter exchange (cluster). */
-FIO_IFUNC int fio_letter_local_ipc_listen(const char *url) {
-  if (fio_listen(.url = url,
-                 .on_open = fio_letter_local_ipc_on_open,
-                 .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER))
-    return -1;
-  char *url_copy = fio_bstr_write(NULL, url, strlen(url));
-  if (!url_copy)
-    return -1;
-  fio_state_callback_add(FIO_CALL_IN_CHILD,
-                         (void (*)(void *))fio_letter_local_ipc_connect,
-                         url_copy);
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio_bstr_free,
-                         NULL);
-  return 0;
+/** Starts listening to IPC connections on a local socket. */
+FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
+  (void)ignr_;
+  if (fio_srv_is_worker()) {
+    FIO_LOG_DEBUG("(pub/sub) IPC socket skipped - no workers are spawned.");
+    return;
+  }
+  FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
+                         .on_open = fio_letter_local_ipc_on_open,
+                         .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
+                         .on_root = 1),
+             "(pub/sub) couldn't open a socket for IPC.");
 }
 
 /* *****************************************************************************
@@ -1156,9 +1128,15 @@ Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url);
+FIO_IFUNC int fio_letter_remote_listen(const char *url) {
+  (void)url; /* TODO! */
+  return 0;
+}
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url);
+FIO_IFUNC int fio_letter_remote_connect(const char *url) {
+  (void)url; /* TODO! */
+  return 0;
+}
 
 /* *****************************************************************************
 
@@ -1316,8 +1294,6 @@ FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_) {
         NULL);
     if (!fio_channel_map_count(map))
       fio_channel_map_destroy(map);
-    fio_channel_on_destroy(ch);
-    fio_channel_free(ch);
   }
 
 #if FIO_POSTOFFICE_THREAD_LOCK
@@ -1341,7 +1317,7 @@ no_channel:
 ***************************************************************************** */
 
 /** Defers the on_unsubscribe callback. */
-FIO_IFUNC void fio_subscription_unsubscribe(fio_subscription_s *s) {
+FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s) {
   if (!s)
     return;
   s->on_message = fio_subscription___mock_cb;
@@ -1448,7 +1424,7 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
                 .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
                                           (uint16_t)args.filter)),
                 .name = args.channel,
-                .on_close = (void (*)(void *))fio_subscription_unsubscribe,
+                .on_close = (void (*)(void *))fio___subscription_unsubscribe,
                 .udata = s);
     return;
   }
@@ -1493,7 +1469,7 @@ int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
                                   (uint16_t)args.filter)),
         .name = args.channel);
   }
-  fio_subscription_unsubscribe(
+  fio___subscription_unsubscribe(
       *(fio_subscription_s **)args.subscription_handle_ptr);
   return 0;
 }
@@ -1514,7 +1490,7 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   }
   if ((fio_letter_flags(l) & FIO_POSTOFFICE.remote_send_filter)) {
     /* deliver to remote connections... all of them? yes, we are the source. */
-    fio_protocol_each(fio_letter_protocol_remote(),
+    fio_protocol_each(&FIO_LETTER_PROTOCOL_REMOTE,
                       (void (*)(fio_s *, void *))fio_letter_write,
                       l_);
   }
@@ -1580,15 +1556,30 @@ external_engine:
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, 256);
+  fio_string_write2(&url,
+                    NULL,
+                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
+                    FIO_STRING_WRITE_HEX(fio_rand64()),
+                    FIO_STRING_WRITE_STR1((char *)".sock"));
+  fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_ipc_listen, NULL);
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         fio___postoffice_on_enter_child,
+                         NULL);
 }
 
 /** Callback called by the letter protocol entering a child processes. */
-FIO_SFUNC void fio___postoffice_on_enter_child(void) {
+FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
+  (void)ignr_;
   FIO_POSTOFFICE.publish_filter = FIO___PUBSUB_PROCESS;
   FIO_POSTOFFICE.local_send_filter =
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
+  fio_connect(FIO_POSTOFFICE.ipc_url,
+              &FIO_LETTER_PROTOCOL_IPC_CHILD,
+              NULL,
+              NULL);
 }
 
 /* *****************************************************************************

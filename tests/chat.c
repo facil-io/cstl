@@ -44,26 +44,15 @@ static fio_protocol_s CHAT_PROTOCOL_CHAT = {
 };
 
 /* *****************************************************************************
-Nothings
-***************************************************************************** */
-
-/** Callback called by the letter protocol when a letter arrives @ master. */
-FIO_SFUNC void fio_letter_on_recieved_root(fio_letter_s *letter) {
-  (void)letter;
-}
-/** Callback called by the letter protocol when a letter arrives @ child. */
-FIO_SFUNC void fio_letter_on_recieved_child(fio_letter_s *letter) {
-  (void)letter;
-}
-/* *****************************************************************************
 IO "Objects" and helpers
 ***************************************************************************** */
 
+#define CHAT_MAX_HANDLE_LEN  31 /* must be less than 254 */
 #define CHAT_MAX_MESSAGE_LEN 8192
 
 typedef struct {
   fio_stream_s input;
-  char name[32];
+  char name[CHAT_MAX_HANDLE_LEN + 1];
 } client_s;
 
 FIO_IFUNC client_s *client_new(void) {
@@ -90,8 +79,18 @@ FIO_SFUNC void on_login_start(fio_s *io) {
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(void *udata) { client_free(udata); }
+FIO_SFUNC void on_close(void *udata) {
+  FIO_STR_INFO_TMP_VAR(s, CHAT_MAX_HANDLE_LEN + 32);
+  client_s *c = udata;
+  fio_string_write2(&s,
+                    NULL,
+                    FIO_STRING_WRITE_STR2(c->name, c->name[31]),
+                    FIO_STRING_WRITE_STR1(" left the chat.\n"));
+  fio_publish(.message = FIO_STR2BUF_INFO(s));
+  client_free(c);
+}
 
+/** Performs "login" logic (saves user handle) */
 FIO_SFUNC void on_data_first_line(fio_s *io, char *name, size_t len) {
   if (len < 2)
     goto error_name_too_short;
@@ -124,6 +123,7 @@ error_name_too_short:
   fio_close(io);
 }
 
+/** Manages chat messages */
 FIO_SFUNC void on_data_message_line(fio_s *io, char *msg, size_t len) {
   client_s *c = fio_udata_get(io);
   char *buf = fio_bstr_write2(NULL,

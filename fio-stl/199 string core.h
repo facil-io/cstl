@@ -19,6 +19,13 @@ Copyright and License: see header file (000 header.h) or top of file
 #if defined(FIO_STR) && !defined(H__FIO_STR__H)
 #define H__FIO_STR__H
 
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio_stack_mem___##name[(capacity)];                                     \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio_stack_mem___##name, .capa = (capacity)                          \
+  }
+
 /* *****************************************************************************
 String Authorship Helpers (`fio_string_write` functions)
 ***************************************************************************** */

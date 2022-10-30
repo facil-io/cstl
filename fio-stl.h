@@ -472,7 +472,6 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
   char *restrict d = (char *)d_;
   char *restrict s = (char *)s_;
 #if FIO_MEMCPYX_UNROLL
-
   if (l & 4) {
     FIO_MEMCPY4(d, s);
     d += 4;
@@ -8366,6 +8365,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   [schema://][user[:]][password[@]][host.com[:/]][:port/][/path][?quary][#target]
   */
   const char *end = url + len;
+  const char *quary_start = end;
   const char *pos = url;
   fio_url_s r = {.scheme = {.buf = (char *)url}};
   if (len == 0) {
@@ -8399,6 +8399,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto start_path;
   case '?':
     /* host?[query] */
+    quary_start = pos;
     r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_query;
@@ -8564,9 +8565,14 @@ finish:
         (r.scheme.buf[2] | 32) == 'l' && (r.scheme.buf[3] | 32) == 'e') ||
        ((r.scheme.buf[0] | 32) == 'u' && (r.scheme.buf[1] | 32) == 'n' &&
         (r.scheme.buf[2] | 32) == 'i' && (r.scheme.buf[3] | 32) == 'x'))) {
-    r.path.len += (r.path.buf - (r.scheme.buf + 7));
+    r.path.len = quary_start - (r.scheme.buf + 7);
     r.path.buf = r.scheme.buf + 7;
     r.user.len = r.password.len = r.port.len = r.host.len = 0;
+  } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
+    r.path.len = quary_start - r.host.buf;
+    r.path.buf = r.host.buf;
+    r.host.buf = NULL;
+    r.host.len = 0;
   }
 
   /* set any empty values to NULL */
@@ -10377,7 +10383,7 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
 }
 
-/** an 8 byte memset implementation. */
+/** an 8 byte value memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 #if 0 /* 64 byte loops seem slower for some reason... */
   uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
@@ -14593,7 +14599,8 @@ Queue/Timer Cleanup
 
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SOCK) && !defined(FIO_SOCK_POLL_LIST)
+#if defined(FIO_SOCK) && !defined(H___FIO_SOCK___H)
+#define H___FIO_SOCK___H
 
 /* *****************************************************************************
 OS specific patches.
@@ -14675,27 +14682,20 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #endif
 
 /* *****************************************************************************
-IO Poll - API
+Socket OS abstraction - API
 ***************************************************************************** */
-#define FIO_SOCK_POLL_RW(fd_)                                                  \
-  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
-#define FIO_SOCK_POLL_R(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLIN }
-#define FIO_SOCK_POLL_W(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLOUT }
-#define FIO_SOCK_POLL_LIST(...)                                                \
-  (struct pollfd[]) {                                                          \
-    __VA_ARGS__, (struct pollfd) { .fd = -1 }                                  \
-  }
 
+/** Socket type flags */
 typedef enum {
   FIO_SOCK_SERVER = 0,
   FIO_SOCK_CLIENT = 1,
   FIO_SOCK_NONBLOCK = 2,
   FIO_SOCK_TCP = 4,
   FIO_SOCK_UDP = 8,
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   FIO_SOCK_UNIX = 16,
+#else
+#define FIO_SOCK_UNIX 0
 #endif
 } fio_sock_open_flags_e;
 
@@ -14732,7 +14732,7 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 #endif
@@ -14775,7 +14775,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
   struct addrinfo *addr = NULL;
   int fd;
   switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
                     | (uint16_t)FIO_SOCK_UNIX
 #endif
                     ))) {
@@ -14813,7 +14813,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     fio_sock_address_free(addr);
     return fd;
 
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   case FIO_SOCK_UNIX:
     return fio_sock_open_unix(address,
                               (flags & FIO_SOCK_CLIENT),
@@ -14862,14 +14862,17 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
 
   /* parse URL */
   fio_url_s u = fio_url_parse(url, strlen(url));
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* unix socket */
     flags &= FIO_SOCK_SERVER | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK;
     flags |= FIO_SOCK_UNIX;
     if (u.path.len >= 2048) {
       errno = EINVAL;
-      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      FIO_LOG_ERROR(
+          "Couldn't open unix socket to %s - host name too long (%zu).",
+          url,
+          u.path.len);
       return -1;
     }
     FIO_MEMCPY(buf, u.path.buf, u.path.len);
@@ -15135,7 +15138,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
   return capa;
 }
 
-#if FIO_OS_POSIX || defined(AF_UNIX)
+#ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   /* Unix socket */
@@ -15240,20 +15243,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     const char *msg;
     uint16_t flag;
   } server_tests[] = {
-    {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
-#if FIO_OS_POSIX
+      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+#ifdef AF_UNIX
 #ifdef P_tmpdir
-    {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
-     NULL,
-     "Unix",
-     FIO_SOCK_UNIX},
+      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
+       NULL,
+       "Unix",
+       FIO_SOCK_UNIX},
 #else
-    {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
 #endif
 #endif
-    /* accept doesn't work with UDP, not like this... UDP test is seperate */
-    // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
-    {.address = NULL},
+      /* accept doesn't work with UDP, not like this... UDP test is seperate */
+      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+      {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
@@ -15325,7 +15328,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                fio_sock_wait_io(cl, POLLIN | POLLOUT, 0),
                (int)POLLNVAL,
                (int)POLLERR);
-#if FIO_OS_POSIX
+#ifdef AF_UNIX
     if (FIO_SOCK_UNIX == server_tests[i].flag)
       unlink(server_tests[i].address);
 #endif
@@ -17226,6 +17229,13 @@ Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STR) && !defined(H__FIO_STR__H)
 #define H__FIO_STR__H
+
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio_stack_mem___##name[(capacity)];                                     \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio_stack_mem___##name, .capa = (capacity)                          \
+  }
 
 /* *****************************************************************************
 String Authorship Helpers (`fio_string_write` functions)
@@ -24452,7 +24462,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR map) {
 SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
-  if (o->map)
+  if (o->map && o->count)
     FIO_NAME(FIO_MAP_NAME, __destroy_objects)(o);
   FIO_NAME(FIO_MAP_NAME, __dealloc_map)(o);
   *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
@@ -25675,6 +25685,7 @@ Reference Counter (Wrapper) Cleanup
 /* *****************************************************************************
 Pointer Tagging Cleanup
 ***************************************************************************** */
+#ifndef FIO___DEV___
 #undef FIO_PTR_TAG
 #undef FIO_PTR_UNTAG
 #undef FIO_PTR_TAG_TYPE
@@ -25682,6 +25693,7 @@ Pointer Tagging Cleanup
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #undef FIO_PTR_TAG_VALID_OR_GOTO
+#endif
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
@@ -29083,7 +29095,7 @@ SFUNC int fio_srv_is_master() {
 }
 
 /* Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker() { return !fio___srvdata.is_worker; }
+SFUNC int fio_srv_is_worker() { return !!fio___srvdata.is_worker; }
 
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
@@ -29301,7 +29313,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
   if (s->on_finish)
     s->on_finish(s->udata);
-  FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
+  if (!s->on_root || fio___srvdata.pid == fio___srvdata.root_pid)
+    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -29330,9 +29343,14 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
+FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
+  (void)ignr_;
+  fio___srv_listen_attach_task(udata);
+}
+
 void fio_listen___(void); /* IDE Marker */
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
-  static int64_t port = 3000;
+  static int64_t port = 0;
   size_t len = args.url ? strlen(args.url) + 1 : 0;
   struct fio_listen_args *cpy = NULL;
   fio_str_info_s adr, tmp;
@@ -29352,7 +29370,7 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (args.url) {
     FIO_MEMCPY((void *)(cpy->url), args.url, len);
   } else {
-    if (port == 3000) {
+    if (!port) {
       char *port_env = getenv("PORT");
       if (port_env)
         port = fio_atol10(&port_env);
@@ -29373,10 +29391,14 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   if (fd == -1)
     goto fd_error;
   *fd_store = fd;
-  fio_state_callback_add(
-      (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
-      fio___srv_listen_attach_task,
-      (void *)cpy);
+  if (fio_srv_is_running()) {
+    fio_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
+  } else {
+    fio_state_callback_add(
+        (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
+        fio___srv_listen_attach_task,
+        (void *)cpy);
+  }
   fio_state_callback_add(FIO_CALL_AT_EXIT,
                          (void (*)(void *))fio___srv_env_safe_destroy,
                          (void *)&fio___srvdata.env);
@@ -30078,6 +30100,7 @@ static struct FIO_POSTOFFICE {
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
+  char ipc_url[256];
 } FIO_POSTOFFICE = {
 #if FIO_POSTOFFICE_THREAD_LOCK
     .lock = FIO___LOCK_INIT,
@@ -30090,7 +30113,7 @@ static struct FIO_POSTOFFICE {
 };
 
 /** Callback called when entering a child processes. */
-FIO_SFUNC void fio___postoffice_on_enter_child(void);
+FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
 
 /* *****************************************************************************
 
@@ -30165,6 +30188,8 @@ Letter Protocol API & Callbacks
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *letter);
 /** Callback called by the letter protocol when a letter arrives @ child. */
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *letter);
+/** Starts listening to IPC connections on a local socket. */
+FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_);
 
 /** Write a letter to a specific IO object */
 FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
@@ -30175,15 +30200,6 @@ FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 FIO_IFUNC int fio_letter_remote_listen(const char *url);
 /** Connect to remote letter exchange server (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_connect(const char *url);
-/** Inter Process Communication (IPC) letter exchange. */
-FIO_IFUNC int fio_letter_local_ipc_listen(const char *url);
-
-/** Returns a protocol in which letters are tested for single delivery. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void);
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_master(void);
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_child(void);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
@@ -30205,10 +30221,7 @@ Subscription Type API
 ***************************************************************************** */
 
 /* unsubscribes and defers the callback. */
-FIO_IFUNC void fio_subscription_unsubscribe(fio_subscription_s *s);
-
-/* delivers a letter to all of a channel's subscribers */
-FIO_SFUNC void fio_subscription_deliver(fio_channel_s *ch, fio_letter_s *l);
+FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 
 /* *****************************************************************************
 Subscription Management Tasks
@@ -30223,6 +30236,8 @@ FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_);
 /** Delivers a letter to a subscription */
 FIO_IFUNC void fio___subscription_on_message_task(void *s, void *l);
 
+/** publishes a letter to the expecting processes by letter flags. */
+FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_);
 /* *****************************************************************************
 
 
@@ -30581,10 +30596,12 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
+  fio___publish_letter_task(l, NULL);
   (void)l; /* TODO! */
 }
 
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *l) {
+  fio___channel_deliver(l);
   (void)l; /* TODO! */
 }
 
@@ -30634,19 +30651,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_timeout = fio___letter_on_timeout,
 };
 
-/** returns a protocol in which letters are tested for single delivery. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_remote(void) {
-  return &FIO_LETTER_PROTOCOL_REMOTE;
-}
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_master(void) {
-  return &FIO_LETTER_PROTOCOL_IPC_MASTER;
-}
-/** returns a protocol suitable for IPC - letter validation is skipped. */
-FIO_IFUNC fio_protocol_s *fio_letter_protocol_ipc_child(void) {
-  return &FIO_LETTER_PROTOCOL_IPC_CHILD;
-}
-
 FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
   fio_state_callback_add(FIO_CALL_AT_EXIT,
                          (void (*)(void *))fio___letter_map_destroy,
@@ -30657,32 +30661,22 @@ FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
-/** Allows remote connections to extend the local letter exchange (cluster). */
-FIO_IFUNC void fio_letter_local_ipc_connect(const char *url) {
-  fio___postoffice_on_enter_child();
-  fio_connect(url, &FIO_LETTER_PROTOCOL_IPC_CHILD, NULL, NULL);
-}
-
 FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
-/** Allows remote connections to extend the local letter exchange (cluster). */
-FIO_IFUNC int fio_letter_local_ipc_listen(const char *url) {
-  if (fio_listen(.url = url,
-                 .on_open = fio_letter_local_ipc_on_open,
-                 .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER))
-    return -1;
-  char *url_copy = fio_bstr_write(NULL, url, strlen(url));
-  if (!url_copy)
-    return -1;
-  fio_state_callback_add(FIO_CALL_IN_CHILD,
-                         (void (*)(void *))fio_letter_local_ipc_connect,
-                         url_copy);
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio_bstr_free,
-                         NULL);
-  return 0;
+/** Starts listening to IPC connections on a local socket. */
+FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
+  (void)ignr_;
+  if (fio_srv_is_worker()) {
+    FIO_LOG_DEBUG("(pub/sub) IPC socket skipped - no workers are spawned.");
+    return;
+  }
+  FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
+                         .on_open = fio_letter_local_ipc_on_open,
+                         .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
+                         .on_root = 1),
+             "(pub/sub) couldn't open a socket for IPC.");
 }
 
 /* *****************************************************************************
@@ -30690,9 +30684,15 @@ Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url);
+FIO_IFUNC int fio_letter_remote_listen(const char *url) {
+  (void)url; /* TODO! */
+  return 0;
+}
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url);
+FIO_IFUNC int fio_letter_remote_connect(const char *url) {
+  (void)url; /* TODO! */
+  return 0;
+}
 
 /* *****************************************************************************
 
@@ -30850,8 +30850,6 @@ FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_) {
         NULL);
     if (!fio_channel_map_count(map))
       fio_channel_map_destroy(map);
-    fio_channel_on_destroy(ch);
-    fio_channel_free(ch);
   }
 
 #if FIO_POSTOFFICE_THREAD_LOCK
@@ -30875,7 +30873,7 @@ no_channel:
 ***************************************************************************** */
 
 /** Defers the on_unsubscribe callback. */
-FIO_IFUNC void fio_subscription_unsubscribe(fio_subscription_s *s) {
+FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s) {
   if (!s)
     return;
   s->on_message = fio_subscription___mock_cb;
@@ -30982,7 +30980,7 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
                 .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
                                           (uint16_t)args.filter)),
                 .name = args.channel,
-                .on_close = (void (*)(void *))fio_subscription_unsubscribe,
+                .on_close = (void (*)(void *))fio___subscription_unsubscribe,
                 .udata = s);
     return;
   }
@@ -31027,7 +31025,7 @@ int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
                                   (uint16_t)args.filter)),
         .name = args.channel);
   }
-  fio_subscription_unsubscribe(
+  fio___subscription_unsubscribe(
       *(fio_subscription_s **)args.subscription_handle_ptr);
   return 0;
 }
@@ -31048,7 +31046,7 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   }
   if ((fio_letter_flags(l) & FIO_POSTOFFICE.remote_send_filter)) {
     /* deliver to remote connections... all of them? yes, we are the source. */
-    fio_protocol_each(fio_letter_protocol_remote(),
+    fio_protocol_each(&FIO_LETTER_PROTOCOL_REMOTE,
                       (void (*)(fio_s *, void *))fio_letter_write,
                       l_);
   }
@@ -31114,15 +31112,30 @@ external_engine:
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, 256);
+  fio_string_write2(&url,
+                    NULL,
+                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
+                    FIO_STRING_WRITE_HEX(fio_rand64()),
+                    FIO_STRING_WRITE_STR1((char *)".sock"));
+  fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_ipc_listen, NULL);
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         fio___postoffice_on_enter_child,
+                         NULL);
 }
 
 /** Callback called by the letter protocol entering a child processes. */
-FIO_SFUNC void fio___postoffice_on_enter_child(void) {
+FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
+  (void)ignr_;
   FIO_POSTOFFICE.publish_filter = FIO___PUBSUB_PROCESS;
   FIO_POSTOFFICE.local_send_filter =
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
+  fio_connect(FIO_POSTOFFICE.ipc_url,
+              &FIO_LETTER_PROTOCOL_IPC_CHILD,
+              NULL,
+              NULL);
 }
 
 /* *****************************************************************************
