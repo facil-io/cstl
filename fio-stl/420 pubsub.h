@@ -1708,7 +1708,7 @@ Pub/Sub Testing
 Letter Testing
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
-  fprintf(stderr, "* Testing Letter Protocol (pub/sub message exchange)\n");
+  fprintf(stderr, "* Testing letter format (pub/sub message exchange)\n");
   struct test_info {
     char *channel;
     char *msg;
@@ -1770,11 +1770,75 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
   }
 }
 
+FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_on_message)(fio_msg_s *msg) {
+  ((int *)(msg->udata))[0] += 1;
+}
+FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_on_unsubscribe)(void *udata) {
+  ((int *)(udata))[0] -= 1;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
+  fprintf(stderr, "* Testing pub/sub round-trip.\n");
+  uintptr_t sub_handle = 0;
+  int state = 0, expected = 0, delta = 0;
+  fio_buf_info_s test_channel = FIO_BUF_INFO1("pubsub_test_channel");
+  subscribe_args_s sub[] = {
+      {
+          .channel = test_channel,
+          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
+          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
+          .filter = -127,
+          .udata = &state,
+      },
+      {
+          .channel = test_channel,
+          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
+          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
+          .subscription_handle_ptr = &sub_handle,
+          .udata = &state,
+          .filter = -127,
+      },
+      {
+          .channel = FIO_BUF_INFO1("pubsub_*"),
+          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
+          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
+          .filter = -127,
+          .udata = &state,
+          .is_pattern = 1,
+      },
+  };
+  const int sub_count = (sizeof(sub) / sizeof(sub[0]));
+#define FIO___PUBLISH2TEST()                                                   \
+  fio_publish(.channel = test_channel,                                         \
+              .filter = -127,                                                  \
+              .engine = FIO_PUBSUB_CLUSTER);                                   \
+  expected += delta;                                                           \
+  fio_queue_perform_all(fio___srv_tasks);
+  for (int i = 0; i < sub_count; ++i) {
+    fio_subscribe FIO_NOOP(sub[i]);
+    ++delta;
+    FIO_ASSERT(state == expected, "subscribe shouldn't have affected state");
+    FIO___PUBLISH2TEST();
+    FIO_ASSERT(state == expected, "pub/sub test state incorrect (1-%d)", i);
+    FIO___PUBLISH2TEST();
+    FIO_ASSERT(state == expected, "pub/sub test state incorrect (2-%d)", i);
+  }
+  for (int i = 0; i < sub_count; ++i) {
+    fio_unsubscribe FIO_NOOP(sub[i]);
+    --delta;
+    --expected;
+    fio_queue_perform_all(fio___srv_tasks);
+    FIO_ASSERT(state == expected, "unsubscribe should call callback");
+    FIO___PUBLISH2TEST();
+    FIO_ASSERT(state == expected, "pub/sub test state incorrect (3-%d)", i);
+    FIO___PUBLISH2TEST();
+    FIO_ASSERT(state == expected, "pub/sub test state incorrect (4-%d)", i);
+  }
+#undef FIO___PUBLISH2TEST
+}
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
-  /*
-   * TODO: test Pub/Sub here
-   */
   FIO_NAME_TEST(stl, letter)();
+  FIO_NAME_TEST(stl, pubsub_roundtrip)();
 }
 
 #endif /* FIO_TEST_CSTL */

@@ -578,13 +578,16 @@ FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #else
 #define FIO_BSTR___LEAK_TESTER(i)
 #endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#ifndef FIO___BSTR_META
+#define FIO___BSTR_META(bstr)                                                  \
+  FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s))
+#endif
 
 /** Duplicates a `fio_bstr` using copy on write. */
 FIO_IFUNC char *fio_bstr_dup(char *bstr) {
   if (!bstr)
     return bstr;
-  fio___bstr_meta_s *meta =
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
+  fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_add(&meta->ref, 1) > ((uint32_t)1UL << 31))
     goto copy_anyway;
   return bstr;
@@ -598,8 +601,7 @@ copy_anyway:
 FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
     return;
-  fio___bstr_meta_s *meta =
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
+  fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
     return;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
@@ -610,10 +612,7 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
 FIO_IFUNC char *fio_bstr___len_set(char *bstr, size_t len) {
   if (!bstr)
     return bstr;
-  fio___bstr_meta_s *meta =
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
-  meta->len = len < meta->capa ? len : meta->len;
-  bstr[meta->len] = 0;
+  bstr[(FIO___BSTR_META(bstr)->len = len)] = 0;
   return bstr;
 }
 
@@ -621,8 +620,7 @@ FIO_IFUNC char *fio_bstr___len_set(char *bstr, size_t len) {
 FIO_SFUNC char *fio_bstr___make_unique(char *bstr) {
   if (!bstr)
     return bstr;
-  fio___bstr_meta_s *meta =
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
+  fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (!meta->ref)
     return bstr;
   fio_str_info_s i = fio_bstr_info(bstr);
@@ -645,9 +643,7 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len) {
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
-      mem};
+  fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_STR_INFO3(bstr, meta->len, meta->capa);
 }
@@ -655,9 +651,7 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
   fio___bstr_meta_s mem[1] = {0};
-  fio___bstr_meta_s *meta_map[2] = {
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s)),
-      mem};
+  fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_BUF_INFO2(bstr, meta->len);
 }
@@ -666,14 +660,18 @@ FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
 FIO_IFUNC size_t fio_bstr_len(char *bstr) {
   if (!bstr)
     return 0;
-  fio___bstr_meta_s *meta =
-      FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s));
+  fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   return meta->len;
 }
 
 /** Sets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
-  return fio_bstr___len_set(fio_bstr___make_unique(bstr), len);
+  bstr = fio_bstr___make_unique(bstr);
+  if (!bstr)
+    return bstr;
+  fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
+  meta->len = len < meta->capa ? len : meta->len;
+  return fio_bstr___len_set(bstr, len);
 }
 
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
@@ -683,7 +681,7 @@ FIO_IFUNC char *fio_bstr_write(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write(&i, fio_bstr_reallocate, src, len);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Replaces data in a fio_bstr, returning the address of the new fio_bstr. */
@@ -700,7 +698,7 @@ FIO_IFUNC char *fio_bstr_replace(char *bstr,
                      overwrite_len,
                      src,
                      len);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
@@ -709,7 +707,7 @@ FIO_IFUNC char *fio_bstr_write2 FIO_NOOP(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write2 FIO_NOOP(&i, fio_bstr_reallocate, srcs);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Writes number to a fio_bstr, returning the address of the new fio_bstr. */
@@ -717,35 +715,35 @@ FIO_IFUNC char *fio_bstr_write_i(char *bstr, int64_t num) {
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_i(&i, fio_bstr_reallocate, num);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 /** Writes number to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write_u(char *bstr, uint64_t num) {
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_u(&i, fio_bstr_reallocate, num);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 /** Writes number to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write_hex(char *bstr, uint64_t num) {
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_hex(&i, fio_bstr_reallocate, num);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 /** Writes number to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write_bin(char *bstr, uint64_t num) {
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_bin(&i, fio_bstr_reallocate, num);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 /** Writes escaped data to a fio_bstr, returning its new address. */
 FIO_IFUNC char *fio_bstr_write_escape(char *bstr, const void *src, size_t len) {
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_escape(&i, fio_bstr_reallocate, src, len);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Un-escapes and writes data to a fio_bstr, returning its new address. */
@@ -755,7 +753,7 @@ FIO_IFUNC char *fio_bstr_write_unescape(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_unescape(&i, fio_bstr_reallocate, src, len);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Writes base64 encoded data to a fio_bstr, returning its new address. */
@@ -766,7 +764,7 @@ FIO_IFUNC char *fio_bstr_write_base64enc(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_base64enc(&i, fio_bstr_reallocate, src, len, url_encoded);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Decodes base64 data and writes to a fio_bstr, returning its new address. */
@@ -776,7 +774,7 @@ FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_base64dec(&i, fio_bstr_reallocate, src, len);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
@@ -787,7 +785,7 @@ fio_bstr_printf(char *bstr, const char *format, ...) {
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_vprintf(&i, fio_bstr_reallocate, format, argv);
   va_end(argv);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Writes to the String from a regular file `fd`. */
@@ -798,7 +796,7 @@ FIO_IFUNC char *fio_bstr_readfd(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_readfd(&i, fio_bstr_reallocate, fd, start_at, limit);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 /** Writes to the String from a regular file named `filename`. */
 FIO_IFUNC char *fio_bstr_readfile(char *bstr,
@@ -808,7 +806,7 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_readfile(&i, fio_bstr_reallocate, filename, start_at, limit);
-  return fio_bstr_len_set(i.buf, i.len);
+  return fio_bstr___len_set(i.buf, i.len);
 }
 
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
@@ -2070,28 +2068,32 @@ Binary String Type - Embedded Strings
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
   const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
-  if (dest->capa) {
-    bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
-        ((fio___bstr_meta_s *)dest->buf - 1),
-        sizeof(bstr_m[0]) + dest->capa,
-        new_capa,
-        ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
-  } else {
-    bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
-    if (bstr_m) {
-      FIO_BSTR___LEAK_TESTER(1);
-      if (!FIO_MEM_REALLOC_IS_SAFE_)
-        *bstr_m = (fio___bstr_meta_s){0};
-      if (dest->len) {
-        FIO_MEMCPY((bstr_m + 1), dest->buf, dest->len);
-      }
-    }
-  }
+  if (!dest->capa)
+    goto copy_the_string;
+  bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
+      ((fio___bstr_meta_s *)dest->buf - 1),
+      sizeof(bstr_m[0]) + dest->capa,
+      new_capa,
+      ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
+update_metadata:
   dest->buf = (char *)(bstr_m + 1);
   bstr_m->capa = dest->capa = new_capa - sizeof(bstr_m[0]);
   return 0;
+
+copy_the_string:
+  bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
+  if (!bstr_m)
+    return -1;
+  if (!FIO_MEM_REALLOC_IS_SAFE_)
+    *bstr_m = (fio___bstr_meta_s){0};
+  FIO_BSTR___LEAK_TESTER(1);
+  if (dest->len) {
+    FIO_MEMCPY((bstr_m + 1), dest->buf, dest->len + 1);
+    bstr_m->len = dest->len;
+  }
+  goto update_metadata;
 }
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)

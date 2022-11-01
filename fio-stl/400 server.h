@@ -1044,9 +1044,10 @@ SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
  * `on_close` callback as if the connection was closed.
  */
 SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
-  fio___srv_env_safe_s *const selector[2] = {&fio___srvdata.env, &io->env};
-  fio___srv_env_safe_s *e = selector[!io];
-  return fio___srv_env_safe_remove(e, args.name.buf, args.name.len, args.type);
+  return fio___srv_env_safe_remove((io ? &io->env : &fio___srvdata.env),
+                                   args.name.buf,
+                                   args.name.len,
+                                   args.type);
 }
 
 /* *****************************************************************************
