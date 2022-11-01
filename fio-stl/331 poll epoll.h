@@ -188,7 +188,7 @@ Poll Monitoring Testing?
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(stderr,
-          "* skipped testing file descriptor polling (engine: epoll).\n");
+          "* SKIPPED testing file descriptor polling (engine: epoll).\n");
 }
 
 #endif /* FIO_TEST_CSTL */

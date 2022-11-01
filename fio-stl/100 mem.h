@@ -2911,7 +2911,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   fprintf(stderr,
-          "* validating allocation alignment on %zu byte border.\n",
+          "* Validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
@@ -2962,7 +2962,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
     }
   }
   fprintf(stderr,
-          "* re-validating allocation alignment on %zu byte border.\n",
+          "* Re-validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);

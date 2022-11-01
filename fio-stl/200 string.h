@@ -1579,7 +1579,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test (irrelevant for type).\n");
+    FIO_LOG_DEBUG("* Skipped `compact` test (irrelevant for type).");
   }
 
   {
@@ -1632,7 +1632,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, len)(&str),
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
-
+#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -1700,6 +1700,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
+#endif /* FIO___CSTL_NON_COMBINED_INCLUSION */
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
   if (1) {
     /* Testing Static initialization and writing */

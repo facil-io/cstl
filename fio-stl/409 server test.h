@@ -18,7 +18,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 
 /* State callback tests */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
-  fprintf(stderr, "   * testing fio_env.\n");
+  fprintf(stderr, "   * Testing fio_env.\n");
   size_t a = 0, b = 0, c = 0;
   fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
@@ -82,8 +82,7 @@ Test summery
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
-  /* TODO: add more tests */
-  fprintf(stderr, "* testing fio_srv units (TODO).\n");
+  fprintf(stderr, "* Testing fio_srv units (TODO).\n");
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
 }
 

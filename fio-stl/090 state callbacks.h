@@ -320,7 +320,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
-  fprintf(stderr, "* testing state callback API (TODO)\n");
+  fprintf(stderr, "* Testing state callback API.\n");
   size_t count = 0;
   for (size_t i = 0; i < 1024; ++i) {
     fio_state_callback_add(FIO_CALL_RESERVED1,

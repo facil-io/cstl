@@ -2446,7 +2446,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_buf_info_s sb_buf = FIO_STR2BUF_INFO(sb);
     const size_t test_repetitions = (1ULL << 17);
     fprintf(stderr,
-            "* testing comparison speeds (%zu tests of %zu bytes):\n",
+            "* Testing comparison speeds (%zu tests of %zu bytes):\n",
             test_repetitions,
             sa.len - 1);
     clock_t start = clock();
@@ -2481,7 +2481,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
-    fprintf(stderr, "* testing fio_string_write_(i|u|hex) speeds:\n");
+    fprintf(stderr, "* Testing fio_string_write_(i|u|hex) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
      fio_atol,

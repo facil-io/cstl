@@ -306,7 +306,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 #undef FIO_IMAP_TESTER_IMAP_VALID
 
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
-  fprintf(stderr, "* testing core indexed array type (imap)\n");
+  fprintf(stderr, "* Testing core indexed array type (imap).\n");
   fio_imap_tester_s a = {0};
   fio_imap_tester_reserve(&a, 1024);
   FIO_ASSERT(fio_imap_tester_capa(&a) >= 1024 &&

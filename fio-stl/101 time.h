@@ -606,7 +606,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
 #if DEBUG
     fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
 #endif
-    fprintf(stderr, "  performance testing fio_time2gm vs gmtime_r\n");
+    fprintf(stderr, "  Performance testing fio_time2gm vs gmtime_r\n");
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);

@@ -8206,7 +8206,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio_imap_tester,
 #undef FIO_IMAP_TESTER_IMAP_VALID
 
 FIO_SFUNC void FIO_NAME_TEST(stl, imap_core)(void) {
-  fprintf(stderr, "* testing core indexed array type (imap)\n");
+  fprintf(stderr, "* Testing core indexed array type (imap).\n");
   fio_imap_tester_s a = {0};
   fio_imap_tester_reserve(&a, 1024);
   FIO_ASSERT(fio_imap_tester_capa(&a) >= 1024 &&
@@ -9735,7 +9735,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
   /*
    * TODO: test module here
    */
-  fprintf(stderr, "* testing state callback API (TODO)\n");
+  fprintf(stderr, "* Testing state callback API.\n");
   size_t count = 0;
   for (size_t i = 0; i < 1024; ++i) {
     fio_state_callback_add(FIO_CALL_RESERVED1,
@@ -12690,7 +12690,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   fprintf(stderr,
-          "* validating allocation alignment on %zu byte border.\n",
+          "* Validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
@@ -12741,7 +12741,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
     }
   }
   fprintf(stderr,
-          "* re-validating allocation alignment on %zu byte border.\n",
+          "* Re-validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
@@ -13446,7 +13446,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
 #if DEBUG
     fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
 #endif
-    fprintf(stderr, "  performance testing fio_time2gm vs gmtime_r\n");
+    fprintf(stderr, "  Performance testing fio_time2gm vs gmtime_r\n");
     start = fio_time_micro();
     for (size_t i = 0; i < (1 << 17); ++i) {
       volatile struct tm tm = fio_time2gm(now);
@@ -14438,7 +14438,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
              "queue library didn't release dynamic queue (should be static)");
   fio_queue_free(q);
   {
-    fprintf(stderr, "* testing urgent insertion\n");
+    fprintf(stderr, "* Testing urgent insertion\n");
     fio_queue_init(&q2);
     for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
       FIO_ASSERT(!fio_queue_push_urgent(&q2,
@@ -16735,7 +16735,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, glob_matching)(void) {
       {.pat = (char *)NULL, .str = (char *)NULL, .expect = 0},
       // clang-format on
   };
-  fprintf(stderr, "* testing glob matching.\n");
+  fprintf(stderr, "* Testing glob matching.\n");
   for (size_t i = 0; t[i].pat; ++i) {
     fio_str_info_s p = FIO_STR_INFO1(t[i].pat);
     fio_str_info_s s = FIO_STR_INFO1(t[i].str);
@@ -19655,7 +19655,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_buf_info_s sb_buf = FIO_STR2BUF_INFO(sb);
     const size_t test_repetitions = (1ULL << 17);
     fprintf(stderr,
-            "* testing comparison speeds (%zu tests of %zu bytes):\n",
+            "* Testing comparison speeds (%zu tests of %zu bytes):\n",
             test_repetitions,
             sa.len - 1);
     clock_t start = clock();
@@ -19690,7 +19690,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
-    fprintf(stderr, "* testing fio_string_write_(i|u|hex) speeds:\n");
+    fprintf(stderr, "* Testing fio_string_write_(i|u|hex) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
      fio_atol,
@@ -21287,7 +21287,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    fprintf(stderr, "* skipped `compact` test (irrelevant for type).\n");
+    FIO_LOG_DEBUG("* Skipped `compact` test (irrelevant for type).");
   }
 
   {
@@ -21340,7 +21340,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, len)(&str),
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
-
+#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -21408,6 +21408,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
+#endif /* FIO___CSTL_NON_COMBINED_INCLUSION */
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
   if (1) {
     /* Testing Static initialization and writing */
@@ -27233,7 +27234,7 @@ Poll Monitoring Testing?
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(stderr,
-          "* skipped testing file descriptor polling (engine: epoll).\n");
+          "* SKIPPED testing file descriptor polling (engine: epoll).\n");
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -27422,7 +27423,7 @@ Poll Monitoring Testing?
 #ifdef FIO_TEST_CSTL
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(stderr,
-          "* skipped testing file descriptor polling (engine: kqueue).\n");
+          "* SKIPPED testing file descriptor polling (engine: kqueue).\n");
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -27703,7 +27704,7 @@ Poll Monitoring Testing?
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
-      "* testing file descriptor monitoring (poll setup / cleanup only).\n");
+      "* Testing file descriptor monitoring (poll setup / cleanup only).\n");
   fio_poll_s p;
   fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
@@ -29481,7 +29482,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 
 /* State callback tests */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
-  fprintf(stderr, "   * testing fio_env.\n");
+  fprintf(stderr, "   * Testing fio_env.\n");
   size_t a = 0, b = 0, c = 0;
   fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
@@ -29545,8 +29546,7 @@ Test summery
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
-  /* TODO: add more tests */
-  fprintf(stderr, "* testing fio_srv units (TODO).\n");
+  fprintf(stderr, "* Testing fio_srv units (TODO).\n");
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
 }
 
@@ -34652,15 +34652,15 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 }
 
 void fio_test_dynamic_types(void) {
-  char *filename = (char *)FIO__FILE__;
+  char *filename = (char *)FIO___INCLUDE_FILE;
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();
   fprintf(stderr, "===============\n");
-  fprintf(stderr, "Testing Dynamic Types (%s)\n", filename);
+  fprintf(stderr, "Testing facil.io CSTL (%s)\n", filename);
   fprintf(
       stderr,
-      "facil.io core: version \x1B[1m" FIO_VERSION_STRING "\x1B[0m\n"
+      "Version: \x1B[1m" FIO_VERSION_STRING "\x1B[0m\n"
       "The facil.io library was originally coded by \x1B[1mBoaz Segev\x1B[0m.\n"
       "Please give credit where credit is due.\n"
       "\x1B[1mYour support is only fair\x1B[0m - give value for value.\n"

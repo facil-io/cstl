@@ -595,15 +595,15 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 }
 
 void fio_test_dynamic_types(void) {
-  char *filename = (char *)FIO__FILE__;
+  char *filename = (char *)FIO___INCLUDE_FILE;
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();
   fprintf(stderr, "===============\n");
-  fprintf(stderr, "Testing Dynamic Types (%s)\n", filename);
+  fprintf(stderr, "Testing facil.io CSTL (%s)\n", filename);
   fprintf(
       stderr,
-      "facil.io core: version \x1B[1m" FIO_VERSION_STRING "\x1B[0m\n"
+      "Version: \x1B[1m" FIO_VERSION_STRING "\x1B[0m\n"
       "The facil.io library was originally coded by \x1B[1mBoaz Segev\x1B[0m.\n"
       "Please give credit where credit is due.\n"
       "\x1B[1mYour support is only fair\x1B[0m - give value for value.\n"

@@ -270,7 +270,7 @@ Poll Monitoring Testing?
 FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fprintf(
       stderr,
-      "* testing file descriptor monitoring (poll setup / cleanup only).\n");
+      "* Testing file descriptor monitoring (poll setup / cleanup only).\n");
   fio_poll_s p;
   fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};

@@ -208,7 +208,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, glob_matching)(void) {
       {.pat = (char *)NULL, .str = (char *)NULL, .expect = 0},
       // clang-format on
   };
-  fprintf(stderr, "* testing glob matching.\n");
+  fprintf(stderr, "* Testing glob matching.\n");
   for (size_t i = 0; t[i].pat; ++i) {
     fio_str_info_s p = FIO_STR_INFO1(t[i].pat);
     fio_str_info_s s = FIO_STR_INFO1(t[i].str);

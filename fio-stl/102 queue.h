@@ -930,7 +930,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
              "queue library didn't release dynamic queue (should be static)");
   fio_queue_free(q);
   {
-    fprintf(stderr, "* testing urgent insertion\n");
+    fprintf(stderr, "* Testing urgent insertion\n");
     fio_queue_init(&q2);
     for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
       FIO_ASSERT(!fio_queue_push_urgent(&q2,
