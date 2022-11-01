@@ -1396,12 +1396,8 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
 
 ***************************************************************************** */
 
+/** Subscribes to a named channel in the numerical filter's namespace. */
 void fio_subscribe___(void); /* sublimetext marker */
-/**
- * Subscribes to a named channel in the numerical filter's namespace.
- *
- * The on_unsubscribe callback will be called on failure.
- */
 SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
@@ -1451,16 +1447,8 @@ sub_error:
   return;
 }
 
+/** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
-/**
- * Cancels an existing subscriptions.
- *
- * Accepts the same arguments as `fio_subscribe`, except the `udata` and
- * callback details are ignored (no need to provide `udata` or callback
- * details).
- *
- * Returns -1 if the subscription could not be found. Otherwise returns 0.
- */
 int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
   if (!args.subscription_handle_ptr) {
     return fio_env_remove(
@@ -1497,23 +1485,7 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   fio_letter_free(l);
 }
 
-/**
- * Publishes a message to the relevant subscribers (if any).
- *
- * See `fio_publish_args_s` for details.
- *
- * By default the message is sent using the FIO_PUBSUB_CLUSTER engine (all
- * processes, including the calling process).
- *
- * To limit the message only to other processes (exclude the calling process),
- * use the FIO_PUBSUB_SIBLINGS engine.
- *
- * To limit the message only to the calling process, use the
- * FIO_PUBSUB_PROCESS engine.
- *
- * To publish messages to the pub/sub layer, the `.filter` argument MUST be
- * equal to 0 or missing.
- */
+/** Publishes a message to the relevant subscribers (if any). */
 void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   fio_letter_s *l;
