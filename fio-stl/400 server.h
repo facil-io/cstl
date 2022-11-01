@@ -731,7 +731,8 @@ FIO_SFUNC void fio___srv_wakeup(void) {
   if (!fio___srvdata.wakeup)
     return;
   char buf[1] = {~0};
-  fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
+  ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
+  (void)ignr;
 }
 
 FIO_SFUNC fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
