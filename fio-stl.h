@@ -5252,13 +5252,13 @@ SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   switch (base) {
   case 2: /* overflow - unsupported */
   case 8: /* overflow - unsupported */
-  case 10: return sprintf(dest, "%" PRId64, num);
+  case 10: return snprintf(dest, 256, "%" PRId64, num);
   case 16:
     if (num >= 0)
-      return sprintf(dest, "0x%.16" PRIx64, num);
-    return sprintf(dest, "-0x%.8" PRIx64, (0 - num));
+      return snprintf(dest, 256, "0x%.16" PRIx64, num);
+    return snprintf(dest, 256, "-0x%.8" PRIx64, (0 - num));
   }
-  return sprintf(dest, "%" PRId64, num);
+  return snprintf(dest, 256, "%" PRId64, num);
 }
 
 SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
@@ -6608,7 +6608,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fprintf(stderr, "* Testing Risky Hash and Risky Mask (sanity).\n");
   {
-    char *str = "testing that risky hash is always the same hash";
+    char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = strlen(str);
     char buf[128];
     memcpy(buf, str, len);
@@ -6625,7 +6625,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   }
   {
     char buf[64];
-    const char *str = "this is a short text, to test risky masking, ok";
+    const char *str = (char *)"this is a short text, to test risky masking, ok";
     const size_t len = strlen(str); /* 47 */
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
@@ -12373,10 +12373,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   }
   { /* test fio_memcpy as memmove */
     fprintf(stderr, "* testing fio_memcpy with overlapping memory (memmove)\n");
-    char *msg =
-        "fio_memcpy should work also as memmove, "
-        "so no undefined behavior should occur. "
-        "Should be true for larger offsets too. At least over 128 Bytes.";
+    char *msg = (char *)"fio_memcpy should work also as memmove, "
+                        "so no undefined behavior should occur. "
+                        "Should be true for larger offsets too. At least over "
+                        "128 Bytes.";
     size_t len = strlen(msg);
     char buf[512];
     for (size_t offset = 0; offset < len; ++offset) {
@@ -17851,7 +17851,7 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len) {
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
-  fio___bstr_meta_s mem[1] = {0};
+  fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_STR_INFO3(bstr, meta->len, meta->capa);
@@ -17859,7 +17859,7 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
-  fio___bstr_meta_s mem[1] = {0};
+  fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_BUF_INFO2(bstr, meta->len);
@@ -19623,8 +19623,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(fio_bstr_is_greater(str, NULL),
                "fio_bstr_is_greater failed vs a NULL String");
     str = fio_bstr_write2(str,
-                          FIO_STRING_WRITE_STR1(" "),
-                          FIO_STRING_WRITE_STR1("World!"));
+                          FIO_STRING_WRITE_STR1((char *)" "),
+                          FIO_STRING_WRITE_STR1((char *)"World!"));
     FIO_ASSERT(fio_bstr_info(str).len == 12 &&
                    !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
                "fio_bstr_write2 failed!");
@@ -19638,7 +19638,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(!memcmp(str, s_copy, fio_bstr_len(s_copy)),
                "fio_bstr copy after write copied data error!");
     FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(s_copy),
-                                  FIO_BUF_INFO2("Hello World!", 12)),
+                                  FIO_BUF_INFO2((char *)"Hello World!", 12)),
                "fio_bstr old copy corrupted?");
     fio_bstr_free(s_copy);
     fio_bstr_free(str);
@@ -24511,7 +24511,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
     uint32_t pos = *(uint32_t *)o->map;
     for (int i = 0; i < 3; ++i) {
       struct timespec t = {0};
-      clock_gettime(0, &t);
+      clock_gettime(CLOCK_MONOTONIC, &t);
       pos *= t.tv_nsec ^ t.tv_sec ^ (uintptr_t)imap;
       pos ^= pos >> 7;
     }
@@ -24782,7 +24782,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_next)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -24911,7 +24911,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 
@@ -24920,7 +24920,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_prev)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -25033,7 +25033,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 #undef FIO_MAP___EACH_COPY_HASH
@@ -25069,8 +25069,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       start_at = 0;
   } else if (start_at > o->count)
     return o->count;
-  FIO_NAME(FIO_MAP_NAME, iterator_s)
-  i = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) i = {.private_.pos = 0};
   for (;;) {
     i = FIO_NAME(FIO_MAP_NAME, get_next)(map, &i);
     if (!FIO_NAME(FIO_MAP_NAME, iterator_is_valid)(&i))
@@ -25489,7 +25488,8 @@ Copyright and License: see header file (000 header.h) or top of file
 #ifdef FIO_REF_METADATA
 #define FIO_REF_METADATA_INIT(meta)                                            \
   do {                                                                         \
-    (meta) = (FIO_REF_METADATA){0};                                            \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (meta) = (FIO_REF_METADATA){0};                                          \
   } while (0)
 #else
 #define FIO_REF_METADATA_INIT(meta)
@@ -27375,9 +27375,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
     return -1;
   struct kevent events[FIO_POLL_MAX_EVENTS] = {{0}};
 
-  const struct timespec timeout = {.tv_sec = (timeout_ / 1024),
-                                   .tv_nsec =
-                                       ((timeout_ & (1023UL)) * 1000000)};
+  const struct timespec timeout = {
+      .tv_sec = (time_t)(timeout_ / 1024),
+      .tv_nsec = (suseconds_t)((timeout_ & (1023UL)) * 1000000)};
   /* wait for events and handle them */
   int active_count =
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
@@ -28464,7 +28464,8 @@ FIO_SFUNC void fio___srv_wakeup(void) {
   if (!fio___srvdata.wakeup)
     return;
   char buf[1] = {~0};
-  fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
+  ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
+  (void)ignr;
 }
 
 FIO_SFUNC fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
@@ -29487,7 +29488,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
   fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       1,
       (fio___srv_env_obj_s){
@@ -29496,7 +29497,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       2,
       (fio___srv_env_obj_s){
@@ -29505,7 +29506,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       2);
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       3,
       (fio___srv_env_obj_s){
@@ -29514,7 +29515,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "b_key",
+      (char *)"b_key",
       5,
       1,
       (fio___srv_env_obj_s){
@@ -29523,19 +29524,19 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "c_key",
+      (char *)"c_key",
       5,
       1,
       (fio___srv_env_obj_s){
           .udata = &c,
           .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
       1);
-  fio___srv_env_safe_unset(&env, "a_key", 5, 3);
+  fio___srv_env_safe_unset(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a,
              "unset should have removed an object without calling callback.");
-  fio___srv_env_safe_remove(&env, "a_key", 5, 3);
+  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a, "remove after unset should have no side-effects.");
-  fio___srv_env_safe_remove(&env, "a_key", 5, 2);
+  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 2);
   FIO_ASSERT(a == 1, "remove should call callbacks.");
   fio___srv_env_safe_destroy(&env);
   FIO_ASSERT(a == 2 && b == 1 && c == 1, "destroy should call callbacks.");
@@ -29774,7 +29775,8 @@ SFUNC void fio_message_defer(fio_msg_s *msg);
 Pub/Sub - defaults and builtin pub/sub engines
 ***************************************************************************** */
 
-enum {
+typedef enum {
+  /** Flag bits for internal usage (letter exchange network format). */
   FIO___PUBSUB_PROCESS = 1,
   FIO___PUBSUB_ROOT = 2,
   FIO___PUBSUB_SIBLINGS = 4,
@@ -30953,12 +30955,8 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
 
 ***************************************************************************** */
 
+/** Subscribes to a named channel in the numerical filter's namespace. */
 void fio_subscribe___(void); /* sublimetext marker */
-/**
- * Subscribes to a named channel in the numerical filter's namespace.
- *
- * The on_unsubscribe callback will be called on failure.
- */
 SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
@@ -31008,16 +31006,8 @@ sub_error:
   return;
 }
 
+/** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
-/**
- * Cancels an existing subscriptions.
- *
- * Accepts the same arguments as `fio_subscribe`, except the `udata` and
- * callback details are ignored (no need to provide `udata` or callback
- * details).
- *
- * Returns -1 if the subscription could not be found. Otherwise returns 0.
- */
 int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
   if (!args.subscription_handle_ptr) {
     return fio_env_remove(
@@ -31054,23 +31044,7 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   fio_letter_free(l);
 }
 
-/**
- * Publishes a message to the relevant subscribers (if any).
- *
- * See `fio_publish_args_s` for details.
- *
- * By default the message is sent using the FIO_PUBSUB_CLUSTER engine (all
- * processes, including the calling process).
- *
- * To limit the message only to other processes (exclude the calling process),
- * use the FIO_PUBSUB_SIBLINGS engine.
- *
- * To limit the message only to the calling process, use the
- * FIO_PUBSUB_PROCESS engine.
- *
- * To publish messages to the pub/sub layer, the `.filter` argument MUST be
- * equal to 0 or missing.
- */
+/** Publishes a message to the relevant subscribers (if any). */
 void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   fio_letter_s *l;
@@ -31272,10 +31246,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     int16_t filter;
     uint8_t flags;
   } test_info[] = {
-      {"My Channel", "My channel Message", 0, 0},
-      {NULL, "My filter Message", 1, 255},
-      {"My Channel and Filter", "My channel -filter Message", 257, 4},
-      {"My Channel and negative Filter", "My channel - filter Message", -3, 8},
+      {(char *)"My Channel", (char *)"My channel Message", 0, 0},
+      {NULL, (char *)"My filter Message", 1, 255},
+      {(char *)"My Channel and Filter",
+       (char *)"My channel -filter Message",
+       257,
+       4},
+      {(char *)"My Channel and negative Filter",
+       (char *)"My channel - filter Message",
+       -3,
+       8},
       {0},
   };
   for (int i = 0;
@@ -31338,7 +31318,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   fprintf(stderr, "* Testing pub/sub round-trip.\n");
   uintptr_t sub_handle = 0;
   int state = 0, expected = 0, delta = 0;
-  fio_buf_info_s test_channel = FIO_BUF_INFO1("pubsub_test_channel");
+  fio_buf_info_s test_channel = FIO_BUF_INFO1((char *)"pubsub_test_channel");
   subscribe_args_s sub[] = {
       {
           .channel = test_channel,
@@ -31356,7 +31336,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
           .filter = -127,
       },
       {
-          .channel = FIO_BUF_INFO1("pubsub_*"),
+          .channel = FIO_BUF_INFO1((char *)"pubsub_*"),
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
           .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
           .filter = -127,
@@ -31497,14 +31477,12 @@ Type Naming Macros for FIOBJ types. By default, results in:
 General Requirements / Macros
 ***************************************************************************** */
 
-#ifdef FIO_EXTERN
 #ifdef __cplusplus /* C++ doesn't allow declarations for static variables */
-#define FIOBJ_EXTERN_OBJ     extern "C"
-#define FIOBJ_EXTERN_OBJ_IMP extern "C" __attribute__((weak))
-#else
+#define FIOBJ_EXTERN_OBJ     extern "C" FIO_WEAK
+#define FIOBJ_EXTERN_OBJ_IMP extern "C" FIO_WEAK
+#elif defined(FIO_EXTERN)
 #define FIOBJ_EXTERN_OBJ     extern
-#define FIOBJ_EXTERN_OBJ_IMP __attribute__((weak))
-#endif
+#define FIOBJ_EXTERN_OBJ_IMP FIO_WEAK
 #else
 #define FIOBJ_EXTERN_OBJ     static __attribute__((unused))
 #define FIOBJ_EXTERN_OBJ_IMP static __attribute__((unused))

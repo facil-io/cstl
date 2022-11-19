@@ -23,7 +23,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
   fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       1,
       (fio___srv_env_obj_s){
@@ -32,7 +32,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       2,
       (fio___srv_env_obj_s){
@@ -41,7 +41,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       2);
   fio___srv_env_safe_set(
       &env,
-      "a_key",
+      (char *)"a_key",
       5,
       3,
       (fio___srv_env_obj_s){
@@ -50,7 +50,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "b_key",
+      (char *)"b_key",
       5,
       1,
       (fio___srv_env_obj_s){
@@ -59,19 +59,19 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       1);
   fio___srv_env_safe_set(
       &env,
-      "c_key",
+      (char *)"c_key",
       5,
       1,
       (fio___srv_env_obj_s){
           .udata = &c,
           .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
       1);
-  fio___srv_env_safe_unset(&env, "a_key", 5, 3);
+  fio___srv_env_safe_unset(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a,
              "unset should have removed an object without calling callback.");
-  fio___srv_env_safe_remove(&env, "a_key", 5, 3);
+  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a, "remove after unset should have no side-effects.");
-  fio___srv_env_safe_remove(&env, "a_key", 5, 2);
+  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 2);
   FIO_ASSERT(a == 1, "remove should call callbacks.");
   fio___srv_env_safe_destroy(&env);
   FIO_ASSERT(a == 2 && b == 1 && c == 1, "destroy should call callbacks.");

@@ -217,7 +217,8 @@ SFUNC void fio_message_defer(fio_msg_s *msg);
 Pub/Sub - defaults and builtin pub/sub engines
 ***************************************************************************** */
 
-enum {
+typedef enum {
+  /** Flag bits for internal usage (letter exchange network format). */
   FIO___PUBSUB_PROCESS = 1,
   FIO___PUBSUB_ROOT = 2,
   FIO___PUBSUB_SIBLINGS = 4,
@@ -1687,10 +1688,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     int16_t filter;
     uint8_t flags;
   } test_info[] = {
-      {"My Channel", "My channel Message", 0, 0},
-      {NULL, "My filter Message", 1, 255},
-      {"My Channel and Filter", "My channel -filter Message", 257, 4},
-      {"My Channel and negative Filter", "My channel - filter Message", -3, 8},
+      {(char *)"My Channel", (char *)"My channel Message", 0, 0},
+      {NULL, (char *)"My filter Message", 1, 255},
+      {(char *)"My Channel and Filter",
+       (char *)"My channel -filter Message",
+       257,
+       4},
+      {(char *)"My Channel and negative Filter",
+       (char *)"My channel - filter Message",
+       -3,
+       8},
       {0},
   };
   for (int i = 0;
@@ -1753,7 +1760,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   fprintf(stderr, "* Testing pub/sub round-trip.\n");
   uintptr_t sub_handle = 0;
   int state = 0, expected = 0, delta = 0;
-  fio_buf_info_s test_channel = FIO_BUF_INFO1("pubsub_test_channel");
+  fio_buf_info_s test_channel = FIO_BUF_INFO1((char *)"pubsub_test_channel");
   subscribe_args_s sub[] = {
       {
           .channel = test_channel,
@@ -1771,7 +1778,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
           .filter = -127,
       },
       {
-          .channel = FIO_BUF_INFO1("pubsub_*"),
+          .channel = FIO_BUF_INFO1((char *)"pubsub_*"),
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
           .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
           .filter = -127,

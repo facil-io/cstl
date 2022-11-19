@@ -1097,7 +1097,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
     uint32_t pos = *(uint32_t *)o->map;
     for (int i = 0; i < 3; ++i) {
       struct timespec t = {0};
-      clock_gettime(0, &t);
+      clock_gettime(CLOCK_MONOTONIC, &t);
       pos *= t.tv_nsec ^ t.tv_sec ^ (uintptr_t)imap;
       pos ^= pos >> 7;
     }
@@ -1368,7 +1368,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_next)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -1497,7 +1497,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 
@@ -1506,7 +1506,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_prev)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -1619,7 +1619,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 #undef FIO_MAP___EACH_COPY_HASH
@@ -1655,8 +1655,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       start_at = 0;
   } else if (start_at > o->count)
     return o->count;
-  FIO_NAME(FIO_MAP_NAME, iterator_s)
-  i = {0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) i = {.private_.pos = 0};
   for (;;) {
     i = FIO_NAME(FIO_MAP_NAME, get_next)(map, &i);
     if (!FIO_NAME(FIO_MAP_NAME, iterator_is_valid)(&i))

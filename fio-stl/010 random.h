@@ -559,7 +559,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fprintf(stderr, "* Testing Risky Hash and Risky Mask (sanity).\n");
   {
-    char *str = "testing that risky hash is always the same hash";
+    char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = strlen(str);
     char buf[128];
     memcpy(buf, str, len);
@@ -576,7 +576,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   }
   {
     char buf[64];
-    const char *str = "this is a short text, to test risky masking, ok";
+    const char *str = (char *)"this is a short text, to test risky masking, ok";
     const size_t len = strlen(str); /* 47 */
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;

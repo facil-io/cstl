@@ -642,7 +642,7 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len) {
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
-  fio___bstr_meta_s mem[1] = {0};
+  fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_STR_INFO3(bstr, meta->len, meta->capa);
@@ -650,7 +650,7 @@ FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
-  fio___bstr_meta_s mem[1] = {0};
+  fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
   return FIO_BUF_INFO2(bstr, meta->len);
@@ -2414,8 +2414,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(fio_bstr_is_greater(str, NULL),
                "fio_bstr_is_greater failed vs a NULL String");
     str = fio_bstr_write2(str,
-                          FIO_STRING_WRITE_STR1(" "),
-                          FIO_STRING_WRITE_STR1("World!"));
+                          FIO_STRING_WRITE_STR1((char *)" "),
+                          FIO_STRING_WRITE_STR1((char *)"World!"));
     FIO_ASSERT(fio_bstr_info(str).len == 12 &&
                    !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
                "fio_bstr_write2 failed!");
@@ -2429,7 +2429,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(!memcmp(str, s_copy, fio_bstr_len(s_copy)),
                "fio_bstr copy after write copied data error!");
     FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(s_copy),
-                                  FIO_BUF_INFO2("Hello World!", 12)),
+                                  FIO_BUF_INFO2((char *)"Hello World!", 12)),
                "fio_bstr old copy corrupted?");
     fio_bstr_free(s_copy);
     fio_bstr_free(str);

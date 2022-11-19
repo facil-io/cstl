@@ -43,7 +43,8 @@ Copyright and License: see header file (000 header.h) or top of file
 #ifdef FIO_REF_METADATA
 #define FIO_REF_METADATA_INIT(meta)                                            \
   do {                                                                         \
-    (meta) = (FIO_REF_METADATA){0};                                            \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (meta) = (FIO_REF_METADATA){0};                                          \
   } while (0)
 #else
 #define FIO_REF_METADATA_INIT(meta)

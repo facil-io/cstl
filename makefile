@@ -124,7 +124,7 @@ FLAGS:=
 # C specific compiler options
 C_EXTRA_OPT:=
 # C++ specific compiler options
-CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-vla-extension -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros
+CXX_EXTRA_OPT:=-Wno-keyword-macro -Wno-vla-extension -Wno-c99-extensions -Wno-zero-length-array -Wno-variadic-macros -Wno-missing-braces
 # c standard   (if any, without the `-std=` prefix, i.e.: c11)
 CSTD?=gnu11
 # c++ standard (if any, without the `-std=` prefix, i.e.: c++11)

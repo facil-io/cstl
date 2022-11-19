@@ -89,14 +89,12 @@ Type Naming Macros for FIOBJ types. By default, results in:
 General Requirements / Macros
 ***************************************************************************** */
 
-#ifdef FIO_EXTERN
 #ifdef __cplusplus /* C++ doesn't allow declarations for static variables */
-#define FIOBJ_EXTERN_OBJ     extern "C"
-#define FIOBJ_EXTERN_OBJ_IMP extern "C" __attribute__((weak))
-#else
+#define FIOBJ_EXTERN_OBJ     extern "C" FIO_WEAK
+#define FIOBJ_EXTERN_OBJ_IMP extern "C" FIO_WEAK
+#elif defined(FIO_EXTERN)
 #define FIOBJ_EXTERN_OBJ     extern
-#define FIOBJ_EXTERN_OBJ_IMP __attribute__((weak))
-#endif
+#define FIOBJ_EXTERN_OBJ_IMP FIO_WEAK
 #else
 #define FIOBJ_EXTERN_OBJ     static __attribute__((unused))
 #define FIOBJ_EXTERN_OBJ_IMP static __attribute__((unused))
