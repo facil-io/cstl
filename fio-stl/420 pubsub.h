@@ -1041,7 +1041,7 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
-  fio___publish_letter_task(l, NULL);
+  fio_defer(fio___publish_letter_task, fio_letter_dup(l), NULL);
   (void)l; /* TODO! */
 }
 

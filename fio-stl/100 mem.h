@@ -604,6 +604,11 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 
 /** an 8 byte value memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  if (!(data & (~(uint64_t)0xFFULL))) {
+    data |= (data << 8); /* if a single char was passed, match memset */
+    data |= (data << 16);
+    data |= (data << 32);
+  }
 #if 0 /* 64 byte loops seem slower for some reason... */
   uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
   char *d = (char *)dest_;
@@ -968,6 +973,11 @@ FIO_MEMORY_DISABLE - use the system allocator
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   return calloc(size, 1);
+#elif defined(DEBUG) && DEBUG
+  void *ret = malloc(size);
+  if (ret)
+    FIO___MEMSET(ret, (uint64_t)0xFAFAFAFAFAFAFAFAULL, size);
+  return ret;
 #else
   return malloc(size);
 #endif
@@ -1805,6 +1815,11 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
                  0,
                  (((size_t)c->blocks[b].pos) << FIO_MEMORY_ALIGN_LOG));
   }
+#elif defined(DEBUG) && DEBUG
+  /* set all bytes to 0xAF to better catch initialization bugs */
+  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
+               0xFAFAFAFAFAFAFAFAULL,
+               FIO_MEMORY_BLOCK_SIZE);
 #else
   /** only reset a block's free-list header */
   FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
@@ -2014,6 +2029,12 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
                   FIO_MEMORY_BIG_BLOCK_HEADER_SIZE));
   }
 #else
+#if defined(DEBUG) && DEBUG
+  /* set all bytes to 0xAF to better catch initialization bugs */
+  FIO___MEMSET((void *)b,
+               0xFAFAFAFAFAFAFAFAULL,
+               FIO_MEMORY_SYS_ALLOCATION_SIZE);
+#endif /* DEBUG */
   /* reset chunk header, which is always bigger than big_block header*/
   FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
   /* zero out possible block memory (if required) */

@@ -165,9 +165,9 @@ FIO_IFUNC void fio___poly_consume128bit(fio___poly_s *pl,
     t0 = fio_buf2u64_little(msg);
     t1 = fio_buf2u64_little(((uint8_t *)msg + 8));
     /* a += msg */
-    a0 += ((t0)&0xfffffffffff);
-    a1 += (((t0 >> 44) | (t1 << 20)) & 0xfffffffffff);
-    a2 += (((t1 >> 24)) & 0x3ffffffffff) | (is_full << 40);
+    a0 += ((t0)&0xFFFFFFFFFFF);
+    a1 += (((t0 >> 44) | (t1 << 20)) & 0xFFFFFFFFFFF);
+    a2 += (((t1 >> 24)) & 0x3FFFFFFFFFF) | (is_full << 40);
   }
 
   /* a *= r */
@@ -232,31 +232,31 @@ FIO_IFUNC void fio___poly_finilize(fio___poly_s *pl) {
   a2 = pl->a[2];
 
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
   a2 += c;
   c = (a2 >> 42);
-  a2 &= 0x3ffffffffff;
+  a2 &= 0x3FFFFFFFFFF;
   a0 += c * 5;
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
+  a0 &= 0xFFFFFFFFFFF;
   a1 += c;
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
   a2 += c;
   c = (a2 >> 42);
-  a2 &= 0x3ffffffffff;
+  a2 &= 0x3FFFFFFFFFF;
   a0 += c * 5;
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
+  a0 &= 0xFFFFFFFFFFF;
   a1 += c;
 
   /* compute a + -p */
   g0 = a0 + 5;
   c = (g0 >> 44);
-  g0 &= 0xfffffffffff;
+  g0 &= 0xFFFFFFFFFFF;
   g1 = a1 + c;
   c = (g1 >> 44);
-  g1 &= 0xfffffffffff;
+  g1 &= 0xFFFFFFFFFFF;
   g2 = a2 + c - ((uint64_t)1 << 42);
 
   /* select h if h < p, or h + -p if h >= p */
@@ -273,14 +273,14 @@ FIO_IFUNC void fio___poly_finilize(fio___poly_s *pl) {
   t0 = pl->s[0];
   t1 = pl->s[1];
 
-  a0 += ((t0)&0xfffffffffff);
+  a0 += ((t0)&0xFFFFFFFFFFF);
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
-  a1 += (((t0 >> 44) | (t1 << 20)) & 0xfffffffffff) + c;
+  a0 &= 0xFFFFFFFFFFF;
+  a1 += (((t0 >> 44) | (t1 << 20)) & 0xFFFFFFFFFFF) + c;
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
-  a2 += (((t1 >> 24)) & 0x3ffffffffff) + c;
-  a2 &= 0x3ffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
+  a2 += (((t1 >> 24)) & 0x3FFFFFFFFFF) + c;
+  a2 &= 0x3FFFFFFFFFF;
 
   /* mac = a % (2^128) */
   a0 = ((a0) | (a1 << 44));

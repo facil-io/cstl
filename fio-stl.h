@@ -7332,9 +7332,9 @@ FIO_IFUNC void fio___poly_consume128bit(fio___poly_s *pl,
     t0 = fio_buf2u64_little(msg);
     t1 = fio_buf2u64_little(((uint8_t *)msg + 8));
     /* a += msg */
-    a0 += ((t0)&0xfffffffffff);
-    a1 += (((t0 >> 44) | (t1 << 20)) & 0xfffffffffff);
-    a2 += (((t1 >> 24)) & 0x3ffffffffff) | (is_full << 40);
+    a0 += ((t0)&0xFFFFFFFFFFF);
+    a1 += (((t0 >> 44) | (t1 << 20)) & 0xFFFFFFFFFFF);
+    a2 += (((t1 >> 24)) & 0x3FFFFFFFFFF) | (is_full << 40);
   }
 
   /* a *= r */
@@ -7399,31 +7399,31 @@ FIO_IFUNC void fio___poly_finilize(fio___poly_s *pl) {
   a2 = pl->a[2];
 
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
   a2 += c;
   c = (a2 >> 42);
-  a2 &= 0x3ffffffffff;
+  a2 &= 0x3FFFFFFFFFF;
   a0 += c * 5;
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
+  a0 &= 0xFFFFFFFFFFF;
   a1 += c;
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
   a2 += c;
   c = (a2 >> 42);
-  a2 &= 0x3ffffffffff;
+  a2 &= 0x3FFFFFFFFFF;
   a0 += c * 5;
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
+  a0 &= 0xFFFFFFFFFFF;
   a1 += c;
 
   /* compute a + -p */
   g0 = a0 + 5;
   c = (g0 >> 44);
-  g0 &= 0xfffffffffff;
+  g0 &= 0xFFFFFFFFFFF;
   g1 = a1 + c;
   c = (g1 >> 44);
-  g1 &= 0xfffffffffff;
+  g1 &= 0xFFFFFFFFFFF;
   g2 = a2 + c - ((uint64_t)1 << 42);
 
   /* select h if h < p, or h + -p if h >= p */
@@ -7440,14 +7440,14 @@ FIO_IFUNC void fio___poly_finilize(fio___poly_s *pl) {
   t0 = pl->s[0];
   t1 = pl->s[1];
 
-  a0 += ((t0)&0xfffffffffff);
+  a0 += ((t0)&0xFFFFFFFFFFF);
   c = (a0 >> 44);
-  a0 &= 0xfffffffffff;
-  a1 += (((t0 >> 44) | (t1 << 20)) & 0xfffffffffff) + c;
+  a0 &= 0xFFFFFFFFFFF;
+  a1 += (((t0 >> 44) | (t1 << 20)) & 0xFFFFFFFFFFF) + c;
   c = (a1 >> 44);
-  a1 &= 0xfffffffffff;
-  a2 += (((t1 >> 24)) & 0x3ffffffffff) + c;
-  a2 &= 0x3ffffffffff;
+  a1 &= 0xFFFFFFFFFFF;
+  a2 += (((t1 >> 24)) & 0x3FFFFFFFFFF) + c;
+  a2 &= 0x3FFFFFFFFFF;
 
   /* mac = a % (2^128) */
   a0 = ((a0) | (a1 << 44));
@@ -10383,6 +10383,11 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 
 /** an 8 byte value memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  if (!(data & (~(uint64_t)0xFFULL))) {
+    data |= (data << 8); /* if a single char was passed, match memset */
+    data |= (data << 16);
+    data |= (data << 32);
+  }
 #if 0 /* 64 byte loops seem slower for some reason... */
   uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
   char *d = (char *)dest_;
@@ -10747,6 +10752,11 @@ FIO_MEMORY_DISABLE - use the system allocator
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
   return calloc(size, 1);
+#elif defined(DEBUG) && DEBUG
+  void *ret = malloc(size);
+  if (ret)
+    FIO___MEMSET(ret, (uint64_t)0xFAFAFAFAFAFAFAFAULL, size);
+  return ret;
 #else
   return malloc(size);
 #endif
@@ -11584,6 +11594,11 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(
                  0,
                  (((size_t)c->blocks[b].pos) << FIO_MEMORY_ALIGN_LOG));
   }
+#elif defined(DEBUG) && DEBUG
+  /* set all bytes to 0xAF to better catch initialization bugs */
+  FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
+               0xFAFAFAFAFAFAFAFAULL,
+               FIO_MEMORY_BLOCK_SIZE);
 #else
   /** only reset a block's free-list header */
   FIO___MEMSET(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0),
@@ -11793,6 +11808,12 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_block__reset_memory)(
                   FIO_MEMORY_BIG_BLOCK_HEADER_SIZE));
   }
 #else
+#if defined(DEBUG) && DEBUG
+  /* set all bytes to 0xAF to better catch initialization bugs */
+  FIO___MEMSET((void *)b,
+               0xFAFAFAFAFAFAFAFAULL,
+               FIO_MEMORY_SYS_ALLOCATION_SIZE);
+#endif /* DEBUG */
   /* reset chunk header, which is always bigger than big_block header*/
   FIO___MEMSET((void *)b, 0, sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s)));
   /* zero out possible block memory (if required) */
@@ -30599,7 +30620,7 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
-  fio___publish_letter_task(l, NULL);
+  fio_defer(fio___publish_letter_task, fio_letter_dup(l), NULL);
   (void)l; /* TODO! */
 }
 
