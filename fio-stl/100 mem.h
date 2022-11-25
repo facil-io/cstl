@@ -531,81 +531,53 @@ Helpers and System Memory Allocation
 SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
-  uint64_t tmp_buf[8] FIO_ALIGN(16);
   if ((d == s) | !bytes | !d | !s) {
-    FIO_LOG_DEBUG2("fio_memcpy null");
+    FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return;
   }
-  uintptr_t offset = ((uintptr_t)d - (uintptr_t)s);
-  if (offset >= bytes) {
-    /* walk forwards (memcpy) */
-    /* 4 word groups */
-    char *dstop = d + (bytes & (~(size_t)127ULL));
+  if (s + bytes <= d || d + bytes <= s) { /* walk forwards (memcpy) */
+    char *dstop = d + (bytes & (~(size_t)4095ULL));
     for (; d < dstop;) {
-      FIO_MEMCPY64(tmp_buf, s);
-      FIO_MEMCPY64(d, tmp_buf);
-      FIO_MEMCPY64(tmp_buf, s + 64);
-      FIO_MEMCPY64(d + 64, tmp_buf);
-      d += 128;
-      s += 128;
+      FIO_MEMCPY4096(d, s);
+      d += 4096;
+      s += 4096;
     }
-    if ((bytes & 64)) {
-      FIO_MEMCPY64(tmp_buf, s);
-      FIO_MEMCPY64(d, tmp_buf);
-      d += 64;
-      s += 64;
+    FIO_MEMCPY4095x(d, s, bytes);
+  } else if (d < s) {
+    /* memory overlaps at end (copy forward, use buffer) */
+    char *dstop = d + (bytes & (~(size_t)4095ULL));
+    char tmp_buf[4096] FIO_ALIGN(16);
+    for (; d < dstop;) {
+      FIO_MEMCPY4096(tmp_buf, s);
+      FIO_MEMCPY4096(d, tmp_buf);
+      d += 4096;
+      s += 4096;
     }
-    FIO_MEMCPY63x(tmp_buf, s, bytes);
-    FIO_MEMCPY63x(d, tmp_buf, bytes);
-    return;
+    FIO_MEMCPY4095x(tmp_buf, s, bytes);
+    FIO_MEMCPY4095x(d, tmp_buf, bytes);
   } else {
-    /* some memory overlaps, walk backwards (memmove) */
-    char *const dstop = d + (bytes & 63);
+    /* memory overlaps at beginning, walk backwards (memmove) */
+    char *dstop = d + (bytes & 4095ULL);
+    char tmp_buf[4096] FIO_ALIGN(16);
     d += bytes;
     s += bytes;
     for (; d > dstop;) {
-      d -= 64;
-      s -= 64;
-      FIO_MEMCPY64(tmp_buf, s);
-      FIO_MEMCPY64(d, tmp_buf);
+      d -= 4096;
+      s -= 4096;
+      FIO_MEMCPY4096(tmp_buf, s);
+      FIO_MEMCPY4096(d, tmp_buf);
     }
-    /* the same as FIO_MEMCPY63x, but walking backwards... */
-    if (bytes & 32) {
-      d -= 32;
-      s -= 32;
-      FIO_MEMCPY32(tmp_buf, s);
-      FIO_MEMCPY32(d, tmp_buf);
-    }
-    if (bytes & 16) {
-      d -= 16;
-      s -= 16;
-      FIO_MEMCPY16(tmp_buf, s);
-      FIO_MEMCPY16(d, tmp_buf);
-    }
-    if (bytes & 8) {
-      d -= 8;
-      s -= 8;
-      FIO_MEMCPY8(tmp_buf, s);
-      FIO_MEMCPY8(d, tmp_buf);
-    }
-    d -= (bytes & 7);
-    s -= (bytes & 7);
-    switch ((bytes & 7)) {
-    case 7: d[6] = s[6]; /* fall through */
-    case 6: d[5] = s[5]; /* fall through */
-    case 5: d[4] = s[4]; /* fall through */
-    case 4: d[3] = s[3]; /* fall through */
-    case 3: d[2] = s[2]; /* fall through */
-    case 2: d[1] = s[1]; /* fall through */
-    case 1: d[0] = s[0]; /* fall through */
-    }
+    d -= (bytes & 4095ULL);
+    s -= (bytes & 4095ULL);
+    FIO_MEMCPY4095x(tmp_buf, s, bytes);
+    FIO_MEMCPY4095x(d, tmp_buf, bytes);
   }
 }
 
 /** an 8 byte value memset implementation. */
 SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  if (!(data & (~(uint64_t)0xFFULL))) {
-    data |= (data << 8); /* if a single char was passed, match memset */
+  if (data < 0x100ULL) { /* if a single byte value, match memset */
+    data |= (data << 8);
     data |= (data << 16);
     data |= (data << 32);
   }

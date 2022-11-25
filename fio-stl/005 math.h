@@ -21,6 +21,50 @@ Copyright and License: see header file (000 header.h) or top of file
 #define H___FIO_MATH___H 1
 
 /* *****************************************************************************
+Useful math unions.
+***************************************************************************** */
+
+/** An unsigned 128bit union type. */
+typedef union {
+  uint8_t u8[16];
+  uint16_t u16[8];
+  uint32_t u32[4];
+  uint64_t u64[2];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[1];
+#endif
+} fio_128u;
+
+/** An unsigned 256bit union type. */
+typedef union {
+  uint8_t u8[32];
+  uint16_t u16[16];
+  uint32_t u32[8];
+  uint64_t u64[4];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[2];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[1];
+#endif
+
+} fio_256u;
+
+/** An unsigned 512bit union type. */
+typedef union {
+  uint8_t u8[64];
+  uint16_t u16[32];
+  uint32_t u32[16];
+  uint64_t u64[8];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[4];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[2];
+#endif
+} fio_512u;
+
+/* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
 
@@ -107,7 +151,7 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
-#if __has_builtin(__builtin_addcll) && 0
+#if __has_builtin(__builtin_addcll)
   return __builtin_addcll(a, b, carry_in, carry_out);
 #elif defined(__SIZEOF_INT128__) && 0
   /* This is actually slower as it occupies more CPU registers */
@@ -127,9 +171,9 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
-#if __has_builtin(__builtin_subcll) && 0
+#if __has_builtin(__builtin_subcll)
   uint64_t u = __builtin_subcll(a, b, carry_in, carry_out);
-#elif defined(__SIZEOF_INT128__) && 0
+#elif defined(__SIZEOF_INT128__)
   __uint128_t u = (__uint128_t)a - b - carry_in;
   if (carry_out)
     *carry_out = (uint64_t)(u >> 127U);

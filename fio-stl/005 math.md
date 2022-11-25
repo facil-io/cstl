@@ -42,6 +42,55 @@ uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
 
 Multiply with carry out.
 
+### Multi-Precision Helper Types
+
+The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types.
+
+
+#### `fio_128u`
+
+```c
+typedef union {
+  uint8_t u8[16];
+  uint16_t u16[8];
+  uint32_t u32[4];
+  uint64_t u64[2];
+  __uint128_t u128[1]; /* if supported by the compiler */
+} fio_128u;
+```
+
+An unsigned 128 bit union type.
+
+#### `fio_256u`
+
+```c
+typedef union {
+  uint8_t u8[32];
+  uint16_t u16[16];
+  uint32_t u32[8];
+  uint64_t u64[4];
+  __uint128_t u128[2]; /* if supported by the compiler */
+  __uint256_t u256[1]; /* if supported by the compiler */
+} fio_256u;
+```
+
+An unsigned 256 bit union type.
+
+#### `fio_512u`
+
+```c
+typedef union {
+  uint8_t u8[64];
+  uint16_t u16[32];
+  uint32_t u32[16];
+  uint64_t u64[8];
+  __uint128_t u128[4]; /* if supported by the compiler */
+  __uint256_t u256[2]; /* if supported by the compiler */
+} fio_512u;
+```
+
+An unsigned 512 bit union type.
+
 ### Multi-Precision Math with Little Endian arrays
 
 The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).

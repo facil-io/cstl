@@ -96,11 +96,6 @@ ChaCha20Poly1305 Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-typedef union {
-  uint32_t u32[16];
-  uint64_t u64[8];
-} fio___chacha_u;
-
 /* *****************************************************************************
 Poly1305 (authentication)
 Prime 2^130-5   = 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB
@@ -118,7 +113,7 @@ typedef struct {
   uint64_t s[2];
   /* Accumulator should not exceed 131 bits at the end of every cycle. */
   uint64_t a[3];
-} fio___poly_s;
+} FIO_ALIGN(16) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(void *key256b) {
   uint64_t t0, t1;
@@ -346,10 +341,10 @@ SFUNC void fio_poly1305_auth(void *mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-FIO_IFUNC fio___chacha_u fio___chacha_init(void *key,
-                                           void *nounce,
-                                           uint32_t counter) {
-  fio___chacha_u o = {
+FIO_IFUNC fio_512u fio___chacha_init(void *key,
+                                     void *nounce,
+                                     uint32_t counter) {
+  fio_512u o = {
       .u32 =
           {
               // clang-format off
@@ -379,7 +374,7 @@ FIO_IFUNC fio___chacha_u fio___chacha_init(void *key,
     c += d; b ^= c; b = fio_lrot32(b, 7);
 // clang-format on
 
-FIO_IFUNC void fio___chacha_dround(fio___chacha_u *c) {
+FIO_IFUNC void fio___chacha_dround(fio_512u *c) {
   FIO___CHACHA_QROUND(c->u32[0], c->u32[4], c->u32[8], c->u32[12]);
   FIO___CHACHA_QROUND(c->u32[1], c->u32[5], c->u32[9], c->u32[13]);
   FIO___CHACHA_QROUND(c->u32[2], c->u32[6], c->u32[10], c->u32[14]);
@@ -390,7 +385,7 @@ FIO_IFUNC void fio___chacha_dround(fio___chacha_u *c) {
   FIO___CHACHA_QROUND(c->u32[3], c->u32[4], c->u32[9], c->u32[14]);
 }
 
-FIO_IFUNC void fio___chacha_xor(fio___chacha_u *dest, fio___chacha_u *c) {
+FIO_IFUNC void fio___chacha_xor(fio_512u *dest, fio_512u *c) {
   // clang-format off
 #if __LITTLE_ENDIAN__
   dest->u64[0] ^= c->u64[0]; dest->u64[1] ^= c->u64[1];
@@ -410,8 +405,8 @@ FIO_IFUNC void fio___chacha_xor(fio___chacha_u *dest, fio___chacha_u *c) {
   // clang-format on
 }
 
-FIO_IFUNC void fio___chacha_round20(fio___chacha_u *c) {
-  fio___chacha_u c2 = *c;
+FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
+  fio_512u c2 = *c;
   // clang-format off
   fio___chacha_dround(&c2); fio___chacha_dround(&c2);
   fio___chacha_dround(&c2); fio___chacha_dround(&c2);
@@ -434,10 +429,10 @@ SFUNC void fio_chacha20(void *data,
                         void *key,
                         void *nounce,
                         uint32_t counter) {
-  fio___chacha_u c = fio___chacha_init(key, nounce, counter);
-  fio___chacha_u dest;
+  fio_512u c = fio___chacha_init(key, nounce, counter);
+  fio_512u dest;
   for (size_t i = 0; i < len; i += 64) {
-    fio___chacha_u c2 = c;
+    fio_512u c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
     FIO_MEMCPY64(dest.u64, data);
@@ -464,9 +459,9 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
                                      size_t adlen,
                                      void *key,
                                      void *nounce) {
-  fio___chacha_u c = fio___chacha_init(key, nounce, 0);
-  fio___chacha_u c2 = c;
-  fio___chacha_u dest;
+  fio_512u c = fio___chacha_init(key, nounce, 0);
+  fio_512u c2 = c;
+  fio_512u dest;
   fio___chacha_round20(&c2); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c2);
   if (adlen)
@@ -505,7 +500,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *mac,
                                       size_t adlen,
                                       void *key,
                                       void *nounce) {
-  fio___chacha_u c = fio___chacha_init(key, nounce, 0);
+  fio_512u c = fio___chacha_init(key, nounce, 0);
   fio___chacha_round20(&c); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c);
   if (adlen)
