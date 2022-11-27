@@ -587,6 +587,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   if (nonblock && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_DEBUG("couldn't set socket to nonblocking mode");
     fio_sock_close(fd);
+    unlink(addr.sun_path);
     return -1;
   }
   if (is_client) {
@@ -596,6 +597,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
                     addr.sun_path,
                     strerror(errno));
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
   } else {
@@ -604,12 +606,14 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
       // umask(old_umask);
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
     // umask(old_umask);
     if (listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
   }

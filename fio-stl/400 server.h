@@ -1590,7 +1590,17 @@ static void fio___srv_listen_on_close(void *settings_) {
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   struct fio_listen_args *l = (struct fio_listen_args *)udata;
   int *pfd = (int *)(l + 1);
-  close(*pfd);
+  fio_sock_close(*pfd);
+#ifdef AF_UNIX
+  /* delete the unix socket file, if any. */
+  fio_url_s u = fio_url_parse(l->url, strlen(l->url));
+  if (!u.host.buf && !u.port.buf && u.path.buf) {
+    unlink(u.path.buf);
+  }
+#endif
+  fio_state_callback_remove(FIO_CALL_AT_EXIT,
+                            fio___srv_listen_cleanup_task,
+                            udata);
   FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
 }
 
@@ -1669,9 +1679,6 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
         fio___srv_listen_attach_task,
         (void *)cpy);
   }
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio___srv_env_safe_destroy,
-                         (void *)&fio___srvdata.env);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_cleanup_task, cpy);
   return 0;
 fd_error:

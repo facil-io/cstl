@@ -533,7 +533,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
 /* *****************************************************************************
 Postoffice State
 ***************************************************************************** */
-
+#ifndef FIO___IPC_LEN
+#define FIO___IPC_LEN 256
+#endif
 static struct FIO_POSTOFFICE {
 #if FIO_POSTOFFICE_THREAD_LOCK
   FIO___LOCK_TYPE lock;
@@ -545,7 +547,7 @@ static struct FIO_POSTOFFICE {
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
-  char ipc_url[256];
+  char ipc_url[FIO___IPC_LEN];
 } FIO_POSTOFFICE = {
 #if FIO_POSTOFFICE_THREAD_LOCK
     .lock = FIO___LOCK_INIT,
@@ -1529,7 +1531,7 @@ external_engine:
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
-  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, 256);
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
   fio_string_write2(&url,
                     NULL,
                     FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
