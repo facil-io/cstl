@@ -664,8 +664,6 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, cli)();
-  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, stream)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, poll)();

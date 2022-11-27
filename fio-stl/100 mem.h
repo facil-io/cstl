@@ -624,10 +624,10 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     if (!(r[0] | r[1] | r[2] | r[3])) { buf += 32; continue; }
     for (size_t i_tmp = 0; i_tmp < 4; ++i_tmp)
     {
-      if(buf[0] == token) return (void*)buf; if(buf[1] == token) return (void*)(buf + 1);
-      if(buf[2] == token) return (void*)(buf + 2); if(buf[3] == token) return (void*)(buf + 3);
-      if(buf[4] == token) return (void*)(buf + 4); if(buf[5] == token) return (void*)(buf + 5);
-      if(buf[6] == token) return (void*)(buf + 6); if(buf[7] == token) return (void*)(buf + 7);
+      if(buf[0] == token) return (void*)buf;             if(buf[1] == token) return (void*)(buf + 1);
+      if(buf[2] == token) return (void*)(buf + 2);       if(buf[3] == token) return (void*)(buf + 3);
+      if(buf[4] == token) return (void*)(buf + 4);       if(buf[5] == token) return (void*)(buf + 5);
+      if(buf[6] == token) return (void*)(buf + 6);       if(buf[7] == token) return (void*)(buf + 7);
       buf += 8;
     }
   }
