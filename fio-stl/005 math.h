@@ -437,7 +437,7 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
     for (size_t i = 0; i < len; ++i) { // clang-format off
      dest[(i << 1)]     = abwmul[(i << 1)]     = fio_math_mulc64(a[i], b[i], &c);
      dest[(i << 1) + 1] = abwmul[(i << 1) + 1] = c;
-   } // clang-format on
+    } // clang-format on
     c = 0;
     for (size_t i = 0; i < len - 1; ++i) {
       dest[(i + 1) << 1] += c;
