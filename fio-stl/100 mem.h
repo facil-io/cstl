@@ -535,9 +535,8 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return;
   }
-  if (s + bytes <= d || d + bytes <= s || d + 4095 < s) { /* direct copy */
-    char *dstop = d + (bytes & (~(size_t)4095ULL));
-    for (; d < dstop;) {
+  if (s + bytes <= d || d + bytes <= s || d + 4095 < s) { /* direct */
+    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
       FIO_MEMCPY4096(d, s);
       d += 4096;
       s += 4096;
@@ -547,12 +546,9 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     char tmp_buf[4096] FIO_ALIGN(16);
     FIO_MEMCPY4095x(tmp_buf, s, bytes);
     FIO_MEMCPY4095x(d, tmp_buf, bytes);
-    return;
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    char *dstop = d + (bytes & (~(size_t)4095ULL));
     char tmp_buf[4096] FIO_ALIGN(16);
-    // if(d < s)
-    for (; d < dstop;) {
+    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
       FIO_MEMCPY4096(tmp_buf, s);
       FIO_MEMCPY4096(d, tmp_buf);
       d += 4096;
@@ -561,11 +557,10 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_MEMCPY4095x(tmp_buf, s, bytes);
     FIO_MEMCPY4095x(d, tmp_buf, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    char *dstop = d + (bytes & 4095ULL);
     char tmp_buf[4096] FIO_ALIGN(16);
     d += bytes;
     s += bytes;
-    for (; d > dstop;) {
+    for (char *dstop = d + (bytes & 4095ULL); d > dstop;) {
       d -= 4096;
       s -= 4096;
       FIO_MEMCPY4096(tmp_buf, s);
@@ -622,13 +617,16 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080); /* keeps only 0x80 - match 7/8 bits of token */
     r[2] &= UINT64_C(0x8080808080808080); r[3] &= UINT64_C(0x8080808080808080);
     if (!(r[0] | r[1] | r[2] | r[3])) { buf += 32; continue; }
-    for (size_t i_tmp = 0; i_tmp < 4; ++i_tmp)
+    for (size_t i_tmp = 0; i_tmp < 4; ((++i_tmp), (buf += 8)))
     {
-      if(buf[0] == token) return (void*)buf;             if(buf[1] == token) return (void*)(buf + 1);
-      if(buf[2] == token) return (void*)(buf + 2);       if(buf[3] == token) return (void*)(buf + 3);
-      if(buf[4] == token) return (void*)(buf + 4);       if(buf[5] == token) return (void*)(buf + 5);
-      if(buf[6] == token) return (void*)(buf + 6);       if(buf[7] == token) return (void*)(buf + 7);
-      buf += 8;
+      if(buf[0] == token) return (void*)buf; 
+      if(buf[1] == token) return (void*)(buf + 1);
+      if(buf[2] == token) return (void*)(buf + 2);
+      if(buf[3] == token) return (void*)(buf + 3);
+      if(buf[4] == token) return (void*)(buf + 4);
+      if(buf[5] == token) return (void*)(buf + 5);
+      if(buf[6] == token) return (void*)(buf + 6);
+      if(buf[7] == token) return (void*)(buf + 7);
     }
   }
   if (buf + 15 < end) {
@@ -2651,43 +2649,45 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           repetitions);
 
   for (int len_i = 5; len_i < 20; ++len_i) {
-    const size_t mem_len = 1ULL << len_i;
-    void *mem = malloc(mem_len << 1);
-    FIO_ASSERT_ALLOC(mem);
-    uint64_t sig = (uintptr_t)mem;
-    sig ^= sig >> 13;
-    sig ^= sig << 17;
-    sig ^= sig << 29;
-    sig ^= sig << 31;
-    fio_memset(mem, sig, mem_len);
+    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i);
+         ++mem_len) {
+      void *mem = malloc(mem_len << 1);
+      FIO_ASSERT_ALLOC(mem);
+      uint64_t sig = (uintptr_t)mem;
+      sig ^= sig >> 13;
+      sig ^= sig << 17;
+      sig ^= sig << 29;
+      sig ^= sig << 31;
+      fio_memset(mem, sig, mem_len);
 
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      fio_memcpy((char *)mem + mem_len, mem, mem_len);
-      FIO_COMPILER_GUARD;
+      start = fio_time_micro();
+      for (int i = 0; i < repetitions; ++i) {
+        fio_memcpy((char *)mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+
+      fio___memset_test_aligned((char *)mem + mem_len,
+                                sig,
+                                mem_len,
+                                "fio_memcpy sanity test FAILED");
+      fprintf(stderr,
+              "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
+              mem_len,
+              (size_t)(end - start));
+      start = fio_time_micro();
+      for (int i = 0; i < repetitions; ++i) {
+        memcpy((char *)mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
+              mem_len,
+              (size_t)(end - start));
+
+      free(mem);
     }
-    end = fio_time_micro();
-
-    fio___memset_test_aligned((char *)mem + mem_len,
-                              sig,
-                              mem_len,
-                              "fio_memcpy sanity test FAILED");
-    fprintf(stderr,
-            "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
-            mem_len,
-            (size_t)(end - start));
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      memcpy((char *)mem + mem_len, mem, mem_len);
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
-            mem_len,
-            (size_t)(end - start));
-
-    free(mem);
   }
 
   fprintf(stderr,

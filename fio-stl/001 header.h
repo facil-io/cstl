@@ -270,10 +270,6 @@ FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 Memory Copying Primitives
 ***************************************************************************** */
 
-#ifndef FIO_MEMCPYX_UNROLL
-/** If set, manual unrolling is used for the fio___memcpy7x helper. */
-#define FIO_MEMCPYX_UNROLL 1
-#endif
 #if __has_builtin(__builtin_memset)
 #ifndef FIO_MEMSET
 #define FIO_MEMSET __builtin_memset
@@ -367,63 +363,57 @@ FIO___MAKE_MEMCPY_FIXED(4096)
 #define FIO_MEMCPY63x(dest, src, len)   fio___memcpy63x((dest), (src), (len))
 #define FIO_MEMCPY127x(dest, src, len)  fio___memcpy127x((dest), (src), (len))
 #define FIO_MEMCPY255x(dest, src, len)  fio___memcpy255x((dest), (src), (len))
+#define FIO_MEMCPY511x(dest, src, len)  fio___memcpy511x((dest), (src), (len))
 #define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-  char *restrict d = (char *)d_;
-  char *restrict s = (char *)s_;
-#if FIO_MEMCPYX_UNROLL
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
     *d = *s;
-#else
-  l &= 7;
-  while (l--) {
-    *(d++) = *(s++);
-  }
-#endif
 }
 
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void fio___memcpy15x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy15x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy31x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy63x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_IFUNC void fio___memcpy127x(void *restrict dest_,
-                                const void *restrict src_,
+FIO_IFUNC void fio___memcpy127x(void *restrict d_,
+                                const void *restrict s_,
                                 size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(64);
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
@@ -431,11 +421,25 @@ FIO_IFUNC void fio___memcpy127x(void *restrict dest_,
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy255x(void *restrict dest_,
-                                const void *restrict src_,
+FIO_IFUNC void fio___memcpy255x(void *restrict d_,
+                                const void *restrict s_,
                                 size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
+FIO_IFUNC void fio___memcpy511x(void *restrict d_,
+                                const void *restrict s_,
+                                size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(256);
   FIO_MEMCPY___PARTIAL(128);
   FIO_MEMCPY___PARTIAL(64);
   FIO_MEMCPY___PARTIAL(32);
@@ -444,11 +448,11 @@ FIO_IFUNC void fio___memcpy255x(void *restrict dest_,
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy4095x(void *restrict dest_,
-                                 const void *restrict src_,
+FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
+                                 const void *restrict s_,
                                  size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(2048);
   FIO_MEMCPY___PARTIAL(1024);
   FIO_MEMCPY___PARTIAL(512);
