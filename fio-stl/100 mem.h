@@ -535,9 +535,9 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return;
   }
-  if (s + bytes <= d || d + bytes <= s || d + 4095 < s) { /* direct */
+  if (s + bytes <= d || d + bytes <= s || (uintptr_t)d + 4095 < (uintptr_t)s) {
     for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
-      FIO_MEMCPY4096(d, s);
+      FIO_MEMCPY4096(d, s); /* direct copy, no meaningful overlap */
       d += 4096;
       s += 4096;
     }
@@ -2649,7 +2649,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           repetitions);
 
   for (int len_i = 5; len_i < 20; ++len_i) {
-    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i);
+    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
       void *mem = malloc(mem_len << 1);
       FIO_ASSERT_ALLOC(mem);
