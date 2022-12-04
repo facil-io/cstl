@@ -3280,6 +3280,17 @@ FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
 }
 
 /**
+ * Detects a good chance that there's a byte where all the bits are set (255)
+ * within a 4 byte vector.
+ *
+ * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC uint32_t fio_has_full_byte32_maybe(uint32_t row) {
+  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
+         UINT32_C(0x80808080);
+}
+
+/**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
@@ -3305,6 +3316,17 @@ FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
 FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
   return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
          (row & UINT64_C(0x8080808080808080));
+}
+
+/**
+ * Detects a good chance that there's a byte where all the bits are set (255)
+ * within an 8 byte vector.
+ *
+ * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC uint64_t fio_has_full_byte64_maybe(uint64_t row) {
+  return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
+         UINT64_C(0x8080808080808080);
 }
 
 /**
@@ -7277,14 +7299,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
                          0,
                          1);
 #if HAVE_OPENSSL
-  fprintf(stderr, "\tComparing to " OPENSSL_VERSION_TEXT "\n");
+  fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"SHA1",
+                         (char *)"OpenSSL SHA-1",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"SHA1",
+                         (char *)"OpenSSL SHA-1",
                          13,
                          0,
                          1);
@@ -7715,24 +7737,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   //                        0,
   //                        1);
 #if HAVE_OPENSSL
-  fprintf(stderr, "\tComparing to " OPENSSL_VERSION_TEXT "\n");
+  fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA256",
+                         (char *)"OpenSSL SHA-256",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA256",
+                         (char *)"OpenSSL SHA-256",
                          13,
                          0,
                          1);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA512",
+                         (char *)"OpenSSL SHA-512",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA512",
+                         (char *)"OpenSSL SHA-512",
                          13,
                          0,
                          1);
@@ -13017,6 +13039,60 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
 
+FIO_SFUNC void *fio___naive_memchr(const void *buffer,
+                                   const char token,
+                                   size_t len) {
+  const char *r = (const char *)buffer;
+  const char *e = r + len;
+#if 0
+  const char *e_group = r + (len & (~UINT64_C(63)));
+  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
+  umask |= (umask << 32);
+  umask |= (umask << 16);
+  umask |= (umask << 8);
+  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
+  for (; r < e_group; r += 64) {
+    fio_512u u;
+    FIO_MEMCPY64(u.u64, r);
+    for (size_t i = 0; i < 8; ++i) {
+      u.u64[i] = u.u64[i] ^ umask;
+      u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+      u.u64[i] += UINT64_C(0x0101010101010101);
+      u.u64[i] &= UINT64_C(0x8080808080808080);
+    }
+    if (!(u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3] | u.u64[4] | u.u64[5] |
+          u.u64[6] | u.u64[7]))
+      continue;
+    for (size_t i = 0; i < 64; ++i) {
+      if (r[i] == token)
+        return (void *)(r + i);
+    }
+  }
+  if (r + 31 < e) {
+    fio_256u u;
+    FIO_MEMCPY32(u.u64, r);
+    for (size_t i = 0; i < 4; ++i) {
+      u.u64[i] = u.u64[i] ^ umask;
+      u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
+      u.u64[i] += UINT64_C(0x0101010101010101);
+      u.u64[i] &= UINT64_C(0x8080808080808080);
+    }
+    if ((u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3])) {
+      for (size_t i = 0; i < 32;) {
+        if (r[i] == token)
+          return (void *)(r + i);
+        ++i;
+      }
+    }
+  }
+#endif
+  for (; r < e; ++r) {
+    if (*r == token)
+      return (void *)r;
+  }
+  return NULL;
+}
+
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
@@ -13159,6 +13235,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
+    FIO_ASSERT(fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
+                   fio_memchr((char *)mem + 1, 0, mem_len),
+               "fio_memchr != naive approach");
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
@@ -13172,6 +13251,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
             "\tfio_memchr\t(%zu bytes):\t%zu us\n",
             token_index,
             (size_t)(end - start));
+
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
@@ -13182,6 +13262,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
     fprintf(stderr,
             "\tsystem memchr\t(%zu bytes):\t%zu us\n",
+            token_index,
+            (size_t)(end - start));
+
+    start = fio_time_micro();
+    for (int i = 0; i < repetitions; ++i) {
+      FIO_ASSERT((char *)fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
+                     ((char *)mem + token_index),
+                 "memchr failed?");
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\ta naive memchr\t(%zu bytes):\t%zu us\n",
             token_index,
             (size_t)(end - start));
 

@@ -554,6 +554,17 @@ FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
 }
 
 /**
+ * Detects a good chance that there's a byte where all the bits are set (255)
+ * within a 4 byte vector.
+ *
+ * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC uint32_t fio_has_full_byte32_maybe(uint32_t row) {
+  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
+         UINT32_C(0x80808080);
+}
+
+/**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
@@ -579,6 +590,17 @@ FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
 FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
   return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
          (row & UINT64_C(0x8080808080808080));
+}
+
+/**
+ * Detects a good chance that there's a byte where all the bits are set (255)
+ * within an 8 byte vector.
+ *
+ * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC uint64_t fio_has_full_byte64_maybe(uint64_t row) {
+  return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
+         UINT64_C(0x8080808080808080);
 }
 
 /**
