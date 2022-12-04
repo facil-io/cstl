@@ -2567,8 +2567,8 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
                                    size_t len) {
   const char *r = (const char *)buffer;
   const char *e = r + len;
-#if 0
   const char *e_group = r + (len & (~UINT64_C(63)));
+#if 0
   uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
   umask |= (umask << 32);
   umask |= (umask << 16);
@@ -2606,6 +2606,13 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
           return (void *)(r + i);
         ++i;
       }
+    }
+  }
+#else
+  for (; r < e_group; r += 64) {
+    for (size_t i = 0; i < 64; ++i) {
+      if (r[i] == token)
+        return (void *)(r + i);
     }
   }
 #endif
