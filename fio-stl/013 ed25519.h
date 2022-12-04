@@ -21,7 +21,7 @@ Copyright and License: see header file (000 header.h) or top of file
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
-TODO: ED25519
+TODO: ED 25519, ED 448
 
 ED-25519 key generation, key exchange and signatures are crucial to complete the
 minimal building blocks that would allow to secure inter-machine communication

@@ -203,7 +203,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
 #endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
-  fprintf(stderr, "* Testing SHA1\n");
+  fprintf(stderr, "* Testing SHA-1\n");
   struct {
     const char *str;
     const char *sha1;
@@ -243,13 +243,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
                          0,
                          1);
 #if HAVE_OPENSSL
+  fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
+                         (char *)"OpenSSL SHA-1",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
+                         (char *)"OpenSSL SHA-1",
                          13,
                          0,
                          1);

@@ -7237,7 +7237,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
 #endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
-  fprintf(stderr, "* Testing SHA1\n");
+  fprintf(stderr, "* Testing SHA-1\n");
   struct {
     const char *str;
     const char *sha1;
@@ -7277,13 +7277,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
                          0,
                          1);
 #if HAVE_OPENSSL
+  fprintf(stderr, "\tComparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
+                         (char *)"SHA1",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA1",
+                         (char *)"SHA1",
                          13,
                          0,
                          1);
@@ -7321,9 +7322,10 @@ Copyright and License: see header file (000 header.h) or top of file
 #if defined(FIO_SHA2) && !defined(H___FIO_SHA2___H)
 #define H___FIO_SHA2___H
 /* *****************************************************************************
-SHA 2 API - TODO!
+SHA 2 API
 ***************************************************************************** */
 
+/** Streaming SHA-256 type. */
 typedef struct {
   fio_256u hash;
   fio_512u cache;
@@ -7332,22 +7334,30 @@ typedef struct {
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
 FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len);
-/** A simple, non streaming, implementation of the SHA-512 hashing algorithm. */
-FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len);
 
-/** initializes a fio_256u so the hash can be consumed. */
+/** initializes a fio_256u so the hash can consume streaming data. */
 FIO_IFUNC fio_sha256_s fio_sha256_init();
 /** Feed data into the hash */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
 /** finalizes a fio_256u with the SHA 256 hash. */
 SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h);
 
-/** initializes a fio_512u so the hash can be consumed. */
-FIO_IFUNC fio_512u fio_sha512_init();
-/** if ((len == 0) || (len & 127)), the hash will be finalized! */
-SFUNC fio_512u fio_sha512_consume(fio_512u h, const void *data, uint64_t len);
+/** Streaming SHA-512 type. */
+typedef struct {
+  fio_512u hash;
+  fio_1024u cache;
+  uint64_t total_len;
+} fio_sha512_s;
+
+/** A simple, non streaming, implementation of the SHA-512 hashing algorithm. */
+FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len);
+
+/** initializes a fio_512u so the hash can consume streaming data. */
+FIO_IFUNC fio_sha512_s fio_sha512_init();
+/** Feed data into the hash */
+SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
 /** finalizes a fio_512u with the SHA 512 hash. */
-FIO_IFUNC fio_512u fio_sha512_finalize(fio_512u h);
+SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h);
 
 /* *****************************************************************************
 Implementation - static / inline functions.
@@ -7374,27 +7384,26 @@ FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len) {
 }
 
 /** initializes a fio_256u so the hash can be consumed. */
-FIO_IFUNC fio_512u fio_sha512_init() {
-  fio_512u h = {.u64 = {0ULL}}; /* TODO! */
+FIO_IFUNC fio_sha512_s fio_sha512_init() {
+  fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
   return h;
 }
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
 FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len) {
-  fio_512u h = fio_sha512_init();
-  h = fio_sha512_consume(h, data, len);
-  if (len && !(len & 127))
-    h = fio_sha512_consume(h, NULL, 0);
-  return h;
-}
-FIO_IFUNC fio_512u fio_sha512_finalize(fio_512u h) {
-  return fio_sha512_consume(h, NULL, 0);
+  fio_sha512_s h = fio_sha512_init();
+  fio_sha512_consume(&h, data, len);
+  return fio_sha512_finalize(&h);
 }
 
 /* *****************************************************************************
 Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Implementation - SHA-256
+***************************************************************************** */
 
 FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
   const uint32_t sha256_consts[64] = {
@@ -7419,7 +7428,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
   }
 
-#define FIO___SHA256_ROUND_INNER()                                             \
+#define FIO___SHA256_ROUND_INNER_COMMON()                                      \
   const uint32_t t2 = ((h->u32[0] & h->u32[1]) ^ (h->u32[0] & h->u32[2]) ^     \
                        (h->u32[1] & h->u32[2])) +                              \
                       (fio_rrot32(h->u32[0], 2) ^ fio_rrot32(h->u32[0], 13) ^  \
@@ -7438,7 +7447,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
                         ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
                         (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
                          fio_rrot32(h->u32[4], 25));
-    FIO___SHA256_ROUND_INNER();
+    FIO___SHA256_ROUND_INNER_COMMON();
   }
   for (size_t i = 0; i < 48; ++i) { /* expand block */
     w[(i & 15)] =
@@ -7451,10 +7460,11 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
                         ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
                         (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
                          fio_rrot32(h->u32[4], 25));
-    FIO___SHA256_ROUND_INNER();
+    FIO___SHA256_ROUND_INNER_COMMON();
   }
   for (size_t i = 0; i < 8; ++i)
     h->u32[i] += old.u32[i]; /* compress block with previous state */
+#undef FIO___SHA256_ROUND_INNER_COMMON
 }
 
 /** consume data and feed it to hash. */
@@ -7500,14 +7510,72 @@ SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
   fio___sha256_round(&h->hash, h->cache.u8);
   for (size_t i = 0; i < 8; ++i)
     h->hash.u32[i] = fio_ntol32(h->hash.u32[i]); /* back to big endien */
+  h->total_len = ((uint64_t)0ULL - 1ULL);
   return h->hash;
 }
 
-SFUNC fio_512u fio_sha512_consume(fio_512u h, const void *data, uint64_t len) {
-  return h;
+/* *****************************************************************************
+Implementation - SHA-512
+***************************************************************************** */
+
+FIO_IFUNC void fio___sha512_round(fio_512u *h, const uint8_t *block) {
+  /* TODO! */
+  (void)h;
+  (void)block;
+}
+
+/** Feed data into the hash */
+SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
+  (void)h;
   (void)data;
   (void)len;
   /* TODO! */
+
+  const uint8_t *r = (const uint8_t *)data;
+  const size_t old_total = h->total_len;
+  const size_t new_total = len + h->total_len;
+  h->total_len = new_total;
+  /* manage cache */
+  if (old_total & 127) {
+    const size_t offset = (old_total & 127);
+    if (len + offset < 128) { /* not enough - copy to cache */
+      FIO_MEMCPY127x((h->cache.u8 + offset), r, len);
+      return;
+    }
+    /* consume cache */
+    const size_t byte2copy = 128UL - offset;
+    FIO_MEMCPY127x(h->cache.u8 + offset, r, byte2copy);
+    fio___sha512_round(&h->hash, h->cache.u8);
+    FIO_MEMSET(h->cache.u8, 0, 128);
+    r += byte2copy;
+    len -= byte2copy;
+  }
+  const uint8_t *end = r + (len & (~(uint64_t)127ULL));
+  while ((uintptr_t)r < (uintptr_t)end) {
+    fio___sha512_round(&h->hash, r);
+    r += 128;
+  }
+  FIO_MEMCPY63x(h->cache.u64, r, len);
+}
+
+/** finalizes a fio_512u with the SHA 512 hash. */
+SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h) {
+  /* TODO! */
+  if (h->total_len == ((uint64_t)0ULL - 1ULL))
+    return h->hash;
+  const size_t total = h->total_len;
+  const size_t remainder = total & 127;
+  h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
+  if ((remainder) > 119) { /* make sure there's room to attach `total_len` */
+    fio___sha512_round(&h->hash, h->cache.u8);
+    FIO_MEMSET(h->cache.u8, 0, 128);
+  }
+  h->cache.u64[15] = fio_lton64((total << 3));
+  fio___sha512_round(&h->hash, h->cache.u8);
+  for (size_t i = 0; i < 8; ++i)
+    h->hash.u64[i] = fio_ntol64(h->hash.u64[i]); /* back to big endien */
+  h->total_len = ((uint64_t)0ULL - 1ULL);
+  return h->hash;
 }
 
 /* *****************************************************************************
@@ -7530,7 +7598,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
   fio_256u result;
@@ -7543,11 +7610,10 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
   SHA512((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
-
-#endif
+#endif /* HAVE_OPENSSL */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
-  fprintf(stderr, "* Testing SHA2\n");
+  fprintf(stderr, "* Testing SHA-2\n");
   struct {
     const char *str;
     const char *sha256;
@@ -7649,6 +7715,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   //                        0,
   //                        1);
 #if HAVE_OPENSSL
+  fprintf(stderr, "\tComparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
                          (char *)"OpenSSL SHA256",
                          5,
@@ -8215,6 +8282,17 @@ Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
+#if HAVE_OPENSSL
+// #include <openssl/bio.h>
+// #include <openssl/err.h>
+// #include <openssl/ssl.h>
+// FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __poly1305_open_ssl_wrapper)(char
+// *data,
+//                                                                   size_t len)
+//                                                                   {
+// }
+#endif /* HAVE_OPENSSL */
+
 FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
   uint64_t result[2];
   char *key =
@@ -8360,6 +8438,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          3,
                          0);
+#if HAVE_OPENSSL && 0
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305 (unaligned)",
+                         13,
+                         3,
+                         0);
+#endif /* HAVE_OPENSSL */
 
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",
@@ -8432,7 +8527,7 @@ Copyright and License: see header file (000 header.h) or top of file
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
-TODO: ED25519
+TODO: ED 25519, ED 448
 
 ED-25519 key generation, key exchange and signatures are crucial to complete the
 minimal building blocks that would allow to secure inter-machine communication

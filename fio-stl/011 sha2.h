@@ -296,7 +296,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
   fio_256u result;
@@ -309,11 +308,10 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
   SHA512((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
-
-#endif
+#endif /* HAVE_OPENSSL */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
-  fprintf(stderr, "* Testing SHA2\n");
+  fprintf(stderr, "* Testing SHA-2\n");
   struct {
     const char *str;
     const char *sha256;
@@ -415,23 +413,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   //                        0,
   //                        1);
 #if HAVE_OPENSSL
+  fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA256",
+                         (char *)"OpenSSL SHA-256",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA256",
+                         (char *)"OpenSSL SHA-256",
                          13,
                          0,
                          1);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA512",
+                         (char *)"OpenSSL SHA-512",
                          5,
                          0,
                          0);
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA512",
+                         (char *)"OpenSSL SHA-512",
                          13,
                          0,
                          1);

@@ -532,6 +532,17 @@ Module Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
 
+#if HAVE_OPENSSL
+// #include <openssl/bio.h>
+// #include <openssl/err.h>
+// #include <openssl/ssl.h>
+// FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __poly1305_open_ssl_wrapper)(char
+// *data,
+//                                                                   size_t len)
+//                                                                   {
+// }
+#endif /* HAVE_OPENSSL */
+
 FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
   uint64_t result[2];
   char *key =
@@ -677,6 +688,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          3,
                          0);
+#if HAVE_OPENSSL && 0
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305 (unaligned)",
+                         13,
+                         3,
+                         0);
+#endif /* HAVE_OPENSSL */
 
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",

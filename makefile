@@ -492,6 +492,7 @@ ifdef TEST4CRYPTO
 FIO_TLS_TEST_OPENSSL:="\\n\
 \#define _GNU_SOURCE\\n\
 \#include <stdlib.h>\\n\
+\#include <stdio.h>\\n\
 \#include <openssl/bio.h> \\n\
 \#include <openssl/err.h> \\n\
 \#include <openssl/ssl.h> \\n\
