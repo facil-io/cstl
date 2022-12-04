@@ -704,13 +704,13 @@ FIO_SFUNC struct {
 /* Returns zero (0) on success or -1 on failure. */
 SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
                                    void (*cleanup)(void *)) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1) &&
         metadata_func == FIO_PUBSUB_METADATA[i].build)
       return 0;
     fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
   }
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT;
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT;
        ++i) { /* insert if available */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -729,7 +729,7 @@ SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
  * Removal might be delayed if live metatdata exists.
  */
 SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1) &&
         metadata_func == FIO_PUBSUB_METADATA[i].build) {
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -741,7 +741,7 @@ SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
 /** Finds the message's metadata, returning the data or NULL. */
 SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (FIO_PUBSUB_METADATA[i].ref &&
         metadata_func == FIO_PUBSUB_METADATA[i].build) {
       return fio_msg2letter(msg)->metadata[i];
@@ -754,7 +754,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
 FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   if (!l->metadata_is_initialized)
     return;
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       FIO_PUBSUB_METADATA[i].cleanup(l->metadata[i]);
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -768,7 +768,7 @@ FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
   if (fio_atomic_or(&l->metadata_is_initialized, 1)) {
     return;
   }
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       l->metadata[i] = FIO_PUBSUB_METADATA[i].build(
           fio_letter_channel(l),

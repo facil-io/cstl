@@ -132,7 +132,7 @@ iMap Creation Macro
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
       /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
-      for (int mini_steps = 0;;) {                                             \
+      for (size_t mini_steps = 0;;) {                                          \
         pos &= pos_mask;                                                       \
         const imap_type pos_hash = imap[pos] & hash_mask;                      \
         const imap_type pos_index = imap[pos] & pos_mask;                      \

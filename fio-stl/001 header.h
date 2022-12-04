@@ -1086,22 +1086,22 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
   if (t && result)
     *result = *t;
   return result;
 }
 
-FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
+FIO_IFUNC int fio___w_strcasecmp(const char *s1, const char *s2) {
   return _stricmp(s1, s2);
 }
 
-FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
+FIO_IFUNC int fio___w_write(int fd, const void *b, unsigned int l) {
   return _write(fd, b, l);
 }
 
-FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
+FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
 
@@ -1112,6 +1112,7 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
 #define stat _stat
 #endif /* stat */
 
+#ifndef O_APPEND
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
@@ -1136,7 +1137,7 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
-
+#endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
 #endif
@@ -1170,9 +1171,13 @@ FIO_SFUNC ssize_t fio_pwrite(int fd,
                              off_t offset);
 FIO_SFUNC int fio_kill(int pid, int signum);
 
-#define kill   fio_kill
-#define pread  fio_pread
-#define pwrite fio_pwrite
+#define kill       fio_kill
+#define pread      fio_pread
+#define pwrite     fio_pwrite
+#define gmtime_r   fio___w_gmtime_r
+#define strcasecmp fio___w_strcasecmp
+#define write      fio___w_write
+#define read       fio___w_read
 
 #if !FIO_HAVE_UNIX_TOOLS
 /* patch clock_gettime */

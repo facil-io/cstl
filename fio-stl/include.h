@@ -35,8 +35,14 @@
 #ifdef FIO_SHA1
 #include "011 sha1.h"
 #endif
+#ifdef FIO_SHA2
+#include "011 sha2.h"
+#endif
 #ifdef FIO_CHACHA
 #include "012 chacha20poly1305.h"
+#endif
+#ifdef FIO_ED25519
+#include "013 ed25519.h"
 #endif
 #ifdef FIO_IMAP_CORE
 #include "020 imap.h"

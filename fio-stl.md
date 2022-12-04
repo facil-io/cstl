@@ -4861,8 +4861,8 @@ FIO_IFUNC uintptr_t map_get2(map_s *m, key_s key) {
 void example(void) {
   map_s m = FIO_MAP_INIT;
   /* write the long keys twice, to prove they self-destruct in the Hash-Map */
-  for (int overwrite = 0; overwrite < 2; ++overwrite) {
-    for (int i = 0; i < 10; ++i) {
+  for (size_t overwrite = 0; overwrite < 2; ++overwrite) {
+    for (size_t i = 0; i < 10; ++i) {
       const char *prefix = "a long key will require memory allocation: ";
       key_s k;
       key_init_const(&k, prefix, strlen(prefix)); /* points to string literal */
@@ -4872,7 +4872,7 @@ void example(void) {
     }
   }
   /* short keys don't allocate external memory (string embedded in the object) */
-  for (int i = 0; i < 10; ++i) {
+  for (size_t i = 0; i < 10; ++i) {
     /* short keys fit in pointer + length type... test assumes 64bit addresses */
     const char *prefix = "embed: ";
     key_s k;

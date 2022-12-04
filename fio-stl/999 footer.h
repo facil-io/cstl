@@ -33,6 +33,8 @@ Everything, and the Kitchen Sink
 #define FIO_RAND
 #define FIO_RISKY_HASH
 #define FIO_SHA1
+// #define FIO_SHA2
+// #define FIO_ED25519
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_STATE

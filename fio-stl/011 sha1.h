@@ -16,12 +16,13 @@
 
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
-#ifdef FIO_SHA1
+#if defined(FIO_SHA1) && !defined(H___FIO_SHA1___H)
+#define H___FIO_SHA1___H
 /* *****************************************************************************
 SHA 1
 ***************************************************************************** */
 
-/** The data tyope containing the SHA1 digest (result). */
+/** The data type containing the SHA1 digest (result). */
 typedef union {
 #ifdef __SIZEOF_INT128__
   __uint128_t align__;
@@ -194,12 +195,9 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
                                                                 size_t len) {
-  uintptr_t result[6];
-  SHA_CTX o_sh1;
-  SHA1_Init(&o_sh1);
-  SHA1_Update(&o_sh1, data, len);
-  SHA1_Final((unsigned char *)result, &o_sh1);
-  return result[0];
+  fio_256u result;
+  SHA1((const unsigned char *)data, len, result.u8);
+  return result.u64[0];
 }
 
 #endif

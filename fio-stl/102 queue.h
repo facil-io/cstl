@@ -798,7 +798,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
   /* test task user data integrity. */
   fio___queue_test_counter_task(NULL, NULL);
-  for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
+  for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
     fio_queue_push(q,
                    .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
@@ -806,7 +806,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
-  for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
+  for (size_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
        i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
        ++i) {
     fio_queue_push(q,

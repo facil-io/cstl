@@ -771,11 +771,11 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       comb |= ((uint64_t)imap[(pos + offsets[6]) & pos_mask]) << (6 * 8);
       comb |= ((uint64_t)imap[(pos + offsets[7]) & pos_mask]) << (7 * 8);
       const uint64_t has_possible_match =
-          (((comb ^ bhash64) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) *
+          (((comb ^ bhash64) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) &
           0x8080808080808080ULL;
       if (has_possible_match) {
         /* there was a 7 bit match in one of the bytes in this 8 byte group */
-        for (int i = 0; i < 8; ++i) {
+        for (size_t i = 0; i < 8; ++i) {
           const uint32_t tmp = (pos + offsets[i]) & pos_mask;
           if (imap[tmp] != bhash)
             continue;

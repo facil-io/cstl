@@ -64,6 +64,48 @@ typedef union {
 #endif
 } fio_512u;
 
+/** An unsigned 1024bit union type. */
+typedef union {
+  uint8_t u8[128];
+  uint16_t u16[64];
+  uint32_t u32[32];
+  uint64_t u64[16];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[8];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[4];
+#endif
+} fio_1024u;
+
+/** An unsigned 2048bit union type. */
+typedef union {
+  uint8_t u8[256];
+  uint16_t u16[128];
+  uint32_t u32[64];
+  uint64_t u64[32];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[8];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[4];
+#endif
+} fio_2048u;
+
+/** An unsigned 4096bit union type. */
+typedef union {
+  uint8_t u8[512];
+  uint16_t u16[256];
+  uint32_t u32[128];
+  uint64_t u64[64];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[32];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[16];
+#endif
+} fio_4096u;
+
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */

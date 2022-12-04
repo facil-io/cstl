@@ -398,10 +398,6 @@ FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 Memory Copying Primitives
 ***************************************************************************** */
 
-#ifndef FIO_MEMCPYX_UNROLL
-/** If set, manual unrolling is used for the fio___memcpy7x helper. */
-#define FIO_MEMCPYX_UNROLL 1
-#endif
 #if __has_builtin(__builtin_memset)
 #ifndef FIO_MEMSET
 #define FIO_MEMSET __builtin_memset
@@ -495,63 +491,57 @@ FIO___MAKE_MEMCPY_FIXED(4096)
 #define FIO_MEMCPY63x(dest, src, len)   fio___memcpy63x((dest), (src), (len))
 #define FIO_MEMCPY127x(dest, src, len)  fio___memcpy127x((dest), (src), (len))
 #define FIO_MEMCPY255x(dest, src, len)  fio___memcpy255x((dest), (src), (len))
+#define FIO_MEMCPY511x(dest, src, len)  fio___memcpy511x((dest), (src), (len))
 #define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-  char *restrict d = (char *)d_;
-  char *restrict s = (char *)s_;
-#if FIO_MEMCPYX_UNROLL
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
     *d = *s;
-#else
-  l &= 7;
-  while (l--) {
-    *(d++) = *(s++);
-  }
-#endif
 }
 
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void fio___memcpy15x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy15x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio___memcpy31x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy31x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_IFUNC void fio___memcpy63x(void *restrict dest_,
-                               const void *restrict src_,
+FIO_IFUNC void fio___memcpy63x(void *restrict d_,
+                               const void *restrict s_,
                                size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_IFUNC void fio___memcpy127x(void *restrict dest_,
-                                const void *restrict src_,
+FIO_IFUNC void fio___memcpy127x(void *restrict d_,
+                                const void *restrict s_,
                                 size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(64);
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
@@ -559,11 +549,25 @@ FIO_IFUNC void fio___memcpy127x(void *restrict dest_,
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy255x(void *restrict dest_,
-                                const void *restrict src_,
+FIO_IFUNC void fio___memcpy255x(void *restrict d_,
+                                const void *restrict s_,
                                 size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
+FIO_IFUNC void fio___memcpy511x(void *restrict d_,
+                                const void *restrict s_,
+                                size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(256);
   FIO_MEMCPY___PARTIAL(128);
   FIO_MEMCPY___PARTIAL(64);
   FIO_MEMCPY___PARTIAL(32);
@@ -572,11 +576,11 @@ FIO_IFUNC void fio___memcpy255x(void *restrict dest_,
   fio___memcpy7x(d, s, l);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy4095x(void *restrict dest_,
-                                 const void *restrict src_,
+FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
+                                 const void *restrict s_,
                                  size_t l) {
-  char *restrict d = (char *)dest_;
-  const char *restrict s = (const char *)src_;
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(2048);
   FIO_MEMCPY___PARTIAL(1024);
   FIO_MEMCPY___PARTIAL(512);
@@ -1210,22 +1214,22 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
   if (t && result)
     *result = *t;
   return result;
 }
 
-FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
+FIO_IFUNC int fio___w_strcasecmp(const char *s1, const char *s2) {
   return _stricmp(s1, s2);
 }
 
-FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
+FIO_IFUNC int fio___w_write(int fd, const void *b, unsigned int l) {
   return _write(fd, b, l);
 }
 
-FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
+FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
 
@@ -1236,6 +1240,7 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
 #define stat _stat
 #endif /* stat */
 
+#ifndef O_APPEND
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
 #define O_CREAT       _O_CREAT
@@ -1260,7 +1265,7 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
-
+#endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
 #endif
@@ -1294,9 +1299,13 @@ FIO_SFUNC ssize_t fio_pwrite(int fd,
                              off_t offset);
 FIO_SFUNC int fio_kill(int pid, int signum);
 
-#define kill   fio_kill
-#define pread  fio_pread
-#define pwrite fio_pwrite
+#define kill       fio_kill
+#define pread      fio_pread
+#define pwrite     fio_pwrite
+#define gmtime_r   fio___w_gmtime_r
+#define strcasecmp fio___w_strcasecmp
+#define write      fio___w_write
+#define read       fio___w_read
 
 #if !FIO_HAVE_UNIX_TOOLS
 /* patch clock_gettime */
@@ -3925,6 +3934,48 @@ typedef union {
   __uint256_t u256[2];
 #endif
 } fio_512u;
+
+/** An unsigned 1024bit union type. */
+typedef union {
+  uint8_t u8[128];
+  uint16_t u16[64];
+  uint32_t u32[32];
+  uint64_t u64[16];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[8];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[4];
+#endif
+} fio_1024u;
+
+/** An unsigned 2048bit union type. */
+typedef union {
+  uint8_t u8[256];
+  uint16_t u16[128];
+  uint32_t u32[64];
+  uint64_t u64[32];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[8];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[4];
+#endif
+} fio_2048u;
+
+/** An unsigned 4096bit union type. */
+typedef union {
+  uint8_t u8[512];
+  uint16_t u16[256];
+  uint32_t u32[128];
+  uint64_t u64[64];
+#if defined(__SIZEOF_INT128__)
+  __uint128_t u128[32];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t u256[16];
+#endif
+} fio_4096u;
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -6999,12 +7050,13 @@ Random - Cleanup
 
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
-#ifdef FIO_SHA1
+#if defined(FIO_SHA1) && !defined(H___FIO_SHA1___H)
+#define H___FIO_SHA1___H
 /* *****************************************************************************
 SHA 1
 ***************************************************************************** */
 
-/** The data tyope containing the SHA1 digest (result). */
+/** The data type containing the SHA1 digest (result). */
 typedef union {
 #ifdef __SIZEOF_INT128__
   __uint128_t align__;
@@ -7177,12 +7229,9 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
                                                                 size_t len) {
-  uintptr_t result[6];
-  SHA_CTX o_sh1;
-  SHA1_Init(&o_sh1);
-  SHA1_Update(&o_sh1, data, len);
-  SHA1_Final((unsigned char *)result, &o_sh1);
-  return result[0];
+  fio_256u result;
+  SHA1((const unsigned char *)data, len, result.u8);
+  return result.u64[0];
 }
 
 #endif
@@ -7250,6 +7299,388 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SHA1 */
 #undef FIO_SHA1
+/* ************************************************************************* */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_SHA2       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                    SHA 2
+                        SHA-256 / SHA-512 and variations
+
+
+
+Copyright and License: see header file (000 header.h) or top of file
+***************************************************************************** */
+#if defined(FIO_SHA2) && !defined(H___FIO_SHA2___H)
+#define H___FIO_SHA2___H
+/* *****************************************************************************
+SHA 2 API - TODO!
+***************************************************************************** */
+
+typedef struct {
+  fio_256u hash;
+  fio_512u cache;
+  uint64_t total_len;
+} fio_sha256_s;
+
+/** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
+FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len);
+/** A simple, non streaming, implementation of the SHA-512 hashing algorithm. */
+FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len);
+
+/** initializes a fio_256u so the hash can be consumed. */
+FIO_IFUNC fio_sha256_s fio_sha256_init();
+/** Feed data into the hash */
+SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
+/** finalizes a fio_256u with the SHA 256 hash. */
+SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h);
+
+/** initializes a fio_512u so the hash can be consumed. */
+FIO_IFUNC fio_512u fio_sha512_init();
+/** if ((len == 0) || (len & 127)), the hash will be finalized! */
+SFUNC fio_512u fio_sha512_consume(fio_512u h, const void *data, uint64_t len);
+/** finalizes a fio_512u with the SHA 512 hash. */
+FIO_IFUNC fio_512u fio_sha512_finalize(fio_512u h);
+
+/* *****************************************************************************
+Implementation - static / inline functions.
+***************************************************************************** */
+
+/** initializes a fio_256u so the hash can be consumed. */
+FIO_IFUNC fio_sha256_s fio_sha256_init() {
+  fio_sha256_s h = {.hash.u32 = {0x6A09E667ULL,
+                                 0xBB67AE85ULL,
+                                 0x3C6EF372ULL,
+                                 0xA54FF53AULL,
+                                 0x510E527FULL,
+                                 0x9B05688CULL,
+                                 0x1F83D9ABULL,
+                                 0x5BE0CD19ULL}};
+  return h;
+}
+
+/** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
+FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len) {
+  fio_sha256_s h = fio_sha256_init();
+  fio_sha256_consume(&h, data, len);
+  return fio_sha256_finalize(&h);
+}
+
+/** initializes a fio_256u so the hash can be consumed. */
+FIO_IFUNC fio_512u fio_sha512_init() {
+  fio_512u h = {.u64 = {0ULL}}; /* TODO! */
+  return h;
+}
+
+/** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
+FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len) {
+  fio_512u h = fio_sha512_init();
+  h = fio_sha512_consume(h, data, len);
+  if (len && !(len & 127))
+    h = fio_sha512_consume(h, NULL, 0);
+  return h;
+}
+FIO_IFUNC fio_512u fio_sha512_finalize(fio_512u h) {
+  return fio_sha512_consume(h, NULL, 0);
+}
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
+  const uint32_t sha256_consts[64] = {
+      0x428A2F98ULL, 0x71374491ULL, 0xB5C0FBCFULL, 0xE9B5DBA5ULL, 0x3956C25BULL,
+      0x59F111F1ULL, 0x923F82A4ULL, 0xAB1C5ED5ULL, 0xD807AA98ULL, 0x12835B01ULL,
+      0x243185BEULL, 0x550C7DC3ULL, 0x72BE5D74ULL, 0x80DEB1FEULL, 0x9BDC06A7ULL,
+      0xC19BF174ULL, 0xE49B69C1ULL, 0xEFBE4786ULL, 0x0FC19DC6ULL, 0x240CA1CCULL,
+      0x2DE92C6FULL, 0x4A7484AAULL, 0x5CB0A9DCULL, 0x76F988DAULL, 0x983E5152ULL,
+      0xA831C66DULL, 0xB00327C8ULL, 0xBF597FC7ULL, 0xC6E00BF3ULL, 0xD5A79147ULL,
+      0x06CA6351ULL, 0x14292967ULL, 0x27B70A85ULL, 0x2E1B2138ULL, 0x4D2C6DFCULL,
+      0x53380D13ULL, 0x650A7354ULL, 0x766A0ABBULL, 0x81C2C92EULL, 0x92722C85ULL,
+      0xA2BFE8A1ULL, 0xA81A664BULL, 0xC24B8B70ULL, 0xC76C51A3ULL, 0xD192E819ULL,
+      0xD6990624ULL, 0xF40E3585ULL, 0x106AA070ULL, 0x19A4C116ULL, 0x1E376C08ULL,
+      0x2748774CULL, 0x34B0BCB5ULL, 0x391C0CB3ULL, 0x4ED8AA4AULL, 0x5B9CCA4FULL,
+      0x682E6FF3ULL, 0x748F82EEULL, 0x78A5636FULL, 0x84C87814ULL, 0x8CC70208ULL,
+      0x90BEFFFAULL, 0xA4506CEBULL, 0xBEF9A3F7ULL, 0xC67178F2ULL};
+  const fio_256u old = *h;
+  /* read data as an array of 16 big endian 32 bit integers. */
+  uint32_t w[16];
+  FIO_MEMCPY64(w, block);
+  for (size_t i = 0; i < 16; ++i) {
+    w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
+  }
+
+#define FIO___SHA256_ROUND_INNER()                                             \
+  const uint32_t t2 = ((h->u32[0] & h->u32[1]) ^ (h->u32[0] & h->u32[2]) ^     \
+                       (h->u32[1] & h->u32[2])) +                              \
+                      (fio_rrot32(h->u32[0], 2) ^ fio_rrot32(h->u32[0], 13) ^  \
+                       fio_rrot32(h->u32[0], 22));                             \
+  h->u32[7] = h->u32[6];                                                       \
+  h->u32[6] = h->u32[5];                                                       \
+  h->u32[5] = h->u32[4];                                                       \
+  h->u32[4] = h->u32[3];                                                       \
+  h->u32[3] = h->u32[2];                                                       \
+  h->u32[2] = h->u32[1];                                                       \
+  h->u32[1] = h->u32[0];                                                       \
+  h->u32[4] += t1;                                                             \
+  h->u32[0] = t1 + t2
+  for (size_t i = 0; i < 16; ++i) {
+    const uint32_t t1 = h->u32[7] + sha256_consts[i] + w[i] +
+                        ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
+                        (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
+                         fio_rrot32(h->u32[4], 25));
+    FIO___SHA256_ROUND_INNER();
+  }
+  for (size_t i = 0; i < 48; ++i) { /* expand block */
+    w[(i & 15)] =
+        (fio_rrot32(w[((i + 14) & 15)], 17) ^
+         fio_rrot32(w[((i + 14) & 15)], 19) ^ (w[((i + 14) & 15)] >> 10)) +
+        w[((i + 9) & 15)] + w[(i & 15)] +
+        (fio_rrot32(w[((i + 1) & 15)], 7) ^ fio_rrot32(w[((i + 1) & 15)], 18) ^
+         (w[((i + 1) & 15)] >> 3));
+    const uint32_t t1 = h->u32[7] + sha256_consts[i + 16] + w[(i & 15)] +
+                        ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
+                        (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
+                         fio_rrot32(h->u32[4], 25));
+    FIO___SHA256_ROUND_INNER();
+  }
+  for (size_t i = 0; i < 8; ++i)
+    h->u32[i] += old.u32[i]; /* compress block with previous state */
+}
+
+/** consume data and feed it to hash. */
+SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
+  const uint8_t *r = (const uint8_t *)data;
+  const size_t old_total = h->total_len;
+  const size_t new_total = len + h->total_len;
+  h->total_len = new_total;
+  /* manage cache */
+  if (old_total & 63) {
+    const size_t offset = (old_total & 63);
+    if (len + offset < 64) { /* not enough - copy to cache */
+      FIO_MEMCPY63x((h->cache.u8 + offset), r, len);
+      return;
+    }
+    /* consume cache */
+    const size_t byte2copy = 64UL - offset;
+    FIO_MEMCPY63x(h->cache.u8 + offset, r, byte2copy);
+    fio___sha256_round(&h->hash, h->cache.u8);
+    FIO_MEMSET(h->cache.u8, 0, 64);
+    r += byte2copy;
+    len -= byte2copy;
+  }
+  const uint8_t *end = r + (len & (~(uint64_t)63ULL));
+  while ((uintptr_t)r < (uintptr_t)end) {
+    fio___sha256_round(&h->hash, r);
+    r += 64;
+  }
+  FIO_MEMCPY63x(h->cache.u64, r, len);
+}
+
+SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
+  if (h->total_len == ((uint64_t)0ULL - 1ULL))
+    return h->hash;
+  const size_t total = h->total_len;
+  const size_t remainder = total & 63;
+  h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
+  if ((remainder) > 47) { /* make sure there's room to attach `total_len` */
+    fio___sha256_round(&h->hash, h->cache.u8);
+    FIO_MEMSET(h->cache.u8, 0, 64);
+  }
+  h->cache.u64[7] = fio_lton64((total << 3));
+  fio___sha256_round(&h->hash, h->cache.u8);
+  for (size_t i = 0; i < 8; ++i)
+    h->hash.u32[i] = fio_ntol32(h->hash.u32[i]); /* back to big endien */
+  return h->hash;
+}
+
+SFUNC fio_512u fio_sha512_consume(fio_512u h, const void *data, uint64_t len) {
+  return h;
+  (void)data;
+  (void)len;
+  /* TODO! */
+}
+
+/* *****************************************************************************
+SHA2 Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_wrapper)(char *data,
+                                                         size_t len) {
+  fio_256u h = fio_sha256((const void *)data, (uint64_t)len);
+  return (uintptr_t)(h.u64[0]);
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
+                                                         size_t len) {
+  fio_512u h = fio_sha512((const void *)data, (uint64_t)len);
+  return (uintptr_t)(h.u64[0]);
+}
+
+#if HAVE_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper)(char *data,
+                                                                  size_t len) {
+  fio_256u result;
+  SHA256((const unsigned char *)data, len, result.u8);
+  return result.u64[0];
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
+                                                                  size_t len) {
+  fio_512u result;
+  SHA512((const unsigned char *)data, len, result.u8);
+  return result.u64[0];
+}
+
+#endif
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
+  fprintf(stderr, "* Testing SHA2\n");
+  struct {
+    const char *str;
+    const char *sha256;
+    const char *sha512;
+  } data[] = {
+      {
+          .str = (char *)"abc",
+          .sha256 = (char *)"\xBA\x78\x16\xBF\x8F\x01\xCF\xEA\x41\x41\x40\xDE"
+                            "\x5D\xAE\x22\x23\xB0\x03\x61\xA3\x96\x17\x7A\x9C"
+                            "\xB4\x10\xFF\x61\xF2\x00\x15\xAD",
+      },
+      {
+          .str = (char *)"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnl"
+                         "mnomnopnopq",
+          .sha256 = (char *)"\x24\x8D\x6A\x61\xD2\x06\x38\xB8\xE5\xC0\x26"
+                            "\x93\x0C\x3E\x60\x39\xA3\x3C\xE4\x59\x64\xFF"
+                            "\x21\x67\xF6\xEC\xED\xD4\x19\xDB\x06\xC1",
+      },
+      {
+          .str = (char *)"The quick brown fox jumps over the lazy dog",
+          .sha256 = (char *)"\xD7\xA8\xFB\xB3\x07\xD7\x80\x94\x69\xCA\x9A\xBC"
+                            "\xB0\x08\x2E\x4F\x8D\x56\x51\xE4\x6D\x3C\xDB\x76"
+                            "\x2D\x02\xD0\xBF\x37\xC9\xE5\x92",
+          .sha512 =
+              (char *)"\x07\xE5\x47\xD9\x58\x6F\x6A\x73\xF7\x3F\xBA\xC0\x43\x5E"
+                      "\xD7\x69\x51\x21\x8F\xB7\xD0\xC8\xD7\x88\xA3\x09\xD7\x85"
+                      "\x43\x6B\xBB\x64\x2E\x93\xA2\x52\xA9\x54\xF2\x39\x12\x54"
+                      "\x7D\x1E\x8A\x3B\x5E\xD6\xE1\xBF\xD7\x09\x78\x21\x23\x3F"
+                      "\xA0\x53\x8F\x3D\xB8\x54\xFE\xE6",
+      },
+      {
+          .str = (char *)"The quick brown fox jumps over the lazy cog",
+          .sha256 = (char *)"\xE4\xC4\xD8\xF3\xBF\x76\xB6\x92\xDE\x79\x1A\x17"
+                            "\x3E\x05\x32\x11\x50\xF7\xA3\x45\xB4\x64\x84\xFE"
+                            "\x42\x7F\x6A\xCC\x7E\xCC\x81\xBE",
+          .sha512 =
+              (char *)"\x3E\xEE\xE1\xD0\xE1\x17\x33\xEF\x15\x2A\x6C\x29\x50\x3B"
+                      "\x3A\xE2\x0C\x4F\x1F\x3C\xDA\x4C\xB2\x6F\x1B\xC1\xA4\x1F"
+                      "\x91\xC7\xFE\x4A\xB3\xBD\x86\x49\x40\x49\xE2\x01\xC4\xBD"
+                      "\x51\x55\xF3\x1E\xCB\x7A\x3C\x86\x06\x84\x3C\x4C\xC8\xDF"
+                      "\xCA\xB7\xDA\x11\xC8\xAE\x50\x45",
+      },
+      {
+          .str = (char *)"",
+          .sha256 = (char *)"\xE3\xB0\xC4\x42\x98\xFC\x1C\x14\x9A\xFB\xF4\xC8"
+                            "\x99\x6F\xB9\x24\x27\xAE\x41\xE4\x64\x9B\x93\x4C"
+                            "\xA4\x95\x99\x1B\x78\x52\xB8\x55",
+          .sha512 =
+              (char *)"\xCF\x83\xE1\x35\x7E\xEF\xB8\xBD\xF1\x54\x28\x50\xD6\x6D"
+                      "\x80\x07\xD6\x20\xE4\x05\x0B\x57\x15\xDC\x83\xF4\xA9\x21"
+                      "\xD3\x6C\xE9\xCE\x47\xD0\xD1\x3C\x5D\x85\xF2\xB0\xFF\x83"
+                      "\x18\xD2\x87\x7E\xEC\x2F\x63\xB9\x31\xBD\x47\x41\x7A\x81"
+                      "\xA5\x38\x32\x7A\xF9\x27\xDA\x3E",
+      },
+  };
+  for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
+    if (!data[i].str)
+      continue;
+    if (data[i].sha256) {
+      fio_256u sha256 = fio_sha256(data[i].str, strlen(data[i].str));
+      FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
+                 "SHA256 mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
+                 data[i].str,
+                 sha256.u8[0],
+                 sha256.u8[1],
+                 sha256.u8[2],
+                 sha256.u8[3],
+                 sha256.u8[28],
+                 sha256.u8[29],
+                 sha256.u8[30],
+                 sha256.u8[31]);
+    }
+    // if (data[i].sha512) {
+    //   fio_512u sha512 = fio_sha512(data[i].str, strlen(data[i].str));
+    //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
+    //              "SHA512 mismatch for \"%s\"",
+    //              data[i].str);
+    // }
+  }
+#if !DEBUG
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
+                         (char *)"fio_sha256",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
+                         (char *)"fio_sha256",
+                         13,
+                         0,
+                         1);
+  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+  //                        (char *)"fio_sha512",
+  //                        5,
+  //                        0,
+  //                        0);
+  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+  //                        (char *)"fio_sha512",
+  //                        13,
+  //                        0,
+  //                        1);
+#if HAVE_OPENSSL
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA256",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA256",
+                         13,
+                         0,
+                         1);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA512",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
+                         (char *)"OpenSSL SHA512",
+                         13,
+                         0,
+                         1);
+#endif /* HAVE_OPENSSL */
+#endif /* !DEBUG */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_SHA2 */
+#undef FIO_SHA2
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
@@ -7982,6 +8413,76 @@ Module Cleanup
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
 #define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_ED25519    /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                          Elliptic Curve ED25519 (WIP)
+
+
+
+
+Copyright and License: see header file (000 header.h) or top of file
+***************************************************************************** */
+#if defined(FIO_ED25519) && !defined(H___FIO_ED25519___H)
+#define H___FIO_ED25519___H
+
+/* *****************************************************************************
+TODO: ED25519
+
+ED-25519 key generation, key exchange and signatures are crucial to complete the
+minimal building blocks that would allow to secure inter-machine communication
+in mostly secure environments. Of course the use of a tested cryptographic
+library (where accessible) might be preferred, but some security is better than
+none.
+***************************************************************************** */
+
+/* *****************************************************************************
+ED25519 API
+***************************************************************************** */
+
+/* *****************************************************************************
+Implementation - inlined static functions
+***************************************************************************** */
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* prevent ED25519 keys from having a small period (cyclic value). */
+FIO_IFUNC void fio___ed25519_clamp_on_key(fio_256u *k) {
+  k->u8[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
+  k->u8[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
+  k->u8[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
+}
+
+/* *****************************************************************************
+Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ED25519)(void) {
+  /*
+   * TODO: test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_ED25519
+#endif /* FIO_ED25519 */
+/* ************************************************************************* */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
 #define FIO_IMAP_CORE  /* Development inclusion - ignore line */
 #include "./include.h" /* Development inclusion - ignore line */
 #endif                 /* Development inclusion - ignore line */
@@ -8112,7 +8613,7 @@ iMap Creation Macro
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
       /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
-      for (int mini_steps = 0;;) {                                             \
+      for (size_t mini_steps = 0;;) {                                          \
         pos &= pos_mask;                                                       \
         const imap_type pos_hash = imap[pos] & hash_mask;                      \
         const imap_type pos_index = imap[pos] & pos_mask;                      \
@@ -10394,10 +10895,9 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return;
   }
-  if (s + bytes <= d || d + bytes <= s || d + 4095 < s) { /* direct copy */
-    char *dstop = d + (bytes & (~(size_t)4095ULL));
-    for (; d < dstop;) {
-      FIO_MEMCPY4096(d, s);
+  if (s + bytes <= d || d + bytes <= s || (uintptr_t)d + 4095 < (uintptr_t)s) {
+    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
+      FIO_MEMCPY4096(d, s); /* direct copy, no meaningful overlap */
       d += 4096;
       s += 4096;
     }
@@ -10406,12 +10906,9 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     char tmp_buf[4096] FIO_ALIGN(16);
     FIO_MEMCPY4095x(tmp_buf, s, bytes);
     FIO_MEMCPY4095x(d, tmp_buf, bytes);
-    return;
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    char *dstop = d + (bytes & (~(size_t)4095ULL));
     char tmp_buf[4096] FIO_ALIGN(16);
-    // if(d < s)
-    for (; d < dstop;) {
+    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
       FIO_MEMCPY4096(tmp_buf, s);
       FIO_MEMCPY4096(d, tmp_buf);
       d += 4096;
@@ -10420,11 +10917,10 @@ SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_MEMCPY4095x(tmp_buf, s, bytes);
     FIO_MEMCPY4095x(d, tmp_buf, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    char *dstop = d + (bytes & 4095ULL);
     char tmp_buf[4096] FIO_ALIGN(16);
     d += bytes;
     s += bytes;
-    for (; d > dstop;) {
+    for (char *dstop = d + (bytes & 4095ULL); d > dstop;) {
       d -= 4096;
       s -= 4096;
       FIO_MEMCPY4096(tmp_buf, s);
@@ -10481,13 +10977,16 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     r[0] &= UINT64_C(0x8080808080808080); r[1] &= UINT64_C(0x8080808080808080); /* keeps only 0x80 - match 7/8 bits of token */
     r[2] &= UINT64_C(0x8080808080808080); r[3] &= UINT64_C(0x8080808080808080);
     if (!(r[0] | r[1] | r[2] | r[3])) { buf += 32; continue; }
-    for (size_t i_tmp = 0; i_tmp < 4; ++i_tmp)
+    for (size_t i_tmp = 0; i_tmp < 4; ((++i_tmp), (buf += 8)))
     {
-      if(buf[0] == token) return (void*)buf; if(buf[1] == token) return (void*)(buf + 1);
-      if(buf[2] == token) return (void*)(buf + 2); if(buf[3] == token) return (void*)(buf + 3);
-      if(buf[4] == token) return (void*)(buf + 4); if(buf[5] == token) return (void*)(buf + 5);
-      if(buf[6] == token) return (void*)(buf + 6); if(buf[7] == token) return (void*)(buf + 7);
-      buf += 8;
+      if(buf[0] == token) return (void*)buf; 
+      if(buf[1] == token) return (void*)(buf + 1);
+      if(buf[2] == token) return (void*)(buf + 2);
+      if(buf[3] == token) return (void*)(buf + 3);
+      if(buf[4] == token) return (void*)(buf + 4);
+      if(buf[5] == token) return (void*)(buf + 5);
+      if(buf[6] == token) return (void*)(buf + 6);
+      if(buf[7] == token) return (void*)(buf + 7);
     }
   }
   if (buf + 15 < end) {
@@ -12510,43 +13009,45 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           repetitions);
 
   for (int len_i = 5; len_i < 20; ++len_i) {
-    const size_t mem_len = 1ULL << len_i;
-    void *mem = malloc(mem_len << 1);
-    FIO_ASSERT_ALLOC(mem);
-    uint64_t sig = (uintptr_t)mem;
-    sig ^= sig >> 13;
-    sig ^= sig << 17;
-    sig ^= sig << 29;
-    sig ^= sig << 31;
-    fio_memset(mem, sig, mem_len);
+    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
+         ++mem_len) {
+      void *mem = malloc(mem_len << 1);
+      FIO_ASSERT_ALLOC(mem);
+      uint64_t sig = (uintptr_t)mem;
+      sig ^= sig >> 13;
+      sig ^= sig << 17;
+      sig ^= sig << 29;
+      sig ^= sig << 31;
+      fio_memset(mem, sig, mem_len);
 
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      fio_memcpy((char *)mem + mem_len, mem, mem_len);
-      FIO_COMPILER_GUARD;
+      start = fio_time_micro();
+      for (int i = 0; i < repetitions; ++i) {
+        fio_memcpy((char *)mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+
+      fio___memset_test_aligned((char *)mem + mem_len,
+                                sig,
+                                mem_len,
+                                "fio_memcpy sanity test FAILED");
+      fprintf(stderr,
+              "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
+              mem_len,
+              (size_t)(end - start));
+      start = fio_time_micro();
+      for (int i = 0; i < repetitions; ++i) {
+        memcpy((char *)mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
+              mem_len,
+              (size_t)(end - start));
+
+      free(mem);
     }
-    end = fio_time_micro();
-
-    fio___memset_test_aligned((char *)mem + mem_len,
-                              sig,
-                              mem_len,
-                              "fio_memcpy sanity test FAILED");
-    fprintf(stderr,
-            "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
-            mem_len,
-            (size_t)(end - start));
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      memcpy((char *)mem + mem_len, mem, mem_len);
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
-            mem_len,
-            (size_t)(end - start));
-
-    free(mem);
   }
 
   fprintf(stderr,
@@ -14374,7 +14875,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
 
   /* test task user data integrity. */
   fio___queue_test_counter_task(NULL, NULL);
-  for (intptr_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
+  for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC << 2); ++i) {
     fio_queue_push(q,
                    .fn = fio___queue_test_counter_task,
                    .udata1 = (void *)(i + 1),
@@ -14382,7 +14883,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
   }
   fio_queue_perform_all(q);
   fio_queue_perform_all(q);
-  for (intptr_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
+  for (size_t i = (FIO_QUEUE_TASKS_PER_ALLOC << 2);
        i < (FIO_QUEUE_TASKS_PER_ALLOC << 3);
        ++i) {
     fio_queue_push(q,
@@ -15236,6 +15737,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   if (nonblock && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_DEBUG("couldn't set socket to nonblocking mode");
     fio_sock_close(fd);
+    unlink(addr.sun_path);
     return -1;
   }
   if (is_client) {
@@ -15245,6 +15747,7 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
                     addr.sun_path,
                     strerror(errno));
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
   } else {
@@ -15253,12 +15756,14 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
       // umask(old_umask);
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
     // umask(old_umask);
     if (listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
+      unlink(addr.sun_path);
       return -1;
     }
   }
@@ -24253,11 +24758,11 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       comb |= ((uint64_t)imap[(pos + offsets[6]) & pos_mask]) << (6 * 8);
       comb |= ((uint64_t)imap[(pos + offsets[7]) & pos_mask]) << (7 * 8);
       const uint64_t has_possible_match =
-          (((comb ^ bhash64) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) *
+          (((comb ^ bhash64) & 0x7F7F7F7F7F7F7F7FULL) + 0x0101010101010101ULL) &
           0x8080808080808080ULL;
       if (has_possible_match) {
         /* there was a 7 bit match in one of the bytes in this 8 byte group */
-        for (int i = 0; i < 8; ++i) {
+        for (size_t i = 0; i < 8; ++i) {
           const uint32_t tmp = (pos + offsets[i]) & pos_mask;
           if (imap[tmp] != bhash)
             continue;
@@ -29391,7 +29896,17 @@ static void fio___srv_listen_on_close(void *settings_) {
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   struct fio_listen_args *l = (struct fio_listen_args *)udata;
   int *pfd = (int *)(l + 1);
-  close(*pfd);
+  fio_sock_close(*pfd);
+#ifdef AF_UNIX
+  /* delete the unix socket file, if any. */
+  fio_url_s u = fio_url_parse(l->url, strlen(l->url));
+  if (!u.host.buf && !u.port.buf && u.path.buf) {
+    unlink(u.path.buf);
+  }
+#endif
+  fio_state_callback_remove(FIO_CALL_AT_EXIT,
+                            fio___srv_listen_cleanup_task,
+                            udata);
   FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
 }
 
@@ -29470,9 +29985,6 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
         fio___srv_listen_attach_task,
         (void *)cpy);
   }
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio___srv_env_safe_destroy,
-                         (void *)&fio___srvdata.env);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_cleanup_task, cpy);
   return 0;
 fd_error:
@@ -30159,7 +30671,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
 /* *****************************************************************************
 Postoffice State
 ***************************************************************************** */
-
+#ifndef FIO___IPC_LEN
+#define FIO___IPC_LEN 256
+#endif
 static struct FIO_POSTOFFICE {
 #if FIO_POSTOFFICE_THREAD_LOCK
   FIO___LOCK_TYPE lock;
@@ -30171,7 +30685,7 @@ static struct FIO_POSTOFFICE {
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
-  char ipc_url[256];
+  char ipc_url[FIO___IPC_LEN];
 } FIO_POSTOFFICE = {
 #if FIO_POSTOFFICE_THREAD_LOCK
     .lock = FIO___LOCK_INIT,
@@ -30328,13 +30842,13 @@ FIO_SFUNC struct {
 /* Returns zero (0) on success or -1 on failure. */
 SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
                                    void (*cleanup)(void *)) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1) &&
         metadata_func == FIO_PUBSUB_METADATA[i].build)
       return 0;
     fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
   }
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT;
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT;
        ++i) { /* insert if available */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -30353,7 +30867,7 @@ SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
  * Removal might be delayed if live metatdata exists.
  */
 SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1) &&
         metadata_func == FIO_PUBSUB_METADATA[i].build) {
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -30365,7 +30879,7 @@ SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
 /** Finds the message's metadata, returning the data or NULL. */
 SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func) {
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
     if (FIO_PUBSUB_METADATA[i].ref &&
         metadata_func == FIO_PUBSUB_METADATA[i].build) {
       return fio_msg2letter(msg)->metadata[i];
@@ -30378,7 +30892,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
 FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   if (!l->metadata_is_initialized)
     return;
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       FIO_PUBSUB_METADATA[i].cleanup(l->metadata[i]);
       fio_atomic_sub(&FIO_PUBSUB_METADATA[i].ref, 1);
@@ -30392,7 +30906,7 @@ FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
   if (fio_atomic_or(&l->metadata_is_initialized, 1)) {
     return;
   }
-  for (int i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
+  for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) {
     if (fio_atomic_add(&FIO_PUBSUB_METADATA[i].ref, 1)) {
       l->metadata[i] = FIO_PUBSUB_METADATA[i].build(
           fio_letter_channel(l),
@@ -31155,7 +31669,7 @@ external_engine:
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
-  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, 256);
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
   fio_string_write2(&url,
                     NULL,
                     FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
@@ -34767,8 +35281,6 @@ void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, cli)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, cli)();
-  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, stream)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, poll)();
@@ -34872,6 +35384,8 @@ Everything, and the Kitchen Sink
 #define FIO_RAND
 #define FIO_RISKY_HASH
 #define FIO_SHA1
+// #define FIO_SHA2
+// #define FIO_ED25519
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_STATE
@@ -34941,8 +35455,14 @@ Everything, and the Kitchen Sink
 #ifdef FIO_SHA1
 #include "011 sha1.h"
 #endif
+#ifdef FIO_SHA2
+#include "011 sha2.h"
+#endif
 #ifdef FIO_CHACHA
 #include "012 chacha20poly1305.h"
+#endif
+#ifdef FIO_ED25519
+#include "013 ed25519.h"
 #endif
 #ifdef FIO_IMAP_CORE
 #include "020 imap.h"
