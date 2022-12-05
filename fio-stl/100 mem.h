@@ -2535,30 +2535,22 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
                                          uint64_t data,
                                          size_t bytes,
                                          const char *msg) {
-  uint64_t *dest = (uint64_t *)dest_;
-  size_t units = bytes >> 3;
-  FIO_ASSERT(*(dest) = data,
-             "%s memory data was overwritten (first 8 bytes)",
-             msg);
-  while (units >= 16) {
-    FIO_ASSERT(dest[0] == data && dest[1] == data && dest[2] == data &&
-                   dest[3] == data && dest[4] == data && dest[5] == data &&
-                   dest[6] == data && dest[7] == data && dest[8] == data &&
-                   dest[9] == data && dest[10] == data && dest[11] == data &&
-                   dest[12] == data && dest[13] == data && dest[14] == data &&
-                   dest[15] == data,
+  uint8_t *r = (uint8_t *)dest_;
+  uint8_t *e_group = r + (bytes & (~(size_t)63ULL));
+  uint64_t d[8] = {data, data, data, data, data, data, data, data};
+  while (r < e_group) {
+    FIO_MEMCPY64(d, r);
+    FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
+                   d[4] == data && d[5] == data && d[6] == data && d[7] == data,
                "%s memory data was overwritten",
                msg);
-    dest += 16;
-    units -= 16;
+    r += 64;
   }
-  units &= 15;
-  while (units) {
-    FIO_ASSERT(*(dest++) == data,
-               "%s memory data was overwritten",
-               msg); /* fall through */
-    --units;
-  }
+  FIO_MEMCPY63x(d, r, bytes);
+  FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
+                 d[4] == data && d[5] == data && d[6] == data && d[7] == data,
+             "%s memory data was overwritten",
+             msg);
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
 
@@ -2574,48 +2566,60 @@ FIO_SFUNC void *fio___simd_math_memchr(const void *buffer,
   umask |= (umask << 16);
   umask |= (umask << 8);
   umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
-  fio_512u u;
+  fio_512u u, validator;
 
 #define FIO___MEMCHR_INNER_LOOP()                                              \
-  uint64_t tmp = (u.u64[i] ^= umask);       /* byte match == 0xFF */           \
+  validator.u64[i] = (u.u64[i] ^= umask);   /* byte match == 0xFF */           \
   u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */         \
   u.u64[i] += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */       \
-  u.u64[i] &= UINT64_C(0x8080808080808080); /* keep only 0x80 */               \
-  u.u64[i] &= tmp;                          /* validate remaining 1:8 */       \
-  result |= u.u64[i];
+  u.u64[i] &= UINT64_C(0x8080808080808080); /* keep only 0x80 */
 
-  for (; r < e_group; (r += 64), (result = 0)) {
-    FIO_MEMCPY64(u.u64, r);
-    for (size_t i = 0; i < 8; ++i) {
-      FIO___MEMCHR_INNER_LOOP();
+  for (;;) {
+    for (; r < e_group; r += 64) {
+      FIO_MEMCPY64(u.u64, r);
+      for (size_t i = 0; i < 8; ++i) {
+        FIO___MEMCHR_INNER_LOOP();
+      }
+      if (u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3] | u.u64[4] | u.u64[5] |
+          u.u64[6] | u.u64[7])
+        goto found;
     }
-    if (result)
-      goto found;
-  }
-  if (r < e) {
-    result = 0;
-    u.u64[0] = u.u64[1] = u.u64[2] = u.u64[3] = u.u64[4] = u.u64[5] = u.u64[6] =
-        u.u64[7] = ~umask;
-    FIO_MEMCPY63x(u.u64, r, len);
-    for (size_t i = 0; i < 8; ++i) {
-      FIO___MEMCHR_INNER_LOOP();
+    if (r < e) {
+      u.u64[0] = u.u64[1] = u.u64[2] = u.u64[3] = u.u64[4] = u.u64[5] =
+          u.u64[6] = u.u64[7] = ~umask;
+      FIO_MEMCPY63x(u.u64, r, len);
+      for (size_t i = 0; i < 8; ++i) {
+        FIO___MEMCHR_INNER_LOOP();
+      }
+      if (u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3] | u.u64[4] | u.u64[5] |
+          u.u64[6] | u.u64[7])
+        goto found;
     }
-    if (result)
-      goto found;
-  }
-  return NULL;
+    return NULL;
 
-found:
-  result = fio_has_byte2bitmap(u.u64[0]) |
-           (fio_has_byte2bitmap(u.u64[1]) << 8) |
-           (fio_has_byte2bitmap(u.u64[2]) << 16) |
-           (fio_has_byte2bitmap(u.u64[3]) << 24) |
-           (fio_has_byte2bitmap(u.u64[4]) << 32) |
-           (fio_has_byte2bitmap(u.u64[5]) << 40) |
-           (fio_has_byte2bitmap(u.u64[6]) << 48) |
-           (fio_has_byte2bitmap(u.u64[7]) << 56);
-  result &= ~result + 1; /* isolate lowest bit */
-  return (void *)(r + fio_bits_lsb_index(result));
+  found:
+    /* validate last bit + enforce little endian for bitmap */
+    u.u64[0] = fio_ltole64(u.u64[0] & validator.u64[0]);
+    u.u64[1] = fio_ltole64(u.u64[1] & validator.u64[1]);
+    u.u64[2] = fio_ltole64(u.u64[2] & validator.u64[2]);
+    u.u64[3] = fio_ltole64(u.u64[3] & validator.u64[3]);
+    u.u64[4] = fio_ltole64(u.u64[4] & validator.u64[4]);
+    u.u64[5] = fio_ltole64(u.u64[5] & validator.u64[5]);
+    u.u64[6] = fio_ltole64(u.u64[6] & validator.u64[6]);
+    u.u64[7] = fio_ltole64(u.u64[7] & validator.u64[7]);
+    result = fio_has_byte2bitmap(u.u64[0]) |
+             (fio_has_byte2bitmap(u.u64[1]) << 8) |
+             (fio_has_byte2bitmap(u.u64[2]) << 16) |
+             (fio_has_byte2bitmap(u.u64[3]) << 24) |
+             (fio_has_byte2bitmap(u.u64[4]) << 32) |
+             (fio_has_byte2bitmap(u.u64[5]) << 40) |
+             (fio_has_byte2bitmap(u.u64[6]) << 48) |
+             (fio_has_byte2bitmap(u.u64[7]) << 56);
+    if (result) {
+      return (void *)(r + fio_bits_lsb_index(result));
+    }
+    r += 64;
+  }
 #undef FIO___MEMCHR_INNER_LOOP
 }
 
