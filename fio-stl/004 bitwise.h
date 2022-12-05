@@ -659,16 +659,16 @@ FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
 #endif /* __SIZEOF_INT128__ */
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
-FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
+FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
   result >>= 7;             /* move result to first bit of each byte */
   result |= (result >> 7);  /* combine 2 bytes of result */
   result |= (result >> 14); /* combine 4 bytes of result */
   result |= (result >> 28); /* combine 8 bytes of result */
-  return (((uint8_t)result) & 0xFF);
+  return result & 0xFFULL;
 }
 
 /** Isolates the least significant (lowest) bit. */
-FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & ((~i) + 1)); }
 
 /** Isolates the most significant (highest) bit. */
 FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {

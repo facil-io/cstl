@@ -3385,16 +3385,16 @@ FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
 #endif /* __SIZEOF_INT128__ */
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
-FIO_IFUNC uint8_t fio_has_byte2bitmap(uint64_t result) {
+FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
   result >>= 7;             /* move result to first bit of each byte */
   result |= (result >> 7);  /* combine 2 bytes of result */
   result |= (result >> 14); /* combine 4 bytes of result */
   result |= (result >> 28); /* combine 8 bytes of result */
-  return (((uint8_t)result) & 0xFF);
+  return result & 0xFFULL;
 }
 
 /** Isolates the least significant (lowest) bit. */
-FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & (0 - i)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & ((~i) + 1)); }
 
 /** Isolates the most significant (highest) bit. */
 FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
@@ -13039,67 +13039,81 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
 
+FIO_SFUNC void *fio___simd_math_memchr(const void *buffer,
+                                       const char token,
+                                       size_t len) {
+  const char *r = (const char *)buffer;
+  const char *e = r + len;
+  const char *e_group = r + (len & (~UINT64_C(63)));
+  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
+  uint64_t result;
+  umask |= (umask << 32);
+  umask |= (umask << 16);
+  umask |= (umask << 8);
+  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
+  fio_512u u;
+
+#define FIO___MEMCHR_INNER_LOOP()                                              \
+  uint64_t tmp = (u.u64[i] ^= umask);       /* byte match == 0xFF */           \
+  u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */         \
+  u.u64[i] += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */       \
+  u.u64[i] &= UINT64_C(0x8080808080808080); /* keep only 0x80 */               \
+  u.u64[i] &= tmp;                          /* validate remaining 1:8 */       \
+  result |= u.u64[i];
+
+  for (; r < e_group; (r += 64), (result = 0)) {
+    FIO_MEMCPY64(u.u64, r);
+    for (size_t i = 0; i < 8; ++i) {
+      FIO___MEMCHR_INNER_LOOP();
+    }
+    if (result)
+      goto found;
+  }
+  if (r < e) {
+    result = 0;
+    u.u64[0] = u.u64[1] = u.u64[2] = u.u64[3] = u.u64[4] = u.u64[5] = u.u64[6] =
+        u.u64[7] = ~umask;
+    FIO_MEMCPY63x(u.u64, r, len);
+    for (size_t i = 0; i < 8; ++i) {
+      FIO___MEMCHR_INNER_LOOP();
+    }
+    if (result)
+      goto found;
+  }
+  return NULL;
+
+found:
+  result = fio_has_byte2bitmap(u.u64[0]) |
+           (fio_has_byte2bitmap(u.u64[1]) << 8) |
+           (fio_has_byte2bitmap(u.u64[2]) << 16) |
+           (fio_has_byte2bitmap(u.u64[3]) << 24) |
+           (fio_has_byte2bitmap(u.u64[4]) << 32) |
+           (fio_has_byte2bitmap(u.u64[5]) << 40) |
+           (fio_has_byte2bitmap(u.u64[6]) << 48) |
+           (fio_has_byte2bitmap(u.u64[7]) << 56);
+  result &= ~result + 1; /* isolate lowest bit */
+  return (void *)(r + fio_bits_lsb_index(result));
+#undef FIO___MEMCHR_INNER_LOOP
+}
+
 FIO_SFUNC void *fio___naive_memchr(const void *buffer,
                                    const char token,
                                    size_t len) {
   const char *r = (const char *)buffer;
   const char *e = r + len;
   const char *e_group = r + (len & (~UINT64_C(63)));
-#if 0
-  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFF;
-  umask |= (umask << 32);
-  umask |= (umask << 16);
-  umask |= (umask << 8);
-  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
-  for (; r < e_group; r += 64) {
-    fio_512u u;
-    FIO_MEMCPY64(u.u64, r);
-    for (size_t i = 0; i < 8; ++i) {
-      u.u64[i] = u.u64[i] ^ umask;
-      u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
-      u.u64[i] += UINT64_C(0x0101010101010101);
-      u.u64[i] &= UINT64_C(0x8080808080808080);
-    }
-    if (!(u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3] | u.u64[4] | u.u64[5] |
-          u.u64[6] | u.u64[7]))
-      continue;
-    for (size_t i = 0; i < 64; ++i) {
-      if (r[i] == token)
-        return (void *)(r + i);
-    }
-  }
-  if (r + 31 < e) {
-    fio_256u u;
-    FIO_MEMCPY32(u.u64, r);
-    for (size_t i = 0; i < 4; ++i) {
-      u.u64[i] = u.u64[i] ^ umask;
-      u.u64[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F);
-      u.u64[i] += UINT64_C(0x0101010101010101);
-      u.u64[i] &= UINT64_C(0x8080808080808080);
-    }
-    if ((u.u64[0] | u.u64[1] | u.u64[2] | u.u64[3])) {
-      for (size_t i = 0; i < 32;) {
-        if (r[i] == token)
-          return (void *)(r + i);
-        ++i;
-      }
-    }
-  }
-#else
   for (; r < e_group; r += 64) {
     for (size_t i = 0; i < 64; ++i) {
       if (r[i] == token)
         return (void *)(r + i);
     }
   }
-#endif
   for (; r < e; ++r) {
     if (*r == token)
       return (void *)r;
   }
   return NULL;
 }
-
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
@@ -13245,6 +13259,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != naive approach");
+    FIO_ASSERT(fio___simd_math_memchr((char *)mem + 1, 0, mem_len) ==
+                   fio_memchr((char *)mem + 1, 0, mem_len),
+               "fio_memchr (partial math) != full math approach");
+
     start = fio_time_micro();
     for (int i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
@@ -13269,6 +13287,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
     fprintf(stderr,
             "\tsystem memchr\t(%zu bytes):\t%zu us\n",
+            token_index,
+            (size_t)(end - start));
+
+    start = fio_time_micro();
+    for (int i = 0; i < repetitions; ++i) {
+      FIO_ASSERT((char *)fio___simd_math_memchr((char *)mem + 1, 0, mem_len) ==
+                     ((char *)mem + token_index),
+                 "fio___simd_math_memchr failed?");
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tfull math\t(%zu bytes):\t%zu us\n",
             token_index,
             (size_t)(end - start));
 
