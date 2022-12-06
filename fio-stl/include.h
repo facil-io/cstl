@@ -29,6 +29,9 @@
 #ifdef FIO_THREADS
 #include "007 threads.h"
 #endif
+#ifdef FIO_TIME
+#include "008 time.h"
+#endif
 #ifdef FIO_RAND
 #include "010 random.h"
 #endif
@@ -59,9 +62,6 @@
 
 #include "100 mem.h" /* later files rely on macros from here. */
 
-#ifdef FIO_TIME
-#include "101 time.h"
-#endif
 #ifdef FIO_QUEUE
 #include "102 queue.h"
 #endif
@@ -139,5 +139,4 @@
 #endif
 
 #endif /* !H___FIO_CSTL_COMBINED___H */
-/* *************************************************************************
- */
+/* ************************************************************************* */

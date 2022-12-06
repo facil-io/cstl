@@ -2445,6 +2445,15 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
   return NULL;
 }
 
+FIO_SFUNC void fio___naive_memcpy(void *restrict d_,
+                                  const void *restrict s_,
+                                  size_t len) {
+  char *d = (char *)d_;
+  const char *s = (const char *)s_;
+  while (len--)
+    *(d++) = *(s++);
+}
+
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
@@ -2511,7 +2520,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                               mem_len,
                               "fio_memset sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memset\t(%zu bytes):\t%zu us\n",
+            "\tfio_memset\t(%zu bytes):\t%zuus\n",
             mem_len,
             (size_t)(end - start));
     start = fio_time_micro();
@@ -2521,7 +2530,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memset\t(%zu bytes):\t%zu us\n",
+            "\tsystem memset\t(%zu bytes):\t%zuus\n",
             mem_len,
             (size_t)(end - start));
 
@@ -2532,7 +2541,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           "* Speed testing memcpy (%d repetitions per test):\n",
           repetitions);
 
-  for (int len_i = 5; len_i < 20; ++len_i) {
+  for (int len_i = 5; len_i < 22; ++len_i) {
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
       void *mem = malloc(mem_len << 1);
@@ -2543,6 +2552,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       sig ^= sig << 29;
       sig ^= sig << 31;
       fio_memset(mem, sig, mem_len);
+      size_t mbsec;
 
       start = fio_time_micro();
       for (int i = 0; i < repetitions; ++i) {
@@ -2550,25 +2560,61 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
-
       fio___memset_test_aligned((char *)mem + mem_len,
                                 sig,
                                 mem_len,
                                 "fio_memcpy sanity test FAILED");
+      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
+              "\tfio_memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
               mem_len,
-              (size_t)(end - start));
+              (size_t)(end - start),
+              mbsec);
+
+      // size_t threads_used = 0;
+      // start = fio_time_micro();
+      // for (int i = 0; i < repetitions; ++i) {
+      //   threads_used = fio_thread_memcpy((char *)mem + mem_len, mem,
+      //   mem_len); if (threads_used == 1)
+      //     break;
+      //   FIO_COMPILER_GUARD;
+      // }
+      // end = fio_time_micro();
+      // fio___memset_test_aligned((char *)mem + mem_len,
+      //                           sig,
+      //                           mem_len,
+      //                           "fio_thread_memcpy sanity test FAILED");
+      // mbsec = ((end - start) * repetitions) / mem_len;
+      // fprintf(stderr,
+      //         "   fio_thread_memcpy (%zut)\t(%zu bytes):\t%zu"
+      //         "us\t%zumb/sec\n", threads_used, mem_len, (size_t)(end -
+      //         start), mbsec);
+
       start = fio_time_micro();
       for (int i = 0; i < repetitions; ++i) {
         memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
+      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
+              "\tsystem memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
               mem_len,
-              (size_t)(end - start));
+              (size_t)(end - start),
+              mbsec);
+
+      // start = fio_time_micro();
+      // for (int i = 0; i < repetitions; ++i) {
+      //   fio___naive_memcpy((char *)mem + mem_len, mem, mem_len);
+      //   FIO_COMPILER_GUARD;
+      // }
+      // end = fio_time_micro();
+      // mbsec = (mem_len * repetitions) / (end - start);
+      // fprintf(stderr,
+      //         "\tnaive memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+      //         mem_len,
+      //         (size_t)(end - start),
+      //         mbsec);
 
       free(mem);
     }
@@ -2622,7 +2668,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memchr\t(%zu bytes):\t%zu us\n",
+            "\tsystem memchr\t(%zu bytes):\t%zuus\n",
             token_index,
             (size_t)(end - start));
 
@@ -2648,7 +2694,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\ta naive memchr\t(%zu bytes):\t%zu us\n",
+            "\ta naive memchr\t(%zu bytes):\t%zuus\n",
             token_index,
             (size_t)(end - start));
 

@@ -718,7 +718,7 @@ Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
+#if __has_builtin(__builtin_memcpy) && 0
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
@@ -727,12 +727,6 @@ Memory Copying Primitives
   FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
                                      const void *restrict src) {               \
     __builtin_memcpy(dest, src, bytes);                                        \
-  }
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    __builtin_memcpy(d, s, bytes);                                             \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
   }
 #else
 #ifndef FIO_MEMCPY
@@ -751,13 +745,6 @@ Memory Copying Primitives
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
   }
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    fio___memcpy##bytes(d, s);                                                 \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-
 #endif /* __has_builtin(__builtin_memcpy) */
 
 #define FIO_MEMCPY1(dest, src)    fio___memcpy1((dest), (src))
@@ -800,33 +787,24 @@ FIO___MAKE_MEMCPY_FIXED(2048)
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
+/* Constant time copy of bytes (partial copy test) */
+#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+  if ((l & bytes)) {                                                           \
+    fio___memcpy##bytes(d, s);                                                 \
+    d += bytes;                                                                \
+    s += bytes;                                                                \
+  }
+
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-#if 1
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-#else
-  /* assume we can always copy/write 8 bytes into the buffer? */
-  uint64_t d, s, mask;
-  FIO_MEMCPY8(&d, d_);
-  FIO_MEMCPY8(&s, s_);
-  mask = (~UINT64_C(0)) << ((l & 7) << 3);
-#if __BIG_ENDIAN__
-  mask = ~mask;
-#endif
-  d &= mask;
-  s &= ~mask;
-  d |= s;
-  FIO_MEMCPY8(d_, &d);
-#endif
+  FIO_MEMCPY___PARTIAL(1);
 }
-
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio___memcpy15x(void *restrict d_,
                                const void *restrict s_,
@@ -834,7 +812,9 @@ FIO_IFUNC void fio___memcpy15x(void *restrict d_,
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
 FIO_IFUNC void fio___memcpy31x(void *restrict d_,
@@ -844,7 +824,9 @@ FIO_IFUNC void fio___memcpy31x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_IFUNC void fio___memcpy63x(void *restrict d_,
@@ -855,7 +837,9 @@ FIO_IFUNC void fio___memcpy63x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
 FIO_IFUNC void fio___memcpy127x(void *restrict d_,
@@ -867,7 +851,9 @@ FIO_IFUNC void fio___memcpy127x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy255x(void *restrict d_,
@@ -880,7 +866,9 @@ FIO_IFUNC void fio___memcpy255x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy511x(void *restrict d_,
@@ -894,7 +882,9 @@ FIO_IFUNC void fio___memcpy511x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
@@ -909,7 +899,9 @@ FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
@@ -925,7 +917,9 @@ FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
@@ -942,7 +936,9 @@ FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 #undef FIO_MEMCPY___PARTIAL
 
@@ -968,26 +964,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-#if 0
-  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
-  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
-    FIO_MEMCPY64(d, repeated);
-    FIO_MEMCPY64(d + 64, repeated);
-    FIO_MEMCPY64(d + 128, repeated);
-    FIO_MEMCPY64(d + 192, repeated);
-    d += 256;
-  }
-  if (bytes & 128) {
-    FIO_MEMCPY64(d, repeated);
-    FIO_MEMCPY64(d + 64, repeated);
-    d += 128;
-  }
-  if (bytes & 64) {
-    FIO_MEMCPY64(d, repeated);
-    d += 64;
-  }
-  FIO_MEMCPY63x(d, repeated, bytes);
-#else
+
 #define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
   if (bytes & u8_count)                                                        \
     for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
@@ -1004,14 +981,13 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   FIO___MEMSET_IF_LOOP(8, 1);
   FIO_MEMCPY7x(d, &data, bytes);
 #undef FIO___MEMSET_IF_LOOP
-#endif
 }
 
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCK_NUM  1024
+#define FIO___MEMCPY_BLOCK_NUM  1024ULL
 #define FIO___MEMCPY_BLOCKx_NUM 1023ULL
 #define FIO___MEMCPY_BLOCK      FIO_MEMCPY1024
 #define FIO___MEMCPY_BLOCKx     FIO_MEMCPY1023x
@@ -1027,7 +1003,8 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
-    for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
+    for (const char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM));
+         d < dstop;) {
       FIO___MEMCPY_BLOCK(d, s); /* direct copy, no meaningful overlap */
       d += FIO___MEMCPY_BLOCK_NUM;
       s += FIO___MEMCPY_BLOCK_NUM;
@@ -1087,7 +1064,7 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
  *
  * Placed here (mostly copied from bitmap module).
  */
-FIO_SFUNC size_t fio___lsb_index4memchr(uint64_t i) {
+FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(i);
 #else
@@ -1158,7 +1135,7 @@ FIO_SFUNC size_t fio___lsb_index4memchr(uint64_t i) {
   case UINT64_C(0x4000000000000000): return 62;
   case UINT64_C(0x8000000000000000): return 63;
   }
-  return 63;
+  return (0ULL - 1ULL);
 #endif /* __builtin vs. map */
 }
 
@@ -1199,10 +1176,16 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
       u[i] |= u[i] >> 28;                                                      \
       flag |= (u[i] & 0xFFU) << (i << 3); /* placed packed bitmap in u64 */    \
     }                                                                          \
-    return (void *)(r + fio___lsb_index4memchr(flag));                         \
+    return (void *)(r + fio___lsb_index_unsafe(flag));                         \
   } while (0)
 
-  for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
+  for (const char *const e = r + (len & (~UINT64_C(255))); r < e;) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+  if ((len & 128)) {
     FIO___MEMCHR_BITMAP_TEST(8);
     FIO___MEMCHR_BITMAP_TEST(8);
   }
@@ -1274,7 +1257,7 @@ Static Assertions
 #endif
 
 typedef struct {
-  char data[2];
+  unsigned char data[2];
 } fio___padding_char_struct_test_s;
 
 FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
@@ -1292,7 +1275,8 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1469,7 +1453,8 @@ typedef struct fio_index8_node_s {
 
 /* *****************************************************************************
 Common String Helpers
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -1527,7 +1512,8 @@ typedef struct fio_buf_info_s {
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
@@ -1620,7 +1606,8 @@ Patches for Windows
 
 /* *****************************************************************************
 Windows initialization
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
@@ -1644,7 +1631,8 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 
 /* *****************************************************************************
 Inlined patched and MACRO statements
-***************************************************************************** */
+*****************************************************************************
+*/
 
 FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
@@ -1945,11 +1933,13 @@ End persistent segment (end include-once guard)
 
 
 
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /* *****************************************************************************
 Memory allocation macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 /* secure by default */
@@ -1987,7 +1977,8 @@ Memory allocation macros
 
 /* *****************************************************************************
 Locking selector
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_USE_THREAD_MUTEX
 #define FIO_USE_THREAD_MUTEX 0
@@ -3597,23 +3588,12 @@ FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
 }
 
 /**
- * Detects a good chance that there's a byte where all the bits are set (255)
- * within a 4 byte vector.
- *
- * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC uint32_t fio_has_full_byte32_maybe(uint32_t row) {
-  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
-         UINT32_C(0x80808080);
-}
-
-/**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
-  return fio_has_full_byte32(~row);
+  return (row - UINT32_C(0x01010101)) & (~row & UINT32_C(0x80808080));
 }
 
 /**
@@ -3622,7 +3602,7 @@ FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
  * The requested byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
-  return fio_has_full_byte32(~(row ^ (UINT32_C(0x01010101) * byte)));
+  return fio_has_zero_byte32((row ^ (UINT32_C(0x01010101) * byte)));
 }
 
 /**
@@ -3636,23 +3616,13 @@ FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
 }
 
 /**
- * Detects a good chance that there's a byte where all the bits are set (255)
- * within an 8 byte vector.
- *
- * The possibly full byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC uint64_t fio_has_full_byte64_maybe(uint64_t row) {
-  return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
-         UINT64_C(0x8080808080808080);
-}
-
-/**
  * Detects a byte where no bits are set (0) within an 8 byte vector.
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
-  return fio_has_full_byte64(~row);
+  return (row - UINT64_C(0x0101010101010101)) &
+         ((~row) & UINT64_C(0x8080808080808080));
 }
 
 /**
@@ -3661,7 +3631,7 @@ FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
  * The requested byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
-  return fio_has_full_byte64(~(row ^ (UINT64_C(0x0101010101010101) * byte)));
+  return fio_has_zero_byte64((row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
 #ifdef __SIZEOF_INT128__
@@ -3686,7 +3656,11 @@ FIO_IFUNC __uint128_t fio_has_full_byte128(__uint128_t row) {
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
-  return fio_has_full_byte128(~row);
+  const __uint128_t all80 = ((__uint128_t)(0x8080808080808080) << 64) |
+                            (__uint128_t)(0x8080808080808080);
+  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
+                            (__uint128_t)(0x0101010101010101);
+  return ((row - all01) & ((~row) & all80));
 }
 
 /**
@@ -3697,7 +3671,7 @@ FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
 FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
   const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
                             (__uint128_t)(0x0101010101010101);
-  return fio_has_full_byte128(~(row ^ (all01 * byte)));
+  return fio_has_zero_byte128((row ^ (all01 * byte)));
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -6483,6 +6457,59 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
 #endif /* FIO_THREADS_COND_BYO */
 
 #endif /* FIO_OS_WIN */
+
+/* *****************************************************************************
+Multi-Threaded `memcpy`
+***************************************************************************** */
+
+#ifndef FIO_MEMCPY_THREADS
+#define FIO_MEMCPY_THREADS 8
+#endif
+#undef FIO_MEMCPY_THREADS___MINCPY
+#define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
+typedef struct {
+  const char *restrict dest;
+  void *restrict src;
+  size_t bytes;
+} fio___thread_memcpy_s;
+
+FIO_SFUNC void *fio___thread_memcpy_task(void *v_) {
+  fio___thread_memcpy_s *v = (fio___thread_memcpy_s *)v_;
+  FIO_MEMCPY((void *)(v->dest), (void *)(v->src), v->bytes);
+  return NULL;
+}
+
+/** Multi-threaded memcpy using up to FIO_MEMCPY_THREADS threads */
+FIO_SFUNC size_t fio_thread_memcpy(const void *restrict dest,
+                                   void *restrict src,
+                                   size_t bytes) {
+  size_t i = 0, r;
+  const char *restrict d = (const char *restrict)dest;
+  char *restrict s = (char *restrict)src;
+  fio_thread_t threads[FIO_MEMCPY_THREADS - 1];
+  fio___thread_memcpy_s info[FIO_MEMCPY_THREADS - 1];
+  size_t bytes_per_thread = bytes / FIO_MEMCPY_THREADS;
+  if (bytes < FIO_MEMCPY_THREADS___MINCPY)
+    goto finished_creating_thread;
+
+  for (; i < (FIO_MEMCPY_THREADS - 1); ++i) {
+    info[i] = (fio___thread_memcpy_s){d, s, bytes_per_thread};
+    if (fio_thread_create(threads + i, fio___thread_memcpy_task, info + i))
+      goto finished_creating_thread;
+    d += bytes_per_thread;
+    s += bytes_per_thread;
+    bytes -= bytes_per_thread;
+  }
+finished_creating_thread:
+  r = i + 1;
+  FIO_MEMCPY((void *)d, (void *)s, bytes); /* memcpy reminder */
+  while (i) {
+    --i;
+    fio_thread_join(threads + i);
+  }
+  return r;
+}
+
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -6522,6 +6549,674 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
+/* ************************************************************************* */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___   /* Development inclusion - ignore line */
+#define FIO_TIME       /* Development inclusion - ignore line */
+#include "./include.h" /* Development inclusion - ignore line */
+#endif                 /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                  Time Helpers
+
+
+
+Copyright and License: see header file (000 header.h) or top of file
+***************************************************************************** */
+#if defined(FIO_TIME) && !defined(H___FIO_TIME___H)
+#define H___FIO_TIME___H
+
+/* *****************************************************************************
+Collecting Monotonic / Real Time
+***************************************************************************** */
+
+/** Returns human (watch) time... this value isn't as safe for measurements. */
+FIO_IFUNC struct timespec fio_time_real();
+
+/** Returns monotonic time. */
+FIO_IFUNC struct timespec fio_time_mono();
+
+/** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
+FIO_IFUNC int64_t fio_time_nano();
+
+/** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
+FIO_IFUNC int64_t fio_time_micro();
+
+/** Returns monotonic time in milliseconds. */
+FIO_IFUNC int64_t fio_time_milli();
+
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC int64_t fio_time2milli(struct timespec);
+
+/**
+ * A faster (yet less localized) alternative to `gmtime_r`.
+ *
+ * See the libc `gmtime_r` documentation for details.
+ *
+ * Falls back to `gmtime_r` for dates before epoch.
+ */
+SFUNC struct tm fio_time2gm(time_t time);
+
+/** Converts a `struct tm` to time in seconds (assuming UTC). */
+SFUNC time_t fio_gm2time(struct tm tm);
+
+/**
+ * Writes an RFC 7231 date representation (HTTP date format) to target.
+ *
+ * Usually requires 29 characters, although this may vary.
+ */
+SFUNC size_t fio_time2rfc7231(char *target, time_t time);
+
+/**
+ * Writes an RFC 2109 date representation to target.
+ *
+ * Usually requires 31 characters, although this may vary.
+ */
+SFUNC size_t fio_time2rfc2109(char *target, time_t time);
+
+/**
+ * Writes an RFC 2822 date representation to target.
+ *
+ * Usually requires 28 to 29 characters, although this may vary.
+ */
+SFUNC size_t fio_time2rfc2822(char *target, time_t time);
+
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time);
+
+/** Adds two `struct timespec` objects. */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
+
+/** Adds milliseconds to a `struct timespec` object. */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
+
+/** Compares two `struct timespec` objects. */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
+
+/* *****************************************************************************
+Time Inline Helpers
+***************************************************************************** */
+
+/** Returns human (watch) time... this value isn't as safe for measurements. */
+FIO_IFUNC struct timespec fio_time_real() {
+  struct timespec t;
+  clock_gettime(CLOCK_REALTIME, &t);
+  return t;
+}
+
+/** Returns monotonic time. */
+FIO_IFUNC struct timespec fio_time_mono() {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return t;
+}
+
+/** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
+FIO_IFUNC int64_t fio_time_nano() {
+  struct timespec t = fio_time_mono();
+  return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
+}
+
+/** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
+FIO_IFUNC int64_t fio_time_micro() {
+  struct timespec t = fio_time_mono();
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
+}
+
+/** Returns monotonic time in milliseconds. */
+FIO_IFUNC int64_t fio_time_milli() {
+  struct timespec t = fio_time_mono();
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/** Converts a `struct timespec` to milliseconds. */
+FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
+  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/* Normalizes a timespec struct after an `add` or `sub` operation. */
+FIO_IFUNC void fio_time___normalize(struct timespec *t) {
+  const long ns_norm[2] = {0, 1000000000LL};
+  t->tv_nsec += ns_norm[(t->tv_nsec < 0)];
+  t->tv_sec += (t->tv_nsec < 0);
+  t->tv_nsec -= ns_norm[(1000000000LL < t->tv_nsec)];
+  t->tv_sec += (1000000000LL < t->tv_nsec);
+}
+
+/** Adds to timespec. */
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2) {
+  t.tv_sec += t2.tv_sec;
+  t.tv_nsec += t2.tv_nsec;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Adds milliseconds to timespec. */
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli) {
+  t.tv_sec += milli >> 10; /* 1024 is close enough, will be normalized */
+  t.tv_nsec += (milli & 1023) * 1000000;
+  fio_time___normalize(&t);
+  return t;
+}
+
+/** Compares two timespecs. */
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
+  size_t a = (t2.tv_sec < t1.tv_sec) << 1;
+  a |= (t2.tv_nsec < t1.tv_nsec);
+  size_t b = (t1.tv_sec < t2.tv_sec) << 1;
+  b |= (t1.tv_nsec < t2.tv_nsec);
+  return (0 - (a < b)) + (b < a);
+}
+
+/* *****************************************************************************
+Time Implementation
+***************************************************************************** */
+#if !defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE)
+
+/**
+ * A faster (yet less localized) alternative to `gmtime_r`.
+ *
+ * See the libc `gmtime_r` documentation for details.
+ *
+ * Falls back to `gmtime_r` for dates before epoch.
+ */
+SFUNC struct tm fio_time2gm(time_t timer) {
+  struct tm tm;
+  ssize_t a, b;
+#if HAVE_TM_TM_ZONE || defined(BSD)
+  tm = (struct tm){
+      .tm_isdst = 0,
+      .tm_zone = (char *)"UTC",
+  };
+#else
+  tm = (struct tm){
+      .tm_isdst = 0,
+  };
+#endif
+
+  // convert seconds from epoch to days from epoch + extract data
+  if (timer >= 0) {
+    // for seconds up to weekdays, we reduce the reminder every step.
+    a = (ssize_t)timer;
+    b = a / 60; // b == time in minutes
+    tm.tm_sec = (int)(a - (b * 60));
+    a = b / 60; // b == time in hours
+    tm.tm_min = (int)(b - (a * 60));
+    b = a / 24; // b == time in days since epoch
+    tm.tm_hour = (int)(a - (b * 24));
+    // b == number of days since epoch
+    // day of epoch was a thursday. Add + 4 so sunday == 0...
+    tm.tm_wday = (b + 4) % 7;
+  } else {
+    // for seconds up to weekdays, we reduce the reminder every step.
+    a = (ssize_t)timer;
+    b = a / 60; // b == time in minutes
+    if (b * 60 != a) {
+      /* seconds passed */
+      tm.tm_sec = (int)((a - (b * 60)) + 60);
+      --b;
+    } else {
+      /* no seconds */
+      tm.tm_sec = 0;
+    }
+    a = b / 60; // b == time in hours
+    if (a * 60 != b) {
+      /* minutes passed */
+      tm.tm_min = (int)((b - (a * 60)) + 60);
+      --a;
+    } else {
+      /* no minutes */
+      tm.tm_min = 0;
+    }
+    b = a / 24; // b == time in days since epoch?
+    if (b * 24 != a) {
+      /* hours passed */
+      tm.tm_hour = (int)((a - (b * 24)) + 24);
+      --b;
+    } else {
+      /* no hours */
+      tm.tm_hour = 0;
+    }
+    // day of epoch was a thursday. Add + 4 so sunday == 0...
+    tm.tm_wday = ((b - 3) % 7);
+    if (tm.tm_wday)
+      tm.tm_wday += 7;
+    /* b == days from epoch */
+  }
+
+  // at this point we can apply the algorithm described here:
+  // http://howardhinnant.github.io/date_algorithms.html#civil_from_days
+  // Credit to Howard Hinnant.
+  {
+    b += 719468L; // adjust to March 1st, 2000 (post leap of 400 year era)
+    // 146,097 = days in era (400 years)
+    const size_t era = (b >= 0 ? b : b - 146096) / 146097;
+    const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
+    const uint16_t yoe =
+        (uint16_t)((doe - doe / 1460 + doe / 36524 - doe / 146096) /
+                   365); // year of era
+    a = yoe;
+    a += era * 400; // a == year number, assuming year starts on March 1st...
+    const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));
+    const uint16_t mp = (uint16_t)((5U * doy + 2) / 153);
+    const uint16_t d = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
+    const uint8_t m = (uint8_t)(mp + (mp < 10 ? 2 : -10));
+    a += (m <= 1);
+    tm.tm_year = (int)(a - 1900); // tm_year == years since 1900
+    tm.tm_mon = m;
+    tm.tm_mday = d;
+    const uint8_t is_leap = (a % 4 == 0 && (a % 100 != 0 || a % 400 == 0));
+    tm.tm_yday = (doy + (is_leap) + 28 + 31) % (365 + is_leap);
+  }
+
+  return tm;
+}
+
+/** Converts a `struct tm` to time in seconds (assuming UTC). */
+SFUNC time_t fio_gm2time(struct tm tm) {
+  int64_t time = 0;
+  // we start with the algorithm described here:
+  // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
+  // Credit to Howard Hinnant.
+  {
+    const int32_t y = (tm.tm_year + 1900) - (tm.tm_mon < 2);
+    const int32_t era = (y >= 0 ? y : y - 399) / 400;
+    const uint16_t yoe = (y - era * 400L); // 0-399
+    const uint32_t doy =
+        (153L * (tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10)) + 2) / 5 + tm.tm_mday -
+        1;                                                       // 0-365
+    const uint32_t doe = yoe * 365L + yoe / 4 - yoe / 100 + doy; // 0-146096
+    time = era * 146097LL + doe - 719468LL; // time == days from epoch
+  }
+
+  /* Adjust for hour, minute and second */
+  time = time * 24LL + tm.tm_hour;
+  time = time * 60LL + tm.tm_min;
+  time = time * 60LL + tm.tm_sec;
+
+  if (tm.tm_isdst > 0) {
+    time -= 60 * 60;
+  }
+#if HAVE_TM_TM_ZONE || defined(BSD)
+  if (tm.tm_gmtoff) {
+    time += tm.tm_gmtoff;
+  }
+#endif
+  return (time_t)time;
+}
+
+static const char *FIO___DAY_NAMES[] =
+    {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+// clang-format off
+static const char *FIO___MONTH_NAMES[] =
+    {"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
+     "Jul ", "Aug ", "Sep ", "Oct ", "Nov ", "Dec "};
+// clang-format on
+static const char *FIO___GMT_STR = "GMT";
+
+/** Writes an RFC 7231 date representation (HTTP date format) to target. */
+SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
+  const struct tm tm = fio_time2gm(time);
+  /* note: day of month is always 2 digits */
+  char *pos = target;
+  uint16_t tmp;
+  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
+  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
+  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
+  pos[3] = ',';
+  pos[4] = ' ';
+  pos += 5;
+  tmp = tm.tm_mday / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
+  pos += 2;
+  *(pos++) = ' ';
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos[3] = ' ';
+  pos += 4;
+  // write year.
+  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+  *(pos++) = ' ';
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
+  pos += 8;
+  pos[0] = ' ';
+  pos[1] = FIO___GMT_STR[0];
+  pos[2] = FIO___GMT_STR[1];
+  pos[3] = FIO___GMT_STR[2];
+  pos[4] = 0;
+  pos += 4;
+  return pos - target;
+}
+/** Writes an RFC 2109 date representation to target. */
+SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
+  const struct tm tm = fio_time2gm(time);
+  /* note: day of month is always 2 digits */
+  char *pos = target;
+  uint16_t tmp;
+  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
+  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
+  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
+  pos[3] = ',';
+  pos[4] = ' ';
+  pos += 5;
+  tmp = tm.tm_mday / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
+  pos += 2;
+  *(pos++) = ' ';
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos[3] = ' ';
+  pos += 4;
+  // write year.
+  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+  *(pos++) = ' ';
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
+  pos += 8;
+  *pos++ = ' ';
+  *pos++ = '-';
+  *pos++ = '0';
+  *pos++ = '0';
+  *pos++ = '0';
+  *pos++ = '0';
+  *pos = 0;
+  return pos - target;
+}
+
+/** Writes an RFC 2822 date representation to target. */
+SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
+  const struct tm tm = fio_time2gm(time);
+  /* note: day of month is either 1 or 2 digits */
+  char *pos = target;
+  uint16_t tmp;
+  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
+  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
+  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
+  pos[3] = ',';
+  pos[4] = ' ';
+  pos += 5;
+  if (tm.tm_mday < 10) {
+    *pos = '0' + tm.tm_mday;
+    ++pos;
+  } else {
+    tmp = tm.tm_mday / 10;
+    pos[0] = '0' + tmp;
+    pos[1] = '0' + (tm.tm_mday - (tmp * 10));
+    pos += 2;
+  }
+  *(pos++) = '-';
+  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
+  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
+  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
+  pos += 3;
+  *(pos++) = '-';
+  // write year.
+  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+  *(pos++) = ' ';
+  tmp = tm.tm_hour / 10;
+  pos[0] = '0' + tmp;
+  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
+  pos[2] = ':';
+  tmp = tm.tm_min / 10;
+  pos[3] = '0' + tmp;
+  pos[4] = '0' + (tm.tm_min - (tmp * 10));
+  pos[5] = ':';
+  tmp = tm.tm_sec / 10;
+  pos[6] = '0' + tmp;
+  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
+  pos += 8;
+  pos[0] = ' ';
+  pos[1] = FIO___GMT_STR[0];
+  pos[2] = FIO___GMT_STR[1];
+  pos[3] = FIO___GMT_STR[2];
+  pos[4] = 0;
+  pos += 4;
+  return pos - target;
+}
+
+/**
+ * Writes a date representation to target in common log format. i.e.,
+ *
+ *         [DD/MMM/yyyy:hh:mm:ss +0000]
+ *
+ * Usually requires 29 characters (includiing square brackes and NUL).
+ */
+SFUNC size_t fio_time2log(char *target, time_t time) {
+  {
+    const struct tm tm = fio_time2gm(time);
+    /* note: day of month is either 1 or 2 digits */
+    char *pos = target;
+    uint16_t tmp;
+    *(pos++) = '[';
+    tmp = tm.tm_mday / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
+    *(pos++) = '/';
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
+    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
+    *(pos++) = '/';
+    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
+    *(pos++) = ':';
+    tmp = tm.tm_hour / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_min / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
+    *(pos++) = ':';
+    tmp = tm.tm_sec / 10;
+    *(pos++) = '0' + tmp;
+    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
+    *(pos++) = ' ';
+    *(pos++) = '+';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = '0';
+    *(pos++) = ']';
+    *(pos) = 0;
+    return pos - target;
+  }
+}
+
+/* *****************************************************************************
+Time - test
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 23) + 1027) /* 23:17:07 */
+#if 1 || FIO_OS_WIN
+#define FIO___GMTIME_TEST_RANGE (1001LL * 376) /* test 0.5 millenia */
+#else
+#define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
+#endif
+
+FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
+  fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
+  struct tm tm1 = {0}, tm2 = {0};
+  const time_t now = fio_time_real().tv_sec;
+#if FIO_OS_WIN
+  const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = 1; /* Windows fails on some date ranges. */
+#else
+  const time_t end =
+      now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+  time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
+#endif
+  FIO_ASSERT(t < end, "time testing range overflowed.");
+  do {
+    time_t tmp = t;
+    t += FIO___GMTIME_TEST_INTERVAL;
+    tm2 = fio_time2gm(tmp);
+    FIO_ASSERT(fio_gm2time(tm2) == tmp,
+               "fio_gm2time roundtrip error (%zu != %zu)",
+               (size_t)fio_gm2time(tm2),
+               (size_t)tmp);
+    gmtime_r(&tmp, &tm1);
+    if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
+        tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
+        tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
+        tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
+      char buf[256];
+      FIO_LOG_ERROR("system gmtime_r != fio_time2gm for %ld!\n", (long)t);
+      fio_time2rfc7231(buf, tmp);
+      FIO_ASSERT(0,
+                 "\n"
+                 "-- System:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- facil.io:\n"
+                 "\ttm_year: %d\n"
+                 "\ttm_mon: %d\n"
+                 "\ttm_mday: %d\n"
+                 "\ttm_yday: %d\n"
+                 "\ttm_hour: %d\n"
+                 "\ttm_min: %d\n"
+                 "\ttm_sec: %d\n"
+                 "\ttm_wday: %d\n"
+                 "-- As String:\n"
+                 "\t%s",
+                 tm1.tm_year,
+                 tm1.tm_mon,
+                 tm1.tm_mday,
+                 tm1.tm_yday,
+                 tm1.tm_hour,
+                 tm1.tm_min,
+                 tm1.tm_sec,
+                 tm1.tm_wday,
+                 tm2.tm_year,
+                 tm2.tm_mon,
+                 tm2.tm_mday,
+                 tm2.tm_yday,
+                 tm2.tm_hour,
+                 tm2.tm_min,
+                 tm2.tm_sec,
+                 tm2.tm_wday,
+                 buf);
+    }
+  } while (t < end);
+  {
+    char buf[48];
+    buf[47] = 0;
+    FIO_MEMSET(buf, 'X', 47);
+    fio_time2rfc7231(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
+    FIO_MEMSET(buf, 'X', 47);
+    fio_time2rfc2109(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
+    FIO_MEMSET(buf, 'X', 47);
+    fio_time2rfc2822(buf, now);
+    FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
+    FIO_MEMSET(buf, 'X', 47);
+    fio_time2log(buf, now);
+    FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
+  }
+  {
+    uint64_t start, stop;
+#if DEBUG
+    fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
+#endif
+    fprintf(stderr, "  Performance testing fio_time2gm vs gmtime_r\n");
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm = fio_time2gm(now);
+      FIO_COMPILER_GUARD;
+      (void)tm;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr,
+            "\t- fio_time2gm speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      volatile struct tm tm;
+      time_t tmp = now;
+      gmtime_r(&tmp, (struct tm *)&tm);
+      FIO_COMPILER_GUARD;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr,
+            "\t- gmtime_r speed test took:  \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+    struct tm tm_now = fio_time2gm(now);
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      time_t t_tmp = fio_gm2time(tm_now);
+      FIO_COMPILER_GUARD;
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr,
+            "\t- fio_gm2time speed test took:\t%zuus\n",
+            (size_t)(stop - start));
+    start = fio_time_micro();
+    for (size_t i = 0; i < (1 << 17); ++i) {
+      tm_now = fio_time2gm(now + i);
+      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
+      FIO_COMPILER_GUARD;
+      (void)t_tmp;
+    }
+    stop = fio_time_micro();
+    fprintf(stderr,
+            "\t- mktime speed test took:    \t%zuus\n",
+            (size_t)(stop - start));
+    fprintf(stderr, "\n");
+  }
+  /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
+}
+#undef FIO___GMTIME_TEST_INTERVAL
+#undef FIO___GMTIME_TEST_RANGE
+#endif /* FIO_TEST_CSTL */
+
+/* *****************************************************************************
+Time Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_TIME
+#endif /* FIO_TIME */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
@@ -13239,6 +13934,15 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
   return NULL;
 }
 
+FIO_SFUNC void fio___naive_memcpy(void *restrict d_,
+                                  const void *restrict s_,
+                                  size_t len) {
+  char *d = (char *)d_;
+  const char *s = (const char *)s_;
+  while (len--)
+    *(d++) = *(s++);
+}
+
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
@@ -13305,7 +14009,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                               mem_len,
                               "fio_memset sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memset\t(%zu bytes):\t%zu us\n",
+            "\tfio_memset\t(%zu bytes):\t%zuus\n",
             mem_len,
             (size_t)(end - start));
     start = fio_time_micro();
@@ -13315,7 +14019,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memset\t(%zu bytes):\t%zu us\n",
+            "\tsystem memset\t(%zu bytes):\t%zuus\n",
             mem_len,
             (size_t)(end - start));
 
@@ -13326,7 +14030,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
           "* Speed testing memcpy (%d repetitions per test):\n",
           repetitions);
 
-  for (int len_i = 5; len_i < 20; ++len_i) {
+  for (int len_i = 5; len_i < 22; ++len_i) {
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
       void *mem = malloc(mem_len << 1);
@@ -13337,6 +14041,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       sig ^= sig << 29;
       sig ^= sig << 31;
       fio_memset(mem, sig, mem_len);
+      size_t mbsec;
 
       start = fio_time_micro();
       for (int i = 0; i < repetitions; ++i) {
@@ -13344,25 +14049,61 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
-
       fio___memset_test_aligned((char *)mem + mem_len,
                                 sig,
                                 mem_len,
                                 "fio_memcpy sanity test FAILED");
+      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tfio_memcpy\t(%zu bytes):\t%zu us\n",
+              "\tfio_memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
               mem_len,
-              (size_t)(end - start));
+              (size_t)(end - start),
+              mbsec);
+
+      // size_t threads_used = 0;
+      // start = fio_time_micro();
+      // for (int i = 0; i < repetitions; ++i) {
+      //   threads_used = fio_thread_memcpy((char *)mem + mem_len, mem,
+      //   mem_len); if (threads_used == 1)
+      //     break;
+      //   FIO_COMPILER_GUARD;
+      // }
+      // end = fio_time_micro();
+      // fio___memset_test_aligned((char *)mem + mem_len,
+      //                           sig,
+      //                           mem_len,
+      //                           "fio_thread_memcpy sanity test FAILED");
+      // mbsec = ((end - start) * repetitions) / mem_len;
+      // fprintf(stderr,
+      //         "   fio_thread_memcpy (%zut)\t(%zu bytes):\t%zu"
+      //         "us\t%zumb/sec\n", threads_used, mem_len, (size_t)(end -
+      //         start), mbsec);
+
       start = fio_time_micro();
       for (int i = 0; i < repetitions; ++i) {
         memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
+      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tsystem memcpy\t(%zu bytes):\t%zu us\n",
+              "\tsystem memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
               mem_len,
-              (size_t)(end - start));
+              (size_t)(end - start),
+              mbsec);
+
+      // start = fio_time_micro();
+      // for (int i = 0; i < repetitions; ++i) {
+      //   fio___naive_memcpy((char *)mem + mem_len, mem, mem_len);
+      //   FIO_COMPILER_GUARD;
+      // }
+      // end = fio_time_micro();
+      // mbsec = (mem_len * repetitions) / (end - start);
+      // fprintf(stderr,
+      //         "\tnaive memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+      //         mem_len,
+      //         (size_t)(end - start),
+      //         mbsec);
 
       free(mem);
     }
@@ -13416,7 +14157,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memchr\t(%zu bytes):\t%zu us\n",
+            "\tsystem memchr\t(%zu bytes):\t%zuus\n",
             token_index,
             (size_t)(end - start));
 
@@ -13442,7 +14183,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\ta naive memchr\t(%zu bytes):\t%zu us\n",
+            "\ta naive memchr\t(%zu bytes):\t%zuus\n",
             token_index,
             (size_t)(end - start));
 
@@ -13767,674 +14508,6 @@ Memory management macros
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */
-/* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_TIME       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
-/* *****************************************************************************
-
-
-
-
-                                  Time Helpers
-
-
-
-Copyright and License: see header file (000 header.h) or top of file
-***************************************************************************** */
-#if defined(FIO_TIME) && !defined(H___FIO_TIME___H)
-#define H___FIO_TIME___H
-
-/* *****************************************************************************
-Collecting Monotonic / Real Time
-***************************************************************************** */
-
-/** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real();
-
-/** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono();
-
-/** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
-FIO_IFUNC int64_t fio_time_nano();
-
-/** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro();
-
-/** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli();
-
-/** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC int64_t fio_time2milli(struct timespec);
-
-/**
- * A faster (yet less localized) alternative to `gmtime_r`.
- *
- * See the libc `gmtime_r` documentation for details.
- *
- * Falls back to `gmtime_r` for dates before epoch.
- */
-SFUNC struct tm fio_time2gm(time_t time);
-
-/** Converts a `struct tm` to time in seconds (assuming UTC). */
-SFUNC time_t fio_gm2time(struct tm tm);
-
-/**
- * Writes an RFC 7231 date representation (HTTP date format) to target.
- *
- * Usually requires 29 characters, although this may vary.
- */
-SFUNC size_t fio_time2rfc7231(char *target, time_t time);
-
-/**
- * Writes an RFC 2109 date representation to target.
- *
- * Usually requires 31 characters, although this may vary.
- */
-SFUNC size_t fio_time2rfc2109(char *target, time_t time);
-
-/**
- * Writes an RFC 2822 date representation to target.
- *
- * Usually requires 28 to 29 characters, although this may vary.
- */
-SFUNC size_t fio_time2rfc2822(char *target, time_t time);
-
-/**
- * Writes a date representation to target in common log format. i.e.,
- *
- *         [DD/MMM/yyyy:hh:mm:ss +0000]
- *
- * Usually requires 29 characters (includiing square brackes and NUL).
- */
-SFUNC size_t fio_time2log(char *target, time_t time);
-
-/** Adds two `struct timespec` objects. */
-FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
-
-/** Adds milliseconds to a `struct timespec` object. */
-FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
-
-/** Compares two `struct timespec` objects. */
-FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
-
-/* *****************************************************************************
-Time Inline Helpers
-***************************************************************************** */
-
-/** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real() {
-  struct timespec t;
-  clock_gettime(CLOCK_REALTIME, &t);
-  return t;
-}
-
-/** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono() {
-  struct timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
-  return t;
-}
-
-/** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
-FIO_IFUNC int64_t fio_time_nano() {
-  struct timespec t = fio_time_mono();
-  return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
-}
-
-/** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro() {
-  struct timespec t = fio_time_mono();
-  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
-}
-
-/** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli() {
-  struct timespec t = fio_time_mono();
-  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
-}
-
-/** Converts a `struct timespec` to milliseconds. */
-FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
-  return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
-}
-
-/* Normalizes a timespec struct after an `add` or `sub` operation. */
-FIO_IFUNC void fio_time___normalize(struct timespec *t) {
-  const long ns_norm[2] = {0, 1000000000LL};
-  t->tv_nsec += ns_norm[(t->tv_nsec < 0)];
-  t->tv_sec += (t->tv_nsec < 0);
-  t->tv_nsec -= ns_norm[(1000000000LL < t->tv_nsec)];
-  t->tv_sec += (1000000000LL < t->tv_nsec);
-}
-
-/** Adds to timespec. */
-FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2) {
-  t.tv_sec += t2.tv_sec;
-  t.tv_nsec += t2.tv_nsec;
-  fio_time___normalize(&t);
-  return t;
-}
-
-/** Adds milliseconds to timespec. */
-FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli) {
-  t.tv_sec += milli >> 10; /* 1024 is close enough, will be normalized */
-  t.tv_nsec += (milli & 1023) * 1000000;
-  fio_time___normalize(&t);
-  return t;
-}
-
-/** Compares two timespecs. */
-FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
-  size_t a = (t2.tv_sec < t1.tv_sec) << 1;
-  a |= (t2.tv_nsec < t1.tv_nsec);
-  size_t b = (t1.tv_sec < t2.tv_sec) << 1;
-  b |= (t1.tv_nsec < t2.tv_nsec);
-  return (0 - (a < b)) + (b < a);
-}
-
-/* *****************************************************************************
-Time Implementation
-***************************************************************************** */
-#if !defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE)
-
-/**
- * A faster (yet less localized) alternative to `gmtime_r`.
- *
- * See the libc `gmtime_r` documentation for details.
- *
- * Falls back to `gmtime_r` for dates before epoch.
- */
-SFUNC struct tm fio_time2gm(time_t timer) {
-  struct tm tm;
-  ssize_t a, b;
-#if HAVE_TM_TM_ZONE || defined(BSD)
-  tm = (struct tm){
-      .tm_isdst = 0,
-      .tm_zone = (char *)"UTC",
-  };
-#else
-  tm = (struct tm){
-      .tm_isdst = 0,
-  };
-#endif
-
-  // convert seconds from epoch to days from epoch + extract data
-  if (timer >= 0) {
-    // for seconds up to weekdays, we reduce the reminder every step.
-    a = (ssize_t)timer;
-    b = a / 60; // b == time in minutes
-    tm.tm_sec = (int)(a - (b * 60));
-    a = b / 60; // b == time in hours
-    tm.tm_min = (int)(b - (a * 60));
-    b = a / 24; // b == time in days since epoch
-    tm.tm_hour = (int)(a - (b * 24));
-    // b == number of days since epoch
-    // day of epoch was a thursday. Add + 4 so sunday == 0...
-    tm.tm_wday = (b + 4) % 7;
-  } else {
-    // for seconds up to weekdays, we reduce the reminder every step.
-    a = (ssize_t)timer;
-    b = a / 60; // b == time in minutes
-    if (b * 60 != a) {
-      /* seconds passed */
-      tm.tm_sec = (int)((a - (b * 60)) + 60);
-      --b;
-    } else {
-      /* no seconds */
-      tm.tm_sec = 0;
-    }
-    a = b / 60; // b == time in hours
-    if (a * 60 != b) {
-      /* minutes passed */
-      tm.tm_min = (int)((b - (a * 60)) + 60);
-      --a;
-    } else {
-      /* no minutes */
-      tm.tm_min = 0;
-    }
-    b = a / 24; // b == time in days since epoch?
-    if (b * 24 != a) {
-      /* hours passed */
-      tm.tm_hour = (int)((a - (b * 24)) + 24);
-      --b;
-    } else {
-      /* no hours */
-      tm.tm_hour = 0;
-    }
-    // day of epoch was a thursday. Add + 4 so sunday == 0...
-    tm.tm_wday = ((b - 3) % 7);
-    if (tm.tm_wday)
-      tm.tm_wday += 7;
-    /* b == days from epoch */
-  }
-
-  // at this point we can apply the algorithm described here:
-  // http://howardhinnant.github.io/date_algorithms.html#civil_from_days
-  // Credit to Howard Hinnant.
-  {
-    b += 719468L; // adjust to March 1st, 2000 (post leap of 400 year era)
-    // 146,097 = days in era (400 years)
-    const size_t era = (b >= 0 ? b : b - 146096) / 146097;
-    const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
-    const uint16_t yoe =
-        (uint16_t)((doe - doe / 1460 + doe / 36524 - doe / 146096) /
-                   365); // year of era
-    a = yoe;
-    a += era * 400; // a == year number, assuming year starts on March 1st...
-    const uint16_t doy = (uint16_t)(doe - (365 * yoe + yoe / 4 - yoe / 100));
-    const uint16_t mp = (uint16_t)((5U * doy + 2) / 153);
-    const uint16_t d = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
-    const uint8_t m = (uint8_t)(mp + (mp < 10 ? 2 : -10));
-    a += (m <= 1);
-    tm.tm_year = (int)(a - 1900); // tm_year == years since 1900
-    tm.tm_mon = m;
-    tm.tm_mday = d;
-    const uint8_t is_leap = (a % 4 == 0 && (a % 100 != 0 || a % 400 == 0));
-    tm.tm_yday = (doy + (is_leap) + 28 + 31) % (365 + is_leap);
-  }
-
-  return tm;
-}
-
-/** Converts a `struct tm` to time in seconds (assuming UTC). */
-SFUNC time_t fio_gm2time(struct tm tm) {
-  int64_t time = 0;
-  // we start with the algorithm described here:
-  // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
-  // Credit to Howard Hinnant.
-  {
-    const int32_t y = (tm.tm_year + 1900) - (tm.tm_mon < 2);
-    const int32_t era = (y >= 0 ? y : y - 399) / 400;
-    const uint16_t yoe = (y - era * 400L); // 0-399
-    const uint32_t doy =
-        (153L * (tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10)) + 2) / 5 + tm.tm_mday -
-        1;                                                       // 0-365
-    const uint32_t doe = yoe * 365L + yoe / 4 - yoe / 100 + doy; // 0-146096
-    time = era * 146097LL + doe - 719468LL; // time == days from epoch
-  }
-
-  /* Adjust for hour, minute and second */
-  time = time * 24LL + tm.tm_hour;
-  time = time * 60LL + tm.tm_min;
-  time = time * 60LL + tm.tm_sec;
-
-  if (tm.tm_isdst > 0) {
-    time -= 60 * 60;
-  }
-#if HAVE_TM_TM_ZONE || defined(BSD)
-  if (tm.tm_gmtoff) {
-    time += tm.tm_gmtoff;
-  }
-#endif
-  return (time_t)time;
-}
-
-static const char *FIO___DAY_NAMES[] =
-    {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-// clang-format off
-static const char *FIO___MONTH_NAMES[] =
-    {"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
-     "Jul ", "Aug ", "Sep ", "Oct ", "Nov ", "Dec "};
-// clang-format on
-static const char *FIO___GMT_STR = "GMT";
-
-/** Writes an RFC 7231 date representation (HTTP date format) to target. */
-SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
-  const struct tm tm = fio_time2gm(time);
-  /* note: day of month is always 2 digits */
-  char *pos = target;
-  uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
-  tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
-  tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
-  tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
-  tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
-  return pos - target;
-}
-/** Writes an RFC 2109 date representation to target. */
-SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
-  const struct tm tm = fio_time2gm(time);
-  /* note: day of month is always 2 digits */
-  char *pos = target;
-  uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
-  tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
-  tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
-  tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
-  tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  *pos++ = ' ';
-  *pos++ = '-';
-  *pos++ = '0';
-  *pos++ = '0';
-  *pos++ = '0';
-  *pos++ = '0';
-  *pos = 0;
-  return pos - target;
-}
-
-/** Writes an RFC 2822 date representation to target. */
-SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
-  const struct tm tm = fio_time2gm(time);
-  /* note: day of month is either 1 or 2 digits */
-  char *pos = target;
-  uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
-  if (tm.tm_mday < 10) {
-    *pos = '0' + tm.tm_mday;
-    ++pos;
-  } else {
-    tmp = tm.tm_mday / 10;
-    pos[0] = '0' + tmp;
-    pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-    pos += 2;
-  }
-  *(pos++) = '-';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos += 3;
-  *(pos++) = '-';
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
-  tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
-  tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
-  tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
-  return pos - target;
-}
-
-/**
- * Writes a date representation to target in common log format. i.e.,
- *
- *         [DD/MMM/yyyy:hh:mm:ss +0000]
- *
- * Usually requires 29 characters (includiing square brackes and NUL).
- */
-SFUNC size_t fio_time2log(char *target, time_t time) {
-  {
-    const struct tm tm = fio_time2gm(time);
-    /* note: day of month is either 1 or 2 digits */
-    char *pos = target;
-    uint16_t tmp;
-    *(pos++) = '[';
-    tmp = tm.tm_mday / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
-    *(pos++) = '/';
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
-    *(pos++) = '/';
-    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-    *(pos++) = ':';
-    tmp = tm.tm_hour / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
-    *(pos++) = ':';
-    tmp = tm.tm_min / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
-    *(pos++) = ':';
-    tmp = tm.tm_sec / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
-    *(pos++) = ' ';
-    *(pos++) = '+';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = ']';
-    *(pos) = 0;
-    return pos - target;
-  }
-}
-
-/* *****************************************************************************
-Time - test
-***************************************************************************** */
-#ifdef FIO_TEST_CSTL
-
-#define FIO___GMTIME_TEST_INTERVAL ((60LL * 60 * 23) + 1027) /* 23:17:07 */
-#if 1 || FIO_OS_WIN
-#define FIO___GMTIME_TEST_RANGE (1001LL * 376) /* test 0.5 millenia */
-#else
-#define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
-#endif
-
-FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
-  fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
-  struct tm tm1 = {0}, tm2 = {0};
-  const time_t now = fio_time_real().tv_sec;
-#if FIO_OS_WIN
-  const time_t end = (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
-  time_t t = 1; /* Windows fails on some date ranges. */
-#else
-  const time_t end =
-      now + (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
-  time_t t = now - (FIO___GMTIME_TEST_RANGE * FIO___GMTIME_TEST_INTERVAL);
-#endif
-  FIO_ASSERT(t < end, "time testing range overflowed.");
-  do {
-    time_t tmp = t;
-    t += FIO___GMTIME_TEST_INTERVAL;
-    tm2 = fio_time2gm(tmp);
-    FIO_ASSERT(fio_gm2time(tm2) == tmp,
-               "fio_gm2time roundtrip error (%zu != %zu)",
-               (size_t)fio_gm2time(tm2),
-               (size_t)tmp);
-    gmtime_r(&tmp, &tm1);
-    if (tm1.tm_year != tm2.tm_year || tm1.tm_mon != tm2.tm_mon ||
-        tm1.tm_mday != tm2.tm_mday || tm1.tm_yday != tm2.tm_yday ||
-        tm1.tm_hour != tm2.tm_hour || tm1.tm_min != tm2.tm_min ||
-        tm1.tm_sec != tm2.tm_sec || tm1.tm_wday != tm2.tm_wday) {
-      char buf[256];
-      FIO_LOG_ERROR("system gmtime_r != fio_time2gm for %ld!\n", (long)t);
-      fio_time2rfc7231(buf, tmp);
-      FIO_ASSERT(0,
-                 "\n"
-                 "-- System:\n"
-                 "\ttm_year: %d\n"
-                 "\ttm_mon: %d\n"
-                 "\ttm_mday: %d\n"
-                 "\ttm_yday: %d\n"
-                 "\ttm_hour: %d\n"
-                 "\ttm_min: %d\n"
-                 "\ttm_sec: %d\n"
-                 "\ttm_wday: %d\n"
-                 "-- facil.io:\n"
-                 "\ttm_year: %d\n"
-                 "\ttm_mon: %d\n"
-                 "\ttm_mday: %d\n"
-                 "\ttm_yday: %d\n"
-                 "\ttm_hour: %d\n"
-                 "\ttm_min: %d\n"
-                 "\ttm_sec: %d\n"
-                 "\ttm_wday: %d\n"
-                 "-- As String:\n"
-                 "\t%s",
-                 tm1.tm_year,
-                 tm1.tm_mon,
-                 tm1.tm_mday,
-                 tm1.tm_yday,
-                 tm1.tm_hour,
-                 tm1.tm_min,
-                 tm1.tm_sec,
-                 tm1.tm_wday,
-                 tm2.tm_year,
-                 tm2.tm_mon,
-                 tm2.tm_mday,
-                 tm2.tm_yday,
-                 tm2.tm_hour,
-                 tm2.tm_min,
-                 tm2.tm_sec,
-                 tm2.tm_wday,
-                 buf);
-    }
-  } while (t < end);
-  {
-    char buf[48];
-    buf[47] = 0;
-    FIO_MEMSET(buf, 'X', 47);
-    fio_time2rfc7231(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
-    FIO_MEMSET(buf, 'X', 47);
-    fio_time2rfc2109(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
-    FIO_MEMSET(buf, 'X', 47);
-    fio_time2rfc2822(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
-    FIO_MEMSET(buf, 'X', 47);
-    fio_time2log(buf, now);
-    FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
-  }
-  {
-    uint64_t start, stop;
-#if DEBUG
-    fprintf(stderr, "PERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
-#endif
-    fprintf(stderr, "  Performance testing fio_time2gm vs gmtime_r\n");
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm = fio_time2gm(now);
-      FIO_COMPILER_GUARD;
-      (void)tm;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t- fio_time2gm speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm;
-      time_t tmp = now;
-      gmtime_r(&tmp, (struct tm *)&tm);
-      FIO_COMPILER_GUARD;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t- gmtime_r speed test took:  \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-    struct tm tm_now = fio_time2gm(now);
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      time_t t_tmp = fio_gm2time(tm_now);
-      FIO_COMPILER_GUARD;
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t- fio_gm2time speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
-      FIO_COMPILER_GUARD;
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t- mktime speed test took:    \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-  }
-  /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
-}
-#undef FIO___GMTIME_TEST_INTERVAL
-#undef FIO___GMTIME_TEST_RANGE
-#endif /* FIO_TEST_CSTL */
-
-/* *****************************************************************************
-Time Cleanup
-***************************************************************************** */
-#endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_TIME
-#endif /* FIO_TIME */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
@@ -35810,6 +35883,9 @@ Everything, and the Kitchen Sink
 #ifdef FIO_THREADS
 #include "007 threads.h"
 #endif
+#ifdef FIO_TIME
+#include "008 time.h"
+#endif
 #ifdef FIO_RAND
 #include "010 random.h"
 #endif
@@ -35840,9 +35916,6 @@ Everything, and the Kitchen Sink
 
 #include "100 mem.h" /* later files rely on macros from here. */
 
-#ifdef FIO_TIME
-#include "101 time.h"
-#endif
 #ifdef FIO_QUEUE
 #include "102 queue.h"
 #endif
@@ -35920,5 +35993,4 @@ Everything, and the Kitchen Sink
 #endif
 
 #endif /* !H___FIO_CSTL_COMBINED___H */
-/* *************************************************************************
- */
+/* ************************************************************************* */

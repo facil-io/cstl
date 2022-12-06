@@ -590,7 +590,7 @@ Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
+#if __has_builtin(__builtin_memcpy) && 0
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
@@ -599,12 +599,6 @@ Memory Copying Primitives
   FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
                                      const void *restrict src) {               \
     __builtin_memcpy(dest, src, bytes);                                        \
-  }
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    __builtin_memcpy(d, s, bytes);                                             \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
   }
 #else
 #ifndef FIO_MEMCPY
@@ -623,13 +617,6 @@ Memory Copying Primitives
     } d = {.ptr = dest}, s = {.ptr = src};                                     \
     *d.grp = *s.grp;                                                           \
   }
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    fio___memcpy##bytes(d, s);                                                 \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-
 #endif /* __has_builtin(__builtin_memcpy) */
 
 #define FIO_MEMCPY1(dest, src)    fio___memcpy1((dest), (src))
@@ -672,33 +659,24 @@ FIO___MAKE_MEMCPY_FIXED(2048)
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
+/* Constant time copy of bytes (partial copy test) */
+#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+  if ((l & bytes)) {                                                           \
+    fio___memcpy##bytes(d, s);                                                 \
+    d += bytes;                                                                \
+    s += bytes;                                                                \
+  }
+
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
 FIO_IFUNC void fio___memcpy7x(void *restrict d_,
                               const void *restrict s_,
                               size_t l) {
-#if 1
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-#else
-  /* assume we can always copy/write 8 bytes into the buffer? */
-  uint64_t d, s, mask;
-  FIO_MEMCPY8(&d, d_);
-  FIO_MEMCPY8(&s, s_);
-  mask = (~UINT64_C(0)) << ((l & 7) << 3);
-#if __BIG_ENDIAN__
-  mask = ~mask;
-#endif
-  d &= mask;
-  s &= ~mask;
-  d |= s;
-  FIO_MEMCPY8(d_, &d);
-#endif
+  FIO_MEMCPY___PARTIAL(1);
 }
-
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio___memcpy15x(void *restrict d_,
                                const void *restrict s_,
@@ -706,7 +684,9 @@ FIO_IFUNC void fio___memcpy15x(void *restrict d_,
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
 FIO_IFUNC void fio___memcpy31x(void *restrict d_,
@@ -716,7 +696,9 @@ FIO_IFUNC void fio___memcpy31x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_IFUNC void fio___memcpy63x(void *restrict d_,
@@ -727,7 +709,9 @@ FIO_IFUNC void fio___memcpy63x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
 FIO_IFUNC void fio___memcpy127x(void *restrict d_,
@@ -739,7 +723,9 @@ FIO_IFUNC void fio___memcpy127x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy255x(void *restrict d_,
@@ -752,7 +738,9 @@ FIO_IFUNC void fio___memcpy255x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy511x(void *restrict d_,
@@ -766,7 +754,9 @@ FIO_IFUNC void fio___memcpy511x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
@@ -781,7 +771,9 @@ FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
@@ -797,7 +789,9 @@ FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
@@ -814,7 +808,9 @@ FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(32);
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  FIO_MEMCPY___PARTIAL(1);
 }
 #undef FIO_MEMCPY___PARTIAL
 
@@ -840,26 +836,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-#if 0
-  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
-  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
-    FIO_MEMCPY64(d, repeated);
-    FIO_MEMCPY64(d + 64, repeated);
-    FIO_MEMCPY64(d + 128, repeated);
-    FIO_MEMCPY64(d + 192, repeated);
-    d += 256;
-  }
-  if (bytes & 128) {
-    FIO_MEMCPY64(d, repeated);
-    FIO_MEMCPY64(d + 64, repeated);
-    d += 128;
-  }
-  if (bytes & 64) {
-    FIO_MEMCPY64(d, repeated);
-    d += 64;
-  }
-  FIO_MEMCPY63x(d, repeated, bytes);
-#else
+
 #define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
   if (bytes & u8_count)                                                        \
     for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
@@ -876,14 +853,13 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   FIO___MEMSET_IF_LOOP(8, 1);
   FIO_MEMCPY7x(d, &data, bytes);
 #undef FIO___MEMSET_IF_LOOP
-#endif
 }
 
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCK_NUM  1024
+#define FIO___MEMCPY_BLOCK_NUM  1024ULL
 #define FIO___MEMCPY_BLOCKx_NUM 1023ULL
 #define FIO___MEMCPY_BLOCK      FIO_MEMCPY1024
 #define FIO___MEMCPY_BLOCKx     FIO_MEMCPY1023x
@@ -899,7 +875,8 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
-    for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
+    for (const char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM));
+         d < dstop;) {
       FIO___MEMCPY_BLOCK(d, s); /* direct copy, no meaningful overlap */
       d += FIO___MEMCPY_BLOCK_NUM;
       s += FIO___MEMCPY_BLOCK_NUM;
@@ -959,7 +936,7 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
  *
  * Placed here (mostly copied from bitmap module).
  */
-FIO_SFUNC size_t fio___lsb_index4memchr(uint64_t i) {
+FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(i);
 #else
@@ -1030,7 +1007,7 @@ FIO_SFUNC size_t fio___lsb_index4memchr(uint64_t i) {
   case UINT64_C(0x4000000000000000): return 62;
   case UINT64_C(0x8000000000000000): return 63;
   }
-  return 63;
+  return (0ULL - 1ULL);
 #endif /* __builtin vs. map */
 }
 
@@ -1071,10 +1048,16 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
       u[i] |= u[i] >> 28;                                                      \
       flag |= (u[i] & 0xFFU) << (i << 3); /* placed packed bitmap in u64 */    \
     }                                                                          \
-    return (void *)(r + fio___lsb_index4memchr(flag));                         \
+    return (void *)(r + fio___lsb_index_unsafe(flag));                         \
   } while (0)
 
-  for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
+  for (const char *const e = r + (len & (~UINT64_C(255))); r < e;) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+  if ((len & 128)) {
     FIO___MEMCHR_BITMAP_TEST(8);
     FIO___MEMCHR_BITMAP_TEST(8);
   }
@@ -1146,7 +1129,7 @@ Static Assertions
 #endif
 
 typedef struct {
-  char data[2];
+  unsigned char data[2];
 } fio___padding_char_struct_test_s;
 
 FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
@@ -1164,7 +1147,8 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1341,7 +1325,8 @@ typedef struct fio_index8_node_s {
 
 /* *****************************************************************************
 Common String Helpers
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -1399,7 +1384,8 @@ typedef struct fio_buf_info_s {
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
@@ -1492,7 +1478,8 @@ Patches for Windows
 
 /* *****************************************************************************
 Windows initialization
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
@@ -1516,7 +1503,8 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 
 /* *****************************************************************************
 Inlined patched and MACRO statements
-***************************************************************************** */
+*****************************************************************************
+*/
 
 FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
@@ -1817,11 +1805,13 @@ End persistent segment (end include-once guard)
 
 
 
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /* *****************************************************************************
 Memory allocation macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 /* secure by default */
@@ -1859,7 +1849,8 @@ Memory allocation macros
 
 /* *****************************************************************************
 Locking selector
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_USE_THREAD_MUTEX
 #define FIO_USE_THREAD_MUTEX 0
