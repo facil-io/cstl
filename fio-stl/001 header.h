@@ -834,42 +834,49 @@ FIO_MEMSET / fio_memset - memset fallbacks
 
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  char *d = (char *)dest_;
   if (data < 0x100) { /* if a single byte value, match memset */
     data |= (data << 8);
     data |= (data << 16);
     data |= (data << 32);
   }
-  uint64_t repeated[4] = {data, data, data, data};
-  char *d = (char *)dest_;
-  char *const d_loop = d + (bytes & (~(size_t)255ULL));
-  while (d < d_loop) {
-    FIO_MEMCPY32(d, repeated);
-    FIO_MEMCPY32(d + 32, repeated);
-    FIO_MEMCPY32(d + 64, repeated);
-    FIO_MEMCPY32(d + 96, repeated);
-    FIO_MEMCPY32(d + 128, repeated);
-    FIO_MEMCPY32(d + 160, repeated);
-    FIO_MEMCPY32(d + 192, repeated);
-    FIO_MEMCPY32(d + 224, repeated);
+#if 0
+  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
+  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
+    FIO_MEMCPY64(d, repeated);
+    FIO_MEMCPY64(d + 64, repeated);
+    FIO_MEMCPY64(d + 128, repeated);
+    FIO_MEMCPY64(d + 192, repeated);
     d += 256;
   }
   if (bytes & 128) {
-    FIO_MEMCPY32(d, repeated);
-    FIO_MEMCPY32(d + 32, repeated);
-    FIO_MEMCPY32(d + 64, repeated);
-    FIO_MEMCPY32(d + 96, repeated);
+    FIO_MEMCPY64(d, repeated);
+    FIO_MEMCPY64(d + 64, repeated);
     d += 128;
   }
   if (bytes & 64) {
-    FIO_MEMCPY32(d, repeated);
-    FIO_MEMCPY32(d + 32, repeated);
+    FIO_MEMCPY64(d, repeated);
     d += 64;
   }
-  if (bytes & 32) {
-    FIO_MEMCPY32(d, repeated);
-    d += 32;
+  FIO_MEMCPY63x(d, repeated, bytes);
+#else
+#define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
+  if (bytes & u8_count)                                                        \
+    for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
+      FIO_MEMCPY8(d, &data);                                                   \
+    } /* let compiler vectorize loop */
+  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
+    for (int i = 0; i < 32; (++i), (d += 8))
+      FIO_MEMCPY8(d, &data); /* let compiler vectorize loop */
   }
-  FIO_MEMCPY31x(d, repeated, bytes);
+  FIO___MEMSET_IF_LOOP(128, 16);
+  FIO___MEMSET_IF_LOOP(64, 8);
+  FIO___MEMSET_IF_LOOP(32, 4);
+  FIO___MEMSET_IF_LOOP(16, 2);
+  FIO___MEMSET_IF_LOOP(8, 1);
+  FIO_MEMCPY7x(d, &data, bytes);
+#undef FIO___MEMSET_IF_LOOP
+#endif
 }
 
 /* *****************************************************************************
