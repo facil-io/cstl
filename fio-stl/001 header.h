@@ -1043,20 +1043,20 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     return NULL;
   const char *r = (const char *)buffer;
   uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFFU;
-  umask |= (umask << 32);
+  umask |= (umask << 32); /* make each byte in umask == token */
   umask |= (umask << 16);
   umask |= (umask << 8);
-  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
 
 #define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
   do {                                                                         \
     uint64_t flag = 0, v, u[group_size];                                       \
     for (size_t i = 0; i < group_size; ++i) { /* partial math */               \
       FIO_MEMCPY8(u + i, r + (i << 3));                                        \
-      u[i] ^= umask;                        /* byte match == 0xFF */           \
-      u[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */         \
-      u[i] += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */       \
-      u[i] &= UINT64_C(0x8080808080808080); /* keep only 7:8 likely match  */  \
+      u[i] ^= umask;                           /* byte match == 0x00 */        \
+      v = u[i] - UINT64_C(0x0101010101010101); /* v: less than 0x80 => 0x80 */ \
+      u[i] = ~u[i]; /* u[i]: if the MSB was zero (less than 0x80) */           \
+      u[i] &= UINT64_C(0x8080808080808080);                                    \
+      u[i] &= v; /* only 0x00 will now be 0x80  */                             \
       flag |= u[i];                                                            \
     }                                                                          \
     if (FIO_LIKELY(!flag)) {                                                   \
@@ -1064,20 +1064,12 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
       break; /* from do..while macro */                                        \
     }                                                                          \
     flag = 0;                                                                  \
-    for (size_t i = 0; i < group_size; ++i) { /* full math */                  \
-      const size_t i8 = (i << 3);                                              \
-      FIO_MEMCPY8(&v, r + i8);                                                 \
-      v ^= umask;               /* byte match == 0xFF */                       \
-      u[i] &= v;                /* only if full byte matches, we get 0x80  */  \
+    for (size_t i = 0; i < group_size; ++i) { /* combine group to bitmap  */   \
       u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
       u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
       u[i] |= u[i] >> 14;                                                      \
       u[i] |= u[i] >> 28;                                                      \
-      flag |= (u[i] & 0xFFU) << i8; /* placed packed bitmap in u64 */          \
-    }                                                                          \
-    if (!flag) {                                                               \
-      r += (group_size << 3);                                                  \
-      break; /* from do..while macro */                                        \
+      flag |= (u[i] & 0xFFU) << (i << 3); /* placed packed bitmap in u64 */    \
     }                                                                          \
     return (void *)(r + fio___lsb_index4memchr(flag));                         \
   } while (0)

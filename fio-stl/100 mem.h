@@ -2583,9 +2583,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
-    fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x66), mem_len + 1);
-    ((uint8_t *)mem)[token_index >> 1] = 128U;     /* match 7 bits out of 8 */
-    ((uint8_t *)mem)[(token_index >> 1) + 1] = 1U; /* match 7 bits out of 8 */
+    fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x80), mem_len + 1);
+    ((uint8_t *)mem)[token_index >> 1] = 0xFFU;       /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 1] = 0x01U; /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 2] = 0x7FU; /* edge case? */
     ((char *)mem)[token_index] = 0;
     ((char *)mem)[token_index + 1] = 0;
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
