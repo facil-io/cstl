@@ -14,7 +14,7 @@ In other words, all the common building blocks one could need in a C project are
 
 The header could be included multiple times with different results, creating different types or exposing different functionality.
 
-**Note**: facil.io Web Application Developers get many of the features of the C STL through including the `fio.h` header. See the [facil.io IO Core documentation](fio) for more information.
+**Note**: the facil.io Web Application Framework builds on the C STL features to provide the IO server, pub / sub layer and types.
 
 ## OS Support
 
@@ -361,7 +361,6 @@ any code.
 
 `FIO_PTR_TAG_VALIDATE` **must** fail on NULL pointers.
 
-
 -------------------------------------------------------------------------------
 
 ## Binary Data Informational Types and Helpers
@@ -453,114 +452,165 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
 -------------------------------------------------------------------------------
 
-## Memory Copying Primitives
+## Byte Ordering - Little Endian vs. Big Endian
+
+To help with byte ordering on different systems, the following macros and functions are defined. Note that there's no built-in support for mixed endian systems.
+
+#### `__BIG_ENDIAN__`
+
+Defined and set to either 1 (on big endian systems) or 0 (little endian systems)
+
+#### `__LITTLE_ENDIAN__`
+
+Defined and set to either 1 (on little endian systems) or 0 (big endian systems)
+
+#### `fio_is_little_endian`, `fio_is_big_endian`
+
+```c
+
+```
+
+These functions perform runtime tests for endianess and may be optimized away by the compiler.
+
+#### `fio_bswap`
+
+Returns a number of the indicated type with it's byte representation swapped.
+
+- `fio_bswap16(i)`
+- `fio_bswap32(i)`
+- `fio_bswap64(i)`
+- `fio_bswap128(i)` (only on compilers that support this type)
+
+#### `fio_lton`, `fio_ntol`
+
+On big-endian systems, the following macros a NOOPs. On little-endian systems these macros flip the byte order.
+
+- `fio_lton16(i)`
+- `fio_ntol16(i)`
+- `fio_lton32(i)`
+- `fio_ntol32(i)`
+- `fio_lton64(i)`
+- `fio_ntol64(i)`
+- `fio_lton128(i)`
+- `fio_ntol128(i)`
+
+#### `fio_ltole`
+
+Converts a local number to little-endian. On big-endian systems, these macros flip the byte order. On little-endian systems these macros are a NOOP.
+
+- `fio_ltole16(i)`
+- `fio_ltole32(i)`
+- `fio_ltole64(i)`
+- `fio_ltole128(i)`
+
+-------------------------------------------------------------------------------
+
+## Memory Copying, Seeking and Setting
 
 The following macros are defined to allow for memory copying primitives of set sizes.
 
-Id addition an overridable `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
+In addition an overrideble `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
+
 #### `FIO_MEMCPY`
 
 ```c
+#ifndef
 #define FIO_MEMCPY memcpy // or __builtin_memcpy if available
+#endif
 ```
 
-Makes it easy to override `memcpy` implementations.
+This macro makes it easy to override the `memcpy` implementation used by the library.
 
-#### `FIO_MEMCPY1`
+By default this will be set to either `memcpy` or `__builtin_memcpy` (if available). It can also be set to `fio_memcpy` if need be.
+
+#### `FIO_MEMCPY##`
 
 ```c
 #define FIO_MEMCPY1(dest, src)  fio___memcpy1((dest), (src))
-```
-
-Copies 1 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY2`
-
-```c
 #define FIO_MEMCPY2(dest, src)  fio___memcpy2((dest), (src))
-```
-
-Copies 2 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY4`
-
-```c
 #define FIO_MEMCPY4(dest, src)  fio___memcpy4((dest), (src))
-```
-
-Copies 4 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY8`
-
-```c
 #define FIO_MEMCPY8(dest, src)  fio___memcpy8((dest), (src))
-```
-
-Copies 8 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY16`
-
-```c
 #define FIO_MEMCPY16(dest, src) fio___memcpy16((dest), (src))
-```
-
-Copies 16 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY32`
-
-```c
 #define FIO_MEMCPY32(dest, src) fio___memcpy32((dest), (src))
-```
-
-Copies 32 bytes from `src` to `dest`.
-
-#### `FIO_MEMCPY64`
-
-```c
 #define FIO_MEMCPY64(dest, src) fio___memcpy64((dest), (src))
+// ...
 ```
 
-Copies 64 bytes from `src` to `dest`.
+Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including).
 
-#### `FIO_MEMCPY7x`
+#### `FIO_MEMCPY##x`
 
 ```c
 #define FIO_MEMCPY7x(dest, src, len)  fio___memcpy7x((dest), (src), (len))
-```
-
-Copies up to  7 bytes from `src` to `dest`, using `len & 7` to calculate the umber of bytes to copy.
-
-This is provided to allow for easy "tail" processing.
-
-#### `FIO_MEMCPY15x`
-
-```c
 #define FIO_MEMCPY15x(dest, src, len) fio___memcpy15x((dest), (src), (len))
-```
-
-Copies  up to 15 bytes from `src` to `dest`, using `len & 15` to calculate the umber of bytes to copy.
-
-This is provided to allow for easy "tail" processing.
-
-#### `FIO_MEMCPY31x`
-
-```c
 #define FIO_MEMCPY31x(dest, src, len) fio___memcpy31x((dest), (src), (len))
+#define FIO_MEMCPY63x(dest, src, len) fio___memcpy63x((dest), (src), (len))
+// ... 
 ```
 
-Copies  up to 31 bytes from `src` to `dest`, using `len & 31` to calculate the umber of bytes to copy.
+Copies up to `n-1` bytes from `src` to `dest` where `n` is a power of 2 between 1 and 4096 (including).
 
 This is provided to allow for easy "tail" processing.
 
-#### `FIO_MEMCPY63x`
+#### `fio_memcpy`
 
 ```c
-#define FIO_MEMCPY63x(dest, src, len) fio___memcpy63x((dest), (src), (len))
+static void fio_memcpy(void *dest, const void *src, size_t length);
 ```
 
-Copies  up to 63 bytes from `src` to `dest`, using `len & 63` to calculate the umber of bytes to copy.
+A fallback for `memcpy`, copies `length` bytes from `src` to `dest`.
 
-This is provided to allow for easy "tail" processing.
+Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
+
+On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+
+#### `FIO_MEMSET`
+
+```c
+#ifndef
+#define FIO_MEMSET memset // or __builtin_memset if available
+#endif
+```
+
+This macro makes it easy to override the `memset` implementation used by the library.
+
+By default this will be set to either `memset` or `__builtin_memset` (if available). It can also be set to `fio_memset` if need be.
+
+#### `fio_memset`
+
+```c
+static void fio_memset(void *restrict dest, uint64_t token, size_t length);
+```
+
+A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
+
+The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
+
+On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+
+#### `FIO_MEMCHR`
+
+```c
+#ifndef
+#define FIO_MEMCHR memchr // or __builtin_memchr if available
+#endif
+```
+
+This macro makes it easy to override the `memchr` implementation used by the library.
+
+By default this will be set to either `memchr` or `__builtin_memchr` (if available). It can also be set to `fio_memchr` if need be.
+
+#### `fio_memchr`
+
+```c
+static void *fio_memchr(const void *buffer, const char token, size_t len);
+```
+
+A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
+
+If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
+
+On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
 
 -------------------------------------------------------------------------------
 
@@ -1071,15 +1121,6 @@ defined:
 
 **Note**: the 128 bit helpers are only available with systems / compilers that support 128 bit types.
 
-#### Byte Swapping
-
-Returns a number of the indicated type with it's byte representation swapped.
-
-- `fio_bswap16(i)`
-- `fio_bswap32(i)`
-- `fio_bswap64(i)`
-- `fio_bswap128(i)`
-
 #### Bit rotation (left / right)
 
 Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) according to the type width specified (i.e., `fio_rrot64` indicates a **r**ight rotation for `uint64_t`).
@@ -1097,28 +1138,6 @@ Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) 
 
 - `FIO_LROT(i, bits)` (MACRO, can be used with any type size)
 - `FIO_RROT(i, bits)` (MACRO, can be used with any type size)
-
-#### Numbers to Numbers (network ordered)
-
-On big-endian systems, these macros a NOOPs, whereas on little-endian systems these macros flip the byte order.
-
-- `fio_lton16(i)`
-- `fio_ntol16(i)`
-- `fio_lton32(i)`
-- `fio_ntol32(i)`
-- `fio_lton64(i)`
-- `fio_ntol64(i)`
-- `fio_lton128(i)`
-- `fio_ntol128(i)`
-
-#### Numbers to Numbers (Little Endian)
-
-Converts a local number to little-endian. On big-endian systems, these macros flip the byte order, whereas on little-endian systems these macros are a NOOP.
-
-- `fio_ltole16(i)`
-- `fio_ltole32(i)`
-- `fio_ltole64(i)`
-- `fio_ltole128(i)`
 
 #### Bytes to Numbers (native / reversed / network ordered)
 
@@ -2562,50 +2581,6 @@ This behavior, including the allocator's default alignment, can be tuned / chang
 It should be possible to use tcmalloc or jemalloc alongside facil.io's allocator.
 
 It's also possible to prevent facil.io's custom allocator from compiling by defining `FIO_MEMORY_DISABLE` (`-DFIO_MEMORY_DISABLE`).
-
-
-### Memory Helpers API
-
-
-#### `fio_memset`
-
-```c
-void fio_memset(void *dest, uint64_t data, size_t bytes);
-```
-
-A somewhat naive implementation of `memset`.
-
-This implementation is probably significantly **slower** than the one included with your compiler's C library, especially for larger memory blocks.
-
-The implementation is provided in case the C library `memset` is unavailable or very naively implemented.
-
-If testing proves (surprisingly) that this implementation is faster than the system's implementation, it is possible to use this implementation for the memory allocator by setting the `FIO_MEMORY_USE_FIO_MEMSET` to `1`.
-
-#### `fio_memcpy`
-
-```c
-void fio_memcpy_aligned(void *dest_, const void *src_, size_t bytes);
-```
-
-A somewhat naive implementation of `memcpy`.
-
-This implementation is probably significantly **slower** than the one included with your compiler's C library, especially for larger memory blocks. Don't use it unless you don't have another implementation handy.
-
-The implementation is provided in case the C library `memset` is unavailable or very naively implemented.
-
-If testing proves (surprisingly) that this implementation is faster than the system's implementation, it is possible to use this implementation for the memory allocator by setting the `FIO_MEMORY_USE_FIO_MEMCOPY` to `1`.
-
-#### `fio_memchr`
-
-```c
-void * fio_memchr(const void *mem, char token, size_t bytes);
-```
-
-A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
-
-If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
-
-For most systems and clib implementations, this fallback should be **slower** than the one offered by the compiler.
 
 ### The Memory Allocator's API
 

@@ -1683,7 +1683,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     const char *tmp = (const char *)src_;
     const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
     for (;;) {
-      tmp = (const char *)memchr(tmp, '\\', (size_t)(stop - tmp));
+      tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
       if (!tmp)
         break;
       size_t step = 1;
@@ -1706,7 +1706,8 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
   uint8_t *writer = (uint8_t *)dest->buf + dest->len;
   while (src < end) {
     if (*src != '\\') {
-      const uint8_t *escape_pos = (const uint8_t *)memchr(src, '\\', end - src);
+      const uint8_t *escape_pos =
+          (const uint8_t *)FIO_MEMCHR(src, '\\', end - src);
       if (!escape_pos)
         escape_pos = end;
       const size_t valid_len = escape_pos - src;

@@ -527,129 +527,6 @@ Helpers and System Memory Allocation
   (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
    ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
 
-/** memcpy / memmove alternative that should work with unaligned memory */
-SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
-  char *d = (char *)dest_;
-  const char *s = (const char *)src_;
-  if ((d == s) | !bytes | !d | !s) {
-    FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
-    return;
-  }
-  if (s + bytes <= d || d + bytes <= s || (uintptr_t)d + 4095 < (uintptr_t)s) {
-    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
-      FIO_MEMCPY4096(d, s); /* direct copy, no meaningful overlap */
-      d += 4096;
-      s += 4096;
-    }
-    FIO_MEMCPY4095x(d, s, bytes);
-  } else if (bytes < 4096) { /* overlap, use buffer to copy all data at once */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
-      FIO_MEMCPY4096(tmp_buf, s);
-      FIO_MEMCPY4096(d, tmp_buf);
-      d += 4096;
-      s += 4096;
-    }
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    d += bytes;
-    s += bytes;
-    for (char *dstop = d + (bytes & 4095ULL); d > dstop;) {
-      d -= 4096;
-      s -= 4096;
-      FIO_MEMCPY4096(tmp_buf, s);
-      FIO_MEMCPY4096(d, tmp_buf);
-    }
-    d -= (bytes & 4095ULL);
-    s -= (bytes & 4095ULL);
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  }
-}
-
-/** an 8 byte value memset implementation. */
-SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  if (data < 0x100) { /* if a single byte value, match memset */
-    data |= (data << 8);
-    data |= (data << 16);
-    data |= (data << 32);
-  }
-  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
-  char *d = (char *)dest_;
-  char *const d_loop = d + (bytes & (~(size_t)63ULL));
-  while (d < d_loop) {
-    FIO_MEMCPY64(d, repeated);
-    d += 64;
-  }
-  FIO_MEMCPY63x(d, repeated, bytes);
-}
-
-/**
- * A token seeking function. This is a fallback for `memchr`, but `memchr`
- * should be faster.
- */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  if (!buffer || !len)
-    return NULL;
-  const char *r = (const char *)buffer;
-  uint64_t flag, u, umask = ((uint64_t)((uint8_t)token)) & 0xFFU;
-  umask |= (umask << 32);
-  umask |= (umask << 16);
-  umask |= (umask << 8);
-  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
-
-#define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
-  flag = 0;                                                                    \
-  for (size_t i = 0; i < (group_size << 3); i += 8) {                          \
-    FIO_MEMCPY8(&u, (r + i));                                                  \
-    u ^= umask;                        /* byte match == 0xFF */                \
-    u &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */              \
-    u += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */            \
-    u &= UINT64_C(0x8080808080808080); /* keep only 7:8 likely match  */       \
-    flag |= u;                                                                 \
-  }                                                                            \
-  if (flag)                                                                    \
-    for (size_t i = 0; i < (group_size << 3); ++i) {                           \
-      if (r[i] == token)                                                       \
-        return (void *)(r + i);                                                \
-    }                                                                          \
-  r += (group_size << 3);
-
-  for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 64)) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 32)) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 16)) {
-    FIO___MEMCHR_BITMAP_TEST(2);
-  }
-  if ((len & 8)) {
-    FIO___MEMCHR_BITMAP_TEST(1);
-  }
-  while ((len & 7)) {
-    if (*r == token)
-      return (void *)r;
-    ++r;
-    --len;
-  }
-  return NULL;
-#undef FIO___MEMCHR_BITMAP_TEST
-}
-
 /* *****************************************************************************
 
 
@@ -2557,7 +2434,7 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
   const char *e_group = r + (len & (~UINT64_C(63)));
   for (; r < e_group; r += 64) {
     for (size_t i = 0; i < 64; ++i) {
-      if (r[i] == token)
+      if (FIO_UNLIKELY(r[i] == token))
         return (void *)(r + i);
     }
   }

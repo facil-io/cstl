@@ -10,15 +10,6 @@ defined:
 
 **Note**: the 128 bit helpers are only available with systems / compilers that support 128 bit types.
 
-#### Byte Swapping
-
-Returns a number of the indicated type with it's byte representation swapped.
-
-- `fio_bswap16(i)`
-- `fio_bswap32(i)`
-- `fio_bswap64(i)`
-- `fio_bswap128(i)`
-
 #### Bit rotation (left / right)
 
 Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) according to the type width specified (i.e., `fio_rrot64` indicates a **r**ight rotation for `uint64_t`).
@@ -36,28 +27,6 @@ Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) 
 
 - `FIO_LROT(i, bits)` (MACRO, can be used with any type size)
 - `FIO_RROT(i, bits)` (MACRO, can be used with any type size)
-
-#### Numbers to Numbers (network ordered)
-
-On big-endian systems, these macros a NOOPs, whereas on little-endian systems these macros flip the byte order.
-
-- `fio_lton16(i)`
-- `fio_ntol16(i)`
-- `fio_lton32(i)`
-- `fio_ntol32(i)`
-- `fio_lton64(i)`
-- `fio_ntol64(i)`
-- `fio_lton128(i)`
-- `fio_ntol128(i)`
-
-#### Numbers to Numbers (Little Endian)
-
-Converts a local number to little-endian. On big-endian systems, these macros flip the byte order, whereas on little-endian systems these macros are a NOOP.
-
-- `fio_ltole16(i)`
-- `fio_ltole32(i)`
-- `fio_ltole64(i)`
-- `fio_ltole128(i)`
 
 #### Bytes to Numbers (native / reversed / network ordered)
 

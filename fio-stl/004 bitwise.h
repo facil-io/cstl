@@ -27,121 +27,6 @@ Copyright and License: see header file (000 header.h) or top of file
 #endif
 
 /* *****************************************************************************
-Swapping byte's order (`bswap` variations)
-***************************************************************************** */
-
-/** Byte swap a 16 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap16)
-#define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
-#else
-FIO_IFUNC uint16_t fio_bswap16(uint16_t i) {
-  return ((((i)&0xFFU) << 8) | (((i)&0xFF00U) >> 8));
-}
-#endif
-
-/** Byte swap a 32 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap32)
-#define fio_bswap32(i) __builtin_bswap32((uint32_t)(i))
-#else
-FIO_IFUNC uint32_t fio_bswap32(uint32_t i) {
-  return ((((i)&0xFFUL) << 24) | (((i)&0xFF00UL) << 8) |
-          (((i)&0xFF0000UL) >> 8) | (((i)&0xFF000000UL) >> 24));
-}
-#endif
-
-/** Byte swap a 64 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap64)
-#define fio_bswap64(i) __builtin_bswap64((uint64_t)(i))
-#else
-FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
-  return ((((i)&0xFFULL) << 56) | (((i)&0xFF00ULL) << 40) |
-          (((i)&0xFF0000ULL) << 24) | (((i)&0xFF000000ULL) << 8) |
-          (((i)&0xFF00000000ULL) >> 8) | (((i)&0xFF0000000000ULL) >> 24) |
-          (((i)&0xFF000000000000ULL) >> 40) |
-          (((i)&0xFF00000000000000ULL) >> 56));
-}
-#endif
-
-#ifdef __SIZEOF_INT128__
-#if __has_builtin(__builtin_bswap128)
-#define fio_bswap128(i) __builtin_bswap128((__uint128_t)(i))
-#else
-FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
-  return ((__uint128_t)fio_bswap64(i) << 64) | fio_bswap64(i >> 64);
-}
-#endif
-#endif /* __SIZEOF_INT128__ */
-
-/* *****************************************************************************
-Switching Endian Ordering
-***************************************************************************** */
-
-#if __BIG_ENDIAN__
-
-/** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i) (i)
-/** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i) (i)
-/** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i) (i)
-
-/** Local byte order to Little Endian byte order, 16 bit integer */
-#define fio_ltole16(i) fio_bswap16((i))
-/** Local byte order to Little Endian byte order, 32 bit integer */
-#define fio_ltole32(i) fio_bswap32((i))
-/** Local byte order to Little Endian byte order, 62 bit integer */
-#define fio_ltole64(i) fio_bswap64((i))
-
-/** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i) (i)
-/** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i) (i)
-/** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i) (i)
-
-#ifdef __SIZEOF_INT128__
-/** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i) (i)
-/** Local byte order to Little Endian byte order, 128 bit integer */
-#define fio_ltole128(i) fio_bswap128((i))
-
-#endif /* __SIZEOF_INT128__ */
-
-#else /* Little Endian */
-
-/** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i)  fio_bswap16((i))
-/** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i)  fio_bswap32((i))
-/** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i)  fio_bswap64((i))
-
-/** Local byte order to Little Endian byte order, 16 bit integer */
-#define fio_ltole16(i) (i)
-/** Local byte order to Little Endian byte order, 32 bit integer */
-#define fio_ltole32(i) (i)
-/** Local byte order to Little Endian byte order, 62 bit integer */
-#define fio_ltole64(i) (i)
-
-/** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i)  fio_bswap16((i))
-/** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i)  fio_bswap32((i))
-/** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i)  fio_bswap64((i))
-
-#ifdef __SIZEOF_INT128__
-/** Local byte order to Network byte order, 128 bit integer */
-#define fio_lton128(i)  fio_bswap128((i))
-/** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i)  fio_bswap128((i))
-/** Local byte order to Little Endian byte order, 128 bit integer */
-#define fio_ltole128(i) (i)
-#endif /* __SIZEOF_INT128__ */
-
-#endif /* __BIG_ENDIAN__ */
-
-/* *****************************************************************************
 Bit rotation
 ***************************************************************************** */
 
@@ -668,7 +553,7 @@ FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
 }
 
 /** Isolates the least significant (lowest) bit. */
-FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & ((~i) + 1)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (i & ((~i) + 1)); }
 
 /** Isolates the most significant (highest) bit. */
 FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
@@ -757,8 +642,8 @@ FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   uint64_t r = 0;
   if (!i)
     goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return __builtin_ctzll(fio_bits_msb(i));
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 63 - __builtin_clzll(i);
 #else
   return fio_bits___map_bit2index(fio_bits_msb(i));
 #endif
@@ -771,8 +656,8 @@ zero:
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   if (!i)
     return (size_t)-1;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return 63 - __builtin_clzll(fio_bits_lsb(i));
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll) && 0
+  return __builtin_ctzll(i);
 #else
   return fio_bits___map_bit2index(fio_bits_lsb(i));
 #endif /* __builtin vs. map */
@@ -969,14 +854,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "bit index map[%zu] error != %zu",
                (size_t)(1ULL << i),
                i);
-    FIO_ASSERT(fio_bits_msb_index((1ULL << i)) == i,
+    FIO_ASSERT(fio_bits_msb_index(((1ULL << i) | 1)) == i,
                "fio_bits_msb_index(%zu) != %zu",
-               1,
-               (size_t)fio_bits_msb_index((1ULL << i)));
-    FIO_ASSERT(fio_bits_lsb_index((1ULL << i)) == i,
+               ((1ULL << i)),
+               (size_t)fio_bits_msb_index(((1ULL << i) | 1)));
+    FIO_ASSERT(fio_bits_lsb_index(((~0ULL) << i)) == i,
                "fio_bits_lsb_index(%zu) != %zu",
                1,
-               (size_t)fio_bits_lsb_index((1ULL << i)));
+               (size_t)fio_bits_lsb_index(((~0ULL) << i)));
   }
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");

@@ -145,11 +145,11 @@ FIO_IFUNC const char *fio___json_skip_comments(const char *buffer,
   if (*buffer == '#' ||
       ((stop - buffer) > 2 && buffer[0] == '/' && buffer[1] == '/')) {
     /* EOL style comment, C style or Bash/Ruby style*/
-    buffer = (const char *)memchr(buffer + 1, '\n', stop - (buffer + 1));
+    buffer = (const char *)FIO_MEMCHR(buffer + 1, '\n', stop - (buffer + 1));
     return buffer;
   }
   if (((stop - buffer) > 3 && buffer[0] == '/' && buffer[1] == '*')) {
-    while ((buffer = (const char *)memchr(buffer, '/', stop - buffer)) &&
+    while ((buffer = (const char *)FIO_MEMCHR(buffer, '/', stop - buffer)) &&
            buffer && ++buffer && buffer[-2] != '*')
       ;
     return buffer;
@@ -162,7 +162,7 @@ FIO_IFUNC const char *fio___json_consume_string(fio_json_parser_s *p,
                                                 const char *stop) {
   const char *start = ++buffer;
   for (;;) {
-    buffer = (const char *)memchr(buffer, '\"', stop - buffer);
+    buffer = (const char *)FIO_MEMCHR(buffer, '\"', stop - buffer);
     if (!buffer)
       return NULL;
     int escaped = 1;

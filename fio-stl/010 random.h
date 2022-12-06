@@ -562,12 +562,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = strlen(str);
     char buf[128];
-    memcpy(buf, str, len);
+    FIO_MEMCPY(buf, str, len);
     uint64_t org_hash = fio_risky_hash(buf, len, 0);
     FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
-      memcpy(tmp, str, len);
+      FIO_MEMCPY(tmp, str, len);
       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
       FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0),
                  "hash should be consistent!");

@@ -150,31 +150,12 @@ extern "C" {
                             Constants (included once)
 
 
-
-
+Note:
+The common header is messy and has a lot of building blocks that are used
+throughout the other modules.
 ***************************************************************************** */
 #ifndef H___FIO_CSTL_INCLUDE_ONCE___H
 #define H___FIO_CSTL_INCLUDE_ONCE___H
-
-/* *****************************************************************************
-Aligned Memory Access
-***************************************************************************** */
-
-#ifndef FIO_UNALIGNED_ACCESS
-/** Allows facil.io to attempt unaligned memory access on *some* CPU systems. */
-#define FIO_UNALIGNED_ACCESS 1
-#endif
-
-#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
-#if FIO_UNALIGNED_ACCESS &&                                                    \
-    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
-     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
-/** True when unaligned memory is allowed. */
-#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
-#else
-#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
-#endif
-#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /* *****************************************************************************
 Compiler detection, GCC / CLang features and OS dependent included files
@@ -249,6 +230,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS 1
 #endif
+
 #if defined(__MINGW32__)
 /* Mingw supports */
 #define FIO_HAVE_UNIX_TOOLS    2
@@ -290,6 +272,26 @@ typedef SSIZE_T ssize_t;
 #include <sys/param.h>
 #include <unistd.h>
 #endif
+
+/* *****************************************************************************
+Aligned Memory Access Selectors
+***************************************************************************** */
+
+#ifndef FIO_UNALIGNED_ACCESS
+/** Allows facil.io to attempt unaligned memory access on *some* CPU systems. */
+#define FIO_UNALIGNED_ACCESS 1
+#endif
+
+#ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
+#if FIO_UNALIGNED_ACCESS &&                                                    \
+    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
+     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
+/** True when unaligned memory is allowed. */
+#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
+#else
+#define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 0
+#endif
+#endif /* FIO_UNALIGNED_MEMORY_ACCESS_ENABLED */
 
 /* *****************************************************************************
 Function Attributes
@@ -341,258 +343,6 @@ Function Attributes
   static __attribute__((destructor)) void fname(void)
 #endif
 
-/* *****************************************************************************
-Static Endian Test
-***************************************************************************** */
-
-#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
-    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 0
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 1
-#endif
-#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
-    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
-    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
-#ifndef __BIG_ENDIAN__
-#define __BIG_ENDIAN__ 1
-#endif
-#ifndef __LITTLE_ENDIAN__
-#define __LITTLE_ENDIAN__ 0
-#endif
-#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
-    !defined(__LITTLE_ENDIAN__)
-#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
-#define FIO_BIG_ENDIAN_TEST    0x34333231UL
-#define FIO_ENDIAN_ORDER_TEST  ('1234')
-#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
-#define __BIG_ENDIAN__    0
-#define __LITTLE_ENDIAN__ 1
-#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
-#define __BIG_ENDIAN__    1
-#define __LITTLE_ENDIAN__ 0
-#else
-#error Could not detect byte order on this system.
-#endif
-
-#endif /* predefined / test endianess */
-
-/* *****************************************************************************
-Dynamic Endian Testing
-***************************************************************************** */
-
-FIO_IFUNC unsigned int fio_is_little_endian(void) {
-  union {
-    unsigned long ul;
-    unsigned char u8[sizeof(unsigned long)];
-  } u = {.ul = 1};
-  return (unsigned int)u.u8[0];
-}
-
-FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
-
-/* *****************************************************************************
-Memory Copying Primitives
-***************************************************************************** */
-
-#if __has_builtin(__builtin_memset)
-#ifndef FIO_MEMSET
-#define FIO_MEMSET __builtin_memset
-#endif
-#else
-#ifndef FIO_MEMSET
-#define FIO_MEMSET memset
-#endif
-#endif
-
-/* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY __builtin_memcpy
-#endif
-#define FIO_MEMCPY1(dest, src)    __builtin_memcpy((dest), (src), 1)
-#define FIO_MEMCPY2(dest, src)    __builtin_memcpy((dest), (src), 2)
-#define FIO_MEMCPY4(dest, src)    __builtin_memcpy((dest), (src), 4)
-#define FIO_MEMCPY8(dest, src)    __builtin_memcpy((dest), (src), 8)
-#define FIO_MEMCPY16(dest, src)   __builtin_memcpy((dest), (src), 16)
-#define FIO_MEMCPY32(dest, src)   __builtin_memcpy((dest), (src), 32)
-#define FIO_MEMCPY64(dest, src)   __builtin_memcpy((dest), (src), 64)
-#define FIO_MEMCPY128(dest, src)  __builtin_memcpy((dest), (src), 128)
-#define FIO_MEMCPY256(dest, src)  __builtin_memcpy((dest), (src), 256)
-#define FIO_MEMCPY512(dest, src)  __builtin_memcpy((dest), (src), 512)
-#define FIO_MEMCPY1024(dest, src) __builtin_memcpy((dest), (src), 1024)
-#define FIO_MEMCPY2048(dest, src) __builtin_memcpy((dest), (src), 2048)
-#define FIO_MEMCPY4096(dest, src) __builtin_memcpy((dest), (src), 4096)
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    __builtin_memcpy(d, s, bytes);                                             \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-#else
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY memcpy
-#endif
-#define FIO_MEMCPY1(dest, src)    fio___memcpy1((dest), (src))
-#define FIO_MEMCPY2(dest, src)    fio___memcpy2((dest), (src))
-#define FIO_MEMCPY4(dest, src)    fio___memcpy4((dest), (src))
-#define FIO_MEMCPY8(dest, src)    fio___memcpy8((dest), (src))
-#define FIO_MEMCPY16(dest, src)   fio___memcpy16((dest), (src))
-#define FIO_MEMCPY32(dest, src)   fio___memcpy32((dest), (src))
-#define FIO_MEMCPY64(dest, src)   fio___memcpy64((dest), (src))
-#define FIO_MEMCPY128(dest, src)  fio___memcpy128((dest), (src))
-#define FIO_MEMCPY256(dest, src)  fio___memcpy256((dest), (src))
-#define FIO_MEMCPY512(dest, src)  fio___memcpy512((dest), (src))
-#define FIO_MEMCPY1024(dest, src) fio___memcpy1024((dest), (src))
-#define FIO_MEMCPY2048(dest, src) fio___memcpy2048((dest), (src))
-#define FIO_MEMCPY4096(dest, src) fio___memcpy4096((dest), (src))
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    fio___memcpy##bytes(d, s);                                                 \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-
-#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
-                                     const void *restrict src) {               \
-    struct fio___memcpy##bytes##_s {                                           \
-      unsigned char data[bytes];                                               \
-    };                                                                         \
-    union {                                                                    \
-      const void *restrict ptr;                                                \
-      struct fio___memcpy##bytes##_s *restrict grp;                            \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.grp = *s.grp;                                                           \
-  }
-FIO___MAKE_MEMCPY_FIXED(1)
-FIO___MAKE_MEMCPY_FIXED(2)
-FIO___MAKE_MEMCPY_FIXED(4)
-FIO___MAKE_MEMCPY_FIXED(8)
-FIO___MAKE_MEMCPY_FIXED(16)
-FIO___MAKE_MEMCPY_FIXED(32)
-FIO___MAKE_MEMCPY_FIXED(64)
-FIO___MAKE_MEMCPY_FIXED(128)
-FIO___MAKE_MEMCPY_FIXED(256)
-FIO___MAKE_MEMCPY_FIXED(512)
-FIO___MAKE_MEMCPY_FIXED(1024)
-FIO___MAKE_MEMCPY_FIXED(2048)
-FIO___MAKE_MEMCPY_FIXED(4096)
-#undef FIO___MAKE_MEMCPY_FIXED
-
-#endif /* __has_builtin(__builtin_memcpy) */
-
-#define FIO_MEMCPY7x(dest, src, len)    fio___memcpy7x((dest), (src), (len))
-#define FIO_MEMCPY15x(dest, src, len)   fio___memcpy15x((dest), (src), (len))
-#define FIO_MEMCPY31x(dest, src, len)   fio___memcpy31x((dest), (src), (len))
-#define FIO_MEMCPY63x(dest, src, len)   fio___memcpy63x((dest), (src), (len))
-#define FIO_MEMCPY127x(dest, src, len)  fio___memcpy127x((dest), (src), (len))
-#define FIO_MEMCPY255x(dest, src, len)  fio___memcpy255x((dest), (src), (len))
-#define FIO_MEMCPY511x(dest, src, len)  fio___memcpy511x((dest), (src), (len))
-#define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
-
-/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void fio___memcpy7x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
-
-/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void fio___memcpy15x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio___memcpy31x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_IFUNC void fio___memcpy63x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_IFUNC void fio___memcpy127x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy255x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy511x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
-                                 const void *restrict s_,
-                                 size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(2048);
-  FIO_MEMCPY___PARTIAL(1024);
-  FIO_MEMCPY___PARTIAL(512);
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  fio___memcpy7x(d, s, l);
-}
-#undef FIO_MEMCPY___PARTIAL
 /* *****************************************************************************
 Conditional Likelihood
 ***************************************************************************** */
@@ -724,69 +474,6 @@ void __attribute__((weak)) fio___(void) {
 #endif
 
 /* *****************************************************************************
-Pointer Math
-***************************************************************************** */
-
-/** Masks a pointer's left-most bits, returning the right bits. */
-#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
-
-/** Masks a pointer's right-most bits, returning the left bits. */
-#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << (bits))))
-
-/** Add offset bytes to pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
-
-/** Subtract X bytes from pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
-
-/** Find the root object (of a struct) from it's field (with sanitizer fix). */
-#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type,                                                     \
-                   ptr,                                                        \
-                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
-
-/* *****************************************************************************
-Security Related macros
-***************************************************************************** */
-#define FIO_MEM_STACK_WIPE(pages)                                              \
-  do {                                                                         \
-    volatile char stack_mem[(pages) << 12] = {0};                              \
-    (void)stack_mem;                                                           \
-  } while (0)
-
-/* *****************************************************************************
-Static Assertions
-***************************************************************************** */
-#if __STDC_VERSION__ >= 201112L
-#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
-#else
-#define FIO_ASSERT_STATIC(cond, msg)                                           \
-  static const char *FIO_NAME(fio_static_assertion_failed,                     \
-                              __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
-#endif
-
-typedef struct {
-  char data[2];
-} fio___padding_char_struct_test_s;
-
-FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
-FIO_ASSERT_STATIC(sizeof(uint8_t) == 1,
-                  "facil.io requires an 8bit wide uint8_t");
-FIO_ASSERT_STATIC(sizeof(uint16_t) == 2,
-                  "facil.io requires a 16bit wide uint16_t");
-FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
-                  "facil.io requires a 32bit wide uint32_t");
-FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
-                  "facil.io requires a 64bit wide uint64_t");
-FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
-                  "compiler adds padding to fio___memcpyX, creating memory "
-                  "alignment issues.");
-
-/* *****************************************************************************
 Miscellaneous helper macros
 ***************************************************************************** */
 
@@ -857,6 +544,752 @@ Miscellaneous helper macros
 #else
 #define FIO_ASSERT_DEBUG(...)
 #endif
+
+/* *****************************************************************************
+Static Endian Test
+***************************************************************************** */
+
+#if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
+    (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 0
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 1
+#endif
+#elif (defined(__BIG_ENDIAN__) && __BIG_ENDIAN__) ||                           \
+    (defined(__LITTLE_ENDIAN__) && !__LITTLE_ENDIAN__) ||                      \
+    (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__))
+#ifndef __BIG_ENDIAN__
+#define __BIG_ENDIAN__ 1
+#endif
+#ifndef __LITTLE_ENDIAN__
+#define __LITTLE_ENDIAN__ 0
+#endif
+#elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
+    !defined(__LITTLE_ENDIAN__)
+#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO_BIG_ENDIAN_TEST    0x34333231UL
+#define FIO_ENDIAN_ORDER_TEST  ('1234')
+#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define __BIG_ENDIAN__    0
+#define __LITTLE_ENDIAN__ 1
+#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#define __BIG_ENDIAN__    1
+#define __LITTLE_ENDIAN__ 0
+#else
+#error Could not detect byte order on this system.
+#endif
+
+#endif /* predefined / test endianess */
+
+/* *****************************************************************************
+Dynamic Endian Testing
+***************************************************************************** */
+
+FIO_IFUNC unsigned int fio_is_little_endian(void) {
+  union {
+    unsigned long ul;
+    unsigned char u8[sizeof(unsigned long)];
+  } u = {.ul = 1};
+  return (unsigned int)u.u8[0];
+}
+
+FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
+
+/* *****************************************************************************
+Swapping byte's order (`bswap` variations)
+***************************************************************************** */
+
+/** Byte swap a 16 bit integer, inlined. */
+#if __has_builtin(__builtin_bswap16)
+#define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
+#else
+FIO_IFUNC uint16_t fio_bswap16(uint16_t i) {
+  return ((((i)&0xFFU) << 8) | (((i)&0xFF00U) >> 8));
+}
+#endif
+
+/** Byte swap a 32 bit integer, inlined. */
+#if __has_builtin(__builtin_bswap32)
+#define fio_bswap32(i) __builtin_bswap32((uint32_t)(i))
+#else
+FIO_IFUNC uint32_t fio_bswap32(uint32_t i) {
+  return ((((i)&0xFFUL) << 24) | (((i)&0xFF00UL) << 8) |
+          (((i)&0xFF0000UL) >> 8) | (((i)&0xFF000000UL) >> 24));
+}
+#endif
+
+/** Byte swap a 64 bit integer, inlined. */
+#if __has_builtin(__builtin_bswap64)
+#define fio_bswap64(i) __builtin_bswap64((uint64_t)(i))
+#else
+FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
+  return ((((i)&0xFFULL) << 56) | (((i)&0xFF00ULL) << 40) |
+          (((i)&0xFF0000ULL) << 24) | (((i)&0xFF000000ULL) << 8) |
+          (((i)&0xFF00000000ULL) >> 8) | (((i)&0xFF0000000000ULL) >> 24) |
+          (((i)&0xFF000000000000ULL) >> 40) |
+          (((i)&0xFF00000000000000ULL) >> 56));
+}
+#endif
+
+#ifdef __SIZEOF_INT128__
+#if __has_builtin(__builtin_bswap128)
+#define fio_bswap128(i) __builtin_bswap128((__uint128_t)(i))
+#else
+FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
+  return ((__uint128_t)fio_bswap64(i) << 64) | fio_bswap64(i >> 64);
+}
+#endif
+#endif /* __SIZEOF_INT128__ */
+
+/* *****************************************************************************
+Switching Endian Ordering
+***************************************************************************** */
+
+#if __BIG_ENDIAN__
+
+/** Local byte order to Network byte order, 16 bit integer */
+#define fio_lton16(i) (i)
+/** Local byte order to Network byte order, 32 bit integer */
+#define fio_lton32(i) (i)
+/** Local byte order to Network byte order, 62 bit integer */
+#define fio_lton64(i) (i)
+
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) fio_bswap16((i))
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) fio_bswap32((i))
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) fio_bswap64((i))
+
+/** Network byte order to Local byte order, 16 bit integer */
+#define fio_ntol16(i) (i)
+/** Network byte order to Local byte order, 32 bit integer */
+#define fio_ntol32(i) (i)
+/** Network byte order to Local byte order, 62 bit integer */
+#define fio_ntol64(i) (i)
+
+#ifdef __SIZEOF_INT128__
+/** Network byte order to Local byte order, 128 bit integer */
+#define fio_ntol128(i) (i)
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) fio_bswap128((i))
+
+#endif /* __SIZEOF_INT128__ */
+
+#else /* Little Endian */
+
+/** Local byte order to Network byte order, 16 bit integer */
+#define fio_lton16(i)  fio_bswap16((i))
+/** Local byte order to Network byte order, 32 bit integer */
+#define fio_lton32(i)  fio_bswap32((i))
+/** Local byte order to Network byte order, 62 bit integer */
+#define fio_lton64(i)  fio_bswap64((i))
+
+/** Local byte order to Little Endian byte order, 16 bit integer */
+#define fio_ltole16(i) (i)
+/** Local byte order to Little Endian byte order, 32 bit integer */
+#define fio_ltole32(i) (i)
+/** Local byte order to Little Endian byte order, 62 bit integer */
+#define fio_ltole64(i) (i)
+
+/** Network byte order to Local byte order, 16 bit integer */
+#define fio_ntol16(i)  fio_bswap16((i))
+/** Network byte order to Local byte order, 32 bit integer */
+#define fio_ntol32(i)  fio_bswap32((i))
+/** Network byte order to Local byte order, 62 bit integer */
+#define fio_ntol64(i)  fio_bswap64((i))
+
+#ifdef __SIZEOF_INT128__
+/** Local byte order to Network byte order, 128 bit integer */
+#define fio_lton128(i)  fio_bswap128((i))
+/** Network byte order to Local byte order, 128 bit integer */
+#define fio_ntol128(i)  fio_bswap128((i))
+/** Local byte order to Little Endian byte order, 128 bit integer */
+#define fio_ltole128(i) (i)
+#endif /* __SIZEOF_INT128__ */
+
+#endif /* __BIG_ENDIAN__ */
+
+/* *****************************************************************************
+Memory Copying Primitives
+***************************************************************************** */
+
+/* memcpy selectors / overriding */
+#if __has_builtin(__builtin_memcpy)
+#ifndef FIO_MEMCPY
+/** `memcpy` selector macro */
+#define FIO_MEMCPY __builtin_memcpy
+#endif
+#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
+  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
+                                     const void *restrict src) {               \
+    __builtin_memcpy(dest, src, bytes);                                        \
+  }
+#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+  if ((l & bytes)) {                                                           \
+    __builtin_memcpy(d, s, bytes);                                             \
+    d += bytes;                                                                \
+    s += bytes;                                                                \
+  }
+#else
+#ifndef FIO_MEMCPY
+/** `memcpy` selector macro */
+#define FIO_MEMCPY memcpy
+#endif
+#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
+  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
+                                     const void *restrict src) {               \
+    struct fio___memcpy##bytes##_s {                                           \
+      unsigned char data[bytes];                                               \
+    };                                                                         \
+    union {                                                                    \
+      const void *restrict ptr;                                                \
+      struct fio___memcpy##bytes##_s *restrict grp;                            \
+    } d = {.ptr = dest}, s = {.ptr = src};                                     \
+    *d.grp = *s.grp;                                                           \
+  }
+#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+  if ((l & bytes)) {                                                           \
+    fio___memcpy##bytes(d, s);                                                 \
+    d += bytes;                                                                \
+    s += bytes;                                                                \
+  }
+
+#endif /* __has_builtin(__builtin_memcpy) */
+
+#define FIO_MEMCPY1(dest, src)    fio___memcpy1((dest), (src))
+#define FIO_MEMCPY2(dest, src)    fio___memcpy2((dest), (src))
+#define FIO_MEMCPY4(dest, src)    fio___memcpy4((dest), (src))
+#define FIO_MEMCPY8(dest, src)    fio___memcpy8((dest), (src))
+#define FIO_MEMCPY16(dest, src)   fio___memcpy16((dest), (src))
+#define FIO_MEMCPY32(dest, src)   fio___memcpy32((dest), (src))
+#define FIO_MEMCPY64(dest, src)   fio___memcpy64((dest), (src))
+#define FIO_MEMCPY128(dest, src)  fio___memcpy128((dest), (src))
+#define FIO_MEMCPY256(dest, src)  fio___memcpy256((dest), (src))
+#define FIO_MEMCPY512(dest, src)  fio___memcpy512((dest), (src))
+#define FIO_MEMCPY1024(dest, src) fio___memcpy1024((dest), (src))
+#define FIO_MEMCPY2048(dest, src) fio___memcpy2048((dest), (src))
+#define FIO_MEMCPY4096(dest, src) fio___memcpy4096((dest), (src))
+
+#define FIO_MEMCPY7x(dest, src, len)    fio___memcpy7x((dest), (src), (len))
+#define FIO_MEMCPY15x(dest, src, len)   fio___memcpy15x((dest), (src), (len))
+#define FIO_MEMCPY31x(dest, src, len)   fio___memcpy31x((dest), (src), (len))
+#define FIO_MEMCPY63x(dest, src, len)   fio___memcpy63x((dest), (src), (len))
+#define FIO_MEMCPY127x(dest, src, len)  fio___memcpy127x((dest), (src), (len))
+#define FIO_MEMCPY255x(dest, src, len)  fio___memcpy255x((dest), (src), (len))
+#define FIO_MEMCPY511x(dest, src, len)  fio___memcpy511x((dest), (src), (len))
+#define FIO_MEMCPY1023x(dest, src, len) fio___memcpy1023x((dest), (src), (len))
+#define FIO_MEMCPY2047x(dest, src, len) fio___memcpy2047x((dest), (src), (len))
+#define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
+
+FIO___MAKE_MEMCPY_FIXED(1)
+FIO___MAKE_MEMCPY_FIXED(2)
+FIO___MAKE_MEMCPY_FIXED(4)
+FIO___MAKE_MEMCPY_FIXED(8)
+FIO___MAKE_MEMCPY_FIXED(16)
+FIO___MAKE_MEMCPY_FIXED(32)
+FIO___MAKE_MEMCPY_FIXED(64)
+FIO___MAKE_MEMCPY_FIXED(128)
+FIO___MAKE_MEMCPY_FIXED(256)
+FIO___MAKE_MEMCPY_FIXED(512)
+FIO___MAKE_MEMCPY_FIXED(1024)
+FIO___MAKE_MEMCPY_FIXED(2048)
+FIO___MAKE_MEMCPY_FIXED(4096)
+#undef FIO___MAKE_MEMCPY_FIXED
+
+/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
+FIO_IFUNC void fio___memcpy7x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
+#if 1
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  if ((l & 1))
+    *d = *s;
+#else
+  /* assume we can always copy/write 8 bytes into the buffer? */
+  uint64_t d, s, mask;
+  FIO_MEMCPY8(&d, d_);
+  FIO_MEMCPY8(&s, s_);
+  mask = (~UINT64_C(0)) << ((l & 7) << 3);
+#if __BIG_ENDIAN__
+  mask = ~mask;
+#endif
+  d &= mask;
+  s &= ~mask;
+  d |= s;
+  FIO_MEMCPY8(d_, &d);
+#endif
+}
+
+/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
+FIO_IFUNC void fio___memcpy15x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
+FIO_IFUNC void fio___memcpy31x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
+FIO_IFUNC void fio___memcpy63x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
+FIO_IFUNC void fio___memcpy127x(void *restrict d_,
+                                const void *restrict s_,
+                                size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
+FIO_IFUNC void fio___memcpy255x(void *restrict d_,
+                                const void *restrict s_,
+                                size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
+FIO_IFUNC void fio___memcpy511x(void *restrict d_,
+                                const void *restrict s_,
+                                size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(256);
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
+FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
+                                 const void *restrict s_,
+                                 size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(512);
+  FIO_MEMCPY___PARTIAL(256);
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
+FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
+                                 const void *restrict s_,
+                                 size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(1024);
+  FIO_MEMCPY___PARTIAL(512);
+  FIO_MEMCPY___PARTIAL(256);
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
+FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
+                                 const void *restrict s_,
+                                 size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(2048);
+  FIO_MEMCPY___PARTIAL(1024);
+  FIO_MEMCPY___PARTIAL(512);
+  FIO_MEMCPY___PARTIAL(256);
+  FIO_MEMCPY___PARTIAL(128);
+  FIO_MEMCPY___PARTIAL(64);
+  FIO_MEMCPY___PARTIAL(32);
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio___memcpy7x(d, s, l);
+}
+#undef FIO_MEMCPY___PARTIAL
+
+/* *****************************************************************************
+FIO_MEMSET / fio_memset - memset fallbacks
+***************************************************************************** */
+
+#ifndef FIO_MEMSET
+#if __has_builtin(__builtin_memset)
+/** `memset` selector macro */
+#define FIO_MEMSET __builtin_memset
+#else
+/** `memset` selector macro */
+#define FIO_MEMSET memset
+#endif
+#endif /* FIO_MEMSET */
+
+/** an 8 byte value memset implementation. */
+FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  if (data < 0x100) { /* if a single byte value, match memset */
+    data |= (data << 8);
+    data |= (data << 16);
+    data |= (data << 32);
+  }
+  uint64_t repeated[4] = {data, data, data, data};
+  char *d = (char *)dest_;
+  char *const d_loop = d + (bytes & (~(size_t)255ULL));
+  while (d < d_loop) {
+    FIO_MEMCPY32(d, repeated);
+    FIO_MEMCPY32(d + 32, repeated);
+    FIO_MEMCPY32(d + 64, repeated);
+    FIO_MEMCPY32(d + 96, repeated);
+    FIO_MEMCPY32(d + 128, repeated);
+    FIO_MEMCPY32(d + 160, repeated);
+    FIO_MEMCPY32(d + 192, repeated);
+    FIO_MEMCPY32(d + 224, repeated);
+    d += 256;
+  }
+  if (bytes & 128) {
+    FIO_MEMCPY32(d, repeated);
+    FIO_MEMCPY32(d + 32, repeated);
+    FIO_MEMCPY32(d + 64, repeated);
+    FIO_MEMCPY32(d + 96, repeated);
+    d += 128;
+  }
+  if (bytes & 64) {
+    FIO_MEMCPY32(d, repeated);
+    FIO_MEMCPY32(d + 32, repeated);
+    d += 64;
+  }
+  if (bytes & 32) {
+    FIO_MEMCPY32(d, repeated);
+    d += 32;
+  }
+  FIO_MEMCPY31x(d, repeated, bytes);
+}
+
+/* *****************************************************************************
+FIO_MEMCPY / fio_memcpy - memcpy fallbacks
+***************************************************************************** */
+
+#define FIO___MEMCPY_BLOCK_NUM  1024
+#define FIO___MEMCPY_BLOCKx_NUM 1023ULL
+#define FIO___MEMCPY_BLOCK      FIO_MEMCPY1024
+#define FIO___MEMCPY_BLOCKx     FIO_MEMCPY1023x
+
+/** memcpy / memmove alternative that should work with unaligned memory */
+FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
+  char *d = (char *)dest_;
+  const char *s = (const char *)src_;
+
+  if ((d == s) | !bytes | !d | !s) {
+    FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
+    return;
+  }
+  if (s + bytes <= d || d + bytes <= s ||
+      (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
+    for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
+      FIO___MEMCPY_BLOCK(d, s); /* direct copy, no meaningful overlap */
+      d += FIO___MEMCPY_BLOCK_NUM;
+      s += FIO___MEMCPY_BLOCK_NUM;
+    }
+    FIO___MEMCPY_BLOCKx(d, s, bytes);
+  } else if (bytes < FIO___MEMCPY_BLOCK_NUM) { /* overlap, fits in buffer */
+    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
+    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
+    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
+  } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
+    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
+    for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
+      FIO___MEMCPY_BLOCK(tmp_buf, s);
+      FIO___MEMCPY_BLOCK(d, tmp_buf);
+      d += FIO___MEMCPY_BLOCK_NUM;
+      s += FIO___MEMCPY_BLOCK_NUM;
+    }
+    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
+    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
+  } else { /* memory overlaps at beginning, walk backwards (memmove) */
+    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
+    d += bytes;
+    s += bytes;
+    for (; d > (char *)dest_ + FIO___MEMCPY_BLOCKx_NUM;) {
+      d -= FIO___MEMCPY_BLOCK_NUM;
+      s -= FIO___MEMCPY_BLOCK_NUM;
+      FIO___MEMCPY_BLOCK(tmp_buf, s);
+      FIO___MEMCPY_BLOCK(d, tmp_buf);
+    }
+    d = (char *)dest_;
+    s = (const char *)src_;
+    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
+    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
+  }
+}
+
+#undef FIO___MEMCPY_BLOCK_NUM
+#undef FIO___MEMCPY_BLOCKx_NUM
+#undef FIO___MEMCPY_BLOCK
+#undef FIO___MEMCPY_BLOCKx
+/* *****************************************************************************
+FIO_MEMCHR / fio_memchr - memchr fallbacks
+***************************************************************************** */
+
+#ifndef FIO_MEMCHR
+#if __has_builtin(__builtin_memchr)
+/** `memchr` selector macro */
+#define FIO_MEMCHR __builtin_memchr
+#else
+/** `memchr` selector macro */
+#define FIO_MEMCHR memchr
+#endif
+#endif /* FIO_MEMCHR */
+
+/**
+ * Returns the index of the least significant (lowest) bit - used in fio_memchr.
+ *
+ * Placed here (mostly copied from bitmap module).
+ */
+FIO_SFUNC size_t fio___lsb_index4memchr(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(i);
+#else
+  i = (i & ((~i) + 1));
+  switch (i) {
+  case UINT64_C(0x1): return 0;
+  case UINT64_C(0x2): return 1;
+  case UINT64_C(0x4): return 2;
+  case UINT64_C(0x8): return 3;
+  case UINT64_C(0x10): return 4;
+  case UINT64_C(0x20): return 5;
+  case UINT64_C(0x40): return 6;
+  case UINT64_C(0x80): return 7;
+  case UINT64_C(0x100): return 8;
+  case UINT64_C(0x200): return 9;
+  case UINT64_C(0x400): return 10;
+  case UINT64_C(0x800): return 11;
+  case UINT64_C(0x1000): return 12;
+  case UINT64_C(0x2000): return 13;
+  case UINT64_C(0x4000): return 14;
+  case UINT64_C(0x8000): return 15;
+  case UINT64_C(0x10000): return 16;
+  case UINT64_C(0x20000): return 17;
+  case UINT64_C(0x40000): return 18;
+  case UINT64_C(0x80000): return 19;
+  case UINT64_C(0x100000): return 20;
+  case UINT64_C(0x200000): return 21;
+  case UINT64_C(0x400000): return 22;
+  case UINT64_C(0x800000): return 23;
+  case UINT64_C(0x1000000): return 24;
+  case UINT64_C(0x2000000): return 25;
+  case UINT64_C(0x4000000): return 26;
+  case UINT64_C(0x8000000): return 27;
+  case UINT64_C(0x10000000): return 28;
+  case UINT64_C(0x20000000): return 29;
+  case UINT64_C(0x40000000): return 30;
+  case UINT64_C(0x80000000): return 31;
+  case UINT64_C(0x100000000): return 32;
+  case UINT64_C(0x200000000): return 33;
+  case UINT64_C(0x400000000): return 34;
+  case UINT64_C(0x800000000): return 35;
+  case UINT64_C(0x1000000000): return 36;
+  case UINT64_C(0x2000000000): return 37;
+  case UINT64_C(0x4000000000): return 38;
+  case UINT64_C(0x8000000000): return 39;
+  case UINT64_C(0x10000000000): return 40;
+  case UINT64_C(0x20000000000): return 41;
+  case UINT64_C(0x40000000000): return 42;
+  case UINT64_C(0x80000000000): return 43;
+  case UINT64_C(0x100000000000): return 44;
+  case UINT64_C(0x200000000000): return 45;
+  case UINT64_C(0x400000000000): return 46;
+  case UINT64_C(0x800000000000): return 47;
+  case UINT64_C(0x1000000000000): return 48;
+  case UINT64_C(0x2000000000000): return 49;
+  case UINT64_C(0x4000000000000): return 50;
+  case UINT64_C(0x8000000000000): return 51;
+  case UINT64_C(0x10000000000000): return 52;
+  case UINT64_C(0x20000000000000): return 53;
+  case UINT64_C(0x40000000000000): return 54;
+  case UINT64_C(0x80000000000000): return 55;
+  case UINT64_C(0x100000000000000): return 56;
+  case UINT64_C(0x200000000000000): return 57;
+  case UINT64_C(0x400000000000000): return 58;
+  case UINT64_C(0x800000000000000): return 59;
+  case UINT64_C(0x1000000000000000): return 60;
+  case UINT64_C(0x2000000000000000): return 61;
+  case UINT64_C(0x4000000000000000): return 62;
+  case UINT64_C(0x8000000000000000): return 63;
+  }
+  return 63;
+#endif /* __builtin vs. map */
+}
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+  if (!buffer || !len)
+    return NULL;
+  const char *r = (const char *)buffer;
+  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFFU;
+  umask |= (umask << 32);
+  umask |= (umask << 16);
+  umask |= (umask << 8);
+  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
+
+#define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
+  do {                                                                         \
+    uint64_t flag = 0, v, u[group_size];                                       \
+    for (size_t i = 0; i < group_size; ++i) { /* partial math */               \
+      FIO_MEMCPY8(u + i, r + (i << 3));                                        \
+      u[i] ^= umask;                        /* byte match == 0xFF */           \
+      u[i] &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */         \
+      u[i] += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */       \
+      u[i] &= UINT64_C(0x8080808080808080); /* keep only 7:8 likely match  */  \
+      flag |= u[i];                                                            \
+    }                                                                          \
+    if (FIO_LIKELY(!flag)) {                                                   \
+      r += (group_size << 3);                                                  \
+      break; /* from do..while macro */                                        \
+    }                                                                          \
+    flag = 0;                                                                  \
+    for (size_t i = 0; i < group_size; ++i) { /* full math */                  \
+      const size_t i8 = (i << 3);                                              \
+      FIO_MEMCPY8(&v, r + i8);                                                 \
+      v ^= umask;               /* byte match == 0xFF */                       \
+      u[i] &= v;                /* only if full byte matches, we get 0x80  */  \
+      u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
+      u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
+      u[i] |= u[i] >> 14;                                                      \
+      u[i] |= u[i] >> 28;                                                      \
+      flag |= (u[i] & 0xFFU) << i8; /* placed packed bitmap in u64 */          \
+    }                                                                          \
+    if (!flag) {                                                               \
+      r += (group_size << 3);                                                  \
+      break; /* from do..while macro */                                        \
+    }                                                                          \
+    return (void *)(r + fio___lsb_index4memchr(flag));                         \
+  } while (0)
+
+  for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+  if ((len & 64)) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+  if ((len & 32)) {
+    FIO___MEMCHR_BITMAP_TEST(4);
+  }
+  if ((len & 16)) {
+    FIO___MEMCHR_BITMAP_TEST(2);
+  }
+  if ((len & 8)) {
+    FIO___MEMCHR_BITMAP_TEST(1);
+  }
+  while ((len & 7)) {
+    if (*r == token)
+      return (void *)r;
+    ++r;
+    --len;
+  }
+  return NULL;
+#undef FIO___MEMCHR_BITMAP_TEST
+}
+/* *****************************************************************************
+Pointer Math
+***************************************************************************** */
+
+/** Masks a pointer's left-most bits, returning the right bits. */
+#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
+  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
+
+/** Masks a pointer's right-most bits, returning the left bits. */
+#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
+  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << (bits))))
+
+/** Add offset bytes to pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
+
+/** Subtract X bytes from pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
+
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
+#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
+  FIO_PTR_MATH_SUB(T_type,                                                     \
+                   ptr,                                                        \
+                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
+
+/* *****************************************************************************
+Security Related macros
+***************************************************************************** */
+#define FIO_MEM_STACK_WIPE(pages)                                              \
+  do {                                                                         \
+    volatile char stack_mem[(pages) << 12] = {0};                              \
+    (void)stack_mem;                                                           \
+  } while (0)
+
+/* *****************************************************************************
+Static Assertions
+***************************************************************************** */
+#if __STDC_VERSION__ >= 201112L
+#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
+#else
+#define FIO_ASSERT_STATIC(cond, msg)                                           \
+  static const char *FIO_NAME(fio_static_assertion_failed,                     \
+                              __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
+#endif
+
+typedef struct {
+  char data[2];
+} fio___padding_char_struct_test_s;
+
+FIO_ASSERT_STATIC(CHAR_BIT == 8, "facil.io requires an 8bit wide char");
+FIO_ASSERT_STATIC(sizeof(uint8_t) == 1,
+                  "facil.io requires an 8bit wide uint8_t");
+FIO_ASSERT_STATIC(sizeof(uint16_t) == 2,
+                  "facil.io requires a 16bit wide uint16_t");
+FIO_ASSERT_STATIC(sizeof(uint32_t) == 4,
+                  "facil.io requires a 32bit wide uint32_t");
+FIO_ASSERT_STATIC(sizeof(uint64_t) == 8,
+                  "facil.io requires a 64bit wide uint64_t");
+FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
+                  "compiler adds padding to fio___memcpyX, creating memory "
+                  "alignment issues.");
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
@@ -2753,121 +3186,6 @@ Copyright and License: see header file (000 header.h) or top of file
 #endif
 
 /* *****************************************************************************
-Swapping byte's order (`bswap` variations)
-***************************************************************************** */
-
-/** Byte swap a 16 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap16)
-#define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
-#else
-FIO_IFUNC uint16_t fio_bswap16(uint16_t i) {
-  return ((((i)&0xFFU) << 8) | (((i)&0xFF00U) >> 8));
-}
-#endif
-
-/** Byte swap a 32 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap32)
-#define fio_bswap32(i) __builtin_bswap32((uint32_t)(i))
-#else
-FIO_IFUNC uint32_t fio_bswap32(uint32_t i) {
-  return ((((i)&0xFFUL) << 24) | (((i)&0xFF00UL) << 8) |
-          (((i)&0xFF0000UL) >> 8) | (((i)&0xFF000000UL) >> 24));
-}
-#endif
-
-/** Byte swap a 64 bit integer, inlined. */
-#if __has_builtin(__builtin_bswap64)
-#define fio_bswap64(i) __builtin_bswap64((uint64_t)(i))
-#else
-FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
-  return ((((i)&0xFFULL) << 56) | (((i)&0xFF00ULL) << 40) |
-          (((i)&0xFF0000ULL) << 24) | (((i)&0xFF000000ULL) << 8) |
-          (((i)&0xFF00000000ULL) >> 8) | (((i)&0xFF0000000000ULL) >> 24) |
-          (((i)&0xFF000000000000ULL) >> 40) |
-          (((i)&0xFF00000000000000ULL) >> 56));
-}
-#endif
-
-#ifdef __SIZEOF_INT128__
-#if __has_builtin(__builtin_bswap128)
-#define fio_bswap128(i) __builtin_bswap128((__uint128_t)(i))
-#else
-FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
-  return ((__uint128_t)fio_bswap64(i) << 64) | fio_bswap64(i >> 64);
-}
-#endif
-#endif /* __SIZEOF_INT128__ */
-
-/* *****************************************************************************
-Switching Endian Ordering
-***************************************************************************** */
-
-#if __BIG_ENDIAN__
-
-/** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i) (i)
-/** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i) (i)
-/** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i) (i)
-
-/** Local byte order to Little Endian byte order, 16 bit integer */
-#define fio_ltole16(i) fio_bswap16((i))
-/** Local byte order to Little Endian byte order, 32 bit integer */
-#define fio_ltole32(i) fio_bswap32((i))
-/** Local byte order to Little Endian byte order, 62 bit integer */
-#define fio_ltole64(i) fio_bswap64((i))
-
-/** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i) (i)
-/** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i) (i)
-/** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i) (i)
-
-#ifdef __SIZEOF_INT128__
-/** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i) (i)
-/** Local byte order to Little Endian byte order, 128 bit integer */
-#define fio_ltole128(i) fio_bswap128((i))
-
-#endif /* __SIZEOF_INT128__ */
-
-#else /* Little Endian */
-
-/** Local byte order to Network byte order, 16 bit integer */
-#define fio_lton16(i)  fio_bswap16((i))
-/** Local byte order to Network byte order, 32 bit integer */
-#define fio_lton32(i)  fio_bswap32((i))
-/** Local byte order to Network byte order, 62 bit integer */
-#define fio_lton64(i)  fio_bswap64((i))
-
-/** Local byte order to Little Endian byte order, 16 bit integer */
-#define fio_ltole16(i) (i)
-/** Local byte order to Little Endian byte order, 32 bit integer */
-#define fio_ltole32(i) (i)
-/** Local byte order to Little Endian byte order, 62 bit integer */
-#define fio_ltole64(i) (i)
-
-/** Network byte order to Local byte order, 16 bit integer */
-#define fio_ntol16(i)  fio_bswap16((i))
-/** Network byte order to Local byte order, 32 bit integer */
-#define fio_ntol32(i)  fio_bswap32((i))
-/** Network byte order to Local byte order, 62 bit integer */
-#define fio_ntol64(i)  fio_bswap64((i))
-
-#ifdef __SIZEOF_INT128__
-/** Local byte order to Network byte order, 128 bit integer */
-#define fio_lton128(i)  fio_bswap128((i))
-/** Network byte order to Local byte order, 128 bit integer */
-#define fio_ntol128(i)  fio_bswap128((i))
-/** Local byte order to Little Endian byte order, 128 bit integer */
-#define fio_ltole128(i) (i)
-#endif /* __SIZEOF_INT128__ */
-
-#endif /* __BIG_ENDIAN__ */
-
-/* *****************************************************************************
 Bit rotation
 ***************************************************************************** */
 
@@ -3394,7 +3712,7 @@ FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
 }
 
 /** Isolates the least significant (lowest) bit. */
-FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (size_t)(i & ((~i) + 1)); }
+FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (i & ((~i) + 1)); }
 
 /** Isolates the most significant (highest) bit. */
 FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
@@ -3483,8 +3801,8 @@ FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
   uint64_t r = 0;
   if (!i)
     goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return __builtin_ctzll(fio_bits_msb(i));
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 63 - __builtin_clzll(i);
 #else
   return fio_bits___map_bit2index(fio_bits_msb(i));
 #endif
@@ -3497,8 +3815,8 @@ zero:
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   if (!i)
     return (size_t)-1;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return 63 - __builtin_clzll(fio_bits_lsb(i));
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll) && 0
+  return __builtin_ctzll(i);
 #else
   return fio_bits___map_bit2index(fio_bits_lsb(i));
 #endif /* __builtin vs. map */
@@ -3695,14 +4013,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
                "bit index map[%zu] error != %zu",
                (size_t)(1ULL << i),
                i);
-    FIO_ASSERT(fio_bits_msb_index((1ULL << i)) == i,
+    FIO_ASSERT(fio_bits_msb_index(((1ULL << i) | 1)) == i,
                "fio_bits_msb_index(%zu) != %zu",
-               1,
-               (size_t)fio_bits_msb_index((1ULL << i)));
-    FIO_ASSERT(fio_bits_lsb_index((1ULL << i)) == i,
+               ((1ULL << i)),
+               (size_t)fio_bits_msb_index(((1ULL << i) | 1)));
+    FIO_ASSERT(fio_bits_lsb_index(((~0ULL) << i)) == i,
                "fio_bits_lsb_index(%zu) != %zu",
                1,
-               (size_t)fio_bits_lsb_index((1ULL << i)));
+               (size_t)fio_bits_lsb_index(((~0ULL) << i)));
   }
 
   fprintf(stderr, "* Testing fio_buf2uX and fio_u2bufX helpers.\n");
@@ -6769,12 +7087,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = strlen(str);
     char buf[128];
-    memcpy(buf, str, len);
+    FIO_MEMCPY(buf, str, len);
     uint64_t org_hash = fio_risky_hash(buf, len, 0);
     FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
-      memcpy(tmp, str, len);
+      FIO_MEMCPY(tmp, str, len);
       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
       FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0),
                  "hash should be consistent!");
@@ -9769,11 +10087,11 @@ FIO_IFUNC const char *fio___json_skip_comments(const char *buffer,
   if (*buffer == '#' ||
       ((stop - buffer) > 2 && buffer[0] == '/' && buffer[1] == '/')) {
     /* EOL style comment, C style or Bash/Ruby style*/
-    buffer = (const char *)memchr(buffer + 1, '\n', stop - (buffer + 1));
+    buffer = (const char *)FIO_MEMCHR(buffer + 1, '\n', stop - (buffer + 1));
     return buffer;
   }
   if (((stop - buffer) > 3 && buffer[0] == '/' && buffer[1] == '*')) {
-    while ((buffer = (const char *)memchr(buffer, '/', stop - buffer)) &&
+    while ((buffer = (const char *)FIO_MEMCHR(buffer, '/', stop - buffer)) &&
            buffer && ++buffer && buffer[-2] != '*')
       ;
     return buffer;
@@ -9786,7 +10104,7 @@ FIO_IFUNC const char *fio___json_consume_string(fio_json_parser_s *p,
                                                 const char *stop) {
   const char *start = ++buffer;
   for (;;) {
-    buffer = (const char *)memchr(buffer, '\"', stop - buffer);
+    buffer = (const char *)FIO_MEMCHR(buffer, '\"', stop - buffer);
     if (!buffer)
       return NULL;
     int escaped = 1;
@@ -11003,129 +11321,6 @@ Helpers and System Memory Allocation
 #define FIO_MEM_BYTES2PAGES(size)                                              \
   (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
    ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
-
-/** memcpy / memmove alternative that should work with unaligned memory */
-SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
-  char *d = (char *)dest_;
-  const char *s = (const char *)src_;
-  if ((d == s) | !bytes | !d | !s) {
-    FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
-    return;
-  }
-  if (s + bytes <= d || d + bytes <= s || (uintptr_t)d + 4095 < (uintptr_t)s) {
-    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
-      FIO_MEMCPY4096(d, s); /* direct copy, no meaningful overlap */
-      d += 4096;
-      s += 4096;
-    }
-    FIO_MEMCPY4095x(d, s, bytes);
-  } else if (bytes < 4096) { /* overlap, use buffer to copy all data at once */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    for (char *dstop = d + (bytes & (~(size_t)4095ULL)); d < dstop;) {
-      FIO_MEMCPY4096(tmp_buf, s);
-      FIO_MEMCPY4096(d, tmp_buf);
-      d += 4096;
-      s += 4096;
-    }
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    char tmp_buf[4096] FIO_ALIGN(16);
-    d += bytes;
-    s += bytes;
-    for (char *dstop = d + (bytes & 4095ULL); d > dstop;) {
-      d -= 4096;
-      s -= 4096;
-      FIO_MEMCPY4096(tmp_buf, s);
-      FIO_MEMCPY4096(d, tmp_buf);
-    }
-    d -= (bytes & 4095ULL);
-    s -= (bytes & 4095ULL);
-    FIO_MEMCPY4095x(tmp_buf, s, bytes);
-    FIO_MEMCPY4095x(d, tmp_buf, bytes);
-  }
-}
-
-/** an 8 byte value memset implementation. */
-SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  if (data < 0x100) { /* if a single byte value, match memset */
-    data |= (data << 8);
-    data |= (data << 16);
-    data |= (data << 32);
-  }
-  uint64_t repeated[8] = {data, data, data, data, data, data, data, data};
-  char *d = (char *)dest_;
-  char *const d_loop = d + (bytes & (~(size_t)63ULL));
-  while (d < d_loop) {
-    FIO_MEMCPY64(d, repeated);
-    d += 64;
-  }
-  FIO_MEMCPY63x(d, repeated, bytes);
-}
-
-/**
- * A token seeking function. This is a fallback for `memchr`, but `memchr`
- * should be faster.
- */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  if (!buffer || !len)
-    return NULL;
-  const char *r = (const char *)buffer;
-  uint64_t flag, u, umask = ((uint64_t)((uint8_t)token)) & 0xFFU;
-  umask |= (umask << 32);
-  umask |= (umask << 16);
-  umask |= (umask << 8);
-  umask = ~umask; /* mask is full of the inverse of the token's bit pattern */
-
-#define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
-  flag = 0;                                                                    \
-  for (size_t i = 0; i < (group_size << 3); i += 8) {                          \
-    FIO_MEMCPY8(&u, (r + i));                                                  \
-    u ^= umask;                        /* byte match == 0xFF */                \
-    u &= UINT64_C(0x7F7F7F7F7F7F7F7F); /* keep 7:8 probability */              \
-    u += UINT64_C(0x0101010101010101); /* only 0x7F becomes 0x80 */            \
-    u &= UINT64_C(0x8080808080808080); /* keep only 7:8 likely match  */       \
-    flag |= u;                                                                 \
-  }                                                                            \
-  if (flag)                                                                    \
-    for (size_t i = 0; i < (group_size << 3); ++i) {                           \
-      if (r[i] == token)                                                       \
-        return (void *)(r + i);                                                \
-    }                                                                          \
-  r += (group_size << 3);
-
-  for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 64)) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 32)) {
-    FIO___MEMCHR_BITMAP_TEST(4);
-  }
-  if ((len & 16)) {
-    FIO___MEMCHR_BITMAP_TEST(2);
-  }
-  if ((len & 8)) {
-    FIO___MEMCHR_BITMAP_TEST(1);
-  }
-  while ((len & 7)) {
-    if (*r == token)
-      return (void *)r;
-    ++r;
-    --len;
-  }
-  return NULL;
-#undef FIO___MEMCHR_BITMAP_TEST
-}
 
 /* *****************************************************************************
 
@@ -13034,7 +13229,7 @@ FIO_SFUNC void *fio___naive_memchr(const void *buffer,
   const char *e_group = r + (len & (~UINT64_C(63)));
   for (; r < e_group; r += 64) {
     for (size_t i = 0; i < 64; ++i) {
-      if (r[i] == token)
+      if (FIO_UNLIKELY(r[i] == token))
         return (void *)(r + i);
     }
   }
@@ -19630,7 +19825,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     const char *tmp = (const char *)src_;
     const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
     for (;;) {
-      tmp = (const char *)memchr(tmp, '\\', (size_t)(stop - tmp));
+      tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
       if (!tmp)
         break;
       size_t step = 1;
@@ -19653,7 +19848,8 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
   uint8_t *writer = (uint8_t *)dest->buf + dest->len;
   while (src < end) {
     if (*src != '\\') {
-      const uint8_t *escape_pos = (const uint8_t *)memchr(src, '\\', end - src);
+      const uint8_t *escape_pos =
+          (const uint8_t *)FIO_MEMCHR(src, '\\', end - src);
       if (!escape_pos)
         escape_pos = end;
       const size_t valid_len = escape_pos - src;
