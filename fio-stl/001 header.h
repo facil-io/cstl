@@ -590,7 +590,7 @@ Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy) && 0
+#if __has_builtin(__builtin_memcpy)
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
