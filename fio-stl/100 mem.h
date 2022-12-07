@@ -2411,14 +2411,14 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   uint8_t *e_group = r + (bytes & (~(size_t)63ULL));
   uint64_t d[8] = {data, data, data, data, data, data, data, data};
   while (r < e_group) {
-    FIO_MEMCPY64(d, r);
+    fio_memcpy64(d, r);
     FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
                    d[4] == data && d[5] == data && d[6] == data && d[7] == data,
                "%s memory data was overwritten",
                msg);
     r += 64;
   }
-  FIO_MEMCPY63x(d, r, bytes);
+  fio_memcpy63x(d, r, bytes);
   FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
                  d[4] == data && d[5] == data && d[6] == data && d[7] == data,
              "%s memory data was overwritten",

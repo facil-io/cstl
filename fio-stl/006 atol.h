@@ -658,12 +658,12 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  FIO_MEMCPY8(dest + written, "Infinity");
+  fio_memcpy8(dest + written, "Infinity");
   written += 8;
   dest[written] = 0;
   return written;
 is_nan:
-  FIO_MEMCPY4(dest, "NaN");
+  fio_memcpy4(dest, "NaN");
   return 3;
 }
 
@@ -1144,7 +1144,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    FIO_MEMCPY15x(buffer, "1234567890.123", 14);
+    fio_memcpy15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();

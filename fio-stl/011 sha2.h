@@ -121,7 +121,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
   const fio_256u old = *h;
   /* read data as an array of 16 big endian 32 bit integers. */
   uint32_t w[16];
-  FIO_MEMCPY64(w, block);
+  fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
   }
@@ -175,12 +175,12 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
   if (old_total & 63) {
     const size_t offset = (old_total & 63);
     if (len + offset < 64) { /* not enough - copy to cache */
-      FIO_MEMCPY63x((h->cache.u8 + offset), r, len);
+      fio_memcpy63x((h->cache.u8 + offset), r, len);
       return;
     }
     /* consume cache */
     const size_t byte2copy = 64UL - offset;
-    FIO_MEMCPY63x(h->cache.u8 + offset, r, byte2copy);
+    fio_memcpy63x(h->cache.u8 + offset, r, byte2copy);
     fio___sha256_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 64);
     r += byte2copy;
@@ -191,7 +191,7 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
     fio___sha256_round(&h->hash, r);
     r += 64;
   }
-  FIO_MEMCPY63x(h->cache.u64, r, len);
+  fio_memcpy63x(h->cache.u64, r, len);
 }
 
 SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
@@ -237,12 +237,12 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
   if (old_total & 127) {
     const size_t offset = (old_total & 127);
     if (len + offset < 128) { /* not enough - copy to cache */
-      FIO_MEMCPY127x((h->cache.u8 + offset), r, len);
+      fio_memcpy127x((h->cache.u8 + offset), r, len);
       return;
     }
     /* consume cache */
     const size_t byte2copy = 128UL - offset;
-    FIO_MEMCPY127x(h->cache.u8 + offset, r, byte2copy);
+    fio_memcpy127x(h->cache.u8 + offset, r, byte2copy);
     fio___sha512_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 128);
     r += byte2copy;
@@ -253,7 +253,7 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
     fio___sha512_round(&h->hash, r);
     r += 128;
   }
-  FIO_MEMCPY63x(h->cache.u64, r, len);
+  fio_memcpy63x(h->cache.u64, r, len);
 }
 
 /** finalizes a fio_512u with the SHA 512 hash. */

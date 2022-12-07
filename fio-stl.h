@@ -718,14 +718,14 @@ Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy) && 0
+#if __has_builtin(__builtin_memcpy)
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
-                                     const void *restrict src) {               \
+  FIO_IFUNC void fio_memcpy##bytes(void *restrict dest,                        \
+                                   const void *restrict src) {                 \
     __builtin_memcpy(dest, src, bytes);                                        \
   }
 #else
@@ -734,39 +734,14 @@ Memory Copying Primitives
 #define FIO_MEMCPY memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
-                                     const void *restrict src) {               \
+  FIO_IFUNC void fio_memcpy##bytes(void *restrict dest,                        \
+                                   const void *restrict src) {                 \
     for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
       ((char *)dest)[i] = ((const char *)src)[i];                              \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
-#define FIO_MEMCPY1(dest, src)    fio___memcpy1((dest), (src))
-#define FIO_MEMCPY2(dest, src)    fio___memcpy2((dest), (src))
-#define FIO_MEMCPY4(dest, src)    fio___memcpy4((dest), (src))
-#define FIO_MEMCPY8(dest, src)    fio___memcpy8((dest), (src))
-#define FIO_MEMCPY16(dest, src)   fio___memcpy16((dest), (src))
-#define FIO_MEMCPY32(dest, src)   fio___memcpy32((dest), (src))
-#define FIO_MEMCPY64(dest, src)   fio___memcpy64((dest), (src))
-#define FIO_MEMCPY128(dest, src)  fio___memcpy128((dest), (src))
-#define FIO_MEMCPY256(dest, src)  fio___memcpy256((dest), (src))
-#define FIO_MEMCPY512(dest, src)  fio___memcpy512((dest), (src))
-#define FIO_MEMCPY1024(dest, src) fio___memcpy1024((dest), (src))
-#define FIO_MEMCPY2048(dest, src) fio___memcpy2048((dest), (src))
-#define FIO_MEMCPY4096(dest, src) fio___memcpy4096((dest), (src))
-
-#define FIO_MEMCPY7x(dest, src, len)    fio___memcpy7x((dest), (src), (len))
-#define FIO_MEMCPY15x(dest, src, len)   fio___memcpy15x((dest), (src), (len))
-#define FIO_MEMCPY31x(dest, src, len)   fio___memcpy31x((dest), (src), (len))
-#define FIO_MEMCPY63x(dest, src, len)   fio___memcpy63x((dest), (src), (len))
-#define FIO_MEMCPY127x(dest, src, len)  fio___memcpy127x((dest), (src), (len))
-#define FIO_MEMCPY255x(dest, src, len)  fio___memcpy255x((dest), (src), (len))
-#define FIO_MEMCPY511x(dest, src, len)  fio___memcpy511x((dest), (src), (len))
-#define FIO_MEMCPY1023x(dest, src, len) fio___memcpy1023x((dest), (src), (len))
-#define FIO_MEMCPY2047x(dest, src, len) fio___memcpy2047x((dest), (src), (len))
-#define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
-
-FIO_IFUNC void fio___memcpy1(void *restrict dest, const void *restrict src) {
+FIO_IFUNC void fio_memcpy1(void *restrict dest, const void *restrict src) {
   *(char *)dest = *(const char *)src;
 }
 FIO___MAKE_MEMCPY_FIXED(2)
@@ -783,18 +758,47 @@ FIO___MAKE_MEMCPY_FIXED(2048)
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
+#define FIO___MAKE_MEMCPY_ALIGNED(bytes)                                       \
+  FIO_IFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
+                                             const void *restrict src) {       \
+    for (size_t i = 0; i < (bytes##ULL / sizeof(size_t)); ++i)                 \
+      ((size_t *)dest)[i] = ((size_t *)src)[i]; /* should vectorize, right? */ \
+  }
+
+FIO_IFUNC void fio_memcpy1_aligned(void *restrict dest, const void *src) {
+  *(char *)dest = *(const char *)src;
+}
+FIO_IFUNC void fio_memcpy2_aligned(void *restrict dest, const void *src) {
+  *(uint16_t *)dest = *(const uint16_t *)src;
+}
+FIO_IFUNC void fio_memcpy4_aligned(void *restrict dest, const void *src) {
+  *(uint32_t *)dest = *(const uint32_t *)src;
+}
+FIO___MAKE_MEMCPY_ALIGNED(8)
+FIO___MAKE_MEMCPY_ALIGNED(16)
+FIO___MAKE_MEMCPY_ALIGNED(32)
+FIO___MAKE_MEMCPY_ALIGNED(64)
+FIO___MAKE_MEMCPY_ALIGNED(128)
+FIO___MAKE_MEMCPY_ALIGNED(256)
+FIO___MAKE_MEMCPY_ALIGNED(512)
+FIO___MAKE_MEMCPY_ALIGNED(1024)
+FIO___MAKE_MEMCPY_ALIGNED(2048)
+FIO___MAKE_MEMCPY_ALIGNED(4096)
+#undef FIO___MAKE_MEMCPY_ALIGNED
+
 /* Constant time copy of bytes (partial copy test) */
+
 #define FIO_MEMCPY___PARTIAL(bytes)                                            \
   if ((l & bytes)) {                                                           \
-    fio___memcpy##bytes(d, s);                                                 \
+    fio_memcpy##bytes(d, s);                                                   \
     d += bytes;                                                                \
     s += bytes;                                                                \
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void fio___memcpy7x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
+FIO_IFUNC void fio_memcpy7x(void *restrict d_,
+                            const void *restrict s_,
+                            size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
@@ -803,9 +807,9 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void fio___memcpy15x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
+FIO_IFUNC void fio_memcpy15x(void *restrict d_,
+                             const void *restrict s_,
+                             size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
@@ -815,9 +819,9 @@ FIO_IFUNC void fio___memcpy15x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio___memcpy31x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
+FIO_IFUNC void fio_memcpy31x(void *restrict d_,
+                             const void *restrict s_,
+                             size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
@@ -828,9 +832,9 @@ FIO_IFUNC void fio___memcpy31x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_IFUNC void fio___memcpy63x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
+FIO_IFUNC void fio_memcpy63x(void *restrict d_,
+                             const void *restrict s_,
+                             size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(32);
@@ -842,9 +846,9 @@ FIO_IFUNC void fio___memcpy63x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_IFUNC void fio___memcpy127x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
+FIO_IFUNC void fio_memcpy127x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(64);
@@ -857,9 +861,9 @@ FIO_IFUNC void fio___memcpy127x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy255x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
+FIO_IFUNC void fio_memcpy255x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(128);
@@ -873,9 +877,9 @@ FIO_IFUNC void fio___memcpy255x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio___memcpy511x(void *restrict d_,
-                                const void *restrict s_,
-                                size_t l) {
+FIO_IFUNC void fio_memcpy511x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(256);
@@ -890,9 +894,9 @@ FIO_IFUNC void fio___memcpy511x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
-                                 const void *restrict s_,
-                                 size_t l) {
+FIO_IFUNC void fio_memcpy1023x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(512);
@@ -908,9 +912,9 @@ FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
-                                 const void *restrict s_,
-                                 size_t l) {
+FIO_IFUNC void fio_memcpy2047x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(1024);
@@ -927,9 +931,9 @@ FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
     *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
-                                 const void *restrict s_,
-                                 size_t l) {
+FIO_IFUNC void fio_memcpy4095x(void *restrict d_,
+                               const void *restrict s_,
+                               size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(2048);
@@ -974,18 +978,18 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 #define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
   if (bytes & u8_count)                                                        \
     for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
-      FIO_MEMCPY8(d, &data);                                                   \
+      fio_memcpy8(d, &data);                                                   \
     } /* let compiler vectorize loop */
   for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
     for (int i = 0; i < 32; (++i), (d += 8))
-      FIO_MEMCPY8(d, &data); /* let compiler vectorize loop */
+      fio_memcpy8(d, &data); /* let compiler vectorize loop */
   }
   FIO___MEMSET_IF_LOOP(128, 16);
   FIO___MEMSET_IF_LOOP(64, 8);
   FIO___MEMSET_IF_LOOP(32, 4);
   FIO___MEMSET_IF_LOOP(16, 2);
   FIO___MEMSET_IF_LOOP(8, 1);
-  FIO_MEMCPY7x(d, &data, bytes);
+  fio_memcpy7x(d, &data, bytes);
 #undef FIO___MEMSET_IF_LOOP
 }
 
@@ -995,8 +999,30 @@ FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 
 #define FIO___MEMCPY_BLOCK_NUM  1024ULL
 #define FIO___MEMCPY_BLOCKx_NUM 1023ULL
-#define FIO___MEMCPY_BLOCK      FIO_MEMCPY1024
-#define FIO___MEMCPY_BLOCKx     FIO_MEMCPY1023x
+#define FIO___MEMCPY_BLOCK      fio_memcpy1024_aligned
+#define FIO___MEMCPY_BLOCKx     fio_memcpy1023x
+#define FIO___MEMCPY_ALIGN_DIR  +
+#define FIO___MEMCPY_ALIGN(d, s, bytes)                                        \
+  if (((bytes & 7) & (bytes > 7))) { /* align memory? */                       \
+    if ((uintptr_t)d & 1) {                                                    \
+      *(d) = *(s);                                                             \
+      d = d FIO___MEMCPY_ALIGN_DIR 1;                                          \
+      s = s FIO___MEMCPY_ALIGN_DIR 1;                                          \
+      --bytes;                                                                 \
+    }                                                                          \
+    if ((uintptr_t)d & 2) {                                                    \
+      fio_memcpy2_aligned(d, s);                                               \
+      d = d FIO___MEMCPY_ALIGN_DIR 2;                                          \
+      s = s FIO___MEMCPY_ALIGN_DIR 2;                                          \
+      bytes -= 2;                                                              \
+    }                                                                          \
+    if ((uintptr_t)d & 4) {                                                    \
+      fio_memcpy4_aligned(d, s);                                               \
+      d = d FIO___MEMCPY_ALIGN_DIR 4;                                          \
+      s = s FIO___MEMCPY_ALIGN_DIR 4;                                          \
+      bytes -= 4;                                                              \
+    }                                                                          \
+  }
 
 /** memcpy / memmove alternative that should work with unaligned memory */
 FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
@@ -1009,6 +1035,7 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
+    FIO___MEMCPY_ALIGN(d, s, bytes);
     for (const char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM));
          d < dstop;) {
       FIO___MEMCPY_BLOCK(d, s); /* direct copy, no meaningful overlap */
@@ -1022,6 +1049,7 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
     char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
+    FIO___MEMCPY_ALIGN(d, s, bytes)
     for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
       FIO___MEMCPY_BLOCK(tmp_buf, s);
       FIO___MEMCPY_BLOCK(d, tmp_buf);
@@ -1030,10 +1058,13 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     }
     FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
     FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
+#undef FIO___MEMCPY_ALIGN_DIR
+#define FIO___MEMCPY_ALIGN_DIR -
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
     char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
     d += bytes;
     s += bytes;
+    FIO___MEMCPY_ALIGN(d, s, bytes);
     for (; d > (char *)dest_ + FIO___MEMCPY_BLOCKx_NUM;) {
       d -= FIO___MEMCPY_BLOCK_NUM;
       s -= FIO___MEMCPY_BLOCK_NUM;
@@ -1051,6 +1082,8 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 #undef FIO___MEMCPY_BLOCKx_NUM
 #undef FIO___MEMCPY_BLOCK
 #undef FIO___MEMCPY_BLOCKx
+#undef FIO___MEMCPY_ALIGN
+#undef FIO___MEMCPY_ALIGN_DIR
 /* *****************************************************************************
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
@@ -1162,7 +1195,7 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   do {                                                                         \
     uint64_t flag = 0, v, u[group_size];                                       \
     for (size_t i = 0; i < group_size; ++i) { /* partial math */               \
-      FIO_MEMCPY8(u + i, r + (i << 3));                                        \
+      fio_memcpy8(u + i, r + (i << 3));                                        \
       u[i] ^= umask;                           /* byte match == 0x00 */        \
       v = u[i] - UINT64_C(0x0101010101010101); /* v: less than 0x80 => 0x80 */ \
       u[i] = ~u[i]; /* u[i]: if the MSB was zero (less than 0x80) */           \
@@ -3301,46 +3334,46 @@ Unaligned memory read / write operations
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  FIO_MEMCPY2(&tmp, c);
+  fio_memcpy2(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  FIO_MEMCPY4(&tmp, c);
+  fio_memcpy4(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
   uint64_t tmp; /* fio_buf2u64 */
-  FIO_MEMCPY8(&tmp, c);
+  fio_memcpy8(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  FIO_MEMCPY2(buf, &i); /* fio_u2buf16 */
+  fio_memcpy2(buf, &i); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  FIO_MEMCPY4(buf, &i); /* fio_u2buf32 */
+  fio_memcpy4(buf, &i); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  FIO_MEMCPY8(buf, &i); /* fio_u2buf64 */
+  fio_memcpy8(buf, &i); /* fio_u2buf64 */
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
   __uint128_t tmp; /* fio_buf2u1128 */
-  FIO_MEMCPY16(&tmp, c);
+  fio_memcpy16(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  FIO_MEMCPY16(buf, &i); /* fio_u2buf128 */
+  fio_memcpy16(buf, &i); /* fio_u2buf128 */
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -3818,15 +3851,15 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
   register char *buf = (char *)buf_;
   uint64_t tmp;
   for (size_t i = 7; i < len; i += 8) {
-    FIO_MEMCPY8(&tmp, buf);
+    fio_memcpy8(&tmp, buf);
     tmp ^= mask;
-    FIO_MEMCPY8(buf, &tmp);
+    fio_memcpy8(buf, &tmp);
     buf += 8;
     mask += nonce;
   }
-  FIO_MEMCPY7x(&tmp, buf, len);
+  fio_memcpy7x(&tmp, buf, len);
   tmp ^= mask;
-  FIO_MEMCPY7x(buf, &tmp, len);
+  fio_memcpy7x(buf, &tmp, len);
   mask += nonce;
   return mask;
 }
@@ -3846,20 +3879,20 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
   uint64_t tmp[4] FIO_ALIGN(16);
   for (size_t i = 31; i < len; i += 32) {
-    FIO_MEMCPY32(tmp, buf);
+    fio_memcpy32(tmp, buf);
     tmp[0] ^= m[0];
     tmp[1] ^= m[1];
     tmp[2] ^= m[2];
     tmp[3] ^= m[3];
-    FIO_MEMCPY32(buf, tmp);
+    fio_memcpy32(buf, tmp);
     buf += 32;
   }
-  FIO_MEMCPY31x(tmp, buf, len);
+  fio_memcpy31x(tmp, buf, len);
   tmp[0] ^= m[0];
   tmp[1] ^= m[1];
   tmp[2] ^= m[2];
   tmp[3] ^= m[3];
-  FIO_MEMCPY31x(buf, tmp, len);
+  fio_memcpy31x(buf, tmp, len);
 }
 
 /* *****************************************************************************
@@ -3945,14 +3978,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     size_t len = strlen(str);
     for (size_t i = 0; i < 31; ++i) {
       buf[i + len] = '\xFF';
-      FIO_MEMCPY63x(buf + i, str, len);
+      fio_memcpy63x(buf + i, str, len);
       FIO_ASSERT(!memcmp(buf + i, str, len),
-                 "FIO_MEMCPY63x failed @ %zu\n\t%.*s != %s",
+                 "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
                  i,
                  (int)len,
                  buf + i,
                  str);
-      FIO_ASSERT(buf[i + len] == '\xFF', "FIO_MEMCPY63x overflow?");
+      FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
@@ -5590,12 +5623,12 @@ finish:
 is_inifinity:
   if (num < 0)
     dest[written++] = '-';
-  FIO_MEMCPY8(dest + written, "Infinity");
+  fio_memcpy8(dest + written, "Infinity");
   written += 8;
   dest[written] = 0;
   return written;
 is_nan:
-  FIO_MEMCPY4(dest, "NaN");
+  fio_memcpy4(dest, "NaN");
   return 3;
 }
 
@@ -6076,7 +6109,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 #if !DEBUG
   {
     clock_t start, stop;
-    FIO_MEMCPY15x(buffer, "1234567890.123", 14);
+    fio_memcpy15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
     size_t r = 0;
     start = clock();
@@ -7502,7 +7535,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    FIO_MEMCPY32(w, data);
+    fio_memcpy32(w, data);
     w[0] = fio_ltole64(w[0]); /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
@@ -7514,7 +7547,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
     w[0] = w[1] = w[2] = w[3] = 0; /* sets padding to 0 */
-    FIO_MEMCPY31x(w, data, len);   /* copies `len & 31` bytes */
+    fio_memcpy31x(w, data, len);   /* copies `len & 31` bytes */
     w[0] = fio_ltole64(w[0]);      /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
@@ -7563,7 +7596,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
   r[1] *= FIO_STABLE_HASH_PRIME0;
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
-  FIO_MEMCPY16(dest, r);
+  fio_memcpy16(dest, r);
 }
 
 #undef FIO_STABLE_HASH_MUL_PRIME
@@ -7675,12 +7708,12 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
   uint8_t *data = (uint8_t *)data_;
   for (unsigned i = 31; i < len; i += 32) {
     uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    FIO_MEMCPY32(data, rv);
+    fio_memcpy32(data, rv);
     data += 32;
   }
   if (len & 31) {
     uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    FIO_MEMCPY31x(data, rv, len);
+    fio_memcpy31x(data, rv, len);
   }
 }
 
@@ -7736,7 +7769,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    FIO_MEMCPY8(buffer, &hash);
+    fio_memcpy8(buffer, &hash);
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -7747,7 +7780,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_COMPILER_GUARD;
     }
     end = clock();
-    FIO_MEMCPY8(buffer, &hash);
+    fio_memcpy8(buffer, &hash);
     if ((end - start) > CLOCKS_PER_SEC || cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
               "\t%-40s %8.2f MB/s\n",
@@ -8225,13 +8258,13 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   uint32_t vec[16];
 
   for (size_t i = 63; i < len; i += 64) {
-    FIO_MEMCPY64(vec, buf);
+    fio_memcpy64(vec, buf);
     fio___sha1_round512(&s, vec);
     buf += 64;
   }
   FIO_MEMSET(vec, 0, sizeof(vec));
   if ((len & 63)) {
-    FIO_MEMCPY63x(vec, buf, len);
+    fio_memcpy63x(vec, buf, len);
   }
   ((uint8_t *)vec)[(len & 63)] = 0x80;
 
@@ -8462,7 +8495,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
   const fio_256u old = *h;
   /* read data as an array of 16 big endian 32 bit integers. */
   uint32_t w[16];
-  FIO_MEMCPY64(w, block);
+  fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
   }
@@ -8516,12 +8549,12 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
   if (old_total & 63) {
     const size_t offset = (old_total & 63);
     if (len + offset < 64) { /* not enough - copy to cache */
-      FIO_MEMCPY63x((h->cache.u8 + offset), r, len);
+      fio_memcpy63x((h->cache.u8 + offset), r, len);
       return;
     }
     /* consume cache */
     const size_t byte2copy = 64UL - offset;
-    FIO_MEMCPY63x(h->cache.u8 + offset, r, byte2copy);
+    fio_memcpy63x(h->cache.u8 + offset, r, byte2copy);
     fio___sha256_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 64);
     r += byte2copy;
@@ -8532,7 +8565,7 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
     fio___sha256_round(&h->hash, r);
     r += 64;
   }
-  FIO_MEMCPY63x(h->cache.u64, r, len);
+  fio_memcpy63x(h->cache.u64, r, len);
 }
 
 SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
@@ -8578,12 +8611,12 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
   if (old_total & 127) {
     const size_t offset = (old_total & 127);
     if (len + offset < 128) { /* not enough - copy to cache */
-      FIO_MEMCPY127x((h->cache.u8 + offset), r, len);
+      fio_memcpy127x((h->cache.u8 + offset), r, len);
       return;
     }
     /* consume cache */
     const size_t byte2copy = 128UL - offset;
-    FIO_MEMCPY127x(h->cache.u8 + offset, r, byte2copy);
+    fio_memcpy127x(h->cache.u8 + offset, r, byte2copy);
     fio___sha512_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 128);
     r += byte2copy;
@@ -8594,7 +8627,7 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
     fio___sha512_round(&h->hash, r);
     r += 128;
   }
-  FIO_MEMCPY63x(h->cache.u64, r, len);
+  fio_memcpy63x(h->cache.u64, r, len);
 }
 
 /** finalizes a fio_512u with the SHA 512 hash. */
@@ -9224,17 +9257,17 @@ SFUNC void fio_chacha20(void *data,
     fio_512u c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY64(dest.u64, data);
+    fio_memcpy64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
-    FIO_MEMCPY64(data, dest.u64);
+    fio_memcpy64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
-  FIO_MEMCPY63x(dest.u64, data, len);
+  fio_memcpy63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
-  FIO_MEMCPY63x(data, dest.u64, len);
+  fio_memcpy63x(data, dest.u64, len);
 }
 
 /* *****************************************************************************
@@ -9260,23 +9293,23 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
     c2 = c;
     ++c.u32[12]; /* block counter */
     fio___chacha_round20(&c2);
-    FIO_MEMCPY64(dest.u64, data);
+    fio_memcpy64(dest.u64, data);
     fio___chacha_xor(&dest, &c2);
     fio___poly_consume128bit(&pl, dest.u64, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 2, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 4, 1);
     fio___poly_consume128bit(&pl, dest.u64 + 6, 1);
-    FIO_MEMCPY64(data, dest.u64);
+    fio_memcpy64(data, dest.u64);
     data = (void *)((uint8_t *)data + 64);
   }
   if (!(len & 63))
     return;
   fio___chacha_round20(&c);
   FIO_MEMSET(dest.u64, 0, 64);
-  FIO_MEMCPY63x(dest.u64, data, len);
+  fio_memcpy63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
   fio___poly_consume_msg(&pl, (uint8_t *)&dest, (len & 63));
-  FIO_MEMCPY63x(data, dest.u64, len);
+  fio_memcpy63x(data, dest.u64, len);
   fio___poly_finilize(&pl);
   fio_u2buf64_little(mac, pl.a[0]);
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
@@ -13905,14 +13938,14 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   uint8_t *e_group = r + (bytes & (~(size_t)63ULL));
   uint64_t d[8] = {data, data, data, data, data, data, data, data};
   while (r < e_group) {
-    FIO_MEMCPY64(d, r);
+    fio_memcpy64(d, r);
     FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
                    d[4] == data && d[5] == data && d[6] == data && d[7] == data,
                "%s memory data was overwritten",
                msg);
     r += 64;
   }
-  FIO_MEMCPY63x(d, r, bytes);
+  fio_memcpy63x(d, r, bytes);
   FIO_ASSERT(d[0] == data && d[1] == data && d[2] == data && d[3] == data &&
                  d[4] == data && d[5] == data && d[6] == data && d[7] == data,
              "%s memory data was overwritten",
@@ -19551,40 +19584,37 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua[4] FIO_ALIGN(16) = {0, 0, 0, 0};
   uint64_t ub[4] FIO_ALIGN(16) = {0, 0, 0, 0};
-  for (size_t i = 31; i < len; i += 32) {
-    FIO_MEMCPY32(ua, a.buf);
-    FIO_MEMCPY32(ub, b.buf);
-    if ((ua[0] ^ ub[0]) | (ua[1] ^ ub[1]) | (ua[2] ^ ub[2]) | (ua[3] ^ ub[3]))
-      goto review_dif;
-    a.buf += 32;
-    b.buf += 32;
+#define FIO_STRING_XOR_GROUP_TEST(group_size)                                  \
+  do {                                                                         \
+    uint64_t flag = 0;                                                         \
+    for (size_t i = 0; i < group_size; ++i) {                                  \
+      fio_memcpy8(ua + (3 - i), a.buf + (i << 3));                             \
+      fio_memcpy8(ub + (3 - i), b.buf + (i << 3));                             \
+      flag |= (ua[(3 - i)] ^ ub[(3 - i)]);                                     \
+    } /* compiler should vectorize this loop */                                \
+    if (flag)                                                                  \
+      goto review_dif##group_size;                                             \
+    a.buf += (group_size##ULL << 3);                                           \
+    b.buf += (group_size##ULL << 3);                                           \
+  } while (0)
+  for (size_t limit = 31; limit < len; limit += 32) {
+    FIO_STRING_XOR_GROUP_TEST(4);
   }
   if (len & 16) {
-    FIO_MEMCPY16(ua, a.buf);
-    FIO_MEMCPY16(ub, b.buf);
-    if ((ua[0] ^ ub[0]) | (ua[1] ^ ub[1]))
-      goto review_dif;
-    a.buf += 16;
-    b.buf += 16;
+    FIO_STRING_XOR_GROUP_TEST(2);
   }
   if (len & 8) {
-    FIO_MEMCPY8(ua, a.buf);
-    FIO_MEMCPY8(ub, b.buf);
-    if ((ua[0] ^ ub[0]))
-      goto review_dif1;
-    a.buf += 8;
-    b.buf += 8;
+    FIO_STRING_XOR_GROUP_TEST(1);
   }
   if ((len & 7)) {
-    FIO_MEMCPY7x(ua, a.buf, len);
-    FIO_MEMCPY7x(ub, b.buf, len);
-    if ((ua[0] ^ ub[0]))
+    fio_memcpy7x(ua + 3, a.buf, len);
+    fio_memcpy7x(ub + 3, b.buf, len);
+    if ((ua[3] ^ ub[3]))
       goto review_dif1;
   }
   return a_len_is_bigger;
-review_dif:
+review_dif4:
   if (ua[0] != ub[0]) {
-  review_dif1:
     ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
     ub[0] = fio_lton64(ub[0]);
     return ua[0] > ub[0];
@@ -19594,14 +19624,17 @@ review_dif:
     ub[1] = fio_lton64(ub[1]);
     return ua[1] > ub[1];
   }
+review_dif2:
   if (ua[2] != ub[2]) {
     ua[2] = fio_lton64(ua[2]);
     ub[2] = fio_lton64(ub[2]);
     return ua[2] > ub[2];
   }
+review_dif1:
   ua[3] = fio_lton64(ua[3]);
   ub[3] = fio_lton64(ub[3]);
   return ua[3] > ub[3];
+#undef FIO_STRING_XOR_GROUP_TEST
 }
 
 /* *****************************************************************************

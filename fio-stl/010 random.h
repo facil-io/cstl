@@ -277,7 +277,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    FIO_MEMCPY32(w, data);
+    fio_memcpy32(w, data);
     w[0] = fio_ltole64(w[0]); /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
@@ -289,7 +289,7 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
   /* copy bytes to the word block in little endian */
   if ((len & 31)) {
     w[0] = w[1] = w[2] = w[3] = 0; /* sets padding to 0 */
-    FIO_MEMCPY31x(w, data, len);   /* copies `len & 31` bytes */
+    fio_memcpy31x(w, data, len);   /* copies `len & 31` bytes */
     w[0] = fio_ltole64(w[0]);      /* make sure we're using little endien */
     w[1] = fio_ltole64(w[1]);
     w[2] = fio_ltole64(w[2]);
@@ -338,7 +338,7 @@ SFUNC void fio_stable_hash128(void *restrict dest,
   r[1] *= FIO_STABLE_HASH_PRIME0;
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
-  FIO_MEMCPY16(dest, r);
+  fio_memcpy16(dest, r);
 }
 
 #undef FIO_STABLE_HASH_MUL_PRIME
@@ -450,12 +450,12 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
   uint8_t *data = (uint8_t *)data_;
   for (unsigned i = 31; i < len; i += 32) {
     uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    FIO_MEMCPY32(data, rv);
+    fio_memcpy32(data, rv);
     data += 32;
   }
   if (len & 31) {
     uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    FIO_MEMCPY31x(data, rv, len);
+    fio_memcpy31x(data, rv, len);
   }
 }
 
@@ -511,7 +511,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   uint64_t hash = 0;
   for (size_t i = 0; i < 4; i++) {
     hash += h((char *)buffer, buffer_len);
-    FIO_MEMCPY8(buffer, &hash);
+    fio_memcpy8(buffer, &hash);
   }
   /* loop until test runs for more than 2 seconds */
   for (uint64_t cycles = cycles_start_at;;) {
@@ -522,7 +522,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
       FIO_COMPILER_GUARD;
     }
     end = clock();
-    FIO_MEMCPY8(buffer, &hash);
+    fio_memcpy8(buffer, &hash);
     if ((end - start) > CLOCKS_PER_SEC || cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
               "\t%-40s %8.2f MB/s\n",

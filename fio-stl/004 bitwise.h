@@ -146,46 +146,46 @@ Unaligned memory read / write operations
 /** Converts an unaligned byte stream to a 16 bit number (local byte order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_local)(const void *c) {
   uint16_t tmp; /* fio_buf2u16 */
-  FIO_MEMCPY2(&tmp, c);
+  fio_memcpy2(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 32 bit number (local byte order). */
 FIO_IFUNC uint32_t FIO_NAME2(fio_buf, u32_local)(const void *c) {
   uint32_t tmp; /* fio_buf2u32 */
-  FIO_MEMCPY4(&tmp, c);
+  fio_memcpy4(&tmp, c);
   return tmp;
 }
 /** Converts an unaligned byte stream to a 64 bit number (local byte order). */
 FIO_IFUNC uint64_t FIO_NAME2(fio_buf, u64_local)(const void *c) {
   uint64_t tmp; /* fio_buf2u64 */
-  FIO_MEMCPY8(&tmp, c);
+  fio_memcpy8(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 16 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf16_local)(void *buf, uint16_t i) {
-  FIO_MEMCPY2(buf, &i); /* fio_u2buf16 */
+  fio_memcpy2(buf, &i); /* fio_u2buf16 */
 }
 /** Writes a local 32 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf32_local)(void *buf, uint32_t i) {
-  FIO_MEMCPY4(buf, &i); /* fio_u2buf32 */
+  fio_memcpy4(buf, &i); /* fio_u2buf32 */
 }
 /** Writes a local 64 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
-  FIO_MEMCPY8(buf, &i); /* fio_u2buf64 */
+  fio_memcpy8(buf, &i); /* fio_u2buf64 */
 }
 
 #ifdef __SIZEOF_INT128__
 /** Converts an unaligned byte stream to a 128 bit number (local byte order). */
 FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
   __uint128_t tmp; /* fio_buf2u1128 */
-  FIO_MEMCPY16(&tmp, c);
+  fio_memcpy16(&tmp, c);
   return tmp;
 }
 
 /** Writes a local 128 bit number to an unaligned buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  FIO_MEMCPY16(buf, &i); /* fio_u2buf128 */
+  fio_memcpy16(buf, &i); /* fio_u2buf128 */
 }
 #endif /* __SIZEOF_INT128__ */
 
@@ -663,15 +663,15 @@ FIO_IFUNC uint64_t fio_xmask2(char *buf_,
   register char *buf = (char *)buf_;
   uint64_t tmp;
   for (size_t i = 7; i < len; i += 8) {
-    FIO_MEMCPY8(&tmp, buf);
+    fio_memcpy8(&tmp, buf);
     tmp ^= mask;
-    FIO_MEMCPY8(buf, &tmp);
+    fio_memcpy8(buf, &tmp);
     buf += 8;
     mask += nonce;
   }
-  FIO_MEMCPY7x(&tmp, buf, len);
+  fio_memcpy7x(&tmp, buf, len);
   tmp ^= mask;
-  FIO_MEMCPY7x(buf, &tmp, len);
+  fio_memcpy7x(buf, &tmp, len);
   mask += nonce;
   return mask;
 }
@@ -691,20 +691,20 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
   uint64_t tmp[4] FIO_ALIGN(16);
   for (size_t i = 31; i < len; i += 32) {
-    FIO_MEMCPY32(tmp, buf);
+    fio_memcpy32(tmp, buf);
     tmp[0] ^= m[0];
     tmp[1] ^= m[1];
     tmp[2] ^= m[2];
     tmp[3] ^= m[3];
-    FIO_MEMCPY32(buf, tmp);
+    fio_memcpy32(buf, tmp);
     buf += 32;
   }
-  FIO_MEMCPY31x(tmp, buf, len);
+  fio_memcpy31x(tmp, buf, len);
   tmp[0] ^= m[0];
   tmp[1] ^= m[1];
   tmp[2] ^= m[2];
   tmp[3] ^= m[3];
-  FIO_MEMCPY31x(buf, tmp, len);
+  fio_memcpy31x(buf, tmp, len);
 }
 
 /* *****************************************************************************
@@ -790,14 +790,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     size_t len = strlen(str);
     for (size_t i = 0; i < 31; ++i) {
       buf[i + len] = '\xFF';
-      FIO_MEMCPY63x(buf + i, str, len);
+      fio_memcpy63x(buf + i, str, len);
       FIO_ASSERT(!memcmp(buf + i, str, len),
-                 "FIO_MEMCPY63x failed @ %zu\n\t%.*s != %s",
+                 "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
                  i,
                  (int)len,
                  buf + i,
                  str);
-      FIO_ASSERT(buf[i + len] == '\xFF', "FIO_MEMCPY63x overflow?");
+      FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
