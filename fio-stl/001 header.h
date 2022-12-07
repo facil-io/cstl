@@ -590,7 +590,7 @@ Memory Copying Primitives
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
+#if __has_builtin(__builtin_memcpy) && 0
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
@@ -608,14 +608,8 @@ Memory Copying Primitives
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_IFUNC void fio___memcpy##bytes(void *restrict dest,                      \
                                      const void *restrict src) {               \
-    struct fio___memcpy##bytes##_s {                                           \
-      unsigned char data[bytes];                                               \
-    };                                                                         \
-    union {                                                                    \
-      const void *restrict ptr;                                                \
-      struct fio___memcpy##bytes##_s *restrict grp;                            \
-    } d = {.ptr = dest}, s = {.ptr = src};                                     \
-    *d.grp = *s.grp;                                                           \
+    for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
+      ((char *)dest)[i] = ((const char *)src)[i];                              \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
