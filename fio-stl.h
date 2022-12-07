@@ -9339,7 +9339,7 @@ Module Testing
 #endif /* HAVE_OPENSSL */
 
 FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
-  uint64_t result[2];
+  uint64_t result[2] = {0};
   char *key =
       (char
            *)"\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42\xd5\x06\xa8"
@@ -9349,7 +9349,7 @@ FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
 }
 
 FIO_SFUNC uintptr_t fio__chacha20_speed_wrapper(char *msg, size_t len) {
-  uint64_t result[2];
+  uint64_t result[2] = {0};
   char *key =
       (char
            *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
@@ -9361,7 +9361,7 @@ FIO_SFUNC uintptr_t fio__chacha20_speed_wrapper(char *msg, size_t len) {
 }
 
 FIO_SFUNC uintptr_t fio__chacha20poly1305_speed_wrapper(char *msg, size_t len) {
-  uint64_t result[2];
+  uint64_t result[2] = {0};
   char *key =
       (char
            *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
@@ -9373,7 +9373,7 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305_speed_wrapper(char *msg, size_t len) {
 
 FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
                                                            size_t len) {
-  uint64_t result[2];
+  uint64_t result[2] = {0};
   char *key =
       (char
            *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"

@@ -5,10 +5,10 @@
 #define FIO_LEAK_COUNTER 1
 #endif
 
-#ifdef FIO_NON_UNIFIED
-#include "fio-stl/include.h"
-#else
+#ifdef FIO_UNIFIED
 #include "fio-stl.h"
+#else
+#include "fio-stl/include.h"
 #endif
 
 int main(int argc, char const *argv[]) {
