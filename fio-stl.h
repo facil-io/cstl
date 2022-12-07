@@ -772,7 +772,9 @@ Memory Copying Primitives
 #define FIO_MEMCPY2047x(dest, src, len) fio___memcpy2047x((dest), (src), (len))
 #define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
 
-FIO___MAKE_MEMCPY_FIXED(1)
+FIO_IFUNC void fio___memcpy1(void *restrict dest, const void *restrict src) {
+  *(char *)dest = *(const char *)src;
+}
 FIO___MAKE_MEMCPY_FIXED(2)
 FIO___MAKE_MEMCPY_FIXED(4)
 FIO___MAKE_MEMCPY_FIXED(8)
@@ -803,7 +805,8 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio___memcpy15x(void *restrict d_,
@@ -814,7 +817,8 @@ FIO_IFUNC void fio___memcpy15x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
 FIO_IFUNC void fio___memcpy31x(void *restrict d_,
@@ -826,7 +830,8 @@ FIO_IFUNC void fio___memcpy31x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_IFUNC void fio___memcpy63x(void *restrict d_,
@@ -839,7 +844,8 @@ FIO_IFUNC void fio___memcpy63x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
 FIO_IFUNC void fio___memcpy127x(void *restrict d_,
@@ -853,7 +859,8 @@ FIO_IFUNC void fio___memcpy127x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy255x(void *restrict d_,
@@ -868,7 +875,8 @@ FIO_IFUNC void fio___memcpy255x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy511x(void *restrict d_,
@@ -884,7 +892,8 @@ FIO_IFUNC void fio___memcpy511x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
@@ -901,7 +910,8 @@ FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
@@ -919,7 +929,8 @@ FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
@@ -938,7 +949,8 @@ FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 #undef FIO_MEMCPY___PARTIAL
 
@@ -7702,7 +7714,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   }
   mem_alignment_offset &= 7;
   size_t const buffer_len = (1ULL << size_log) - mem_alignment_offset;
-  uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
+  uint64_t cycles_start_at = (1ULL << (14 + (fast * 3)));
   if (size_log < 13)
     cycles_start_at <<= (13 - size_log);
   else if (size_log > 13)
@@ -7742,8 +7754,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     end = clock();
     FIO_MEMCPY8(buffer, &hash);
-    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
-        cycles >= ((uint64_t)1 << 62)) {
+    if ((end - start) > CLOCKS_PER_SEC || cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
               "\t%-40s %8.2f MB/s\n",
               name,
@@ -7830,7 +7841,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_hash",
                          7,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
                          13,
@@ -7845,17 +7856,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_hash (unaligned)",
                          5,
                          3,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          13,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit unaligned)",
                          6,
@@ -7870,23 +7881,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
                          0,
-                         4);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
                          13,
                          1,
-                         4);
+                         2);
   if (0) {
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
                            13,
                            0,
-                           4);
+                           2);
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (unaligned)",
                            13,
                            1,
-                           4);
+                           2);
   }
 #endif
 }

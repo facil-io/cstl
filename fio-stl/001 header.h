@@ -644,7 +644,9 @@ Memory Copying Primitives
 #define FIO_MEMCPY2047x(dest, src, len) fio___memcpy2047x((dest), (src), (len))
 #define FIO_MEMCPY4095x(dest, src, len) fio___memcpy4095x((dest), (src), (len))
 
-FIO___MAKE_MEMCPY_FIXED(1)
+FIO_IFUNC void fio___memcpy1(void *restrict dest, const void *restrict src) {
+  *(char *)dest = *(const char *)src;
+}
 FIO___MAKE_MEMCPY_FIXED(2)
 FIO___MAKE_MEMCPY_FIXED(4)
 FIO___MAKE_MEMCPY_FIXED(8)
@@ -675,7 +677,8 @@ FIO_IFUNC void fio___memcpy7x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio___memcpy15x(void *restrict d_,
@@ -686,7 +689,8 @@ FIO_IFUNC void fio___memcpy15x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
 FIO_IFUNC void fio___memcpy31x(void *restrict d_,
@@ -698,7 +702,8 @@ FIO_IFUNC void fio___memcpy31x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_IFUNC void fio___memcpy63x(void *restrict d_,
@@ -711,7 +716,8 @@ FIO_IFUNC void fio___memcpy63x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
 FIO_IFUNC void fio___memcpy127x(void *restrict d_,
@@ -725,7 +731,8 @@ FIO_IFUNC void fio___memcpy127x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy255x(void *restrict d_,
@@ -740,7 +747,8 @@ FIO_IFUNC void fio___memcpy255x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
 FIO_IFUNC void fio___memcpy511x(void *restrict d_,
@@ -756,7 +764,8 @@ FIO_IFUNC void fio___memcpy511x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
@@ -773,7 +782,8 @@ FIO_IFUNC void fio___memcpy1023x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
@@ -791,7 +801,8 @@ FIO_IFUNC void fio___memcpy2047x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
 FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
@@ -810,7 +821,8 @@ FIO_IFUNC void fio___memcpy4095x(void *restrict d_,
   FIO_MEMCPY___PARTIAL(8);
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
-  FIO_MEMCPY___PARTIAL(1);
+  if ((l & 1))
+    *d = *s;
 }
 #undef FIO_MEMCPY___PARTIAL
 

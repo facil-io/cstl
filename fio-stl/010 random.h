@@ -483,7 +483,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   }
   mem_alignment_offset &= 7;
   size_t const buffer_len = (1ULL << size_log) - mem_alignment_offset;
-  uint64_t cycles_start_at = (1ULL << (16 + (fast * 2)));
+  uint64_t cycles_start_at = (1ULL << (14 + (fast * 3)));
   if (size_log < 13)
     cycles_start_at <<= (13 - size_log);
   else if (size_log > 13)
@@ -523,8 +523,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
     }
     end = clock();
     FIO_MEMCPY8(buffer, &hash);
-    if ((end - start) >= (2 * CLOCKS_PER_SEC) ||
-        cycles >= ((uint64_t)1 << 62)) {
+    if ((end - start) > CLOCKS_PER_SEC || cycles >= ((uint64_t)1 << 62)) {
       fprintf(stderr,
               "\t%-40s %8.2f MB/s\n",
               name,
@@ -611,7 +610,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_hash",
                          7,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
                          13,
@@ -626,17 +625,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_hash (unaligned)",
                          5,
                          3,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          13,
                          0,
-                         3);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit unaligned)",
                          6,
@@ -651,23 +650,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
                          0,
-                         4);
+                         2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (unaligned)",
                          13,
                          1,
-                         4);
+                         2);
   if (0) {
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
                            13,
                            0,
-                           4);
+                           2);
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (unaligned)",
                            13,
                            1,
-                           4);
+                           2);
   }
 #endif
 }
