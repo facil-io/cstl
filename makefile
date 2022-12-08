@@ -685,8 +685,8 @@ run: | build
 .PHONY : set_debug_flags___
 set_debug_flags___:
 	$(eval OPTIMIZATION=$(OPTIMIZATION_DEBUG))
-	$(eval CFLAGS+=-coverage -DDEBUG=1)
-	$(eval CXXFLAGS+=-coverage -DDEBUG=1)
+	$(eval CFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
+	$(eval CXXFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
 	$(eval LINKER_FLAGS=-coverage -DDEBUG=1 $(LINKER_FLAGS))
 	@echo "* Set Debug flags."
 

@@ -2203,10 +2203,13 @@ Pointer Tagging
 #endif
 #endif
 
-/* Modules that require FIO_GLOB_MATCH */
+/* Modules required by FIO_GLOB_MATCH */
 #if defined(FIO_PUBSUB)
 #ifndef FIO_GLOB_MATCH
 #define FIO_GLOB_MATCH
+#endif
+#ifndef FIO_CHACHA
+#define FIO_CHACHA
 #endif
 #endif
 
@@ -4582,6 +4585,8 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
                             const size_t len) {
+  if (!len || !bits || !n || !dest)
+    return;
   const size_t offset = bits >> 6;
   bits &= 63;
   uint64_t c = 0, trash;
@@ -4752,31 +4757,20 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
   FIO_MEMSET(q, 0, sizeof(uint64_t) * len);
   size_t rlen;
-  uint64_t c;
+  uint64_t c, mask, imask;
   const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
-  if (!blen) { /* divide by zero! */
-    FIO_LOG_ERROR("divide by zero!");
-    if (dest)
-      FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
-    if (reminder)
-      FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
-    return;
-  }
+  if (!blen)
+    goto divide_by_zero; /* divide by zero! */
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
     const size_t delta = rlen - blen;
     fio_math_shl(t, (uint64_t *)b, delta, len);
     fio_math_sub(r, (uint64_t *)r, t, len);
-    q[delta >> 6] =
-        fio_math_addc64(q[delta >> 6], (1ULL << (delta & 63)), 0, &c);
-    for (size_t i = ((delta >> 6) + 1); i < len; ++i) {
-      q[i] = fio_math_addc64(q[i], 0, c, &c);
-    }
+    q[delta >> 6] |= (1ULL << (delta & 63)); /* set the bit used */
   }
   fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
-  const uint64_t mask =
-      (uint64_t)0ULL -
-      ((t[len - 1] ^ (b[len - 1] ^ a[len - 1])) >> 63); /* SUB overflowed */
-  const uint64_t imask = ~mask;                         /* r was >= b */
+  mask = (uint64_t)0ULL -
+         ((t[len - 1] ^ (b[len - 1] ^ a[len - 1])) >> 63); /* SUB overflowed */
+  imask = ~mask;                                           /* r was >= b */
   q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
   for (size_t i = 1; i < len; ++i) {
     q[i] = fio_math_addc64(q[i], 0, c, &c);
@@ -4789,6 +4783,14 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       reminder[i] = (t[i] & imask) | (r[i] & mask);
     }
   }
+  return;
+divide_by_zero:
+  FIO_LOG_ERROR("divide by zero!");
+  if (dest)
+    FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
+  if (reminder)
+    FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
+  return;
 }
 
 /* *****************************************************************************
@@ -8863,7 +8865,7 @@ SFUNC void fio_chacha20(void *data,
                         uint32_t counter);
 
 /**
- * Given a Poly1305 256bit (16 byte) key, writes the authentication code for the
+ * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
  * poly message and additional data into `mac_dest`.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
@@ -9110,41 +9112,24 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
                                       uint8_t *msg,
                                       size_t len) {
   /* read 16 byte blocks */
+  uint64_t n[2];
   for (size_t i = 15; i < len; i += 16) {
     fio___poly_consume128bit(pl, msg, 1);
     msg += 16;
   }
-  uint64_t n[2] = {0, 0};
-  /* read / pad leftover */
+  if (!(len & 15))
+    return;
+  n[0] = 0;
+  n[1] = 0;
+  fio_memcpy15x(n, msg, len);
+  n[0] = fio_ltole64(n[0]);
+  n[1] = fio_ltole64(n[1]);
   ((uint8_t *)n)[len & 15] = 0x01;
-  switch ((len & 15)) { // clang-format off
-    case 15: n[1] |= ((uint64_t)msg[14] & 0xFF) << 48; /* fall through */
-    case 14: n[1] |= ((uint64_t)msg[13] & 0xFF) << 40; /* fall through */
-    case 13: n[1] |= ((uint64_t)msg[12] & 0xFF) << 32; /* fall through */
-    case 12: n[1] |= ((uint64_t)msg[11] & 0xFF) << 24; /* fall through */
-    case 11: n[1] |= ((uint64_t)msg[10] & 0xFF) << 16; /* fall through */
-    case 10: n[1] |= ((uint64_t)msg[ 9] & 0xFF) <<  8; /* fall through */
-    case 9:  n[1] |= ((uint64_t)msg[ 8] & 0xFF) <<  0; /* fall through */
-    case 8:  n[0] |= ((uint64_t)msg[ 7] & 0xFF) << 56; /* fall through */
-    case 7:  n[0] |= ((uint64_t)msg[ 6] & 0xFF) << 48; /* fall through */
-    case 6:  n[0] |= ((uint64_t)msg[ 5] & 0xFF) << 40; /* fall through */
-    case 5:  n[0] |= ((uint64_t)msg[ 4] & 0xFF) << 32; /* fall through */
-    case 4:  n[0] |= ((uint64_t)msg[ 3] & 0xFF) << 24; /* fall through */
-    case 3:  n[0] |= ((uint64_t)msg[ 2] & 0xFF) << 16; /* fall through */
-    case 2:  n[0] |= ((uint64_t)msg[ 1] & 0xFF) <<  8; /* fall through */
-    case 1:  n[0] |= ((uint64_t)msg[ 0] & 0xFF) <<  0;
-             fio___poly_consume128bit(pl, (void*)n, 0);
-  } // clang-format on
-  (void)msg;
-  (void)len;
+  fio___poly_consume128bit(pl, (void *)n, 0);
 }
 
-/**
- * Given a Poly1305 256bit (16 byte) key, writes the authentication code for the
- * poly message and additional data into `mac_dest`.
- *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- */
+/*
+ * Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *mac,
                              void *key,
                              void *msg,
@@ -9264,6 +9249,7 @@ SFUNC void fio_chacha20(void *data,
   }
   if (!(len & 63))
     return;
+  FIO_MEMSET(dest.u64, 0, 64);
   fio___chacha_round20(&c);
   fio_memcpy63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);
@@ -31254,9 +31240,9 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
 FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url);
+FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]);
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url);
+FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
@@ -31689,6 +31675,7 @@ FIO_SFUNC void fio___letter_on_data_remote(fio_s *io) {
   fio___letter_read(io, fio___on_letter_remote);
 }
 
+/* TODO: app-key + ed25519 per-connection key exchange + ChaCha/Poly */
 static fio_protocol_s FIO_LETTER_PROTOCOL_REMOTE = {
     .on_attach = fio___letter_on_attach,
     .on_data = fio___letter_on_data_remote,
@@ -31741,13 +31728,15 @@ Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url) {
-  (void)url; /* TODO! */
+FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]) {
+  (void)url; /* TODO!  */
+  (void)app_key;
   return 0;
 }
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url) {
+FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]) {
   (void)url; /* TODO! */
+  (void)app_key;
   return 0;
 }
 

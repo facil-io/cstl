@@ -644,9 +644,9 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
 FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url);
+FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]);
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url);
+FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
@@ -1079,6 +1079,7 @@ FIO_SFUNC void fio___letter_on_data_remote(fio_s *io) {
   fio___letter_read(io, fio___on_letter_remote);
 }
 
+/* TODO: app-key + ed25519 per-connection key exchange + ChaCha/Poly */
 static fio_protocol_s FIO_LETTER_PROTOCOL_REMOTE = {
     .on_attach = fio___letter_on_attach,
     .on_data = fio___letter_on_data_remote,
@@ -1131,13 +1132,15 @@ Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
 
 /** Listen to remote letter exchange clients (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_listen(const char *url) {
-  (void)url; /* TODO! */
+FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]) {
+  (void)url; /* TODO!  */
+  (void)app_key;
   return 0;
 }
 /** Connect to remote letter exchange server (cluster letter exchange). */
-FIO_IFUNC int fio_letter_remote_connect(const char *url) {
+FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]) {
   (void)url; /* TODO! */
+  (void)app_key;
   return 0;
 }
 

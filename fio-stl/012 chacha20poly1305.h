@@ -41,7 +41,7 @@ SFUNC void fio_chacha20(void *data,
                         uint32_t counter);
 
 /**
- * Given a Poly1305 256bit (16 byte) key, writes the authentication code for the
+ * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
  * poly message and additional data into `mac_dest`.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
@@ -288,41 +288,24 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
                                       uint8_t *msg,
                                       size_t len) {
   /* read 16 byte blocks */
+  uint64_t n[2];
   for (size_t i = 15; i < len; i += 16) {
     fio___poly_consume128bit(pl, msg, 1);
     msg += 16;
   }
-  uint64_t n[2] = {0, 0};
-  /* read / pad leftover */
+  if (!(len & 15))
+    return;
+  n[0] = 0;
+  n[1] = 0;
+  fio_memcpy15x(n, msg, len);
+  n[0] = fio_ltole64(n[0]);
+  n[1] = fio_ltole64(n[1]);
   ((uint8_t *)n)[len & 15] = 0x01;
-  switch ((len & 15)) { // clang-format off
-    case 15: n[1] |= ((uint64_t)msg[14] & 0xFF) << 48; /* fall through */
-    case 14: n[1] |= ((uint64_t)msg[13] & 0xFF) << 40; /* fall through */
-    case 13: n[1] |= ((uint64_t)msg[12] & 0xFF) << 32; /* fall through */
-    case 12: n[1] |= ((uint64_t)msg[11] & 0xFF) << 24; /* fall through */
-    case 11: n[1] |= ((uint64_t)msg[10] & 0xFF) << 16; /* fall through */
-    case 10: n[1] |= ((uint64_t)msg[ 9] & 0xFF) <<  8; /* fall through */
-    case 9:  n[1] |= ((uint64_t)msg[ 8] & 0xFF) <<  0; /* fall through */
-    case 8:  n[0] |= ((uint64_t)msg[ 7] & 0xFF) << 56; /* fall through */
-    case 7:  n[0] |= ((uint64_t)msg[ 6] & 0xFF) << 48; /* fall through */
-    case 6:  n[0] |= ((uint64_t)msg[ 5] & 0xFF) << 40; /* fall through */
-    case 5:  n[0] |= ((uint64_t)msg[ 4] & 0xFF) << 32; /* fall through */
-    case 4:  n[0] |= ((uint64_t)msg[ 3] & 0xFF) << 24; /* fall through */
-    case 3:  n[0] |= ((uint64_t)msg[ 2] & 0xFF) << 16; /* fall through */
-    case 2:  n[0] |= ((uint64_t)msg[ 1] & 0xFF) <<  8; /* fall through */
-    case 1:  n[0] |= ((uint64_t)msg[ 0] & 0xFF) <<  0;
-             fio___poly_consume128bit(pl, (void*)n, 0);
-  } // clang-format on
-  (void)msg;
-  (void)len;
+  fio___poly_consume128bit(pl, (void *)n, 0);
 }
 
-/**
- * Given a Poly1305 256bit (16 byte) key, writes the authentication code for the
- * poly message and additional data into `mac_dest`.
- *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- */
+/*
+ * Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *mac,
                              void *key,
                              void *msg,
@@ -442,6 +425,7 @@ SFUNC void fio_chacha20(void *data,
   }
   if (!(len & 63))
     return;
+  FIO_MEMSET(dest.u64, 0, 64);
   fio___chacha_round20(&c);
   fio_memcpy63x(dest.u64, data, len);
   fio___chacha_xor(&dest, &c);

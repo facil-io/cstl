@@ -2075,10 +2075,13 @@ Pointer Tagging
 #endif
 #endif
 
-/* Modules that require FIO_GLOB_MATCH */
+/* Modules required by FIO_GLOB_MATCH */
 #if defined(FIO_PUBSUB)
 #ifndef FIO_GLOB_MATCH
 #define FIO_GLOB_MATCH
+#endif
+#ifndef FIO_CHACHA
+#define FIO_CHACHA
 #endif
 #endif
 
