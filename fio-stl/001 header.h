@@ -37,9 +37,15 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if !defined(__GNUC__) && !defined(__clang__) && !defined(GNUC_BYPASS)
+#ifndef __attribute__
 #define __attribute__(...)
+#endif
+#ifndef __has_include
 #define __has_include(...) 0
+#endif
+#ifndef __has_builtin
 #define __has_builtin(...) 0
+#endif
 #define GNUC_BYPASS        1
 #elif !defined(__clang__) && !defined(__has_builtin)
 /* E.g: GCC < 6.0 doesn't support __has_builtin */

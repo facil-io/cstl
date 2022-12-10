@@ -460,6 +460,101 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
 }
 
 /* *****************************************************************************
+Playhouse hashing (next risky version)
+***************************************************************************** */
+
+typedef union {
+  uint64_t v[4] FIO_ALIGN(16);
+#ifdef __SIZEOF_INT128__
+  __uint128_t u128[2];
+#endif
+} fio___r2hash_s;
+
+FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
+                                                 size_t len,
+                                                 uint64_t seed) {
+  fio___r2hash_s v = {.v = {seed, seed, seed, seed}};
+  fio___r2hash_s const prime = {.v = {FIO_STABLE_HASH_PRIME0,
+                                      FIO_STABLE_HASH_PRIME1,
+                                      FIO_STABLE_HASH_PRIME2,
+                                      FIO_STABLE_HASH_PRIME3}};
+  fio___r2hash_s w;
+  const uint8_t *data = (const uint8_t *)data_;
+  /* seed selection is constant time to avoid leaking seed data */
+  seed += len;
+  seed ^= fio_lrot64(seed, 47);
+  seed ^= FIO_STABLE_HASH_PRIME4;
+
+  /* consumes 32 bytes (256 bits) blocks (no padding needed) */
+  for (size_t pos = 31; pos < len; pos += 32) {
+    for (size_t i = 0; i < 4; ++i) {
+      fio_memcpy8(w.v + i, data + (i << 3));
+      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
+      v.v[i] ^= w.v[i];
+      v.v[i] *= prime.v[i];
+      w.v[i] = fio_lrot64(w.v[i], 31);
+      w.v[i] ^= seed;
+      v.v[i] += w.v[i];
+    }
+    seed ^= w.v[0] + w.v[1] + w.v[2] + w.v[3];
+    data += 32;
+  }
+  /* copy bytes to the word block in little endian */
+  if ((len & 31)) {
+    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0; /* sets padding to 0 */
+    fio_memcpy31x(w.v, data, len);         /* copies `len & 31` bytes */
+    for (size_t i = 0; i < 4; ++i) {
+      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
+      v.v[i] ^= w.v[i];
+      v.v[i] *= prime.v[i];
+      w.v[i] = fio_lrot64(w.v[i], 31);
+      w.v[i] ^= seed;
+      v.v[i] += w.v[i];
+    }
+  }
+  /* inner vector mini-avalanche */
+  for (size_t i = 0; i < 4; ++i)
+    v.v[i] *= prime.v[i];
+  v.v[0] ^= fio_lrot64(v.v[0], 7);
+  v.v[1] ^= fio_lrot64(v.v[1], 11);
+  v.v[2] ^= fio_lrot64(v.v[2], 13);
+  v.v[3] ^= fio_lrot64(v.v[3], 17);
+  return v;
+}
+
+/*  Computes a facil.io Stable Hash. */
+SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
+  uint64_t r;
+  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
+  /* summing avalanche */
+  r = v.v[0] + v.v[1] + v.v[2] + v.v[3];
+  r ^= r >> 31;
+  r *= FIO_STABLE_HASH_PRIME4;
+  r ^= r >> 31;
+  return r;
+}
+
+SFUNC void fio_risky2_hash128(void *restrict dest,
+                              const void *restrict data_,
+                              size_t len,
+                              uint64_t seed) {
+  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
+  uint64_t r[2];
+  r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
+  r[1] = v.v[0] ^ v.v[1] ^ v.v[2] ^ v.v[3];
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  r[0] *= FIO_STABLE_HASH_PRIME4;
+  r[1] *= FIO_STABLE_HASH_PRIME0;
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  fio_memcpy16(dest, r);
+}
+
+#undef FIO___R2_HASH_MUL_PRIME
+#undef FIO___R2_HASH_ROUND_FULL
+
+/* *****************************************************************************
 FIO_RAND Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
@@ -542,6 +637,9 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
   return fio_stable_hash(buf, len, 1);
 }
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
+  return fio_risky2_hash(buf, len, 1);
+}
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
                                                            size_t len) {
@@ -599,12 +697,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  str);
     }
   }
-  const uint8_t alignment_test_offset = 0;
-  if (alignment_test_offset)
-    fprintf(stderr,
-            "The following speed tests use a memory alignment offset of %d "
-            "bytes.\n",
-            (int)(alignment_test_offset & 7));
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
@@ -626,6 +718,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+  fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
@@ -646,6 +739,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+  fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
@@ -657,6 +751,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          1,
                          2);
   if (0) {
+    fprintf(stderr, "\n");
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
                            13,
@@ -668,6 +763,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                            1,
                            2);
   }
+  /* playground speed testing */
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit)",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         5,
+                         3,
+                         2);
+  fprintf(stderr, "\n");
 #endif
 }
 

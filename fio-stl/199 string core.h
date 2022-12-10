@@ -282,7 +282,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             fio_string_realloc_fn reallocate,
                             int fd,
                             intptr_t start_at,
-                            intptr_t limit);
+                            size_t limit);
 
 /**
  * Opens the file `filename` and pastes it's contents (or a slice ot it) at
@@ -296,7 +296,9 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
                               const char *filename,
                               intptr_t start_at,
-                              intptr_t limit);
+                              size_t limit);
+
+/* TODO: memory optimized version of `gets` with set limit */
 
 /* *****************************************************************************
 Memory Helpers (for Authorship)
@@ -2003,7 +2005,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             fio_string_realloc_fn reallocate,
                             int fd,
                             intptr_t start_at,
-                            intptr_t limit) {
+                            size_t limit) {
   int r = 0;
   size_t file_len = fio_fd_size(fd);
 
@@ -2052,7 +2054,7 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
                               const char *filename,
                               intptr_t start_at,
-                              intptr_t limit) {
+                              size_t limit) {
   int r = -1;
   int fd = fio_filename_open(filename, O_RDONLY);
   if (fd == -1)

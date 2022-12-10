@@ -369,8 +369,12 @@ FIO_IFUNC void fio___chacha_dround(fio_512u *c) {
 }
 
 FIO_IFUNC void fio___chacha_xor(fio_512u *dest, fio_512u *c) {
+#if 1
+  for (size_t i = 0; i < 8; ++i) {
+    dest->u64[i] ^= c->u64[i];
+  }
   // clang-format off
-#if __LITTLE_ENDIAN__
+#elif __LITTLE_ENDIAN__
   dest->u64[0] ^= c->u64[0]; dest->u64[1] ^= c->u64[1];
   dest->u64[2] ^= c->u64[2]; dest->u64[3] ^= c->u64[3];
   dest->u64[4] ^= c->u64[4]; dest->u64[5] ^= c->u64[5];
@@ -689,7 +693,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          3,
                          0);
 #endif /* HAVE_OPENSSL */
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",
                          7,
@@ -705,7 +709,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          3,
                          0);
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
                          (char *)"ChaCha20Poly1305 (auth+decrypt)",
                          7,
@@ -716,7 +720,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          0,
                          0);
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
                          (char *)"ChaCha20Poly1305 (encrypt+MAC)",
                          7,

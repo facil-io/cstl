@@ -1136,6 +1136,17 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
 
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
   static size_t warning_printed = 0;
+#define FIO___MEMORY_ARENA_LOCK_WARNING()                                      \
+  do {                                                                         \
+    if (!warning_printed)                                                      \
+      FIO_LOG_WARNING(FIO_MACRO2STR(FIO_NAME(                                  \
+          FIO_MEMORY_NAME,                                                     \
+          malloc)) " high arena contention.\n"                                 \
+                   "          Consider recompiling with more arenas.");        \
+    warning_printed = 1;                                                       \
+  } while (0)
+#else
+#define FIO___MEMORY_ARENA_LOCK_WARNING()
 #endif
   /** thread arena value */
   size_t arena_index;
@@ -1148,7 +1159,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     arena_index = fio_risky_ptr(u.p) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if 0 && defined(DEBUG)
+#if defined(DEBUG)
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
@@ -1172,21 +1183,15 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     if (++loop_count <
         (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count << 1))
       continue;
-#if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
-    if (!warning_printed)
-      FIO_LOG_WARNING(FIO_MACRO2STR(
-          FIO_NAME(FIO_MEMORY_NAME,
-                   malloc)) " high arena contention.\n"
-                            "          Consider recompiling with more arenas.");
-    warning_printed = 1;
-#endif /* DEBUG */
+    FIO___MEMORY_ARENA_LOCK_WARNING();
+#undef FIO___MEMORY_ARENA_LOCK_WARNING
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
     /* slow wait for last arena */
     FIO_MEMORY_LOCK(
         FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
     return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
 #else
-      // FIO_THREAD_RESCHEDULE();
+    // FIO_THREAD_RESCHEDULE();
 #endif /* FIO_MEMORY_USE_THREAD_MUTEX */
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */
@@ -1391,8 +1396,8 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     arean_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (arean_count == (size_t)-1UL)
       arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
-    else
-      arean_count += (arean_count << 2); /* arenas !> threads (birthday) */
+    else /* arenas !> threads (birthday) */
+      arean_count = (arean_count << 1) + 2;
 #else
 #if _MSC_VER
 #pragma message(                                                               \

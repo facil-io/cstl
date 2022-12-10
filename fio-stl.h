@@ -165,9 +165,15 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if !defined(__GNUC__) && !defined(__clang__) && !defined(GNUC_BYPASS)
+#ifndef __attribute__
 #define __attribute__(...)
+#endif
+#ifndef __has_include
 #define __has_include(...) 0
+#endif
+#ifndef __has_builtin
 #define __has_builtin(...) 0
+#endif
 #define GNUC_BYPASS        1
 #elif !defined(__clang__) && !defined(__has_builtin)
 /* E.g: GCC < 6.0 doesn't support __has_builtin */
@@ -7720,6 +7726,101 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
 }
 
 /* *****************************************************************************
+Playhouse hashing (next risky version)
+***************************************************************************** */
+
+typedef union {
+  uint64_t v[4] FIO_ALIGN(16);
+#ifdef __SIZEOF_INT128__
+  __uint128_t u128[2];
+#endif
+} fio___r2hash_s;
+
+FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
+                                                 size_t len,
+                                                 uint64_t seed) {
+  fio___r2hash_s v = {.v = {seed, seed, seed, seed}};
+  fio___r2hash_s const prime = {.v = {FIO_STABLE_HASH_PRIME0,
+                                      FIO_STABLE_HASH_PRIME1,
+                                      FIO_STABLE_HASH_PRIME2,
+                                      FIO_STABLE_HASH_PRIME3}};
+  fio___r2hash_s w;
+  const uint8_t *data = (const uint8_t *)data_;
+  /* seed selection is constant time to avoid leaking seed data */
+  seed += len;
+  seed ^= fio_lrot64(seed, 47);
+  seed ^= FIO_STABLE_HASH_PRIME4;
+
+  /* consumes 32 bytes (256 bits) blocks (no padding needed) */
+  for (size_t pos = 31; pos < len; pos += 32) {
+    for (size_t i = 0; i < 4; ++i) {
+      fio_memcpy8(w.v + i, data + (i << 3));
+      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
+      v.v[i] ^= w.v[i];
+      v.v[i] *= prime.v[i];
+      w.v[i] = fio_lrot64(w.v[i], 31);
+      w.v[i] ^= seed;
+      v.v[i] += w.v[i];
+    }
+    seed ^= w.v[0] + w.v[1] + w.v[2] + w.v[3];
+    data += 32;
+  }
+  /* copy bytes to the word block in little endian */
+  if ((len & 31)) {
+    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0; /* sets padding to 0 */
+    fio_memcpy31x(w.v, data, len);         /* copies `len & 31` bytes */
+    for (size_t i = 0; i < 4; ++i) {
+      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
+      v.v[i] ^= w.v[i];
+      v.v[i] *= prime.v[i];
+      w.v[i] = fio_lrot64(w.v[i], 31);
+      w.v[i] ^= seed;
+      v.v[i] += w.v[i];
+    }
+  }
+  /* inner vector mini-avalanche */
+  for (size_t i = 0; i < 4; ++i)
+    v.v[i] *= prime.v[i];
+  v.v[0] ^= fio_lrot64(v.v[0], 7);
+  v.v[1] ^= fio_lrot64(v.v[1], 11);
+  v.v[2] ^= fio_lrot64(v.v[2], 13);
+  v.v[3] ^= fio_lrot64(v.v[3], 17);
+  return v;
+}
+
+/*  Computes a facil.io Stable Hash. */
+SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
+  uint64_t r;
+  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
+  /* summing avalanche */
+  r = v.v[0] + v.v[1] + v.v[2] + v.v[3];
+  r ^= r >> 31;
+  r *= FIO_STABLE_HASH_PRIME4;
+  r ^= r >> 31;
+  return r;
+}
+
+SFUNC void fio_risky2_hash128(void *restrict dest,
+                              const void *restrict data_,
+                              size_t len,
+                              uint64_t seed) {
+  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
+  uint64_t r[2];
+  r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
+  r[1] = v.v[0] ^ v.v[1] ^ v.v[2] ^ v.v[3];
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  r[0] *= FIO_STABLE_HASH_PRIME4;
+  r[1] *= FIO_STABLE_HASH_PRIME0;
+  r[0] ^= r[0] >> 31;
+  r[1] ^= r[1] >> 31;
+  fio_memcpy16(dest, r);
+}
+
+#undef FIO___R2_HASH_MUL_PRIME
+#undef FIO___R2_HASH_ROUND_FULL
+
+/* *****************************************************************************
 FIO_RAND Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
@@ -7802,6 +7903,9 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
   return fio_stable_hash(buf, len, 1);
 }
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
+  return fio_risky2_hash(buf, len, 1);
+}
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
                                                            size_t len) {
@@ -7859,12 +7963,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                  str);
     }
   }
-  const uint8_t alignment_test_offset = 0;
-  if (alignment_test_offset)
-    fprintf(stderr,
-            "The following speed tests use a memory alignment offset of %d "
-            "bytes.\n",
-            (int)(alignment_test_offset & 7));
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
                          (char *)"fio_risky_hash",
@@ -7886,6 +7984,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+  fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
                          (char *)"fio_stable_hash (64 bit)",
                          7,
@@ -7906,6 +8005,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+  fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
@@ -7917,6 +8017,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          1,
                          2);
   if (0) {
+    fprintf(stderr, "\n");
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
                            13,
@@ -7928,6 +8029,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                            1,
                            2);
   }
+  /* playground speed testing */
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit)",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         5,
+                         3,
+                         2);
+  fprintf(stderr, "\n");
 #endif
 }
 
@@ -9193,8 +9317,12 @@ FIO_IFUNC void fio___chacha_dround(fio_512u *c) {
 }
 
 FIO_IFUNC void fio___chacha_xor(fio_512u *dest, fio_512u *c) {
+#if 1
+  for (size_t i = 0; i < 8; ++i) {
+    dest->u64[i] ^= c->u64[i];
+  }
   // clang-format off
-#if __LITTLE_ENDIAN__
+#elif __LITTLE_ENDIAN__
   dest->u64[0] ^= c->u64[0]; dest->u64[1] ^= c->u64[1];
   dest->u64[2] ^= c->u64[2]; dest->u64[3] ^= c->u64[3];
   dest->u64[4] ^= c->u64[4]; dest->u64[5] ^= c->u64[5];
@@ -9513,7 +9641,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          3,
                          0);
 #endif /* HAVE_OPENSSL */
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",
                          7,
@@ -9529,7 +9657,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          3,
                          0);
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
                          (char *)"ChaCha20Poly1305 (auth+decrypt)",
                          7,
@@ -9540,7 +9668,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          13,
                          0,
                          0);
-
+  fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
                          (char *)"ChaCha20Poly1305 (encrypt+MAC)",
                          7,
@@ -12649,6 +12777,17 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
 
 #if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
   static size_t warning_printed = 0;
+#define FIO___MEMORY_ARENA_LOCK_WARNING()                                      \
+  do {                                                                         \
+    if (!warning_printed)                                                      \
+      FIO_LOG_WARNING(FIO_MACRO2STR(FIO_NAME(                                  \
+          FIO_MEMORY_NAME,                                                     \
+          malloc)) " high arena contention.\n"                                 \
+                   "          Consider recompiling with more arenas.");        \
+    warning_printed = 1;                                                       \
+  } while (0)
+#else
+#define FIO___MEMORY_ARENA_LOCK_WARNING()
 #endif
   /** thread arena value */
   size_t arena_index;
@@ -12661,7 +12800,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     arena_index = fio_risky_ptr(u.p) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if 0 && defined(DEBUG)
+#if defined(DEBUG)
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
@@ -12685,21 +12824,15 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     if (++loop_count <
         (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count << 1))
       continue;
-#if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_CSTL)
-    if (!warning_printed)
-      FIO_LOG_WARNING(FIO_MACRO2STR(
-          FIO_NAME(FIO_MEMORY_NAME,
-                   malloc)) " high arena contention.\n"
-                            "          Consider recompiling with more arenas.");
-    warning_printed = 1;
-#endif /* DEBUG */
+    FIO___MEMORY_ARENA_LOCK_WARNING();
+#undef FIO___MEMORY_ARENA_LOCK_WARNING
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
     /* slow wait for last arena */
     FIO_MEMORY_LOCK(
         FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
     return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
 #else
-      // FIO_THREAD_RESCHEDULE();
+    // FIO_THREAD_RESCHEDULE();
 #endif /* FIO_MEMORY_USE_THREAD_MUTEX */
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */
@@ -12904,8 +13037,8 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     arean_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (arean_count == (size_t)-1UL)
       arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
-    else
-      arean_count += (arean_count << 2); /* arenas !> threads (birthday) */
+    else /* arenas !> threads (birthday) */
+      arean_count = (arean_count << 1) + 2;
 #else
 #if _MSC_VER
 #pragma message(                                                               \
@@ -18521,7 +18654,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             fio_string_realloc_fn reallocate,
                             int fd,
                             intptr_t start_at,
-                            intptr_t limit);
+                            size_t limit);
 
 /**
  * Opens the file `filename` and pastes it's contents (or a slice ot it) at
@@ -18535,7 +18668,9 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
                               const char *filename,
                               intptr_t start_at,
-                              intptr_t limit);
+                              size_t limit);
+
+/* TODO: memory optimized version of `gets` with set limit */
 
 /* *****************************************************************************
 Memory Helpers (for Authorship)
@@ -20242,7 +20377,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             fio_string_realloc_fn reallocate,
                             int fd,
                             intptr_t start_at,
-                            intptr_t limit) {
+                            size_t limit) {
   int r = 0;
   size_t file_len = fio_fd_size(fd);
 
@@ -20291,7 +20426,7 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
                               const char *filename,
                               intptr_t start_at,
-                              intptr_t limit) {
+                              size_t limit) {
   int r = -1;
   int fd = fio_filename_open(filename, O_RDONLY);
   if (fd == -1)
