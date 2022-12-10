@@ -460,6 +460,11 @@ SFUNC void fio_rand_bytes(void *data_, size_t len) {
 }
 
 /* *****************************************************************************
+FIO_RAND Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+
+/* *****************************************************************************
 Playhouse hashing (next risky version)
 ***************************************************************************** */
 
@@ -496,7 +501,7 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
       w.v[i] ^= seed;
       v.v[i] += w.v[i];
     }
-    seed ^= w.v[0] + w.v[1] + w.v[2] + w.v[3];
+    seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
   /* copy bytes to the word block in little endian */
@@ -553,11 +558,6 @@ SFUNC void fio_risky2_hash128(void *restrict dest,
 
 #undef FIO___R2_HASH_MUL_PRIME
 #undef FIO___R2_HASH_ROUND_FULL
-
-/* *****************************************************************************
-FIO_RAND Testing
-***************************************************************************** */
-#ifdef FIO_TEST_CSTL
 
 /* *****************************************************************************
 Hashing speed test

@@ -357,61 +357,34 @@ FIO_IFUNC fio_512u fio___chacha_init(void *key,
     c += d; b ^= c; b = fio_lrot32(b, 7);
 // clang-format on
 
-FIO_IFUNC void fio___chacha_dround(fio_512u *c) {
-  FIO___CHACHA_QROUND(c->u32[0], c->u32[4], c->u32[8], c->u32[12]);
-  FIO___CHACHA_QROUND(c->u32[1], c->u32[5], c->u32[9], c->u32[13]);
-  FIO___CHACHA_QROUND(c->u32[2], c->u32[6], c->u32[10], c->u32[14]);
-  FIO___CHACHA_QROUND(c->u32[3], c->u32[7], c->u32[11], c->u32[15]);
-  FIO___CHACHA_QROUND(c->u32[0], c->u32[5], c->u32[10], c->u32[15]);
-  FIO___CHACHA_QROUND(c->u32[1], c->u32[6], c->u32[11], c->u32[12]);
-  FIO___CHACHA_QROUND(c->u32[2], c->u32[7], c->u32[8], c->u32[13]);
-  FIO___CHACHA_QROUND(c->u32[3], c->u32[4], c->u32[9], c->u32[14]);
-}
-
 FIO_IFUNC void fio___chacha_xor(fio_512u *dest, fio_512u *c) {
-#if 1
-  for (size_t i = 0; i < 8; ++i) {
-    dest->u64[i] ^= c->u64[i];
+  for (size_t i = 0; i < 16; ++i) {
+    dest->u32[i] ^= fio_ltole32(c->u32[i]);
   }
-  // clang-format off
-#elif __LITTLE_ENDIAN__
-  dest->u64[0] ^= c->u64[0]; dest->u64[1] ^= c->u64[1];
-  dest->u64[2] ^= c->u64[2]; dest->u64[3] ^= c->u64[3];
-  dest->u64[4] ^= c->u64[4]; dest->u64[5] ^= c->u64[5];
-  dest->u64[6] ^= c->u64[6]; dest->u64[7] ^= c->u64[7];
-#else
-  dest->u64[0] ^= fio_ltole32(c->u32[0])  | ((uint64_t)fio_ltole32(c->u32[1])  << 32);
-  dest->u64[1] ^= fio_ltole32(c->u32[2])  | ((uint64_t)fio_ltole32(c->u32[3])  << 32);
-  dest->u64[2] ^= fio_ltole32(c->u32[4])  | ((uint64_t)fio_ltole32(c->u32[5])  << 32);
-  dest->u64[3] ^= fio_ltole32(c->u32[6])  | ((uint64_t)fio_ltole32(c->u32[7])  << 32);
-  dest->u64[4] ^= fio_ltole32(c->u32[8])  | ((uint64_t)fio_ltole32(c->u32[9])  << 32);
-  dest->u64[5] ^= fio_ltole32(c->u32[10]) | ((uint64_t)fio_ltole32(c->u32[11]) << 32);
-  dest->u64[6] ^= fio_ltole32(c->u32[12]) | ((uint64_t)fio_ltole32(c->u32[13]) << 32);
-  dest->u64[7] ^= fio_ltole32(c->u32[14]) | ((uint64_t)fio_ltole32(c->u32[15]) << 32);
-#endif
-  // clang-format on
 }
 
 FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
   fio_512u c2 = *c;
-  // clang-format off
-  fio___chacha_dround(&c2); fio___chacha_dround(&c2);
-  fio___chacha_dround(&c2); fio___chacha_dround(&c2);
-  fio___chacha_dround(&c2); fio___chacha_dround(&c2);
-  fio___chacha_dround(&c2); fio___chacha_dround(&c2);
-  fio___chacha_dround(&c2); fio___chacha_dround(&c2);
-  c->u32[0 + 0] += c2.u32[0 + 0];   c->u32[0 + 1] += c2.u32[0 + 1];
-  c->u32[0 + 2] += c2.u32[0 + 2];   c->u32[0 + 3] += c2.u32[0 + 3];
-  c->u32[4 + 0] += c2.u32[4 + 0];   c->u32[4 + 1] += c2.u32[4 + 1];
-  c->u32[4 + 2] += c2.u32[4 + 2];   c->u32[4 + 3] += c2.u32[4 + 3];
-  c->u32[8 + 0] += c2.u32[8 + 0];   c->u32[8 + 1] += c2.u32[8 + 1];
-  c->u32[8 + 2] += c2.u32[8 + 2];   c->u32[8 + 3] += c2.u32[8 + 3];
-  c->u32[12 + 0]+= c2.u32[12 + 0];  c->u32[12 + 1]+=c2.u32[12 + 1];
-  c->u32[12 + 2]+= c2.u32[12 + 2];  c->u32[12 + 3]+=c2.u32[12 + 3];
-  // clang-format on
+  for (size_t round = 0; round < 10; ++round) {
+    for (size_t i = 0; i < 4; ++i) {
+      FIO___CHACHA_QROUND(c2.u32[i],
+                          c2.u32[i + 4],
+                          c2.u32[i + 8],
+                          c2.u32[i + 12]);
+    }
+    for (size_t i = 0; i < 4; ++i) {
+      FIO___CHACHA_QROUND(c2.u32[i],
+                          c2.u32[((i + 1) & 3) + 4],
+                          c2.u32[((i + 2) & 3) + 8],
+                          c2.u32[((i + 3) & 3) + 12]);
+    }
+  }
+  for (size_t i = 0; i < 16; ++i) {
+    c->u32[i] += c2.u32[i];
+  }
 }
 
-SFUNC void fio_chacha20(void *data,
+SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
                         void *key,
                         void *nounce,
@@ -533,20 +506,20 @@ Module Testing
 
 FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
   uint64_t result[2] = {0};
-  char *key =
-      (char
-           *)"\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42\xd5\x06\xa8"
-             "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b";
+  char *key = (char *)"\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42"
+                      "\xd5\x06\xa8"
+                      "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41"
+                      "\x49\xf5\x1b";
   fio_poly1305_auth(result, key, msg, len, NULL, 0);
   return (uintptr_t)result[0];
 }
 
 FIO_SFUNC uintptr_t fio__chacha20_speed_wrapper(char *msg, size_t len) {
   uint64_t result[2] = {0};
-  char *key =
-      (char
-           *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-             "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
+  char *key = (char *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
+                      "\x0d\x0e\x0f"
+                      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
+                      "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
   fio_chacha20(msg, len, key, nounce, 1);
   result[0] = fio_buf2u64_local(msg);
@@ -555,10 +528,10 @@ FIO_SFUNC uintptr_t fio__chacha20_speed_wrapper(char *msg, size_t len) {
 
 FIO_SFUNC uintptr_t fio__chacha20poly1305_speed_wrapper(char *msg, size_t len) {
   uint64_t result[2] = {0};
-  char *key =
-      (char
-           *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-             "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
+  char *key = (char *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
+                      "\x0d\x0e\x0f"
+                      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
+                      "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
   fio_chacha20_poly1305_enc(result, msg, len, NULL, 0, key, nounce);
   return (uintptr_t)result[0];
@@ -567,10 +540,10 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305_speed_wrapper(char *msg, size_t len) {
 FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
                                                            size_t len) {
   uint64_t result[2] = {0};
-  char *key =
-      (char
-           *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-             "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
+  char *key = (char *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
+                      "\x0d\x0e\x0f"
+                      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
+                      "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
   fio_poly1305_auth(result, key, msg, len, NULL, 0);
   fio_chacha20(msg, len, key, nounce, 1);
@@ -737,7 +710,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
 #endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
 Module Cleanup
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_CHACHA
