@@ -9348,7 +9348,8 @@ FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
     c->u32[i] = fio_ltole32(c->u32[i]);
   }
 }
-FIO_IFUNC void fio___chacha_round20x2(uint32_t *cypher, uint32_t *v) {
+FIO_IFUNC void fio___chacha_round20x2(uint32_t *restrict cypher,
+                                      uint32_t *restrict v) {
   for (size_t b = 1; b < 2; ++b) { /* block counters increase */
     cypher[(b << 4) + 12] += b;
     v[(b << 4) + 12] += b;
