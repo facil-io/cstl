@@ -497,8 +497,8 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
       w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
       v.v[i] ^= w.v[i];
       v.v[i] *= prime.v[i];
-      w.v[i] = fio_lrot64(w.v[i], 31);
-      w.v[i] ^= seed;
+      v.v[i] = fio_lrot64(w.v[i], 31);
+      v.v[i] ^= seed;
       v.v[i] += w.v[i];
     }
     seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
@@ -512,8 +512,8 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
       w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
       v.v[i] ^= w.v[i];
       v.v[i] *= prime.v[i];
-      w.v[i] = fio_lrot64(w.v[i], 31);
-      w.v[i] ^= seed;
+      v.v[i] = fio_lrot64(w.v[i], 31);
+      v.v[i] ^= seed;
       v.v[i] += w.v[i];
     }
   }
