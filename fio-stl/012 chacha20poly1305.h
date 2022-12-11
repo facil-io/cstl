@@ -368,12 +368,6 @@ FIO_IFUNC fio_512u fio___chacha_init(void *key,
     FIO___CHACHA_QROUND_S4(a, b, c, d);                                        \
   } while (0)
 
-FIO_IFUNC void fio___chacha_xor(uint32_t *dest, fio_512u *c) {
-  for (size_t i = 0; i < 16; ++i) {
-    dest[i] ^= fio_ltole32(c->u32[i]);
-  }
-}
-
 FIO_IFUNC void fio___chacha_xor64(void *dest_,
                                   uint64_t *src,
                                   const size_t groups) {
@@ -403,6 +397,7 @@ FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
   }
   for (size_t i = 0; i < 16; ++i) {
     c->u32[i] += c2.u32[i];
+    c->u32[i] = fio_ltole32(c->u32[i]);
   }
 }
 FIO_IFUNC void fio___chacha_round20x2(uint32_t *cypher, uint32_t *v) {
@@ -425,8 +420,10 @@ FIO_IFUNC void fio___chacha_round20x2(uint32_t *cypher, uint32_t *v) {
                             v[(b << 4) | ((((i + 3) & 3) | 12))]);
   }
   for (size_t i = 0; i < 16; ++i)
-    for (size_t b = 0; b < 2; ++b)
+    for (size_t b = 0; b < 2; ++b) {
       cypher[(b << 4) | i] += v[(b << 4) | i];
+      cypher[(b << 4) | i] = fio_ltole32(cypher[(b << 4) | i]);
+    }
 }
 
 SFUNC void fio_chacha20(void *restrict data,
@@ -899,15 +896,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                  "ChaCha20Poly1305 authentication != Poly1305 code");
       FIO_ASSERT(!memcmp(mac, tests[i].mac, 16),
                  "ChaCha20Poly1305 authentication code failed");
-      fio_chacha20_poly1305_dec(mac,
-                                buffer,
-                                len,
-                                tests[i].ad,
-                                tests[i].ad_len,
-                                tests[i].key,
-                                tests[i].nounce);
+      FIO_ASSERT(!fio_chacha20_poly1305_dec(tests[i].mac,
+                                            buffer,
+                                            len,
+                                            tests[i].ad,
+                                            tests[i].ad_len,
+                                            tests[i].key,
+                                            tests[i].nounce),
+                 "fio_chacha20_poly1305_dec returned error for %s",
+                 tests[i].msg);
       FIO_ASSERT(!memcmp(buffer, tests[i].msg, len),
-                 "ChaCha20Poly1305 decoding failed");
+                 "ChaCha20Poly1305 decoding failed for %s",
+                 tests[i].msg);
     }
   }
 
