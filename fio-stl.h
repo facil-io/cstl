@@ -9032,7 +9032,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
  * Returns `-1` on error (authentication failed).
  */
 SFUNC int fio_chacha20_poly1305_dec(void *mac,
-                                    void *data,
+                                    void *restrict data,
                                     size_t len,
                                     void *ad, /* additional data */
                                     size_t adlen,
@@ -9535,7 +9535,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *mac,
 }
 
 SFUNC int fio_chacha20_poly1305_dec(void *mac,
-                                    void *data,
+                                    void *restrict data,
                                     size_t len,
                                     void *ad, /* additional data */
                                     size_t adlen,
@@ -9821,7 +9821,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
         {.expected = NULL}};
     for (size_t i = 0; tests[i].expected; ++i) {
       size_t len = strlen(tests[i].msg);
-      char buffer[4096];
+      char buffer[1024];
       char mac[16], mac2[16];
       FIO_MEMCPY(buffer, tests[i].msg, len);
       fio_chacha20_poly1305_enc(mac,
@@ -9844,7 +9844,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                  "ChaCha20Poly1305 authentication != Poly1305 code");
       FIO_ASSERT(!memcmp(mac, tests[i].mac, 16),
                  "ChaCha20Poly1305 authentication code failed");
-      FIO_ASSERT(!fio_chacha20_poly1305_dec(tests[i].mac,
+      FIO_ASSERT(!fio_chacha20_poly1305_dec(mac,
                                             buffer,
                                             len,
                                             tests[i].ad,
