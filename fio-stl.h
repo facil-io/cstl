@@ -9854,9 +9854,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                                             tests[i].nounce),
                  "fio_chacha20_poly1305_dec returned error for %s",
                  tests[i].msg);
-      FIO_ASSERT(!memcmp(buffer, tests[i].msg, len),
-                 "ChaCha20Poly1305 decoding failed for %s",
-                 tests[i].msg);
+      FIO_ASSERT(
+          !memcmp(buffer, tests[i].msg, len),
+          "ChaCha20Poly1305 decoding failed for %s\nshould have been %.*s",
+          tests[i].msg,
+          (int)len,
+          buffer);
     }
   }
 
