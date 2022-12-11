@@ -34,7 +34,7 @@ Using ChaCha20 and Poly1305 separately
  * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
  * * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
  */
-SFUNC void fio_chacha20(void *data,
+SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
                         void *key,
                         void *nounce,
@@ -46,11 +46,11 @@ SFUNC void fio_chacha20(void *data,
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
  */
-SFUNC void fio_poly1305_auth(void *mac_dest,
+SFUNC void fio_poly1305_auth(void *restrict mac_dest,
                              void *key256bits,
-                             void *message,
+                             void *restrict message,
                              size_t len,
-                             void *additional_data,
+                             void *restrict additional_data,
                              size_t additional_data_len);
 
 /**
@@ -63,8 +63,8 @@ SFUNC void fio_poly1305_auth(void *mac_dest,
  * * `data`   MAY be omitted, WILL be encrypted.
  * * `mac`    MUST point to a buffer with (at least) 16 available bytes.
  */
-SFUNC void fio_chacha20_poly1305_enc(void *mac,
-                                     void *data,
+SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
+                                     void *restrict data,
                                      size_t len,
                                      void *ad, /* additional data */
                                      size_t adlen,
@@ -311,11 +311,11 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 
 /*
  * Given a Poly1305 key, writes a MAC into `mac_dest`. */
-SFUNC void fio_poly1305_auth(void *mac,
+SFUNC void fio_poly1305_auth(void *restrict mac,
                              void *key,
-                             void *msg,
+                             void *restrict msg,
                              size_t len,
-                             void *ad,
+                             void *restrict ad,
                              size_t ad_len) {
   fio___poly_s pl = fio___poly_init(key);
   fio___poly_consume_msg(&pl, (uint8_t *)ad, ad_len);
@@ -448,11 +448,10 @@ SFUNC void fio_chacha20(void *restrict data,
     ++c.u32[12];
   }
   if ((len & 63)) {
-    fio_512u c2 = c;
     fio_512u dest; /* no need to initialize, junk data disregarded. */
-    fio___chacha_round20(&c2);
+    fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
-    fio___chacha_xor64(dest.u64, c2.u64, 8);
+    fio___chacha_xor64(dest.u64, c.u64, 8);
     fio_memcpy63x(data, dest.u64, len);
   }
 }
@@ -461,8 +460,8 @@ SFUNC void fio_chacha20(void *restrict data,
 ChaCha20Poly1305 Encryption with Authentication
 ***************************************************************************** */
 
-SFUNC void fio_chacha20_poly1305_enc(void *mac,
-                                     void *data,
+SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
+                                     void *restrict data,
                                      size_t len,
                                      void *ad, /* additional data */
                                      size_t adlen,
@@ -549,9 +548,9 @@ SFUNC void fio_chacha20_poly1305_enc(void *mac,
 }
 
 SFUNC void fio_chacha20_poly1305_auth(void *mac,
-                                      void *data,
+                                      void *restrict data,
                                       size_t len,
-                                      void *ad, /* additional data */
+                                      void *restrict ad, /* additional data */
                                       size_t adlen,
                                       void *key,
                                       void *nounce) {
