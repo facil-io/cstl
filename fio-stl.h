@@ -730,9 +730,8 @@ Memory Copying Primitives
 #define FIO_MEMCPY __builtin_memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio_memcpy##bytes(void *restrict dest,                        \
-                                   const void *restrict src) {                 \
-    __builtin_memcpy(dest, src, bytes);                                        \
+  FIO_IFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+    __builtin_memcpy(d, s, bytes);                                             \
   }
 #else
 #ifndef FIO_MEMCPY
@@ -746,77 +745,43 @@ Memory Copying Primitives
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
-/** memcpy no-op. */
 FIO_IFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)d), ((void)s);
 }
-/** Copies 1 byte from `src` to `dest`. */
 FIO_IFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
 }
-/** Copies 2 bytes from `src` to `dest`. */
+/** Copies 2 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(2)
-/** Copies 3 bytes from `src` to `dest`. */
+/** Copies 3 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(3)
-/** Copies 4 bytes from `src` to `dest`. */
+/** Copies 4 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(4)
-/** Copies 5 bytes from `src` to `dest`. */
+/** Copies 5 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(5)
-/** Copies 6 bytes from `src` to `dest`. */
+/** Copies 6 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(6)
-/** Copies 7 bytes from `src` to `dest`. */
+/** Copies 7 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(7)
-/** Copies 8 bytes from `src` to `dest`. */
+/** Copies 8 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(8)
-/** Copies 16 bytes from `src` to `dest`. */
+/** Copies 16 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(16)
-/** Copies 24 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(24)
-/** Copies 32 bytes from `src` to `dest`. */
+/** Copies 32 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(32)
-/** Copies 40 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(40)
-/** Copies 48 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(48)
-/** Copies 56 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(56)
-/** Copies 64 bytes from `src` to `dest`. */
+/** Copies 64 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(64)
-/** Copies 64 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(96)
-/** Copies 128 bytes from `src` to `dest`. */
+/** Copies 128 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(128)
-/** Copies 192 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(192)
-/** Copies 256 bytes from `src` to `dest`. */
+/** Copies 256 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(256)
-/** Copies 320 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(320)
-/** Copies 384 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(384)
-/** Copies 448 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(448)
-/** Copies 512 bytes from `src` to `dest`. */
+/** Copies 512 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(512)
-/** Copies 640 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(640)
-/** Copies 768 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(768)
-/** Copies 896 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(896)
-/** Copies 1024 bytes from `src` to `dest`. */
+/** Copies 1024 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(1024)
-/** Copies 1536 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(1536)
-/** Copies 2048 bytes from `src` to `dest`. */
+/** Copies 2048 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(2048)
-/** Copies 2560 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(2560)
-/** Copies 3072 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(3072)
-/** Copies 3584 bytes from `src` to `dest`. */
-FIO___MAKE_MEMCPY_FIXED(3584)
-/** Copies 4096 bytes from `src` to `dest`. */
+/** Copies 4096 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
@@ -830,71 +795,57 @@ FIO___MAKE_MEMCPY_FIXED(4096)
 FIO_IFUNC void fio_memcpy1_aligned(void *restrict dest, const void *src) {
   *(char *)dest = *(const char *)src;
 }
+/** Copies 2 bytes where both `src` and `dest` are aligned. */
 FIO_IFUNC void fio_memcpy2_aligned(void *restrict dest, const void *src) {
   *(uint16_t *)dest = *(const uint16_t *)src;
 }
+/** Copies 4 bytes where both `src` and `dest` are aligned. */
 FIO_IFUNC void fio_memcpy4_aligned(void *restrict dest, const void *src) {
   *(uint32_t *)dest = *(const uint32_t *)src;
 }
-/** Copies 8 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 8 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(8)
-/** Copies 16 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 16 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(16)
-/** Copies 32 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 32 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(32)
-/** Copies 64 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 64 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(64)
-/** Copies 128 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 128 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(128)
-/** Copies 256 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 256 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(256)
-/** Copies 512 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 512 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(512)
-/** Copies 1024 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 1024 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(1024)
-/** Copies 2048 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 2048 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(2048)
-/** Copies 4096 bytes from `src` to `dest`, where pointers are word aligned. */
+/** Copies 4096 bytes where both `src` and `dest` are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(4096)
 #undef FIO___MAKE_MEMCPY_ALIGNED
 
-#define FIO___MEMCPYX_MAKER4(bytes, blog, n4, n2, n1, nx)                      \
-  FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
-                                      const void *restrict s_,                 \
-                                      size_t l) {                              \
-    void (*const fn[])(void *, const void *) = {                               \
-        fio_memcpy0,                                                           \
-        fio_memcpy##n1,                                                        \
-        fio_memcpy##n2,                                                        \
-        fio_memcpy##n4,                                                        \
-    };                                                                         \
-    register char *restrict d = (char *restrict)d_;                            \
-    register const char *restrict s = (const char *restrict)s_;                \
-    fn[(l >> (blog - 2)) & 3](d, s);                                           \
-    d += (l & (bytes & (~0ULL << (blog - 2))));                                \
-    s += (l & (bytes & (~0ULL << (blog - 2))));                                \
-    fio_memcpy##nx##x(d, s, l);                                                \
+/** Does nothing. */
+FIO_IFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
+  ((void)d), ((void)s), ((void)l);
+}
+
+#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+  if ((l & bytes)) {                                                           \
+    fio_memcpy##bytes(d, s);                                                   \
+    d += bytes;                                                                \
+    s += bytes;                                                                \
   }
-#define FIO___MEMCPYX_MAKER8(bytes, blog, g7, g6, g5, g4, g3, g2, g1, gx)      \
+#define FIO_MEMCPYX_MAKER4(bytes, n4, n2, n1, nx)                              \
   FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
                                       const void *restrict s_,                 \
                                       size_t l) {                              \
-    void (*const fn[])(void *, const void *) = {                               \
-        fio_memcpy0,                                                           \
-        fio_memcpy##g1,                                                        \
-        fio_memcpy##g2,                                                        \
-        fio_memcpy##g3,                                                        \
-        fio_memcpy##g4,                                                        \
-        fio_memcpy##g5,                                                        \
-        fio_memcpy##g6,                                                        \
-        fio_memcpy##g7,                                                        \
-    };                                                                         \
-    register char *restrict d = (char *restrict)d_;                            \
-    register const char *restrict s = (const char *restrict)s_;                \
-    fn[(l >> (blog - 3)) & 7](d, s);                                           \
-    d += (l & (bytes & (~0ULL << (blog - 3))));                                \
-    s += (l & (bytes & (~0ULL << (blog - 3))));                                \
-    fio_memcpy##gx##x(d, s, l);                                                \
+    char *restrict d = (char *restrict)d_;                                     \
+    const char *restrict s = (const char *restrict)s_;                         \
+    FIO_MEMCPY___PARTIAL(n4);                                                  \
+    FIO_MEMCPY___PARTIAL(n2);                                                  \
+    FIO_MEMCPY___PARTIAL(n1);                                                  \
+    fio_memcpy##nx##x(d, s, l);                                                \
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
@@ -917,33 +868,38 @@ FIO_IFUNC void fio_memcpy7x(void *restrict d_,
 FIO_IFUNC void fio_memcpy15x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
-  register char *restrict d = (char *restrict)d_;
-  register const char *restrict s = (const char *restrict)s_;
-  void (*const fn[])(void *, const void *) = {fio_memcpy0, fio_memcpy8};
-  fn[(l >> 3) & 1](d_, s_);
-  d += (l & 8);
-  s += (l & 8);
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(8);
   fio_memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO___MEMCPYX_MAKER4(31, 5, 24, 16, 8, 7)
+FIO_IFUNC void fio_memcpy31x(void *restrict d_,
+                             const void *restrict s_,
+                             size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(16);
+  FIO_MEMCPY___PARTIAL(8);
+  fio_memcpy7x(d, s, l);
+}
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO___MEMCPYX_MAKER8(63, 6, 56, 48, 40, 32, 24, 16, 8, 7)
+FIO_MEMCPYX_MAKER4(63, 32, 16, 8, 7)
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO___MEMCPYX_MAKER4(127, 7, 96, 64, 32, 31)
+FIO_MEMCPYX_MAKER4(127, 64, 32, 16, 15)
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO___MEMCPYX_MAKER4(255, 8, 192, 128, 64, 63)
+FIO_MEMCPYX_MAKER4(255, 128, 64, 32, 31)
 /** Copies up to 511 bytes to `dest` from `src`, calculated by `len & 511`. */
-FIO___MEMCPYX_MAKER8(511, 9, 448, 384, 320, 256, 192, 128, 64, 63)
+FIO_MEMCPYX_MAKER4(511, 256, 128, 64, 63)
 /** Copies up to 1023 bytes to `dest` from `src`, calculated by `len & 1023`. */
-FIO___MEMCPYX_MAKER8(1023, 10, 896, 768, 640, 512, 384, 256, 128, 127)
+FIO_MEMCPYX_MAKER4(1023, 512, 256, 128, 127)
 /** Copies up to 2047 bytes to `dest` from `src`, calculated by `len & 2047`. */
-FIO___MEMCPYX_MAKER4(2047, 11, 1536, 1024, 512, 511)
+FIO_MEMCPYX_MAKER4(2047, 1024, 512, 256, 255)
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO___MEMCPYX_MAKER8(4095, 12, 3584, 3072, 2560, 2048, 1536, 1024, 512, 511)
+FIO_MEMCPYX_MAKER4(4095, 2048, 1024, 512, 511)
 
-#undef FIO___MEMCPYX_MAKER4
-#undef FIO___MEMCPYX_MAKER8
+#undef FIO_MEMCPYX_MAKER4
+#undef FIO_MEMCPY___PARTIAL
 
 /* *****************************************************************************
 FIO_MEMSET / fio_memset - memset fallbacks
@@ -996,7 +952,7 @@ FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 #define FIO___MEMCPY_BLOCKx     fio_memcpy1023x
 #define FIO___MEMCPY_ALIGN_DIR  +
 #define FIO___MEMCPY_ALIGN(d, s, bytes)                                        \
-  if (((bytes & 7) & (bytes > FIO___MEMCPY_BLOCKx_NUM))) { /* align memory? */ \
+  if (((bytes & 7) & (bytes > 256))) { /* align memory? */                     \
     if ((uintptr_t)d & 1) {                                                    \
       *(d) = *(s);                                                             \
       d = d FIO___MEMCPY_ALIGN_DIR 1;                                          \
