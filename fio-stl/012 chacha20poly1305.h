@@ -36,8 +36,8 @@ Using ChaCha20 and Poly1305 separately
  */
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
-                        void *key,
-                        void *nounce,
+                        const void *key,
+                        const void *nounce,
                         uint32_t counter);
 
 /**
@@ -47,7 +47,7 @@ SFUNC void fio_chacha20(void *restrict data,
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
  */
 SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             void *key256bits,
+                             const void *key256bits,
                              void *restrict message,
                              size_t len,
                              void *restrict additional_data,
@@ -66,10 +66,10 @@ SFUNC void fio_poly1305_auth(void *restrict mac_dest,
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *ad, /* additional data */
+                                     void *restrict ad, /* additional data */
                                      size_t adlen,
-                                     void *key,
-                                     void *nounce);
+                                     const void *key,
+                                     const void *nounce);
 
 /**
  * Performs an in-place decryption of `data` using ChaCha20 after authenticating
@@ -83,13 +83,13 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
  *
  * Returns `-1` on error (authentication failed).
  */
-SFUNC int fio_chacha20_poly1305_dec(void *mac,
+SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *ad, /* additional data */
+                                    void *restrict ad, /* additional data */
                                     size_t adlen,
-                                    void *key,
-                                    void *nounce);
+                                    const void *key,
+                                    const void *nounce);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
@@ -115,7 +115,7 @@ typedef struct {
   uint64_t a[3];
 } FIO_ALIGN(16) fio___poly_s;
 
-FIO_IFUNC fio___poly_s fio___poly_init(void *key256b) {
+FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   uint64_t t0, t1;
   /* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
   t0 = fio_buf2u64_little((uint8_t *)key256b + 0);
@@ -136,7 +136,7 @@ FIO_IFUNC fio___poly_s fio___poly_init(void *key256b) {
   return pl;
 }
 FIO_IFUNC void fio___poly_consume128bit(fio___poly_s *pl,
-                                        void *msg,
+                                        const void *msg,
                                         uint64_t is_full) {
   uint64_t r0, r1, r2;
   uint64_t s1, s2;
@@ -312,7 +312,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 /*
  * Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
-                             void *key,
+                             const void *key,
                              void *restrict msg,
                              size_t len,
                              void *restrict ad,
@@ -329,8 +329,8 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-FIO_IFUNC fio_512u fio___chacha_init(void *key,
-                                     void *nounce,
+FIO_IFUNC fio_512u fio___chacha_init(const void *key,
+                                     const void *nounce,
                                      uint32_t counter) {
   fio_512u o = {
       .u32 =
@@ -429,8 +429,8 @@ FIO_IFUNC void fio___chacha_round20x2(uint32_t *restrict cypher,
 
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
-                        void *key,
-                        void *nounce,
+                        const void *key,
+                        const void *nounce,
                         uint32_t counter) {
   fio_512u c = fio___chacha_init(key, nounce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
@@ -463,10 +463,10 @@ ChaCha20Poly1305 Encryption with Authentication
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *ad, /* additional data */
+                                     void *restrict ad, /* additional data */
                                      size_t adlen,
-                                     void *key,
-                                     void *nounce) {
+                                     const void *key,
+                                     const void *nounce) {
   fio_512u c = fio___chacha_init(key, nounce, 0);
   fio___poly_s pl;
   {
@@ -547,13 +547,13 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
 }
 
-SFUNC void fio_chacha20_poly1305_auth(void *mac,
+SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       void *restrict data,
                                       size_t len,
                                       void *restrict ad, /* additional data */
                                       size_t adlen,
-                                      void *key,
-                                      void *nounce) {
+                                      const void *key,
+                                      const void *nounce) {
   fio_512u c = fio___chacha_init(key, nounce, 0);
   fio___chacha_round20(&c); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c);
@@ -586,13 +586,13 @@ SFUNC void fio_chacha20_poly1305_auth(void *mac,
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
 }
 
-SFUNC int fio_chacha20_poly1305_dec(void *mac,
+SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *ad, /* additional data */
+                                    void *restrict ad, /* additional data */
                                     size_t adlen,
-                                    void *key,
-                                    void *nounce) {
+                                    const void *key,
+                                    const void *nounce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
   if (((auth[0] != fio_buf2u64_little(mac)) |
@@ -679,8 +679,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test ChaCha20 independently */
     struct {
-      char key[32];
-      char nounce[12];
+      char key[33];
+      char nounce[13];
       char *src;
       char *expected;
     } tests[] = {
@@ -741,14 +741,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test Poly1305 independently */
     struct {
-      char key[32];
+      char key[33];
       char *msg;
       char *expected;
     } tests[] = {{
                      .key = "\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe"
                             "\x42\xd5\x06\xa8\x01\x03\x80\x8a\xfb\x0d\xb2\xfd"
                             "\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b",
-                     .msg = "Cryptographic Forum Research Group",
+                     .msg = (char *)"Cryptographic Forum Research Group",
                      .expected =
                          (char *)"\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b"
                                  "\xaf\x0c\x01\x27\xa9",
@@ -778,13 +778,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test ChaCha20Poly1305 */
     struct {
-      char key[32];
-      char nounce[12];
+      char key[33];
+      char nounce[13];
       char *ad;
       size_t ad_len;
       char *msg;
       char *expected;
-      char mac[16];
+      char mac[17];
     } tests[] = {
         {
             .key = "\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d"

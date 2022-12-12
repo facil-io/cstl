@@ -785,19 +785,34 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
+    void (*fn[])(void *, const void *, size_t) = {
+        fio_memcpy7x,
+        fio_memcpy15x,
+        fio_memcpy31x,
+        fio_memcpy63x,
+        fio_memcpy127x,
+        fio_memcpy255x,
+        fio_memcpy511x,
+        fio_memcpy1023x,
+        fio_memcpy2047x,
+        fio_memcpy4095x,
+        NULL,
+    };
     char buf[128];
     const char *str = "This string should be 39 chars long, ok";
     size_t len = strlen(str);
-    for (size_t i = 0; i < 31; ++i) {
-      buf[i + len] = '\xFF';
-      fio_memcpy63x(buf + i, str, len);
-      FIO_ASSERT(!memcmp(buf + i, str, len),
-                 "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
-                 i,
-                 (int)len,
-                 buf + i,
-                 str);
-      FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+    for (size_t ifn = 0; fn[ifn]; ++ifn) {
+      for (size_t i = 0; i < 31; ++i) {
+        buf[i + len] = '\xFF';
+        fio_memcpy63x(buf + i, str, len);
+        FIO_ASSERT(!memcmp(buf + i, str, (len & ((1UL << (ifn + 3)) - 1))),
+                   "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
+                   i,
+                   (int)len,
+                   buf + i,
+                   str);
+        FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+      }
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");

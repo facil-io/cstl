@@ -174,7 +174,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #ifndef __has_builtin
 #define __has_builtin(...) 0
 #endif
-#define GNUC_BYPASS        1
+#define GNUC_BYPASS 1
 #elif !defined(__clang__) && !defined(__has_builtin)
 /* E.g: GCC < 6.0 doesn't support __has_builtin */
 #define __has_builtin(...) 0
@@ -747,20 +747,33 @@ Memory Copying Primitives
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
+/** Copies 1 byte from `src` to `dest`. */
 FIO_IFUNC void fio_memcpy1(void *restrict dest, const void *restrict src) {
   *(char *)dest = *(const char *)src;
 }
+/** Copies 2 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(2)
+/** Copies 4 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(4)
+/** Copies 8 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(8)
+/** Copies 16 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(16)
+/** Copies 32 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(32)
+/** Copies 64 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(64)
+/** Copies 128 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(128)
+/** Copies 256 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(256)
+/** Copies 512 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(512)
+/** Copies 1024 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(1024)
+/** Copies 2048 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(2048)
+/** Copies 4096 bytes from `src` to `dest`. */
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
@@ -780,183 +793,94 @@ FIO_IFUNC void fio_memcpy2_aligned(void *restrict dest, const void *src) {
 FIO_IFUNC void fio_memcpy4_aligned(void *restrict dest, const void *src) {
   *(uint32_t *)dest = *(const uint32_t *)src;
 }
+/** Copies 8 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(8)
+/** Copies 16 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(16)
+/** Copies 32 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(32)
+/** Copies 64 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(64)
+/** Copies 128 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(128)
+/** Copies 256 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(256)
+/** Copies 512 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(512)
+/** Copies 1024 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(1024)
+/** Copies 2048 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(2048)
+/** Copies 4096 bytes from `src` to `dest`, where pointers are word aligned. */
 FIO___MAKE_MEMCPY_ALIGNED(4096)
 #undef FIO___MAKE_MEMCPY_ALIGNED
 
-/* Constant time copy of bytes (partial copy test) */
-
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
+#define FIO___MEMCPYX_PARTIAL(bytes)                                           \
   if ((l & bytes)) {                                                           \
     fio_memcpy##bytes(d, s);                                                   \
     d += bytes;                                                                \
     s += bytes;                                                                \
+  }
+#define FIO___MEMCPYX_MAKER4(bytes, n4, n2, n1, nx)                            \
+  FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
+                                      const void *restrict s_,                 \
+                                      size_t l) {                              \
+    register char *restrict d = (char *restrict)d_;                            \
+    register const char *restrict s = (const char *restrict)s_;                \
+    FIO___MEMCPYX_PARTIAL(n4);                                                 \
+    FIO___MEMCPYX_PARTIAL(n2);                                                 \
+    FIO___MEMCPYX_PARTIAL(n1);                                                 \
+    fio_memcpy##nx##x(d, s, l);                                                \
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
 FIO_IFUNC void fio_memcpy7x(void *restrict d_,
                             const void *restrict s_,
                             size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
+  register char *restrict d = (char *restrict)d_;
+  register const char *restrict s = (const char *restrict)s_;
+  FIO___MEMCPYX_PARTIAL(4);
+  FIO___MEMCPYX_PARTIAL(2);
   if ((l & 1))
     *d = *s;
 }
+
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio_memcpy15x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
+  register char *restrict d = (char *restrict)d_;
+  register const char *restrict s = (const char *restrict)s_;
+  FIO___MEMCPYX_PARTIAL(8);
+  fio_memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
 FIO_IFUNC void fio_memcpy31x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
+  register char *restrict d = (char *restrict)d_;
+  register const char *restrict s = (const char *restrict)s_;
+  FIO___MEMCPYX_PARTIAL(16);
+  FIO___MEMCPYX_PARTIAL(8);
+  fio_memcpy7x(d, s, l);
 }
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_IFUNC void fio_memcpy63x(void *restrict d_,
-                             const void *restrict s_,
-                             size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
+FIO___MEMCPYX_MAKER4(63, 32, 16, 8, 7)
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_IFUNC void fio_memcpy127x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
+FIO___MEMCPYX_MAKER4(127, 64, 32, 16, 15)
 /** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio_memcpy255x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
-/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_IFUNC void fio_memcpy511x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
+FIO___MEMCPYX_MAKER4(255, 128, 64, 32, 31)
+/** Copies up to 511 bytes to `dest` from `src`, calculated by `len & 511`. */
+FIO___MEMCPYX_MAKER4(511, 256, 128, 64, 63)
+/** Copies up to 1023 bytes to `dest` from `src`, calculated by `len & 1023`. */
+FIO___MEMCPYX_MAKER4(1023, 512, 256, 128, 127)
+/** Copies up to 2047 bytes to `dest` from `src`, calculated by `len & 2047`. */
+FIO___MEMCPYX_MAKER4(2047, 1024, 512, 256, 255)
 /** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio_memcpy1023x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(512);
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
-/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio_memcpy2047x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(1024);
-  FIO_MEMCPY___PARTIAL(512);
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
-/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_IFUNC void fio_memcpy4095x(void *restrict d_,
-                               const void *restrict s_,
-                               size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(2048);
-  FIO_MEMCPY___PARTIAL(1024);
-  FIO_MEMCPY___PARTIAL(512);
-  FIO_MEMCPY___PARTIAL(256);
-  FIO_MEMCPY___PARTIAL(128);
-  FIO_MEMCPY___PARTIAL(64);
-  FIO_MEMCPY___PARTIAL(32);
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d = *s;
-}
-#undef FIO_MEMCPY___PARTIAL
+FIO___MEMCPYX_MAKER4(4095, 2048, 1024, 512, 511)
+
+#undef FIO___MEMCPYX_MAKER4
+#undef FIO___MEMCPYX_PARTIAL
 
 /* *****************************************************************************
 FIO_MEMSET / fio_memset - memset fallbacks
@@ -3982,19 +3906,34 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
+    void (*fn[])(void *, const void *, size_t) = {
+        fio_memcpy7x,
+        fio_memcpy15x,
+        fio_memcpy31x,
+        fio_memcpy63x,
+        fio_memcpy127x,
+        fio_memcpy255x,
+        fio_memcpy511x,
+        fio_memcpy1023x,
+        fio_memcpy2047x,
+        fio_memcpy4095x,
+        NULL,
+    };
     char buf[128];
     const char *str = "This string should be 39 chars long, ok";
     size_t len = strlen(str);
-    for (size_t i = 0; i < 31; ++i) {
-      buf[i + len] = '\xFF';
-      fio_memcpy63x(buf + i, str, len);
-      FIO_ASSERT(!memcmp(buf + i, str, len),
-                 "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
-                 i,
-                 (int)len,
-                 buf + i,
-                 str);
-      FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+    for (size_t ifn = 0; fn[ifn]; ++ifn) {
+      for (size_t i = 0; i < 31; ++i) {
+        buf[i + len] = '\xFF';
+        fio_memcpy63x(buf + i, str, len);
+        FIO_ASSERT(!memcmp(buf + i, str, (len & ((1UL << (ifn + 3)) - 1))),
+                   "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
+                   i,
+                   (int)len,
+                   buf + i,
+                   str);
+        FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+      }
     }
   }
   fprintf(stderr, "* Testing fio_bswapX macros.\n");
@@ -7756,31 +7695,29 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
 
+#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
+  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
+  v.v[i] ^= w.v[i];                                                            \
+  v.v[i] *= prime.v[i];                                                        \
+  w.v[i] = fio_lrot64(w.v[i], 31);                                             \
+  v.v[i] += w.v[i];                                                            \
+  v.v[i] ^= seed;
+
   /* consumes 32 bytes (256 bits) blocks (no padding needed) */
   for (size_t pos = 31; pos < len; pos += 32) {
     for (size_t i = 0; i < 4; ++i) {
       fio_memcpy8(w.v + i, data + (i << 3));
-      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
-      v.v[i] ^= w.v[i];
-      v.v[i] *= prime.v[i];
-      v.v[i] = fio_lrot64(w.v[i], 31);
-      v.v[i] ^= seed;
-      v.v[i] += w.v[i];
+      FIO___R2_ROUND(i);
     }
     seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
-  /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0; /* sets padding to 0 */
-    fio_memcpy31x(w.v, data, len);         /* copies `len & 31` bytes */
+    uint64_t pad[4] = {0};         /* pad message with 0s */
+    fio_memcpy31x(pad, data, len); /* copies `len & 31` bytes */
     for (size_t i = 0; i < 4; ++i) {
-      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
-      v.v[i] ^= w.v[i];
-      v.v[i] *= prime.v[i];
-      v.v[i] = fio_lrot64(w.v[i], 31);
-      v.v[i] ^= seed;
-      v.v[i] += w.v[i];
+      fio_memcpy8(w.v + i, pad + i);
+      FIO___R2_ROUND(i);
     }
   }
   /* inner vector mini-avalanche */
@@ -7791,10 +7728,13 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   v.v[2] ^= fio_lrot64(v.v[2], 13);
   v.v[3] ^= fio_lrot64(v.v[3], 17);
   return v;
+#undef FIO___R2_ROUND
 }
 
 /*  Computes a facil.io Stable Hash. */
-SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
+FIO_SFUNC uint64_t fio_risky2_hash(const void *data_,
+                                   size_t len,
+                                   uint64_t seed) {
   uint64_t r;
   fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
   /* summing avalanche */
@@ -7805,10 +7745,10 @@ SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
   return r;
 }
 
-SFUNC void fio_risky2_hash128(void *restrict dest,
-                              const void *restrict data_,
-                              size_t len,
-                              uint64_t seed) {
+FIO_SFUNC void fio_risky2_hash128(void *restrict dest,
+                                  const void *restrict data_,
+                                  size_t len,
+                                  uint64_t seed) {
   fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
   uint64_t r[2];
   r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
@@ -8032,22 +7972,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   /* playground speed testing */
   fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit)",
+                         (char *)"rXtest (64 bit)",
                          7,
                          0,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit)",
+                         (char *)"rXtest (64 bit)",
                          13,
                          0,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         (char *)"rXtest (64 bit unaligned)",
                          6,
                          3,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         (char *)"rXtest (64 bit unaligned)",
                          5,
                          3,
                          2);
@@ -8984,8 +8924,8 @@ Using ChaCha20 and Poly1305 separately
  */
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
-                        void *key,
-                        void *nounce,
+                        const void *key,
+                        const void *nounce,
                         uint32_t counter);
 
 /**
@@ -8995,7 +8935,7 @@ SFUNC void fio_chacha20(void *restrict data,
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
  */
 SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             void *key256bits,
+                             const void *key256bits,
                              void *restrict message,
                              size_t len,
                              void *restrict additional_data,
@@ -9014,10 +8954,10 @@ SFUNC void fio_poly1305_auth(void *restrict mac_dest,
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *ad, /* additional data */
+                                     void *restrict ad, /* additional data */
                                      size_t adlen,
-                                     void *key,
-                                     void *nounce);
+                                     const void *key,
+                                     const void *nounce);
 
 /**
  * Performs an in-place decryption of `data` using ChaCha20 after authenticating
@@ -9031,13 +8971,13 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
  *
  * Returns `-1` on error (authentication failed).
  */
-SFUNC int fio_chacha20_poly1305_dec(void *mac,
+SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *ad, /* additional data */
+                                    void *restrict ad, /* additional data */
                                     size_t adlen,
-                                    void *key,
-                                    void *nounce);
+                                    const void *key,
+                                    const void *nounce);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
@@ -9063,7 +9003,7 @@ typedef struct {
   uint64_t a[3];
 } FIO_ALIGN(16) fio___poly_s;
 
-FIO_IFUNC fio___poly_s fio___poly_init(void *key256b) {
+FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   uint64_t t0, t1;
   /* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
   t0 = fio_buf2u64_little((uint8_t *)key256b + 0);
@@ -9084,7 +9024,7 @@ FIO_IFUNC fio___poly_s fio___poly_init(void *key256b) {
   return pl;
 }
 FIO_IFUNC void fio___poly_consume128bit(fio___poly_s *pl,
-                                        void *msg,
+                                        const void *msg,
                                         uint64_t is_full) {
   uint64_t r0, r1, r2;
   uint64_t s1, s2;
@@ -9260,7 +9200,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 /*
  * Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
-                             void *key,
+                             const void *key,
                              void *restrict msg,
                              size_t len,
                              void *restrict ad,
@@ -9277,8 +9217,8 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-FIO_IFUNC fio_512u fio___chacha_init(void *key,
-                                     void *nounce,
+FIO_IFUNC fio_512u fio___chacha_init(const void *key,
+                                     const void *nounce,
                                      uint32_t counter) {
   fio_512u o = {
       .u32 =
@@ -9377,8 +9317,8 @@ FIO_IFUNC void fio___chacha_round20x2(uint32_t *restrict cypher,
 
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
-                        void *key,
-                        void *nounce,
+                        const void *key,
+                        const void *nounce,
                         uint32_t counter) {
   fio_512u c = fio___chacha_init(key, nounce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
@@ -9411,10 +9351,10 @@ ChaCha20Poly1305 Encryption with Authentication
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *ad, /* additional data */
+                                     void *restrict ad, /* additional data */
                                      size_t adlen,
-                                     void *key,
-                                     void *nounce) {
+                                     const void *key,
+                                     const void *nounce) {
   fio_512u c = fio___chacha_init(key, nounce, 0);
   fio___poly_s pl;
   {
@@ -9495,13 +9435,13 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
 }
 
-SFUNC void fio_chacha20_poly1305_auth(void *mac,
+SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       void *restrict data,
                                       size_t len,
                                       void *restrict ad, /* additional data */
                                       size_t adlen,
-                                      void *key,
-                                      void *nounce) {
+                                      const void *key,
+                                      const void *nounce) {
   fio_512u c = fio___chacha_init(key, nounce, 0);
   fio___chacha_round20(&c); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c);
@@ -9534,13 +9474,13 @@ SFUNC void fio_chacha20_poly1305_auth(void *mac,
   fio_u2buf64_little(&((char *)mac)[8], pl.a[1]);
 }
 
-SFUNC int fio_chacha20_poly1305_dec(void *mac,
+SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *ad, /* additional data */
+                                    void *restrict ad, /* additional data */
                                     size_t adlen,
-                                    void *key,
-                                    void *nounce) {
+                                    const void *key,
+                                    const void *nounce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
   if (((auth[0] != fio_buf2u64_little(mac)) |
@@ -9627,8 +9567,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test ChaCha20 independently */
     struct {
-      char key[32];
-      char nounce[12];
+      char key[33];
+      char nounce[13];
       char *src;
       char *expected;
     } tests[] = {
@@ -9689,14 +9629,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test Poly1305 independently */
     struct {
-      char key[32];
+      char key[33];
       char *msg;
       char *expected;
     } tests[] = {{
                      .key = "\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe"
                             "\x42\xd5\x06\xa8\x01\x03\x80\x8a\xfb\x0d\xb2\xfd"
                             "\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b",
-                     .msg = "Cryptographic Forum Research Group",
+                     .msg = (char *)"Cryptographic Forum Research Group",
                      .expected =
                          (char *)"\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b"
                                  "\xaf\x0c\x01\x27\xa9",
@@ -9726,13 +9666,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
   { /* test ChaCha20Poly1305 */
     struct {
-      char key[32];
-      char nounce[12];
+      char key[33];
+      char nounce[13];
       char *ad;
       size_t ad_len;
       char *msg;
       char *expected;
-      char mac[16];
+      char mac[17];
     } tests[] = {
         {
             .key = "\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d"

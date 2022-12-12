@@ -490,31 +490,29 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
 
+#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
+  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
+  v.v[i] ^= w.v[i];                                                            \
+  v.v[i] *= prime.v[i];                                                        \
+  w.v[i] = fio_lrot64(w.v[i], 31);                                             \
+  v.v[i] += w.v[i];                                                            \
+  v.v[i] ^= seed;
+
   /* consumes 32 bytes (256 bits) blocks (no padding needed) */
   for (size_t pos = 31; pos < len; pos += 32) {
     for (size_t i = 0; i < 4; ++i) {
       fio_memcpy8(w.v + i, data + (i << 3));
-      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
-      v.v[i] ^= w.v[i];
-      v.v[i] *= prime.v[i];
-      v.v[i] = fio_lrot64(w.v[i], 31);
-      v.v[i] ^= seed;
-      v.v[i] += w.v[i];
+      FIO___R2_ROUND(i);
     }
     seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
-  /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0; /* sets padding to 0 */
-    fio_memcpy31x(w.v, data, len);         /* copies `len & 31` bytes */
+    uint64_t pad[4] = {0};         /* pad message with 0s */
+    fio_memcpy31x(pad, data, len); /* copies `len & 31` bytes */
     for (size_t i = 0; i < 4; ++i) {
-      w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */
-      v.v[i] ^= w.v[i];
-      v.v[i] *= prime.v[i];
-      v.v[i] = fio_lrot64(w.v[i], 31);
-      v.v[i] ^= seed;
-      v.v[i] += w.v[i];
+      fio_memcpy8(w.v + i, pad + i);
+      FIO___R2_ROUND(i);
     }
   }
   /* inner vector mini-avalanche */
@@ -525,10 +523,13 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   v.v[2] ^= fio_lrot64(v.v[2], 13);
   v.v[3] ^= fio_lrot64(v.v[3], 17);
   return v;
+#undef FIO___R2_ROUND
 }
 
 /*  Computes a facil.io Stable Hash. */
-SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
+FIO_SFUNC uint64_t fio_risky2_hash(const void *data_,
+                                   size_t len,
+                                   uint64_t seed) {
   uint64_t r;
   fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
   /* summing avalanche */
@@ -539,10 +540,10 @@ SFUNC uint64_t fio_risky2_hash(const void *data_, size_t len, uint64_t seed) {
   return r;
 }
 
-SFUNC void fio_risky2_hash128(void *restrict dest,
-                              const void *restrict data_,
-                              size_t len,
-                              uint64_t seed) {
+FIO_SFUNC void fio_risky2_hash128(void *restrict dest,
+                                  const void *restrict data_,
+                                  size_t len,
+                                  uint64_t seed) {
   fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
   uint64_t r[2];
   r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
@@ -766,22 +767,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   /* playground speed testing */
   fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit)",
+                         (char *)"rXtest (64 bit)",
                          7,
                          0,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit)",
+                         (char *)"rXtest (64 bit)",
                          13,
                          0,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         (char *)"rXtest (64 bit unaligned)",
                          6,
                          3,
                          2);
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
-                         (char *)"risky2_wrapper (64 bit unaligned)",
+                         (char *)"rXtest (64 bit unaligned)",
                          5,
                          3,
                          2);
