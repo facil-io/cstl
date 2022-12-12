@@ -730,24 +730,6 @@ FIO___MAKE_MEMCPY_ALIGNED(2048)
 FIO___MAKE_MEMCPY_ALIGNED(4096)
 #undef FIO___MAKE_MEMCPY_ALIGNED
 
-#define FIO___MEMCPYX_PARTIAL(bytes)                                           \
-  if ((l & bytes)) {                                                           \
-    fio_memcpy##bytes(d, s);                                                   \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-#if 1
-#define FIO___MEMCPYX_MAKER4(bytes, blog, n4, n2, n1, nx)                      \
-  FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
-                                      const void *restrict s_,                 \
-                                      size_t l) {                              \
-    register char *restrict d = (char *restrict)d_;                            \
-    register const char *restrict s = (const char *restrict)s_;                \
-    FIO___MEMCPYX_PARTIAL(n2);                                                 \
-    FIO___MEMCPYX_PARTIAL(n1);                                                 \
-    fio_memcpy##nx##x(d, s, l);                                                \
-  }
-#else
 #define FIO___MEMCPYX_MAKER4(bytes, blog, n4, n2, n1, nx)                      \
   FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
                                       const void *restrict s_,                 \
@@ -765,8 +747,6 @@ FIO___MAKE_MEMCPY_ALIGNED(4096)
     s += (l & (bytes & (~0ULL << (blog - 2))));                                \
     fio_memcpy##nx##x(d, s, l);                                                \
   }
-
-#endif
 #define FIO___MEMCPYX_MAKER8(bytes, blog, g7, g6, g5, g4, g3, g2, g1, gx)      \
   FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
                                       const void *restrict s_,                 \
@@ -805,14 +785,16 @@ FIO_IFUNC void fio_memcpy7x(void *restrict d_,
   };
   fn[l & 7](d_, s_);
 }
-
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio_memcpy15x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
   register char *restrict d = (char *restrict)d_;
   register const char *restrict s = (const char *restrict)s_;
-  FIO___MEMCPYX_PARTIAL(8);
+  void (*const fn[])(void *, const void *) = {fio_memcpy0, fio_memcpy8};
+  fn[(l >> 3) & 1](d_, s_);
+  d += (l & 8);
+  s += (l & 8);
   fio_memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
@@ -834,7 +816,6 @@ FIO___MEMCPYX_MAKER8(4095, 12, 3584, 3072, 2560, 2048, 1536, 1024, 512, 511)
 
 #undef FIO___MEMCPYX_MAKER4
 #undef FIO___MEMCPYX_MAKER8
-#undef FIO___MEMCPYX_PARTIAL
 
 /* *****************************************************************************
 FIO_MEMSET / fio_memset - memset fallbacks
