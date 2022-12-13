@@ -2434,7 +2434,6 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
-  const size_t base_repetitions = 8192;
 
   { /* test fio_memcpy possible overflow. */
     uint64_t buf1[64];
@@ -2473,6 +2472,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
 #ifndef DEBUG
   fprintf(stderr, "* Speed testing memset:\n");
+  const size_t base_repetitions = 8192;
 
   for (size_t len_i = 5; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions

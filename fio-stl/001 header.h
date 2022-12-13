@@ -876,16 +876,10 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
 #define FIO_MEMCHR memchr
 #endif
 #endif /* FIO_MEMCHR */
-/**
- * Returns the index of the least significant (lowest) bit - used in fio_memchr.
- *
- * Placed here (mostly copied from bitmap module).
- */
-FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return __builtin_ctzll(i);
-#else
-  i = (i & ((~i) + 1));
+
+#if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
+    !__has_builtin(__builtin_clzll)
+FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
   switch (i) {
   case UINT64_C(0x1): return 0;
   case UINT64_C(0x2): return 1;
@@ -953,6 +947,38 @@ FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
   case UINT64_C(0x8000000000000000): return 63;
   }
   return (0ULL - 1ULL);
+}
+#endif /* __builtin_ctzll || __builtin_clzll */
+
+/**
+ * Returns the index of the least significant (lowest) bit - used in fio_memchr.
+ *
+ * Placed here (mostly copied from bitmap module).
+ */
+FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(i);
+#else
+  return fio___single_bit_index_unsafe(i & ((~i) + 1));
+#endif /* __builtin vs. map */
+}
+/**
+ * Returns the index of the least significant (lowest) bit - used in wrine_bin.
+ *
+ * Placed here (mostly copied from bitmap module).
+ */
+FIO_SFUNC size_t fio___msb_index_unsafe(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 63 - __builtin_clzll(i);
+#else
+  i |= i >> 1;
+  i |= i >> 2;
+  i |= i >> 4;
+  i |= i >> 8;
+  i |= i >> 16;
+  i |= i >> 32;
+  i = ((i + 1) >> 1) | (i & ((uint64_t)1ULL << 63));
+  return fio___single_bit_index_unsafe(i);
 #endif /* __builtin vs. map */
 }
 /**

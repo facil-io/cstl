@@ -550,100 +550,22 @@ FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
   return i;
 }
 
-FIO_IFUNC size_t fio_bits___map_bit2index(uint64_t i) {
-  switch (i) {
-  case UINT64_C(0x1): return 0;
-  case UINT64_C(0x2): return 1;
-  case UINT64_C(0x4): return 2;
-  case UINT64_C(0x8): return 3;
-  case UINT64_C(0x10): return 4;
-  case UINT64_C(0x20): return 5;
-  case UINT64_C(0x40): return 6;
-  case UINT64_C(0x80): return 7;
-  case UINT64_C(0x100): return 8;
-  case UINT64_C(0x200): return 9;
-  case UINT64_C(0x400): return 10;
-  case UINT64_C(0x800): return 11;
-  case UINT64_C(0x1000): return 12;
-  case UINT64_C(0x2000): return 13;
-  case UINT64_C(0x4000): return 14;
-  case UINT64_C(0x8000): return 15;
-  case UINT64_C(0x10000): return 16;
-  case UINT64_C(0x20000): return 17;
-  case UINT64_C(0x40000): return 18;
-  case UINT64_C(0x80000): return 19;
-  case UINT64_C(0x100000): return 20;
-  case UINT64_C(0x200000): return 21;
-  case UINT64_C(0x400000): return 22;
-  case UINT64_C(0x800000): return 23;
-  case UINT64_C(0x1000000): return 24;
-  case UINT64_C(0x2000000): return 25;
-  case UINT64_C(0x4000000): return 26;
-  case UINT64_C(0x8000000): return 27;
-  case UINT64_C(0x10000000): return 28;
-  case UINT64_C(0x20000000): return 29;
-  case UINT64_C(0x40000000): return 30;
-  case UINT64_C(0x80000000): return 31;
-  case UINT64_C(0x100000000): return 32;
-  case UINT64_C(0x200000000): return 33;
-  case UINT64_C(0x400000000): return 34;
-  case UINT64_C(0x800000000): return 35;
-  case UINT64_C(0x1000000000): return 36;
-  case UINT64_C(0x2000000000): return 37;
-  case UINT64_C(0x4000000000): return 38;
-  case UINT64_C(0x8000000000): return 39;
-  case UINT64_C(0x10000000000): return 40;
-  case UINT64_C(0x20000000000): return 41;
-  case UINT64_C(0x40000000000): return 42;
-  case UINT64_C(0x80000000000): return 43;
-  case UINT64_C(0x100000000000): return 44;
-  case UINT64_C(0x200000000000): return 45;
-  case UINT64_C(0x400000000000): return 46;
-  case UINT64_C(0x800000000000): return 47;
-  case UINT64_C(0x1000000000000): return 48;
-  case UINT64_C(0x2000000000000): return 49;
-  case UINT64_C(0x4000000000000): return 50;
-  case UINT64_C(0x8000000000000): return 51;
-  case UINT64_C(0x10000000000000): return 52;
-  case UINT64_C(0x20000000000000): return 53;
-  case UINT64_C(0x40000000000000): return 54;
-  case UINT64_C(0x80000000000000): return 55;
-  case UINT64_C(0x100000000000000): return 56;
-  case UINT64_C(0x200000000000000): return 57;
-  case UINT64_C(0x400000000000000): return 58;
-  case UINT64_C(0x800000000000000): return 59;
-  case UINT64_C(0x1000000000000000): return 60;
-  case UINT64_C(0x2000000000000000): return 61;
-  case UINT64_C(0x4000000000000000): return 62;
-  case UINT64_C(0x8000000000000000): return 63;
-  }
-  return (size_t)-1;
-}
-
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
-  uint64_t r = 0;
   if (!i)
     goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return 63 - __builtin_clzll(i);
-#else
-  return fio_bits___map_bit2index(fio_bits_msb(i));
-#endif
+  return fio___msb_index_unsafe(i);
 zero:
-  r = (size_t)-1;
-  return r;
+  return (size_t)-1;
 }
 
 /** Returns the index of the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   if (!i)
-    return (size_t)-1;
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll) && 0
-  return __builtin_ctzll(i);
-#else
-  return fio_bits___map_bit2index(fio_bits_lsb(i));
-#endif /* __builtin vs. map */
+    goto zero;
+  return fio___lsb_index_unsafe(i);
+zero:
+  return (size_t)-1;
 }
 
 /* *****************************************************************************
@@ -852,10 +774,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
   }
   for (size_t i = 0; i < 63; ++i) {
-    FIO_ASSERT(fio_bits___map_bit2index((1ULL << i)) == i,
+#if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
+    !__has_builtin(__builtin_clzll)
+    FIO_ASSERT(fio___single_bit_index_unsafe((1ULL << i)) == i,
                "bit index map[%zu] error != %zu",
                (size_t)(1ULL << i),
                i);
+#endif
     FIO_ASSERT(fio_bits_msb_index(((1ULL << i) | 1)) == i,
                "fio_bits_msb_index(%zu) != %zu",
                ((1ULL << i)),

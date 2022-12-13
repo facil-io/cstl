@@ -1039,26 +1039,20 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
 SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
-  int r = -1;
-  char buf[64];
-  size_t len = 0;
-  buf[0] = '0';
-  while (i) {
-    buf[len++] = '0' + (i & 1);
-    i >>= 1;
-    buf[len++] = '0' + (i & 1);
-    i >>= 1;
-  }
-  len += !len; /* printing 0 if zero */
+  int r = 0;
+  size_t len = fio_digits_bin(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
-    return r; /* no writing of partial numbers. */
-  r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
-  }
+    return (r = -1); /* no writing of partial numbers. */
+  dest->buf[dest->len] = '0';
+  dest->len += len;
+  len = dest->len;
   dest->buf[dest->len] = 0;
-  return r;
-
+  while (i) {
+    dest->buf[--len] = '0' + (i & 1);
+    i >>= 1;
+    dest->buf[--len] = '0' + (i & 1);
+    i >>= 1;
+  }
   return r;
 }
 
@@ -1449,7 +1443,7 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     case 2: /* number */ len += fio_digits10(pos->info.i); break;
     case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
     case 4: /* hex */ len += fio_digits16(pos->info.u); break;
-    case 5: /* binary */ len += fio_bits_msb_index(pos->info.u) + 1; break;
+    case 5: /* binary */ len += fio_digits_bin(pos->info.u); break;
     case 6: /* float */ len += 18; break;
     default: len += pos->info.str.len;
     }
@@ -2131,6 +2125,10 @@ FIO_SFUNC size_t FIO_NAME_TEST(stl, string_core_ltoa)(char *buf,
     fio_string_write_hex(&s, NULL, i);
     return s.len;
   }
+  if (base == 2) {
+    fio_string_write_bin(&s, NULL, i);
+    return s.len;
+  }
   fio_string_write_i(&s, NULL, i);
   return s.len;
 }
@@ -2492,7 +2490,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
-    fprintf(stderr, "* Testing fio_string_write_(i|u|hex) speeds:\n");
+    fprintf(stderr, "* Testing fio_string_write_(i|u|hex|bin) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
      fio_atol,

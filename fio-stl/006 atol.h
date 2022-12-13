@@ -51,6 +51,8 @@ FIO_IFUNC size_t fio_digits10(int64_t i);
 FIO_IFUNC size_t fio_digits10u(uint64_t i);
 /** Returns the number of digits in base 16 for an unsigned number. */
 FIO_IFUNC size_t fio_digits16(uint64_t i);
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_IFUNC size_t fio_digits_bin(uint64_t i);
 
 /* *****************************************************************************
 Strings to Numbers - API
@@ -150,6 +152,16 @@ FIO_IFUNC size_t fio_digits16(uint64_t i) {
   if (i < 0x100000000000000ULL)
     return 14;
   return 16;
+}
+
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_IFUNC size_t fio_digits_bin(uint64_t i) {
+  size_t r = 1;
+  if (!i)
+    return r;
+  r = fio___msb_index_unsafe(i) + 1;
+  r += (r & 1); /* binary is written 2 zeros at a time */
+  return r;
 }
 
 /* *****************************************************************************
@@ -321,6 +333,18 @@ done:
   if (!inv) /* do not limit unsigned representation for positive r */
     return r;
   return (r = fio_u2i_limit(r, inv));
+}
+
+SFUNC uint64_t fio_atol_bin(char **pstr) {
+  uint64_t r = 0;
+  size_t d;
+  while ((d = (size_t)(**pstr) - (size_t)'0') < 2) {
+    r |= d;
+    r <<= 1;
+    if ((r & UINT64_C(0x8000000000000000)))
+      return r;
+  }
+  return r;
 }
 
 SFUNC int64_t fio_atol(char **pstr) {
@@ -681,6 +705,21 @@ FIO_IFUNC int64_t FIO_NAME_TEST(stl, atol_time)(void) {
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
+SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
+  switch (base) {
+  case 2: /* overflow - unsupported */
+  case 8: /* overflow - unsupported */
+  case 10: return snprintf(dest, 256, "%" PRId64, num);
+  case 16:
+    if (num >= 0)
+      return snprintf(dest, 256, "0x%.16" PRIx64, num);
+    return snprintf(dest, 256, "-0x%.8" PRIx64, (0 - num));
+  }
+  return snprintf(dest, 256, "%" PRId64, num);
+}
+
+SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
+
 FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
                                               int64_t (*a2l)(char **),
                                               size_t (*l2a)(char *,
@@ -698,12 +737,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
   } * pb, b[] = {
               {.str = "Base 10", .base = 10},
               {.str = "Hex    ", .prefix = "0x", .prefix_len = 2, .base = 16},
-              // {.str = "Binary ", .prefix = "0b", .prefix_len = 2, .base = 2},
+              {.str = "Binary ", .prefix = "0b", .prefix_len = 2, .base = 2},
               // {.str = "Oct    ", .prefix = "0", .prefix_len = 1, .base = 8},
               /* end marker */
               {.str = NULL},
           };
   fprintf(stderr, "    * %s test performance:\n", name);
+  if (l2a == sprintf_wrapper)
+    b[2].str = NULL;
   for (pb = b; pb->str; ++pb) {
     start = FIO_NAME_TEST(stl, atol_time)();
     for (int64_t i = -FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
@@ -770,21 +811,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
     // clang-format on
   }
 }
-
-SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
-  switch (base) {
-  case 2: /* overflow - unsupported */
-  case 8: /* overflow - unsupported */
-  case 10: return snprintf(dest, 256, "%" PRId64, num);
-  case 16:
-    if (num >= 0)
-      return snprintf(dest, 256, "0x%.16" PRIx64, num);
-    return snprintf(dest, 256, "-0x%.8" PRIx64, (0 - num));
-  }
-  return snprintf(dest, 256, "%" PRId64, num);
-}
-
-SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol and fio_ltoa.\n");
@@ -949,6 +975,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_LTOA_DIGITS16(0x100000000000000ULL, 16);
   TEST_LTOA_DIGITS16(0xFF00000000000000ULL, 16);
 #undef TEST_LTOA_DIGITS16
+
+#define TEST_LTOA_DIGITS_BIN(num, digits)                                      \
+  FIO_ASSERT(fio_digits_bin(num) == digits,                                    \
+             "fio_digits_bin failed for " #num " != (%zu)",                    \
+             (size_t)fio_digits_bin(num));
+
+  TEST_LTOA_DIGITS_BIN(0x00ULL, 1);
+  TEST_LTOA_DIGITS_BIN(-0x01ULL, 64);
+  TEST_LTOA_DIGITS_BIN(0x10ULL, 6);
+  TEST_LTOA_DIGITS_BIN(0x100ULL, 10);
+  TEST_LTOA_DIGITS_BIN(0x10000ULL, 18);
+  TEST_LTOA_DIGITS_BIN(0x20000ULL, 18);
+  TEST_LTOA_DIGITS_BIN(0xFFFFFFULL, 24);
+  TEST_LTOA_DIGITS_BIN(0x1000000ULL, 26);
+  TEST_LTOA_DIGITS_BIN(0x10000000ULL, 30);
+  TEST_LTOA_DIGITS_BIN(0x100000000ULL, 34);
+  TEST_LTOA_DIGITS_BIN(0x10000000000ULL, 42);
+  TEST_LTOA_DIGITS_BIN(0x1000000000000ULL, 50);
+  TEST_LTOA_DIGITS_BIN(0x100000000000000ULL, 58);
+  TEST_LTOA_DIGITS_BIN(0xFF00000000000000ULL, 64);
+#undef TEST_LTOA_DIGITS_BIN
 
   FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
   FIO_NAME_TEST(stl, atol_speed)
