@@ -218,16 +218,6 @@ Translates to the STL's build version **string** (i.e., `"beta.1"`), if any.
 
 Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
-#### `FIO_VERSION_GUARD`
-
-If the `FIO_VERSION_GUARD` macro is defined in **a single** translation unit (C file) **before** including `fio-stl.h` for the first time, then the version macros become available using functions as well: `fio_version_major`, `fio_version_minor`, etc'.
-
-#### `FIO_VERSION_VALIDATE`
-
-By adding the `FIO_VERSION_GUARD` functions, a version test could be performed during runtime (which can be used for static libraries), using the macro `FIO_VERSION_VALIDATE()`.
-
-**Note**: the `FIO_VERSION_VALIDATE()` macro does not test build versions, only API compatibility (Major and Minor and Patch versions during development and Major and Minor versions after a 1.x release).
-
 -------------------------------------------------------------------------------
 
 ### Pointer Arithmetics
@@ -363,7 +353,7 @@ any code.
 
 -------------------------------------------------------------------------------
 
-## Binary Data Informational Types and Helpers
+## Binary Data Informational Types and Helper Macros
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
 
@@ -526,6 +516,7 @@ By default this will be set to either `memcpy` or `__builtin_memcpy` (if availab
 #### `fio_memcpy##`
 
 ```c
+static void fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
 static void fio_memcpy1(void *restrict dest, const void *restrict src);
 static void fio_memcpy2(void *restrict dest, const void *restrict src);
 static void fio_memcpy4(void *restrict dest, const void *restrict src);
@@ -576,7 +567,7 @@ A fallback for `memcpy`, copies `length` bytes from `src` to `dest`.
 
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 #### `FIO_MEMSET`
 
@@ -600,7 +591,7 @@ A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
 
 The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 #### `FIO_MEMCHR`
 
@@ -624,7 +615,7 @@ A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at 
 
 If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 -------------------------------------------------------------------------------
 

@@ -7,9 +7,10 @@
 #include "./include.h"  /* Development inclusion - ignore line */
 #endif                  /* Development inclusion - ignore line */
 /* ************************************************************************* */
-#if (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+#if defined(FIO_POLL) &&                                                       \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL &&                                \
-    !defined(H___FIO_POLL_EGN___H) && defined(H___FIO_POLL___H) &&             \
+    !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
     !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************

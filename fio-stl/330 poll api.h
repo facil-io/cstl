@@ -17,7 +17,6 @@
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
-#define H___FIO_POLL___H
 
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
@@ -157,5 +156,4 @@ SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-#undef FIO_POLL
 #endif /* FIO_POLL */

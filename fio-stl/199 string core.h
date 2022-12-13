@@ -966,27 +966,26 @@ SFUNC int fio_string_write_i(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              int64_t i) {
   int r = -1;
-  char buf[32];
   size_t len = 0;
   size_t inv = i < 0;
   if (inv) {
     i = 0 - i;
   }
-  while (i > 9) {
-    uint64_t nxt = (uint64_t)i / 10;
-    buf[len++] = '0' + ((uint64_t)i - (nxt * 10));
-    i = (int64_t)nxt;
-  }
-  buf[len++] = '0' + (unsigned char)i;
-  buf[len] = '-';
-  len += inv;
+  len = fio_digits10(i) + inv;
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
+  len += dest->len;
+  dest->len = len;
+  dest->buf[len] = 0;
+  while (i > 9) {
+    uint64_t nxt = (uint64_t)i / 10;
+    dest->buf[--len] = '0' + ((uint64_t)i - (nxt * 10));
+    i = (int64_t)nxt;
   }
-  dest->buf[dest->len] = 0;
+  --len;
+  dest->buf[len - inv] = '-';
+  dest->buf[len] = '0' + (unsigned char)i;
   return r;
 }
 
@@ -995,21 +994,20 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              uint64_t i) {
   int r = -1;
-  char buf[32];
-  size_t len = 0;
-  while (i > 9) {
-    uint64_t nxt = i / 10;
-    buf[len++] = '0' + (i - (nxt * 10));
-    i = nxt;
-  }
-  buf[len++] = '0' + (unsigned char)i;
+  size_t len = fio_digits10u(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
+  len += dest->len;
+  dest->len = len;
+  dest->buf[len] = 0;
+  while (i > 9) {
+    uint64_t nxt = i / 10;
+    dest->buf[--len] = '0' + (i - (nxt * 10));
+    i = nxt;
   }
-  dest->buf[dest->len] = 0;
+  --len;
+  dest->buf[len] = '0' + (unsigned char)i;
   return r;
 }
 
@@ -2227,8 +2225,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write2 failed to truncate (bin)!");
   }
   { /* test numeral fio_string_write functions. */
-    char mem[16];
-    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
+    char mem[32];
+    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_i(&buf, NULL, 0),
                "fio_string_write_i returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
@@ -2237,7 +2235,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write_i returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "0-42", 5),
                "fio_string_write_i didn't print -24!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
+    buf = FIO_STR_INFO3(mem, 0, 32);
+    FIO_ASSERT(!fio_string_write_u(&buf, NULL, 0),
+               "fio_string_write_u returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
+               "fio_string_write_u didn't print 0!");
+    FIO_ASSERT(!fio_string_write_u(&buf, NULL, -42LL),
+               "fio_string_write_u returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 21 &&
+                   !memcmp(buf.buf, "018446744073709551574", 21),
+               "fio_string_write_u didn't print -24!");
+    buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 0),
                "fio_string_write_hex returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 2 && !memcmp(buf.buf, "00", 3),
@@ -2246,7 +2254,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write_hex returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "002A", 5),
                "fio_string_write_hex didn't print 2A!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
+    buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 0),
                "fio_string_write_bin returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),

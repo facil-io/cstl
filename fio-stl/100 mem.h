@@ -2431,38 +2431,10 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
 
-FIO_SFUNC void *fio___naive_memchr(const void *buffer,
-                                   const char token,
-                                   size_t len) {
-  const char *r = (const char *)buffer;
-  const char *e = r + len;
-  const char *e_group = r + (len & (~UINT64_C(63)));
-  for (; r < e_group; r += 64) {
-    for (size_t i = 0; i < 64; ++i) {
-      if (FIO_UNLIKELY(r[i] == token))
-        return (void *)(r + i);
-    }
-  }
-  for (; r < e; ++r) {
-    if (*r == token)
-      return (void *)r;
-  }
-  return NULL;
-}
-
-FIO_SFUNC void fio___naive_memcpy(void *restrict d_,
-                                  const void *restrict s_,
-                                  size_t len) {
-  char *d = (char *)d_;
-  const char *s = (const char *)s_;
-  while (len--)
-    *(d++) = *(s++);
-}
-
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
-  const int repetitions = 8192;
+  const size_t base_repetitions = 8192;
 
   { /* test fio_memcpy possible overflow. */
     uint64_t buf1[64];
@@ -2500,11 +2472,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   }
 
 #ifndef DEBUG
-  fprintf(stderr,
-          "* Speed testing memset (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memset:\n");
 
-  for (int len_i = 5; len_i < 20; ++len_i) {
+  for (size_t len_i = 5; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = 1ULL << len_i;
     void *mem = malloc(mem_len);
     FIO_ASSERT_ALLOC(mem);
@@ -2515,7 +2487,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     sig ^= sig << 31;
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       fio_memset(mem, sig, mem_len);
       FIO_COMPILER_GUARD;
     }
@@ -2525,28 +2497,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                               mem_len,
                               "fio_memset sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memset\t(%zu bytes):\t%zuus\n",
+            "\tfio_memset\t(%zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       memset(mem, (int)sig, mem_len);
       FIO_COMPILER_GUARD;
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memset\t(%zu bytes):\t%zuus\n",
+            "\tsystem memset\t(%zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     free(mem);
   }
 
-  fprintf(stderr,
-          "* Speed testing memcpy (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memcpy:\n");
 
-  for (int len_i = 5; len_i < 22; ++len_i) {
+  for (int len_i = 5; len_i < 21; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
       void *mem = malloc(mem_len << 1);
@@ -2557,10 +2531,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       sig ^= sig << 29;
       sig ^= sig << 31;
       fio_memset(mem, sig, mem_len);
-      size_t mbsec;
 
       start = fio_time_micro();
-      for (int i = 0; i < repetitions; ++i) {
+      for (size_t i = 0; i < repetitions; ++i) {
         fio_memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
@@ -2569,16 +2542,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                                 sig,
                                 mem_len,
                                 "fio_memcpy sanity test FAILED");
-      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tfio_memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+              "\tfio_memcpy\t(%zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
-              mbsec);
+              repetitions);
 
       // size_t threads_used = 0;
       // start = fio_time_micro();
-      // for (int i = 0; i < repetitions; ++i) {
+      // for (size_t i = 0; i < repetitions; ++i) {
       //   threads_used = fio_thread_memcpy((char *)mem + mem_len, mem,
       //   mem_len); if (threads_used == 1)
       //     break;
@@ -2589,47 +2561,31 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       //                           sig,
       //                           mem_len,
       //                           "fio_thread_memcpy sanity test FAILED");
-      // mbsec = ((end - start) * repetitions) / mem_len;
       // fprintf(stderr,
       //         "   fio_thread_memcpy (%zut)\t(%zu bytes):\t%zu"
-      //         "us\t%zumb/sec\n", threads_used, mem_len, (size_t)(end -
-      //         start), mbsec);
+      //         "us\t/ %zu\n", threads_used, mem_len, (size_t)(end
+      //         - start), repetitions);
 
       start = fio_time_micro();
-      for (int i = 0; i < repetitions; ++i) {
+      for (size_t i = 0; i < repetitions; ++i) {
         memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
-      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tsystem memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+              "\tsystem memcpy\t(%zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
-              mbsec);
-
-      // start = fio_time_micro();
-      // for (int i = 0; i < repetitions; ++i) {
-      //   fio___naive_memcpy((char *)mem + mem_len, mem, mem_len);
-      //   FIO_COMPILER_GUARD;
-      // }
-      // end = fio_time_micro();
-      // mbsec = (mem_len * repetitions) / (end - start);
-      // fprintf(stderr,
-      //         "\tnaive memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
-      //         mem_len,
-      //         (size_t)(end - start),
-      //         mbsec);
-
+              repetitions);
       free(mem);
     }
   }
 
-  fprintf(stderr,
-          "* Speed testing memchr (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memchr:\n");
 
   for (int len_i = 5; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
     const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
@@ -2643,15 +2599,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
-    FIO_ASSERT(fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
-                   fio_memchr((char *)mem + 1, 0, mem_len),
-               "fio_memchr != naive approach");
     // FIO_ASSERT(fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
     //                fio_memchr((char *)mem + 1, 0, mem_len),
     //            "fio_memchr (partial math) != alternative approach");
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
                      ((char *)mem + token_index),
                  "fio_memchr failed?");
@@ -2660,12 +2613,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
 
     fprintf(stderr,
-            "\tfio_memchr\t(%zu bytes):\t%zu us\n",
+            "\tfio_memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
             token_index,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
                      ((char *)mem + token_index),
                  "memchr failed?");
@@ -2673,12 +2627,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memchr\t(%zu bytes):\t%zuus\n",
+            "\tsystem memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
             token_index,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     // start = fio_time_micro();
-    // for (int i = 0; i < repetitions; ++i) {
+    // for (size_t i = 0; i < repetitions; ++i) {
     //   FIO_ASSERT((char *)fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
     //                  ((char *)mem + token_index),
     //              "fio___alt_memchr failed?");
@@ -2686,29 +2641,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     // }
     // end = fio_time_micro();
     // fprintf(stderr,
-    //         "\tfio_alt_memchr\t(%zu bytes):\t%zu us\n",
+    //         "\tfio_alt_memchr\t(%zu bytes):\t%zu us\t/ %zu\n",
     //         token_index,
-    //         (size_t)(end - start));
-
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      FIO_ASSERT((char *)fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + token_index),
-                 "memchr failed?");
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\ta naive memchr\t(%zu bytes):\t%zuus\n",
-            token_index,
-            (size_t)(end - start));
+    //         (size_t)(end - start), repetitions);
 
     free(mem);
   }
 #endif /* DEBUG */
-  (void)start;
-  (void)end;
-  (void)repetitions;
+  ((void)start), ((void)end);
 }
 #endif /* H___FIO_TEST_MEMORY_HELPERS_H */
 

@@ -37,7 +37,7 @@ int main(int argc, char const *argv[]) {
   data = fiobj2json(FIOBJ_INVALID, json, 1);
 
   /* print out the final data in JSON format. */
-  printf("%s\n", fiobj_str2ptr(data));
+  printf("%s\n", fiobj_str_ptr(data));
 
   /* cleanup. */
   fiobj_free(data);

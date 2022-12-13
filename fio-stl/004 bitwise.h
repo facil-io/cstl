@@ -785,33 +785,37 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
-    void (*fn[])(void *, const void *, size_t) = {
-        fio_memcpy7x,
-        fio_memcpy15x,
-        fio_memcpy31x,
-        fio_memcpy63x,
-        fio_memcpy127x,
-        fio_memcpy255x,
-        fio_memcpy511x,
-        fio_memcpy1023x,
-        fio_memcpy2047x,
-        fio_memcpy4095x,
-        NULL,
+    struct {
+      void (*fn)(void *, const void *, size_t);
+      const char *name;
+      size_t len;
+    } tests[] = {
+        {fio_memcpy7x, "fio_memcpy7x", 7},
+        {fio_memcpy15x, "fio_memcpy15x", 15},
+        {fio_memcpy31x, "fio_memcpy31x", 31},
+        {fio_memcpy63x, "fio_memcpy63x", 63},
+        {fio_memcpy127x, "fio_memcpy127x", 127},
+        {fio_memcpy255x, "fio_memcpy255x", 255},
+        {fio_memcpy511x, "fio_memcpy511x", 511},
+        {fio_memcpy1023x, "fio_memcpy1023x", 1023},
+        {fio_memcpy2047x, "fio_memcpy2047x", 2047},
+        {fio_memcpy4095x, "fio_memcpy4095x", 4095},
+        {NULL},
     };
-    char buf[128];
-    const char *str = "This string should be 39 chars long, ok";
-    size_t len = strlen(str);
-    for (size_t ifn = 0; fn[ifn]; ++ifn) {
+    char buf[(4096 << 1) + 64];
+    fio_rand_bytes(buf + (4096 + 32), (4096 + 32));
+    for (size_t ifn = 0; tests[ifn].fn;
+         ++ifn) { /* TODO: test all x primitives */
+      size_t len = tests[ifn].len;
       for (size_t i = 0; i < 31; ++i) {
+        memset(buf, 0, 4096 + 32);
         buf[i + len] = '\xFF';
-        fio_memcpy63x(buf + i, str, len);
-        FIO_ASSERT(!memcmp(buf + i, str, (len & ((1UL << (ifn + 3)) - 1))),
-                   "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
-                   i,
-                   (int)len,
-                   buf + i,
-                   str);
-        FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+        tests[ifn].fn(buf + i, buf + (4096 + 32), len);
+        FIO_ASSERT(!memcmp(buf + i, buf + (4096 + 32), len),
+                   "%s failed @ %zu\n",
+                   tests[ifn].name,
+                   i);
+        FIO_ASSERT(buf[i + len] == '\xFF', "%s overflow?", tests[ifn].name);
       }
     }
   }

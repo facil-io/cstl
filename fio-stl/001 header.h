@@ -293,51 +293,9 @@ supports macros that will help detect and validate it's version.
 #define FIO_VERSION_BUILD ""
 #endif
 
-/** If implemented, returns the major version number. */
-int fio_version_major(void);
-/** If implemented, returns the minor version number. */
-int fio_version_minor(void);
-/** If implemented, returns the patch version number. */
-int fio_version_patch(void);
-/** If implemented, returns the build version string. */
-const char *fio_version_build(void);
-/** If implemented, returns the version number as a string. */
-char *fio_version_string(void);
-
-#if FIO_VERSION_MAJOR
-#define FIO_VERSION_VALIDATE()                                                 \
-  FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
-                 fio_version_minor() == FIO_VERSION_MINOR,                     \
-             "facil.io version mismatch, not %s",                              \
-             fio_version_string())
-#else
-#define FIO_VERSION_VALIDATE()                                                 \
-  FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
-                 fio_version_minor() == FIO_VERSION_MINOR &&                   \
-                 fio_version_patch() == FIO_VERSION_PATCH,                     \
-             "facil.io version mismatch, not %s",                              \
-             fio_version_string())
-#endif
-/**
- * To implement the fio_version_* functions and FIO_VERSION_VALIDATE guard, the
- * `FIO_VERSION_GUARD` must be defined (only) once per application / library.
- */
-#ifdef FIO_VERSION_GUARD
-int __attribute__((weak)) fio_version_major(void) { return FIO_VERSION_MAJOR; }
-int __attribute__((weak)) fio_version_minor(void) { return FIO_VERSION_MINOR; }
-int __attribute__((weak)) fio_version_patch(void) { return FIO_VERSION_PATCH; }
-const char *__attribute__((weak)) fio_version_build(void) {
-  return FIO_VERSION_BUILD;
-}
-char *__attribute__((weak)) fio_version_string(void) {
-  return FIO_VERSION_STRING;
-}
-#undef FIO_VERSION_GUARD
-#endif /* FIO_VERSION_GUARD */
-
 #if !defined(FIO_NO_COOKIE)
 /** If implemented, does stuff. */
-void __attribute__((weak)) fio___(void) {
+void FIO_WEAK fio___(void) {
   volatile uint8_t tmp[] =
       "\xA8\x94\x9A\x10\x99\x92\x93\x96\x9C\x1D\x96\x9F\x10\x9C\x96\x91\xB1\x92"
       "\xB1\xB6\x10\xBB\x92\xB3\x10\x92\xBA\xB8\x94\x9F\xB1\x9A\x98\x10\x91\xB6"
@@ -602,7 +560,7 @@ Memory Copying Primitives
 #define FIO_MEMCPY __builtin_memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
     __builtin_memcpy(d, s, bytes);                                             \
   }
 #else
@@ -611,16 +569,16 @@ Memory Copying Primitives
 #define FIO_MEMCPY memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
     for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
       ((char *)d)[i] = ((const char *)s)[i];                                   \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
-FIO_IFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
+FIO_SFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)d), ((void)s);
 }
-FIO_IFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
+FIO_SFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
 }
 /** Copies 2 bytes from `src` (`s`) to `dest` (`d`). */
@@ -658,7 +616,7 @@ FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
 #define FIO___MAKE_MEMCPY_ALIGNED(bytes)                                       \
-  FIO_IFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
+  FIO_SFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
                                              const void *restrict src) {       \
     for (size_t i = 0; i < (bytes##ULL / sizeof(size_t)); ++i)                 \
       ((size_t *)dest)[i] = ((size_t *)src)[i]; /* should vectorize, right? */ \
@@ -698,7 +656,7 @@ FIO___MAKE_MEMCPY_ALIGNED(4096)
 #undef FIO___MAKE_MEMCPY_ALIGNED
 
 /** Does nothing. */
-FIO_IFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
+FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
   ((void)d), ((void)s), ((void)l);
 }
 
@@ -746,7 +704,7 @@ FIO_IFUNC void fio_memcpy15x(void *restrict d_,
   fio_memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio_memcpy31x(void *restrict d_,
+FIO_SFUNC void fio_memcpy31x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
   char *restrict d = (char *restrict)d_;
@@ -801,6 +759,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
       fio_memcpy8(d, &data);                                                   \
     } /* let compiler vectorize loop */
+
   for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
     for (int i = 0; i < 32; (++i), (d += 8))
       fio_memcpy8(d, &data); /* let compiler vectorize loop */
@@ -908,7 +867,6 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 /* *****************************************************************************
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
-
 #ifndef FIO_MEMCHR
 #if __has_builtin(__builtin_memchr)
 /** `memchr` selector macro */
@@ -918,7 +876,6 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
 #define FIO_MEMCHR memchr
 #endif
 #endif /* FIO_MEMCHR */
-
 /**
  * Returns the index of the least significant (lowest) bit - used in fio_memchr.
  *
@@ -998,7 +955,6 @@ FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
   return (0ULL - 1ULL);
 #endif /* __builtin vs. map */
 }
-
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
@@ -1135,8 +1091,7 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1312,9 +1267,8 @@ typedef struct fio_index8_node_s {
 #endif
 
 /* *****************************************************************************
-Common String Helpers
-*****************************************************************************
-*/
+String and Buffer Information Containers + Helper Macros
+***************************************************************************** */
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
