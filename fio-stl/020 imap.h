@@ -47,6 +47,7 @@ iMap Creation Macro
  * - `array_name_get`      returns a pointer to the object within the array.
  * - `array_name_remove`   removes an object and resets its memory to zero.
  * - `array_name_reserve`  reserves a minimum imap storage capacity.
+ * - `array_name_rehash`   re-builds the imap (use after sorting).
  */
 #define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
                                array_type,                                     \
@@ -216,6 +217,17 @@ iMap Creation Macro
     if (!FIO_NAME(array_name, __fill_imap)(a))                                 \
       return 0;                                                                \
     return FIO_NAME(array_name, __expand)(a);                                  \
+  }                                                                            \
+  /** Rehashes the array and fills the imap (use after sorting). */            \
+  FIO_IFUNC int FIO_NAME(array_name, rehash)(FIO_NAME(array_name, s) * a) {    \
+    if (!a || !a->ary)                                                         \
+      return -1;                                                               \
+    size_t bytes = sizeof(imap_type) * ((size_t)1ULL << a->capa_bits);         \
+    imap_type *imap = FIO_NAME(array_name, imap)(a);                           \
+    FIO_MEMSET(imap, 0, bytes);                                                \
+    if (!FIO_NAME(array_name, __fill_imap)(a))                                 \
+      return -1;                                                               \
+    return 0;                                                                  \
   }                                                                            \
   /** Sets an object in the Array. Optionally overwrites existing data. */     \
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \

@@ -1958,6 +1958,123 @@ Destroys a simple conditional variable.
 
 
 -------------------------------------------------------------------------------
+## Time Helpers
+
+```c
+#define FIO_TIME
+#include "fio-stl.h"
+```
+
+By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
+
+#### `fio_time_real`
+
+```c
+struct timespec fio_time_real();
+```
+
+Returns human (watch) time... this value isn't as safe for measurements.
+
+#### `fio_time_mono`
+
+```c
+struct timespec fio_time_mono();
+```
+
+Returns monotonic time.
+
+#### `fio_time_nano`
+
+```c
+uint64_t fio_time_nano();
+```
+
+Returns monotonic time in nano-seconds (now in 1 micro of a second).
+
+#### `fio_time_micro`
+
+```c
+uint64_t fio_time_micro();
+```
+
+Returns monotonic time in micro-seconds (now in 1 millionth of a second).
+
+#### `fio_time_milli`
+
+```c
+uint64_t fio_time_milli();
+```
+
+Returns monotonic time in milliseconds.
+
+
+#### `fio_time2milli`
+
+```c
+uint64_t fio_time2milli(struct timespec t);
+```
+
+Converts a `struct timespec` to milliseconds.
+
+#### `fio_time2gm`
+
+```c
+struct tm fio_time2gm(time_t timer);
+```
+
+A faster (yet less localized) alternative to `gmtime_r`.
+
+See the libc `gmtime_r` documentation for details.
+
+Returns a `struct tm` object filled with the date information.
+
+This function is used internally for the formatting functions: , `fio_time2rfc7231`, `fio_time2rfc2109`, and `fio_time2rfc2822`.
+
+#### `fio_gm2time`
+
+```c
+time_t fio_gm2time(struct tm tm)
+```
+
+Converts a `struct tm` to time in seconds (assuming UTC).
+
+This function is less localized then the `mktime` / `timegm` library functions.
+
+#### `fio_time2rfc7231`
+
+```c
+size_t fio_time2rfc7231(char *target, time_t time);
+```
+
+Writes an RFC 7231 date representation (HTTP date format) to target.
+
+Requires 29 characters (for positive, 4 digit years).
+
+The format is similar to DDD, dd, MON, YYYY, HH:MM:SS GMT
+
+i.e.: Sun, 06 Nov 1994 08:49:37 GMT
+
+#### `fio_time2rfc2109`
+
+```c
+size_t fio_time2rfc2109(char *target, time_t time);
+```
+
+Writes an RFC 2109 date representation to target.
+
+Requires 31 characters (for positive, 4 digit years).
+
+#### `fio_time2rfc2822`
+
+```c
+size_t fio_time2rfc2822(char *target, time_t time);
+```
+
+Writes an RFC 2822 date representation to target.
+
+Requires 28 or 29 characters (for positive, 4 digit years).
+
+-------------------------------------------------------------------------------
 ## Pseudo Random Generation
 
 ```c
@@ -2211,6 +2328,46 @@ void fio_poly1305_auth(void *mac_dest,
 Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
 
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+
+-------------------------------------------------------------------------------
+## iMap - a Mapped Array
+
+The `FIO_TYPEDEF_IMAP_ARRAY` macro is one way to design a hash map. It is used when both insertion order and iteration over the complete data set is of high priority. 
+
+#### `FIO_TYPEDEF_IMAP_ARRAY`
+
+```c
+#define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
+                               array_type,                                     \
+                               imap_type,                                      \
+                               hash_fn,                                        \
+                               cmp_fn,                                         \
+                               is_valid_fn)
+```
+
+This MACRO defines the type and functions needed for an indexed array.
+
+An indexed array is simple ordered array who's objects are indexed using an almost-hash map, allowing for easy seeking while also enjoying the advantages provided by the array structure.
+
+The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index in array and any leftover hash data (the first half being tested during the random access and the leftover during comparison). The reserved value `0` indicates a free slot. The reserved value `~0` indicates a freed item (a free slot that was previously used).
+
+This is mostly for internal use and documentation is poor (PR, anyone?).
+
+The macro defines the following:
+
+- `array_name_s`        the main array container (.ary is the array itself)
+
+- `array_name_seeker_s` is a seeker type that finds objects.
+- `array_name_seek`     finds an object or its future position.
+
+- `array_name_reserve`  reserves a minimum imap storage capacity.
+- `array_name_capa`     the imap's theoretical storage capacity.
+
+- `array_name_set`      writes or overwrites data to the array.
+- `array_name_get`      returns a pointer to the object within the array.
+- `array_name_remove`   removes an object and resets its memory to zero.
+
+- `array_name_rehash`   re-builds the imap (use after sorting).
 
 -------------------------------------------------------------------------------
 ## URL (URI) parsing
@@ -2661,6 +2818,112 @@ void run_my_json_minifier(char *json, size_t len) {
   fio_str_destroy(&p.out);
 }
 ```
+
+-------------------------------------------------------------------------------
+## State Callbacks
+
+The state callback API, which is also used internally by stateful modules such as the memory allocator, allows callbacks to be registered for specific changes in the state of the app.
+
+This allows modules to react to changes in the state of the program without requiring the functions that caused the change in state to know about each of the modules that wish to react, only requiting it to publish a notification by calling `fio_state_callback_force`.
+
+When using this module it is better if it is used as a global `FIO_EXTERN` module, so state notifications are not limited to the scope of the C file (the translation unit).
+
+By defining the `FIO_STATE` macro, the following are defined:
+
+#### `fio_state_callback_add`
+
+```c
+void fio_state_callback_add(fio_state_event_type_e event,
+                            void (*func)(void *),
+                            void *arg);
+```
+
+Adds a callback to the list of callbacks to be called for the `event`.
+
+The callback should accept a single `void *` as an argument.
+
+Events are performed either in the order in which they were registered or in reverse order, depending on the context.
+
+These are the possible `event` values, note that some of them are only relevant in the context of the `FIO_SERVER` module:
+
+```c
+typedef enum {
+  /** Called once during library initialization. */
+  FIO_CALL_ON_INITIALIZE,
+  /** Called once before starting up the IO reactor. */
+  FIO_CALL_PRE_START,
+  /** Called before each time the IO reactor forks a new worker. */
+  FIO_CALL_BEFORE_FORK,
+  /** Called after each fork (both parent and child), before FIO_CALL_IN_XXX */
+  FIO_CALL_AFTER_FORK,
+  /** Called by a worker process right after forking. */
+  FIO_CALL_IN_CHILD,
+  /** Called by the master process after spawning a worker (after forking). */
+  FIO_CALL_IN_MASTER,
+  /** Called every time a *Worker* process starts. */
+  FIO_CALL_ON_START,
+  /** Reserved for internal use. */
+  FIO_CALL_RESERVED1,
+  /** Reserved for internal use. */
+  FIO_CALL_RESERVED2,
+  /** User state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER1,
+  /** User state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2,
+  /** Called when facil.io enters idling mode. */
+  FIO_CALL_ON_IDLE,
+
+  /* the following events are performed in reverse (LIFO): */
+
+  /** A reversed user state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER1_REVERSE,
+  /** A reversed user state event queue (unused, available for the user). */
+  FIO_CALL_ON_USER2_REVERSE,
+  /** Reserved for internal use. */
+  FIO_CALL_RESERVED1_REVERSED,
+  /** Reserved for internal use. */
+  FIO_CALL_RESERVED2_REVERSED,
+  /** Called before starting the shutdown sequence. */
+  FIO_CALL_ON_SHUTDOWN,
+  /** Called by each worker the moment it detects the master process crashed. */
+  FIO_CALL_ON_PARENT_CRUSH,
+  /** Called by the parent (master) after a worker process crashed. */
+  FIO_CALL_ON_CHILD_CRUSH,
+  /** Called just before finishing up (both on child and parent processes). */
+  FIO_CALL_ON_FINISH,
+  /** An alternative to the system's at_exit. */
+  FIO_CALL_AT_EXIT,
+  /** used for testing and array allocation - must be last. */
+  FIO_CALL_NEVER
+} fio_state_event_type_e;
+
+```
+
+#### `fio_state_callback_remove`
+
+```c
+int fio_state_callback_remove(fio_state_event_type_e,
+                              void (*func)(void *),
+                              void *arg);
+```
+
+Removes a callback from the list of callbacks to be called for the event.
+
+See also [`fio_state_callback_add`](#fio_state_callback_add) for details of possible events.
+
+#### `fio_state_callback_force`
+
+```c
+void fio_state_callback_force(fio_state_event_type_e);
+```
+
+Forces all the existing callbacks to run, as if the event occurred.
+
+Callbacks for all initialization / idling tasks are called in order of creation (where `fio_state_event_type_e` <= `FIO_CALL_ON_IDLE`).
+
+Callbacks for all cleanup oriented tasks are called in reverse order of creation (where `fio_state_event_type_e` >= `FIO_CALL_ON_USER1_REVERSE`).
+
+During an event, changes to the callback list are ignored (callbacks can't add or remove other callbacks for the same event).
 
 -------------------------------------------------------------------------------
 ## Local Memory Allocation
@@ -3179,123 +3442,6 @@ The following are reserved macro names:
 
 * `FIO_MALLOC_TMP_USE_SYSTEM`
 
-
--------------------------------------------------------------------------------
-## Time Helpers
-
-```c
-#define FIO_TIME
-#include "fio-stl.h"
-```
-
-By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
-
-#### `fio_time_real`
-
-```c
-struct timespec fio_time_real();
-```
-
-Returns human (watch) time... this value isn't as safe for measurements.
-
-#### `fio_time_mono`
-
-```c
-struct timespec fio_time_mono();
-```
-
-Returns monotonic time.
-
-#### `fio_time_nano`
-
-```c
-uint64_t fio_time_nano();
-```
-
-Returns monotonic time in nano-seconds (now in 1 micro of a second).
-
-#### `fio_time_micro`
-
-```c
-uint64_t fio_time_micro();
-```
-
-Returns monotonic time in micro-seconds (now in 1 millionth of a second).
-
-#### `fio_time_milli`
-
-```c
-uint64_t fio_time_milli();
-```
-
-Returns monotonic time in milliseconds.
-
-
-#### `fio_time2milli`
-
-```c
-uint64_t fio_time2milli(struct timespec t);
-```
-
-Converts a `struct timespec` to milliseconds.
-
-#### `fio_time2gm`
-
-```c
-struct tm fio_time2gm(time_t timer);
-```
-
-A faster (yet less localized) alternative to `gmtime_r`.
-
-See the libc `gmtime_r` documentation for details.
-
-Returns a `struct tm` object filled with the date information.
-
-This function is used internally for the formatting functions: , `fio_time2rfc7231`, `fio_time2rfc2109`, and `fio_time2rfc2822`.
-
-#### `fio_gm2time`
-
-```c
-time_t fio_gm2time(struct tm tm)
-```
-
-Converts a `struct tm` to time in seconds (assuming UTC).
-
-This function is less localized then the `mktime` / `timegm` library functions.
-
-#### `fio_time2rfc7231`
-
-```c
-size_t fio_time2rfc7231(char *target, time_t time);
-```
-
-Writes an RFC 7231 date representation (HTTP date format) to target.
-
-Requires 29 characters (for positive, 4 digit years).
-
-The format is similar to DDD, dd, MON, YYYY, HH:MM:SS GMT
-
-i.e.: Sun, 06 Nov 1994 08:49:37 GMT
-
-#### `fio_time2rfc2109`
-
-```c
-size_t fio_time2rfc2109(char *target, time_t time);
-```
-
-Writes an RFC 2109 date representation to target.
-
-Requires 31 characters (for positive, 4 digit years).
-
-#### `fio_time2rfc2822`
-
-```c
-size_t fio_time2rfc2822(char *target, time_t time);
-```
-
-Writes an RFC 2822 date representation to target.
-
-Requires 28 or 29 characters (for positive, 4 digit years).
 
 -------------------------------------------------------------------------------
 ## Task Queue
