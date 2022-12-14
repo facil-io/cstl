@@ -810,6 +810,7 @@ FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
 FIO_IFUNC void fio_memcpy7x(void *restrict d_,
                             const void *restrict s_,
                             size_t l) {
+#if defined(__ARM_FEATURE_UNALIGNED)
   void (*const fn[])(void *, const void *) = {
       fio_memcpy0,
       fio_memcpy1,
@@ -821,6 +822,14 @@ FIO_IFUNC void fio_memcpy7x(void *restrict d_,
       fio_memcpy7,
   };
   fn[l & 7](d_, s_);
+#else
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  if ((l & 1))
+    *d = *s;
+#endif
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
 FIO_IFUNC void fio_memcpy15x(void *restrict d_,

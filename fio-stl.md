@@ -6023,6 +6023,24 @@ This macro destroys an external representation of a `key` if it didn't make it i
 
 This is useful in when the key was pre-allocated, if it's reference was increased in advance for some reason or when "transferring ownership" of the `key` to the map.
 
+
+#### `FIO_MAP_KEYSTR`
+
+```c
+#ifdef FIO_MAP_KEYSTR
+#define FIO_MAP_KEY                  fio_str_info_s
+#define FIO_MAP_KEY_INTERNAL         fio_keystr_s
+#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
+#define FIO_MAP_KEY_COPY(dest, src)  (dest) = fio_keystr_copy((src), ...)
+#define FIO_MAP_KEY_CMP(a, b)        fio_keystr_is_eq2((a), (b))
+#define FIO_MAP_KEY_DESTROY(key)      fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))
+#define FIO_MAP_KEY_DISCARD(key)
+```
+
+If `FIO_MAP_KEY` isn't set, or `FIO_MAP_KEYSTR` is explicitly defined, than a `fio_str_info_s` will be the external key type and `fio_keystr_s` will be the internal key type.
+
+Passing a key with `key.capa == (size_t)-1` will prevent a string copy and the map will assume that the string will stay in the same memory address for the whole of the map's lifetime.
+
 ### Defining the Map's Values
 
 Most often we want a dictionary or a hash map to retrieve a `value` based on its associated `key`.
@@ -6114,17 +6132,17 @@ For example:
 /* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
 
 /** set helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_buf_info_s key, fio_buf_info_s obj) {
+FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
   return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
 }
 /** conditional set helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_set_if_missing2(dict_s *m,
-                                              fio_buf_info_s key,
-                                              fio_buf_info_s obj) {
+FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_str_info_s key,
+                                              fio_str_info_s obj) {
   return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
 }
 /** get helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_get2(dict_s *m, fio_buf_info_s key) {
+FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
   return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
 }
 ```
@@ -6142,7 +6160,7 @@ This can be done using the `FIO_MAP_HASH_FN(key)` macro i.e.:
 #define FIO_MAP_NAME                 dict
 #define FIO_MAP_VALUE_BSTR /* a special macro helper to define binary Strings as values. */
 #define FIO_RAND           /* to provide us with a hash function. */
-/* use any non-inlined function (preferably non-static too). Here `dict_destroy` is used. */
+/* use any non-inlined function's address as a hash salt. Here `dict_destroy` is used. */
 #define FIO_MAP_HASH_FN(key) fio_risky_hash(key.buf, key.len, (uint64_t)(dict_destroy))
 #include "fio-stl.h"
 ```
