@@ -7,49 +7,21 @@
 
 If the `FIO_ATOL` macro is defined, the following functions will be defined:
 
-### String / Number Helpers
+**Note**: all functions that write to a buffer also write a `NUL` terminator byte.
 
-#### `fio_c2i`
+### Signed Number / String Conversion
 
-```c
-uint8_t fio_c2i(unsigned char c);
-```
+The most common use of number to string conversion (and string to number) relates to converting signed numbers. 
 
-Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+However, consider using unsigned conversion where possible.
 
-Out of bound values return 255.
-
-This allows calculations for up to base 36.
-
-#### `fio_digits10`
+#### `fio_atol10`
 
 ```c
-size_t fio_digits10(int64_t i);
+int64_t fio_atol10(char **pstr);
 ```
 
-Returns the signed number of digits in base 10. This number includes the possible `-` sign digit.
-
-#### `fio_digits10u`
-
-```c
-size_t fio_digits10u(uint64_t i);
-```
-
-Returns the number of digits in base 10 for an unsigned number.
-
-#### `fio_digits16`
-
-```c
-size_t fio_digits16(uint64_t i);
-```
-
-Returns the number of digits in base 16 for an **unsigned** number.
-
-Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
-
-**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
-
-### String / Number Conversion API
+Reads a signed base 10 formatted number.
 
 #### `fio_atol`
 
@@ -59,22 +31,9 @@ int64_t fio_atol(char **pstr);
 
 A helper function that converts between String data to a signed int64_t.
 
-Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and
-binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant Bit
-must come first.
+Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant Bit must come first.
 
-The most significant difference between this function and `strtol` (aside of API
-design), is the added support for binary representations.
-
-#### `fio_atof`
-
-```c
-double fio_atof(char **pstr);
-```
-
-A helper function that converts between String data to a signed double.
-
-Currently wraps `strtod` with some special case handling.
+The most significant difference between this function and `strtol` (aside of API design), is the added support for binary representations.
 
 #### `fio_ltoa`
 
@@ -94,6 +53,16 @@ An unsupported base will log an error and print zero.
 
 Returns the number of bytes actually written (excluding the NUL terminator).
 
+#### `fio_atof`
+
+```c
+double fio_atof(char **pstr);
+```
+
+A helper function that converts between String data to a signed double.
+
+Currently wraps `strtod` with some special case handling.
+
 #### `fio_ftoa`
 
 ```c
@@ -112,5 +81,169 @@ to base 10. Prefixes aren't added (i.e., no "0x" or "0b" at the beginning of the
 string).
 
 Returns the number of bytes actually written (excluding the NUL terminator).
+
+#### `fio_ltoa10`
+
+```c
+void fio_ltoa10(char *dest, int64_t i, size_t digits);
+```
+
+Writes a signed number to `dest` using `digits` bytes (+ `NUL`). See also [`fio_digits10`](#fio_digits10).
+
+### Unsigned Number / String Conversion
+
+#### `fio_ltoa10`
+
+```c
+void fio_ltoa10(char *dest, uint64_t i, size_t digits);
+```
+
+Writes a signed number to `dest` using `digits` bytes (+ `NUL`).
+
+#### `fio_ltoa10u`
+
+```c
+void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`).
+
+#### `fio_ltoa16u`
+
+```c
+void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in hex format (base 16).
+
+#### `fio_ltoa_bin`
+
+```c
+void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in binary format (base 2).
+
+#### `fio_ltoa_xbase`
+
+```c
+void fio_ltoa_xbase(char *dest, uint64_t i, size_t digits, size_t base);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in `base` format (up to base 36 inclusive).
+
+#### `fio_atol8u`
+
+```c
+uint64_t fio_atol8u(char **pstr);
+```
+
+Reads an unsigned base 8 formatted number.
+
+#### `fio_atol10u`
+
+```c
+uint64_t fio_atol10u(char **pstr);
+```
+
+Reads an unsigned base 10 formatted number.
+
+#### `fio_atol16u`
+
+```c
+uint64_t fio_atol16u(char **pstr);
+```
+
+Reads an unsigned hex formatted number (possibly prefixed with "0x").
+
+#### `fio_atol_bin`
+
+```c
+uint64_t fio_atol_bin(char **pstr);
+```
+
+Reads an unsigned binary formatted number (possibly prefixed with "0b").
+
+#### `fio_atol_xbase`
+
+```c
+uint64_t fio_atol_xbase(char **pstr, size_t base);
+```
+
+Read an unsigned number in any base up to base 36.
+
+### Number / String Conversion Helpers
+
+#### `fio_c2i`
+
+```c
+uint8_t fio_c2i(unsigned char c);
+```
+
+Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+
+Out of bound values return 255.
+
+This allows calculations for up to base 36.
+
+#### `fio_u2i_limit`
+
+```c
+int64_t fio_u2i_limit(uint64_t val, size_t to_negative);
+```
+
+Converts an unsigned `val` to a signed `val`, limiting the value to provide overflow protection and limiting it to either a negative or a positive value.
+
+#### `fio_digits10`
+
+```c
+size_t fio_digits10(int64_t i);
+```
+
+Returns the number of digits of the **signed** number when using base 10. The result includes the possible sign (`-`) digit.
+
+#### `fio_digits10u`
+
+```c
+size_t fio_digits10u(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 10.
+
+#### `fio_digits8u`
+
+```c
+size_t fio_digits8u(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 8.
+
+#### `fio_digits16u`
+
+```c
+size_t fio_digits16u(uint64_t i);
+```
+
+Returns the number of digits in base 16 for an **unsigned** number.
+
+Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
+
+**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
+
+#### `fio_digits_bin`
+
+```c
+size_t fio_digits_bin(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 2.
+
+#### `fio_digits_xbase`
+
+```c
+size_t fio_digits_xbase(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base `base`.
 
 -------------------------------------------------------------------------------

@@ -426,6 +426,8 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len);
 FIO_SFUNC int fio_bstr_is_greater(char *a, char *b);
 /** Compares to see if fio_bstr a is equal to another String. */
 FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b);
+/** Compares to see if fio_bstr a is equal to another String. */
+FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b);
 
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write(char *bstr,
@@ -495,6 +497,8 @@ Key String Type - binary String container for Hash Maps and Arrays
 typedef struct fio_keystr_s fio_keystr_s;
 
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str);
 
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
@@ -508,7 +512,7 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 /** Compares two Key Strings. */
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
-FIO_IFUNC int fio_keystr_is_eq2info(fio_keystr_s a_, fio_str_info_s b);
+FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
 
 /* *****************************************************************************
 
@@ -821,6 +825,11 @@ FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b) {
   fio_str_info_s a = fio_bstr_info(a_);
   return FIO_STR_INFO_IS_EQ(a, b);
 }
+/** Compares to see if fio_bstr a is equal to another String. */
+FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b) {
+  fio_buf_info_s a = fio_bstr_buf(a_);
+  return FIO_BUF_INFO_IS_EQ(a, b);
+}
 
 /* *****************************************************************************
 Key String Type - binary String container for Hash Maps and Arrays
@@ -834,6 +843,16 @@ struct fio_keystr_s {
   const char *buf;
 };
 
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
+  fio_buf_info_s r;
+  if ((str->info + 1) > 1) {
+    r = (fio_buf_info_s){.len = str->info, .buf = (char *)str->embd};
+    return r;
+  }
+  r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
+  return r;
+}
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
   fio_str_info_s r;
@@ -897,13 +916,13 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 
 /** Compares two Key Strings. */
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
-  fio_str_info_s a = fio_keystr_info(&a_);
-  fio_str_info_s b = fio_keystr_info(&b_);
-  return FIO_STR_INFO_IS_EQ(a, b);
+  fio_buf_info_s a = fio_keystr_buf(&a_);
+  fio_buf_info_s b = fio_keystr_buf(&b_);
+  return FIO_BUF_INFO_IS_EQ(a, b);
 }
 
 /** Compares a Key String to any String - used internally by the hash map. */
-FIO_IFUNC int fio_keystr_is_eq2info(fio_keystr_s a_, fio_str_info_s b) {
+FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b) {
   fio_str_info_s a = fio_keystr_info(&a_);
   return FIO_STR_INFO_IS_EQ(a, b);
 }
@@ -967,25 +986,12 @@ SFUNC int fio_string_write_i(fio_str_info_s *dest,
                              int64_t i) {
   int r = -1;
   size_t len = 0;
-  size_t inv = i < 0;
-  if (inv) {
-    i = 0 - i;
-  }
-  len = fio_digits10(i) + inv;
+  len = fio_digits10(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  len += dest->len;
-  dest->len = len;
-  dest->buf[len] = 0;
-  while (i > 9) {
-    uint64_t nxt = (uint64_t)i / 10;
-    dest->buf[--len] = '0' + ((uint64_t)i - (nxt * 10));
-    i = (int64_t)nxt;
-  }
-  --len;
-  dest->buf[len - inv] = '-';
-  dest->buf[len] = '0' + (unsigned char)i;
+  fio_ltoa10(dest->buf + dest->len, i, len);
+  dest->len += len;
   return r;
 }
 
@@ -998,16 +1004,8 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  len += dest->len;
-  dest->len = len;
-  dest->buf[len] = 0;
-  while (i > 9) {
-    uint64_t nxt = i / 10;
-    dest->buf[--len] = '0' + (i - (nxt * 10));
-    i = nxt;
-  }
-  --len;
-  dest->buf[len] = '0' + (unsigned char)i;
+  fio_ltoa10u(dest->buf + dest->len, i, len);
+  dest->len += len;
   return r;
 }
 
@@ -1016,22 +1014,11 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
   int r = 0;
-  size_t len = fio_digits16(i);
+  size_t len = fio_digits16u(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return (r = -1); /* no writing of partial numbers. */
+  fio_ltoa16u(dest->buf + dest->len, i, len);
   dest->len += len;
-  len = dest->len;
-  dest->buf[dest->len] = 0;
-  while (i > 255) {
-    dest->buf[len - 1] = fio_i2c(i & 15);
-    i >>= 4;
-    dest->buf[len - 2] = fio_i2c(i & 15);
-    i >>= 4;
-    len -= 2;
-  }
-  dest->buf[len - 1] = fio_i2c(i & 15);
-  i >>= 4;
-  dest->buf[len - 2] = fio_i2c(i & 15);
   return r;
 }
 
@@ -1043,16 +1030,8 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
   size_t len = fio_digits_bin(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return (r = -1); /* no writing of partial numbers. */
-  dest->buf[dest->len] = '0';
+  fio_ltoa_bin(dest->buf + dest->len, i, len);
   dest->len += len;
-  len = dest->len;
-  dest->buf[dest->len] = 0;
-  while (i) {
-    dest->buf[--len] = '0' + (i & 1);
-    i >>= 1;
-    dest->buf[--len] = '0' + (i & 1);
-    i >>= 1;
-  }
   return r;
 }
 
@@ -1442,7 +1421,7 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     switch (pos->klass) { /* use more memory rather then calculate twice. */
     case 2: /* number */ len += fio_digits10(pos->info.i); break;
     case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
-    case 4: /* hex */ len += fio_digits16(pos->info.u); break;
+    case 4: /* hex */ len += fio_digits16u(pos->info.u); break;
     case 5: /* binary */ len += fio_digits_bin(pos->info.u); break;
     case 6: /* float */ len += 18; break;
     default: len += pos->info.str.len;

@@ -21,41 +21,9 @@ Copyright and License: see header file (000 header.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
+/*TODO: cleanup + remove ltoa (doubles in String Core) */
 /* *****************************************************************************
-Strings <=> Numbers - Main Helper API
-***************************************************************************** */
-/**
- * Maps characters to alphanumerical value, where numbers have their natural
- * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
- *
- * Out of bound values return 255.
- *
- * This allows parsing of numeral strings for up to base 36.
- */
-IFUNC uint8_t fio_c2i(unsigned char c);
-
-/**
- * Maps numeral values to alphanumerical characters, where numbers have their
- * natural values (0-9) and `A-Z` are the values 10-35.
- *
- * Accepts values up to 63. Returns zero for values over 35. Out of bound values
- * produce undefined behavior.
- *
- * This allows printing of numerals for up to base 36.
- */
-IFUNC uint8_t fio_i2c(unsigned char i);
-
-/** Returns the number of digits in base 10. */
-FIO_IFUNC size_t fio_digits10(int64_t i);
-/** Returns the number of digits in base 10 for an unsigned number. */
-FIO_IFUNC size_t fio_digits10u(uint64_t i);
-/** Returns the number of digits in base 16 for an unsigned number. */
-FIO_IFUNC size_t fio_digits16(uint64_t i);
-/** Returns the number of digits in base 2 for an unsigned number. */
-FIO_IFUNC size_t fio_digits_bin(uint64_t i);
-
-/* *****************************************************************************
-Strings to Numbers - API
+Strings to Signed Numbers - API
 ***************************************************************************** */
 /**
  * A helper function that converts between String data to a signed int64_t.
@@ -73,7 +41,7 @@ SFUNC int64_t fio_atol(char **pstr);
 SFUNC double fio_atof(char **pstr);
 
 /* *****************************************************************************
-Numbers to Strings - API
+Signed Numbers to Strings - API
 ***************************************************************************** */
 
 /**
@@ -108,18 +76,128 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
  * terminator).
  */
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
+
 /* *****************************************************************************
-Strings to Numbers - Implementation - inlined
+Unsigned Numbers, Building Blocks and Helpers
+***************************************************************************** */
+/**
+ * Maps characters to alphanumerical value, where numbers have their natural
+ * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
+ *
+ * Out of bound values return 255.
+ *
+ * This allows parsing of numeral strings for up to base 36.
+ */
+IFUNC uint8_t fio_c2i(unsigned char c);
+
+/**
+ * Maps numeral values to alphanumerical characters, where numbers have their
+ * natural values (0-9) and `A-Z` are the values 10-35.
+ *
+ * Accepts values up to 63. Returns zero for values over 35. Out of bound values
+ * produce undefined behavior.
+ *
+ * This allows printing of numerals for up to base 36.
+ */
+IFUNC uint8_t fio_i2c(unsigned char i);
+
+/** Returns the number of digits in base 10. */
+FIO_IFUNC size_t fio_digits10(int64_t i);
+/** Returns the number of digits in base 10 for an unsigned number. */
+FIO_SFUNC size_t fio_digits10u(uint64_t i);
+
+/** Returns the number of digits in base 8 for an unsigned number. */
+FIO_SFUNC size_t fio_digits8u(uint64_t i);
+/** Returns the number of digits in base 16 for an unsigned number. */
+FIO_SFUNC size_t fio_digits16u(uint64_t i);
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_bin(uint64_t i);
+/** Returns the number of digits in any base X<65 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base);
+
+/** Writes a signed number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits);
+/** Reads a signed base 10 formatted number. */
+SFUNC int64_t fio_atol10(char **pstr);
+
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa_xbase(char *dest,
+                              uint64_t i,
+                              size_t digits,
+                              size_t base);
+
+/** Reads a signed base 8 formatted number. */
+SFUNC uint64_t fio_atol8u(char **pstr);
+/** Reads a signed base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr);
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+SFUNC uint64_t fio_atol16u(char **pstr);
+/** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
+SFUNC uint64_t fio_atol_bin(char **pstr);
+/** Read an unsigned number in any base up to base 36. */
+SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
+
+/** Converts an unsigned `val` to a signed `val`, with overflow protection. */
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
+
+/* *****************************************************************************
+
+
+Implementation - inlined
+
+
 ***************************************************************************** */
 
 /** Returns the number of digits in base 10. */
 FIO_IFUNC size_t fio_digits10(int64_t i) {
-  if (i + 1 > 0)
+  if (i >= 0)
     return fio_digits10u(i);
   return fio_digits10u((0 - i)) + 1;
 }
+
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_bin(uint64_t i) {
+  size_t r = 1;
+  if (!i)
+    return r;
+  r = fio___msb_index_unsafe(i) + 1;
+  r += (r & 1); /* binary is written 2 zeros at a time */
+  return r;
+}
+
+/** Returns the number of digits in base 8 for an unsigned number. */
+FIO_SFUNC size_t fio_digits8u(uint64_t i) {
+  size_t r = 1;
+  for (;;) {
+    if (i < 8)
+      return r;
+    if (i < 16)
+      return r + 1;
+    if (i < 24)
+      return r + 2;
+    if (i < 32)
+      return r + 3;
+    if (i < 40)
+      return r + 4;
+    if (i < 48)
+      return r + 5;
+    if (i < 56)
+      return r + 6;
+    if (i < 64)
+      return r + 7;
+    r += 8;
+    i >>= 6;
+  }
+}
+
 /** Returns the number of digits in base 10 for an unsigned number. */
-FIO_IFUNC size_t fio_digits10u(uint64_t i) {
+FIO_SFUNC size_t fio_digits10u(uint64_t i) {
   size_t r = 1;
   for (;;) {
     if (i < 10ULL)
@@ -136,7 +214,7 @@ FIO_IFUNC size_t fio_digits10u(uint64_t i) {
 }
 
 /** Returns the number of digits in base 16 for an unsigned number. */
-FIO_IFUNC size_t fio_digits16(uint64_t i) {
+FIO_SFUNC size_t fio_digits16u(uint64_t i) {
   if (i < 0x100ULL)
     return 2;
   if (i < 0x10000ULL)
@@ -154,18 +232,118 @@ FIO_IFUNC size_t fio_digits16(uint64_t i) {
   return 16;
 }
 
-/** Returns the number of digits in base 2 for an unsigned number. */
-FIO_IFUNC size_t fio_digits_bin(uint64_t i) {
+/** Returns the number of digits in base X<65 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
+  size_t base2 = base * base;
+  size_t base3 = base2 * base;
+  size_t base4 = base3 * base;
+  size_t base5 = base4 * base;
   size_t r = 1;
-  if (!i)
-    return r;
-  r = fio___msb_index_unsafe(i) + 1;
-  r += (r & 1); /* binary is written 2 zeros at a time */
-  return r;
+  for (;;) {
+    if (i < base)
+      return r;
+    if (i < base2)
+      return r + 1;
+    if (i < base3)
+      return r + 2;
+    if (i < base4)
+      return r + 3;
+    r += 4;
+    i /= base5;
+  }
+}
+
+FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits) {
+  size_t inv = i < 0;
+  dest[0] = '-';
+  dest += inv;
+  if (inv)
+    i = (int64_t)(~(uint64_t)i + 1ULL); /* WARNING: assumes 2's complement */
+  fio_ltoa10u(dest, (uint64_t)i, digits - inv);
+}
+
+FIO_IFUNC void fio_ltoa8u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    dest[--digits] = '0' + (i & 7);
+    i >>= 3;
+  }
+  dest[0] = '0' + (i & 7);
+}
+
+FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    uint64_t nxt = i / 10;
+    dest[--digits] = '0' + (i - (nxt * 10ULL));
+    i = nxt;
+  }
+  dest[0] = '0' + (unsigned char)i;
+}
+
+FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 2) {
+    dest[digits - 1] = fio_i2c(i & 15);
+    i >>= 4;
+    dest[digits - 2] = fio_i2c(i & 15);
+    i >>= 4;
+    digits -= 2;
+  }
+  dest[digits == 2] = fio_i2c(i & 15);
+  i >>= ((digits == 2) << 2);
+  dest[0] = fio_i2c(i & 15);
+}
+
+FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 8) {
+    for (size_t d = 0; d < 8; ++d) { /* may the compiler unroll */
+      dest[--digits] = '0' + (i & 1);
+      i >>= 1;
+    }
+  }
+  while (digits > 1) {
+    dest[--digits] = '0' + (i & 1);
+    i >>= 1;
+  }
+  dest[0] = '0' + (unsigned char)(i & 1);
+}
+
+FIO_IFUNC void fio_ltoa_xbase(char *dest,
+                              uint64_t i,
+                              size_t digits,
+                              size_t base) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    uint64_t nxt = i / base;
+    dest[--digits] = fio_i2c(i - (nxt * 10ULL));
+    i = nxt;
+  }
+  dest[--digits] = fio_i2c(i);
+}
+
+/** Converts an unsigned `val` to a signed `val`, with overflow protection. */
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
+  if (!to_negative) {
+    /* overflow? */
+    if (!(val & 0x8000000000000000ULL))
+      return val;
+    errno = E2BIG;
+    val = 0x7FFFFFFFFFFFFFFFULL;
+    return val;
+  }
+  if (!(val & 0x8000000000000000ULL)) {
+    val = (int64_t)0LL - (int64_t)val;
+    return val;
+  }
+  /* read overflow */
+  errno = E2BIG;
+  return (int64_t)(val = 0x8000000000000000ULL);
 }
 
 /* *****************************************************************************
-Strings to Numbers - Implementation - possibly externed
+Implementation - possibly externed
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
@@ -174,6 +352,10 @@ typedef struct {
   int64_t expo;
   uint8_t sign;
 } fio___number_s;
+
+/* *****************************************************************************
+Unsigned core and helpers
+***************************************************************************** */
 
 /**
  * Maps characters to alphanumerical value, where numbers have their natural
@@ -184,7 +366,7 @@ typedef struct {
  * This allows parsing of numeral strings for up to base 36.
  */
 IFUNC uint8_t fio_c2i(unsigned char c) {
-  static const uint8_t fio___alphanumerical_map[256] = {
+  static const uint8_t fio___alphanumeric_map[256] = {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -203,7 +385,7 @@ IFUNC uint8_t fio_c2i(unsigned char c) {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
-  return fio___alphanumerical_map[c];
+  return fio___alphanumeric_map[c];
 }
 
 /**
@@ -216,82 +398,16 @@ IFUNC uint8_t fio_c2i(unsigned char c) {
  * This allows printing of numerals for up to base 36.
  */
 IFUNC uint8_t fio_i2c(unsigned char i) {
-  static const uint8_t fio___alphanumerical_map[64] = {
+  static const uint8_t fio___alphanumeric_map[64] = {
       '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B',
       'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
       'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
-  return fio___alphanumerical_map[i & 63];
+  return fio___alphanumeric_map[i & 63];
 }
 
-/** Reads number information in base 2. Returned expo in base 2. */
-FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t mask = ((1ULL) << ((sizeof(mask) << 3) - 1));
-  while (**pstr >= '0' && **pstr <= '1' && !(r.val & mask)) {
-    r.val = (r.val << 1) | (**pstr - '0');
-    ++(*pstr);
-  }
-  while (**pstr >= '0' && **pstr <= '1') {
-    ++r.expo;
-    ++(*pstr);
-  }
-  return r;
-}
-
-FIO_IFUNC fio___number_s fio___aton_read_b2_bX(char **pstr, uint8_t base) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t limit = ((~0ULL) / base) - (base - 1);
-  register uint8_t tmp;
-  while ((tmp = fio_c2i(**pstr)) < base && r.val <= (limit)) {
-    r.val = (r.val * base) + tmp;
-    ++(*pstr);
-  }
-  while (fio_c2i(**pstr) < base) {
-    ++r.expo;
-    ++(*pstr);
-  }
-  return r;
-}
-
-/** Reads number information for base 16 (hex). Returned expo in base 4. */
-FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
-  for (; !(r.val & mask);) {
-    uint8_t tmp = fio_c2i(**pstr);
-    if (tmp > 15)
-      return r;
-    r.val = (r.val << 4) | tmp;
-    ++(*pstr);
-  }
-  while ((fio_c2i(**pstr)) < 16) {
-    ++(*pstr);
-    ++r.expo;
-  }
-  return r;
-}
-
-FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
-  if (!inv) {
-    /* overflow? */
-    if (!(val & 0x8000000000000000ULL))
-      return val;
-    errno = E2BIG;
-    val = 0x7FFFFFFFFFFFFFFFULL;
-    return val;
-  }
-  if (!(val & 0x8000000000000000ULL)) {
-    val = (int64_t)0LL - (int64_t)val;
-    return val;
-  }
-  /* read overflow */
-  errno = E2BIG;
-  return (int64_t)(val = 0x8000000000000000ULL);
-}
-
+/** Reads a signed base 10 formatted number. */
 SFUNC int64_t fio_atol10(char **pstr) {
-  int64_t r;
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 8;
+  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
   char *pos = *pstr;
   const size_t inv = (pos[0] == '-');
   pos += inv;
@@ -302,150 +418,219 @@ SFUNC int64_t fio_atol10(char **pstr) {
     val += r0;
     ++pos;
   }
+  if (((size_t)(pos[0] - '0') < 10ULL)) {
+    errno = E2BIG;
+  }
+  *pstr = pos;
+  return fio_u2i_limit(val, inv);
+}
+
+/** Reads a signed base 8 formatted number. */
+SFUNC uint64_t fio_atol8u(char **pstr) {
+  uint64_t r = 0;
+  size_t d;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 8) {
+    r <<= 3;
+    r |= d;
+    ++*pstr;
+    if ((r & UINT64_C(0xE000000000000000)))
+      break;
+  }
+  if ((fio_c2i(**pstr)) < 16)
+    errno = E2BIG;
+  return r;
+}
+
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  uint64_t r = 0;
+  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+  char *pos = *pstr;
+  uint64_t r0;
+  while (((r0 = (uint64_t)(pos[0] - '0')) < 10ULL) & (r < add_limit)) {
+    r *= 10;
+    r += r0;
+    ++pos;
+  }
   while (((size_t)(pos[0] - '0') < 10ULL)) {
     errno = E2BIG;
     ++pos;
   }
   *pstr = pos;
-  r = fio_u2i_limit(val, inv);
   return r;
 }
 
-SFUNC int64_t fio_atol16(char **pstr) {
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+SFUNC uint64_t fio_atol16u(char **pstr) {
   uint64_t r = 0;
-  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
-  const size_t inv = (**pstr == '-');
-  *pstr += inv;
+  size_t d;
   *pstr += (**pstr == '0');
-  *pstr += ((**pstr | 32) == 'x');
-  for (; !(r & mask);) {
-    uint8_t tmp = fio_c2i(**pstr);
-    if (tmp > 15)
-      goto done;
-    r = (r << 4) | tmp;
-    ++(*pstr);
+  *pstr += (**pstr | 32) == 'x' && fio_c2i((unsigned char)(pstr[0][1])) < 16;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 16) {
+    r <<= 4;
+    r |= d;
+    ++*pstr;
+    if ((r & UINT64_C(0xF000000000000000)))
+      break;
   }
-  while ((fio_c2i(**pstr)) < 16) {
+  if ((fio_c2i(**pstr)) < 16)
     errno = E2BIG;
-    ++(*pstr);
-  }
-done:
-  if (!inv) /* do not limit unsigned representation for positive r */
-    return r;
-  return (r = fio_u2i_limit(r, inv));
+  return r;
 }
 
+/** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
 SFUNC uint64_t fio_atol_bin(char **pstr) {
   uint64_t r = 0;
   size_t d;
-  while ((d = (size_t)(**pstr) - (size_t)'0') < 2) {
-    r |= d;
+  *pstr += (**pstr == '0');
+  *pstr += (**pstr | 32) == 'b' && ((size_t)(pstr[0][1]) - (size_t)'0') < 2;
+  while ((d = (size_t)((unsigned char)(**pstr)) - (size_t)'0') < 2) {
     r <<= 1;
+    r |= d;
+    ++*pstr;
     if ((r & UINT64_C(0x8000000000000000)))
-      return r;
+      break;
   }
+  if ((d = (size_t)(**pstr) - (size_t)'0') < 2)
+    errno = E2BIG;
   return r;
 }
+
+/** Attempts to read an unsigned number in any base up to base 36. */
+SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base) {
+  uint64_t r = 0;
+  if (base > 36)
+    return r;
+  if (base == 10)
+    return (r = fio_atol10u(pstr));
+  if (base == 16)
+    return (r = fio_atol16u(pstr));
+  if (base == 2)
+    return (r = fio_atol_bin(pstr));
+  const uint64_t limit = (~UINT64_C(0)) / base;
+  size_t d;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < base) {
+    r *= base;
+    r += d;
+    ++*pstr;
+    if (r > limit)
+      break;
+  }
+  if ((fio_c2i(**pstr)) < base)
+    errno = E2BIG;
+  return r;
+}
+
+/* *****************************************************************************
+fio_atol
+***************************************************************************** */
 
 SFUNC int64_t fio_atol(char **pstr) {
   if (!pstr || !(*pstr))
     return 0;
+  uint64_t v = 0;
+  uint64_t (*fn)(char **) = fio_atol10u;
   char *p = *pstr;
-  unsigned char invert = 0;
-  fio___number_s n = (fio___number_s){0};
-
-  while ((int)(unsigned char)isspace((unsigned char)*p))
-    ++p;
-  if (*p == '-') {
-    invert = 1;
-    ++p;
-  } else if (*p == '+') {
-    ++p;
-  }
+  unsigned inv = (p[0] == '-');
+  p += inv;
+  char *const s = p;
   switch (*p) {
   case 'x': /* fall through */
-  case 'X': goto is_hex;
+  case 'X': fn = fio_atol16u; goto compute;
   case 'b': /* fall through */
-  case 'B': goto is_binary;
+  case 'B': fn = fio_atol_bin; goto compute;
   case '0':
-    ++p;
-    switch (*p) {
+    switch (p[1]) {
     case 'x': /* fall through */
-    case 'X': goto is_hex;
+    case 'X': fn = fio_atol16u; goto compute;
     case 'b': /* fall through */
-    case 'B': goto is_binary;
+    case 'B': fn = fio_atol_bin; goto compute;
+    case '0': /* fall through */
+    case '1': /* fall through */
+    case '2': /* fall through */
+    case '3': /* fall through */
+    case '4': /* fall through */
+    case '5': /* fall through */
+    case '6': /* fall through */
+    case '7': fn = fio_atol8u;
     }
-    goto is_base8;
   }
-
-  /* is_base10: */
-  return fio_atol10(pstr);
-  *pstr = p;
-  n = fio___aton_read_b2_bX(pstr, 10);
-
-  /* sign can't be embeded */
-#define CALC_N_VAL()                                                           \
-  if (invert) {                                                                \
-    if (n.expo || ((n.val << 1) && (n.val >> ((sizeof(n.val) << 3) - 1)))) {   \
-      errno = E2BIG;                                                           \
-      return (int64_t)(1ULL << ((sizeof(n.val) << 3) - 1));                    \
-    }                                                                          \
-    n.val = 0 - n.val;                                                         \
-  } else {                                                                     \
-    if (n.expo || (n.val >> ((sizeof(n.val) << 3) - 1))) {                     \
-      errno = E2BIG;                                                           \
-      return (int64_t)((~0ULL) >> 1);                                          \
-    }                                                                          \
-  }
-
-  CALC_N_VAL();
-  return n.val;
-
-is_hex:
-  ++p;
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_b16(pstr);
-
-  /* sign can be embeded */
-#define CALC_N_VAL_EMBEDABLE()                                                 \
-  if (invert) {                                                                \
-    if (n.expo) {                                                              \
-      errno = E2BIG;                                                           \
-      return (int64_t)(1ULL << ((sizeof(n.val) << 3) - 1));                    \
-    }                                                                          \
-    n.val = 0 - n.val;                                                         \
-  } else {                                                                     \
-    if (n.expo) {                                                              \
-      errno = E2BIG;                                                           \
-      return (int64_t)((~0ULL) >> 1);                                          \
-    }                                                                          \
-  }
-
-  CALC_N_VAL_EMBEDABLE();
-  return n.val;
-
-is_binary:
-  ++p;
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_b2(pstr);
-  CALC_N_VAL_EMBEDABLE()
-  return n.val;
-
-is_base8:
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_bX(pstr, 8);
-  CALC_N_VAL();
-  return n.val;
+compute:
+  v = fn(&p);
+  if (p != s)
+    *pstr = p;
+  if (fn == fio_atol10u)
+    return fio_u2i_limit(v, inv);
+  if (!inv) /* sign embedded in the representation */
+    return (int64_t)v;
+  return fio_u2i_limit(v, inv);
 }
+
+/* *****************************************************************************
+fio_ltoa
+***************************************************************************** */
+
+SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
+  size_t len = 0;
+  uint64_t n = (uint64_t)num;
+  size_t digits;
+  char dump[96];
+  if (!dest)
+    dest = dump;
+
+  switch (base) {
+  case 1: /* fall through */
+  case 2: /* Base 2 */
+    len += (digits = fio_digits_bin(n));
+    fio_ltoa_bin(dest, n, digits); /* embedded sign bit */
+    return len;
+  case 8: /* Base 8 */
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits8u(n));
+    fio_ltoa8u(dest, n, digits);
+    return len;
+  case 16: /* Base 16 */
+    len += (digits = fio_digits16u(n));
+    fio_ltoa16u(dest, n, digits); /* embedded sign bit */
+    return len;
+  case 0:  /* fall through */
+  case 10: /* Base 10 */
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits10u(n));
+    fio_ltoa10u(dest, n, digits);
+    return len;
+  default: /* any base up to base 36 */
+    if (base > 36)
+      goto base_error;
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits_xbase(n, base));
+    fio_ltoa_xbase(dest, n, digits, base);
+    return len;
+  }
+
+base_error:
+  FIO_LOG_ERROR("fio_ltoa base out of range");
+  return len;
+}
+
+/* *****************************************************************************
+fio_atof
+***************************************************************************** */
 
 SFUNC double fio_atof(char **pstr) {
   if (!pstr || !(*pstr))
@@ -464,181 +649,8 @@ binary_raw:
 }
 
 /* *****************************************************************************
-Numbers to Strings - Implementation
+fio_ftoa
 ***************************************************************************** */
-
-SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
-  size_t len = 0;
-  char buf[48]; /* we only need up to 20 for base 10, but base 3 needs 41... */
-
-  if (!num)
-    goto zero;
-  if (base > 36)
-    goto base_error;
-
-  switch (base) {
-  case 1: /* fall through */
-  case 2:
-    /* Base 2 */
-    {
-      uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
-                        /* dest[len++] = '0'; */
-                        /* dest[len++] = 'b'; */
-#if __has_builtin(__builtin_clzll)
-      i = __builtin_clzll(n);
-      /* make sure the Binary representation doesn't appear signed */
-      if (i) {
-        --i;
-        /*  keep it even */
-        if ((i & 1))
-          --i;
-        n <<= i;
-      }
-#else
-      while ((i < 64) && (n & 0x8000000000000000ULL) == 0) {
-        n <<= 1;
-        i++;
-      }
-      /* make sure the Binary representation doesn't appear signed */
-      if (i) {
-        --i;
-        n = n >> 1;
-        /*  keep it even */
-        if ((i & 1)) {
-          --i;
-          n = n >> 1;
-        }
-      }
-#endif
-      /* write to dest. */
-      while (i < 64) {
-        dest[len++] = ((n & 0x8000000000000000ULL) ? '1' : '0');
-        n = n << 1;
-        i++;
-      }
-      dest[len] = 0;
-      return len;
-    }
-  case 8:
-    /* Base 8 */
-    {
-      uint64_t l = 0;
-      if (num < 0) {
-        dest[len++] = '-';
-        num = 0 - num;
-      }
-      dest[len++] = '0';
-
-      while (num) {
-        buf[l++] = '0' + (num & 7);
-        num = num >> 3;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-
-  case 16:
-    /* Base 16 */
-    {
-      uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
-      /* dest[len++] = '0'; */
-      /* dest[len++] = 'x'; */
-      while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
-        n = n << 8;
-        i++;
-      }
-      /* make sure the Hex representation doesn't appear misleadingly signed. */
-      if (i && (n & 0x8000000000000000ULL) && (n & 0x00FFFFFFFFFFFFFFULL)) {
-        dest[len++] = '0';
-        dest[len++] = '0';
-      }
-      /* write the damn thing, high to low */
-      while (i < 8) {
-        uint8_t tmp = (n & 0xF000000000000000ULL) >> 60;
-        uint8_t tmp2 = (n & 0x0F00000000000000ULL) >> 56;
-        dest[len++] = fio_i2c(tmp);
-        dest[len++] = fio_i2c(tmp2);
-        i++;
-        n = n << 8;
-      }
-      dest[len] = 0;
-      return len;
-    }
-  case 0: /* fall through */
-  case 10:
-    /* Base 10 */
-    {
-      int64_t t = num / 10;
-      uint64_t l = 0;
-      if (num < 0) {
-        /* may fail due to overflow, fixed with tail (t) */
-        num = (uint64_t)0 - (uint64_t)num;
-        t = (int64_t)((uint64_t)((uint64_t)0 - (uint64_t)t));
-        dest[len++] = '-';
-      }
-      while (num) {
-        buf[l++] = '0' + ((uint64_t)num - (uint64_t)(t * 10));
-        num = t;
-        t = num / 10;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-
-  default:
-    /* any base up to base 36 */
-    {
-      int64_t t = num / base;
-      uint64_t l = 0;
-      if (num < 0) {
-        num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-        t = (int64_t)0 - t;
-        dest[len++] = '-';
-      }
-      while (num) {
-        buf[l++] = fio_i2c(num - (t * base));
-        num = t;
-        t = num / base;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-  }
-
-base_error:
-  FIO_LOG_ERROR("fio_ltoa base out of range");
-zero:
-  switch (base) {
-  case 1:
-  case 2:
-    dest[len++] = '0';
-    dest[len++] = 'b';
-    break;
-  case 8: dest[len++] = '0'; break;
-  case 16:
-    dest[len++] = '0';
-    dest[len++] = 'x';
-    dest[len++] = '0';
-    break;
-  }
-  dest[len++] = '0';
-  dest[len] = 0;
-  return len;
-}
 
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
   if (base == 2 || base == 16) {
@@ -818,7 +830,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
-    buffer[tmp++] = 0;
     char *tmp2 = buffer;
     int i2 = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
@@ -862,7 +873,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (size_t)(p - (s)),                                              \
                (void *)p,                                                      \
                (void *)s);                                                     \
-    char buf[72];                                                              \
+    char buf[96];                                                              \
     buf[0] = '0';                                                              \
     buf[1] = 'b';                                                              \
     buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                      \
@@ -873,9 +884,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                buf,                                                            \
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
-    buf[fio_ltoa(buf, n, 8)] = 0;                                              \
+    fio_ltoa(buf, n, 8);                                                       \
     p = buf;                                                                   \
-    FIO_ASSERT(fio_atol(&p) == (n),                                            \
+    p += buf[0] == '-';                                                        \
+    FIO_ASSERT((int64_t)fio_atol8u(&p) == ((buf[0] == '-') ? (0 - (n)) : (n)), \
                "fio_ltoa base 8 test error! "                                  \
                "%s != %s (%zd)",                                               \
                buf,                                                            \
@@ -949,20 +961,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_LTOA_DIGITS10(-7777777LL, (7 + 1));
   TEST_LTOA_DIGITS10(-88888888LL, (8 + 1));
   TEST_LTOA_DIGITS10(-999999999LL, (9 + 1));
+  TEST_LTOA_DIGITS10(-9223372036854775807LL, (19 + 1));
 #undef TEST_LTOA_DIGITS10
 
 #define TEST_LTOA_DIGITS16(num, digits)                                        \
-  FIO_ASSERT(fio_digits16(num) == digits,                                      \
-             "fio_digits16 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits16(num));                                       \
+  FIO_ASSERT(fio_digits16u(num) == digits,                                     \
+             "fio_digits16u failed for " #num " != (%zu)",                     \
+             (size_t)fio_digits16u(num));                                      \
   {                                                                            \
     char *number_str__ = (char *)#num;                                         \
     char *pstr__ = number_str__;                                               \
-    FIO_ASSERT(fio_atol16(&pstr__) == (int64_t)num,                            \
-               "fio_atol16 failed for " #num);                                 \
+    FIO_ASSERT(fio_atol16u(&pstr__) == (uint64_t)(num),                        \
+               "fio_atol16u failed for " #num " != %zu",                       \
+               ((pstr__ = number_str__), (size_t)fio_atol16u(&pstr__)));       \
   }
   TEST_LTOA_DIGITS16(0x00ULL, 2);
-  TEST_LTOA_DIGITS16(-0x01ULL, 16);
   TEST_LTOA_DIGITS16(0x10ULL, 2);
   TEST_LTOA_DIGITS16(0x100ULL, 4);
   TEST_LTOA_DIGITS16(0x10000ULL, 6);

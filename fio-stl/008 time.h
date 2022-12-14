@@ -304,14 +304,31 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   return (time_t)time;
 }
 
-static const char *FIO___DAY_NAMES[] =
-    {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-// clang-format off
-static const char *FIO___MONTH_NAMES[] =
-    {"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
-     "Jul ", "Aug ", "Sep ", "Oct ", "Nov ", "Dec "};
-// clang-format on
-static const char *FIO___GMT_STR = "GMT";
+FIO_SFUNC char *fio_time_write_day(char *dest, const struct tm *tm) {
+  static const char *FIO___DAY_NAMES[] =
+      {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  dest[0] = FIO___DAY_NAMES[tm->tm_wday][0];
+  dest[1] = FIO___DAY_NAMES[tm->tm_wday][1];
+  dest[2] = FIO___DAY_NAMES[tm->tm_wday][2];
+  return dest + 3;
+}
+
+FIO_SFUNC char *fio_time_write_month(char *dest, const struct tm *tm) {
+  // clang-format off
+  static const char *FIO___MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  // clang-format on
+  dest[0] = FIO___MONTH_NAMES[tm->tm_mon][0];
+  dest[1] = FIO___MONTH_NAMES[tm->tm_mon][1];
+  dest[2] = FIO___MONTH_NAMES[tm->tm_mon][2];
+  return dest + 3;
+}
+
+FIO_SFUNC char *fio_time_write_year(char *dest, const struct tm *tm) {
+  int64_t year = tm->tm_year + 1900;
+  const size_t digits = fio_digits10(year);
+  fio_ltoa10(dest, year, digits);
+  return dest + digits;
+}
 
 /** Writes an RFC 7231 date representation (HTTP date format) to target. */
 SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
@@ -319,43 +336,33 @@ SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
   /* note: day of month is always 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+  *pos++ = ' ';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = ' ';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+  *pos++ = ' ';
+  *pos++ = 'G';
+  *pos++ = 'M';
+  *pos++ = 'T';
+  *pos = 0;
   return pos - target;
 }
 /** Writes an RFC 2109 date representation to target. */
@@ -364,37 +371,28 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
   /* note: day of month is always 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+  *pos++ = ' ';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = ' ';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
   *pos++ = ' ';
   *pos++ = '-';
   *pos++ = '0';
@@ -411,48 +409,37 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
   /* note: day of month is either 1 or 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   if (tm.tm_mday < 10) {
-    *pos = '0' + tm.tm_mday;
-    ++pos;
+    *pos++ = '0' + tm.tm_mday;
   } else {
     tmp = tm.tm_mday / 10;
-    pos[0] = '0' + tmp;
-    pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-    pos += 2;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
   }
-  *(pos++) = '-';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos += 3;
-  *(pos++) = '-';
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '-';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = '-';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+  *pos++ = ' ';
+  *pos++ = 'G';
+  *pos++ = 'M';
+  *pos++ = 'T';
+  *pos = 0;
   return pos - target;
 }
 
@@ -469,35 +456,33 @@ SFUNC size_t fio_time2log(char *target, time_t time) {
     /* note: day of month is either 1 or 2 digits */
     char *pos = target;
     uint16_t tmp;
-    *(pos++) = '[';
+    *pos++ = '[';
     tmp = tm.tm_mday / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
-    *(pos++) = '/';
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
-    *(pos++) = '/';
-    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+    *pos++ = '/';
+    pos = fio_time_write_month(pos, &tm);
+    *pos++ = '/';
+    pos = fio_time_write_year(pos, &tm);
+    *pos++ = ':';
     tmp = tm.tm_hour / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+    *pos++ = ':';
     tmp = tm.tm_min / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_min - (tmp * 10));
+    *pos++ = ':';
     tmp = tm.tm_sec / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
-    *(pos++) = ' ';
-    *(pos++) = '+';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = ']';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+    *pos++ = ' ';
+    *pos++ = '+';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = ']';
     *(pos) = 0;
     return pos - target;
   }

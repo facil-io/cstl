@@ -617,10 +617,10 @@ typedef struct fio_keystr_s fio_keystr_s;
 
 a semi-opaque type used for the `fio_keystr` functions
 
-#### `fio_keystr_info`
+#### `fio_keystr_buf`
 
 ```c
-fio_str_info_s fio_keystr_info(fio_keystr_s *str);
+fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
 ```
 
 Returns the Key String.
@@ -675,10 +675,10 @@ This example maps words to numbers. Note that this will work also with binary da
 /* example adding strings to map and printing data. */
 void example(void) {
   umap_s map = FIO_MAP_INIT;
-  umap_set(&map, FIO_STR_INFO1("One"), 1, NULL);
-  umap_set(&map, FIO_STR_INFO1("Two"), 2, NULL);
-  umap_set(&map, FIO_STR_INFO1("Three"), 3, NULL);
-  umap_set(&map, FIO_STR_INFO1("Infinity"), (uintptr_t)-1, NULL);
+  umap_set(&map, FIO_BUF_INFO1("One"), 1, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Two"), 2, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Three"), 3, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Infinity"), (uintptr_t)-1, NULL);
   FIO_MAP_EACH(umap, &map, i) {
     printf("%s: %llu\n",
            (int)i.key.len,

@@ -602,7 +602,7 @@ typedef struct {
   fio___srv_env_s env;
 } fio___srv_env_safe_s;
 
-#define FIO__SRV_ENV_SAFE_INIT                                                 \
+#define FIO___SRV_ENV_SAFE_INIT                                                \
   { .lock = FIO_THREAD_MUTEX_INIT, .env = FIO_MAP_INIT }
 
 FIO_IFUNC void fio___srv_env_safe_set(fio___srv_env_safe_s *e,
@@ -648,6 +648,7 @@ FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
 FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
   fio___srv_env_destroy(&e->env);
   fio_thread_mutex_destroy(&e->lock);
+  *e = (fio___srv_env_safe_s)FIO___SRV_ENV_SAFE_INIT;
 }
 
 /* *****************************************************************************
@@ -703,7 +704,7 @@ static struct {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
-    .env = FIO__SRV_ENV_SAFE_INIT,
+    .env = FIO___SRV_ENV_SAFE_INIT,
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
@@ -878,7 +879,7 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
       .pr = &MOCK_PROTOCOL,
       .node = FIO_LIST_INIT(io->node),
       .stream = FIO_STREAM_INIT(io->stream),
-      .env = FIO__SRV_ENV_SAFE_INIT,
+      .env = FIO___SRV_ENV_SAFE_INIT,
       .active = fio___srvdata.tick,
       .state = FIO_STATE_OPEN,
       .fd = -1,

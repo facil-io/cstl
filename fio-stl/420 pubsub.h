@@ -105,6 +105,9 @@ typedef struct {
   int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
+  /** If set, subscription will be limited to the root / master process. */
+  /** TODO: not implemented */
+  uint8_t master_only;
 } subscribe_args_s;
 
 /**
@@ -529,6 +532,19 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
 #define FIO_STL_KEEP__           1
 #include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
+
+/* TODO: mastr only subscription map */
+// #define FIO_MAP_NAME fio___master_sub
+// #define FIO_MAP_TYPE fio_subscription_ *
+// #define FIO_MAP_TYPE_DESTROY(key) \
+//   do { \
+//     fio_channel_on_destroy(key); \
+//     fio_channel_free((key)); \
+//   } while (0)
+// #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
+// #define FIO_STL_KEEP__           1
+// #include FIO___INCLUDE_FILE
+// #undef FIO_STL_KEEP__
 
 /* *****************************************************************************
 Postoffice State
@@ -1099,12 +1115,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_timeout = fio___letter_on_timeout,
 };
 
-FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio___letter_map_destroy,
-                         (void *)(&fio___letter_validation.map));
-}
-
 /* *****************************************************************************
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
@@ -1408,6 +1418,10 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
     goto sub_error;
+  if (args.master_only) {
+    // args.subscription_handle_ptr = NULL;
+    /* TODO! */
+  }
   *s = (fio_subscription_s){
       .io = args.io,
       .on_message = (args.on_message ? args.on_message
@@ -1443,6 +1457,7 @@ channel_error:
   fio_subscription_free(s);
   return;
 sub_error:
+  FIO_LOG_ERROR("failed to allocate a new subscription");
   if (args.on_unsubscribe) {
     union {
       void *p;
@@ -1456,6 +1471,10 @@ sub_error:
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
 int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
+  if (args.master_only) {
+    // args.subscription_handle_ptr = NULL;
+    /* TODO! */
+  }
   if (!args.subscription_handle_ptr) {
     return fio_env_remove(
         args.io,
@@ -1544,6 +1563,9 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_state_callback_add(FIO_CALL_IN_CHILD,
                          fio___postoffice_on_enter_child,
                          NULL);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         (void (*)(void *))fio___letter_map_destroy,
+                         (void *)(&fio___letter_validation.map));
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -1558,6 +1580,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
               &FIO_LETTER_PROTOCOL_IPC_CHILD,
               NULL,
               NULL);
+  /* TODO! clear master-only subscriptions */
 }
 
 /* *****************************************************************************

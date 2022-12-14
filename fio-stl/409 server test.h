@@ -20,7 +20,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
   fprintf(stderr, "   * Testing fio_env.\n");
   size_t a = 0, b = 0, c = 0;
-  fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
+  fio___srv_env_safe_s env = FIO___SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
       &env,
       (char *)"a_key",

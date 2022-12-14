@@ -405,7 +405,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.3"
+#define FIO_VERSION_BUILD "alpha.04"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -421,51 +421,9 @@ supports macros that will help detect and validate it's version.
 #define FIO_VERSION_BUILD ""
 #endif
 
-/** If implemented, returns the major version number. */
-int fio_version_major(void);
-/** If implemented, returns the minor version number. */
-int fio_version_minor(void);
-/** If implemented, returns the patch version number. */
-int fio_version_patch(void);
-/** If implemented, returns the build version string. */
-const char *fio_version_build(void);
-/** If implemented, returns the version number as a string. */
-char *fio_version_string(void);
-
-#if FIO_VERSION_MAJOR
-#define FIO_VERSION_VALIDATE()                                                 \
-  FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
-                 fio_version_minor() == FIO_VERSION_MINOR,                     \
-             "facil.io version mismatch, not %s",                              \
-             fio_version_string())
-#else
-#define FIO_VERSION_VALIDATE()                                                 \
-  FIO_ASSERT(fio_version_major() == FIO_VERSION_MAJOR &&                       \
-                 fio_version_minor() == FIO_VERSION_MINOR &&                   \
-                 fio_version_patch() == FIO_VERSION_PATCH,                     \
-             "facil.io version mismatch, not %s",                              \
-             fio_version_string())
-#endif
-/**
- * To implement the fio_version_* functions and FIO_VERSION_VALIDATE guard, the
- * `FIO_VERSION_GUARD` must be defined (only) once per application / library.
- */
-#ifdef FIO_VERSION_GUARD
-int __attribute__((weak)) fio_version_major(void) { return FIO_VERSION_MAJOR; }
-int __attribute__((weak)) fio_version_minor(void) { return FIO_VERSION_MINOR; }
-int __attribute__((weak)) fio_version_patch(void) { return FIO_VERSION_PATCH; }
-const char *__attribute__((weak)) fio_version_build(void) {
-  return FIO_VERSION_BUILD;
-}
-char *__attribute__((weak)) fio_version_string(void) {
-  return FIO_VERSION_STRING;
-}
-#undef FIO_VERSION_GUARD
-#endif /* FIO_VERSION_GUARD */
-
 #if !defined(FIO_NO_COOKIE)
 /** If implemented, does stuff. */
-void __attribute__((weak)) fio___(void) {
+void FIO_WEAK fio___(void) {
   volatile uint8_t tmp[] =
       "\xA8\x94\x9A\x10\x99\x92\x93\x96\x9C\x1D\x96\x9F\x10\x9C\x96\x91\xB1\x92"
       "\xB1\xB6\x10\xBB\x92\xB3\x10\x92\xBA\xB8\x94\x9F\xB1\x9A\x98\x10\x91\xB6"
@@ -730,7 +688,7 @@ Memory Copying Primitives
 #define FIO_MEMCPY __builtin_memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
     __builtin_memcpy(d, s, bytes);                                             \
   }
 #else
@@ -739,16 +697,16 @@ Memory Copying Primitives
 #define FIO_MEMCPY memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_IFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
     for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
       ((char *)d)[i] = ((const char *)s)[i];                                   \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
-FIO_IFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
+FIO_SFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)d), ((void)s);
 }
-FIO_IFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
+FIO_SFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
 }
 /** Copies 2 bytes from `src` (`s`) to `dest` (`d`). */
@@ -786,7 +744,7 @@ FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
 #define FIO___MAKE_MEMCPY_ALIGNED(bytes)                                       \
-  FIO_IFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
+  FIO_SFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
                                              const void *restrict src) {       \
     for (size_t i = 0; i < (bytes##ULL / sizeof(size_t)); ++i)                 \
       ((size_t *)dest)[i] = ((size_t *)src)[i]; /* should vectorize, right? */ \
@@ -826,7 +784,7 @@ FIO___MAKE_MEMCPY_ALIGNED(4096)
 #undef FIO___MAKE_MEMCPY_ALIGNED
 
 /** Does nothing. */
-FIO_IFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
+FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
   ((void)d), ((void)s), ((void)l);
 }
 
@@ -874,7 +832,7 @@ FIO_IFUNC void fio_memcpy15x(void *restrict d_,
   fio_memcpy7x(d, s, l);
 }
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_IFUNC void fio_memcpy31x(void *restrict d_,
+FIO_SFUNC void fio_memcpy31x(void *restrict d_,
                              const void *restrict s_,
                              size_t l) {
   char *restrict d = (char *restrict)d_;
@@ -929,6 +887,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
       fio_memcpy8(d, &data);                                                   \
     } /* let compiler vectorize loop */
+
   for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
     for (int i = 0; i < 32; (++i), (d += 8))
       fio_memcpy8(d, &data); /* let compiler vectorize loop */
@@ -1036,7 +995,6 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 /* *****************************************************************************
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
-
 #ifndef FIO_MEMCHR
 #if __has_builtin(__builtin_memchr)
 /** `memchr` selector macro */
@@ -1047,16 +1005,9 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
 #endif
 #endif /* FIO_MEMCHR */
 
-/**
- * Returns the index of the least significant (lowest) bit - used in fio_memchr.
- *
- * Placed here (mostly copied from bitmap module).
- */
-FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return __builtin_ctzll(i);
-#else
-  i = (i & ((~i) + 1));
+#if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
+    !__has_builtin(__builtin_clzll)
+FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
   switch (i) {
   case UINT64_C(0x1): return 0;
   case UINT64_C(0x2): return 1;
@@ -1124,9 +1075,40 @@ FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
   case UINT64_C(0x8000000000000000): return 63;
   }
   return (0ULL - 1ULL);
+}
+#endif /* __builtin_ctzll || __builtin_clzll */
+
+/**
+ * Returns the index of the least significant (lowest) bit - used in fio_memchr.
+ *
+ * Placed here (mostly copied from bitmap module).
+ */
+FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(i);
+#else
+  return fio___single_bit_index_unsafe(i & ((~i) + 1));
 #endif /* __builtin vs. map */
 }
-
+/**
+ * Returns the index of the least significant (lowest) bit - used in wrine_bin.
+ *
+ * Placed here (mostly copied from bitmap module).
+ */
+FIO_SFUNC size_t fio___msb_index_unsafe(uint64_t i) {
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 63 - __builtin_clzll(i);
+#else
+  i |= i >> 1;
+  i |= i >> 2;
+  i |= i >> 4;
+  i |= i >> 8;
+  i |= i >> 16;
+  i |= i >> 32;
+  i = ((i + 1) >> 1) | (i & ((uint64_t)1ULL << 63));
+  return fio___single_bit_index_unsafe(i);
+#endif /* __builtin vs. map */
+}
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
@@ -1263,8 +1245,7 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1440,9 +1421,8 @@ typedef struct fio_index8_node_s {
 #endif
 
 /* *****************************************************************************
-Common String Helpers
-*****************************************************************************
-*/
+String and Buffer Information Containers + Helper Macros
+***************************************************************************** */
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -3690,100 +3670,22 @@ FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
   return i;
 }
 
-FIO_IFUNC size_t fio_bits___map_bit2index(uint64_t i) {
-  switch (i) {
-  case UINT64_C(0x1): return 0;
-  case UINT64_C(0x2): return 1;
-  case UINT64_C(0x4): return 2;
-  case UINT64_C(0x8): return 3;
-  case UINT64_C(0x10): return 4;
-  case UINT64_C(0x20): return 5;
-  case UINT64_C(0x40): return 6;
-  case UINT64_C(0x80): return 7;
-  case UINT64_C(0x100): return 8;
-  case UINT64_C(0x200): return 9;
-  case UINT64_C(0x400): return 10;
-  case UINT64_C(0x800): return 11;
-  case UINT64_C(0x1000): return 12;
-  case UINT64_C(0x2000): return 13;
-  case UINT64_C(0x4000): return 14;
-  case UINT64_C(0x8000): return 15;
-  case UINT64_C(0x10000): return 16;
-  case UINT64_C(0x20000): return 17;
-  case UINT64_C(0x40000): return 18;
-  case UINT64_C(0x80000): return 19;
-  case UINT64_C(0x100000): return 20;
-  case UINT64_C(0x200000): return 21;
-  case UINT64_C(0x400000): return 22;
-  case UINT64_C(0x800000): return 23;
-  case UINT64_C(0x1000000): return 24;
-  case UINT64_C(0x2000000): return 25;
-  case UINT64_C(0x4000000): return 26;
-  case UINT64_C(0x8000000): return 27;
-  case UINT64_C(0x10000000): return 28;
-  case UINT64_C(0x20000000): return 29;
-  case UINT64_C(0x40000000): return 30;
-  case UINT64_C(0x80000000): return 31;
-  case UINT64_C(0x100000000): return 32;
-  case UINT64_C(0x200000000): return 33;
-  case UINT64_C(0x400000000): return 34;
-  case UINT64_C(0x800000000): return 35;
-  case UINT64_C(0x1000000000): return 36;
-  case UINT64_C(0x2000000000): return 37;
-  case UINT64_C(0x4000000000): return 38;
-  case UINT64_C(0x8000000000): return 39;
-  case UINT64_C(0x10000000000): return 40;
-  case UINT64_C(0x20000000000): return 41;
-  case UINT64_C(0x40000000000): return 42;
-  case UINT64_C(0x80000000000): return 43;
-  case UINT64_C(0x100000000000): return 44;
-  case UINT64_C(0x200000000000): return 45;
-  case UINT64_C(0x400000000000): return 46;
-  case UINT64_C(0x800000000000): return 47;
-  case UINT64_C(0x1000000000000): return 48;
-  case UINT64_C(0x2000000000000): return 49;
-  case UINT64_C(0x4000000000000): return 50;
-  case UINT64_C(0x8000000000000): return 51;
-  case UINT64_C(0x10000000000000): return 52;
-  case UINT64_C(0x20000000000000): return 53;
-  case UINT64_C(0x40000000000000): return 54;
-  case UINT64_C(0x80000000000000): return 55;
-  case UINT64_C(0x100000000000000): return 56;
-  case UINT64_C(0x200000000000000): return 57;
-  case UINT64_C(0x400000000000000): return 58;
-  case UINT64_C(0x800000000000000): return 59;
-  case UINT64_C(0x1000000000000000): return 60;
-  case UINT64_C(0x2000000000000000): return 61;
-  case UINT64_C(0x4000000000000000): return 62;
-  case UINT64_C(0x8000000000000000): return 63;
-  }
-  return (size_t)-1;
-}
-
 /** Returns the index of the most significant (highest) bit. */
 FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
-  uint64_t r = 0;
   if (!i)
     goto zero;
-#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return 63 - __builtin_clzll(i);
-#else
-  return fio_bits___map_bit2index(fio_bits_msb(i));
-#endif
+  return fio___msb_index_unsafe(i);
 zero:
-  r = (size_t)-1;
-  return r;
+  return (size_t)-1;
 }
 
 /** Returns the index of the least significant (lowest) bit. */
 FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
   if (!i)
-    return (size_t)-1;
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll) && 0
-  return __builtin_ctzll(i);
-#else
-  return fio_bits___map_bit2index(fio_bits_lsb(i));
-#endif /* __builtin vs. map */
+    goto zero;
+  return fio___lsb_index_unsafe(i);
+zero:
+  return (size_t)-1;
 }
 
 /* *****************************************************************************
@@ -3925,33 +3827,37 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
-    void (*fn[])(void *, const void *, size_t) = {
-        fio_memcpy7x,
-        fio_memcpy15x,
-        fio_memcpy31x,
-        fio_memcpy63x,
-        fio_memcpy127x,
-        fio_memcpy255x,
-        fio_memcpy511x,
-        fio_memcpy1023x,
-        fio_memcpy2047x,
-        fio_memcpy4095x,
-        NULL,
+    struct {
+      void (*fn)(void *, const void *, size_t);
+      const char *name;
+      size_t len;
+    } tests[] = {
+        {fio_memcpy7x, "fio_memcpy7x", 7},
+        {fio_memcpy15x, "fio_memcpy15x", 15},
+        {fio_memcpy31x, "fio_memcpy31x", 31},
+        {fio_memcpy63x, "fio_memcpy63x", 63},
+        {fio_memcpy127x, "fio_memcpy127x", 127},
+        {fio_memcpy255x, "fio_memcpy255x", 255},
+        {fio_memcpy511x, "fio_memcpy511x", 511},
+        {fio_memcpy1023x, "fio_memcpy1023x", 1023},
+        {fio_memcpy2047x, "fio_memcpy2047x", 2047},
+        {fio_memcpy4095x, "fio_memcpy4095x", 4095},
+        {NULL},
     };
-    char buf[128];
-    const char *str = "This string should be 39 chars long, ok";
-    size_t len = strlen(str);
-    for (size_t ifn = 0; fn[ifn]; ++ifn) {
+    char buf[(4096 << 1) + 64];
+    fio_rand_bytes(buf + (4096 + 32), (4096 + 32));
+    for (size_t ifn = 0; tests[ifn].fn;
+         ++ifn) { /* TODO: test all x primitives */
+      size_t len = tests[ifn].len;
       for (size_t i = 0; i < 31; ++i) {
+        memset(buf, 0, 4096 + 32);
         buf[i + len] = '\xFF';
-        fio_memcpy63x(buf + i, str, len);
-        FIO_ASSERT(!memcmp(buf + i, str, (len & ((1UL << (ifn + 3)) - 1))),
-                   "fio_memcpy63x failed @ %zu\n\t%.*s != %s",
-                   i,
-                   (int)len,
-                   buf + i,
-                   str);
-        FIO_ASSERT(buf[i + len] == '\xFF', "fio_memcpy63x overflow?");
+        tests[ifn].fn(buf + i, buf + (4096 + 32), len);
+        FIO_ASSERT(!memcmp(buf + i, buf + (4096 + 32), len),
+                   "%s failed @ %zu\n",
+                   tests[ifn].name,
+                   i);
+        FIO_ASSERT(buf[i + len] == '\xFF', "%s overflow?", tests[ifn].name);
       }
     }
   }
@@ -3988,10 +3894,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot64 failed");
   }
   for (size_t i = 0; i < 63; ++i) {
-    FIO_ASSERT(fio_bits___map_bit2index((1ULL << i)) == i,
+#if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
+    !__has_builtin(__builtin_clzll)
+    FIO_ASSERT(fio___single_bit_index_unsafe((1ULL << i)) == i,
                "bit index map[%zu] error != %zu",
                (size_t)(1ULL << i),
                i);
+#endif
     FIO_ASSERT(fio_bits_msb_index(((1ULL << i) | 1)) == i,
                "fio_bits_msb_index(%zu) != %zu",
                ((1ULL << i)),
@@ -4952,39 +4861,9 @@ Copyright and License: see header file (000 header.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
+/*TODO: cleanup + remove ltoa (doubles in String Core) */
 /* *****************************************************************************
-Strings <=> Numbers - Main Helper API
-***************************************************************************** */
-/**
- * Maps characters to alphanumerical value, where numbers have their natural
- * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
- *
- * Out of bound values return 255.
- *
- * This allows parsing of numeral strings for up to base 36.
- */
-IFUNC uint8_t fio_c2i(unsigned char c);
-
-/**
- * Maps numeral values to alphanumerical characters, where numbers have their
- * natural values (0-9) and `A-Z` are the values 10-35.
- *
- * Accepts values up to 63. Returns zero for values over 35. Out of bound values
- * produce undefined behavior.
- *
- * This allows printing of numerals for up to base 36.
- */
-IFUNC uint8_t fio_i2c(unsigned char i);
-
-/** Returns the number of digits in base 10. */
-FIO_IFUNC size_t fio_digits10(int64_t i);
-/** Returns the number of digits in base 10 for an unsigned number. */
-FIO_IFUNC size_t fio_digits10u(uint64_t i);
-/** Returns the number of digits in base 16 for an unsigned number. */
-FIO_IFUNC size_t fio_digits16(uint64_t i);
-
-/* *****************************************************************************
-Strings to Numbers - API
+Strings to Signed Numbers - API
 ***************************************************************************** */
 /**
  * A helper function that converts between String data to a signed int64_t.
@@ -5002,7 +4881,7 @@ SFUNC int64_t fio_atol(char **pstr);
 SFUNC double fio_atof(char **pstr);
 
 /* *****************************************************************************
-Numbers to Strings - API
+Signed Numbers to Strings - API
 ***************************************************************************** */
 
 /**
@@ -5037,18 +4916,128 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
  * terminator).
  */
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
+
 /* *****************************************************************************
-Strings to Numbers - Implementation - inlined
+Unsigned Numbers, Building Blocks and Helpers
+***************************************************************************** */
+/**
+ * Maps characters to alphanumerical value, where numbers have their natural
+ * values (0-9) and `A-Z` (or `a-z`) are the values 10-35.
+ *
+ * Out of bound values return 255.
+ *
+ * This allows parsing of numeral strings for up to base 36.
+ */
+IFUNC uint8_t fio_c2i(unsigned char c);
+
+/**
+ * Maps numeral values to alphanumerical characters, where numbers have their
+ * natural values (0-9) and `A-Z` are the values 10-35.
+ *
+ * Accepts values up to 63. Returns zero for values over 35. Out of bound values
+ * produce undefined behavior.
+ *
+ * This allows printing of numerals for up to base 36.
+ */
+IFUNC uint8_t fio_i2c(unsigned char i);
+
+/** Returns the number of digits in base 10. */
+FIO_IFUNC size_t fio_digits10(int64_t i);
+/** Returns the number of digits in base 10 for an unsigned number. */
+FIO_SFUNC size_t fio_digits10u(uint64_t i);
+
+/** Returns the number of digits in base 8 for an unsigned number. */
+FIO_SFUNC size_t fio_digits8u(uint64_t i);
+/** Returns the number of digits in base 16 for an unsigned number. */
+FIO_SFUNC size_t fio_digits16u(uint64_t i);
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_bin(uint64_t i);
+/** Returns the number of digits in any base X<65 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base);
+
+/** Writes a signed number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits);
+/** Reads a signed base 10 formatted number. */
+SFUNC int64_t fio_atol10(char **pstr);
+
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
+/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+FIO_IFUNC void fio_ltoa_xbase(char *dest,
+                              uint64_t i,
+                              size_t digits,
+                              size_t base);
+
+/** Reads a signed base 8 formatted number. */
+SFUNC uint64_t fio_atol8u(char **pstr);
+/** Reads a signed base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr);
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+SFUNC uint64_t fio_atol16u(char **pstr);
+/** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
+SFUNC uint64_t fio_atol_bin(char **pstr);
+/** Read an unsigned number in any base up to base 36. */
+SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
+
+/** Converts an unsigned `val` to a signed `val`, with overflow protection. */
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
+
+/* *****************************************************************************
+
+
+Implementation - inlined
+
+
 ***************************************************************************** */
 
 /** Returns the number of digits in base 10. */
 FIO_IFUNC size_t fio_digits10(int64_t i) {
-  if (i + 1 > 0)
+  if (i >= 0)
     return fio_digits10u(i);
   return fio_digits10u((0 - i)) + 1;
 }
+
+/** Returns the number of digits in base 2 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_bin(uint64_t i) {
+  size_t r = 1;
+  if (!i)
+    return r;
+  r = fio___msb_index_unsafe(i) + 1;
+  r += (r & 1); /* binary is written 2 zeros at a time */
+  return r;
+}
+
+/** Returns the number of digits in base 8 for an unsigned number. */
+FIO_SFUNC size_t fio_digits8u(uint64_t i) {
+  size_t r = 1;
+  for (;;) {
+    if (i < 8)
+      return r;
+    if (i < 16)
+      return r + 1;
+    if (i < 24)
+      return r + 2;
+    if (i < 32)
+      return r + 3;
+    if (i < 40)
+      return r + 4;
+    if (i < 48)
+      return r + 5;
+    if (i < 56)
+      return r + 6;
+    if (i < 64)
+      return r + 7;
+    r += 8;
+    i >>= 6;
+  }
+}
+
 /** Returns the number of digits in base 10 for an unsigned number. */
-FIO_IFUNC size_t fio_digits10u(uint64_t i) {
+FIO_SFUNC size_t fio_digits10u(uint64_t i) {
   size_t r = 1;
   for (;;) {
     if (i < 10ULL)
@@ -5065,7 +5054,7 @@ FIO_IFUNC size_t fio_digits10u(uint64_t i) {
 }
 
 /** Returns the number of digits in base 16 for an unsigned number. */
-FIO_IFUNC size_t fio_digits16(uint64_t i) {
+FIO_SFUNC size_t fio_digits16u(uint64_t i) {
   if (i < 0x100ULL)
     return 2;
   if (i < 0x10000ULL)
@@ -5083,8 +5072,118 @@ FIO_IFUNC size_t fio_digits16(uint64_t i) {
   return 16;
 }
 
+/** Returns the number of digits in base X<65 for an unsigned number. */
+FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
+  size_t base2 = base * base;
+  size_t base3 = base2 * base;
+  size_t base4 = base3 * base;
+  size_t base5 = base4 * base;
+  size_t r = 1;
+  for (;;) {
+    if (i < base)
+      return r;
+    if (i < base2)
+      return r + 1;
+    if (i < base3)
+      return r + 2;
+    if (i < base4)
+      return r + 3;
+    r += 4;
+    i /= base5;
+  }
+}
+
+FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits) {
+  size_t inv = i < 0;
+  dest[0] = '-';
+  dest += inv;
+  if (inv)
+    i = (int64_t)(~(uint64_t)i + 1ULL); /* WARNING: assumes 2's complement */
+  fio_ltoa10u(dest, (uint64_t)i, digits - inv);
+}
+
+FIO_IFUNC void fio_ltoa8u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    dest[--digits] = '0' + (i & 7);
+    i >>= 3;
+  }
+  dest[0] = '0' + (i & 7);
+}
+
+FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    uint64_t nxt = i / 10;
+    dest[--digits] = '0' + (i - (nxt * 10ULL));
+    i = nxt;
+  }
+  dest[0] = '0' + (unsigned char)i;
+}
+
+FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 2) {
+    dest[digits - 1] = fio_i2c(i & 15);
+    i >>= 4;
+    dest[digits - 2] = fio_i2c(i & 15);
+    i >>= 4;
+    digits -= 2;
+  }
+  dest[digits == 2] = fio_i2c(i & 15);
+  i >>= ((digits == 2) << 2);
+  dest[0] = fio_i2c(i & 15);
+}
+
+FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
+  dest[digits] = 0;
+  while (digits > 8) {
+    for (size_t d = 0; d < 8; ++d) { /* may the compiler unroll */
+      dest[--digits] = '0' + (i & 1);
+      i >>= 1;
+    }
+  }
+  while (digits > 1) {
+    dest[--digits] = '0' + (i & 1);
+    i >>= 1;
+  }
+  dest[0] = '0' + (unsigned char)(i & 1);
+}
+
+FIO_IFUNC void fio_ltoa_xbase(char *dest,
+                              uint64_t i,
+                              size_t digits,
+                              size_t base) {
+  dest[digits] = 0;
+  while (digits > 1) {
+    uint64_t nxt = i / base;
+    dest[--digits] = fio_i2c(i - (nxt * 10ULL));
+    i = nxt;
+  }
+  dest[--digits] = fio_i2c(i);
+}
+
+/** Converts an unsigned `val` to a signed `val`, with overflow protection. */
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
+  if (!to_negative) {
+    /* overflow? */
+    if (!(val & 0x8000000000000000ULL))
+      return val;
+    errno = E2BIG;
+    val = 0x7FFFFFFFFFFFFFFFULL;
+    return val;
+  }
+  if (!(val & 0x8000000000000000ULL)) {
+    val = (int64_t)0LL - (int64_t)val;
+    return val;
+  }
+  /* read overflow */
+  errno = E2BIG;
+  return (int64_t)(val = 0x8000000000000000ULL);
+}
+
 /* *****************************************************************************
-Strings to Numbers - Implementation - possibly externed
+Implementation - possibly externed
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
@@ -5093,6 +5192,10 @@ typedef struct {
   int64_t expo;
   uint8_t sign;
 } fio___number_s;
+
+/* *****************************************************************************
+Unsigned core and helpers
+***************************************************************************** */
 
 /**
  * Maps characters to alphanumerical value, where numbers have their natural
@@ -5103,7 +5206,7 @@ typedef struct {
  * This allows parsing of numeral strings for up to base 36.
  */
 IFUNC uint8_t fio_c2i(unsigned char c) {
-  static const uint8_t fio___alphanumerical_map[256] = {
+  static const uint8_t fio___alphanumeric_map[256] = {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -5122,7 +5225,7 @@ IFUNC uint8_t fio_c2i(unsigned char c) {
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
-  return fio___alphanumerical_map[c];
+  return fio___alphanumeric_map[c];
 }
 
 /**
@@ -5135,82 +5238,16 @@ IFUNC uint8_t fio_c2i(unsigned char c) {
  * This allows printing of numerals for up to base 36.
  */
 IFUNC uint8_t fio_i2c(unsigned char i) {
-  static const uint8_t fio___alphanumerical_map[64] = {
+  static const uint8_t fio___alphanumeric_map[64] = {
       '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B',
       'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
       'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
-  return fio___alphanumerical_map[i & 63];
+  return fio___alphanumeric_map[i & 63];
 }
 
-/** Reads number information in base 2. Returned expo in base 2. */
-FIO_IFUNC fio___number_s fio___aton_read_b2_b2(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t mask = ((1ULL) << ((sizeof(mask) << 3) - 1));
-  while (**pstr >= '0' && **pstr <= '1' && !(r.val & mask)) {
-    r.val = (r.val << 1) | (**pstr - '0');
-    ++(*pstr);
-  }
-  while (**pstr >= '0' && **pstr <= '1') {
-    ++r.expo;
-    ++(*pstr);
-  }
-  return r;
-}
-
-FIO_IFUNC fio___number_s fio___aton_read_b2_bX(char **pstr, uint8_t base) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t limit = ((~0ULL) / base) - (base - 1);
-  register uint8_t tmp;
-  while ((tmp = fio_c2i(**pstr)) < base && r.val <= (limit)) {
-    r.val = (r.val * base) + tmp;
-    ++(*pstr);
-  }
-  while (fio_c2i(**pstr) < base) {
-    ++r.expo;
-    ++(*pstr);
-  }
-  return r;
-}
-
-/** Reads number information for base 16 (hex). Returned expo in base 4. */
-FIO_IFUNC fio___number_s fio___aton_read_b2_b16(char **pstr) {
-  fio___number_s r = (fio___number_s){0};
-  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
-  for (; !(r.val & mask);) {
-    uint8_t tmp = fio_c2i(**pstr);
-    if (tmp > 15)
-      return r;
-    r.val = (r.val << 4) | tmp;
-    ++(*pstr);
-  }
-  while ((fio_c2i(**pstr)) < 16) {
-    ++(*pstr);
-    ++r.expo;
-  }
-  return r;
-}
-
-FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t inv) {
-  if (!inv) {
-    /* overflow? */
-    if (!(val & 0x8000000000000000ULL))
-      return val;
-    errno = E2BIG;
-    val = 0x7FFFFFFFFFFFFFFFULL;
-    return val;
-  }
-  if (!(val & 0x8000000000000000ULL)) {
-    val = (int64_t)0LL - (int64_t)val;
-    return val;
-  }
-  /* read overflow */
-  errno = E2BIG;
-  return (int64_t)(val = 0x8000000000000000ULL);
-}
-
+/** Reads a signed base 10 formatted number. */
 SFUNC int64_t fio_atol10(char **pstr) {
-  int64_t r;
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 8;
+  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
   char *pos = *pstr;
   const size_t inv = (pos[0] == '-');
   pos += inv;
@@ -5221,138 +5258,219 @@ SFUNC int64_t fio_atol10(char **pstr) {
     val += r0;
     ++pos;
   }
+  if (((size_t)(pos[0] - '0') < 10ULL)) {
+    errno = E2BIG;
+  }
+  *pstr = pos;
+  return fio_u2i_limit(val, inv);
+}
+
+/** Reads a signed base 8 formatted number. */
+SFUNC uint64_t fio_atol8u(char **pstr) {
+  uint64_t r = 0;
+  size_t d;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 8) {
+    r <<= 3;
+    r |= d;
+    ++*pstr;
+    if ((r & UINT64_C(0xE000000000000000)))
+      break;
+  }
+  if ((fio_c2i(**pstr)) < 16)
+    errno = E2BIG;
+  return r;
+}
+
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  uint64_t r = 0;
+  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+  char *pos = *pstr;
+  uint64_t r0;
+  while (((r0 = (uint64_t)(pos[0] - '0')) < 10ULL) & (r < add_limit)) {
+    r *= 10;
+    r += r0;
+    ++pos;
+  }
   while (((size_t)(pos[0] - '0') < 10ULL)) {
     errno = E2BIG;
     ++pos;
   }
   *pstr = pos;
-  r = fio_u2i_limit(val, inv);
   return r;
 }
 
-SFUNC int64_t fio_atol16(char **pstr) {
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+SFUNC uint64_t fio_atol16u(char **pstr) {
   uint64_t r = 0;
-  const uint64_t mask = ~((~(uint64_t)0ULL) >> 4);
-  const size_t inv = (**pstr == '-');
-  *pstr += inv;
+  size_t d;
   *pstr += (**pstr == '0');
-  *pstr += ((**pstr | 32) == 'x');
-  for (; !(r & mask);) {
-    uint8_t tmp = fio_c2i(**pstr);
-    if (tmp > 15)
-      goto done;
-    r = (r << 4) | tmp;
-    ++(*pstr);
+  *pstr += (**pstr | 32) == 'x' && fio_c2i((unsigned char)(pstr[0][1])) < 16;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 16) {
+    r <<= 4;
+    r |= d;
+    ++*pstr;
+    if ((r & UINT64_C(0xF000000000000000)))
+      break;
   }
-  while ((fio_c2i(**pstr)) < 16) {
+  if ((fio_c2i(**pstr)) < 16)
     errno = E2BIG;
-    ++(*pstr);
-  }
-done:
-  if (!inv) /* do not limit unsigned representation for positive r */
-    return r;
-  return (r = fio_u2i_limit(r, inv));
+  return r;
 }
+
+/** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
+SFUNC uint64_t fio_atol_bin(char **pstr) {
+  uint64_t r = 0;
+  size_t d;
+  *pstr += (**pstr == '0');
+  *pstr += (**pstr | 32) == 'b' && ((size_t)(pstr[0][1]) - (size_t)'0') < 2;
+  while ((d = (size_t)((unsigned char)(**pstr)) - (size_t)'0') < 2) {
+    r <<= 1;
+    r |= d;
+    ++*pstr;
+    if ((r & UINT64_C(0x8000000000000000)))
+      break;
+  }
+  if ((d = (size_t)(**pstr) - (size_t)'0') < 2)
+    errno = E2BIG;
+  return r;
+}
+
+/** Attempts to read an unsigned number in any base up to base 36. */
+SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base) {
+  uint64_t r = 0;
+  if (base > 36)
+    return r;
+  if (base == 10)
+    return (r = fio_atol10u(pstr));
+  if (base == 16)
+    return (r = fio_atol16u(pstr));
+  if (base == 2)
+    return (r = fio_atol_bin(pstr));
+  const uint64_t limit = (~UINT64_C(0)) / base;
+  size_t d;
+  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < base) {
+    r *= base;
+    r += d;
+    ++*pstr;
+    if (r > limit)
+      break;
+  }
+  if ((fio_c2i(**pstr)) < base)
+    errno = E2BIG;
+  return r;
+}
+
+/* *****************************************************************************
+fio_atol
+***************************************************************************** */
 
 SFUNC int64_t fio_atol(char **pstr) {
   if (!pstr || !(*pstr))
     return 0;
+  uint64_t v = 0;
+  uint64_t (*fn)(char **) = fio_atol10u;
   char *p = *pstr;
-  unsigned char invert = 0;
-  fio___number_s n = (fio___number_s){0};
-
-  while ((int)(unsigned char)isspace((unsigned char)*p))
-    ++p;
-  if (*p == '-') {
-    invert = 1;
-    ++p;
-  } else if (*p == '+') {
-    ++p;
-  }
+  unsigned inv = (p[0] == '-');
+  p += inv;
+  char *const s = p;
   switch (*p) {
   case 'x': /* fall through */
-  case 'X': goto is_hex;
+  case 'X': fn = fio_atol16u; goto compute;
   case 'b': /* fall through */
-  case 'B': goto is_binary;
+  case 'B': fn = fio_atol_bin; goto compute;
   case '0':
-    ++p;
-    switch (*p) {
+    switch (p[1]) {
     case 'x': /* fall through */
-    case 'X': goto is_hex;
+    case 'X': fn = fio_atol16u; goto compute;
     case 'b': /* fall through */
-    case 'B': goto is_binary;
+    case 'B': fn = fio_atol_bin; goto compute;
+    case '0': /* fall through */
+    case '1': /* fall through */
+    case '2': /* fall through */
+    case '3': /* fall through */
+    case '4': /* fall through */
+    case '5': /* fall through */
+    case '6': /* fall through */
+    case '7': fn = fio_atol8u;
     }
-    goto is_base8;
   }
-
-  /* is_base10: */
-  return fio_atol10(pstr);
-  *pstr = p;
-  n = fio___aton_read_b2_bX(pstr, 10);
-
-  /* sign can't be embeded */
-#define CALC_N_VAL()                                                           \
-  if (invert) {                                                                \
-    if (n.expo || ((n.val << 1) && (n.val >> ((sizeof(n.val) << 3) - 1)))) {   \
-      errno = E2BIG;                                                           \
-      return (int64_t)(1ULL << ((sizeof(n.val) << 3) - 1));                    \
-    }                                                                          \
-    n.val = 0 - n.val;                                                         \
-  } else {                                                                     \
-    if (n.expo || (n.val >> ((sizeof(n.val) << 3) - 1))) {                     \
-      errno = E2BIG;                                                           \
-      return (int64_t)((~0ULL) >> 1);                                          \
-    }                                                                          \
-  }
-
-  CALC_N_VAL();
-  return n.val;
-
-is_hex:
-  ++p;
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_b16(pstr);
-
-  /* sign can be embeded */
-#define CALC_N_VAL_EMBEDABLE()                                                 \
-  if (invert) {                                                                \
-    if (n.expo) {                                                              \
-      errno = E2BIG;                                                           \
-      return (int64_t)(1ULL << ((sizeof(n.val) << 3) - 1));                    \
-    }                                                                          \
-    n.val = 0 - n.val;                                                         \
-  } else {                                                                     \
-    if (n.expo) {                                                              \
-      errno = E2BIG;                                                           \
-      return (int64_t)((~0ULL) >> 1);                                          \
-    }                                                                          \
-  }
-
-  CALC_N_VAL_EMBEDABLE();
-  return n.val;
-
-is_binary:
-  ++p;
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_b2(pstr);
-  CALC_N_VAL_EMBEDABLE()
-  return n.val;
-
-is_base8:
-  while (*p == '0') {
-    ++p;
-  }
-  *pstr = p;
-  n = fio___aton_read_b2_bX(pstr, 8);
-  CALC_N_VAL();
-  return n.val;
+compute:
+  v = fn(&p);
+  if (p != s)
+    *pstr = p;
+  if (fn == fio_atol10u)
+    return fio_u2i_limit(v, inv);
+  if (!inv) /* sign embedded in the representation */
+    return (int64_t)v;
+  return fio_u2i_limit(v, inv);
 }
+
+/* *****************************************************************************
+fio_ltoa
+***************************************************************************** */
+
+SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
+  size_t len = 0;
+  uint64_t n = (uint64_t)num;
+  size_t digits;
+  char dump[96];
+  if (!dest)
+    dest = dump;
+
+  switch (base) {
+  case 1: /* fall through */
+  case 2: /* Base 2 */
+    len += (digits = fio_digits_bin(n));
+    fio_ltoa_bin(dest, n, digits); /* embedded sign bit */
+    return len;
+  case 8: /* Base 8 */
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits8u(n));
+    fio_ltoa8u(dest, n, digits);
+    return len;
+  case 16: /* Base 16 */
+    len += (digits = fio_digits16u(n));
+    fio_ltoa16u(dest, n, digits); /* embedded sign bit */
+    return len;
+  case 0:  /* fall through */
+  case 10: /* Base 10 */
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits10u(n));
+    fio_ltoa10u(dest, n, digits);
+    return len;
+  default: /* any base up to base 36 */
+    if (base > 36)
+      goto base_error;
+    if (num < 0) {
+      *(dest++) = '-';
+      if (n != UINT64_C(0x8000000000000000))
+        n = 0 - n;
+      ++len;
+    }
+    len += (digits = fio_digits_xbase(n, base));
+    fio_ltoa_xbase(dest, n, digits, base);
+    return len;
+  }
+
+base_error:
+  FIO_LOG_ERROR("fio_ltoa base out of range");
+  return len;
+}
+
+/* *****************************************************************************
+fio_atof
+***************************************************************************** */
 
 SFUNC double fio_atof(char **pstr) {
   if (!pstr || !(*pstr))
@@ -5371,181 +5489,8 @@ binary_raw:
 }
 
 /* *****************************************************************************
-Numbers to Strings - Implementation
+fio_ftoa
 ***************************************************************************** */
-
-SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
-  size_t len = 0;
-  char buf[48]; /* we only need up to 20 for base 10, but base 3 needs 41... */
-
-  if (!num)
-    goto zero;
-  if (base > 36)
-    goto base_error;
-
-  switch (base) {
-  case 1: /* fall through */
-  case 2:
-    /* Base 2 */
-    {
-      uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
-                        /* dest[len++] = '0'; */
-                        /* dest[len++] = 'b'; */
-#if __has_builtin(__builtin_clzll)
-      i = __builtin_clzll(n);
-      /* make sure the Binary representation doesn't appear signed */
-      if (i) {
-        --i;
-        /*  keep it even */
-        if ((i & 1))
-          --i;
-        n <<= i;
-      }
-#else
-      while ((i < 64) && (n & 0x8000000000000000ULL) == 0) {
-        n <<= 1;
-        i++;
-      }
-      /* make sure the Binary representation doesn't appear signed */
-      if (i) {
-        --i;
-        n = n >> 1;
-        /*  keep it even */
-        if ((i & 1)) {
-          --i;
-          n = n >> 1;
-        }
-      }
-#endif
-      /* write to dest. */
-      while (i < 64) {
-        dest[len++] = ((n & 0x8000000000000000ULL) ? '1' : '0');
-        n = n << 1;
-        i++;
-      }
-      dest[len] = 0;
-      return len;
-    }
-  case 8:
-    /* Base 8 */
-    {
-      uint64_t l = 0;
-      if (num < 0) {
-        dest[len++] = '-';
-        num = 0 - num;
-      }
-      dest[len++] = '0';
-
-      while (num) {
-        buf[l++] = '0' + (num & 7);
-        num = num >> 3;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-
-  case 16:
-    /* Base 16 */
-    {
-      uint64_t n = num; /* avoid bit shifting inconsistencies with signed bit */
-      uint8_t i = 0;    /* counting bits */
-      /* dest[len++] = '0'; */
-      /* dest[len++] = 'x'; */
-      while ((n & 0xFF00000000000000ULL) == 0) { // since n != 0, then i < 8
-        n = n << 8;
-        i++;
-      }
-      /* make sure the Hex representation doesn't appear misleadingly signed. */
-      if (i && (n & 0x8000000000000000ULL) && (n & 0x00FFFFFFFFFFFFFFULL)) {
-        dest[len++] = '0';
-        dest[len++] = '0';
-      }
-      /* write the damn thing, high to low */
-      while (i < 8) {
-        uint8_t tmp = (n & 0xF000000000000000ULL) >> 60;
-        uint8_t tmp2 = (n & 0x0F00000000000000ULL) >> 56;
-        dest[len++] = fio_i2c(tmp);
-        dest[len++] = fio_i2c(tmp2);
-        i++;
-        n = n << 8;
-      }
-      dest[len] = 0;
-      return len;
-    }
-  case 0: /* fall through */
-  case 10:
-    /* Base 10 */
-    {
-      int64_t t = num / 10;
-      uint64_t l = 0;
-      if (num < 0) {
-        /* may fail due to overflow, fixed with tail (t) */
-        num = (uint64_t)0 - (uint64_t)num;
-        t = (int64_t)((uint64_t)((uint64_t)0 - (uint64_t)t));
-        dest[len++] = '-';
-      }
-      while (num) {
-        buf[l++] = '0' + ((uint64_t)num - (uint64_t)(t * 10));
-        num = t;
-        t = num / 10;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-
-  default:
-    /* any base up to base 36 */
-    {
-      int64_t t = num / base;
-      uint64_t l = 0;
-      if (num < 0) {
-        num = 0 - num; /* might fail due to overflow, but fixed with tail (t) */
-        t = (int64_t)0 - t;
-        dest[len++] = '-';
-      }
-      while (num) {
-        buf[l++] = fio_i2c(num - (t * base));
-        num = t;
-        t = num / base;
-      }
-      while (l) {
-        --l;
-        dest[len++] = buf[l];
-      }
-      dest[len] = 0;
-      return len;
-    }
-  }
-
-base_error:
-  FIO_LOG_ERROR("fio_ltoa base out of range");
-zero:
-  switch (base) {
-  case 1:
-  case 2:
-    dest[len++] = '0';
-    dest[len++] = 'b';
-    break;
-  case 8: dest[len++] = '0'; break;
-  case 16:
-    dest[len++] = '0';
-    dest[len++] = 'x';
-    dest[len++] = '0';
-    break;
-  }
-  dest[len++] = '0';
-  dest[len] = 0;
-  return len;
-}
 
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
   if (base == 2 || base == 16) {
@@ -5612,6 +5557,21 @@ FIO_IFUNC int64_t FIO_NAME_TEST(stl, atol_time)(void) {
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
+SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
+  switch (base) {
+  case 2: /* overflow - unsupported */
+  case 8: /* overflow - unsupported */
+  case 10: return snprintf(dest, 256, "%" PRId64, num);
+  case 16:
+    if (num >= 0)
+      return snprintf(dest, 256, "0x%.16" PRIx64, num);
+    return snprintf(dest, 256, "-0x%.8" PRIx64, (0 - num));
+  }
+  return snprintf(dest, 256, "%" PRId64, num);
+}
+
+SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
+
 FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
                                               int64_t (*a2l)(char **),
                                               size_t (*l2a)(char *,
@@ -5629,12 +5589,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
   } * pb, b[] = {
               {.str = "Base 10", .base = 10},
               {.str = "Hex    ", .prefix = "0x", .prefix_len = 2, .base = 16},
-              // {.str = "Binary ", .prefix = "0b", .prefix_len = 2, .base = 2},
+              {.str = "Binary ", .prefix = "0b", .prefix_len = 2, .base = 2},
               // {.str = "Oct    ", .prefix = "0", .prefix_len = 1, .base = 8},
               /* end marker */
               {.str = NULL},
           };
   fprintf(stderr, "    * %s test performance:\n", name);
+  if (l2a == sprintf_wrapper)
+    b[2].str = NULL;
   for (pb = b; pb->str; ++pb) {
     start = FIO_NAME_TEST(stl, atol_time)();
     for (int64_t i = -FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
@@ -5702,28 +5664,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
   }
 }
 
-SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
-  switch (base) {
-  case 2: /* overflow - unsupported */
-  case 8: /* overflow - unsupported */
-  case 10: return snprintf(dest, 256, "%" PRId64, num);
-  case 16:
-    if (num >= 0)
-      return snprintf(dest, 256, "0x%.16" PRIx64, num);
-    return snprintf(dest, 256, "-0x%.8" PRIx64, (0 - num));
-  }
-  return snprintf(dest, 256, "%" PRId64, num);
-}
-
-SFUNC int64_t strtoll_wrapper(char **pstr) { return strtoll(*pstr, pstr, 0); }
-
 FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   fprintf(stderr, "* Testing fio_atol and fio_ltoa.\n");
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
-    buffer[tmp++] = 0;
     char *tmp2 = buffer;
     int i2 = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
@@ -5767,7 +5713,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                (size_t)(p - (s)),                                              \
                (void *)p,                                                      \
                (void *)s);                                                     \
-    char buf[72];                                                              \
+    char buf[96];                                                              \
     buf[0] = '0';                                                              \
     buf[1] = 'b';                                                              \
     buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                      \
@@ -5778,9 +5724,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                buf,                                                            \
                ((char *)(s)),                                                  \
                (size_t)((p = buf), fio_atol(&p)));                             \
-    buf[fio_ltoa(buf, n, 8)] = 0;                                              \
+    fio_ltoa(buf, n, 8);                                                       \
     p = buf;                                                                   \
-    FIO_ASSERT(fio_atol(&p) == (n),                                            \
+    p += buf[0] == '-';                                                        \
+    FIO_ASSERT((int64_t)fio_atol8u(&p) == ((buf[0] == '-') ? (0 - (n)) : (n)), \
                "fio_ltoa base 8 test error! "                                  \
                "%s != %s (%zd)",                                               \
                buf,                                                            \
@@ -5854,20 +5801,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_LTOA_DIGITS10(-7777777LL, (7 + 1));
   TEST_LTOA_DIGITS10(-88888888LL, (8 + 1));
   TEST_LTOA_DIGITS10(-999999999LL, (9 + 1));
+  TEST_LTOA_DIGITS10(-9223372036854775807LL, (19 + 1));
 #undef TEST_LTOA_DIGITS10
 
 #define TEST_LTOA_DIGITS16(num, digits)                                        \
-  FIO_ASSERT(fio_digits16(num) == digits,                                      \
-             "fio_digits16 failed for " #num " != (%zu)",                      \
-             (size_t)fio_digits16(num));                                       \
+  FIO_ASSERT(fio_digits16u(num) == digits,                                     \
+             "fio_digits16u failed for " #num " != (%zu)",                     \
+             (size_t)fio_digits16u(num));                                      \
   {                                                                            \
     char *number_str__ = (char *)#num;                                         \
     char *pstr__ = number_str__;                                               \
-    FIO_ASSERT(fio_atol16(&pstr__) == (int64_t)num,                            \
-               "fio_atol16 failed for " #num);                                 \
+    FIO_ASSERT(fio_atol16u(&pstr__) == (uint64_t)(num),                        \
+               "fio_atol16u failed for " #num " != %zu",                       \
+               ((pstr__ = number_str__), (size_t)fio_atol16u(&pstr__)));       \
   }
   TEST_LTOA_DIGITS16(0x00ULL, 2);
-  TEST_LTOA_DIGITS16(-0x01ULL, 16);
   TEST_LTOA_DIGITS16(0x10ULL, 2);
   TEST_LTOA_DIGITS16(0x100ULL, 4);
   TEST_LTOA_DIGITS16(0x10000ULL, 6);
@@ -5880,6 +5828,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_LTOA_DIGITS16(0x100000000000000ULL, 16);
   TEST_LTOA_DIGITS16(0xFF00000000000000ULL, 16);
 #undef TEST_LTOA_DIGITS16
+
+#define TEST_LTOA_DIGITS_BIN(num, digits)                                      \
+  FIO_ASSERT(fio_digits_bin(num) == digits,                                    \
+             "fio_digits_bin failed for " #num " != (%zu)",                    \
+             (size_t)fio_digits_bin(num));
+
+  TEST_LTOA_DIGITS_BIN(0x00ULL, 1);
+  TEST_LTOA_DIGITS_BIN(-0x01ULL, 64);
+  TEST_LTOA_DIGITS_BIN(0x10ULL, 6);
+  TEST_LTOA_DIGITS_BIN(0x100ULL, 10);
+  TEST_LTOA_DIGITS_BIN(0x10000ULL, 18);
+  TEST_LTOA_DIGITS_BIN(0x20000ULL, 18);
+  TEST_LTOA_DIGITS_BIN(0xFFFFFFULL, 24);
+  TEST_LTOA_DIGITS_BIN(0x1000000ULL, 26);
+  TEST_LTOA_DIGITS_BIN(0x10000000ULL, 30);
+  TEST_LTOA_DIGITS_BIN(0x100000000ULL, 34);
+  TEST_LTOA_DIGITS_BIN(0x10000000000ULL, 42);
+  TEST_LTOA_DIGITS_BIN(0x1000000000000ULL, 50);
+  TEST_LTOA_DIGITS_BIN(0x100000000000000ULL, 58);
+  TEST_LTOA_DIGITS_BIN(0xFF00000000000000ULL, 64);
+#undef TEST_LTOA_DIGITS_BIN
 
   FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
   FIO_NAME_TEST(stl, atol_speed)
@@ -6860,14 +6829,31 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   return (time_t)time;
 }
 
-static const char *FIO___DAY_NAMES[] =
-    {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-// clang-format off
-static const char *FIO___MONTH_NAMES[] =
-    {"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
-     "Jul ", "Aug ", "Sep ", "Oct ", "Nov ", "Dec "};
-// clang-format on
-static const char *FIO___GMT_STR = "GMT";
+FIO_SFUNC char *fio_time_write_day(char *dest, const struct tm *tm) {
+  static const char *FIO___DAY_NAMES[] =
+      {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  dest[0] = FIO___DAY_NAMES[tm->tm_wday][0];
+  dest[1] = FIO___DAY_NAMES[tm->tm_wday][1];
+  dest[2] = FIO___DAY_NAMES[tm->tm_wday][2];
+  return dest + 3;
+}
+
+FIO_SFUNC char *fio_time_write_month(char *dest, const struct tm *tm) {
+  // clang-format off
+  static const char *FIO___MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  // clang-format on
+  dest[0] = FIO___MONTH_NAMES[tm->tm_mon][0];
+  dest[1] = FIO___MONTH_NAMES[tm->tm_mon][1];
+  dest[2] = FIO___MONTH_NAMES[tm->tm_mon][2];
+  return dest + 3;
+}
+
+FIO_SFUNC char *fio_time_write_year(char *dest, const struct tm *tm) {
+  int64_t year = tm->tm_year + 1900;
+  const size_t digits = fio_digits10(year);
+  fio_ltoa10(dest, year, digits);
+  return dest + digits;
+}
 
 /** Writes an RFC 7231 date representation (HTTP date format) to target. */
 SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
@@ -6875,43 +6861,33 @@ SFUNC size_t fio_time2rfc7231(char *target, time_t time) {
   /* note: day of month is always 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+  *pos++ = ' ';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = ' ';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+  *pos++ = ' ';
+  *pos++ = 'G';
+  *pos++ = 'M';
+  *pos++ = 'T';
+  *pos = 0;
   return pos - target;
 }
 /** Writes an RFC 2109 date representation to target. */
@@ -6920,37 +6896,28 @@ SFUNC size_t fio_time2rfc2109(char *target, time_t time) {
   /* note: day of month is always 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   tmp = tm.tm_mday / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-  pos += 2;
-  *(pos++) = ' ';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos[3] = ' ';
-  pos += 4;
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+  *pos++ = ' ';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = ' ';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
   *pos++ = ' ';
   *pos++ = '-';
   *pos++ = '0';
@@ -6967,48 +6934,37 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
   /* note: day of month is either 1 or 2 digits */
   char *pos = target;
   uint16_t tmp;
-  pos[0] = FIO___DAY_NAMES[tm.tm_wday][0];
-  pos[1] = FIO___DAY_NAMES[tm.tm_wday][1];
-  pos[2] = FIO___DAY_NAMES[tm.tm_wday][2];
-  pos[3] = ',';
-  pos[4] = ' ';
-  pos += 5;
+  pos = fio_time_write_day(pos, &tm);
+  *pos++ = ',';
+  *pos++ = ' ';
   if (tm.tm_mday < 10) {
-    *pos = '0' + tm.tm_mday;
-    ++pos;
+    *pos++ = '0' + tm.tm_mday;
   } else {
     tmp = tm.tm_mday / 10;
-    pos[0] = '0' + tmp;
-    pos[1] = '0' + (tm.tm_mday - (tmp * 10));
-    pos += 2;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
   }
-  *(pos++) = '-';
-  pos[0] = FIO___MONTH_NAMES[tm.tm_mon][0];
-  pos[1] = FIO___MONTH_NAMES[tm.tm_mon][1];
-  pos[2] = FIO___MONTH_NAMES[tm.tm_mon][2];
-  pos += 3;
-  *(pos++) = '-';
-  // write year.
-  pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-  *(pos++) = ' ';
+  *pos++ = '-';
+  pos = fio_time_write_month(pos, &tm);
+  *pos++ = '-';
+  pos = fio_time_write_year(pos, &tm);
+  *pos++ = ' ';
   tmp = tm.tm_hour / 10;
-  pos[0] = '0' + tmp;
-  pos[1] = '0' + (tm.tm_hour - (tmp * 10));
-  pos[2] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_min / 10;
-  pos[3] = '0' + tmp;
-  pos[4] = '0' + (tm.tm_min - (tmp * 10));
-  pos[5] = ':';
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_min - (tmp * 10));
+  *pos++ = ':';
   tmp = tm.tm_sec / 10;
-  pos[6] = '0' + tmp;
-  pos[7] = '0' + (tm.tm_sec - (tmp * 10));
-  pos += 8;
-  pos[0] = ' ';
-  pos[1] = FIO___GMT_STR[0];
-  pos[2] = FIO___GMT_STR[1];
-  pos[3] = FIO___GMT_STR[2];
-  pos[4] = 0;
-  pos += 4;
+  *pos++ = '0' + tmp;
+  *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+  *pos++ = ' ';
+  *pos++ = 'G';
+  *pos++ = 'M';
+  *pos++ = 'T';
+  *pos = 0;
   return pos - target;
 }
 
@@ -7025,35 +6981,33 @@ SFUNC size_t fio_time2log(char *target, time_t time) {
     /* note: day of month is either 1 or 2 digits */
     char *pos = target;
     uint16_t tmp;
-    *(pos++) = '[';
+    *pos++ = '[';
     tmp = tm.tm_mday / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_mday - (tmp * 10));
-    *(pos++) = '/';
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][0];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][1];
-    *(pos++) = FIO___MONTH_NAMES[tm.tm_mon][2];
-    *(pos++) = '/';
-    pos += fio_ltoa(pos, tm.tm_year + 1900, 10);
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+    *pos++ = '/';
+    pos = fio_time_write_month(pos, &tm);
+    *pos++ = '/';
+    pos = fio_time_write_year(pos, &tm);
+    *pos++ = ':';
     tmp = tm.tm_hour / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_hour - (tmp * 10));
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+    *pos++ = ':';
     tmp = tm.tm_min / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_min - (tmp * 10));
-    *(pos++) = ':';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_min - (tmp * 10));
+    *pos++ = ':';
     tmp = tm.tm_sec / 10;
-    *(pos++) = '0' + tmp;
-    *(pos++) = '0' + (tm.tm_sec - (tmp * 10));
-    *(pos++) = ' ';
-    *(pos++) = '+';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = '0';
-    *(pos++) = ']';
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_sec - (tmp * 10));
+    *pos++ = ' ';
+    *pos++ = '+';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = '0';
+    *pos++ = ']';
     *(pos) = 0;
     return pos - target;
   }
@@ -14286,38 +14240,9 @@ FIO_IFUNC void fio___memset_test_aligned(void *restrict dest_,
   (void)msg; /* in case FIO_ASSERT is disabled */
 }
 
-FIO_SFUNC void *fio___naive_memchr(const void *buffer,
-                                   const char token,
-                                   size_t len) {
-  const char *r = (const char *)buffer;
-  const char *e = r + len;
-  const char *e_group = r + (len & (~UINT64_C(63)));
-  for (; r < e_group; r += 64) {
-    for (size_t i = 0; i < 64; ++i) {
-      if (FIO_UNLIKELY(r[i] == token))
-        return (void *)(r + i);
-    }
-  }
-  for (; r < e; ++r) {
-    if (*r == token)
-      return (void *)r;
-  }
-  return NULL;
-}
-
-FIO_SFUNC void fio___naive_memcpy(void *restrict d_,
-                                  const void *restrict s_,
-                                  size_t len) {
-  char *d = (char *)d_;
-  const char *s = (const char *)s_;
-  while (len--)
-    *(d++) = *(s++);
-}
-
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   uint64_t start, end;
-  const int repetitions = 8192;
 
   { /* test fio_memcpy possible overflow. */
     uint64_t buf1[64];
@@ -14355,11 +14280,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   }
 
 #ifndef DEBUG
-  fprintf(stderr,
-          "* Speed testing memset (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memset:\n");
+  const size_t base_repetitions = 8192;
 
-  for (int len_i = 5; len_i < 20; ++len_i) {
+  for (size_t len_i = 5; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = 1ULL << len_i;
     void *mem = malloc(mem_len);
     FIO_ASSERT_ALLOC(mem);
@@ -14370,7 +14296,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     sig ^= sig << 31;
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       fio_memset(mem, sig, mem_len);
       FIO_COMPILER_GUARD;
     }
@@ -14380,28 +14306,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                               mem_len,
                               "fio_memset sanity test FAILED");
     fprintf(stderr,
-            "\tfio_memset\t(%zu bytes):\t%zuus\n",
+            "\tfio_memset\t(%zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       memset(mem, (int)sig, mem_len);
       FIO_COMPILER_GUARD;
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memset\t(%zu bytes):\t%zuus\n",
+            "\tsystem memset\t(%zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     free(mem);
   }
 
-  fprintf(stderr,
-          "* Speed testing memcpy (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memcpy:\n");
 
-  for (int len_i = 5; len_i < 22; ++len_i) {
+  for (int len_i = 5; len_i < 21; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
       void *mem = malloc(mem_len << 1);
@@ -14412,10 +14340,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       sig ^= sig << 29;
       sig ^= sig << 31;
       fio_memset(mem, sig, mem_len);
-      size_t mbsec;
 
       start = fio_time_micro();
-      for (int i = 0; i < repetitions; ++i) {
+      for (size_t i = 0; i < repetitions; ++i) {
         fio_memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
@@ -14424,16 +14351,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                                 sig,
                                 mem_len,
                                 "fio_memcpy sanity test FAILED");
-      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tfio_memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+              "\tfio_memcpy\t(%zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
-              mbsec);
+              repetitions);
 
       // size_t threads_used = 0;
       // start = fio_time_micro();
-      // for (int i = 0; i < repetitions; ++i) {
+      // for (size_t i = 0; i < repetitions; ++i) {
       //   threads_used = fio_thread_memcpy((char *)mem + mem_len, mem,
       //   mem_len); if (threads_used == 1)
       //     break;
@@ -14444,47 +14370,31 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       //                           sig,
       //                           mem_len,
       //                           "fio_thread_memcpy sanity test FAILED");
-      // mbsec = ((end - start) * repetitions) / mem_len;
       // fprintf(stderr,
       //         "   fio_thread_memcpy (%zut)\t(%zu bytes):\t%zu"
-      //         "us\t%zumb/sec\n", threads_used, mem_len, (size_t)(end -
-      //         start), mbsec);
+      //         "us\t/ %zu\n", threads_used, mem_len, (size_t)(end
+      //         - start), repetitions);
 
       start = fio_time_micro();
-      for (int i = 0; i < repetitions; ++i) {
+      for (size_t i = 0; i < repetitions; ++i) {
         memcpy((char *)mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
       }
       end = fio_time_micro();
-      mbsec = (mem_len * repetitions) / (end - start);
       fprintf(stderr,
-              "\tsystem memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
+              "\tsystem memcpy\t(%zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
-              mbsec);
-
-      // start = fio_time_micro();
-      // for (int i = 0; i < repetitions; ++i) {
-      //   fio___naive_memcpy((char *)mem + mem_len, mem, mem_len);
-      //   FIO_COMPILER_GUARD;
-      // }
-      // end = fio_time_micro();
-      // mbsec = (mem_len * repetitions) / (end - start);
-      // fprintf(stderr,
-      //         "\tnaive memcpy\t(%zu bytes):\t%zuus\t%zumb/sec\n",
-      //         mem_len,
-      //         (size_t)(end - start),
-      //         mbsec);
-
+              repetitions);
       free(mem);
     }
   }
 
-  fprintf(stderr,
-          "* Speed testing memchr (%d repetitions per test):\n",
-          repetitions);
+  fprintf(stderr, "* Speed testing memchr:\n");
 
   for (int len_i = 5; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
     const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
@@ -14498,15 +14408,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
-    FIO_ASSERT(fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
-                   fio_memchr((char *)mem + 1, 0, mem_len),
-               "fio_memchr != naive approach");
     // FIO_ASSERT(fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
     //                fio_memchr((char *)mem + 1, 0, mem_len),
     //            "fio_memchr (partial math) != alternative approach");
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
                      ((char *)mem + token_index),
                  "fio_memchr failed?");
@@ -14515,12 +14422,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
 
     fprintf(stderr,
-            "\tfio_memchr\t(%zu bytes):\t%zu us\n",
+            "\tfio_memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
             token_index,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
+    for (size_t i = 0; i < repetitions; ++i) {
       FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
                      ((char *)mem + token_index),
                  "memchr failed?");
@@ -14528,12 +14436,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     }
     end = fio_time_micro();
     fprintf(stderr,
-            "\tsystem memchr\t(%zu bytes):\t%zuus\n",
+            "\tsystem memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
             token_index,
-            (size_t)(end - start));
+            (size_t)(end - start),
+            repetitions);
 
     // start = fio_time_micro();
-    // for (int i = 0; i < repetitions; ++i) {
+    // for (size_t i = 0; i < repetitions; ++i) {
     //   FIO_ASSERT((char *)fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
     //                  ((char *)mem + token_index),
     //              "fio___alt_memchr failed?");
@@ -14541,29 +14450,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     // }
     // end = fio_time_micro();
     // fprintf(stderr,
-    //         "\tfio_alt_memchr\t(%zu bytes):\t%zu us\n",
+    //         "\tfio_alt_memchr\t(%zu bytes):\t%zu us\t/ %zu\n",
     //         token_index,
-    //         (size_t)(end - start));
-
-    start = fio_time_micro();
-    for (int i = 0; i < repetitions; ++i) {
-      FIO_ASSERT((char *)fio___naive_memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + token_index),
-                 "memchr failed?");
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\ta naive memchr\t(%zu bytes):\t%zuus\n",
-            token_index,
-            (size_t)(end - start));
+    //         (size_t)(end - start), repetitions);
 
     free(mem);
   }
 #endif /* DEBUG */
-  (void)start;
-  (void)end;
-  (void)repetitions;
+  ((void)start), ((void)end);
 }
 #endif /* H___FIO_TEST_MEMORY_HELPERS_H */
 
@@ -19012,6 +18906,8 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len);
 FIO_SFUNC int fio_bstr_is_greater(char *a, char *b);
 /** Compares to see if fio_bstr a is equal to another String. */
 FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b);
+/** Compares to see if fio_bstr a is equal to another String. */
+FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b);
 
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write(char *bstr,
@@ -19081,6 +18977,8 @@ Key String Type - binary String container for Hash Maps and Arrays
 typedef struct fio_keystr_s fio_keystr_s;
 
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str);
 
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
@@ -19094,7 +18992,7 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 /** Compares two Key Strings. */
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
-FIO_IFUNC int fio_keystr_is_eq2info(fio_keystr_s a_, fio_str_info_s b);
+FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
 
 /* *****************************************************************************
 
@@ -19407,6 +19305,11 @@ FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b) {
   fio_str_info_s a = fio_bstr_info(a_);
   return FIO_STR_INFO_IS_EQ(a, b);
 }
+/** Compares to see if fio_bstr a is equal to another String. */
+FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b) {
+  fio_buf_info_s a = fio_bstr_buf(a_);
+  return FIO_BUF_INFO_IS_EQ(a, b);
+}
 
 /* *****************************************************************************
 Key String Type - binary String container for Hash Maps and Arrays
@@ -19420,6 +19323,16 @@ struct fio_keystr_s {
   const char *buf;
 };
 
+/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
+  fio_buf_info_s r;
+  if ((str->info + 1) > 1) {
+    r = (fio_buf_info_s){.len = str->info, .buf = (char *)str->embd};
+    return r;
+  }
+  r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
+  return r;
+}
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
   fio_str_info_s r;
@@ -19483,13 +19396,13 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 
 /** Compares two Key Strings. */
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
-  fio_str_info_s a = fio_keystr_info(&a_);
-  fio_str_info_s b = fio_keystr_info(&b_);
-  return FIO_STR_INFO_IS_EQ(a, b);
+  fio_buf_info_s a = fio_keystr_buf(&a_);
+  fio_buf_info_s b = fio_keystr_buf(&b_);
+  return FIO_BUF_INFO_IS_EQ(a, b);
 }
 
 /** Compares a Key String to any String - used internally by the hash map. */
-FIO_IFUNC int fio_keystr_is_eq2info(fio_keystr_s a_, fio_str_info_s b) {
+FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b) {
   fio_str_info_s a = fio_keystr_info(&a_);
   return FIO_STR_INFO_IS_EQ(a, b);
 }
@@ -19552,27 +19465,13 @@ SFUNC int fio_string_write_i(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              int64_t i) {
   int r = -1;
-  char buf[32];
   size_t len = 0;
-  size_t inv = i < 0;
-  if (inv) {
-    i = 0 - i;
-  }
-  while (i > 9) {
-    uint64_t nxt = (uint64_t)i / 10;
-    buf[len++] = '0' + ((uint64_t)i - (nxt * 10));
-    i = (int64_t)nxt;
-  }
-  buf[len++] = '0' + (unsigned char)i;
-  buf[len] = '-';
-  len += inv;
+  len = fio_digits10(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
-  }
-  dest->buf[dest->len] = 0;
+  fio_ltoa10(dest->buf + dest->len, i, len);
+  dest->len += len;
   return r;
 }
 
@@ -19581,21 +19480,12 @@ SFUNC int fio_string_write_u(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              uint64_t i) {
   int r = -1;
-  char buf[32];
-  size_t len = 0;
-  while (i > 9) {
-    uint64_t nxt = i / 10;
-    buf[len++] = '0' + (i - (nxt * 10));
-    i = nxt;
-  }
-  buf[len++] = '0' + (unsigned char)i;
+  size_t len = fio_digits10u(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return r; /* no writing of partial numbers. */
   r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
-  }
-  dest->buf[dest->len] = 0;
+  fio_ltoa10u(dest->buf + dest->len, i, len);
+  dest->len += len;
   return r;
 }
 
@@ -19604,22 +19494,11 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
   int r = 0;
-  size_t len = fio_digits16(i);
+  size_t len = fio_digits16u(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
     return (r = -1); /* no writing of partial numbers. */
+  fio_ltoa16u(dest->buf + dest->len, i, len);
   dest->len += len;
-  len = dest->len;
-  dest->buf[dest->len] = 0;
-  while (i > 255) {
-    dest->buf[len - 1] = fio_i2c(i & 15);
-    i >>= 4;
-    dest->buf[len - 2] = fio_i2c(i & 15);
-    i >>= 4;
-    len -= 2;
-  }
-  dest->buf[len - 1] = fio_i2c(i & 15);
-  i >>= 4;
-  dest->buf[len - 2] = fio_i2c(i & 15);
   return r;
 }
 
@@ -19627,26 +19506,12 @@ SFUNC int fio_string_write_hex(fio_str_info_s *dest,
 SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i) {
-  int r = -1;
-  char buf[64];
-  size_t len = 0;
-  buf[0] = '0';
-  while (i) {
-    buf[len++] = '0' + (i & 1);
-    i >>= 1;
-    buf[len++] = '0' + (i & 1);
-    i >>= 1;
-  }
-  len += !len; /* printing 0 if zero */
+  int r = 0;
+  size_t len = fio_digits_bin(i);
   if (fio_string___write_validate_len(dest, reallocate, &len))
-    return r; /* no writing of partial numbers. */
-  r = 0;
-  while (len) {
-    dest->buf[dest->len++] = buf[--len];
-  }
-  dest->buf[dest->len] = 0;
-  return r;
-
+    return (r = -1); /* no writing of partial numbers. */
+  fio_ltoa_bin(dest->buf + dest->len, i, len);
+  dest->len += len;
   return r;
 }
 
@@ -20036,8 +19901,8 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     switch (pos->klass) { /* use more memory rather then calculate twice. */
     case 2: /* number */ len += fio_digits10(pos->info.i); break;
     case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
-    case 4: /* hex */ len += fio_digits16(pos->info.u); break;
-    case 5: /* binary */ len += fio_bits_msb_index(pos->info.u) + 1; break;
+    case 4: /* hex */ len += fio_digits16u(pos->info.u); break;
+    case 5: /* binary */ len += fio_digits_bin(pos->info.u); break;
     case 6: /* float */ len += 18; break;
     default: len += pos->info.str.len;
     }
@@ -20719,6 +20584,10 @@ FIO_SFUNC size_t FIO_NAME_TEST(stl, string_core_ltoa)(char *buf,
     fio_string_write_hex(&s, NULL, i);
     return s.len;
   }
+  if (base == 2) {
+    fio_string_write_bin(&s, NULL, i);
+    return s.len;
+  }
   fio_string_write_i(&s, NULL, i);
   return s.len;
 }
@@ -20813,8 +20682,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write2 failed to truncate (bin)!");
   }
   { /* test numeral fio_string_write functions. */
-    char mem[16];
-    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
+    char mem[32];
+    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_i(&buf, NULL, 0),
                "fio_string_write_i returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
@@ -20823,7 +20692,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write_i returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "0-42", 5),
                "fio_string_write_i didn't print -24!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
+    buf = FIO_STR_INFO3(mem, 0, 32);
+    FIO_ASSERT(!fio_string_write_u(&buf, NULL, 0),
+               "fio_string_write_u returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
+               "fio_string_write_u didn't print 0!");
+    FIO_ASSERT(!fio_string_write_u(&buf, NULL, -42LL),
+               "fio_string_write_u returned error!");
+    FIO_ASSERT(mem == buf.buf && buf.len == 21 &&
+                   !memcmp(buf.buf, "018446744073709551574", 21),
+               "fio_string_write_u didn't print -24!");
+    buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 0),
                "fio_string_write_hex returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 2 && !memcmp(buf.buf, "00", 3),
@@ -20832,7 +20711,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write_hex returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "002A", 5),
                "fio_string_write_hex didn't print 2A!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
+    buf = FIO_STR_INFO3(mem, 0, 32);
     FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 0),
                "fio_string_write_bin returned error!");
     FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
@@ -21070,7 +20949,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fprintf(stderr,
             "\t* strcmp libc test cycles:            %zu\n",
             (size_t)(end - start));
-    fprintf(stderr, "* Testing fio_string_write_(i|u|hex) speeds:\n");
+    fprintf(stderr, "* Testing fio_string_write_(i|u|hex|bin) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
      fio_atol,
@@ -24834,7 +24713,7 @@ Map Settings - Sets have only keys (value == key) - Hash Maps have values
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
   (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, __key_alloc))
-#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq2info((a), (b))
+#define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq2((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)                                               \
   fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))
 #define FIO_MAP_KEY_DISCARD(key)
@@ -24846,14 +24725,15 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
   (void)len; /* if unused */
 }
 #undef FIO_MAP_KEYSTR
+
 /* if FIO_MAP_KEY is undefined, assume String keys (using `fio_bstr`). */
 #elif !defined(FIO_MAP_KEY)
-#define FIO_MAP_KEY                  fio_str_info_s
+#define FIO_MAP_KEY                  fio_buf_info_s
 #define FIO_MAP_KEY_INTERNAL         char *
-#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
+#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_buf((k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
-#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2info((a), (b))
+#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2buf((a), (b))
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
 #endif
@@ -24894,9 +24774,9 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #endif
 
 #ifdef FIO_MAP_VALUE_BSTR
-#define FIO_MAP_VALUE                  fio_str_info_s
+#define FIO_MAP_VALUE                  fio_buf_info_s
 #define FIO_MAP_VALUE_INTERNAL         char *
-#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_info((v))
+#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_buf((v))
 #define FIO_MAP_VALUE_COPY(dest, src)                                          \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 #define FIO_MAP_VALUE_DESTROY(v) fio_bstr_free((v))
@@ -28282,7 +28162,6 @@ CLI - cleanup
 Copyright and License: see header file (000 header.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
-#define H___FIO_POLL___H
 
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
@@ -28422,7 +28301,6 @@ SFUNC void fio___poll_ev_mock(void *udata) { (void)udata; }
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-#undef FIO_POLL
 #endif /* FIO_POLL */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
@@ -28433,9 +28311,10 @@ Cleanup
 #include "./include.h"  /* Development inclusion - ignore line */
 #endif                  /* Development inclusion - ignore line */
 /* ************************************************************************* */
-#if (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+#if defined(FIO_POLL) &&                                                       \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL &&                                \
-    !defined(H___FIO_POLL_EGN___H) && defined(H___FIO_POLL___H) &&             \
+    !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
     !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
@@ -28632,9 +28511,10 @@ Cleanup
 #include "./include.h"  /* Development inclusion - ignore line */
 #endif                  /* Development inclusion - ignore line */
 /* ************************************************************************* */
-#if (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+#if defined(FIO_POLL) &&                                                       \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE &&                               \
-    !defined(H___FIO_POLL_EGN___H) && defined(H___FIO_POLL___H) &&             \
+    !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
     !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
@@ -28821,9 +28701,10 @@ Cleanup
 #include "./include.h"  /* Development inclusion - ignore line */
 #endif                  /* Development inclusion - ignore line */
 /* ************************************************************************* */
-#if (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+#if defined(FIO_POLL) &&                                                       \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL &&                                 \
-    !defined(H___FIO_POLL_EGN___H) && defined(H___FIO_POLL___H) &&             \
+    !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
     !defined(FIO_STL_KEEP__)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
@@ -29111,6 +28992,11 @@ Cleanup
 #undef FIO_POLL_EX_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */
+
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
+#define H___FIO_POLL___H
+#undef FIO_POLL
+#endif /* FIO_POLL */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
@@ -29715,7 +29601,7 @@ typedef struct {
   fio___srv_env_s env;
 } fio___srv_env_safe_s;
 
-#define FIO__SRV_ENV_SAFE_INIT                                                 \
+#define FIO___SRV_ENV_SAFE_INIT                                                \
   { .lock = FIO_THREAD_MUTEX_INIT, .env = FIO_MAP_INIT }
 
 FIO_IFUNC void fio___srv_env_safe_set(fio___srv_env_safe_s *e,
@@ -29761,6 +29647,7 @@ FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
 FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
   fio___srv_env_destroy(&e->env);
   fio_thread_mutex_destroy(&e->lock);
+  *e = (fio___srv_env_safe_s)FIO___SRV_ENV_SAFE_INIT;
 }
 
 /* *****************************************************************************
@@ -29816,7 +29703,7 @@ static struct {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
-    .env = FIO__SRV_ENV_SAFE_INIT,
+    .env = FIO___SRV_ENV_SAFE_INIT,
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
@@ -29991,7 +29878,7 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
       .pr = &MOCK_PROTOCOL,
       .node = FIO_LIST_INIT(io->node),
       .stream = FIO_STREAM_INIT(io->stream),
-      .env = FIO__SRV_ENV_SAFE_INIT,
+      .env = FIO___SRV_ENV_SAFE_INIT,
       .active = fio___srvdata.tick,
       .state = FIO_STATE_OPEN,
       .fd = -1,
@@ -30872,7 +30759,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
   fprintf(stderr, "   * Testing fio_env.\n");
   size_t a = 0, b = 0, c = 0;
-  fio___srv_env_safe_s env = FIO__SRV_ENV_SAFE_INIT;
+  fio___srv_env_safe_s env = FIO___SRV_ENV_SAFE_INIT;
   fio___srv_env_safe_set(
       &env,
       (char *)"a_key",
@@ -31050,6 +30937,9 @@ typedef struct {
   int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
+  /** If set, subscription will be limited to the root / master process. */
+  /** TODO: not implemented */
+  uint8_t master_only;
 } subscribe_args_s;
 
 /**
@@ -31474,6 +31364,19 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
 #define FIO_STL_KEEP__           1
 #include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
+
+/* TODO: mastr only subscription map */
+// #define FIO_MAP_NAME fio___master_sub
+// #define FIO_MAP_TYPE fio_subscription_ *
+// #define FIO_MAP_TYPE_DESTROY(key) \
+//   do { \
+//     fio_channel_on_destroy(key); \
+//     fio_channel_free((key)); \
+//   } while (0)
+// #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
+// #define FIO_STL_KEEP__           1
+// #include FIO___INCLUDE_FILE
+// #undef FIO_STL_KEEP__
 
 /* *****************************************************************************
 Postoffice State
@@ -32044,12 +31947,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_timeout = fio___letter_on_timeout,
 };
 
-FIO_CONSTRUCTOR(fio___letter_protocol_callback) {
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         (void (*)(void *))fio___letter_map_destroy,
-                         (void *)(&fio___letter_validation.map));
-}
-
 /* *****************************************************************************
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
@@ -32353,6 +32250,10 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
     goto sub_error;
+  if (args.master_only) {
+    // args.subscription_handle_ptr = NULL;
+    /* TODO! */
+  }
   *s = (fio_subscription_s){
       .io = args.io,
       .on_message = (args.on_message ? args.on_message
@@ -32388,6 +32289,7 @@ channel_error:
   fio_subscription_free(s);
   return;
 sub_error:
+  FIO_LOG_ERROR("failed to allocate a new subscription");
   if (args.on_unsubscribe) {
     union {
       void *p;
@@ -32401,6 +32303,10 @@ sub_error:
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
 int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
+  if (args.master_only) {
+    // args.subscription_handle_ptr = NULL;
+    /* TODO! */
+  }
   if (!args.subscription_handle_ptr) {
     return fio_env_remove(
         args.io,
@@ -32489,6 +32395,9 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_state_callback_add(FIO_CALL_IN_CHILD,
                          fio___postoffice_on_enter_child,
                          NULL);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         (void (*)(void *))fio___letter_map_destroy,
+                         (void *)(&fio___letter_validation.map));
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -32503,6 +32412,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
               &FIO_LETTER_PROTOCOL_IPC_CHILD,
               NULL,
               NULL);
+  /* TODO! clear master-only subscriptions */
 }
 
 /* *****************************************************************************
@@ -34299,14 +34209,14 @@ FIOBJ Integers (bigger numbers)
 
 SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
                                cstr)(FIOBJ i) {
-  static char buf[22 * 256];
+  static char buf[32 * 128];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
-  char *tmp = buf + (at * 22);
-  size_t len =
-      fio_ltoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i), 10);
-  tmp[len] = 0;
-  return (fio_str_info_s){.buf = tmp, .len = len};
+  fio_str_info_s s = {.buf = buf + ((at & 127) << 5), .capa = 31};
+  fio_string_write_i(&s,
+                     NULL,
+                     FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i));
+  return s;
 }
 
 FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___NUMBER_CLASS_VTBL = {
@@ -34359,10 +34269,10 @@ FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
 
 SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
                                cstr)(FIOBJ i) {
-  static char buf[32 * 256];
+  static char buf[32 * 128];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
-  char *tmp = buf + (at << 5);
+  char *tmp = buf + ((at & 127) << 5);
   size_t len =
       fio_ftoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i), 10);
   tmp[len] = 0;
@@ -35217,7 +35127,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
 FIOBJ cleanup
 ***************************************************************************** */
 
-#endif /* FIOBJ_EXTERN_COMPLETE */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
 #endif /* FIO_FIOBJ */

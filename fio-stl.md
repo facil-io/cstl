@@ -218,16 +218,6 @@ Translates to the STL's build version **string** (i.e., `"beta.1"`), if any.
 
 Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
-#### `FIO_VERSION_GUARD`
-
-If the `FIO_VERSION_GUARD` macro is defined in **a single** translation unit (C file) **before** including `fio-stl.h` for the first time, then the version macros become available using functions as well: `fio_version_major`, `fio_version_minor`, etc'.
-
-#### `FIO_VERSION_VALIDATE`
-
-By adding the `FIO_VERSION_GUARD` functions, a version test could be performed during runtime (which can be used for static libraries), using the macro `FIO_VERSION_VALIDATE()`.
-
-**Note**: the `FIO_VERSION_VALIDATE()` macro does not test build versions, only API compatibility (Major and Minor and Patch versions during development and Major and Minor versions after a 1.x release).
-
 -------------------------------------------------------------------------------
 
 ### Pointer Arithmetics
@@ -363,7 +353,7 @@ any code.
 
 -------------------------------------------------------------------------------
 
-## Binary Data Informational Types and Helpers
+## Binary Data Informational Types and Helper Macros
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
 
@@ -526,6 +516,7 @@ By default this will be set to either `memcpy` or `__builtin_memcpy` (if availab
 #### `fio_memcpy##`
 
 ```c
+static void fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
 static void fio_memcpy1(void *restrict dest, const void *restrict src);
 static void fio_memcpy2(void *restrict dest, const void *restrict src);
 static void fio_memcpy4(void *restrict dest, const void *restrict src);
@@ -576,7 +567,7 @@ A fallback for `memcpy`, copies `length` bytes from `src` to `dest`.
 
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 #### `FIO_MEMSET`
 
@@ -600,7 +591,7 @@ A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
 
 The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 #### `FIO_MEMCHR`
 
@@ -624,7 +615,7 @@ A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at 
 
 If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
 
-On most of `clib` implementations the library call will be better. On embedded systems, test before deciding.
+On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
 -------------------------------------------------------------------------------
 
@@ -1556,49 +1547,21 @@ This can be used to extract an exponent value in base 2.
 
 If the `FIO_ATOL` macro is defined, the following functions will be defined:
 
-### String / Number Helpers
+**Note**: all functions that write to a buffer also write a `NUL` terminator byte.
 
-#### `fio_c2i`
+### Signed Number / String Conversion
 
-```c
-uint8_t fio_c2i(unsigned char c);
-```
+The most common use of number to string conversion (and string to number) relates to converting signed numbers. 
 
-Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+However, consider using unsigned conversion where possible.
 
-Out of bound values return 255.
-
-This allows calculations for up to base 36.
-
-#### `fio_digits10`
+#### `fio_atol10`
 
 ```c
-size_t fio_digits10(int64_t i);
+int64_t fio_atol10(char **pstr);
 ```
 
-Returns the signed number of digits in base 10. This number includes the possible `-` sign digit.
-
-#### `fio_digits10u`
-
-```c
-size_t fio_digits10u(uint64_t i);
-```
-
-Returns the number of digits in base 10 for an unsigned number.
-
-#### `fio_digits16`
-
-```c
-size_t fio_digits16(uint64_t i);
-```
-
-Returns the number of digits in base 16 for an **unsigned** number.
-
-Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
-
-**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
-
-### String / Number Conversion API
+Reads a signed base 10 formatted number.
 
 #### `fio_atol`
 
@@ -1608,22 +1571,9 @@ int64_t fio_atol(char **pstr);
 
 A helper function that converts between String data to a signed int64_t.
 
-Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and
-binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant Bit
-must come first.
+Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant Bit must come first.
 
-The most significant difference between this function and `strtol` (aside of API
-design), is the added support for binary representations.
-
-#### `fio_atof`
-
-```c
-double fio_atof(char **pstr);
-```
-
-A helper function that converts between String data to a signed double.
-
-Currently wraps `strtod` with some special case handling.
+The most significant difference between this function and `strtol` (aside of API design), is the added support for binary representations.
 
 #### `fio_ltoa`
 
@@ -1643,6 +1593,16 @@ An unsupported base will log an error and print zero.
 
 Returns the number of bytes actually written (excluding the NUL terminator).
 
+#### `fio_atof`
+
+```c
+double fio_atof(char **pstr);
+```
+
+A helper function that converts between String data to a signed double.
+
+Currently wraps `strtod` with some special case handling.
+
 #### `fio_ftoa`
 
 ```c
@@ -1661,6 +1621,170 @@ to base 10. Prefixes aren't added (i.e., no "0x" or "0b" at the beginning of the
 string).
 
 Returns the number of bytes actually written (excluding the NUL terminator).
+
+#### `fio_ltoa10`
+
+```c
+void fio_ltoa10(char *dest, int64_t i, size_t digits);
+```
+
+Writes a signed number to `dest` using `digits` bytes (+ `NUL`). See also [`fio_digits10`](#fio_digits10).
+
+### Unsigned Number / String Conversion
+
+#### `fio_ltoa10`
+
+```c
+void fio_ltoa10(char *dest, uint64_t i, size_t digits);
+```
+
+Writes a signed number to `dest` using `digits` bytes (+ `NUL`).
+
+#### `fio_ltoa10u`
+
+```c
+void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`).
+
+#### `fio_ltoa16u`
+
+```c
+void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in hex format (base 16).
+
+#### `fio_ltoa_bin`
+
+```c
+void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in binary format (base 2).
+
+#### `fio_ltoa_xbase`
+
+```c
+void fio_ltoa_xbase(char *dest, uint64_t i, size_t digits, size_t base);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in `base` format (up to base 36 inclusive).
+
+#### `fio_atol8u`
+
+```c
+uint64_t fio_atol8u(char **pstr);
+```
+
+Reads an unsigned base 8 formatted number.
+
+#### `fio_atol10u`
+
+```c
+uint64_t fio_atol10u(char **pstr);
+```
+
+Reads an unsigned base 10 formatted number.
+
+#### `fio_atol16u`
+
+```c
+uint64_t fio_atol16u(char **pstr);
+```
+
+Reads an unsigned hex formatted number (possibly prefixed with "0x").
+
+#### `fio_atol_bin`
+
+```c
+uint64_t fio_atol_bin(char **pstr);
+```
+
+Reads an unsigned binary formatted number (possibly prefixed with "0b").
+
+#### `fio_atol_xbase`
+
+```c
+uint64_t fio_atol_xbase(char **pstr, size_t base);
+```
+
+Read an unsigned number in any base up to base 36.
+
+### Number / String Conversion Helpers
+
+#### `fio_c2i`
+
+```c
+uint8_t fio_c2i(unsigned char c);
+```
+
+Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
+
+Out of bound values return 255.
+
+This allows calculations for up to base 36.
+
+#### `fio_u2i_limit`
+
+```c
+int64_t fio_u2i_limit(uint64_t val, size_t to_negative);
+```
+
+Converts an unsigned `val` to a signed `val`, limiting the value to provide overflow protection and limiting it to either a negative or a positive value.
+
+#### `fio_digits10`
+
+```c
+size_t fio_digits10(int64_t i);
+```
+
+Returns the number of digits of the **signed** number when using base 10. The result includes the possible sign (`-`) digit.
+
+#### `fio_digits10u`
+
+```c
+size_t fio_digits10u(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 10.
+
+#### `fio_digits8u`
+
+```c
+size_t fio_digits8u(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 8.
+
+#### `fio_digits16u`
+
+```c
+size_t fio_digits16u(uint64_t i);
+```
+
+Returns the number of digits in base 16 for an **unsigned** number.
+
+Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
+
+**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
+
+#### `fio_digits_bin`
+
+```c
+size_t fio_digits_bin(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base 2.
+
+#### `fio_digits_xbase`
+
+```c
+size_t fio_digits_xbase(int64_t i);
+```
+
+Returns the number of digits of the **unsigned** number when using base `base`.
 
 -------------------------------------------------------------------------------
 ## Threads (portable)
@@ -4648,10 +4772,10 @@ typedef struct fio_keystr_s fio_keystr_s;
 
 a semi-opaque type used for the `fio_keystr` functions
 
-#### `fio_keystr_info`
+#### `fio_keystr_buf`
 
 ```c
-fio_str_info_s fio_keystr_info(fio_keystr_s *str);
+fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
 ```
 
 Returns the Key String.
@@ -4706,10 +4830,10 @@ This example maps words to numbers. Note that this will work also with binary da
 /* example adding strings to map and printing data. */
 void example(void) {
   umap_s map = FIO_MAP_INIT;
-  umap_set(&map, FIO_STR_INFO1("One"), 1, NULL);
-  umap_set(&map, FIO_STR_INFO1("Two"), 2, NULL);
-  umap_set(&map, FIO_STR_INFO1("Three"), 3, NULL);
-  umap_set(&map, FIO_STR_INFO1("Infinity"), (uintptr_t)-1, NULL);
+  umap_set(&map, FIO_BUF_INFO1("One"), 1, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Two"), 2, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Three"), 3, NULL);
+  umap_set(&map, FIO_BUF_INFO1("Infinity"), (uintptr_t)-1, NULL);
   FIO_MAP_EACH(umap, &map, i) {
     printf("%s: %llu\n",
            (int)i.key.len,
@@ -5794,17 +5918,17 @@ By default, if not defined differently, facil.io maps use String data as the `ke
 /* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
 
 /** set helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
+FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_buf_info_s key, fio_buf_info_s obj) {
   return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
 }
 /** conditional set helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
-                                              fio_str_info_s key,
-                                              fio_str_info_s obj) {
+FIO_IFUNC fio_buf_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_buf_info_s key,
+                                              fio_buf_info_s obj) {
   return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
 }
 /** get helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
+FIO_IFUNC fio_buf_info_s dict_get2(dict_s *m, fio_buf_info_s key) {
   return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
 }
 ```
@@ -5815,7 +5939,7 @@ Note that this Map implementation, like all dynamic type templates, supports opt
 
 Every map / dictionary requires a `key` type that is used for either testing uniqueness (a Set) or accessing a `value` (a Hash Map or Dictionary).
 
-If the `key` type is left undefined, facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
+If the `key` type is left undefined, the map's API will expect a `fio_buf_info_s` as a key and facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
 
 It is also possible to define the helper macro `FIO_MAP_KEYSTR` in which case the Strings internally will use the `fio_keystr` API, which is optimized to hold up to 14 bytes (on 64bit systems) before allocating memory (while adding an allocation overhead to the map itself).
 
@@ -5825,10 +5949,12 @@ To use a custom `key` type and control its behavior, define any (or all) of the 
 
 ```c
 /* default when FIO_MAP_KEY is undefined */
-#define FIO_MAP_KEY  fio_str_info_s
+#define FIO_MAP_KEY  fio_buf_info_s
 ```
 
 The "external" / exposed type used to define the key. The external type is the type used by the API for inputting and reviewing key values. However, `FIO_MAP_KEY_INTERNAL` may be (optionally) defined in order for the map to use a different type for storage purposes.
+
+If undefined, keys will be a binary safe buffer / string (`fio_buf_info_s`). Internally the implementation will use the `fio_bstr` API to allocate, store and free copies of each key.
 
 #### `FIO_MAP_KEY_INTERNAL`
 
@@ -5907,9 +6033,9 @@ Values and their behavior can be controlled using similar macros to the `key` ma
 
 ```c
 #ifdef FIO_MAP_VALUE_BSTR
-#define FIO_MAP_VALUE                  fio_str_info_s
+#define FIO_MAP_VALUE                  fio_buf_info_s
 #define FIO_MAP_VALUE_INTERNAL         char *
-#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_info((v))
+#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_buf((v))
 #define FIO_MAP_VALUE_COPY(dest, src)                                     \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 #define FIO_MAP_VALUE_DESTROY(v) fio_bstr_free((v))
@@ -5988,17 +6114,17 @@ For example:
 /* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
 
 /** set helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
+FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_buf_info_s key, fio_buf_info_s obj) {
   return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
 }
 /** conditional set helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
-                                              fio_str_info_s key,
-                                              fio_str_info_s obj) {
+FIO_IFUNC fio_buf_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_buf_info_s key,
+                                              fio_buf_info_s obj) {
   return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
 }
 /** get helper for consistent and secure hash values */
-FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
+FIO_IFUNC fio_buf_info_s dict_get2(dict_s *m, fio_buf_info_s key) {
   return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
 }
 ```
@@ -8497,9 +8623,9 @@ In the facil.io web application framework, there are extensions to the core `FIO
 
 1. To use the `FIOBJ` soft types, define the `FIO_FIOBJ` macro and then include the facil.io STL header.
 
-2. To include declarations as globally available symbols (allowing the functions to be called from multiple C files), define `FIOBJ_EXTERN` _before_ including the STL header.
+2. To include declarations as globally available symbols (allowing the functions to be called from multiple C files), define `FIO_EXTERN` _before_ including the STL header.
 
-    This also requires that a _single_ C file (translation unit) define `FIOBJ_EXTERN_COMPLETE` _before_ including the header with the `FIOBJ_EXTERN` directive.
+    This also requires that a _single_ C file (translation unit) define `FIO_EXTERN_COMPLETE` _before_ including the header with the `FIO_EXTERN` directive.
 
 3. The `FIOBJ` types use pointer tagging and require that the memory allocator provide allocations on 8 byte memory alignment boundaries (they also assume each byte is 8 bits).
 
@@ -8665,7 +8791,7 @@ fio_str_info_s fiobj2cstr(FIOBJ o);
 
 Returns a temporary String representation for any FIOBJ object.
 
-For number objects and floats this is thread safe for up to 256 threads.
+For number objects and floats this is thread safe for up to 128 threads.
 
 For printing Arrays and Hash maps, using a JSON representation will provide more information.
 
@@ -9394,7 +9520,7 @@ size_t fiobj_static_len(FIOBJ s);
 #endif
 ```
 
-**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIOBJ_EXTERN_COMPLETE` macro **before** including the `fio-stl.h` file (as well as defining `FIO_FIOBJ` and `FIOBJ_EXTERN`).
+**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIO_EXTERN_COMPLETE` macro **before** including the `fio-stl.h` file (as well as defining `FIO_FIOBJ` and `FIO_EXTERN`).
 
 The implementation may look like this.
 
@@ -9541,7 +9667,7 @@ static int static_string_free2(FIOBJ o) { return fiobj_static_string_free(o); }
 Example usage:
 
 ```c
-#define FIOBJ_EXTERN_COMPLETE // we will place the FIOBJ implementation here.
+#define FIO_EXTERN_COMPLETE   // we will place the FIOBJ implementation here.
 #include "fiobj_static.h"     // include FIOBJ extension type
 int main(void) {
   FIOBJ o = fiobj_static_new("my static string", 16);

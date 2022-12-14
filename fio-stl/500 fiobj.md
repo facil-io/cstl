@@ -50,9 +50,9 @@ In the facil.io web application framework, there are extensions to the core `FIO
 
 1. To use the `FIOBJ` soft types, define the `FIO_FIOBJ` macro and then include the facil.io STL header.
 
-2. To include declarations as globally available symbols (allowing the functions to be called from multiple C files), define `FIOBJ_EXTERN` _before_ including the STL header.
+2. To include declarations as globally available symbols (allowing the functions to be called from multiple C files), define `FIO_EXTERN` _before_ including the STL header.
 
-    This also requires that a _single_ C file (translation unit) define `FIOBJ_EXTERN_COMPLETE` _before_ including the header with the `FIOBJ_EXTERN` directive.
+    This also requires that a _single_ C file (translation unit) define `FIO_EXTERN_COMPLETE` _before_ including the header with the `FIO_EXTERN` directive.
 
 3. The `FIOBJ` types use pointer tagging and require that the memory allocator provide allocations on 8 byte memory alignment boundaries (they also assume each byte is 8 bits).
 
@@ -218,7 +218,7 @@ fio_str_info_s fiobj2cstr(FIOBJ o);
 
 Returns a temporary String representation for any FIOBJ object.
 
-For number objects and floats this is thread safe for up to 256 threads.
+For number objects and floats this is thread safe for up to 128 threads.
 
 For printing Arrays and Hash maps, using a JSON representation will provide more information.
 
@@ -947,7 +947,7 @@ size_t fiobj_static_len(FIOBJ s);
 #endif
 ```
 
-**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIOBJ_EXTERN_COMPLETE` macro **before** including the `fio-stl.h` file (as well as defining `FIO_FIOBJ` and `FIOBJ_EXTERN`).
+**Note**: The header assumes that _somewhere_ there's a C implementation file that includes the `FIOBJ` implementation. That C file defines the `FIO_EXTERN_COMPLETE` macro **before** including the `fio-stl.h` file (as well as defining `FIO_FIOBJ` and `FIO_EXTERN`).
 
 The implementation may look like this.
 
@@ -1094,7 +1094,7 @@ static int static_string_free2(FIOBJ o) { return fiobj_static_string_free(o); }
 Example usage:
 
 ```c
-#define FIOBJ_EXTERN_COMPLETE // we will place the FIOBJ implementation here.
+#define FIO_EXTERN_COMPLETE   // we will place the FIOBJ implementation here.
 #include "fiobj_static.h"     // include FIOBJ extension type
 int main(void) {
   FIOBJ o = fiobj_static_new("my static string", 16);

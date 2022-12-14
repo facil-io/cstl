@@ -1519,14 +1519,14 @@ FIOBJ Integers (bigger numbers)
 
 SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
                                cstr)(FIOBJ i) {
-  static char buf[22 * 256];
+  static char buf[32 * 128];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
-  char *tmp = buf + (at * 22);
-  size_t len =
-      fio_ltoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i), 10);
-  tmp[len] = 0;
-  return (fio_str_info_s){.buf = tmp, .len = len};
+  fio_str_info_s s = {.buf = buf + ((at & 127) << 5), .capa = 31};
+  fio_string_write_i(&s,
+                     NULL,
+                     FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(i));
+  return s;
 }
 
 FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___NUMBER_CLASS_VTBL = {
@@ -1579,10 +1579,10 @@ FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
 
 SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
                                cstr)(FIOBJ i) {
-  static char buf[32 * 256];
+  static char buf[32 * 128];
   static uint8_t pos = 0;
   size_t at = fio_atomic_add(&pos, 1);
-  char *tmp = buf + (at << 5);
+  char *tmp = buf + ((at & 127) << 5);
   size_t len =
       fio_ftoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i), 10);
   tmp[len] = 0;
@@ -2437,7 +2437,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
 FIOBJ cleanup
 ***************************************************************************** */
 
-#endif /* FIOBJ_EXTERN_COMPLETE */
+#endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
 #endif /* FIO_FIOBJ */
