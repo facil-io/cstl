@@ -33,7 +33,7 @@ Sort Settings
 #endif
 
 #ifndef FIO_SORT_SWAP
-/** Swapping array members */
+/** Default swap operation assumes an array and swaps array members */
 #define FIO_SORT_SWAP(a, b)                                                    \
   do {                                                                         \
     FIO_SORT_TYPE tmp__ = (a);                                                 \

@@ -177,22 +177,22 @@ FIO_SFUNC size_t fio_digits8u(uint64_t i) {
   for (;;) {
     if (i < 8)
       return r;
-    if (i < 16)
-      return r + 1;
-    if (i < 24)
-      return r + 2;
-    if (i < 32)
-      return r + 3;
-    if (i < 40)
-      return r + 4;
-    if (i < 48)
-      return r + 5;
-    if (i < 56)
-      return r + 6;
     if (i < 64)
+      return r + 1;
+    if (i < 512)
+      return r + 2;
+    if (i < 4096)
+      return r + 3;
+    if (i < 32768)
+      return r + 4;
+    if (i < 262144)
+      return r + 5;
+    if (i < 2097152)
+      return r + 6;
+    if (i < 16777216)
       return r + 7;
     r += 8;
-    i >>= 6;
+    i >>= 24;
   }
 }
 
@@ -263,64 +263,71 @@ FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits) {
 }
 
 FIO_IFUNC void fio_ltoa8u(char *dest, uint64_t i, size_t digits) {
-  dest[digits] = 0;
-  while (digits > 1) {
-    dest[--digits] = '0' + (i & 7);
+  dest += digits;
+  *dest-- = 0;
+  while (i > 7) {
+    *dest-- = '0' + (i & 7);
     i >>= 3;
   }
-  dest[0] = '0' + (i & 7);
+  *dest = '0' + i;
 }
 
 FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
-  dest[digits] = 0;
-  while (digits > 1) {
+  dest += digits;
+  *dest-- = 0;
+  while (i > 9) {
     uint64_t nxt = i / 10;
-    dest[--digits] = '0' + (i - (nxt * 10ULL));
+    *dest-- = '0' + (i - (nxt * 10ULL));
     i = nxt;
   }
-  dest[0] = '0' + (unsigned char)i;
+  *dest = '0' + (unsigned char)i;
 }
 
 FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
-  dest[digits] = 0;
-  while (digits > 2) {
-    dest[digits - 1] = fio_i2c(i & 15);
+  dest += digits;
+  *dest-- = 0;
+  while (i > 255) {
+    *dest-- = fio_i2c(i & 15);
     i >>= 4;
-    dest[digits - 2] = fio_i2c(i & 15);
+    *dest-- = fio_i2c(i & 15);
     i >>= 4;
-    digits -= 2;
   }
-  dest[digits == 2] = fio_i2c(i & 15);
-  i >>= ((digits == 2) << 2);
-  dest[0] = fio_i2c(i & 15);
+  *dest-- = fio_i2c(i & 15);
+  i >>= 4;
+  *dest = fio_i2c(i);
 }
 
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
-  dest[digits] = 0;
-  while (digits > 8) {
-    for (size_t d = 0; d < 8; ++d) { /* may the compiler unroll */
-      dest[--digits] = '0' + (i & 1);
-      i >>= 1;
+  dest += digits;
+  *dest-- = 0;
+  switch (digits & 7) {
+    while (i) {
+      *dest-- = '0' + (i & 1);
+      i >>= 1;                                /* fall through */
+    case 7: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 6: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 5: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 4: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 3: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 2: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 1: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
+    case 0:;
     }
   }
-  while (digits > 1) {
-    dest[--digits] = '0' + (i & 1);
-    i >>= 1;
-  }
-  dest[0] = '0' + (unsigned char)(i & 1);
 }
 
 FIO_IFUNC void fio_ltoa_xbase(char *dest,
                               uint64_t i,
                               size_t digits,
                               size_t base) {
-  dest[digits] = 0;
-  while (digits > 1) {
+  dest += digits;
+  *dest-- = 0;
+  while (i >= base) {
     uint64_t nxt = i / base;
-    dest[--digits] = fio_i2c(i - (nxt * 10ULL));
+    *dest-- = fio_i2c(i - (nxt * 10ULL));
     i = nxt;
   }
-  dest[--digits] = fio_i2c(i);
+  *dest = fio_i2c(i);
 }
 
 /** Converts an unsigned `val` to a signed `val`, with overflow protection. */
@@ -436,7 +443,7 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
     if ((r & UINT64_C(0xE000000000000000)))
       break;
   }
-  if ((fio_c2i(**pstr)) < 16)
+  if ((fio_c2i(**pstr)) < 8)
     errno = E2BIG;
   return r;
 }
@@ -887,12 +894,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     fio_ltoa(buf, n, 8);                                                       \
     p = buf;                                                                   \
     p += buf[0] == '-';                                                        \
-    FIO_ASSERT((int64_t)fio_atol8u(&p) == ((buf[0] == '-') ? (0 - (n)) : (n)), \
+    FIO_ASSERT((r = (int64_t)fio_atol8u(&p)) ==                                \
+                   ((buf[0] == '-') ? (0 - (n)) : (n)),                        \
                "fio_ltoa base 8 test error! "                                  \
                "%s != %s (%zd)",                                               \
                buf,                                                            \
                ((char *)(s)),                                                  \
-               (size_t)((p = buf), fio_atol(&p)));                             \
+               (size_t)r);                                                     \
     buf[fio_ltoa(buf, n, 10)] = 0;                                             \
     p = buf;                                                                   \
     FIO_ASSERT(fio_atol(&p) == (n),                                            \

@@ -43,9 +43,11 @@ size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
 
 A helper function that writes a signed int64_t to a `NUL` terminated string.
 
-No overflow guard is provided, make sure there's at least 66 bytes available (i.e., for base 2).
+If `dest` is `NULL`, returns the number of bytes that would have been written.
 
-**Note**: special base prefixes for base 2 (binary) and base 16 (hex) ar **NOT** added automatically. Consider adding any required prefix when possible (i.e.,`"0x"` for hex and `"0b"` for base 2).
+No overflow guard is provided, so either allow for plenty of headroom (at least 65 bytes) or pass `NULL` first and allocate appropriately.
+
+**Note**: special base prefixes for base 2 (binary) and base 16 (hex) are **NOT** added automatically. Consider adding any required prefix when possible (i.e.,`"0x"` for hex and `"0b"` for base 2).
 
 Supports any base up to base 36 (using 0-9,A-Z).
 
@@ -115,6 +117,8 @@ void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
 ```
 
 Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in hex format (base 16).
+
+Note: for hex based numeral facil.io assumes that `digits` are always even (2, 4, 6, 8, 10, 12, 14, 16).
 
 #### `fio_ltoa_bin`
 
@@ -202,6 +206,8 @@ size_t fio_digits10(int64_t i);
 
 Returns the number of digits of the **signed** number when using base 10. The result includes the possible sign (`-`) digit.
 
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+
 #### `fio_digits10u`
 
 ```c
@@ -210,6 +216,8 @@ size_t fio_digits10u(int64_t i);
 
 Returns the number of digits of the **unsigned** number when using base 10.
 
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+
 #### `fio_digits8u`
 
 ```c
@@ -217,6 +225,8 @@ size_t fio_digits8u(int64_t i);
 ```
 
 Returns the number of digits of the **unsigned** number when using base 8.
+
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
 
 #### `fio_digits16u`
 
@@ -228,6 +238,8 @@ Returns the number of digits in base 16 for an **unsigned** number.
 
 Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
 
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+
 **Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
 
 #### `fio_digits_bin`
@@ -238,6 +250,8 @@ size_t fio_digits_bin(int64_t i);
 
 Returns the number of digits of the **unsigned** number when using base 2.
 
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+
 #### `fio_digits_xbase`
 
 ```c
@@ -246,4 +260,5 @@ size_t fio_digits_xbase(int64_t i);
 
 Returns the number of digits of the **unsigned** number when using base `base`.
 
+This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
 -------------------------------------------------------------------------------
