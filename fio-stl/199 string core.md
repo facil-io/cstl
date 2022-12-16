@@ -486,11 +486,11 @@ fprintf(stdout, "%s\n", str);
 fio_bstr_free(str);
 ```
 
-To copy a `fio_bstr` String use `fio_bstr_dup` - this uses a *copy-on-write* approach which can increase performance:
+To copy a `fio_bstr` String use `fio_bstr_copy` - this uses a *copy-on-write* approach which can increase performance:
 
 ```c
 char * str_org = fio_bstr_write(NULL, "Hello World", 11);
-char * str_cpy = fio_bstr_dup(str_org);    /* str_cpy == str_org : only a reference count increase. */
+char * str_cpy = fio_bstr_copy(str_org);   /* str_cpy == str_org : only a reference count increase. */
 str_cpy = fio_bstr_write(str_cpy, "!", 1); /* str_cpy != str_org : copy-on-write, data copied here. */
 fprintf(stdout, "Original:    %s\nEdited Copy: %s\n", str_org, str_cpy);
 fio_bstr_free(str_org);
@@ -527,10 +527,10 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 
 In addition, the following helpers are provided:
 
-#### `fio_bstr_dup`
+#### `fio_bstr_copy`
 
 ```c
-char *fio_bstr_dup(char *bstr);
+char *fio_bstr_copy(char *bstr);
 ```
 
 Returns a copy-on-write copy of the original `bstr`, increasing the original's reference count.

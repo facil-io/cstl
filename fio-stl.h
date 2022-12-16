@@ -695,10 +695,6 @@ Switching Endian Ordering
 
 #endif /* __BIG_ENDIAN__ */
 
-FIO_IFUNC uint64_t fio_rot_fwd64(uint64_t i, size_t bits) {
-  return FIO_SHIFT_FORWARDS(i, bits & 63) |
-         FIO_SHIFT_BACKWARDS(i, (64 - bits) & 63);
-}
 #define FIO_ROTATE_FORWARDS(i, bits)                                           \
   (FIO_SHIFT_FORWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                      \
    FIO_SHIFT_BACKWARDS(i, ((sizeof(i) << 3) - bits) & ((sizeof(i) << 3) - 1)))
@@ -836,17 +832,18 @@ FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void __attribute__((no_sanitize("address")))
-fio_memcpy7x(void *restrict d_, const void *restrict s_, size_t l) {
+FIO_IFUNC void fio_memcpy7x(void *restrict d_,
+                            const void *restrict s_,
+                            size_t l) {
 /* depending on the machine / compiler, one is better than the other */
-#if 0   /* fast enough on my computer as well as on CI machine */
+#if 0 /* fast enough on my computer as well as on CI machine */
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
     *d = *s;
-#elif 1 /* hand unrolled will be faster sometimes, sometimes not */
+#else
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   switch ((l & 7)) {
@@ -856,19 +853,8 @@ fio_memcpy7x(void *restrict d_, const void *restrict s_, size_t l) {
   case 4: *d++ = *s++; /* fall through */
   case 3: *d++ = *s++; /* fall through */
   case 2: *d++ = *s++; /* fall through */
-  case 1: *d = *s;
+  case 1: *d = *s;     /* fall through */
   }
-#else   /* constant time (but fast enough?) */
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  uint64_t td, ts;
-  uint64_t mask = FIO_SHIFT_FORWARDS((uint64_t)~0ULL, ((l & 7) << 3));
-  fio_memcpy8(&ts, s);
-  fio_memcpy8(&td, d);
-  td &= mask;
-  ts &= ~mask;
-  td |= ts;
-  fio_memcpy8(d, &td);
 #endif
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
@@ -18984,8 +18970,8 @@ typedef struct {
 /** Reserves `len` for future `write` operations (used to minimize realloc). */
 FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len);
 
-/** Duplicates a `fio_bstr` using copy on write. */
-FIO_IFUNC char *fio_bstr_dup(char *bstr);
+/** Copies a `fio_bstr` using "copy on write". */
+FIO_IFUNC char *fio_bstr_copy(char *bstr);
 /** Frees a binary string allocated by a `fio_bstr` function. */
 FIO_IFUNC void fio_bstr_free(char *bstr);
 
@@ -19166,7 +19152,7 @@ FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #endif
 
 /** Duplicates a `fio_bstr` using copy on write. */
-FIO_IFUNC char *fio_bstr_dup(char *bstr) {
+FIO_IFUNC char *fio_bstr_copy(char *bstr) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
@@ -20983,9 +20969,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(fio_bstr_info(str).len == 12 &&
                    !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
                "fio_bstr_write2 failed!");
-    /* test copy-on-write for fio_bstr_dup */
-    char *s_copy = fio_bstr_dup(str);
-    FIO_ASSERT(s_copy == str, "fio_bstr_dup should only copy on write");
+    /* test copy-on-write for fio_bstr_copy */
+    char *s_copy = fio_bstr_copy(str);
+    FIO_ASSERT(s_copy == str, "fio_bstr_copy should only copy on write");
     str = fio_bstr_write(str, "!", 1);
     FIO_ASSERT(s_copy != str, "fio_bstr_s write after copy error!");
     FIO_ASSERT(fio_bstr_len(str) > fio_bstr_len(s_copy),

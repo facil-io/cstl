@@ -54,6 +54,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_RAND
 #define FIO_RISKY_HASH
 #define FIO_SHA1
+#define FIO_SHA2
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_STATE
@@ -690,6 +691,8 @@ void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sha1)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, sha2)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, chacha)();
 #if !DEBUG

@@ -408,8 +408,8 @@ typedef struct {
 /** Reserves `len` for future `write` operations (used to minimize realloc). */
 FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len);
 
-/** Duplicates a `fio_bstr` using copy on write. */
-FIO_IFUNC char *fio_bstr_dup(char *bstr);
+/** Copies a `fio_bstr` using "copy on write". */
+FIO_IFUNC char *fio_bstr_copy(char *bstr);
 /** Frees a binary string allocated by a `fio_bstr` function. */
 FIO_IFUNC void fio_bstr_free(char *bstr);
 
@@ -590,7 +590,7 @@ FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #endif
 
 /** Duplicates a `fio_bstr` using copy on write. */
-FIO_IFUNC char *fio_bstr_dup(char *bstr) {
+FIO_IFUNC char *fio_bstr_copy(char *bstr) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
@@ -2407,9 +2407,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(fio_bstr_info(str).len == 12 &&
                    !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
                "fio_bstr_write2 failed!");
-    /* test copy-on-write for fio_bstr_dup */
-    char *s_copy = fio_bstr_dup(str);
-    FIO_ASSERT(s_copy == str, "fio_bstr_dup should only copy on write");
+    /* test copy-on-write for fio_bstr_copy */
+    char *s_copy = fio_bstr_copy(str);
+    FIO_ASSERT(s_copy == str, "fio_bstr_copy should only copy on write");
     str = fio_bstr_write(str, "!", 1);
     FIO_ASSERT(s_copy != str, "fio_bstr_s write after copy error!");
     FIO_ASSERT(fio_bstr_len(str) > fio_bstr_len(s_copy),

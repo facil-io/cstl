@@ -704,8 +704,9 @@ FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void __attribute__((no_sanitize("address")))
-fio_memcpy7x(void *restrict d_, const void *restrict s_, size_t l) {
+FIO_IFUNC void fio_memcpy7x(void *restrict d_,
+                            const void *restrict s_,
+                            size_t l) {
 /* depending on the machine / compiler, one is better than the other */
 #if 0 /* fast enough on my computer as well as on CI machine */
   char *restrict d = (char *restrict)d_;
@@ -714,17 +715,18 @@ fio_memcpy7x(void *restrict d_, const void *restrict s_, size_t l) {
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
     *d = *s;
-#else /* constant time (but fast enough?) */
+#else
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t td, ts;
-  uint64_t mask = FIO_SHIFT_FORWARDS((uint64_t)~0ULL, ((l & 7) << 3));
-  fio_memcpy8(&ts, s);
-  fio_memcpy8(&td, d);
-  td &= mask;
-  ts &= ~mask;
-  td |= ts;
-  fio_memcpy8(d, &td);
+  switch ((l & 7)) {
+  case 7: *d++ = *s++; /* fall through */
+  case 6: *d++ = *s++; /* fall through */
+  case 5: *d++ = *s++; /* fall through */
+  case 4: *d++ = *s++; /* fall through */
+  case 3: *d++ = *s++; /* fall through */
+  case 2: *d++ = *s++; /* fall through */
+  case 1: *d = *s;     /* fall through */
+  }
 #endif
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */

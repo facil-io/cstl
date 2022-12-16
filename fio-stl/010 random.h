@@ -507,14 +507,39 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
     seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
-  if ((len & 31)) {
-    uint64_t pad[4] = {0};         /* pad message with 0s */
-    fio_memcpy31x(pad, data, len); /* copies `len & 31` bytes */
+#if COPY_THEN_COMPUTE && 0
+  { // pad with zeros or add 32 zero bytes...
+    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0;
+    fio_memcpy31x(w.v, data, len);
     for (size_t i = 0; i < 4; ++i) {
-      fio_memcpy8(w.v + i, pad + i);
       FIO___R2_ROUND(i);
     }
   }
+#else
+  switch (len & 24) { /* only performed if data exits in these positions */
+  case 24: fio_memcpy8(w.v + 2, data + 16); FIO___R2_ROUND(2); /*fall through*/
+  case 16: fio_memcpy8(w.v + 1, data + 8); FIO___R2_ROUND(1);  /*fall through*/
+  case 8:
+    fio_memcpy8(w.v + 0, data);
+    FIO___R2_ROUND(0);
+    data += len & 24;
+  }
+  {
+    uint64_t i = (len & 24) >> 3;
+    w.v[i] = 0;
+    switch ((len & 7)) {
+    case 7: w.v[i] |= ((uint64_t)data[6]) << 48; /* fall through */
+    case 6: w.v[i] |= ((uint64_t)data[5]) << 40; /* fall through */
+    case 5: w.v[i] |= ((uint64_t)data[4]) << 32; /* fall through */
+    case 4: w.v[i] |= ((uint64_t)data[3]) << 24; /* fall through */
+    case 3: w.v[i] |= ((uint64_t)data[2]) << 16; /* fall through */
+    case 2: w.v[i] |= ((uint64_t)data[1]) << 8;  /* fall through */
+    case 1: w.v[i] |= ((uint64_t)data[0]); FIO___R2_ROUND(i);
+    }
+  }
+
+#endif
+
   /* inner vector mini-avalanche */
   for (size_t i = 0; i < 4; ++i)
     v.v[i] *= prime.v[i];
