@@ -298,6 +298,11 @@ iMap Creation Macro
       continue;                                                                \
     else
 
+/** Helper macro for simple imap array types. */
+#define FIO_IMAP_ALWAYS_VALID(o) 1
+/** Helper macro for simple imap array types. */
+#define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
+
 /* *****************************************************************************
 iMap Testing
 ***************************************************************************** */

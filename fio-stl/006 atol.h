@@ -258,7 +258,7 @@ FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits) {
   dest[0] = '-';
   dest += inv;
   if (inv)
-    i = (int64_t)(~(uint64_t)i + 1ULL); /* WARNING: assumes 2's complement */
+    i = (int64_t)((uint64_t)0 - (uint64_t)i);
   fio_ltoa10u(dest, (uint64_t)i, digits - inv);
 }
 
@@ -300,7 +300,7 @@ FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
   dest += digits;
   *dest-- = 0;
-  switch (digits & 7) {
+  switch (digits & 7) { /* last use of `digits` */
     while (i) {
       *dest-- = '0' + (i & 1);
       i >>= 1;                                /* fall through */
@@ -594,8 +594,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
   case 8: /* Base 8 */
     if (num < 0) {
       *(dest++) = '-';
-      if (n != UINT64_C(0x8000000000000000))
-        n = 0 - n;
+      n = 0 - n;
       ++len;
     }
     len += (digits = fio_digits8u(n));
@@ -609,8 +608,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
   case 10: /* Base 10 */
     if (num < 0) {
       *(dest++) = '-';
-      if (n != UINT64_C(0x8000000000000000))
-        n = 0 - n;
+      n = 0 - n;
       ++len;
     }
     len += (digits = fio_digits10u(n));
@@ -621,8 +619,7 @@ SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base) {
       goto base_error;
     if (num < 0) {
       *(dest++) = '-';
-      if (n != UINT64_C(0x8000000000000000))
-        n = 0 - n;
+      n = 0 - n;
       ++len;
     }
     len += (digits = fio_digits_xbase(n, base));

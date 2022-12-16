@@ -2384,6 +2384,11 @@ The macro defines the following:
 
 - `array_name_rehash`   re-builds the imap (use after sorting).
 
+
+Notes:
+
+- `hash_fn(ptr)`, `cmp_fn(a_ptr,b_ptr)` and `is_valid_fn(ptr)` accepts **pointers**  and needs to de-reference them in order to compare their content.
+
 -------------------------------------------------------------------------------
 ## URL (URI) parsing
 
@@ -6558,7 +6563,7 @@ int map_remove(FIO_MAP_PTR map,
               );
 ```
 
-Removes an object in the map, returning a pointer to the map data.
+Removes an object in the map, returning -1 if the object couldn't be found or 0 on success.
 
 #### `map_evict`
 

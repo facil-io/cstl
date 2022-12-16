@@ -106,7 +106,6 @@ typedef struct {
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
   /** If set, subscription will be limited to the root / master process. */
-  /** TODO: not implemented */
   uint8_t master_only;
 } subscribe_args_s;
 
@@ -533,80 +532,41 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
 #include FIO___INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
-/* TODO: mastr only subscription map */
-// #define FIO_MAP_NAME fio___master_sub
-// #define FIO_MAP_TYPE fio_subscription_ *
-// #define FIO_MAP_TYPE_DESTROY(key) \
-//   do { \
-//     fio_channel_on_destroy(key); \
-//     fio_channel_free((key)); \
-//   } while (0)
-// #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
-// #define FIO_STL_KEEP__           1
-// #include FIO___INCLUDE_FILE
-// #undef FIO_STL_KEEP__
-
-/* *****************************************************************************
-Postoffice State
-***************************************************************************** */
-#ifndef FIO___IPC_LEN
-#define FIO___IPC_LEN 256
-#endif
-static struct FIO_POSTOFFICE {
-#if FIO_POSTOFFICE_THREAD_LOCK
-  FIO___LOCK_TYPE lock;
-#endif
-  fio_channel_map_s channels;
-  fio_channel_map_s patterns;
-  FIO_LIST_NODE engines;
-  fio_protocol_s *siblings_protocol;
-  uint8_t publish_filter;
-  uint8_t local_send_filter;
-  uint8_t remote_send_filter;
-  char ipc_url[FIO___IPC_LEN];
-} FIO_POSTOFFICE = {
-#if FIO_POSTOFFICE_THREAD_LOCK
-    .lock = FIO___LOCK_INIT,
-#endif
-    .channels = FIO_MAP_INIT,
-    .patterns = FIO_MAP_INIT,
-    .publish_filter = (FIO___PUBSUB_PROCESS | FIO___PUBSUB_ROOT),
-    .local_send_filter = (FIO___PUBSUB_SIBLINGS),
-    .remote_send_filter = FIO___PUBSUB_REMOTE,
-};
-
-/** Callback called when entering a child processes. */
-FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
-
 /* *****************************************************************************
 
 
 
-                          The Letter Object & Protocol
+                          The Letter Object &
+Protocol
 
 
 
-The Letter Object & Protocol is the internal message exchange protocol and
-format used by the pub/sub service and API. Access is given for zero-copy uses.
+The Letter Object & Protocol is the internal
+message exchange protocol and format used by the
+pub/sub service and API. Access is given for
+zero-copy uses.
 
-The letter exchange protocol imposes the following limitations on message
-exchange:
+The letter exchange protocol imposes the
+following limitations on message exchange:
 
-* Channel Names are limited to 2^16 bytes (65,536 bytes).
+* Channel Names are limited to 2^16 bytes (65,536
+bytes).
 
-* Message payload is limited to 2^24 bytes (16,777,216 bytes == about 16Mb).
+* Message payload is limited to 2^24 bytes
+(16,777,216 bytes == about 16Mb).
 
 * Totally Empty messages are ignored.
 
-Letter network format in bytes (16 byte header + 2 NUL bytes):
-| [ 0-7 ] 8 bytes - Message ID                          |
-| [ 8-9 ] 2 Bytes - numerical Filter                    |
-| [10-11] 2 bytes - little endian channel length        |
-| [12-14] 3 bytes - little endian message length        |
-| [ 15 ]  1 Bytes - flags                               |
-| X bytes - (channel length + 1 NUL terminator)         |
-| Y bytes - (message length + 1 NUL terminator)         |
-Total overhead: 18 bytes (16 byte header + 2 NUL terminators)
+Letter network format in bytes (16 byte header +
+2 NUL bytes): | [ 0-7 ] 8 bytes - Message ID | |
+[ 8-9 ] 2 Bytes - numerical Filter | | [10-11] 2
+bytes - little endian channel length        | |
+[12-14] 3 bytes - little endian message length |
+| [ 15 ]  1 Bytes - flags | | X bytes - (channel
+length + 1 NUL terminator)         | | Y bytes -
+(message length + 1 NUL terminator)         |
+Total overhead: 18 bytes (16 byte header + 2 NUL
+terminators)
 
 ***************************************************************************** */
 
@@ -614,7 +574,8 @@ Total overhead: 18 bytes (16 byte header + 2 NUL terminators)
 Letter Type API & Callbacks
 ***************************************************************************** */
 
-/** Allocates a new letter wrapper to be filled from an existing buffer. */
+/** Allocates a new letter wrapper to be filled
+ * from an existing buffer. */
 FIO_IFUNC fio_letter_s *fio_letter_new_read(const char *head);
 /* allocates a new, fully composed, letter. */
 FIO_IFUNC fio_letter_s *fio_letter_new_compose(fio_buf_info_s channel,
@@ -633,11 +594,14 @@ FIO_IFUNC fio_str_info_s fio_letter_channel(fio_letter_s *l);
 FIO_IFUNC fio_str_info_s fio_letter_message(fio_letter_s *l);
 /** Returns a letter's numerical filter. */
 FIO_IFUNC int16_t fio_letter_filter(fio_letter_s *l);
-/** Returns the letter's flags (8 bits allowing for 8 distinct flags). */
+/** Returns the letter's flags (8 bits allowing
+ * for 8 distinct flags). */
 FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l);
-/** Returns a letter's ID (8 bytes random number) */
+/** Returns a letter's ID (8 bytes random number)
+ */
 FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l);
-/* returns the letter object associated with the public message object. */
+/* returns the letter object associated with the
+ * public message object. */
 FIO_IFUNC fio_letter_s *fio_msg2letter(fio_msg_s *msg);
 
 #define FIO___LETTER_HEADER_LENGTH 16 /* without NUL terminators */
@@ -647,11 +611,14 @@ FIO_IFUNC fio_letter_s *fio_msg2letter(fio_msg_s *msg);
 Letter Protocol API & Callbacks
 ***************************************************************************** */
 
-/** Callback called by the letter protocol when a letter arrives @ master. */
+/** Callback called by the letter protocol when a
+ * letter arrives @ master. */
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *letter);
-/** Callback called by the letter protocol when a letter arrives @ child. */
+/** Callback called by the letter protocol when a
+ * letter arrives @ child. */
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *letter);
-/** Starts listening to IPC connections on a local socket. */
+/** Starts listening to IPC connections on a
+ * local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_);
 
 /** Write a letter to a specific IO object */
@@ -659,23 +626,28 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
 /** Returns a letter's total network length */
 FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 
-/** Listen to remote letter exchange clients (cluster letter exchange). */
+/** Listen to remote letter exchange clients
+ * (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]);
-/** Connect to remote letter exchange server (cluster letter exchange). */
+/** Connect to remote letter exchange server
+ * (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
 ***************************************************************************** */
 
-/** Distributes letters to the channel's subscribers. */
+/** Distributes letters to the channel's
+ * subscribers. */
 FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_);
 
-/** Distributes letters to the distribution channels. */
+/** Distributes letters to the distribution
+ * channels. */
 FIO_IFUNC void fio___channel_deliver(fio_letter_s *letter);
 
 #ifndef FIO_POSTOFFICE_THREAD_LOCK
-/** Controls if the channel subscribe API is published or not. */
+/** Controls if the channel subscribe API is
+ * published or not. */
 #define FIO_POSTOFFICE_THREAD_LOCK 0
 #endif
 
@@ -690,22 +662,89 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 Subscription Management Tasks
 ***************************************************************************** */
 
-/* The task to subscribe to a channel (called by `fio_defer`). */
+/* The task to subscribe to a channel (called by
+ * `fio_defer`). */
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_);
 
-/** Unsubscribes a node and destroys the channel if no more subscribers. */
+/** Unsubscribes a node and destroys the channel
+ * if no more subscribers. */
 FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_);
 
 /** Delivers a letter to a subscription */
 FIO_IFUNC void fio___subscription_on_message_task(void *s, void *l);
 
-/** publishes a letter to the expecting processes by letter flags. */
+/** publishes a letter to the expecting processes
+ * by letter flags. */
 FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_);
+
+/* *****************************************************************************
+Postoffice State
+***************************************************************************** */
+#ifndef FIO___IPC_LEN
+#define FIO___IPC_LEN 256
+#endif
+
+/* master only subscription map */
+#if 0
+#define FIO___PUBSUB_MASTER_MAP_HASH(s)                                        \
+  fio_channel___hash((s[0]->channel->subscriptions.prev                        \
+                          ? s[0]->channel->name                                \
+                          : (char *)s[0]->channel->subscriptions.next),        \
+                     s[0]->channel->name_len,                                  \
+                     s[0]->channel->filter)
+#define FIO___PUBSUB_MASTER_MAP_CMP(a, b)                                      \
+  fio_channel___cmp(a[0]->channel, b[0]->channel)
+FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
+                       fio_subscription_s *,
+                       uint32_t,
+                       FIO___PUBSUB_MASTER_MAP_HASH,
+                       FIO___PUBSUB_MASTER_MAP_CMP,
+                       FIO_IMAP_ALWAYS_VALID)
+#undef FIO___PUBSUB_MASTER_MAP_HASH
+#undef FIO___PUBSUB_MASTER_MAP_CMP
+#else
+#define FIO_MAP_KEYSTR
+#define FIO_MAP_NAME             fio___postoffice_msmap
+#define FIO_MAP_VALUE            fio_subscription_s *
+#define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
+#define FIO_STL_KEEP__
+#include FIO___INCLUDE_FILE
+#undef FIO_STL_KEEP__
+#endif
+
+static struct FIO_POSTOFFICE {
+#if FIO_POSTOFFICE_THREAD_LOCK
+  FIO___LOCK_TYPE lock;
+#endif
+  fio_channel_map_s channels;
+  fio_channel_map_s patterns;
+  FIO_LIST_NODE engines;
+  fio_protocol_s *siblings_protocol;
+  fio___postoffice_msmap_s master_subscriptions;
+  uint8_t publish_filter;
+  uint8_t local_send_filter;
+  uint8_t remote_send_filter;
+  char ipc_url[FIO___IPC_LEN];
+} FIO_POSTOFFICE = {
+#if FIO_POSTOFFICE_THREAD_LOCK
+    .lock = FIO___LOCK_INIT,
+#endif
+    .channels = FIO_MAP_INIT,
+    .patterns = FIO_MAP_INIT,
+    .publish_filter = (FIO___PUBSUB_PROCESS | FIO___PUBSUB_ROOT),
+    .local_send_filter = (FIO___PUBSUB_SIBLINGS),
+    .remote_send_filter = FIO___PUBSUB_REMOTE,
+};
+
+/** Callback called when entering a child
+ * processes. */
+FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
 /* *****************************************************************************
 
 
 
-                          Letter Metadata Implementation
+                          Letter Metadata
+Implementation
 
 
 
@@ -717,7 +756,8 @@ FIO_SFUNC struct {
   size_t ref;
 } FIO_PUBSUB_METADATA[FIO_PUBSUB_METADATA_LIMIT];
 
-/* Returns zero (0) on success or -1 on failure. */
+/* Returns zero (0) on success or -1 on failure.
+ */
 SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
                                    void (*cleanup)(void *)) {
   for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
@@ -742,7 +782,8 @@ SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
 /**
  * Removed the metadata callback.
  *
- * Removal might be delayed if live metatdata exists.
+ * Removal might be delayed if live metatdata
+ * exists.
  */
 SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
   for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
@@ -754,7 +795,8 @@ SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
   }
 }
 
-/** Finds the message's metadata, returning the data or NULL. */
+/** Finds the message's metadata, returning the
+ * data or NULL. */
 SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func) {
   for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
@@ -766,7 +808,8 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
   return NULL;
 }
 
-/** Callback called when a letter is destroyed (reference counting). */
+/** Callback called when a letter is destroyed
+ * (reference counting). */
 FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   if (!l->metadata_is_initialized)
     return;
@@ -779,7 +822,8 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   }
 }
 
-/** Callback called when a letter is destroyed (reference counting). */
+/** Callback called when a letter is destroyed
+ * (reference counting). */
 FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
   if (fio_atomic_or(&l->metadata_is_initialized, 1)) {
     return;
@@ -801,13 +845,15 @@ FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
 
 
 
-                    Letter / Message Object Implementation
+                    Letter / Message Object
+Implementation
 
 
 
 ***************************************************************************** */
 
-/* allocates a new letter wrapper to be filled from an existing buffer. */
+/* allocates a new letter wrapper to be filled
+ * from an existing buffer. */
 FIO_IFUNC fio_letter_s *fio_letter_new_read(const char *head) {
   fio_letter_s *l = NULL;
   uint32_t channel_len = fio_buf2u16_little(head + 10);
@@ -858,7 +904,8 @@ FIO_IFUNC fio_letter_s *fio_letter_new_compose(fio_buf_info_s channel,
   return l;
 
 len_error:
-  FIO_LOG_ERROR("(pubsub) payload too big - exceeds the 16Mb limit!\n\t"
+  FIO_LOG_ERROR("(pubsub) payload too big - exceeds the "
+                "16Mb limit!\n\t"
                 "Channel name length: %u bytes\n\t"
                 "Message data length: %u bytes",
                 (unsigned int)channel.len,
@@ -894,12 +941,14 @@ FIO_IFUNC int16_t fio_letter_filter(fio_letter_s *l) {
   return (int16_t)fio_ltole16(*(uint16_t *)(l->buf + 8));
 }
 
-/* returns the letter's flags (8 bits allowing for 8 distinct flags). */
+/* returns the letter's flags (8 bits allowing
+ * for 8 distinct flags). */
 FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l) {
   return (uint8_t)(l->buf[15]);
 }
 
-/* returns a letter's ID (8 bytes random number) */
+/* returns a letter's ID (8 bytes random number)
+ */
 FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l) {
   return fio_buf2u32_local(l->buf);
 }
@@ -914,7 +963,8 @@ FIO_IFUNC size_t fio_letter_len(fio_letter_s *l) {
 
 
 
-                  Letter Exchange Protocol (Networking / IPC)
+                  Letter Exchange Protocol
+(Networking / IPC)
 
 
 
@@ -935,7 +985,8 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
              .dealloc = (void (*)(void *))fio_letter_free);
 }
 
-/* a default callback for IO subscriptions - sends message data. */
+/* a default callback for IO subscriptions -
+ * sends message data. */
 FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
   if (!msg->message.len)
     return;
@@ -956,7 +1007,9 @@ Letter Reading and Parsing
 typedef struct {
   fio_letter_s *letter;
   size_t pos;
-  char buf[FIO___LETTER_MINIMAL_LEN]; /* minimal message length */
+  char buf[FIO___LETTER_MINIMAL_LEN]; /* minimal
+                                         message
+                                         length */
 } fio_letter_parser_s;
 
 /* a new letter parser */
@@ -977,7 +1030,8 @@ FIO_IFUNC void fio_letter_parser_free(fio_letter_parser_s *p) {
   FIO_MEM_FREE_(p, sizeof(*p));
 }
 
-/* forwards letters to callback, returns 0. Returns -1 on error. */
+/* forwards letters to callback, returns 0.
+ * Returns -1 on error. */
 FIO_IFUNC int fio___letter_read(fio_s *io, void (*callback)(fio_letter_s *)) {
   fio_letter_parser_s *parser = (fio_letter_parser_s *)fio_udata_get(io);
   for (;;) {
@@ -1028,7 +1082,8 @@ error:
 }
 
 /* *****************************************************************************
-Remote Letter Processing - validate unique delivery.
+Remote Letter Processing - validate unique
+delivery.
 ***************************************************************************** */
 
 #define FIO_OMAP_NAME  fio___letter_map
@@ -1095,7 +1150,8 @@ FIO_SFUNC void fio___letter_on_data_remote(fio_s *io) {
   fio___letter_read(io, fio___on_letter_remote);
 }
 
-/* TODO: app-key + ed25519 per-connection key exchange + ChaCha/Poly */
+/* TODO: app-key + ed25519 per-connection key
+ * exchange + ChaCha/Poly */
 static fio_protocol_s FIO_LETTER_PROTOCOL_REMOTE = {
     .on_attach = fio___letter_on_attach,
     .on_data = fio___letter_on_data_remote,
@@ -1123,31 +1179,36 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
-/** Starts listening to IPC connections on a local socket. */
+/** Starts listening to IPC connections on a
+ * local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
   if (fio_srv_is_worker()) {
-    FIO_LOG_DEBUG("(pub/sub) IPC socket skipped - no workers are spawned.");
+    FIO_LOG_DEBUG("(pub/sub) IPC socket skipped "
+                  "- no workers are spawned.");
     return;
   }
   FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
                          .on_open = fio_letter_local_ipc_on_open,
                          .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
                          .on_root = 1),
-             "(pub/sub) couldn't open a socket for IPC.");
+             "(pub/sub) couldn't open a socket for "
+             "IPC.");
 }
 
 /* *****************************************************************************
 Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
 
-/** Listen to remote letter exchange clients (cluster letter exchange). */
+/** Listen to remote letter exchange clients
+ * (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]) {
   (void)url; /* TODO!  */
   (void)app_key;
   return 0;
 }
-/** Connect to remote letter exchange server (cluster letter exchange). */
+/** Connect to remote letter exchange server
+ * (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]) {
   (void)url; /* TODO! */
   (void)app_key;
@@ -1187,7 +1248,8 @@ FIO_IFUNC fio_channel_s *fio_channel_new_named(fio_buf_info_s name,
   return ch;
 }
 
-/** To be used in the fio_letter_on_composed callback to distribute letters. */
+/** To be used in the fio_letter_on_composed
+ * callback to distribute letters. */
 FIO_IFUNC void fio___channel_deliver(fio_letter_s *l) {
   fio_letter_initialize_metadata(l); /* lazy metadata initialization */
   const fio_str_info_s ch_name = fio_letter_channel(l);
@@ -1203,11 +1265,14 @@ FIO_IFUNC void fio___channel_deliver(fio_letter_s *l) {
   FIO___LOCK_LOCK(FIO_POSTOFFICE.lock);
 #endif
   fio_channel_s *ch = fio_channel_map_get(&FIO_POSTOFFICE.channels, hash, &cpy);
-  /* TODO: add NULL channel as catch all? */
+  /* TODO: use NULL channel as catch all? */
   // if (!ch) {
   //   cpy.name_len = 0;
-  //   ch = fio_channel_map_get(&FIO_POSTOFFICE.channels,
-  //                            fio_channel___hash(NULL, 0, filter), &cpy);
+  //   ch =
+  //   fio_channel_map_get(&FIO_POSTOFFICE.channels,
+  //                            fio_channel___hash(NULL,
+  //                            0, filter),
+  //                            &cpy);
   // }
   if (ch)
     fio_defer(fio___channel_deliver_task,
@@ -1256,7 +1321,8 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *s) {
 }
 
 /**
- * Reference counting: `fio_channel_dup(letter)` / `fio_channel_free(letter)`
+ * Reference counting: `fio_channel_dup(letter)`
+ * / `fio_channel_free(letter)`
  */
 
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_) {
@@ -1281,14 +1347,16 @@ FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_) {
   return;
 
 unknown_error:
-  FIO_LOG_FATAL("%d (pubsub) channel couldn't be added to map!",
+  FIO_LOG_FATAL("%d (pubsub) channel couldn't "
+                "be added to map!",
                 fio___srvdata.pid);
 #if FIO_POSTOFFICE_THREAD_LOCK
   FIO___LOCK_UNLOCK(FIO_POSTOFFICE.lock);
 #endif
 }
 
-/** Unsubscribes a node and destroys the channel if no more subscribers. */
+/** Unsubscribes a node and destroys the channel
+ * if no more subscribers. */
 FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_) {
   fio_channel_s *ch = (fio_channel_s *)ch_;
   fio_subscription_s *sub = (fio_subscription_s *)sub_;
@@ -1370,17 +1438,20 @@ reschedule:
   fio_defer(fio___subscription_on_message_task, s_, l_);
 }
 
-/* returns the letter object associated with the message. */
+/* returns the letter object associated with the
+ * message. */
 FIO_IFUNC fio_letter_s *fio_msg2letter(fio_msg_s *msg) {
   return *(fio_letter_s **)(msg + 1);
 }
 
-/** Defers the current callback, so it will be called again for the message. */
+/** Defers the current callback, so it will be
+ * called again for the message. */
 SFUNC void fio_message_defer(fio_msg_s *msg) {
   ((uintptr_t *)(msg + 1))[1] = 1;
 }
 
-/* delivers a letter to all of a channel's subscribers */
+/* delivers a letter to all of a channel's
+ * subscribers */
 FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
   fio_channel_s *ch = (fio_channel_s *)ch_;
   fio_letter_s *l = (fio_letter_s *)l_;
@@ -1412,16 +1483,13 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
 
 ***************************************************************************** */
 
-/** Subscribes to a named channel in the numerical filter's namespace. */
+/** Subscribes to a named channel in the
+ * numerical filter's namespace. */
 void fio_subscribe___(void); /* sublimetext marker */
 SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
     goto sub_error;
-  if (args.master_only) {
-    // args.subscription_handle_ptr = NULL;
-    /* TODO! */
-  }
   *s = (fio_subscription_s){
       .io = args.io,
       .on_message = (args.on_message ? args.on_message
@@ -1435,6 +1503,9 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   if (!s->channel)
     goto channel_error;
   fio_defer(fio___subscribe_task, (void *)s->channel, (void *)s);
+
+  if (args.master_only && !args.io)
+    goto is_master_only;
   if (!args.subscription_handle_ptr) {
     fio_env_set(args.io,
                 .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
@@ -1447,15 +1518,35 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
   *args.subscription_handle_ptr = (uintptr_t)s;
   return;
 
+is_master_only:
+  if (fio_srv_is_master()) {
+    fio___postoffice_msmap_set(
+        &FIO_POSTOFFICE.master_subscriptions,
+        fio_channel___hash(args.channel.buf, args.channel.len, args.filter),
+        FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
+        s,
+        NULL);
+  } else {
+    fio_channel_free(s->channel);
+    fio_subscription_free(s);
+    FIO_LOG_WARNING(
+        "(%d) master-only subscription attempt on a non-master process: %.*s",
+        fio___srvdata.pid,
+        (int)args.channel.len,
+        args.channel.buf);
+  }
+  return;
+
 channel_error:
-  FIO_LOG_ERROR(
-      "(%d) (pubsub) channel cannot be created?\n\t%zu bytes long\n\t%.*s",
-      fio___srvdata.pid,
-      args.channel.len,
-      (int)args.channel.len,
-      args.channel.buf);
+  FIO_LOG_ERROR("(%d) (pubsub) channel cannot be "
+                "created?\n\t%zu bytes long\n\t%.*s",
+                fio___srvdata.pid,
+                args.channel.len,
+                (int)args.channel.len,
+                args.channel.buf);
   fio_subscription_free(s);
   return;
+
 sub_error:
   FIO_LOG_ERROR("failed to allocate a new subscription");
   if (args.on_unsubscribe) {
@@ -1471,10 +1562,8 @@ sub_error:
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
 int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
-  if (args.master_only) {
-    // args.subscription_handle_ptr = NULL;
-    /* TODO! */
-  }
+  if (args.master_only && !args.io)
+    goto is_master_only;
   if (!args.subscription_handle_ptr) {
     return fio_env_remove(
         args.io,
@@ -1485,6 +1574,13 @@ int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
   fio___subscription_unsubscribe(
       *(fio_subscription_s **)args.subscription_handle_ptr);
   return 0;
+
+is_master_only:
+  return fio___postoffice_msmap_remove(
+      &FIO_POSTOFFICE.master_subscriptions,
+      fio_channel___hash(args.channel.buf, args.channel.len, args.filter),
+      FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
+      NULL);
 }
 
 /* *****************************************************************************
@@ -1502,7 +1598,8 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
                       l_);
   }
   if ((fio_letter_flags(l) & FIO_POSTOFFICE.remote_send_filter)) {
-    /* deliver to remote connections... all of them? yes, we are the source. */
+    /* deliver to remote connections... all of
+     * them? yes, we are the source. */
     fio_protocol_each(&FIO_LETTER_PROTOCOL_REMOTE,
                       (void (*)(fio_s *, void *))fio_letter_write,
                       l_);
@@ -1510,7 +1607,8 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   fio_letter_free(l);
 }
 
-/** Publishes a message to the relevant subscribers (if any). */
+/** Publishes a message to the relevant
+ * subscribers (if any). */
 void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   fio_letter_s *l;
@@ -1566,9 +1664,16 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_state_callback_add(FIO_CALL_AT_EXIT,
                          (void (*)(void *))fio___letter_map_destroy,
                          (void *)(&fio___letter_validation.map));
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         (void (*)(void *))fio___postoffice_msmap_destroy,
+                         (void *)(&FIO_POSTOFFICE.master_subscriptions));
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         (void (*)(void *))fio___postoffice_msmap_destroy,
+                         (void *)(&FIO_POSTOFFICE.master_subscriptions));
 }
 
-/** Callback called by the letter protocol entering a child processes. */
+/** Callback called by the letter protocol
+ * entering a child processes. */
 FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
   (void)ignr_;
   FIO_POSTOFFICE.publish_filter = FIO___PUBSUB_PROCESS;
@@ -1587,7 +1692,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
 
 
 
-                      Letter Engine Support Implementation
+                    Letter Engine Support Implementation
 
 
 
@@ -1618,12 +1723,12 @@ static void fio_pubsub_mock_publish(const fio_pubsub_engine_s *eng,
 /** Callback for when a channel is created. */
 FIO_IFUNC void fio_channel_on_create(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
-  FIO_LOG_DEBUG2(
-      "%d (pubsub) channel created (filter %d, length %zu bytes): %s",
-      fio___srvdata.pid,
-      (int)ch->filter,
-      (size_t)ch->name_len,
-      name.buf);
+  FIO_LOG_DEBUG2("%d (pubsub) channel created (filter %d, "
+                 "length %zu bytes): %s",
+                 fio___srvdata.pid,
+                 (int)ch->filter,
+                 (size_t)ch->name_len,
+                 name.buf);
   FIO_LIST_EACH(fio_pubsub_engine_s,
                 internal_use_.node,
                 &FIO_POSTOFFICE.engines,
@@ -1640,12 +1745,12 @@ FIO_IFUNC void fio_channel_on_destroy(fio_channel_s *ch) {
                 e) {
     (&e->unsubscribe + ch->is_pattern)[0](e, name, ch->filter);
   }
-  FIO_LOG_DEBUG2(
-      "%d (pubsub) channel destroyed (filter %d, length %zu bytes): %s",
-      fio___srvdata.pid,
-      (int)ch->filter,
-      (size_t)ch->name_len,
-      name.buf);
+  FIO_LOG_DEBUG2("%d (pubsub) channel destroyed (filter "
+                 "%d, length %zu bytes): %s",
+                 fio___srvdata.pid,
+                 (int)ch->filter,
+                 (size_t)ch->name_len,
+                 name.buf);
 }
 
 static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
@@ -1678,7 +1783,8 @@ static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
   }
 }
 
-/** Attaches an engine, so it's callback can be called by facil.io. */
+/** Attaches an engine, so it's callback can be
+ * called by facil.io. */
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
@@ -1695,7 +1801,8 @@ FIO_SFUNC void fio_pubsub_detach___task(void *engine, void *ignr_) {
   e->detached(e);
 }
 
-/** Schedules an engine for Detachment, so it could be safely destroyed. */
+/** Schedules an engine for Detachment, so it
+ * could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine) {
   fio_defer(fio_pubsub_detach___task, engine, NULL);
 }
@@ -1709,7 +1816,9 @@ Pub/Sub Testing
 Letter Testing
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
-  fprintf(stderr, "* Testing letter format (pub/sub message exchange)\n");
+  fprintf(stderr,
+          "* Testing letter format (pub/sub "
+          "message exchange)\n");
   struct test_info {
     char *channel;
     char *msg;
@@ -1824,7 +1933,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   for (int i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
     ++delta;
-    FIO_ASSERT(state == expected, "subscribe shouldn't have affected state");
+    FIO_ASSERT(state == expected,
+               "subscribe shouldn't have "
+               "affected state");
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (1-%d)", i);
     FIO___PUBLISH2TEST();

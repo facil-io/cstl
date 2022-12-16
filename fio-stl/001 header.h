@@ -513,6 +513,15 @@ Switching Endian Ordering
 /** Local byte order to Little Endian byte order, 128 bit integer */
 #define fio_ltole128(i) fio_bswap128((i))
 
+#ifndef FIO_SHIFT_FORWARDS
+/** An endianess dependent shift operation, moves bytes forwards. */
+#define FIO_SHIFT_FORWARDS(i, bits) ((i) >> (bits))
+#endif
+#ifndef FIO_SHIFT_BACKWARDS
+/** An endianess dependent shift operation, moves bytes backwards. */
+#define FIO_SHIFT_BACKWARDS(i, bits) ((i) << (bits))
+#endif
+
 #endif /* __SIZEOF_INT128__ */
 
 #else /* Little Endian */
@@ -547,7 +556,23 @@ Switching Endian Ordering
 #define fio_ltole128(i) (i)
 #endif /* __SIZEOF_INT128__ */
 
+#ifndef FIO_SHIFT_FORWARDS
+/** An endianess dependent shift operation, moves bytes forwards. */
+#define FIO_SHIFT_FORWARDS(i, bits) ((i) << (bits))
+#endif
+#ifndef FIO_SHIFT_BACKWARDS
+/** An endianess dependent shift operation, moves bytes backwards. */
+#define FIO_SHIFT_BACKWARDS(i, bits) ((i) >> (bits))
+#endif
+
 #endif /* __BIG_ENDIAN__ */
+
+#define FIO_ROTATE_FORWARDS(i, bits)                                           \
+  (FIO_SHIFT_FORWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                      \
+   FIO_SHIFT_BACKWARDS(i, ((sizeof(i) << 3) - bits) & ((sizeof(i) << 3) - 1)))
+#define FIO_ROTATE_BACKWARDS(i, bits)                                          \
+  (FIO_SHIFT_BACKWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                     \
+   FIO_SHIFT_FORWARDS(i, ((sizeof(i) << 3) - bits) & ((sizeof(i) << 3) - 1)))
 
 /* *****************************************************************************
 Memory Copying Primitives
@@ -679,29 +704,27 @@ FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
   }
 
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void fio_memcpy7x(void *restrict d_,
-                            const void *restrict s_,
-                            size_t l) {
+FIO_IFUNC void __attribute__((no_sanitize("address")))
+fio_memcpy7x(void *restrict d_, const void *restrict s_, size_t l) {
 /* depending on the machine / compiler, one is better than the other */
-#if defined(__clang__)
-  void (*const fn[])(void *, const void *) = {
-      fio_memcpy0,
-      fio_memcpy1,
-      fio_memcpy2,
-      fio_memcpy3,
-      fio_memcpy4,
-      fio_memcpy5,
-      fio_memcpy6,
-      fio_memcpy7,
-  };
-  fn[l & 7](d_, s_);
-#else
+#if 0 /* fast enough on my computer as well as on CI machine */
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
     *d = *s;
+#else /* constant time (but fast enough?) */
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  uint64_t td, ts;
+  uint64_t mask = FIO_SHIFT_FORWARDS((uint64_t)~0ULL, ((l & 7) << 3));
+  fio_memcpy8(&ts, s);
+  fio_memcpy8(&td, d);
+  td &= mask;
+  ts &= ~mask;
+  td |= ts;
+  fio_memcpy8(d, &td);
 #endif
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */

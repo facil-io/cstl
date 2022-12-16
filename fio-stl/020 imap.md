@@ -37,4 +37,9 @@ The macro defines the following:
 
 - `array_name_rehash`   re-builds the imap (use after sorting).
 
+
+Notes:
+
+- `hash_fn(ptr)`, `cmp_fn(a_ptr,b_ptr)` and `is_valid_fn(ptr)` accepts **pointers**  and needs to de-reference them in order to compare their content.
+
 -------------------------------------------------------------------------------
