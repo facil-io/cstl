@@ -135,7 +135,7 @@ SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes);
+SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
 
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`

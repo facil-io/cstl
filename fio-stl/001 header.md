@@ -516,41 +516,27 @@ By default this will be set to either `memcpy` or `__builtin_memcpy` (if availab
 #### `fio_memcpy##`
 
 ```c
-static void fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
-static void fio_memcpy1(void *restrict dest, const void *restrict src);
-static void fio_memcpy2(void *restrict dest, const void *restrict src);
-static void fio_memcpy4(void *restrict dest, const void *restrict src);
-static void fio_memcpy8(void *restrict dest, const void *restrict src);
-static void fio_memcpy16(void *restrict dest, const void *restrict src);
-static void fio_memcpy32(void *restrict dest, const void *restrict src);
-static void fio_memcpy64(void *restrict dest, const void *restrict src);
-// ... void fio_memcpy4096
+static void * fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
+static void * fio_memcpy1(void *restrict dest, const void *restrict src);
+static void * fio_memcpy2(void *restrict dest, const void *restrict src);
+static void * fio_memcpy4(void *restrict dest, const void *restrict src);
+static void * fio_memcpy8(void *restrict dest, const void *restrict src);
+static void * fio_memcpy16(void *restrict dest, const void *restrict src);
+static void * fio_memcpy32(void *restrict dest, const void *restrict src);
+static void * fio_memcpy64(void *restrict dest, const void *restrict src);
+// ... void * fio_memcpy4096
 ```
 
 Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including).
 
-#### `fio_memcpy##_aligned`
-
-```c
-static void fio_memcpy1_aligned(void *restrict dest, const void *restrict src);  /* same as fio_memcpy1 */
-static void fio_memcpy2_aligned(void *restrict dest, const void *restrict src);  /* 2 byte alignment */
-static void fio_memcpy4_aligned(void *restrict dest, const void *restrict src);  /* 4 byte alignment */
-static void fio_memcpy8_aligned(void *restrict dest, const void *restrict src);  /* word alignment */
-// ... void fio_memcpy4096_aligned                                           /* ... word alignment */
-```
-
-Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including) and both `dest` and `src` are properly aligned.
-
-**Note**: careful when calling these functions on systems that allow unaligned memory access - for example, Intel - as they might not allow unaligned memory access in vectorized code and `gcc` might vectorize the code anyway.
-
 #### `fio_memcpy##x`
 
 ```c
-static void fio_memcpy7x(void *restrict dest, const void *restrict src), size_t length;
-static void fio_memcpy15x(void *restrict dest, const void *restrict src, size_t length);
-static void fio_memcpy31x(void *restrict dest, const void *restrict src, size_t length);
-static void fio_memcpy63x(void *restrict dest, const void *restrict src, size_t length);
-// ... void fio_memcpy4095x
+static void * fio_memcpy7x(void *restrict dest, const void *restrict src), size_t length;
+static void * fio_memcpy15x(void *restrict dest, const void *restrict src, size_t length);
+static void * fio_memcpy31x(void *restrict dest, const void *restrict src, size_t length);
+static void * fio_memcpy63x(void *restrict dest, const void *restrict src, size_t length);
+// ... void * fio_memcpy4095x
 ```
 
 Copies up to `n-1` bytes from `src` to `dest` where `n` is a power of 2 between 1 and 4096 (including).
@@ -560,7 +546,7 @@ This is provided to allow for easy "tail" processing.
 #### `fio_memcpy`
 
 ```c
-static void fio_memcpy(void *dest, const void *src, size_t length);
+static void *fio_memcpy(void *dest, const void *src, size_t length);
 ```
 
 A fallback for `memcpy`, copies `length` bytes from `src` to `dest`.

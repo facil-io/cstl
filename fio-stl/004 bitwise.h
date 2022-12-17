@@ -708,7 +708,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
     struct {
-      void (*fn)(void *, const void *, size_t);
+      void *(*fn)(void *, const void *, size_t);
       const char *name;
       size_t len;
     } tests[] = {

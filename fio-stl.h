@@ -713,8 +713,9 @@ Memory Copying Primitives
 #define FIO_MEMCPY __builtin_memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
-    __builtin_memcpy(d, s, bytes);                                             \
+  FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
+                                    const void *restrict s) {                  \
+    return __builtin_memcpy(d, s, bytes);                                      \
   }
 #else
 #ifndef FIO_MEMCPY
@@ -722,17 +723,22 @@ Memory Copying Primitives
 #define FIO_MEMCPY memcpy
 #endif
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_SFUNC void fio_memcpy##bytes(void *restrict d, const void *restrict s) { \
+  FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
+                                    const void *restrict s) {                  \
+    void *const r = (char *)d + bytes;                                         \
     for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
       ((char *)d)[i] = ((const char *)s)[i];                                   \
+    return r;                                                                  \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
-FIO_SFUNC void fio_memcpy0(void *restrict d, const void *restrict s) {
-  ((void)d), ((void)s);
+FIO_SFUNC void *fio_memcpy0(void *restrict d, const void *restrict s) {
+  ((void)s);
+  return d;
 }
-FIO_SFUNC void fio_memcpy1(void *restrict d, const void *restrict s) {
+FIO_SFUNC void *fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
+  return (void *)((uintptr_t)d + 1);
 }
 /** Copies 2 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(2)
@@ -768,49 +774,10 @@ FIO___MAKE_MEMCPY_FIXED(2048)
 FIO___MAKE_MEMCPY_FIXED(4096)
 #undef FIO___MAKE_MEMCPY_FIXED
 
-#define FIO___MAKE_MEMCPY_ALIGNED(bytes)                                       \
-  FIO_SFUNC void fio_memcpy##bytes##_aligned(void *restrict dest,              \
-                                             const void *restrict src) {       \
-    for (size_t i = 0; i < (bytes##ULL / sizeof(size_t)); ++i)                 \
-      ((size_t *)dest)[i] = ((size_t *)src)[i]; /* should vectorize, right? */ \
-  }
-
-FIO_IFUNC void fio_memcpy1_aligned(void *restrict dest, const void *src) {
-  *(char *)dest = *(const char *)src;
-}
-/** Copies 2 bytes where both `src` and `dest` are aligned. */
-FIO_IFUNC void fio_memcpy2_aligned(void *restrict dest, const void *src) {
-  *(uint16_t *)dest = *(const uint16_t *)src;
-}
-/** Copies 4 bytes where both `src` and `dest` are aligned. */
-FIO_IFUNC void fio_memcpy4_aligned(void *restrict dest, const void *src) {
-  *(uint32_t *)dest = *(const uint32_t *)src;
-}
-/** Copies 8 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(8)
-/** Copies 16 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(16)
-/** Copies 32 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(32)
-/** Copies 64 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(64)
-/** Copies 128 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(128)
-/** Copies 256 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(256)
-/** Copies 512 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(512)
-/** Copies 1024 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(1024)
-/** Copies 2048 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(2048)
-/** Copies 4096 bytes where both `src` and `dest` are word aligned. */
-FIO___MAKE_MEMCPY_ALIGNED(4096)
-#undef FIO___MAKE_MEMCPY_ALIGNED
-
 /** Does nothing. */
-FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
-  ((void)d), ((void)s), ((void)l);
+FIO_SFUNC void *fio_memcpy0x(void *d, const void *s, size_t l) {
+  ((void)s), ((void)l);
+  return d;
 }
 
 #define FIO_MEMCPY___PARTIAL(bytes)                                            \
@@ -819,63 +786,117 @@ FIO_SFUNC void fio_memcpy0x(void *d, const void *s, size_t l) {
     d += bytes;                                                                \
     s += bytes;                                                                \
   }
-#define FIO_MEMCPYX_MAKER4(bytes, n4, n2, n1, nx)                              \
-  FIO_SFUNC void fio_memcpy##bytes##x(void *restrict d_,                       \
-                                      const void *restrict s_,                 \
-                                      size_t l) {                              \
-    char *restrict d = (char *restrict)d_;                                     \
-    const char *restrict s = (const char *restrict)s_;                         \
-    FIO_MEMCPY___PARTIAL(n4);                                                  \
-    FIO_MEMCPY___PARTIAL(n2);                                                  \
-    FIO_MEMCPY___PARTIAL(n1);                                                  \
-    fio_memcpy##nx##x(d, s, l);                                                \
-  }
-
 /** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void fio_memcpy7x(void *restrict d_,
-                            const void *restrict s_,
-                            size_t l) {
-/* depending on the machine / compiler, one is better than the other */
-#if 0 /* fast enough on my computer as well as on CI machine */
+FIO_IFUNC void *fio_memcpy7x(void *restrict d_,
+                             const void *restrict s_,
+                             size_t l) {
+  /* depending on the machine / compiler, one is better than the other */
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(4);
   FIO_MEMCPY___PARTIAL(2);
   if ((l & 1))
-    *d = *s;
-#else
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  switch ((l & 7)) {
-  case 7: *d++ = *s++; /* fall through */
-  case 6: *d++ = *s++; /* fall through */
-  case 5: *d++ = *s++; /* fall through */
-  case 4: *d++ = *s++; /* fall through */
-  case 3: *d++ = *s++; /* fall through */
-  case 2: *d++ = *s++; /* fall through */
-  case 1: *d = *s;     /* fall through */
-  }
-#endif
+    *d++ = *s;
+  return (void *)d;
 }
 /** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void fio_memcpy15x(void *restrict d_,
-                             const void *restrict s_,
-                             size_t l) {
+FIO_IFUNC void *fio_memcpy15x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(8);
-  fio_memcpy7x(d, s, l);
+  FIO_MEMCPY___PARTIAL(4);
+  FIO_MEMCPY___PARTIAL(2);
+  if ((l & 1))
+    *d++ = *s;
+  return (void *)d;
 }
+
+#if 1 /* use a mostly generix X copy primitive. */
+
+FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
+                                    const void *restrict s_,
+                                    size_t l) {
+  void *const r = (void *)((uintptr_t)d_ + l);
+  if (l < 16) {
+    fio_memcpy15x(d_, s_, l);
+    return r;
+  }
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  if (l < 32) {
+    /* 16 byte block */
+    fio_memcpy16(d, s);
+    /* leftover */
+    s += (l & 15);
+    d += (l & 15);
+    fio_memcpy16(d, s);
+    return r;
+  }
+  if (l < 64) {
+    /* 32 byte block */
+    fio_memcpy32(d, s);
+    /* leftover */
+    s += (l & 31);
+    d += (l & 31);
+    fio_memcpy32(d, s);
+    return r;
+  }
+  for (;;) {
+    /* 64 byte block? */
+    fio_memcpy64(d, s);
+    l -= 64;
+    if (l < 64)
+      break;
+    s += 64;
+    d += 64;
+  }
+  /* leftover */
+  s += 63 & l;
+  d += 63 & l;
+  fio_memcpy64(d, s);
+  return r;
+}
+
+#define FIO_MEMCPYX_MAKER(lim)                                                 \
+  FIO_SFUNC void *fio_memcpy##lim##x(void *restrict d,                         \
+                                     const void *restrict s,                   \
+                                     size_t l) {                               \
+    return fio_memcpy_unsafe_x(d, s, (l & lim));                               \
+  }
+FIO_MEMCPYX_MAKER(31)
+FIO_MEMCPYX_MAKER(63)
+FIO_MEMCPYX_MAKER(127)
+FIO_MEMCPYX_MAKER(255)
+FIO_MEMCPYX_MAKER(511)
+FIO_MEMCPYX_MAKER(1023)
+FIO_MEMCPYX_MAKER(2047)
+FIO_MEMCPYX_MAKER(4095)
+
+#else /* use an `if` base for partial copy? */
 /** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_SFUNC void fio_memcpy31x(void *restrict d_,
-                             const void *restrict s_,
-                             size_t l) {
+FIO_SFUNC void *fio_memcpy31x(void *restrict d_,
+                              const void *restrict s_,
+                              size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   FIO_MEMCPY___PARTIAL(16);
   FIO_MEMCPY___PARTIAL(8);
-  fio_memcpy7x(d, s, l);
+  return fio_memcpy7x(d, s, l);
 }
+#define FIO_MEMCPYX_MAKER4(bytes, n4, n2, n1, nx)                              \
+  FIO_SFUNC void *fio_memcpy##bytes##x(void *restrict d_,                      \
+                                       const void *restrict s_,                \
+                                       size_t l) {                             \
+    char *restrict d = (char *restrict)d_;                                     \
+    const char *restrict s = (const char *restrict)s_;                         \
+    FIO_MEMCPY___PARTIAL(n4);                                                  \
+    FIO_MEMCPY___PARTIAL(n2);                                                  \
+    FIO_MEMCPY___PARTIAL(n1);                                                  \
+    return fio_memcpy##nx##x(d, s, l);                                         \
+  }
+
 /** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
 FIO_MEMCPYX_MAKER4(63, 32, 16, 8, 7)
 /** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
@@ -892,8 +913,9 @@ FIO_MEMCPYX_MAKER4(2047, 1024, 512, 256, 255)
 FIO_MEMCPYX_MAKER4(4095, 2048, 1024, 512, 511)
 
 #undef FIO_MEMCPYX_MAKER4
-#undef FIO_MEMCPY___PARTIAL
+#endif /* `if` based `fio_memcpy_x` */
 
+#undef FIO_MEMCPY___PARTIAL
 /* *****************************************************************************
 FIO_MEMSET / fio_memset - memset fallbacks
 ***************************************************************************** */
@@ -954,13 +976,13 @@ FIO_MEMCPY / fio_memcpy - memcpy fallbacks
       --bytes;                                                                 \
     }                                                                          \
     if ((uintptr_t)d & 2) {                                                    \
-      fio_memcpy2_aligned(d, s);                                               \
+      fio_memcpy2(d, s);                                                       \
       d = d FIO___MEMCPY_ALIGN_DIR 2;                                          \
       s = s FIO___MEMCPY_ALIGN_DIR 2;                                          \
       bytes -= 2;                                                              \
     }                                                                          \
     if ((uintptr_t)d & 4) {                                                    \
-      fio_memcpy4_aligned(d, s);                                               \
+      fio_memcpy4(d, s);                                                       \
       d = d FIO___MEMCPY_ALIGN_DIR 4;                                          \
       s = s FIO___MEMCPY_ALIGN_DIR 4;                                          \
       bytes -= 4;                                                              \
@@ -968,13 +990,14 @@ FIO_MEMCPY / fio_memcpy - memcpy fallbacks
   }
 
 /** memcpy / memmove alternative that should work with unaligned memory */
-FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
+FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
+  void *const r = (char *)dest_ + (src_ ? bytes : 0);
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
 
   if ((d == s) | !bytes | !d | !s) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
-    return;
+    return r;
   }
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
@@ -1019,6 +1042,7 @@ FIO_SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
     FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
   }
+  return r;
 }
 
 #undef FIO___MEMCPY_BLOCK_NUM
@@ -3863,7 +3887,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   fprintf(stderr, "* Testing fio_memcpy primitives.\n");
   {
     struct {
-      void (*fn)(void *, const void *, size_t);
+      void *(*fn)(void *, const void *, size_t);
       const char *name;
       size_t len;
     } tests[] = {
@@ -7715,6 +7739,13 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   w.v[i] = fio_lrot64(w.v[i], 31);                                             \
   v.v[i] += w.v[i];                                                            \
   v.v[i] ^= seed;
+#undef FIO___R2_ROUND
+#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
+  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
+  v.v[i] += w.v[i];                                                            \
+  v.v[i] = fio_lrot64(v.v[i], 31);                                             \
+  v.v[i] *= prime.v[i];                                                        \
+  v.v[i] += seed;
 
   /* consumes 32 bytes (256 bits) blocks (no padding needed) */
   for (size_t pos = 31; pos < len; pos += 32) {
@@ -7722,11 +7753,11 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
       fio_memcpy8(w.v + i, data + (i << 3));
       FIO___R2_ROUND(i);
     }
-    seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
+    // seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
-#if COPY_THEN_COMPUTE && 0
-  { // pad with zeros or add 32 zero bytes...
+#if (FIO___R2_PERFORM_FULL_BLOCK + 1) && 1
+  if (len & 31) { // pad with zeros or add 32 zero bytes...
     w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0;
     fio_memcpy31x(w.v, data, len);
     for (size_t i = 0; i < 4; ++i) {
@@ -7742,20 +7773,12 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
     FIO___R2_ROUND(0);
     data += len & 24;
   }
-  {
+  if (len & 7) {
     uint64_t i = (len & 24) >> 3;
     w.v[i] = 0;
-    switch ((len & 7)) {
-    case 7: w.v[i] |= ((uint64_t)data[6]) << 48; /* fall through */
-    case 6: w.v[i] |= ((uint64_t)data[5]) << 40; /* fall through */
-    case 5: w.v[i] |= ((uint64_t)data[4]) << 32; /* fall through */
-    case 4: w.v[i] |= ((uint64_t)data[3]) << 24; /* fall through */
-    case 3: w.v[i] |= ((uint64_t)data[2]) << 16; /* fall through */
-    case 2: w.v[i] |= ((uint64_t)data[1]) << 8;  /* fall through */
-    case 1: w.v[i] |= ((uint64_t)data[0]); FIO___R2_ROUND(i);
-    }
+    fio_memcpy7x(w.v + i, data, len);
+    FIO___R2_ROUND(i);
   }
-
 #endif
 
   /* inner vector mini-avalanche */
@@ -12026,7 +12049,7 @@ SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void fio_memcpy(void *dest_, const void *src_, size_t bytes);
+SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
 
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
