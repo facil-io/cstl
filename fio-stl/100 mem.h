@@ -2459,14 +2459,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       memcpy(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);
       FIO_ASSERT(!memcmp(buf + offset, msg, len),
-                 "fio_memcpy failed on overlapping data (offset +%d)",
-                 offset);
+                 "fio_memcpy failed on overlapping data (offset +%d, len %zu)",
+                 offset,
+                 len);
       memset(buf, 0, sizeof(buf));
       memcpy(buf + offset, msg, len);
       fio_memcpy(buf, buf + offset, len);
+      if (memcmp(buf, msg, len)) {
+        FIO_LOG_DEBUG2("break point");
+      }
       FIO_ASSERT(!memcmp(buf, msg, len),
-                 "fio_memcpy failed on overlapping data (offset -%d)",
-                 offset);
+                 "fio_memcpy failed on overlapping data (offset -%d, len %zu)",
+                 offset,
+                 len);
     }
   }
 

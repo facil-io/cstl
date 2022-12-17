@@ -158,7 +158,7 @@ Implementation - inlined
 FIO_IFUNC size_t fio_digits10(int64_t i) {
   if (i >= 0)
     return fio_digits10u(i);
-  return fio_digits10u((0 - i)) + 1;
+  return fio_digits10u((0ULL - (uint64_t)i)) + 1;
 }
 
 /** Returns the number of digits in base 2 for an unsigned number. */

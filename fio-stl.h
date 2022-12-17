@@ -780,51 +780,29 @@ FIO_SFUNC void *fio_memcpy0x(void *d, const void *s, size_t l) {
   return d;
 }
 
-#define FIO_MEMCPY___PARTIAL(bytes)                                            \
-  if ((l & bytes)) {                                                           \
-    fio_memcpy##bytes(d, s);                                                   \
-    d += bytes;                                                                \
-    s += bytes;                                                                \
-  }
-/** Copies up to 7 bytes to `dest` from `src`, calculated by `len & 7`. */
-FIO_IFUNC void *fio_memcpy7x(void *restrict d_,
-                             const void *restrict s_,
-                             size_t l) {
-  /* depending on the machine / compiler, one is better than the other */
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d++ = *s;
-  return (void *)d;
-}
-/** Copies up to 15 bytes to `dest` from `src`, calculated by `len & 15`. */
-FIO_IFUNC void *fio_memcpy15x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(8);
-  FIO_MEMCPY___PARTIAL(4);
-  FIO_MEMCPY___PARTIAL(2);
-  if ((l & 1))
-    *d++ = *s;
-  return (void *)d;
-}
-
-#if 1 /* use a mostly generix X copy primitive. */
-
+/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
 FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     const void *restrict s_,
                                     size_t l) {
-  void *const r = (void *)((uintptr_t)d_ + l);
-  if (l < 16) {
-    fio_memcpy15x(d_, s_, l);
-    return r;
-  }
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
+  if (l < 16) {
+    if ((l & 8)) {
+      fio_memcpy8(d, s);
+      (d += 8), (s += 8);
+    }
+    if ((l & 4)) {
+      fio_memcpy4(d, s);
+      (d += 4), (s += 4);
+    }
+    if ((l & 2)) {
+      fio_memcpy2(d, s);
+      (d += 2), (s += 2);
+    }
+    if ((l & 1))
+      *d++ = *s;
+    return (void *)d;
+  }
   if (l < 32) {
     /* 16 byte block */
     fio_memcpy16(d, s);
@@ -832,7 +810,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
     s += (l & 15);
     d += (l & 15);
     fio_memcpy16(d, s);
-    return r;
+    return (void *)(d += 16);
   }
   if (l < 64) {
     /* 32 byte block */
@@ -841,7 +819,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
     s += (l & 31);
     d += (l & 31);
     fio_memcpy32(d, s);
-    return r;
+    return (void *)(d += 32);
   }
   for (;;) {
     /* 64 byte block? */
@@ -856,7 +834,107 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   s += 63 & l;
   d += 63 & l;
   fio_memcpy64(d, s);
-  return r;
+  return (void *)(d += 64);
+}
+
+/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
+FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
+                                      const void *restrict s_,
+                                      size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+  uint64_t t[8] FIO_ALIGN(16);
+  if (l < 16) {
+    if ((l & 8)) {
+      fio_memcpy8(t, s);
+      fio_memcpy8(d, t);
+      (d += 8), (s += 8);
+    }
+    if ((l & 4)) {
+      fio_memcpy4(t, s);
+      fio_memcpy4(d, t);
+      (d += 4), (s += 4);
+    }
+    if ((l & 2)) {
+      fio_memcpy2(t, s);
+      fio_memcpy2(d, t);
+      (d += 2), (s += 2);
+    }
+    if ((l & 1))
+      *d++ = *s;
+    return (void *)d;
+  }
+  if (l < 32) {
+    /* 16 byte block */
+    fio_memcpy16(t, s);
+    fio_memcpy16(t + 2, s + (l & 15));
+    fio_memcpy16(d, t);
+    d += (l & 15);
+    fio_memcpy16(d, t + 2);
+    return (void *)(d += 16);
+  }
+  if (l < 64) {
+    /* 32 byte block */
+    fio_memcpy32(t, s);
+    fio_memcpy32(t + 4, s + (l & 31));
+    fio_memcpy32(d, t);
+    d += (l & 31);
+    fio_memcpy32(d, t + 4);
+    return (void *)(d += 32);
+  }
+  do {
+    /* 64 byte block? */
+    fio_memcpy64(t, s);
+    fio_memcpy64(d, t);
+    (s += 64), (d += 64), (l -= 64);
+  } while (l > 63);
+  return fio_memcpy_buffered_x(d, s, l);
+}
+
+/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
+FIO_SFUNC void *fio_memcpy_buffered__reversed_x(void *restrict d_,
+                                                const void *restrict s_,
+                                                size_t l) {
+  char *restrict d = (char *restrict)d_ + l;
+  const char *restrict s = (const char *restrict)s_ + l;
+  uint64_t t[8] FIO_ALIGN(16);
+  while (l > 63) {
+    (s -= 64), (d -= 64), (l -= 64);
+    fio_memcpy64(t, s);
+    FIO_COMPILER_GUARD;
+    fio_memcpy64(d, t);
+  }
+  if ((l & 32)) {
+    (d -= 32), (s -= 32);
+    fio_memcpy32(t, s);
+    FIO_COMPILER_GUARD;
+    fio_memcpy32(d, t);
+  }
+  if ((l & 16)) {
+    (d -= 16), (s -= 16);
+    fio_memcpy16(t, s);
+    FIO_COMPILER_GUARD;
+    fio_memcpy16(d, t);
+  }
+  if ((l & 8)) {
+    (d -= 8), (s -= 8);
+    fio_memcpy8(t, s);
+    FIO_COMPILER_GUARD;
+    fio_memcpy8(d, t);
+  }
+  if ((l & 4)) {
+    (d -= 4), (s -= 4);
+    fio_memcpy4(t, s);
+    fio_memcpy4(d, t);
+  }
+  if ((l & 2)) {
+    (d -= 2), (s -= 2);
+    fio_memcpy2(t, s);
+    fio_memcpy2(d, t);
+  }
+  if ((l & 1))
+    *--d = *--s;
+  return (void *)d;
 }
 
 #define FIO_MEMCPYX_MAKER(lim)                                                 \
@@ -865,6 +943,8 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                      size_t l) {                               \
     return fio_memcpy_unsafe_x(d, s, (l & lim));                               \
   }
+FIO_MEMCPYX_MAKER(7)
+FIO_MEMCPYX_MAKER(15)
 FIO_MEMCPYX_MAKER(31)
 FIO_MEMCPYX_MAKER(63)
 FIO_MEMCPYX_MAKER(127)
@@ -873,47 +953,7 @@ FIO_MEMCPYX_MAKER(511)
 FIO_MEMCPYX_MAKER(1023)
 FIO_MEMCPYX_MAKER(2047)
 FIO_MEMCPYX_MAKER(4095)
-
-#else /* use an `if` base for partial copy? */
-/** Copies up to 31 bytes to `dest` from `src`, calculated by `len & 31`. */
-FIO_SFUNC void *fio_memcpy31x(void *restrict d_,
-                              const void *restrict s_,
-                              size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
-  FIO_MEMCPY___PARTIAL(16);
-  FIO_MEMCPY___PARTIAL(8);
-  return fio_memcpy7x(d, s, l);
-}
-#define FIO_MEMCPYX_MAKER4(bytes, n4, n2, n1, nx)                              \
-  FIO_SFUNC void *fio_memcpy##bytes##x(void *restrict d_,                      \
-                                       const void *restrict s_,                \
-                                       size_t l) {                             \
-    char *restrict d = (char *restrict)d_;                                     \
-    const char *restrict s = (const char *restrict)s_;                         \
-    FIO_MEMCPY___PARTIAL(n4);                                                  \
-    FIO_MEMCPY___PARTIAL(n2);                                                  \
-    FIO_MEMCPY___PARTIAL(n1);                                                  \
-    return fio_memcpy##nx##x(d, s, l);                                         \
-  }
-
-/** Copies up to 63 bytes to `dest` from `src`, calculated by `len & 63`. */
-FIO_MEMCPYX_MAKER4(63, 32, 16, 8, 7)
-/** Copies up to 127 bytes to `dest` from `src`, calculated by `len & 127`. */
-FIO_MEMCPYX_MAKER4(127, 64, 32, 16, 15)
-/** Copies up to 255 bytes to `dest` from `src`, calculated by `len & 255`. */
-FIO_MEMCPYX_MAKER4(255, 128, 64, 32, 31)
-/** Copies up to 511 bytes to `dest` from `src`, calculated by `len & 511`. */
-FIO_MEMCPYX_MAKER4(511, 256, 128, 64, 63)
-/** Copies up to 1023 bytes to `dest` from `src`, calculated by `len & 1023`. */
-FIO_MEMCPYX_MAKER4(1023, 512, 256, 128, 127)
-/** Copies up to 2047 bytes to `dest` from `src`, calculated by `len & 2047`. */
-FIO_MEMCPYX_MAKER4(2047, 1024, 512, 256, 255)
-/** Copies up to 4095 bytes to `dest` from `src`, calculated by `len & 4095`. */
-FIO_MEMCPYX_MAKER4(4095, 2048, 1024, 512, 511)
-
-#undef FIO_MEMCPYX_MAKER4
-#endif /* `if` based `fio_memcpy_x` */
+#undef FIO_MEMCPYX_MAKER
 
 #undef FIO_MEMCPY___PARTIAL
 /* *****************************************************************************
@@ -962,87 +1002,33 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCK_NUM  1024ULL
-#define FIO___MEMCPY_BLOCKx_NUM 1023ULL
+#define FIO___MEMCPY_BLOCK_NUM  64ULL
+#define FIO___MEMCPY_BLOCKx_NUM 63ULL
 #define FIO___MEMCPY_BLOCK      fio_memcpy1024
 #define FIO___MEMCPY_BLOCKx     fio_memcpy1023x
-#define FIO___MEMCPY_ALIGN_DIR  +
-#define FIO___MEMCPY_ALIGN(d, s, bytes)                                        \
-  if (((bytes & 7) & (bytes > 256))) { /* align memory? */                     \
-    if ((uintptr_t)d & 1) {                                                    \
-      *(d) = *(s);                                                             \
-      d = d FIO___MEMCPY_ALIGN_DIR 1;                                          \
-      s = s FIO___MEMCPY_ALIGN_DIR 1;                                          \
-      --bytes;                                                                 \
-    }                                                                          \
-    if ((uintptr_t)d & 2) {                                                    \
-      fio_memcpy2(d, s);                                                       \
-      d = d FIO___MEMCPY_ALIGN_DIR 2;                                          \
-      s = s FIO___MEMCPY_ALIGN_DIR 2;                                          \
-      bytes -= 2;                                                              \
-    }                                                                          \
-    if ((uintptr_t)d & 4) {                                                    \
-      fio_memcpy4(d, s);                                                       \
-      d = d FIO___MEMCPY_ALIGN_DIR 4;                                          \
-      s = s FIO___MEMCPY_ALIGN_DIR 4;                                          \
-      bytes -= 4;                                                              \
-    }                                                                          \
-  }
 
 /** memcpy / memmove alternative that should work with unaligned memory */
 FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
-  void *const r = (char *)dest_ + (src_ ? bytes : 0);
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
 
   if ((d == s) | !bytes | !d | !s) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
-    return r;
+    return d;
   }
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
-    FIO___MEMCPY_ALIGN(d, s, bytes);
-    for (const char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM));
-         d < dstop;) {
-      FIO___MEMCPY_BLOCK(d, s); /* direct copy, no meaningful overlap */
-      d += FIO___MEMCPY_BLOCK_NUM;
-      s += FIO___MEMCPY_BLOCK_NUM;
-    }
-    FIO___MEMCPY_BLOCKx(d, s, bytes);
+    return fio_memcpy_unsafe_x(d, s, bytes);
   } else if (bytes < FIO___MEMCPY_BLOCK_NUM) { /* overlap, fits in buffer */
     char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
     FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
     FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
-    FIO___MEMCPY_ALIGN(d, s, bytes)
-    for (char *dstop = d + (bytes & (~FIO___MEMCPY_BLOCKx_NUM)); d < dstop;) {
-      FIO___MEMCPY_BLOCK(tmp_buf, s);
-      FIO___MEMCPY_BLOCK(d, tmp_buf);
-      d += FIO___MEMCPY_BLOCK_NUM;
-      s += FIO___MEMCPY_BLOCK_NUM;
-    }
-    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
-    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
-#undef FIO___MEMCPY_ALIGN_DIR
-#define FIO___MEMCPY_ALIGN_DIR -
+    return fio_memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
-    d += bytes;
-    s += bytes;
-    FIO___MEMCPY_ALIGN(d, s, bytes);
-    for (; d > (char *)dest_ + FIO___MEMCPY_BLOCKx_NUM;) {
-      d -= FIO___MEMCPY_BLOCK_NUM;
-      s -= FIO___MEMCPY_BLOCK_NUM;
-      FIO___MEMCPY_BLOCK(tmp_buf, s);
-      FIO___MEMCPY_BLOCK(d, tmp_buf);
-    }
-    d = (char *)dest_;
-    s = (const char *)src_;
-    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
-    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
+    return fio_memcpy_buffered__reversed_x(d, s, bytes);
   }
-  return r;
+  return d;
 }
 
 #undef FIO___MEMCPY_BLOCK_NUM
@@ -5057,7 +5043,7 @@ Implementation - inlined
 FIO_IFUNC size_t fio_digits10(int64_t i) {
   if (i >= 0)
     return fio_digits10u(i);
-  return fio_digits10u((0 - i)) + 1;
+  return fio_digits10u((0ULL - (uint64_t)i)) + 1;
 }
 
 /** Returns the number of digits in base 2 for an unsigned number. */
@@ -14373,14 +14359,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       memcpy(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);
       FIO_ASSERT(!memcmp(buf + offset, msg, len),
-                 "fio_memcpy failed on overlapping data (offset +%d)",
-                 offset);
+                 "fio_memcpy failed on overlapping data (offset +%d, len %zu)",
+                 offset,
+                 len);
       memset(buf, 0, sizeof(buf));
       memcpy(buf + offset, msg, len);
       fio_memcpy(buf, buf + offset, len);
+      if (memcmp(buf, msg, len)) {
+        FIO_LOG_DEBUG2("break point");
+      }
       FIO_ASSERT(!memcmp(buf, msg, len),
-                 "fio_memcpy failed on overlapping data (offset -%d)",
-                 offset);
+                 "fio_memcpy failed on overlapping data (offset -%d, len %zu)",
+                 offset,
+                 len);
     }
   }
 
