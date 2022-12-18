@@ -176,7 +176,20 @@ Map Types
 ***************************************************************************** */
 
 /** internal object data representation */
-typedef struct {
+typedef struct FIO_NAME(FIO_MAP_NAME, node_s) FIO_NAME(FIO_MAP_NAME, node_s);
+
+/** A Hash Map / Set type */
+typedef struct FIO_NAME(FIO_MAP_NAME, s) {
+  uint32_t bits;
+  uint32_t count;
+  FIO_NAME(FIO_MAP_NAME, node_s) * map;
+#if FIO_MAP_ORDERED
+  FIO_INDEXED_LIST32_HEAD head;
+#endif
+} FIO_NAME(FIO_MAP_NAME, s);
+
+/** internal object data representation */
+struct FIO_NAME(FIO_MAP_NAME, node_s) {
 #if !FIO_MAP_RECALC_HASH
   uint64_t hash;
 #endif
@@ -187,17 +200,7 @@ typedef struct {
 #if FIO_MAP_ORDERED
   FIO_INDEXED_LIST32_NODE node;
 #endif
-} FIO_NAME(FIO_MAP_NAME, node_s);
-
-/** The map type */
-typedef struct {
-  uint32_t bits;
-  uint32_t count;
-  FIO_NAME(FIO_MAP_NAME, node_s) * map;
-#if FIO_MAP_ORDERED
-  FIO_INDEXED_LIST32_HEAD head;
-#endif
-} FIO_NAME(FIO_MAP_NAME, s);
+};
 
 /** Map iterator type */
 typedef struct {

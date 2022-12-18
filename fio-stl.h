@@ -7725,13 +7725,6 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
   w.v[i] = fio_lrot64(w.v[i], 31);                                             \
   v.v[i] += w.v[i];                                                            \
   v.v[i] ^= seed;
-#undef FIO___R2_ROUND
-#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
-  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
-  v.v[i] += w.v[i];                                                            \
-  v.v[i] = fio_lrot64(v.v[i], 31);                                             \
-  v.v[i] *= prime.v[i];                                                        \
-  v.v[i] += seed;
 
   /* consumes 32 bytes (256 bits) blocks (no padding needed) */
   for (size_t pos = 31; pos < len; pos += 32) {
@@ -7739,14 +7732,15 @@ FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
       fio_memcpy8(w.v + i, data + (i << 3));
       FIO___R2_ROUND(i);
     }
-    // seed = w.v[0] + w.v[1] + w.v[2] + w.v[3];
+    seed += w.v[0] + w.v[1] + w.v[2] + w.v[3];
     data += 32;
   }
 #if (FIO___R2_PERFORM_FULL_BLOCK + 1) && 1
-  if (len & 31) { // pad with zeros or add 32 zero bytes...
-    w.v[0] = w.v[1] = w.v[2] = w.v[3] = 0;
-    fio_memcpy31x(w.v, data, len);
+  if (len & 31) { // pad with zeros
+    uint64_t tmp_buf[4] = {0};
+    fio_memcpy31x(tmp_buf, data, len);
     for (size_t i = 0; i < 4; ++i) {
+      w.v[0] = tmp_buf[1];
       FIO___R2_ROUND(i);
     }
   }
@@ -21423,8 +21417,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s,
  *
  * If `dest` is empty, the resulting Strings will be equal.
  */
-FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest,
-                                                        FIO_STR_PTR const src);
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest,
+                                                    FIO_STR_PTR const src);
 
 /** Alias for fio_str_concat */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, join)(FIO_STR_PTR dest,
@@ -22098,7 +22092,6 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 
 
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Core Callbacks - Memory management
@@ -22139,6 +22132,11 @@ FIO_SFUNC void FIO_NAME(FIO_STR_NAME,
                         __default_free_noop2)(fio_str_info_s str) {
   (void)str;
 }
+
+/* *****************************************************************************
+External functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Implementation - Memory management
@@ -23065,7 +23063,7 @@ Copyright and License: see header file (000 header.h) or top of file
 #endif
 
 /*
- * Uses the array structure to embed object, if there's sppace for them.
+ * Uses the array structure to embed object, if there's space for them.
  *
  * This optimizes small arrays and specifically touplets. For `void *` type
  * arrays this allows for 2 objects to be embedded, resulting in faster access
@@ -23073,7 +23071,7 @@ Copyright and License: see header file (000 header.h) or top of file
  *
  * For large arrays, it is better to disable this feature.
  *
- * Note: alues larger than 1 add a memory allocation cost to the array
+ * Note: values larger than 1 add a memory allocation cost to the array
  * container, adding enough room for at least `FIO_ARRAY_ENABLE_EMBEDDED - 1`
  * items.
  */
@@ -23098,14 +23096,15 @@ Copyright and License: see header file (000 header.h) or top of file
 Dynamic Arrays - type
 ***************************************************************************** */
 
-typedef struct {
-  /* start common header */
+/** an Array type. */
+typedef struct FIO_NAME(FIO_ARRAY_NAME, s) {
+  /* start common header (with embedded array type) */
   /** the offser to the first item. */
   uint32_t start;
   /** The offset to the first empty location the array. */
   uint32_t end;
-  /* end common header */
-  /** The attay's capacity only 32bits are valid */
+  /* end common header (with embedded array type) */
+  /** The array's capacity - limited to 32bits, but we use the extra padding. */
   uintptr_t capa;
   /** a pointer to the array's memory (if not embedded) */
   FIO_ARRAY_TYPE *ary;
@@ -24945,7 +24944,20 @@ Map Types
 ***************************************************************************** */
 
 /** internal object data representation */
-typedef struct {
+typedef struct FIO_NAME(FIO_MAP_NAME, node_s) FIO_NAME(FIO_MAP_NAME, node_s);
+
+/** A Hash Map / Set type */
+typedef struct FIO_NAME(FIO_MAP_NAME, s) {
+  uint32_t bits;
+  uint32_t count;
+  FIO_NAME(FIO_MAP_NAME, node_s) * map;
+#if FIO_MAP_ORDERED
+  FIO_INDEXED_LIST32_HEAD head;
+#endif
+} FIO_NAME(FIO_MAP_NAME, s);
+
+/** internal object data representation */
+struct FIO_NAME(FIO_MAP_NAME, node_s) {
 #if !FIO_MAP_RECALC_HASH
   uint64_t hash;
 #endif
@@ -24956,17 +24968,7 @@ typedef struct {
 #if FIO_MAP_ORDERED
   FIO_INDEXED_LIST32_NODE node;
 #endif
-} FIO_NAME(FIO_MAP_NAME, node_s);
-
-/** The map type */
-typedef struct {
-  uint32_t bits;
-  uint32_t count;
-  FIO_NAME(FIO_MAP_NAME, node_s) * map;
-#if FIO_MAP_ORDERED
-  FIO_INDEXED_LIST32_HEAD head;
-#endif
-} FIO_NAME(FIO_MAP_NAME, s);
+};
 
 /** Map iterator type */
 typedef struct {

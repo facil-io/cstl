@@ -360,8 +360,8 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s,
  *
  * If `dest` is empty, the resulting Strings will be equal.
  */
-FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest,
-                                                        FIO_STR_PTR const src);
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest,
+                                                    FIO_STR_PTR const src);
 
 /** Alias for fio_str_concat */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, join)(FIO_STR_PTR dest,
@@ -1035,7 +1035,6 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 
 
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Core Callbacks - Memory management
@@ -1076,6 +1075,11 @@ FIO_SFUNC void FIO_NAME(FIO_STR_NAME,
                         __default_free_noop2)(fio_str_info_s str) {
   (void)str;
 }
+
+/* *****************************************************************************
+External functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Implementation - Memory management

@@ -10,7 +10,7 @@ Includes
 #define FIO_LEAK_COUNTER 1
 #endif /* DEBUG */
 #define FIO_MEMORY_NAME http_mem
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
@@ -23,7 +23,7 @@ Includes
 #define FIO_TIME
 #define FIO_SOCK
 #define FIO_FILES
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 /* *****************************************************************************
 Helper types
@@ -39,13 +39,13 @@ FIO_SFUNC void *http_keystr_alloc(size_t capa) { return http_mem_malloc(capa); }
 #define FIO_ARRAY_TYPE              fio_keystr_s
 #define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj), http_keystr_free)
 #define FIO_ARRAY_TYPE_CMP(a, b)    fio_keystr_is_eq((a), (b))
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 #define FIO_MAP_NAME http_cmap
 #define FIO_MAP_VALUE_BSTR
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 #define FIO_MAP_NAME  http_hmap
 #define FIO_MAP_VALUE http_sary_s
@@ -57,7 +57,7 @@ FIO_SFUNC void *http_keystr_alloc(size_t capa) { return http_mem_malloc(capa); }
 #define FIO_MAP_VALUE_DESTROY(o) http_sary_destroy(&(o))
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 /** set `add` to positive to add multiple values or negative to overwrite. */
 FIO_IFUNC fio_str_info_s http_hmap_set2(http_hmap_s *map,
@@ -69,10 +69,12 @@ FIO_IFUNC fio_str_info_s http_hmap_set2(http_hmap_s *map,
     return r;
   if (!val.buf || !val.len)
     goto remove_key;
-  http_sary_s *o = http_hmap_node2val_ptr(http_hmap_get_ptr(map, key));
+  http_sary_s *o =
+      http_hmap_node2val_ptr(http_hmap_get_ptr(map, FIO_STR2BUF_INFO(key)));
   if (!o) {
     http_sary_s va = {0};
-    o = http_hmap_node2val_ptr(http_hmap_set_ptr(map, key, va, NULL, 1));
+    o = http_hmap_node2val_ptr(
+        http_hmap_set_ptr(map, FIO_STR2BUF_INFO(key), va, NULL, 1));
     add = 1;
   }
   if (FIO_UNLIKELY(!o)) {
@@ -94,7 +96,7 @@ FIO_IFUNC fio_str_info_s http_hmap_set2(http_hmap_s *map,
   return r;
 
 remove_key:
-  http_hmap_remove(map, key, NULL);
+  http_hmap_remove(map, FIO_STR2BUF_INFO(key), NULL);
   return r;
 }
 
@@ -102,7 +104,8 @@ FIO_IFUNC fio_str_info_s http_hmap_get2(http_hmap_s *map,
                                         fio_str_info_s key,
                                         int index) {
   fio_str_info_s r = {0};
-  http_sary_s *a = http_hmap_node2val_ptr(http_hmap_get_ptr(map, key));
+  http_sary_s *a =
+      http_hmap_node2val_ptr(http_hmap_get_ptr(map, FIO_STR2BUF_INFO(key)));
   if (!a)
     return r;
   const uint32_t count = http_sary_count(a);
@@ -186,7 +189,7 @@ void http_destroy(http_s *h) {
 #define FIO_REF_INIT(h)                                                        \
   h = (http_s) { .received_at = http_get_timestump(), .body.fd = -1 }
 #define FIO_REF_DESTROY(h) http_destroy(&(h))
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 /** Create a new http_s handle. */
 http_s *http_new(void) { return http_new2(); }
@@ -295,7 +298,7 @@ Short String Property Set / Get
   fio_str_info_s http_##property##_set(http_s *h, fio_str_info_s value) {      \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     fio_keystr_destroy(&h->property, http_keystr_free);                        \
-    h->property = fio_keystr_copy(value, http_keystr_alloc);                   \
+    h->property = fio_keystr_copy(FIO_BUF2STR_INFO(value), http_keystr_alloc); \
     return fio_keystr_info(&h->property);                                      \
   }
 
@@ -318,8 +321,10 @@ typedef struct {
 FIO_SFUNC int http___h_each_task_wrapper(http_hmap_each_s *e) {
   http___h_each_data_s *data = e->udata;
   FIO_ARRAY_EACH(http_sary, &e->value, pos) {
-    if (data->callback(data->h, e->key, fio_keystr_info(pos), data->udata) ==
-        -1)
+    if (data->callback(data->h,
+                       FIO_BUF2STR_INFO(e->key),
+                       fio_keystr_info(pos),
+                       data->udata) == -1)
       return -1;
   }
   return 0;
@@ -623,7 +628,7 @@ Cookies
 FIO_IFUNC void http_cookie___parse_cookie(http_s *h, fio_str_info_s s) {
   /* loop and read Cookie: name=value; name2=value2; name3=value3 */
   while (s.len) {
-    fio_str_info_s k = {0}, v = {0};
+    fio_buf_info_s k = {0}, v = {0};
     /* remove white-space */
     while ((s.buf[0] == ' ' || s.buf[0] == '\t') && s.len) {
       ++s.buf;
@@ -648,7 +653,7 @@ FIO_IFUNC void http_cookie___parse_cookie(http_s *h, fio_str_info_s s) {
     /* skip the ';' if exists (if len is not zero, !!s.len == 1). */
     s.buf += !!s.len;
     s.len -= !!s.len;
-    http_cmap_set_if_missing(h->cookies, k, v);
+    http_cmap_set_if_missing(h->cookies, (k), (v));
   }
 }
 
@@ -656,7 +661,7 @@ FIO_SFUNC void http_cookie___collect(http_s *h) {
   http_sary_s *header = NULL;
   {
     header = http_hmap_node2val_ptr(
-        http_hmap_get_ptr(h->headers, FIO_STR_INFO2("cookie", 6)));
+        http_hmap_get_ptr(h->headers, FIO_BUF_INFO2("cookie", 6)));
   }
   if (!header)
     return;
@@ -851,13 +856,13 @@ int http_cookie_set FIO_NOOP(http_s *h, http_cookie_args_s cookie) {
 
   /* set the "write" cookie store data */
   http_cmap_set(h->cookies + 1,
-                FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                t,
+                FIO_BUF_INFO2((char *)cookie.name, cookie.name_len),
+                FIO_STR2BUF_INFO(t),
                 NULL);
   /* set the "read" cookie store data */
   http_cmap_set(h->cookies,
-                FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
+                FIO_BUF_INFO2((char *)cookie.name, cookie.name_len),
+                FIO_BUF_INFO2((char *)cookie.value, cookie.value_len),
                 NULL);
   if (t.buf != tmp_buf)
     FIO_STRING_FREE2(t);
@@ -869,7 +874,9 @@ fio_str_info_s http_cookie_get(http_s *h, const char *name, size_t len) {
   if (!(fio_atomic_or(&h->state, HTTP_STATE_COOKIES_PARSED) &
         HTTP_STATE_COOKIES_PARSED))
     http_cookie___collect(h);
-  return http_cmap_get(h->cookies, FIO_STR_INFO2((char *)name, len));
+  fio_buf_info_s r =
+      http_cmap_get(h->cookies, FIO_BUF_INFO2((char *)name, len));
+  return FIO_BUF2STR_INFO(r);
 }
 
 /** Iterates through all cookies. A non-zero return will stop iteration. */
@@ -882,7 +889,10 @@ size_t http_cookie_each(http_s *h,
   size_t i = 0;
   FIO_MAP_EACH(http_cmap, h->cookies, pos) {
     ++i;
-    if (callback(h, pos.key, pos.value, udata))
+    if (callback(h,
+                 FIO_BUF2STR_INFO(pos.key),
+                 FIO_BUF2STR_INFO(pos.value),
+                 udata))
       return i;
   }
   return i;
@@ -904,7 +914,7 @@ size_t http_set_cookie_each(http_s *h,
   fio_str_info_s header_name = FIO_STR_INFO2("set-cookie", 10);
   FIO_MAP_EACH(http_cmap, set_cookies, pos) {
     ++i;
-    if (callback(h, header_name, pos.value, udata))
+    if (callback(h, header_name, FIO_BUF2STR_INFO(pos.value), udata))
       return i;
   }
   return i;
@@ -1324,7 +1334,7 @@ Testing the Handle.
 #if defined(TEST)
 #ifndef FIO_URL
 #define FIO_URL
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 #endif
 void http_test FIO_NOOP(void) {
   fprintf(stderr, "* Testing HTTP handle.\r\n");

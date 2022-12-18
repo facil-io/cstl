@@ -101,7 +101,7 @@ Copyright and License: see header file (000 header.h) or top of file
 #endif
 
 /*
- * Uses the array structure to embed object, if there's sppace for them.
+ * Uses the array structure to embed object, if there's space for them.
  *
  * This optimizes small arrays and specifically touplets. For `void *` type
  * arrays this allows for 2 objects to be embedded, resulting in faster access
@@ -109,7 +109,7 @@ Copyright and License: see header file (000 header.h) or top of file
  *
  * For large arrays, it is better to disable this feature.
  *
- * Note: alues larger than 1 add a memory allocation cost to the array
+ * Note: values larger than 1 add a memory allocation cost to the array
  * container, adding enough room for at least `FIO_ARRAY_ENABLE_EMBEDDED - 1`
  * items.
  */
@@ -134,14 +134,15 @@ Copyright and License: see header file (000 header.h) or top of file
 Dynamic Arrays - type
 ***************************************************************************** */
 
-typedef struct {
-  /* start common header */
+/** an Array type. */
+typedef struct FIO_NAME(FIO_ARRAY_NAME, s) {
+  /* start common header (with embedded array type) */
   /** the offser to the first item. */
   uint32_t start;
   /** The offset to the first empty location the array. */
   uint32_t end;
-  /* end common header */
-  /** The attay's capacity only 32bits are valid */
+  /* end common header (with embedded array type) */
+  /** The array's capacity - limited to 32bits, but we use the extra padding. */
   uintptr_t capa;
   /** a pointer to the array's memory (if not embedded) */
   FIO_ARRAY_TYPE *ary;
