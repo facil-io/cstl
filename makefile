@@ -1,10 +1,11 @@
 #############################################################################
 # This makefile was composed for facil.io
 #
-# Copyright (c) 2016-2022 Boaz Segev
-# License MIT / ISC (choose whichever you like)
+# This makefile can (and does) act as a "configure.sh" replacement for testing
+# if libraries or language features are available... it should have everything,
+# including the kitchen sink.
 #
-# This makefile SHOULD be easily portable and Should work on any POSIX system
+# This makefile SHOULD be easily portable and SHOULD work on any POSIX system
 # for any project... under the following assumptions:
 #
 # * If your code has a `main` function, that code should be placed in the
@@ -19,13 +20,13 @@
 # * Test files are independent, each test files compiles and runs as is, and
 #   placed in the `TEST_ROOT` folder (i.e., `./tests`).
 #
-#   Run tests (i.e., the test file `foo.c`) with:       `make test/foo`
-#   Run tests after linking with the library code with: `make test/lib/foo`
-#   Run tests with DEBUG mode (no optimizations) with:  `make test/db/foo`
-#   Run tests with DEBUG and  linking to library with:  `make test/lib/db/foo`
+#   Run tests (i.e., the test file `foo.c`) with:       `make tests/foo`
+#   Run tests with DEBUG mode (no optimizations) with:  `make db/tests/foo`
 #
+# Copyright (c) 2016-2022 Boaz Segev
+# License MIT / ISC (choose whichever you like)
 #############################################################################
-
+FIO_VERSION:= 0.8.x
 #############################################################################
 # Compilation Output Settings
 #############################################################################
@@ -40,7 +41,8 @@ TMP_ROOT=tmp
 # destination folder for the final compiled output
 DEST?=$(TMP_ROOT)
 
-# output folder for `make libdump` - dumps all library files (not source files) in one place.
+# output folder for `make libdump` - dumps all library files (not source files)
+# this creates three folders: `src`, `include` and `all` .
 DUMP_LIB?=libdump
 
 #############################################################################
@@ -48,22 +50,25 @@ DUMP_LIB?=libdump
 #############################################################################
 
 # the main source .c and .cpp source files root folder
-MAIN_ROOT=src
+MAIN_ROOT?=src
 # subfolders under the main source root
-MAIN_SUBFOLDERS=
+MAIN_SUBFOLDERS?=
 
 #############################################################################
 # Library Folder Settings
 #############################################################################
 
 # the library .c and .cpp source files root folder
-LIB_ROOT=lib
+LIB_ROOT?=lib
 
 # publicly used subfolders in the lib root
-LIB_PUBLIC_SUBFOLDERS=
+LIB_PUBLIC_SUBFOLDERS?=
 
 # privately used subfolders in the lib root (this distinction is only relevant for CMake)
-LIB_PRIVATE_SUBFOLDERS=
+LIB_PRIVATE_SUBFOLDERS?=
+
+# When exporting the library, what would it be called
+LIB_NAME?=libfacil
 
 
 #############################################################################
@@ -93,7 +98,7 @@ TEST_DEFAULT=stl
 #############################################################################
 
 # The library details for CMake incorporation. Can be safely removed.
-CMAKE_FILENAME=
+CMAKE_FILENAME?=
 # Project name to be stated in the CMakeFile
 CMAKE_PROJECT=facil.io
 # Space delimited list of required packages
@@ -189,7 +194,7 @@ ifeq ($(OS),Darwin) # Run MacOS commands
   # documentation commands
   # DOCUMENTATION=cldoc generate $(INCLUDE_STR) -- --output ./html $(foreach dir, $(LIB_PUBLIC_SUBFOLDERS), $(wildcard $(addsuffix /, $(basename $(dir)))*.h*))
   # rule modifier (can't be indented)
-$(DEST)/libfacil.so: LDFLAGS+=-dynamiclib -install_name $(realpath $(DEST))/libfacil.so
+$(DEST)/$(LIB_NAME).so: LDFLAGS+=-dynamiclib -install_name $(realpath $(DEST))/$(LIB_NAME).so
 else
   # debugger
   DB=gdb
@@ -218,7 +223,12 @@ MAINSRC=$(foreach dir, $(MAINDIR), $(wildcard $(addsuffix /, $(basename $(dir)))
 FOLDERS=$(LIBDIR) $(MAINDIR) $(TEST_ROOT)
 SOURCES=$(LIBSRC) $(MAINSRC)
 
-BUILDTREE=$(TMP_ROOT) $(foreach dir, $(FOLDERS), $(addsuffix /, $(basename $(TMP_ROOT)))$(basename $(dir)))
+BUILDTREE=$(TMP_ROOT) $(TMP_ROOT)/$(TEST_ROOT) $(foreach dir, $(FOLDERS), $(addsuffix /, $(basename $(TMP_ROOT)))$(basename $(dir)))
+
+ifeq ($(OS),Windows_NT)
+# Windows libraries
+BUILDTREE=$(subst /,\,$(BUILDTREE))
+endif
 
 CCL=$(CC)
 
@@ -227,9 +237,9 @@ INCLUDE_STR=$(foreach dir,$(INCLUDE),$(addprefix -I, $(dir))) $(foreach dir,$(FO
 MAIN_OBJS=$(foreach source, $(MAINSRC), $(addprefix $(TMP_ROOT)/, $(addsuffix .o, $(basename $(source)))))
 LIB_OBJS=$(foreach source, $(LIBSRC), $(addprefix $(TMP_ROOT)/, $(addsuffix .o, $(basename $(source)))))
 
-OBJS_DEPENDENCY:=$(LIB_OBJS:.o=.d) $(MAIN_OBJS:.o=.d) 
+OBJS_DEPENDENCY=$(LIB_OBJS:.o=.d) $(MAIN_OBJS:.o=.d) 
 
-LINKER_LIBS_EXT:=
+LINKER_LIBS_EXT=
 
 #############################################################################
 # Combining single-file library
@@ -248,13 +258,11 @@ ifneq ($(LIB_CONCAT_HEADERS), $(EMPTY))
   $(shell rm $(LIB_CONCAT_TARGET).h 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.h >> $(LIB_CONCAT_TARGET).h)
 endif
-
 ifneq ($(LIB_CONCAT_SOURCES), $(EMPTY))
-  $(info * Building single-file source: $(LIB_CONCAT_TARGET).c)
+  $(info * Building single-file C source: $(LIB_CONCAT_TARGET).c)
   $(shell rm $(LIB_CONCAT_TARGET).c 2> /dev/null)
   $(shell cat $(LIB_CONCAT_FOLDER)/*.c >> $(LIB_CONCAT_TARGET).c)
 endif
-
 ifneq ($(LIB_CONCAT_DOCS), $(EMPTY))
   $(info * Building documentation: $(LIB_CONCAT_TARGET).md)
   $(shell rm $(LIB_CONCAT_TARGET).md 2> /dev/null)
@@ -263,7 +271,7 @@ endif
 
 else
 # Windows implementation
-$(warning *** Single-file library concatination requires a POSIX system.)
+$(warning *** Single-file library concatination skipped: requires a POSIX system.)
 endif #Windows_NT
 
 endif # LIB_CONCAT_TARGET
@@ -528,7 +536,7 @@ else
 endif
 
 
-# add TLS library flags (TODO: non-exclusive?)
+# add TLS library flags (TODO? non-exclusive?)
 ifdef FIO_NO_TLS
   $(info * Skipping crypto library detection.)
 else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPENSSL_LDFLAGS)), 0)
@@ -537,14 +545,16 @@ else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPEN
   LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) $(OPENSSL_LIBS)
   LDFLAGS+=$(OPENSSL_LDFLAGS)
   CFLAGS+=$(OPENSSL_CFLAGS)
+  CXXFLAGS+=$(OPENSSL_CFLAGS)
   PKGC_REQ_OPENSSL=openssl >= 1.1, openssl < 1.2
   PKGC_REQ+=$$(PKGC_REQ_OPENSSL)
 else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", $(LIBSODIUM_CFLAGS) $(LIBSODIUM_LDFLAGS)) , 0)
   # Sodium Crypto Library: https://doc.libsodium.org/usage
   $(info * Detected the Sodium library, setting HAVE_SODIUM)
   FLAGS:=$(FLAGS) HAVE_SODIUM
-  LDFLAGS+=$(LIBSODIUM_CFLAGS)
-  CFLAGS+=$(LIBSODIUM_LDFLAGS)
+  LDFLAGS+=$(LIBSODIUM_LDFLAGS)
+  CFLAGS+=$(LIBSODIUM_CFLAGS)
+  CXXFLAGS+=$(LIBSODIUM_CFLAGS)
 else
   $(info * No compatible SSL/TLS library detected.)
 endif # FIO_NO_TLS
@@ -640,247 +650,188 @@ ifeq ($(call TRY_RUN, $(TIME_TEST_CMD), $(EMPTY)), 0)
 endif
 
 #############################################################################
-# Tasks - Building
+# Tasks - default task
 #############################################################################
-
-ifeq ($(OS),Windows_NT)
-# Windows libraries
-BUILDTREE:=$(subst /,\,$(BUILDTREE))
-endif
-
-
 $(NAME): build
 
-build: | create_tree build_objects
-	@echo "* Linking..."
-	@$(CCL) -o $(BIN) $^ $(OPTIMIZATION) $(LINKER_FLAGS)
-	@echo "* Finished: $(BIN)"
-	@$(DOCUMENTATION)
+#############################################################################
+# Tasks - task modulators
+#############################################################################
 
-build_objects: $(LIB_OBJS) $(MAIN_OBJS)
+.PHONY : db/%
+db/%: clean set_debug_flags % ;
 
-.PHONY : clean
-clean: | _.___clean
+.PHONY : clean/%
+clean/%: clean % ;
+
+#############################################################################
+# Tasks - cleanup and tree construction
+#############################################################################
 
 ifneq ($(OS),Windows_NT)
 # POSIX libraries
-.PHONY : %.___clean
-%.___clean:
+.PHONY : create_tree
+create_tree:
+	-@mkdir -p $(BUILDTREE) 2> /dev/null
+
+.PHONY : clean
+clean:
 	-@rm -f $(BIN) 2> /dev/null || echo "" >> /dev/null
 	-@rm -R -f $(TMP_ROOT) 2> /dev/null || echo "" >> /dev/null
+	-@rm -R -f $(DEST) 2> /dev/null || echo "" >> /dev/null
 	-@mkdir -p $(BUILDTREE) 2> /dev/null
+
+
 else
 # Windows libraries
-.PHONY : %.___clean
-%.___clean:
+.PHONY : create_tree
+create_tree:
+	-@mkdir $(BUILDTREE)
+
+.PHONY : clean
+clean:
 	-@del /f /q $(subst /,\,$(BIN))
 	-@del /s /f /q $(subst /,\,$(TMP_ROOT))
+	-@del /s /f /q $(subst /,\,$(DEST))
 	-@mkdir $(BUILDTREE)
 endif
 
-.PHONY : run
-run: | build
-	@$(BIN)
+#############################################################################
+# Tasks - (TODO!) disassembler & documentation builder
+#############################################################################
 
-.PHONY : set_debug_flags___
-set_debug_flags___:
+ifneq ($(DISAMS),)
+.PHONY : disassemble.%
+disassemble.%: ;
+else
+.PHONY : disassemble.%
+disassemble.%: ;
+endif
+
+.PHONY : documentation.%
+documentation.%: ;
+	@$(DOCUMENTATION)
+
+#############################################################################
+# Tasks - compiling
+#############################################################################
+
+.PHONY : set_debug_flags
+set_debug_flags:
 	$(eval OPTIMIZATION=$(OPTIMIZATION_DEBUG))
 	$(eval CFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
 	$(eval CXXFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
 	$(eval LINKER_FLAGS=-coverage -DDEBUG=1 $(LINKER_FLAGS))
-	@echo "* Set Debug flags."
-
-.PHONY : db
-db: | db.___clean set_debug_flags___ build
-	DEBUG=1 $(MAKE) build
-	$(DB) $(BIN)
-
-ifneq ($(OS),Windows_NT)
-# POSIX libraries
-.PHONY : create_tree
-create_tree:
-	-@mkdir -p $(BUILDTREE) 2> /dev/null
-else
-# Windows libraries
-.PHONY : create_tree
-create_tree:
-	-@mkdir $(BUILDTREE)
-endif
-
-
-lib: | create_tree lib_build
-
-$(DEST)/pkgconfig/facil.pc: makefile | libdump
-	@mkdir -p $(DEST)/pkgconfig && \
-	printf "\
-Name: facil.io\\n\
-Description: facil.io\\n\
-Cflags: -I%s\\n\
-Libs: -L%s -lfacil\\n\
-Version: %s\\n\
-Requires.private: %s\\n\
-" $(realpath $(DEST)/../libdump/include) $(realpath $(DEST)) 0.7.x "$(PKGC_REQ_EVAL)" > $@
-
-$(DEST)/libfacil.so: $(LIB_OBJS) | $(DEST)/pkgconfig/facil.pc
-	@$(CCL) -shared -o $@ $^ $(OPTIMIZATION) $(LINKER_FLAGS)
-
-lib_build: $(DEST)/libfacil.so
-	@$(DOCUMENTATION)
-
-%.o : %.c
-
-#### no disassembler (normal / expected state)
-ifndef DISAMS
-$(TMP_ROOT)/%.o: %.c $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CC) -c $< -o $@ $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION)
-
-$(TMP_ROOT)/%.o: %.cpp $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CC) -c $< -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
-	$(eval CCL=$(CXX))
-	$(eval LINKER_FLAGS+= -lc++)
-
-$(TMP_ROOT)/%.o: %.c++ $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CC) -c $< -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
-	$(eval CCL=$(CXX))
-
-#### add diassembling stage (testing / slower)
-else
-$(TMP_ROOT)/%.o: %.c $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CC) -c $< -o $@ $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION)
-	@$(DISAMS) $@ > $@.s
-
-$(TMP_ROOT)/%.o: %.cpp $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CXX) -o $@ -c $< $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
-	$(eval CCL=$(CXX))
-	$(eval LINKER_FLAGS+= -lc++)
-	@$(DISAMS) $@ > $@.s
-
-$(TMP_ROOT)/%.o: %.c++ $(TMP_ROOT)/%.d
-	@echo "* Compiling $<"
-	@$(CXX) -o $@ -c $< $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
-	$(eval CCL=$(CXX))
-	$(eval LINKER_FLAGS+= -lc++)
-	@$(DISAMS) $@ > $@.s
-endif
+	@echo "* Set debug flags."
 
 $(TMP_ROOT)/%.d: ;
+
+$(TMP_ROOT)/%.o: create_tree %.c $(TMP_ROOT)/%.d
+	@echo "* Compiling $*.c"
+	@$(CC) -c $*.c -o $@ $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION)
+
+$(TMP_ROOT)/%.o: create_tree %.cpp $(TMP_ROOT)/%.d
+	@echo "* Compiling $*.cpp"
+	@$(CC) -c $*.cpp -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
+	$(eval CCL=$(CXX))
+	$(eval LINKER_FLAGS+= -lc++)
+
+$(TMP_ROOT)/%.o: create_tree %.cxx $(TMP_ROOT)/%.d
+	@echo "* Compiling $*.cxx"
+	@$(CC) -c $*.cxx -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
+	$(eval CCL=$(CXX))
+	$(eval LINKER_FLAGS+= -lc++)
+
+$(TMP_ROOT)/%.o: create_tree %.c++ $(TMP_ROOT)/%.d
+	@echo "* Compiling $*.c++"
+	@$(CC) -c $*.c++ -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
+	$(eval CCL=$(CXX))
 
 -include $(OBJS_DEPENDENCY)
 
 #############################################################################
+# Tasks - Building Source (LIB_OBJS + MAIN_OBJS)
+#############################################################################
+
+link.%:
+	@echo "* Linking... ($(DEST)/$*)"
+	@$(CCL) -o $(DEST)/$* $(LIB_OBJS) $(MAIN_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
+
+build_start.%: create_tree ;
+
+build_finish.%: link.% disassemble.% documentation.%
+	@echo "* Finished build ($(DEST)/$*)"
+
+run.%: link.%
+	@$(DEST)/$*
+
+build: build_start.$(NAME) $(LIB_OBJS) $(MAIN_OBJS) build_finish.$(NAME);
+
+run: build run.$(NAME) ;
+
+
+#############################################################################
+# Tasks - Library Build (LIB_OBJS) (TODO!)
+#############################################################################
+
+build_lib_objects: $(LIB_OBJS) ;
+
+link_lib:
+	@$(CCL) -shared -o $(DEST)/$(LIB_NAME).so $(LIB_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
+	@$(DOCUMENTATION)
+
+
+lib: create_tree build_lib_objects link_lib disassemble.all documentation.all;
+
+
+# $(DEST)/pkgconfig/$(LIB_NAME).pc: makefile | libdump
+# 	@mkdir -p $(DEST)/pkgconfig && \
+# 	printf "\
+# Name: facil.io\\n\
+# Description: facil.io\\n\
+# Cflags: -I%s\\n\
+# Libs: -L%s -lfacil\\n\
+# Version: %s\\n\
+# Requires.private: %s\\n\
+# " $(realpath $(DEST)/../libdump/include) $(realpath $(DEST)) $(FIO_VERSION) "$(PKGC_REQ_EVAL)" > $@
+
+# $(DEST)/$(LIB_NAME).so: build_lib_objects | $(DEST)/pkgconfig/$(LIB_NAME).pc
+
+
+#############################################################################
 # Tasks - Testing
 #
-# Tasks:
+# Tasks (order of appearance in code is different, due to matching rules):
 #
-# - test/cpp (tests CPP header / compilation)
-# - test/lib/db/XXX (test, build library, use DEBUG, compile and run XXX.c)
-# - test/lib/XXX (test, build library, compile and run XXX.c)
-# - test/db/XXX (test, use DEBUG, compile and run XXX.c)
-# - test/XXX (test, compile and run XXX.c)
+# - test             compile and runs the default test
+# - tests/cpp        tests CPP compatibility
+# - tests/XXX        compile and runs XXX.c
 #
 #############################################################################
 
-.PHONY : test_set_test_flag___
-test_set_test_flag___:
+tests_set_env.%: create_tree
 	$(eval CFLAGS+=-DTEST=1 -DFIO_WEAK_TLS)
 	$(eval CXXFLAGS+=-DTEST=1 -DFIO_WEAK_TLS)
-	@echo "* Set testing flags."
+	$(eval MAIN_OBJS=$(TMP_ROOT)/$(TEST_ROOT)/$*.o)
+	@echo "* Set testing flags ($*)"
 
-# test/cpp will try to compile a source file using C++ to test header integration
-.PHONY : test/cpp
-test/cpp: | create_tree test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/cpp)
-	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
-	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) -lc++ $(OPTIMIZATION)
+# tests_build.XXX will compile and link tests/XXX.c
+tests_build.%: tests_set_env.% build_start.% $(TMP_ROOT)/$(TEST_ROOT)/%.o build_finish.% ;
+
+tests/cpp: tests_set_env.cpp build_start.cpp $(TMP_ROOT)/$(TEST_ROOT)/cpp.o build_finish.cpp
 	@echo "* Compilation of C++ variation successful."
 
-# test/cpp will try to compile a source file using C++ to test header integration
-.PHONY : test/db/cpp
-test/db/cpp: | create_tree set_debug_flags___ test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/cpp)
-	@echo "* Compiling $(TEST_ROOT)/cpp.cpp"
-	@$(CXX) -c $(TEST_ROOT)/cpp.cpp -o $(TMP_ROOT)/cpp.o $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/cpp.o $(LINKER_FLAGS) -lc++ $(OPTIMIZATION)
-	@echo "* Compilation of C++ variation successful."
-
-# test/build/db/XXX will set DEBUG, compile the library and run tests/XXX.c
-.PHONY : test/lib/db/%
-test/lib/db/%: | create_tree set_debug_flags___ test_set_test_flag___ $(LIB_OBJS)
-	$(eval BIN:=$(DEST)/$*)
-	@echo "* Compiling $(TEST_ROOT)/$*.c"
-	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o -DTEST_WITH_LIBRARY $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$*.o $(LIB_OBJS) $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
-
-
-# test/build/XXX will compile the library and compile and run tests/XXX.c
-.PHONY : test/lib/%
-test/lib/%: | create_tree test_set_test_flag___  $(LIB_OBJS)
-	$(eval BIN:=$(DEST)/$*)
-	@echo "* Compiling $(TEST_ROOT)/$*.c"
-	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o -DTEST_WITH_LIBRARY $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$*.o $(LIB_OBJS) $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
-
-# test/build/XXX will set DEBUG and compile and run tests/XXX.c
-.PHONY : test/db/%
-test/db/%: | create_tree set_debug_flags___ test_set_test_flag___
-	$(eval BIN:=$(DEST)/$*)
-	@echo "* Compiling $(TEST_ROOT)/$*.c"
-	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$*.o $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
-
-
-# test/build/XXX will compile and run tests/XXX.c
-.PHONY : test/%
-test/%: | create_tree test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/$*)
-	@echo "* Compiling $(TEST_ROOT)/$*.c"
-	@$(CC) -c $(TEST_ROOT)/$*.c -o $(TMP_ROOT)/$*.o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$*.o $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
+# tests/build/XXX will compile and run tests/XXX.c
+tests/%: tests_build.% run.% ;
 
 ifneq ($(TEST_DEFAULT),)
-.PHONY : test%
-test: | create_tree test_set_test_flag___ 
-	$(eval BIN:=$(DEST)/$(TEST_DEFAULT))
-	@echo "* Compiling $(TEST_ROOT)/$(TEST_DEFAULT).c"
-	@$(CC) -c $(TEST_ROOT)/$(TEST_DEFAULT).c -o $(TMP_ROOT)/$(TEST_DEFAULT).o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$(TEST_DEFAULT).o $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
 
-.PHONY : test/db%
-test/db: | create_tree set_debug_flags___ test_set_test_flag___
-	$(eval BIN:=$(DEST)/$(TEST_DEFAULT))
-	@echo "* Compiling $(TEST_ROOT)/$(TEST_DEFAULT).c"
-	@$(CC) -c $(TEST_ROOT)/$(TEST_DEFAULT).c -o $(TMP_ROOT)/$(TEST_DEFAULT).o $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION) 
-	@echo "* Linking"
-	@$(CCL) -o $(BIN) $(TMP_ROOT)/$(TEST_DEFAULT).o $(LINKER_FLAGS) $(OPTIMIZATION)
-	@echo "* Starting test:"
-	@$(BIN)
+test: tests/$(TEST_DEFAULT) ;
+
 endif
 
 #############################################################################
-# Tasks - library code dumping & CMake
+# Tasks - library code dumping
 #############################################################################
 
 ifndef DUMP_LIB
@@ -921,6 +872,9 @@ libdump: cmake
 endif
 endif
 
+#############################################################################
+# Tasks - CMake
+#############################################################################
 ifndef CMAKE_FILENAME
 .PHONY : cmake
 cmake:
@@ -959,11 +913,13 @@ endif
 #############################################################################
 
 # Prints the make variables, used for debugging the makefile
-.PHONY : vars
-vars:
+.PHONY : vars.%
+vars.%:
+	@echo "NAME: $(NAME)"
 	@echo "CC: $(CC)"
 	@echo "CXX: $(CXX)"
 	@echo "BIN: $(BIN)"
+	@echo "MAIN_ROOT: $(MAIN_ROOT)"
 	@echo ""
 	@echo "LIBDIR_PUB: $(LIBDIR_PUB)"
 	@echo ""
@@ -999,4 +955,21 @@ vars:
 	@echo ""
 	@echo "LINKER_FLAGS: $(LINKER_FLAGS)"
 
+.PHONY : vars
+vars: vars.all ;
 
+#############################################################################
+# Tasks - facil.io specific: running examples
+#############################################################################
+
+.PHONY : ex/%
+ex/%:
+	@NAME=$* MAIN_ROOT="extras extras/http extras/parsers examples/$*/src" make run
+
+
+# .PHONY : ex_prep.%
+# ex_prep.%:
+# 	$(eval MAIN_ROOT=extras extras/http extras/parsers examples/$*/src)
+
+# .PHONY : ex/%
+# ex/%: ex_prep.% build_start.% $(MAIN_OBJS) $(LIB_OBJS) build_finish.% run.% ;

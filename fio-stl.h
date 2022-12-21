@@ -19084,6 +19084,8 @@ FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
 
+#define FIO_KEYSTR_CONST ((size_t)-1LL)
+
 /* *****************************************************************************
 
 
@@ -19457,7 +19459,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
   }
-  if (str.capa == (size_t)-1) {
+  if (str.capa == FIO_KEYSTR_CONST) {
   no_mem2:
     r.info = 0xFF;
     r.len = str.len;
@@ -24822,7 +24824,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #undef FIO_MAP_KEYSTR
 
 /* if FIO_MAP_KEY is undefined, assume String keys (using `fio_bstr`). */
-#elif !defined(FIO_MAP_KEY)
+#elif !defined(FIO_MAP_KEY) || defined(FIO_MAP_KEY_BSTR)
 #define FIO_MAP_KEY                  fio_buf_info_s
 #define FIO_MAP_KEY_INTERNAL         char *
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_buf((k))
@@ -24832,6 +24834,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
 #endif
+#undef FIO_MAP_KEY_BSTR
 
 #ifndef FIO_MAP_KEY_INTERNAL
 #define FIO_MAP_KEY_INTERNAL FIO_MAP_KEY

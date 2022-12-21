@@ -54,7 +54,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #undef FIO_MAP_KEYSTR
 
 /* if FIO_MAP_KEY is undefined, assume String keys (using `fio_bstr`). */
-#elif !defined(FIO_MAP_KEY)
+#elif !defined(FIO_MAP_KEY) || defined(FIO_MAP_KEY_BSTR)
 #define FIO_MAP_KEY                  fio_buf_info_s
 #define FIO_MAP_KEY_INTERNAL         char *
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_buf((k))
@@ -64,6 +64,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
 #endif
+#undef FIO_MAP_KEY_BSTR
 
 #ifndef FIO_MAP_KEY_INTERNAL
 #define FIO_MAP_KEY_INTERNAL FIO_MAP_KEY

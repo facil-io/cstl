@@ -514,6 +514,8 @@ FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
 
+#define FIO_KEYSTR_CONST ((size_t)-1LL)
+
 /* *****************************************************************************
 
 
@@ -887,7 +889,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
   }
-  if (str.capa == (size_t)-1) {
+  if (str.capa == FIO_KEYSTR_CONST) {
   no_mem2:
     r.info = 0xFF;
     r.len = str.len;

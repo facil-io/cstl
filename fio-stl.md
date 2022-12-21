@@ -6091,7 +6091,7 @@ Note that this Map implementation, like all dynamic type templates, supports opt
 
 Every map / dictionary requires a `key` type that is used for either testing uniqueness (a Set) or accessing a `value` (a Hash Map or Dictionary).
 
-If the `key` type is left undefined, the map's API will expect a `fio_buf_info_s` as a key and facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
+If the `key` type is left undefined (or the `FIO_MAP_KEY_BSTR` macro is defined), the map's API will expect a `fio_buf_info_s` as a key and facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
 
 It is also possible to define the helper macro `FIO_MAP_KEYSTR` in which case the Strings internally will use the `fio_keystr` API, which is optimized to hold up to 14 bytes (on 64bit systems) before allocating memory (while adding an allocation overhead to the map itself).
 
