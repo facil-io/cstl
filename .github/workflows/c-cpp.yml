@@ -14,12 +14,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Test STL (debug) - no allocators
-      run: CFLAGS="-DFIO_MEMORY_DISABLE" make test/db/stl
+      run: CFLAGS="-DFIO_MEMORY_DISABLE" make db/test
     - name: Test STL
-      run: make test/stl
+      run: make test
     - name: Test fio_mallc speed
-      run: make test/malloc
+      run: make tests/malloc
     - name: clean
       run: make clean
     - name: Test STL in debug mode
-      run: make test/db/stl
+      run: make db/test
