@@ -2482,42 +2482,42 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   for (size_t len_i = 5; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
-    const size_t mem_len = 1ULL << len_i;
-    void *mem = malloc(mem_len);
+    const size_t mem_len = (1ULL << len_i);
+    void *mem = malloc(mem_len + 32);
     FIO_ASSERT_ALLOC(mem);
     uint64_t sig = (uintptr_t)mem;
     sig ^= sig >> 13;
     sig ^= sig << 17;
     sig ^= sig << 29;
     sig ^= sig << 31;
-
-    start = fio_time_micro();
-    for (size_t i = 0; i < repetitions; ++i) {
-      fio_memset(mem, sig, mem_len);
-      FIO_COMPILER_GUARD;
+    for (size_t rlen = mem_len - 1; rlen < mem_len + 2; ++rlen) {
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        fio_memset(mem, sig, rlen);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fio___memset_test_aligned(mem,
+                                sig,
+                                rlen,
+                                "fio_memset sanity test FAILED");
+      fprintf(stderr,
+              "\tfio_memset\t(%zu bytes):\t%zuus\t/ %zu\n",
+              rlen,
+              (size_t)(end - start),
+              repetitions);
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        memset(mem, (int)sig, rlen);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tsystem memset\t(%zu bytes):\t%zuus\t/ %zu\n",
+              rlen,
+              (size_t)(end - start),
+              repetitions);
     }
-    end = fio_time_micro();
-    fio___memset_test_aligned(mem,
-                              sig,
-                              mem_len,
-                              "fio_memset sanity test FAILED");
-    fprintf(stderr,
-            "\tfio_memset\t(%zu bytes):\t%zuus\t/ %zu\n",
-            mem_len,
-            (size_t)(end - start),
-            repetitions);
-    start = fio_time_micro();
-    for (size_t i = 0; i < repetitions; ++i) {
-      memset(mem, (int)sig, mem_len);
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\tsystem memset\t(%zu bytes):\t%zuus\t/ %zu\n",
-            mem_len,
-            (size_t)(end - start),
-            repetitions);
-
     free(mem);
   }
 
