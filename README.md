@@ -58,16 +58,22 @@ The fecil.io C STL provides a builtin solution similar in approach to the [Simpl
 ```c
 /* include Core String functionality */
 #define FIO_STR
-#include "fio-stl.h" /* or "fio-stl/include.h" */
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
-void hello_binary_strings(void){
-  char * bstr = fio_bstr_write(NULL, "Hello World", 11);
-  /* note that `bstr` might be updated, not updating the pointer after a `write` is a bug. */
-  bstr = fio_bstr_write2(bstr,
-                         FIO_STRING_WRITE_STR1("\nThe answer is: "),
+void hello_binary_strings(void) {
+  /* note that the `bstr` pointer might be updated!
+   * not updating the pointer after a `write` is a bug. */
+  char *org = fio_bstr_write(NULL, "Hello World", 11);
+  char *copy = fio_bstr_copy(org);
+  printf("Since we use copy on write: %p == %p\n", (void *)copy, (void *)org);
+  /* we could also use fio_bstr_printf, but `write2` should be faster. */
+  copy = fio_bstr_write2(copy,
+                         FIO_STRING_WRITE_STR1(". The answer is: "),
                          FIO_STRING_WRITE_UNUM(42));
-  printf("%s\n", bstr);
-  fio_bstr_free(bstr);
+  printf("Original string: %s\n", org);
+  printf("Copied string:   %s\n", copy);
+  fio_bstr_free(org);
+  fio_bstr_free(copy);
 }
 ```
 
@@ -82,19 +88,22 @@ Or use a template to create your own String type, much better for reference coun
 #define FIO_STR_NAME my_str
 /* Use a reference counting for `my_str_s` (using the same name convention) */
 #define FIO_REF_NAME my_str
-/* Make the reference counter the only constructor rather then having it as an additional flavor */
+/* Make the reference counter the only constructor rather then having it as an
+ * additional flavor */
 #define FIO_REF_CONSTRUCTOR_ONLY
-#include "fio-stl.h" /* or "fio-stl/include.h" */
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
-void hello(void){
-  my_str_s * msg = my_str_new();
+void reference_counted_shared_strings(void) {
+  my_str_s *msg = my_str_new();
   my_str_write(msg, "Hello World", 11);
-  /* increase reference */
-  my_str_dup(msg);
-  printf("%s\n", my_str2ptr(msg));
+  /* increase reference - but the string data is shared(!) */
+  my_str_s *ref = my_str_dup(msg);
+  my_str_write(ref, ", written to both handles.", 26);
+  printf("%s\n", my_str_ptr(msg));
+  printf("%s\n", my_str_ptr(ref));
   my_str_free(msg);
-  printf("Still valid, as we had 2 references: %s\n", my_str2ptr(msg));
-  my_str_free(msg);
+  printf("Still valid, as we had 2 references: %s\n", my_str_ptr(ref));
+  my_str_free(ref);
 }
 ```
 
@@ -108,16 +117,20 @@ typedef struct {
   float f;
 } foo_s;
 
-#define FIO_ARRAY_NAME foo_ary
-#define FIO_ARRAY_TYPE foo_s
-#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
+#define FIO_ARRAY_NAME           foo_ary
+#define FIO_ARRAY_TYPE           foo_s
+#define FIO_ARRAY_TYPE_CMP(a, b) (a.i == b.i && a.f == b.f)
 #include "fio-stl.h"
 
-void example(void) {
+void array_example(void) {
   foo_ary_s a = FIO_ARRAY_INIT;
-  foo_s *p = foo_ary_push(&a, (foo_s){.i = 42});
+  foo_ary_push(&a, (foo_s){.i = 42});
   FIO_ARRAY_EACH(foo_ary, &a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - foo_ary2ptr(&a)), pos->i);
+    fprintf(stderr,
+            "* [%zu]: %p : %d\n",
+            (size_t)(pos - foo_ary2ptr(&a)),
+            (void *)pos,
+            pos->i);
   }
   foo_ary_destroy(&a);
 }
@@ -133,16 +146,16 @@ This is an example for a key-value String Hash Map, also sometimes called a "dic
 #include "fio-stl.h" /* or "fio-stl/include.h" */
 
 /* Set the properties for the key-value Unordered Map type called `dict_s` */
-#define FIO_MAP_NAME                 dict
-#define FIO_MAP_ORDERED              0
-#define FIO_MAP_TYPE                 str_s
-#define FIO_MAP_TYPE_COPY(dest, src) str_init_copy2(&(dest), &(src))
-#define FIO_MAP_TYPE_DESTROY(k)      str_destroy(&k)
-#define FIO_MAP_TYPE_CMP(a, b)       str_is_eq(&(a), &(b))
-#define FIO_MAP_KEY                  FIO_MAP_TYPE
-#define FIO_MAP_KEY_COPY             FIO_MAP_TYPE_COPY
-#define FIO_MAP_KEY_DESTROY          FIO_MAP_TYPE_DESTROY
-#define FIO_MAP_KEY_CMP              FIO_MAP_TYPE_CMP
+#define FIO_MAP_NAME                  dict
+#define FIO_MAP_ORDERED               0
+#define FIO_MAP_VALUE                 str_s
+#define FIO_MAP_VALUE_COPY(dest, src) str_init_copy2(&(dest), &(src))
+#define FIO_MAP_VALUE_DESTROY(k)      str_destroy(&k)
+#define FIO_MAP_VALUE_CMP(a, b)       str_is_eq(&(a), &(b))
+#define FIO_MAP_KEY                   FIO_MAP_VALUE
+#define FIO_MAP_KEY_COPY              FIO_MAP_VALUE_COPY
+#define FIO_MAP_KEY_DESTROY           FIO_MAP_VALUE_DESTROY
+#define FIO_MAP_KEY_CMP               FIO_MAP_VALUE_CMP
 #include "fio-stl.h"
 /** set helper for consistent hash values */
 FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
@@ -150,16 +163,16 @@ FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
 }
 /** get helper for consistent hash values */
 FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
-  return dict_get_ptr(m, str_hash(&key, (uint64_t)m), key);
+  return &(dict_get_ptr(m, str_hash(&key, (uint64_t)m), key)->value);
 }
 
-void example(void) {
+void dict_example(void) {
   dict_s dictionary = FIO_MAP_INIT;
   str_s key, val;
   str_init_const(&key, "hello", 5);
   str_init_const(&val, "Hello World!", 12);
   dict_set2(&dictionary, key, val);
-  fprintf(stdout, "%s\n", str2ptr(dict_get2(&dictionary, key)));
+  fprintf(stdout, "%s\n", str_ptr(dict_get2(&dictionary, key)));
   dict_destroy(&dictionary);
 }
 ```

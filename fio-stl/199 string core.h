@@ -298,7 +298,36 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
                               intptr_t start_at,
                               size_t limit);
 
-/* TODO: memory optimized version of `gets` with set limit */
+/**
+ * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and
+ * ending either at the first occurrence of `delim` or at EOF.
+ *
+ * If `limit` is 0 (or less than 0) as much data as may be required will be
+ * written.
+ *
+ * If `start_at` is negative, position will be calculated from the end of the
+ * file where `-1 == EOF`.
+ *
+ * Note: this will fail unless used on actual seekable files (not sockets, not
+ * pipes).
+ * */
+SFUNC int fio_string_getdelim_fd(fio_str_info_s *dest,
+                                 fio_string_realloc_fn reallocate,
+                                 int fd,
+                                 intptr_t start_at,
+                                 char delim,
+                                 size_t limit);
+
+/**
+ * Opens the file `filename`, calls `fio_string_getdelim_fd` and closes the
+ * file.
+ */
+SFUNC int fio_string_getdelim_file(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const char *filename,
+                                   intptr_t start_at,
+                                   char delim,
+                                   size_t limit);
 
 /* *****************************************************************************
 Memory Helpers (for Authorship)
@@ -481,6 +510,18 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
                                   const char *filename,
                                   intptr_t start_at,
                                   intptr_t limit);
+/** Writes to the String from a regular file named `filename`. */
+FIO_IFUNC char *fio_bstr_getdelim_file(char *bstr,
+                                       const char *filename,
+                                       intptr_t start_at,
+                                       char delim,
+                                       size_t limit);
+/** Writes to the String from a regular file `fd`. */
+FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
+                                     int fd,
+                                     intptr_t start_at,
+                                     char delim,
+                                     size_t limit);
 
 /** Writes a `fio_bstr` in `printf` style. */
 FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
@@ -814,6 +855,35 @@ FIO_IFUNC char *fio_bstr_readfile(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_readfile(&i, fio_bstr_reallocate, filename, start_at, limit);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes to the String from a regular file named `filename`. */
+FIO_IFUNC char *fio_bstr_getdelim_file(char *bstr,
+                                       const char *filename,
+                                       intptr_t start_at,
+                                       char delim,
+                                       size_t limit) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_getdelim_file(&i,
+                           fio_bstr_reallocate,
+                           filename,
+                           start_at,
+                           delim,
+                           limit);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes to the String from a regular file `fd`. */
+FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
+                                     int fd,
+                                     intptr_t start_at,
+                                     char delim,
+                                     size_t limit) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_getdelim_fd(&i, fio_bstr_reallocate, fd, start_at, delim, limit);
   return fio_bstr___len_set(i.buf, i.len);
 }
 
@@ -1964,6 +2034,16 @@ p valid; p decoder; nil
 String File Reading support
 ***************************************************************************** */
 
+FIO_IFUNC intptr_t fio___string_fd_normalise_offset(intptr_t i,
+                                                    size_t file_len) {
+  if (i < 0) {
+    i += (intptr_t)file_len + 1;
+    if (i < 0)
+      i = 0;
+  }
+  return i;
+}
+
 /**
  * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
  *
@@ -1981,36 +2061,16 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             size_t limit) {
   int r = 0;
   size_t file_len = fio_fd_size(fd);
-
-  if (start_at < 0) {
-    start_at += (intptr_t)file_len + 1;
-    if (start_at < 0)
-      start_at = 0;
-  }
+  start_at = fio___string_fd_normalise_offset(start_at, file_len);
   if (limit < 1 || file_len < (size_t)(limit + start_at)) {
     limit = (intptr_t)file_len - start_at;
   }
   if (!dest || !file_len || !limit || (size_t)start_at >= file_len) {
     return (r = -1);
   }
-  size_t total_len = limit;
-  r = fio_string___write_validate_len(dest, reallocate, &total_len);
-  for (;;) {
-    /* use read sizes of up to 27 bits */
-    const size_t to_read =
-        (total_len & (((size_t)1 << 27) - 1)) | ((!!(total_len >> 27)) << 27);
-    ssize_t act;
-    if ((act = pread(fd, dest->buf + dest->len, to_read, start_at)) > 0) {
-      total_len -= act;
-      dest->len += act;
-      start_at += act;
-      if (!total_len)
-        break;
-      continue;
-    }
-    r = -1;
-    break;
-  }
+  r = fio_string___write_validate_len(dest, reallocate, &limit);
+  size_t added = fio_fd_read(fd, dest->buf + dest->len, limit, (off_t)start_at);
+  dest->len += added;
   dest->buf[dest->len] = 0;
   return r;
 }
@@ -2033,6 +2093,67 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
   if (fd == -1)
     return r;
   r = fio_string_readfd(dest, reallocate, fd, start_at, limit);
+  close(fd);
+  return r;
+}
+
+/**
+ * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and
+ * ending at the first occurrence of `token`.
+ *
+ * If `limit` is 0 (or less than 0) as much data as may be required will be
+ * written.
+ *
+ * If `start_at` is negative, position will be calculated from the end of the
+ * file where `-1 == EOF`.
+ *
+ * Note: this will fail unless used on actual seekable files (not sockets, not
+ * pipes).
+ * */
+SFUNC int fio_string_getdelim_fd(fio_str_info_s *dest,
+                                 fio_string_realloc_fn reallocate,
+                                 int fd,
+                                 intptr_t start_at,
+                                 char delim,
+                                 size_t limit) {
+  int r = -1;
+  if (!dest || fd == -1)
+    return r;
+  size_t file_len = fio_fd_size(fd);
+  if (!file_len)
+    return r;
+  start_at = fio___string_fd_normalise_offset(start_at, file_len);
+  if ((size_t)start_at >= file_len)
+    return r;
+  size_t index = fio_fd_find_next(fd, delim, (size_t)start_at);
+  if (index == FIO_FD_FIND_EOF)
+    return r;
+  if (limit < 1 || limit > (index - start_at) + 1) {
+    limit = (index - start_at) + 1;
+  }
+
+  r = fio_string___write_validate_len(dest, reallocate, &limit);
+  size_t added = fio_fd_read(fd, dest->buf + dest->len, limit, (off_t)start_at);
+  dest->len += added;
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/**
+ * Opens the file `filename`, calls `fio_string_getdelim_fd` and closes the
+ * file.
+ */
+SFUNC int fio_string_getdelim_file(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const char *filename,
+                                   intptr_t start_at,
+                                   char delim,
+                                   size_t limit) {
+  int r = -1;
+  int fd = fio_filename_open(filename, O_RDONLY);
+  if (fd == -1)
+    return r;
+  r = fio_string_getdelim_fd(dest, reallocate, fd, start_at, delim, limit);
   close(fd);
   return r;
 }
@@ -2424,6 +2545,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_bstr_free(s_copy);
     fio_bstr_free(str);
   }
+  {
+    char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
+    FIO_ASSERT(s && fio_bstr_len(s), "fio_bstr_readfile failed");
+    FIO_LOG_DEBUG("readfile returned %zu bytes, starting with:\n%s",
+                  fio_bstr_len(s),
+                  s);
+    char *find_z = FIO_MEMCHR(s, 'Z', fio_bstr_len(s));
+    if (find_z) {
+      int fd = open(__FILE__, 0, "r"); // fio_filename_open(__FILE__, 0);
+      FIO_ASSERT(fd != -1, "couldn't open file for testing: " __FILE__);
+      size_t z_index = fio_fd_find_next(fd, 'Z', 0);
+      FIO_ASSERT(z_index != FIO_FD_FIND_EOF, "fio_fd_find_next returned EOF");
+      FIO_ASSERT(z_index == (size_t)(find_z - s),
+                 "fio_fd_find_next index error (%zu != %zu)",
+                 z_index,
+                 (size_t)(find_z - s));
+      close(fd);
+    } else {
+      FIO_LOG_WARNING("couldn't find 'Z' after reading file (bstr)");
+    }
+    fio_bstr_free(s);
+  }
+
 #if !defined(DEBUG) || defined(NODEBUG)
   { /* speed testing comparison */
     char mem[4096];

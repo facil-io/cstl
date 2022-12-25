@@ -1206,7 +1206,14 @@ static void fio___srv_signal_handle(int sig, void *flg) {
 }
 
 FIO_SFUNC void fio___srv_tick(int timeout) {
-  fio_poll_review(&fio___srvdata.poll_data, timeout);
+  static size_t performed_idle = 0;
+  if (fio_poll_review(&fio___srvdata.poll_data, timeout) > 0) {
+    performed_idle = 0;
+  } else {
+    if (!performed_idle)
+      fio_state_callback_force(FIO_CALL_ON_IDLE);
+    performed_idle = 1;
+  }
   fio___srvdata.tick = fio_time_milli();
   fio_timer_push2queue(fio___srv_tasks, fio___srv_timer, fio___srvdata.tick);
   fio_queue_perform_all(fio___srv_tasks);

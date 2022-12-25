@@ -61,6 +61,21 @@ Since some systems have a limit on the number of bytes that can be written at a 
 
 If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
 
+#### `fio_fd_read`
+
+```c
+size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+```
+
+
+Reads up to `len` bytes from `fd` starting at `start_at` offset.
+
+Returns the number of bytes read.
+
+Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
+
+If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
 #### `fio_filename_parse`
 
 ```c
@@ -86,5 +101,23 @@ Parses a file name to folder, base name and extension (zero-copy).
 ```
 
 Selects the folder separation character according to the detected OS.
+
+#### `fio_fd_find_next`
+
+```c
+size_t fio_fd_find_next(int fd, char token, size_t start_at);
+/** End of file value for `fio_fd_find_next` */
+#define FIO_FD_FIND_EOF ((size_t)-1)
+/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
+#define FIO_FD_FIND_BLOCK 4096
+```
+
+Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
+
+This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
+
+**Pros**: limits memory use and (re)allocations, easier overflow protection.
+
+**Cons**: may be slower, as data will most likely be copied again from the file.
 
 -------------------------------------------------------------------------------

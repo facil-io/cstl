@@ -4278,6 +4278,21 @@ Since some systems have a limit on the number of bytes that can be written at a 
 
 If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
 
+#### `fio_fd_read`
+
+```c
+size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+```
+
+
+Reads up to `len` bytes from `fd` starting at `start_at` offset.
+
+Returns the number of bytes read.
+
+Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
+
+If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
 #### `fio_filename_parse`
 
 ```c
@@ -4303,6 +4318,24 @@ Parses a file name to folder, base name and extension (zero-copy).
 ```
 
 Selects the folder separation character according to the detected OS.
+
+#### `fio_fd_find_next`
+
+```c
+size_t fio_fd_find_next(int fd, char token, size_t start_at);
+/** End of file value for `fio_fd_find_next` */
+#define FIO_FD_FIND_EOF ((size_t)-1)
+/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
+#define FIO_FD_FIND_BLOCK 4096
+```
+
+Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
+
+This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
+
+**Pros**: limits memory use and (re)allocations, easier overflow protection.
+
+**Cons**: may be slower, as data will most likely be copied again from the file.
 
 -------------------------------------------------------------------------------
 ## Binary Safe Core String Helpers
@@ -4773,6 +4806,39 @@ Opens the file `filename` and pastes it's contents (or a slice ot it) at the end
 
 If the file can't be located, opened or read, or if `start_at` is beyond the EOF position, NULL is returned in the state's `data` field.
 
+
+#### `fio_string_getdelim_fd`
+
+```c
+int fio_string_getdelim_fd(fio_str_info_s *dest,
+                          fio_string_realloc_fn reallocate,
+                          int fd,
+                          intptr_t start_at,
+                          char delim,
+                          size_t limit);
+```
+
+Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and ending either at the first occurrence of `delim` or at EOF.
+
+If `limit` is 0 (or less than 0) as much data as may be required will be written.
+
+If `start_at` is negative, position will be calculated from the end of the file where `-1 == EOF`.
+
+**Note**: this will fail unless used on actual seekable files (not sockets, not pipes).
+
+#### `fio_string_getdelim_file`
+
+```c
+int fio_string_getdelim_file(fio_str_info_s *dest,
+                            fio_string_realloc_fn reallocate,
+                            const char *filename,
+                            intptr_t start_at,
+                            char delim,
+                            size_t limit);
+```
+
+Opens the file `filename`, calls `fio_string_getdelim_fd` and closes the file.
+
 -------------------------------------------------------------------------------
 
 ## C Strings with Binary Data
@@ -4808,6 +4874,7 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 
 * `fio_bstr_write` - see [`fio_string_write`](#fio_string_write) for details.
 * `fio_bstr_write2` (macro) - see [`fio_string_write2`](#fio_string_write2) for details.
+* `fio_bstr_printf` - see [`fio_string_printf`](#fio_string_printf) for details.
 * `fio_bstr_replace` - see [`fio_string_replace`](#fio_string_replace) for details.
 
 * `fio_bstr_write_i` - see [`fio_string_write_i`](#fio_string_write_i) for details.
@@ -4823,8 +4890,8 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 
 * `fio_bstr_readfd` - see [`fio_string_readfd`](#fio_string_readfd) for details.
 * `fio_bstr_readfile` - see [`fio_string_readfile`](#fio_string_readfile) for details.
-
-* `fio_bstr_printf` - see [`fio_string_printf`](#fio_string_printf) for details.
+* `fio_bstr_getdelim_fd` - see [`fio_string_getdelim_fd`](#fio_string_getdelim_fd) for details.
+* `fio_bstr_getdelim_file` - see [`fio_string_getdelim_file`](#fio_string_getdelim_file) for details.
 
 * `fio_bstr_is_greater` - see [`fio_string_is_greater`](#fio_string_is_greater) for details.
 

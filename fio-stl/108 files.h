@@ -79,17 +79,30 @@ FIO_IFUNC mode_t fio_fd_type(int fd);
   (fio_filename_type((filename)) == S_IFDIR)
 
 /**
- * Writes data to a file, returning the number of bytes written.
+ * Writes data to a file handle, returning the number of bytes written.
  *
  * Returns -1 on error.
  *
  * Since some systems have a limit on the number of bytes that can be written at
- * a single time, this function fragments the system calls into smaller `write`
- * blocks, allowing large data to be written.
+ * a time, this function fragments the system calls into smaller `write` blocks,
+ * allowing large data to be written.
  *
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
+
+/**
+ * Reads up to `len` bytes from `fd`, returning the number of bytes read.
+ *
+ * Returns 0 if no bytes were read or on error.
+ *
+ * Since some systems have a limit on the number of bytes that can be read at
+ * a time, this function fragments the system calls into smaller `read` blocks,
+ * allowing large data to be read.
+ *
+ * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+ */
+FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
 
 /** A result type for the filename parsing helper. */
 typedef struct {
@@ -100,6 +113,24 @@ typedef struct {
 
 /** Parses a file name to folder, base name and extension (zero-copy). */
 SFUNC fio_filename_s fio_filename_parse(const char *filename);
+
+/**
+ * Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
+ *
+ * This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a
+ * loop.
+ *
+ * Pros: limits memory use and (re)allocations, easier overflow protection.
+ *
+ * Cons: may be slower, as data will most likely be copied again from the file.
+ */
+SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at);
+/** End of file value for `fio_fd_find_next` */
+#define FIO_FD_FIND_EOF ((size_t)-1)
+#ifndef FIO_FD_FIND_BLOCK
+/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
+#define FIO_FD_FIND_BLOCK 4096
+#endif
 
 #if FIO_OS_WIN
 #define FIO_FOLDER_SEPARATOR '\\'
@@ -171,6 +202,38 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
     return -1;
   return 0;
 }
+
+/**
+ * Reads up to `len` bytes from `fd`, returning the number of bytes read.
+ *
+ * Since some systems have a limit on the number of bytes that can be read at
+ * a time, this function fragments the system calls into smaller `read` blocks,
+ * allowing large data to be read.
+ *
+ * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+ */
+FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+  char *d = (char *)buf;
+  size_t r = 0;
+  for (;;) {
+    /* use read sizes of up to 27 bits */
+    const size_t to_read =
+        (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
+    ssize_t act;
+    if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
+      r += act;
+      len -= act;
+      start_at += act;
+      if (!len)
+        return r;
+      continue;
+    }
+    if (act == -1 && errno == EINTR)
+      continue;
+    return r;
+  }
+}
+
 /* *****************************************************************************
 File Stat In-lined Helpers
 ***************************************************************************** */
@@ -381,6 +444,29 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
       break;
     }
     ++pos;
+  }
+}
+
+/** Returns index for next `token` in `fd`, or -1 at EOF. */
+SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at) {
+  size_t r = FIO_FD_FIND_EOF;
+  if (fd == -1 || start_at == FIO_FD_FIND_EOF)
+    return r;
+  char buf[FIO_FD_FIND_BLOCK];
+  for (;;) {
+    size_t l =
+        (size_t)pread(fd, buf, (size_t)FIO_FD_FIND_BLOCK, (off_t)start_at);
+    if (l == FIO_FD_FIND_EOF && errno == EINTR)
+      continue; /* try again */
+    if (l + 1ULL < 2ULL)
+      return r; /* single modular math test for -1 and 0 */
+    char *pos = (char *)FIO_MEMCHR(buf, token, l);
+    if (!pos) {
+      start_at += l;
+      continue;
+    }
+    r = start_at + (size_t)(pos - buf);
+    return r;
   }
 }
 
