@@ -21218,6 +21218,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                  z_index,
                  (size_t)(find_z - s));
       close(fd);
+      char *s2 = fio_bstr_getdelim_file(NULL, __FILE__, 0, 'Z', 0);
+      FIO_ASSERT(fio_bstr_len(s2) == z_index + 1,
+                 "fio_bstr_getdelim_file length error (%zu != %zu)?",
+                 fio_bstr_len(s2),
+                 z_index + 1);
+      FIO_ASSERT(s2[z_index] == 'Z',
+                 "fio_bstr_getdelim_file copy error?\n%s",
+                 s2);
+      fio_bstr_free(s2);
     } else {
       FIO_LOG_WARNING("couldn't find 'Z' after reading file (bstr)");
     }

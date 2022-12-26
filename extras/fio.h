@@ -40,4 +40,8 @@ FIO_SFUNC void fio_version_validate(void) {
              FIO_VERSION_MAJOR);
 }
 
+#define FIO_VERSION_NUMBER                                                     \
+  (((size_t)FIO_VERSION_MAJOR << 20) | ((size_t)FIO_VERSION_MINOR << 10) |     \
+   ((size_t)FIO_VERSION_PATCH))
+
 #endif /* H___INCLUDE_FIO_EVERYTHING___H */
