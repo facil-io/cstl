@@ -567,15 +567,6 @@ Switching Endian Ordering
 
 #endif /* __BIG_ENDIAN__ */
 
-#define FIO_ROTATE_FORWARDS(i, bits)                                           \
-  (FIO_SHIFT_FORWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                      \
-   FIO_SHIFT_BACKWARDS(i,                                                      \
-                       ((sizeof(i) << 3) - (bits)) & ((sizeof(i) << 3) - 1)))
-#define FIO_ROTATE_BACKWARDS(i, bits)                                          \
-  (FIO_SHIFT_BACKWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                     \
-   FIO_SHIFT_FORWARDS(i,                                                       \
-                      ((sizeof(i) << 3) - (bits)) & ((sizeof(i) << 3) - 1)))
-
 /* *****************************************************************************
 Memory Copying Primitives
 ***************************************************************************** */
@@ -853,12 +844,8 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-  if (bytes < 64) {
+  if (bytes < 32) {
     uint64_t src[4] = {data, data, data, data};
-    if (bytes & 32) {
-      fio_memcpy32(d, src);
-      d += 32;
-    }
     fio_memcpy31x(d, src, bytes);
     return;
   }
@@ -872,6 +859,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   /* reminder (if any) */
   d -= 32;
   d += bytes & 31;
+  /* rotate `data` to match offset (endian specific) */
 #if __LITTLE_ENDIAN__
 #if __has_builtin(__builtin_rotateright64)
   data = __builtin_rotateright64(data, ((bytes & 7) << 3));
@@ -885,6 +873,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
 #endif
 #endif
+  /* write 32 bytes at offset (writes reminder) */
   for (size_t i = 0; i < 4; (++i), (d += 8)) {
     fio_memcpy8(d, &data);
   }
