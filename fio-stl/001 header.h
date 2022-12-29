@@ -872,7 +872,19 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   /* reminder (if any) */
   d -= 32;
   d += bytes & 31;
-  data = FIO_ROTATE_BACKWARDS(data, (bytes & 7) << 3);
+#if __LITTLE_ENDIAN__
+#if __has_builtin(__builtin_rotateright64)
+  data = __builtin_rotateright64(data, ((bytes & 7) << 3));
+#else
+  data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
+#endif
+#else
+#if __has_builtin(__builtin_rotateleft64)
+  data = __builtin_rotateleft64(data, ((bytes & 7) << 3));
+#else
+  data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
+#endif
+#endif
   for (size_t i = 0; i < 4; (++i), (d += 8)) {
     fio_memcpy8(d, &data);
   }
