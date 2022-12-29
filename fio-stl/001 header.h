@@ -569,10 +569,12 @@ Switching Endian Ordering
 
 #define FIO_ROTATE_FORWARDS(i, bits)                                           \
   (FIO_SHIFT_FORWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                      \
-   FIO_SHIFT_BACKWARDS(i, ((sizeof(i) << 3) - bits) & ((sizeof(i) << 3) - 1)))
+   FIO_SHIFT_BACKWARDS(i,                                                      \
+                       ((sizeof(i) << 3) - (bits)) & ((sizeof(i) << 3) - 1)))
 #define FIO_ROTATE_BACKWARDS(i, bits)                                          \
   (FIO_SHIFT_BACKWARDS(i, bits & ((sizeof(i) << 3) - 1)) |                     \
-   FIO_SHIFT_FORWARDS(i, ((sizeof(i) << 3) - bits) & ((sizeof(i) << 3) - 1)))
+   FIO_SHIFT_FORWARDS(i,                                                       \
+                      ((sizeof(i) << 3) - (bits)) & ((sizeof(i) << 3) - 1)))
 
 /* *****************************************************************************
 Memory Copying Primitives
@@ -845,7 +847,7 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #if 1
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  char *s, *d = (char *)dest_;
+  char *d = (char *)dest_;
   if (data < 0x100) { /* if a single byte value, match memset */
     data |= (data << 8);
     data |= (data << 16);
@@ -868,9 +870,12 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     d += 32;
   }
   /* set 31 byte remainder */
+  if (bytes & 7) {
+    data = FIO_ROTATE_BACKWARDS(data, ((bytes & 7) << 3));
+    src[0] = src[1] = src[2] = src[3] = data;
+  }
   d += bytes & 31;
-  s = d - 32;
-  fio_memcpy32(d, s);
+  fio_memcpy32(d, src);
 }
 #else
 /** an 8 byte value memset implementation. */
