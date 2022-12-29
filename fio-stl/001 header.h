@@ -876,7 +876,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
 #if __has_builtin(__builtin_rotateright64)
   data = __builtin_rotateright64(data, ((bytes & 7) << 3));
 #else
-  data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
+  data = (data >> ((bytes & 7) << 3)) | (data << (((0UL - bytes) & 7) << 3));
 #endif
 #else
 #if __has_builtin(__builtin_rotateleft64)

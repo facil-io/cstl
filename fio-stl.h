@@ -1005,13 +1005,13 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   d -= 32;
   d += bytes & 31;
 #if __LITTLE_ENDIAN__
-#if __has_builtin(__builtin_rotateright64)
+#if __has_builtin(__builtin_rotateright64) && 0
   data = __builtin_rotateright64(data, ((bytes & 7) << 3));
 #else
-  data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
+  data = (data >> ((bytes & 7) << 3)) | (data << (((0UL - bytes) & 7) << 3));
 #endif
 #else
-#if __has_builtin(__builtin_rotateleft64)
+#if __has_builtin(__builtin_rotateleft64) && 0
   data = __builtin_rotateleft64(data, ((bytes & 7) << 3));
 #else
   data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
