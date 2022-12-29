@@ -6,7 +6,11 @@ Feel free to copy, use and enjoy according to the license provided.
 ********************************************************************************
 
 ********************************************************************************
-NOTE: fio-stl.h is auto-generated from: https://github.com/facil-io/cstl
+
+
+            THE fio-stl.h FILE IS AUTO-GENERATED, DO NOT EDIT
+
+
 ***************************************************************************** */
 
 /** ****************************************************************************
@@ -970,6 +974,37 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 #endif /* FIO_MEMSET */
 
+#if 1
+/** an 8 byte value memset implementation. */
+FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  char *s, *d = (char *)dest_;
+  if (data < 0x100) { /* if a single byte value, match memset */
+    data |= (data << 8);
+    data |= (data << 16);
+    data |= (data << 32);
+  }
+  uint64_t src[4] = {data, data, data, data};
+  if (bytes < 64) {
+    if (bytes & 32) {
+      fio_memcpy32(d, src);
+      d += 32;
+    }
+    fio_memcpy31x(d, src, bytes);
+    return;
+  }
+  /* set whole 32 byte groups */
+  for (;;) {
+    fio_memcpy32(d, src);
+    if ((bytes -= 32) < 32)
+      break;
+    d += 32;
+  }
+  /* set 31 byte remainder */
+  d += bytes & 31;
+  s = d - 32;
+  fio_memcpy32(d, s);
+}
+#else
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
@@ -997,7 +1032,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   fio_memcpy7x(d, &data, bytes);
 #undef FIO___MEMSET_IF_LOOP
 }
-
+#endif
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
@@ -2363,7 +2398,7 @@ Copyright and License: see header file (000 header.h) or top of file
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
+#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || FIO_LEAK_COUNTER)
 #define H___FIO_LOG___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
@@ -11674,8 +11709,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
 /* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
-static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
-static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
+/* use `weak` instead of `static` to make sure state in global. */
+FIO_WEAK fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
+FIO_WEAK fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
 FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
@@ -12902,7 +12938,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
             free)) " called more than " FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME, \
                                                                malloc)));       \
   } while (0)
-#else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#else /* defined(DEBUG) || FIO_LEAK_COUNTER */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)              ((void)0)
@@ -12916,7 +12952,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
 #define FIO_MEMORY_PRINT_STATS_END()                ((void)0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                  ((void)0)
 #define FIO_MEMORY_ON_FREE_FUNC()                   ((void)0)
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 
 /* *****************************************************************************
 
@@ -19277,12 +19313,12 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 SFUNC void FIO_BSTR___LEAK_TESTER(int add);
 FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #else
 #define FIO_BSTR___LEAK_TESTER(i)
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
   FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s))
@@ -19326,11 +19362,18 @@ FIO_SFUNC char *fio_bstr___make_unique(char *bstr) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
+  // if (!fio_atomic_add(&meta->ref, 1)) {
+  //   fio_atomic_sub(&meta->ref, 1);
+  //   return bstr;
+  // }
   if (!meta->ref)
     return bstr;
   fio_str_info_s i = fio_bstr_info(bstr);
   i.capa = 0;
-  fio_bstr_reallocate(&i, i.len);
+  if (i.len)
+    fio_bstr_reallocate(&i, i.len);
+  else
+    i.buf = NULL;
   fio_bstr_free(bstr);
   return fio_bstr___len_set(i.buf, i.len);
 }
@@ -20849,7 +20892,7 @@ copy_the_string:
   goto update_metadata;
 }
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 /* leak tester implementation */
 SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
   static size_t counter = 0;
@@ -20868,7 +20911,7 @@ SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
                   counter);
   }
 }
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 
 /* *****************************************************************************
 Testing
@@ -27186,7 +27229,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO_REF_ON_ALLOC()                                                     \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
@@ -27205,7 +27248,7 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
 #else
 #define FIO_REF_ON_ALLOC()
 #define FIO_REF_ON_FREE()
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -33250,7 +33293,7 @@ General Requirements / Macros
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(TEST) || defined(DEBUG) || FIO_LEAK_COUNTER
 #define FIOBJ_MARK_MEMORY 1
 #endif
 
@@ -35823,9 +35866,8 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 
 /* Make sure logging and memory leak counters are set. */
 #define FIO_LOG
-#ifndef FIO_LEAK_COUNTER
+#undef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
-#endif
 #ifndef FIO_FIOBJ
 #define FIO_FIOBJ
 #endif

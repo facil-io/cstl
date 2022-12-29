@@ -842,6 +842,37 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 #endif /* FIO_MEMSET */
 
+#if 1
+/** an 8 byte value memset implementation. */
+FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  char *s, *d = (char *)dest_;
+  if (data < 0x100) { /* if a single byte value, match memset */
+    data |= (data << 8);
+    data |= (data << 16);
+    data |= (data << 32);
+  }
+  uint64_t src[4] = {data, data, data, data};
+  if (bytes < 64) {
+    if (bytes & 32) {
+      fio_memcpy32(d, src);
+      d += 32;
+    }
+    fio_memcpy31x(d, src, bytes);
+    return;
+  }
+  /* set whole 32 byte groups */
+  for (;;) {
+    fio_memcpy32(d, src);
+    if ((bytes -= 32) < 32)
+      break;
+    d += 32;
+  }
+  /* set 31 byte remainder */
+  d += bytes & 31;
+  s = d - 32;
+  fio_memcpy32(d, s);
+}
+#else
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
@@ -869,7 +900,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   fio_memcpy7x(d, &data, bytes);
 #undef FIO___MEMSET_IF_LOOP
 }
-
+#endif
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */

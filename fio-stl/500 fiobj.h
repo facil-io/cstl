@@ -102,7 +102,7 @@ General Requirements / Macros
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(TEST) || defined(DEBUG) || FIO_LEAK_COUNTER
 #define FIOBJ_MARK_MEMORY 1
 #endif
 

@@ -178,7 +178,7 @@ Defined the `fio_test_dynamic_types` and enables as many testing features as pos
 
 #### `FIO_LEAK_COUNTER`
 
-Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
+If set, facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with certainty.
 
 This also prints out some minimal usage information about each allocator when exiting the program. 
 

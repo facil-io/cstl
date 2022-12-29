@@ -144,8 +144,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
 /* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
-static fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
-static fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
+/* use `weak` instead of `static` to make sure state in global. */
+FIO_WEAK fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
+FIO_WEAK fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
 FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {

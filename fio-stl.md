@@ -178,7 +178,7 @@ Defined the `fio_test_dynamic_types` and enables as many testing features as pos
 
 #### `FIO_LEAK_COUNTER`
 
-Counts allocations and deallocations for custom memory allocators, allowing memory leaks to be detected with certainty.
+If set, facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with certainty.
 
 This also prints out some minimal usage information about each allocator when exiting the program. 
 
@@ -4907,7 +4907,11 @@ In addition, the following helpers are provided:
 char *fio_bstr_copy(char *bstr);
 ```
 
-Returns a copy-on-write copy of the original `bstr`, increasing the original's reference count.
+Returns a Copy-on-Write copy of the original `bstr`, increasing the original's reference count.
+
+This approach to Copy-on-Write is **not** thread-safe, as a data race exists between the `copy` operation and any operation that could mutate the string.
+
+However, once the copy operation had completed in a thread-safe manner, further operations between the two instances do not need to be synchronized.
 
 **Note**: This reference counter will automatically make a copy if more than 2 billion (2,147,483,648) references are counted.
 

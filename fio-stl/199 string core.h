@@ -621,12 +621,12 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 SFUNC void FIO_BSTR___LEAK_TESTER(int add);
 FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #else
 #define FIO_BSTR___LEAK_TESTER(i)
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
   FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s))
@@ -670,11 +670,18 @@ FIO_SFUNC char *fio_bstr___make_unique(char *bstr) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
+  // if (!fio_atomic_add(&meta->ref, 1)) {
+  //   fio_atomic_sub(&meta->ref, 1);
+  //   return bstr;
+  // }
   if (!meta->ref)
     return bstr;
   fio_str_info_s i = fio_bstr_info(bstr);
   i.capa = 0;
-  fio_bstr_reallocate(&i, i.len);
+  if (i.len)
+    fio_bstr_reallocate(&i, i.len);
+  else
+    i.buf = NULL;
   fio_bstr_free(bstr);
   return fio_bstr___len_set(i.buf, i.len);
 }
@@ -2193,7 +2200,7 @@ copy_the_string:
   goto update_metadata;
 }
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#if defined(DEBUG) || FIO_LEAK_COUNTER
 /* leak tester implementation */
 SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
   static size_t counter = 0;
@@ -2212,7 +2219,7 @@ SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
                   counter);
   }
 }
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 
 /* *****************************************************************************
 Testing

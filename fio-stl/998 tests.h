@@ -28,9 +28,8 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 
 /* Make sure logging and memory leak counters are set. */
 #define FIO_LOG
-#ifndef FIO_LEAK_COUNTER
+#undef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
-#endif
 #ifndef FIO_FIOBJ
 #define FIO_FIOBJ
 #endif

@@ -1008,7 +1008,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
             free)) " called more than " FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME, \
                                                                malloc)));       \
   } while (0)
-#else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#else /* defined(DEBUG) || FIO_LEAK_COUNTER */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)              ((void)0)
@@ -1022,7 +1022,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
 #define FIO_MEMORY_PRINT_STATS_END()                ((void)0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                  ((void)0)
 #define FIO_MEMORY_ON_FREE_FUNC()                   ((void)0)
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
 
 /* *****************************************************************************
 
