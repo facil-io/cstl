@@ -853,8 +853,8 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-  uint64_t src[4] = {data, data, data, data};
   if (bytes < 64) {
+    uint64_t src[4] = {data, data, data, data};
     if (bytes & 32) {
       fio_memcpy32(d, src);
       d += 32;
@@ -862,20 +862,20 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     fio_memcpy31x(d, src, bytes);
     return;
   }
-  /* set whole 32 byte groups */
-  for (;;) {
-    fio_memcpy32(d, src);
-    if ((bytes -= 32) < 32)
-      break;
-    d += 32;
+  /* 32 byte groups */
+  while (bytes > 31) {
+    for (size_t i = 0; i < 4; (++i), (d += 8)) {
+      fio_memcpy8(d, &data);
+    }
+    bytes -= 32;
   }
-  /* set 31 byte remainder */
-  if (bytes & 7) {
-    data = FIO_ROTATE_BACKWARDS(data, ((bytes & 7) << 3));
-    src[0] = src[1] = src[2] = src[3] = data;
-  }
+  /* reminder (if any) */
+  d -= 32;
   d += bytes & 31;
-  fio_memcpy32(d, src);
+  data = FIO_ROTATE_BACKWARDS(data, (bytes & 7) << 3);
+  for (size_t i = 0; i < 4; (++i), (d += 8)) {
+    fio_memcpy8(d, &data);
+  }
 }
 #else
 /** an 8 byte value memset implementation. */
