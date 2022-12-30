@@ -967,6 +967,24 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 #endif /* FIO_MEMSET */
 
+#if __LITTLE_ENDIAN__
+#if __has_builtin(__builtin_rotateright64) && 0
+#define FIO_MEMSET_WORD_ROTATE64(u64, bytes)                                   \
+  __builtin_rotateright64(u64, (((bytes)&7) << 3));
+#else
+#define FIO_MEMSET_WORD_ROTATE64(u64, bytes)                                   \
+  ((u64) >> (((bytes)&7) << 3)) | ((u64) << (((0UL - (bytes)) & 7) << 3));
+#endif
+#else
+#if __has_builtin(__builtin_rotateleft64)
+#define FIO_MEMSET_WORD_ROTATE64(u64, bytes)                                   \
+  __builtin_rotateright64(u64, (((bytes)&7) << 3));
+#else
+#define FIO_MEMSET_WORD_ROTATE64(u64, bytes)                                   \
+  ((u64) << (((bytes)&7) << 3)) | ((u64) >> (((0UL - (bytes)) & 7) << 3));
+#endif
+#endif
+
 #if 1
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
@@ -976,39 +994,38 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-  if (bytes < 32) {
-    uint64_t src[4] = {data, data, data, data};
-    fio_memcpy31x(d, src, bytes);
-    return;
-  }
+  if (bytes < 32)
+    goto small_memset;
+
   /* 32 byte groups */
-  while (bytes > 31) {
-    for (size_t i = 0; i < 4; (++i), (d += 8)) {
-      fio_memcpy8(d, &data);
+  for (;;) {
+    for (size_t i = 0; i < 32; i += 8) {
+      fio_memcpy8(d + i, &data);
     }
     bytes -= 32;
+    if (bytes < 32)
+      break;
+    d += 32;
   }
-  /* reminder (if any) */
-  d -= 32;
+  /* remainder  */
   d += bytes & 31;
-  /* rotate `data` to match offset (endian specific) */
-#if __LITTLE_ENDIAN__
-#if __has_builtin(__builtin_rotateright64)
-  data = __builtin_rotateright64(data, ((bytes & 7) << 3));
-#else
-  data = (data >> ((bytes & 7) << 3)) | (data << (((0UL - bytes) & 7) << 3));
-#endif
-#else
-#if __has_builtin(__builtin_rotateleft64)
-  data = __builtin_rotateleft64(data, ((bytes & 7) << 3));
-#else
-  data = (data << ((bytes & 7) << 3)) | (data >> (((0UL - bytes) & 7) << 3));
-#endif
-#endif
-  /* write 32 bytes at offset (writes reminder) */
-  for (size_t i = 0; i < 4; (++i), (d += 8)) {
-    fio_memcpy8(d, &data);
+  data = FIO_MEMSET_WORD_ROTATE64(data, bytes);
+  for (size_t i = 0; i < 32; i += 8) {
+    fio_memcpy8(d + i, &data);
   }
+  return;
+
+small_memset:
+  if (bytes & 16) {
+    fio_memcpy8(d, &data);
+    fio_memcpy8(d + 8, &data);
+    d += 16;
+  }
+  if (bytes & 8) {
+    fio_memcpy8(d, &data);
+    d += 8;
+  }
+  fio_memcpy7x(d, &data, bytes);
 }
 #else
 /** an 8 byte value memset implementation. */
