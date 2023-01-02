@@ -474,7 +474,7 @@ SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at) {
 Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
+FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) {
   fprintf(stderr, "* Testing file utilities (partial).\n");
   struct {
     const char *str;

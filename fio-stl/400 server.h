@@ -1234,7 +1234,7 @@ FIO_SFUNC void fio_srv_shutdown(void) {
                 &fio___srvdata.protocols,
                 pr) {
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
-      pr->on_shutdown(io); /* TODO / FIX: movie callback to task? */
+      pr->on_shutdown(io); /* TODO / FIX: move callback to task? */
       fio_close(io);       /* TODO / FIX: skip close on return value? */
       ++connected;
     }

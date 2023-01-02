@@ -651,43 +651,15 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 16) {
-    if ((l & 8)) {
-      fio_memcpy8(d, s);
-      (d += 8), (s += 8);
-    }
-    if ((l & 4)) {
-      fio_memcpy4(d, s);
-      (d += 4), (s += 4);
-    }
-    if ((l & 2)) {
-      fio_memcpy2(d, s);
-      (d += 2), (s += 2);
-    }
-    if ((l & 1))
-      *d++ = *s;
-    return (void *)d;
-  }
-  if (l < 32) {
-    /* 16 byte block */
-    fio_memcpy16(d, s);
-    /* leftover */
-    s += (l & 15);
-    d += (l & 15);
-    fio_memcpy16(d, s);
-    return (void *)(d += 16);
-  }
-  if (l < 64) {
-    /* 32 byte block */
-    fio_memcpy32(d, s);
-    /* leftover */
-    s += (l & 31);
-    d += (l & 31);
-    fio_memcpy32(d, s);
-    return (void *)(d += 32);
-  }
+  if (l < 16)
+    goto small_memcpy_16;
+  if (l < 32)
+    goto small_memcpy_32;
+  if (l < 64)
+    goto small_memcpy_64;
+
+  /* 64(?) byte blocks */
   for (;;) {
-    /* 64 byte block? */
     fio_memcpy64(d, s);
     l -= 64;
     if (l < 64)
@@ -700,6 +672,41 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   d += 63 & l;
   fio_memcpy64(d, s);
   return (void *)(d += 64);
+
+small_memcpy_16:
+  if ((l & 8)) {
+    fio_memcpy8(d, s);
+    (d += 8), (s += 8);
+  }
+  if ((l & 4)) {
+    fio_memcpy4(d, s);
+    (d += 4), (s += 4);
+  }
+  if ((l & 2)) {
+    fio_memcpy2(d, s);
+    (d += 2), (s += 2);
+  }
+  if ((l & 1))
+    *d++ = *s;
+  return (void *)d;
+
+small_memcpy_32:
+  /* 16 byte block */
+  fio_memcpy16(d, s);
+  /* leftover */
+  s += (l & 15);
+  d += (l & 15);
+  fio_memcpy16(d, s);
+  return (void *)(d += 16);
+
+small_memcpy_64:
+  /* 32 byte block */
+  fio_memcpy32(d, s);
+  /* leftover */
+  s += (l & 31);
+  d += (l & 31);
+  fio_memcpy32(d, s);
+  return (void *)(d += 32);
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
@@ -853,7 +860,6 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 #endif
 
-#if 1
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
@@ -895,43 +901,12 @@ small_memset:
   }
   fio_memcpy7x(d, &data, bytes);
 }
-#else
-/** an 8 byte value memset implementation. */
-FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  char *d = (char *)dest_;
-  if (data < 0x100) { /* if a single byte value, match memset */
-    data |= (data << 8);
-    data |= (data << 16);
-    data |= (data << 32);
-  }
 
-#define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
-  if (bytes & u8_count)                                                        \
-    for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
-      fio_memcpy8(d, &data);                                                   \
-    } /* let compiler vectorize loop */
-
-  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
-    for (int i = 0; i < 32; (++i), (d += 8))
-      fio_memcpy8(d, &data); /* let compiler vectorize loop */
-  }
-  FIO___MEMSET_IF_LOOP(128, 16);
-  FIO___MEMSET_IF_LOOP(64, 8);
-  FIO___MEMSET_IF_LOOP(32, 4);
-  FIO___MEMSET_IF_LOOP(16, 2);
-  FIO___MEMSET_IF_LOOP(8, 1);
-  fio_memcpy7x(d, &data, bytes);
-#undef FIO___MEMSET_IF_LOOP
-}
-#endif
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCK_NUM  64ULL
 #define FIO___MEMCPY_BLOCKx_NUM 63ULL
-#define FIO___MEMCPY_BLOCK      fio_memcpy1024
-#define FIO___MEMCPY_BLOCKx     fio_memcpy1023x
 
 /** memcpy / memmove alternative that should work with unaligned memory */
 FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
@@ -942,13 +917,10 @@ FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return d;
   }
+
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio_memcpy_unsafe_x(d, s, bytes);
-  } else if (bytes < FIO___MEMCPY_BLOCK_NUM) { /* overlap, fits in buffer */
-    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
-    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
-    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
     return fio_memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
@@ -957,12 +929,7 @@ FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   return d;
 }
 
-#undef FIO___MEMCPY_BLOCK_NUM
 #undef FIO___MEMCPY_BLOCKx_NUM
-#undef FIO___MEMCPY_BLOCK
-#undef FIO___MEMCPY_BLOCKx
-#undef FIO___MEMCPY_ALIGN
-#undef FIO___MEMCPY_ALIGN_DIR
 /* *****************************************************************************
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */

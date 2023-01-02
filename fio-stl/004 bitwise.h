@@ -726,8 +726,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     };
     char buf[(4096 << 1) + 64];
     fio_rand_bytes(buf + (4096 + 32), (4096 + 32));
-    for (size_t ifn = 0; tests[ifn].fn;
-         ++ifn) { /* TODO: test all x primitives */
+    for (size_t ifn = 0; tests[ifn].fn; ++ifn) {
+      /* test all x primitives */
       size_t len = tests[ifn].len;
       for (size_t i = 0; i < 31; ++i) {
         memset(buf, 0, 4096 + 32);

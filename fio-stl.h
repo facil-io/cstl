@@ -783,43 +783,15 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 16) {
-    if ((l & 8)) {
-      fio_memcpy8(d, s);
-      (d += 8), (s += 8);
-    }
-    if ((l & 4)) {
-      fio_memcpy4(d, s);
-      (d += 4), (s += 4);
-    }
-    if ((l & 2)) {
-      fio_memcpy2(d, s);
-      (d += 2), (s += 2);
-    }
-    if ((l & 1))
-      *d++ = *s;
-    return (void *)d;
-  }
-  if (l < 32) {
-    /* 16 byte block */
-    fio_memcpy16(d, s);
-    /* leftover */
-    s += (l & 15);
-    d += (l & 15);
-    fio_memcpy16(d, s);
-    return (void *)(d += 16);
-  }
-  if (l < 64) {
-    /* 32 byte block */
-    fio_memcpy32(d, s);
-    /* leftover */
-    s += (l & 31);
-    d += (l & 31);
-    fio_memcpy32(d, s);
-    return (void *)(d += 32);
-  }
+  if (l < 16)
+    goto small_memcpy_16;
+  if (l < 32)
+    goto small_memcpy_32;
+  if (l < 64)
+    goto small_memcpy_64;
+
+  /* 64(?) byte blocks */
   for (;;) {
-    /* 64 byte block? */
     fio_memcpy64(d, s);
     l -= 64;
     if (l < 64)
@@ -832,6 +804,41 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   d += 63 & l;
   fio_memcpy64(d, s);
   return (void *)(d += 64);
+
+small_memcpy_16:
+  if ((l & 8)) {
+    fio_memcpy8(d, s);
+    (d += 8), (s += 8);
+  }
+  if ((l & 4)) {
+    fio_memcpy4(d, s);
+    (d += 4), (s += 4);
+  }
+  if ((l & 2)) {
+    fio_memcpy2(d, s);
+    (d += 2), (s += 2);
+  }
+  if ((l & 1))
+    *d++ = *s;
+  return (void *)d;
+
+small_memcpy_32:
+  /* 16 byte block */
+  fio_memcpy16(d, s);
+  /* leftover */
+  s += (l & 15);
+  d += (l & 15);
+  fio_memcpy16(d, s);
+  return (void *)(d += 16);
+
+small_memcpy_64:
+  /* 32 byte block */
+  fio_memcpy32(d, s);
+  /* leftover */
+  s += (l & 31);
+  d += (l & 31);
+  fio_memcpy32(d, s);
+  return (void *)(d += 32);
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
@@ -985,7 +992,6 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 #endif
 
-#if 1
 /** an 8 byte value memset implementation. */
 FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
@@ -1027,43 +1033,12 @@ small_memset:
   }
   fio_memcpy7x(d, &data, bytes);
 }
-#else
-/** an 8 byte value memset implementation. */
-FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
-  char *d = (char *)dest_;
-  if (data < 0x100) { /* if a single byte value, match memset */
-    data |= (data << 8);
-    data |= (data << 16);
-    data |= (data << 32);
-  }
 
-#define FIO___MEMSET_IF_LOOP(u8_count, u_group)                                \
-  if (bytes & u8_count)                                                        \
-    for (int i = 0; i < u_group; (++i), (d += 8)) {                            \
-      fio_memcpy8(d, &data);                                                   \
-    } /* let compiler vectorize loop */
-
-  for (char *const d_loop = d + (bytes & (~(size_t)255ULL)); d < d_loop;) {
-    for (int i = 0; i < 32; (++i), (d += 8))
-      fio_memcpy8(d, &data); /* let compiler vectorize loop */
-  }
-  FIO___MEMSET_IF_LOOP(128, 16);
-  FIO___MEMSET_IF_LOOP(64, 8);
-  FIO___MEMSET_IF_LOOP(32, 4);
-  FIO___MEMSET_IF_LOOP(16, 2);
-  FIO___MEMSET_IF_LOOP(8, 1);
-  fio_memcpy7x(d, &data, bytes);
-#undef FIO___MEMSET_IF_LOOP
-}
-#endif
 /* *****************************************************************************
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCK_NUM  64ULL
 #define FIO___MEMCPY_BLOCKx_NUM 63ULL
-#define FIO___MEMCPY_BLOCK      fio_memcpy1024
-#define FIO___MEMCPY_BLOCKx     fio_memcpy1023x
 
 /** memcpy / memmove alternative that should work with unaligned memory */
 FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
@@ -1074,13 +1049,10 @@ FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return d;
   }
+
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio_memcpy_unsafe_x(d, s, bytes);
-  } else if (bytes < FIO___MEMCPY_BLOCK_NUM) { /* overlap, fits in buffer */
-    char tmp_buf[FIO___MEMCPY_BLOCK_NUM] FIO_ALIGN(16);
-    FIO___MEMCPY_BLOCKx(tmp_buf, s, bytes);
-    FIO___MEMCPY_BLOCKx(d, tmp_buf, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
     return fio_memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
@@ -1089,12 +1061,7 @@ FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   return d;
 }
 
-#undef FIO___MEMCPY_BLOCK_NUM
 #undef FIO___MEMCPY_BLOCKx_NUM
-#undef FIO___MEMCPY_BLOCK
-#undef FIO___MEMCPY_BLOCKx
-#undef FIO___MEMCPY_ALIGN
-#undef FIO___MEMCPY_ALIGN_DIR
 /* *****************************************************************************
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
@@ -3949,8 +3916,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
     };
     char buf[(4096 << 1) + 64];
     fio_rand_bytes(buf + (4096 + 32), (4096 + 32));
-    for (size_t ifn = 0; tests[ifn].fn;
-         ++ifn) { /* TODO: test all x primitives */
+    for (size_t ifn = 0; tests[ifn].fn; ++ifn) {
+      /* test all x primitives */
       size_t len = tests[ifn].len;
       for (size_t i = 0; i < 31; ++i) {
         memset(buf, 0, 4096 + 32);
@@ -4964,7 +4931,6 @@ Copyright and License: see header file (000 header.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
-/*TODO: cleanup + remove ltoa (doubles in String Core) */
 /* *****************************************************************************
 Strings to Signed Numbers - API
 ***************************************************************************** */
@@ -11906,9 +11872,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state_task_global)(void *arg) {
   ++FIO_NAME_TEST(stl, state_task_counter);
 }
 FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
-  /*
-   * TODO: test module here
-   */
   fprintf(stderr, "* Testing state callback API.\n");
   size_t count = 0;
   for (size_t i = 0; i < 1024; ++i) {
@@ -18651,7 +18614,7 @@ SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at) {
 Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) { /* TODO: test module */
+FIO_SFUNC void FIO_NAME_TEST(stl, filename)(void) {
   fprintf(stderr, "* Testing file utilities (partial).\n");
   struct {
     const char *str;
@@ -25560,15 +25523,6 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 /* *****************************************************************************
 Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -26808,7 +26762,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     uint32_t count = FIO_NAME(FIO_MAP_NAME, count)(&map);
     uint32_t loop_test = 0;
     FIO_MAP_EACH(FIO_MAP_NAME, &map, i) {
-      /* TODO: test ordering */
+      /* test ordering */
 #ifdef FIO_MAP_LRU
       FIO_ASSERT(i.key == (count - loop_test),
                  "map FIO_MAP_EACH LRU ordering broken? %zu != %zu",
@@ -27442,7 +27396,7 @@ Sort Implementation - possibly externed functions.
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
 SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
-  /* TODO: a fast(ish) small sort on small arrays */
+  /* a fast(ish) small sort on small arrays */
   if ((!count | !array))
     return;
   if (count < 3) { /* special case */
@@ -30639,7 +30593,7 @@ FIO_SFUNC void fio_srv_shutdown(void) {
                 &fio___srvdata.protocols,
                 pr) {
     FIO_LIST_EACH(fio_s, node, &pr->reserved.ios, io) {
-      pr->on_shutdown(io); /* TODO / FIX: movie callback to task? */
+      pr->on_shutdown(io); /* TODO / FIX: move callback to task? */
       fio_close(io);       /* TODO / FIX: skip close on return value? */
       ++connected;
     }
@@ -32360,12 +32314,12 @@ Letter Protocol Callbacks
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
   fio_defer(fio___publish_letter_task, fio_letter_dup(l), NULL);
-  (void)l; /* TODO! */
+  (void)l;
 }
 
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *l) {
   fio___channel_deliver(l);
-  (void)l; /* TODO! */
+  (void)l;
 }
 
 FIO_SFUNC void fio___letter_on_attach(fio_s *io) {

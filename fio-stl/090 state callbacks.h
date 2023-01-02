@@ -318,9 +318,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, state_task_global)(void *arg) {
   ++FIO_NAME_TEST(stl, state_task_counter);
 }
 FIO_SFUNC void FIO_NAME_TEST(stl, state)(void) {
-  /*
-   * TODO: test module here
-   */
   fprintf(stderr, "* Testing state callback API.\n");
   size_t count = 0;
   for (size_t i = 0; i < 1024; ++i) {

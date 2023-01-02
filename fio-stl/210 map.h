@@ -485,15 +485,6 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 /* *****************************************************************************
 Map Implementation - inlined static functions
 ***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -1733,7 +1724,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     uint32_t count = FIO_NAME(FIO_MAP_NAME, count)(&map);
     uint32_t loop_test = 0;
     FIO_MAP_EACH(FIO_MAP_NAME, &map, i) {
-      /* TODO: test ordering */
+      /* test ordering */
 #ifdef FIO_MAP_LRU
       FIO_ASSERT(i.key == (count - loop_test),
                  "map FIO_MAP_EACH LRU ordering broken? %zu != %zu",

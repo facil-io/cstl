@@ -79,7 +79,7 @@ Sort Implementation - possibly externed functions.
 
 /* Insert sort, for small arrays of `FIO_SORT_TYPE`. */
 SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
-  /* TODO: a fast(ish) small sort on small arrays */
+  /* a fast(ish) small sort on small arrays */
   if ((!count | !array))
     return;
   if (count < 3) { /* special case */
