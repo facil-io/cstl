@@ -1371,7 +1371,7 @@ error:
 fio_string_is_greater
 ***************************************************************************** */
 
-#if 1
+#if 0
 /**
  * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
  *
