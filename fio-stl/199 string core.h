@@ -1371,6 +1371,72 @@ error:
 fio_string_is_greater
 ***************************************************************************** */
 
+#if 1
+/**
+ * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
+ *
+ * Note: returns 0 if data in b is bigger than or equal(!).
+ */
+SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
+  const size_t a_len_is_bigger = a.len > b.len;
+  size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
+  if (a.buf == b.buf)
+    return a_len_is_bigger;
+  uint64_t ua[4] FIO_ALIGN(16) = {0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0};
+  uint64_t flag = 0;
+  if (len < 32)
+    goto mini_cmp;
+
+  for (;;) {
+    for (size_t i = 0; i < 4; ++i) {
+      fio_memcpy8(ua + i, a.buf);
+      fio_memcpy8(ub + i, b.buf);
+      flag |= (ua[i] ^ ub[i]);
+      a.buf += 8;
+      b.buf += 8;
+    }
+    if (flag)
+      goto review_diff;
+    if (len > 31) {
+      len -= 32;
+      continue;
+    }
+    if (!len)
+      return a_len_is_bigger;
+    a.buf -= 32;
+    b.buf -= 32;
+    a.buf += len & 31;
+    b.buf += len & 31;
+    len = 0;
+  }
+
+review_diff:
+  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
+    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
+    ub[i] = fio_lton64(ub[i]);
+  }
+  if (ua[0] != ub[0]) {
+    return ua[0] > ub[0];
+  }
+  if (ua[1] != ub[1]) {
+    return ua[1] > ub[1];
+  }
+  if (ua[2] != ub[2]) {
+    return ua[2] > ub[2];
+  }
+  return ua[3] > ub[3];
+
+mini_cmp:
+  while (len--) {
+    if (a.buf[0] != b.buf[0])
+      return a.buf[0] > b.buf[0];
+    ++a.buf;
+    ++b.buf;
+  }
+  return a_len_is_bigger;
+}
+#else
 /**
  * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
  *
@@ -1383,9 +1449,9 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
     return a_len_is_bigger;
   uint64_t ua[4] FIO_ALIGN(16) = {0, 0, 0, 0};
   uint64_t ub[4] FIO_ALIGN(16) = {0, 0, 0, 0};
+  uint64_t flag = 0;
 #define FIO_STRING_XOR_GROUP_TEST(group_size)                                  \
   do {                                                                         \
-    uint64_t flag = 0;                                                         \
     for (size_t i = 0; i < group_size; ++i) {                                  \
       fio_memcpy8(ua + (3 - i), a.buf + (i << 3));                             \
       fio_memcpy8(ub + (3 - i), b.buf + (i << 3));                             \
@@ -1435,7 +1501,7 @@ review_dif1:
   return ua[3] > ub[3];
 #undef FIO_STRING_XOR_GROUP_TEST
 }
-
+#endif
 /* *****************************************************************************
 Insert / Write2
 ***************************************************************************** */
@@ -2594,43 +2660,51 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     sa.buf[sa.len - 1] += 1;
     fio_buf_info_s sa_buf = FIO_STR2BUF_INFO(sa);
     fio_buf_info_s sb_buf = FIO_STR2BUF_INFO(sb);
-    const size_t test_repetitions = (1ULL << 17);
-    fprintf(stderr,
-            "* Testing comparison speeds (%zu tests of %zu bytes):\n",
-            test_repetitions,
-            sa.len - 1);
-    clock_t start = clock();
-    for (size_t i = 0; i < test_repetitions; ++i) {
-      FIO_COMPILER_GUARD;
-      int r = fio_string_is_greater_buf(sa_buf, sb_buf);
-      FIO_ASSERT(r > 0, "fio_string_is_greater error?!");
+
+    const size_t test_repetitions = (1ULL << 19);
+    const size_t positions[] = {(sa.len - 1), ((sa.len >> 1) - 1), 30, 0};
+    for (const size_t *ppos = positions; *ppos; ++ppos) {
+      sa.buf[*ppos] += 1;
+      sa.len = *ppos + 1;
+      sb.len = *ppos + 1;
+      fprintf(stderr,
+              "* Testing comparison speeds (%zu tests of %zu bytes):\n",
+              test_repetitions,
+              *ppos);
+      clock_t start = clock();
+      for (size_t i = 0; i < test_repetitions; ++i) {
+        FIO_COMPILER_GUARD;
+        int r = fio_string_is_greater_buf(sa_buf, sb_buf);
+        FIO_ASSERT(r > 0, "fio_string_is_greater error?!");
+      }
+      clock_t end = clock();
+      fprintf(stderr,
+              "\t* fio_string_is_greater test cycles:   %zu\n",
+              (size_t)(end - start));
+      start = clock();
+      for (size_t i = 0; i < test_repetitions; ++i) {
+        FIO_COMPILER_GUARD;
+        int r = memcmp(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
+        if (!r)
+          r = sa.len > sb.len;
+        FIO_ASSERT(r > 0, "memcmp error?!");
+      }
+      end = clock();
+      fprintf(stderr,
+              "\t* memcmp libc test cycles:            %zu\n",
+              (size_t)(end - start));
+      start = clock();
+      for (size_t i = 0; i < test_repetitions; ++i) {
+        FIO_COMPILER_GUARD;
+        int r = strcmp(sa.buf, sb.buf);
+        FIO_ASSERT(r > 0, "strcmp error?!");
+      }
+      end = clock();
+      fprintf(stderr,
+              "\t* strcmp libc test cycles:            %zu\n",
+              (size_t)(end - start));
     }
-    clock_t end = clock();
-    fprintf(stderr,
-            "\t* fio_string_is_greater test cycles:   %zu\n",
-            (size_t)(end - start));
-    start = clock();
-    for (size_t i = 0; i < test_repetitions; ++i) {
-      FIO_COMPILER_GUARD;
-      int r = memcmp(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
-      if (!r)
-        r = sa.len > sb.len;
-      FIO_ASSERT(r > 0, "memcmp error?!");
-    }
-    end = clock();
-    fprintf(stderr,
-            "\t* memcmp libc test cycles:            %zu\n",
-            (size_t)(end - start));
-    start = clock();
-    for (size_t i = 0; i < test_repetitions; ++i) {
-      FIO_COMPILER_GUARD;
-      int r = strcmp(sa.buf, sb.buf);
-      FIO_ASSERT(r > 0, "strcmp error?!");
-    }
-    end = clock();
-    fprintf(stderr,
-            "\t* strcmp libc test cycles:            %zu\n",
-            (size_t)(end - start));
+
     fprintf(stderr, "* Testing fio_string_write_(i|u|hex|bin) speeds:\n");
     FIO_NAME_TEST(stl, atol_speed)
     ("fio_string_write/fio_atol",
