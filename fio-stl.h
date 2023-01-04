@@ -20092,7 +20092,6 @@ error:
 fio_string_is_greater
 ***************************************************************************** */
 
-#if 0
 /**
  * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
  *
@@ -20157,72 +20156,7 @@ mini_cmp:
   }
   return a_len_is_bigger;
 }
-#else
-/**
- * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
- *
- * Note: returns 0 if data in b is bigger than or equal(!).
- */
-SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
-  const size_t a_len_is_bigger = a.len > b.len;
-  const size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
-  if (a.buf == b.buf)
-    return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(16) = {0, 0, 0, 0};
-  uint64_t ub[4] FIO_ALIGN(16) = {0, 0, 0, 0};
-  uint64_t flag = 0;
-#define FIO_STRING_XOR_GROUP_TEST(group_size)                                  \
-  do {                                                                         \
-    for (size_t i = 0; i < group_size; ++i) {                                  \
-      fio_memcpy8(ua + (3 - i), a.buf + (i << 3));                             \
-      fio_memcpy8(ub + (3 - i), b.buf + (i << 3));                             \
-      flag |= (ua[(3 - i)] ^ ub[(3 - i)]);                                     \
-    } /* compiler should vectorize this loop */                                \
-    if (flag)                                                                  \
-      goto review_dif##group_size;                                             \
-    a.buf += (group_size##ULL << 3);                                           \
-    b.buf += (group_size##ULL << 3);                                           \
-  } while (0)
-  for (size_t limit = 31; limit < len; limit += 32) {
-    FIO_STRING_XOR_GROUP_TEST(4);
-  }
-  if (len & 16) {
-    FIO_STRING_XOR_GROUP_TEST(2);
-  }
-  if (len & 8) {
-    FIO_STRING_XOR_GROUP_TEST(1);
-  }
-  if ((len & 7)) {
-    fio_memcpy7x(ua + 3, a.buf, len);
-    fio_memcpy7x(ub + 3, b.buf, len);
-    if ((ua[3] ^ ub[3]))
-      goto review_dif1;
-  }
-  return a_len_is_bigger;
-review_dif4:
-  if (ua[0] != ub[0]) {
-    ua[0] = fio_lton64(ua[0]); /* comparison needs network byte order */
-    ub[0] = fio_lton64(ub[0]);
-    return ua[0] > ub[0];
-  }
-  if (ua[1] != ub[1]) {
-    ua[1] = fio_lton64(ua[1]);
-    ub[1] = fio_lton64(ub[1]);
-    return ua[1] > ub[1];
-  }
-review_dif2:
-  if (ua[2] != ub[2]) {
-    ua[2] = fio_lton64(ua[2]);
-    ub[2] = fio_lton64(ub[2]);
-    return ua[2] > ub[2];
-  }
-review_dif1:
-  ua[3] = fio_lton64(ua[3]);
-  ub[3] = fio_lton64(ub[3]);
-  return ua[3] > ub[3];
-#undef FIO_STRING_XOR_GROUP_TEST
-}
-#endif
+
 /* *****************************************************************************
 Insert / Write2
 ***************************************************************************** */
