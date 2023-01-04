@@ -33,8 +33,8 @@ Copyright and License: see header file (000 header.h) or top of file
 Map Settings - Sets have only keys (value == key) - Hash Maps have values
 ***************************************************************************** */
 
-/* if FIO_MAP_KEYSTR is defined, use fio_keystr_s keys */
-#ifdef FIO_MAP_KEYSTR
+/* if FIO_MAP_KEY_KSTR is defined, use fio_keystr_s keys */
+#ifdef FIO_MAP_KEY_KSTR
 #define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
@@ -51,16 +51,16 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
-#undef FIO_MAP_KEYSTR
+#undef FIO_MAP_KEY_KSTR
 
 /* if FIO_MAP_KEY is undefined, assume String keys (using `fio_bstr`). */
 #elif !defined(FIO_MAP_KEY) || defined(FIO_MAP_KEY_BSTR)
-#define FIO_MAP_KEY                  fio_buf_info_s
+#define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         char *
-#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_buf((k))
+#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
-#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2buf((a), (b))
+#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
 #endif
@@ -102,9 +102,9 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #endif
 
 #ifdef FIO_MAP_VALUE_BSTR
-#define FIO_MAP_VALUE                  fio_buf_info_s
+#define FIO_MAP_VALUE                  fio_str_info_s
 #define FIO_MAP_VALUE_INTERNAL         char *
-#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_buf((v))
+#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_info((v))
 #define FIO_MAP_VALUE_COPY(dest, src)                                          \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 #define FIO_MAP_VALUE_DESTROY(v) fio_bstr_free((v))

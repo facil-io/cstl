@@ -4981,7 +4981,7 @@ It is very common for Hash Maps to contain String keys. When the String keys are
 
 The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 14` on 64 bit machines or `len <= 10` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
 
-See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEYSTR` MACRO.
+See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEY_KSTR` MACRO.
 
 #### `FIO_MAP_KEY_STR`
 
@@ -5016,10 +5016,12 @@ Do **not** `fio_keystr_destroy` this key.
 #### `fio_keystr_copy`
 
 ```c
-fio_keystr_s fio_keystr_copy(fio_keystr_s org, void *(*alloc_func)(size_t len));
+fio_keystr_s fio_keystr_copy(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
 ```
 
 Returns a copy of `fio_keystr_s` - used internally by the hash map.
+
+**Note**: when `.capa == FIO_KEYSTR_CONST` then the new `fio_keystr_s` will most likely point to the original pointer (which much remain valid in memory for the lifetime of the key string). Short enough strings are always copied to allow for improved cache locality.
 
 #### `fio_keystr_destroy`
 
@@ -5037,31 +5039,39 @@ int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 
 Compares two Key Strings - used internally by the hash map.
 
+#### `FIO_KEYSTR_CONST`
+
+```c
+#define FIO_KEYSTR_CONST ((size_t)-1LL)
+```
+
 ### `fio_keystr` Example
 
 This example maps words to numbers. Note that this will work also with binary data and dynamic strings.
 
 ```c
 /* map words to numbers. */
+#define FIO_MAP_KEY_KSTR
 #define FIO_UMAP_NAME umap
-#define FIO_MAP_KEYSTR
 #define FIO_MAP_VALUE uintptr_t
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)&umap_destroy)
-#include "fio-stl.h"
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
 /* example adding strings to map and printing data. */
-void example(void) {
+void map_keystr_example(void) {
   umap_s map = FIO_MAP_INIT;
-  umap_set(&map, FIO_BUF_INFO1("One"), 1, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Two"), 2, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Three"), 3, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Infinity"), (uintptr_t)-1, NULL);
-  FIO_MAP_EACH(umap, &map, i) {
-    printf("%s: %llu\n",
-           (int)i.key.len,
-           i.key.buf,
-           (unsigned long long)i.value);
+  /* FIO_KEYSTR_CONST prevents copying of longer constant strings */
+  umap_set(&map, FIO_STR_INFO3("One", 3, FIO_KEYSTR_CONST), 1, NULL);
+  umap_set(&map, FIO_STR_INFO3("Two", 3, FIO_KEYSTR_CONST), 2, NULL);
+  umap_set(&map, FIO_STR_INFO3("Three", 5, FIO_KEYSTR_CONST), 3, NULL);
+  FIO_MAP_EACH(umap, &map, pos) {
+    uintptr_t value = pos.value;
+    /* note that key strings are NOT nul terminated! (minimizes allocations) */
+    printf("%.*s: %llu\n",
+           (int)pos.key.len,
+           pos.key.buf,
+           (unsigned long long)value);
   }
   umap_destroy(&map);
 }
@@ -6141,17 +6151,17 @@ By default, if not defined differently, facil.io maps use String data as the `ke
 /* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
 
 /** set helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_buf_info_s key, fio_buf_info_s obj) {
+FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
   return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
 }
 /** conditional set helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_set_if_missing2(dict_s *m,
-                                              fio_buf_info_s key,
-                                              fio_buf_info_s obj) {
+FIO_IFUNC fio_str_info_s dict_set_if_missing2(dict_s *m,
+                                              fio_str_info_s key,
+                                              fio_str_info_s obj) {
   return dict_set_if_missing(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj);
 }
 /** get helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_get2(dict_s *m, fio_buf_info_s key) {
+FIO_IFUNC fio_str_info_s dict_get2(dict_s *m, fio_str_info_s key) {
   return dict_get(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key);
 }
 ```
@@ -6162,9 +6172,9 @@ Note that this Map implementation, like all dynamic type templates, supports opt
 
 Every map / dictionary requires a `key` type that is used for either testing uniqueness (a Set) or accessing a `value` (a Hash Map or Dictionary).
 
-If the `key` type is left undefined (or the `FIO_MAP_KEY_BSTR` macro is defined), the map's API will expect a `fio_buf_info_s` as a key and facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
+If the `key` type is left undefined (or the `FIO_MAP_KEY_BSTR` macro is defined), the map's API will expect a `fio_str_info_s` as a key and facil.io will default to a String key using the `fio_bstr` functions to allocate, manage and free strings. These strings are always `NUL` terminated and always allocated dynamically.
 
-It is also possible to define the helper macro `FIO_MAP_KEYSTR` in which case the Strings internally will use the `fio_keystr` API, which is optimized to hold up to 14 bytes (on 64bit systems) before allocating memory (while adding an allocation overhead to the map itself).
+It is also possible to define the helper macro `FIO_MAP_KEY_KSTR` in which case the Strings internally will use the `fio_keystr` API, which has a special small string optimization for strings up to 14 bytes (on 64bit systems) before allocating memory (while adding an allocation overhead to the map itself). This could improve performance by improving cache locality.
 
 To use a custom `key` type and control its behavior, define any (or all) of the following macros before including the C STL header library (the `FIO_MAP_KEY` macro is required in order to make changes):
 
@@ -6172,19 +6182,19 @@ To use a custom `key` type and control its behavior, define any (or all) of the 
 
 ```c
 /* default when FIO_MAP_KEY is undefined */
-#define FIO_MAP_KEY  fio_buf_info_s
+#define FIO_MAP_KEY  fio_str_info_s
 ```
 
 The "external" / exposed type used to define the key. The external type is the type used by the API for inputting and reviewing key values. However, `FIO_MAP_KEY_INTERNAL` may be (optionally) defined in order for the map to use a different type for storage purposes.
 
-If undefined, keys will be a binary safe buffer / string (`fio_buf_info_s`). Internally the implementation will use the `fio_bstr` API to allocate, store and free copies of each key.
+If undefined, keys will be a binary safe buffer / string (`fio_str_info_s`). Internally the implementation will use the `fio_bstr` API to allocate, store and free copies of each key.
 
 #### `FIO_MAP_KEY_INTERNAL`
 
 ```c
 /* default when FIO_MAP_KEY is defined */
 #define FIO_MAP_KEY_INTERNAL FIO_MAP_KEY
-/* default when FIO_MAP_KEY is undefined */
+/* default when FIO_MAP_KEY is undefined or FIO_MAP_KEY_BSTR is defined */
 #define FIO_MAP_KEY_INTERNAL char *
 ```
 
@@ -6195,7 +6205,7 @@ The `FIO_MAP_KEY_INTERNAL`, if defined, allows the map to use an internal key st
 ```c
 /* default when FIO_MAP_KEY is defined */
 #define FIO_MAP_KEY_FROM_INTERNAL(k) k
-/* default when FIO_MAP_KEY is undefined */
+/* default when FIO_MAP_KEY is undefined or FIO_MAP_KEY_BSTR is defined */
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
 ```
 
@@ -6207,7 +6217,7 @@ This macro converts between the Map's internal `key` storage type and the API re
 ```c
 /* default when FIO_MAP_KEY is defined */
 #define FIO_MAP_KEY_COPY(dest, src) (dest) = (src)
-/* default when FIO_MAP_KEY is undefined */
+/* default when FIO_MAP_KEY is undefined or FIO_MAP_KEY_BSTR is defined */
 #define FIO_MAP_KEY_COPY(dest, src) (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 ```
 
@@ -6218,7 +6228,7 @@ This macro copies the Map's external representation of the `key` (as defined by 
 ```c
 /* default when FIO_MAP_KEY is defined */
 #define FIO_MAP_KEY_CMP(internal, external) (internal) == (external)
-/* default when FIO_MAP_KEY is undefined */
+/* default when FIO_MAP_KEY is undefined or FIO_MAP_KEY_BSTR is defined */
 #define FIO_MAP_KEY_CMP(internal, external) fio_bstr_is_eq2info((internal), (external))
 ```
 
@@ -6229,7 +6239,7 @@ This macro compares a Map's external representation of a `key` (as defined by th
 ```c
 /* default when FIO_MAP_KEY is defined */
 #define FIO_MAP_KEY_DESTROY(key)
-/* default when FIO_MAP_KEY is undefined */
+/* default when FIO_MAP_KEY is undefined or FIO_MAP_KEY_BSTR is defined */
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 ```
 
@@ -6247,10 +6257,10 @@ This macro destroys an external representation of a `key` if it didn't make it i
 This is useful in when the key was pre-allocated, if it's reference was increased in advance for some reason or when "transferring ownership" of the `key` to the map.
 
 
-#### `FIO_MAP_KEYSTR`
+#### `FIO_MAP_KEY_KSTR`
 
 ```c
-#ifdef FIO_MAP_KEYSTR
+#ifdef FIO_MAP_KEY_KSTR
 #define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
@@ -6260,7 +6270,7 @@ This is useful in when the key was pre-allocated, if it's reference was increase
 #define FIO_MAP_KEY_DISCARD(key)
 ```
 
-If `FIO_MAP_KEY` isn't set, or `FIO_MAP_KEYSTR` is explicitly defined, than a `fio_str_info_s` will be the external key type and `fio_keystr_s` will be the internal key type.
+If `FIO_MAP_KEY` isn't set, or `FIO_MAP_KEY_KSTR` is explicitly defined, than a `fio_str_info_s` will be the external key type and `fio_keystr_s` will be the internal key type.
 
 Passing a key with `key.capa == (size_t)-1` will prevent a string copy and the map will assume that the string will stay in the same memory address for the whole of the map's lifetime.
 
@@ -6274,9 +6284,9 @@ Values and their behavior can be controlled using similar macros to the `key` ma
 
 ```c
 #ifdef FIO_MAP_VALUE_BSTR
-#define FIO_MAP_VALUE                  fio_buf_info_s
+#define FIO_MAP_VALUE                  fio_str_info_s
 #define FIO_MAP_VALUE_INTERNAL         char *
-#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_buf((v))
+#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_info((v))
 #define FIO_MAP_VALUE_COPY(dest, src)                                     \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 #define FIO_MAP_VALUE_DESTROY(v) fio_bstr_free((v))
@@ -6355,7 +6365,7 @@ For example:
 /* it is often more secure to "salt" the hashing function with a per-map salt, and so: */
 
 /** set helper for consistent and secure hash values */
-FIO_IFUNC fio_buf_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
+FIO_IFUNC fio_str_info_s dict_set2(dict_s *m, fio_str_info_s key, fio_str_info_s obj) {
   return dict_set(m, fio_risky_hash(key.buf, key.len, (uint64_t)m), key, obj, NULL);
 }
 /** conditional set helper for consistent and secure hash values */

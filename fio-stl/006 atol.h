@@ -21,7 +21,6 @@ Copyright and License: see header file (000 header.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
-/*TODO: cleanup + remove ltoa (doubles in String Core) */
 /* *****************************************************************************
 Strings to Signed Numbers - API
 ***************************************************************************** */

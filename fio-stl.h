@@ -2273,7 +2273,8 @@ Pointer Tagging
 
 /* Modules that require the String Core API */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
-    defined(FIO_MAP_KEYSTR) || !defined(FIO_MAP_KEY) ||                        \
+    defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
+    (defined(FIO_MAP_VALUE) && !defined(FIO_MAP_KEY)) ||                       \
     defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER) || defined(FIO_FIOBJ)
 #ifndef FIO_STR
 #define FIO_STR
@@ -25071,8 +25072,8 @@ Copyright and License: see header file (000 header.h) or top of file
 Map Settings - Sets have only keys (value == key) - Hash Maps have values
 ***************************************************************************** */
 
-/* if FIO_MAP_KEYSTR is defined, use fio_keystr_s keys */
-#ifdef FIO_MAP_KEYSTR
+/* if FIO_MAP_KEY_KSTR is defined, use fio_keystr_s keys */
+#ifdef FIO_MAP_KEY_KSTR
 #define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
@@ -25089,16 +25090,16 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
-#undef FIO_MAP_KEYSTR
+#undef FIO_MAP_KEY_KSTR
 
 /* if FIO_MAP_KEY is undefined, assume String keys (using `fio_bstr`). */
 #elif !defined(FIO_MAP_KEY) || defined(FIO_MAP_KEY_BSTR)
-#define FIO_MAP_KEY                  fio_buf_info_s
+#define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         char *
-#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_buf((k))
+#define FIO_MAP_KEY_FROM_INTERNAL(k) fio_bstr_info((k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
-#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2buf((a), (b))
+#define FIO_MAP_KEY_CMP(a, b)    fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key) fio_bstr_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
 #endif
@@ -25140,9 +25141,9 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #endif
 
 #ifdef FIO_MAP_VALUE_BSTR
-#define FIO_MAP_VALUE                  fio_buf_info_s
+#define FIO_MAP_VALUE                  fio_str_info_s
 #define FIO_MAP_VALUE_INTERNAL         char *
-#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_buf((v))
+#define FIO_MAP_VALUE_FROM_INTERNAL(v) fio_bstr_info((v))
 #define FIO_MAP_VALUE_COPY(dest, src)                                          \
   (dest) = fio_bstr_write(NULL, (src).buf, (src).len)
 #define FIO_MAP_VALUE_DESTROY(v) fio_bstr_free((v))
@@ -29943,7 +29944,7 @@ typedef struct {
 
 /* unordered `env` dictionary style map */
 #define FIO_UMAP_NAME fio___srv_env
-#define FIO_MAP_KEYSTR
+#define FIO_MAP_KEY_KSTR
 #define FIO_MAP_VALUE fio___srv_env_obj_s
 #define FIO_MAP_VALUE_DESTROY(o)                                               \
   do {                                                                         \
@@ -30646,74 +30647,69 @@ static void fio___srv_wait_for_worker(void *thr_) {
   fio_thread_join(&t);
 }
 
-static fio_lock_i fio___srv_spawn_GIL = FIO_LOCK_INIT;
-
 /** Worker sentinel */
-static void *fio___srv_worker_sentinel(void *thr_ptr) {
-  (void)thr_ptr;
-  pid_t pid = fio_thread_fork();
-  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
-  if (pid) {
-    int status = 0;
-    fio_thread_t thr = fio_thread_current();
-    (void)status;
-    fio_state_callback_force(FIO_CALL_IN_MASTER);
-    fio_state_callback_add(FIO_CALL_ON_FINISH,
-                           fio___srv_wait_for_worker,
-                           (void *)thr);
-    fio_unlock(&fio___srv_spawn_GIL);
-    if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
-      FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
-    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-      FIO_LOG_WARNING("abnormal worker exit detected");
-      fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
-    }
-    if (!fio___srvdata.stop) {
-      FIO_ASSERT_DEBUG(
-          0,
-          "DEBUG mode prevents worker re-spawning, now crashing parent.");
-      fio_state_callback_remove(FIO_CALL_ON_FINISH,
-                                fio___srv_wait_for_worker,
-                                (void *)thr);
-      fio_thread_detach(&thr);
-      fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
-    }
-    return NULL;
+static void *fio___srv_worker_sentinel(void *pid_data) {
+  pid_t pid = (pid_t)(uintptr_t)pid_data;
+  int status = 0;
+  (void)status;
+  fio_thread_t thr = fio_thread_current();
+  fio_state_callback_add(FIO_CALL_ON_FINISH,
+                         fio___srv_wait_for_worker,
+                         (void *)thr);
+  if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
+    FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
+  if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+    FIO_LOG_WARNING("abnormal worker exit detected");
+    fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
   }
-  fio_unlock(&fio___srv_spawn_GIL);
-  fio___srvdata.pid = getpid();
-  fio___srvdata.is_worker = 1;
-  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
-  fio_state_callback_force(FIO_CALL_IN_CHILD);
-  fio___srv_work(1);
-  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
-  exit(0);
+  if (!fio___srvdata.stop) {
+    FIO_ASSERT_DEBUG(
+        0,
+        "DEBUG mode prevents worker re-spawning, now crashing parent.");
+    fio_state_callback_remove(FIO_CALL_ON_FINISH,
+                              fio___srv_wait_for_worker,
+                              (void *)thr);
+    fio_thread_detach(&thr);
+    fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
+  }
   return NULL;
 }
 
-static void fio___srv_spawn_worker(void *thr_ptr, void *ignr_2) {
+static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
   fio_thread_t t;
-  fio_thread_t *pt = (fio_thread_t *)thr_ptr;
-  if (!pt)
-    pt = &t;
+
   if (fio___srvdata.root_pid != fio___srvdata.pid)
     return;
 
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
   fio_queue_perform_all(fio___srv_tasks);
-
-  fio_lock(&fio___srv_spawn_GIL);
-  if (fio_thread_create(pt, fio___srv_worker_sentinel, thr_ptr)) {
-    fio_unlock(&fio___srv_spawn_GIL);
+  /* perform actual fork */
+  pid_t pid = fio_thread_fork();
+  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  if (!pid)
+    goto is_worker_process;
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_MASTER);
+  if (fio_thread_create(&t,
+                        fio___srv_worker_sentinel,
+                        (void *)(uintptr_t)pid)) {
     FIO_LOG_FATAL(
         "sentinel thread creation failed, no worker will be spawned.");
     fio_srv_stop();
   }
-  fio_lock(&fio___srv_spawn_GIL);
-  fio_unlock(&fio___srv_spawn_GIL);
-  (void)ignr_2;
+  return;
+
+is_worker_process:
+  fio___srvdata.pid = getpid();
+  fio___srvdata.is_worker = 1;
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_CHILD);
+  fio___srv_work(1);
+  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
+  exit(0);
 }
 
 /* *****************************************************************************
@@ -30950,7 +30946,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
   if (s->on_finish)
     s->on_finish(s->udata);
-  if (!s->on_root || fio___srvdata.pid == fio___srvdata.root_pid)
+  if ((!s->on_root && fio_srv_is_worker()) ||
+      (s->on_root && fio_srv_is_master()))
     FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
 }
 
@@ -30961,7 +30958,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
 #ifdef AF_UNIX
   /* delete the unix socket file, if any. */
   fio_url_s u = fio_url_parse(l->url, strlen(l->url));
-  if (!u.host.buf && !u.port.buf && u.path.buf) {
+  if (fio_srv_is_master() && !u.host.buf && !u.port.buf && u.path.buf) {
     unlink(u.path.buf);
   }
 #endif
@@ -31902,7 +31899,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #undef FIO___PUBSUB_MASTER_MAP_HASH
 #undef FIO___PUBSUB_MASTER_MAP_CMP
 #else
-#define FIO_MAP_KEYSTR
+#define FIO_MAP_KEY_KSTR
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
@@ -32378,8 +32375,7 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
-/** Starts listening to IPC connections on a
- * local socket. */
+/** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
   if (fio_srv_is_worker()) {
@@ -32880,10 +32876,16 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
-  fio_connect(FIO_POSTOFFICE.ipc_url,
-              &FIO_LETTER_PROTOCOL_IPC_CHILD,
-              NULL,
-              NULL);
+  if (fio_connect(FIO_POSTOFFICE.ipc_url,
+                  &FIO_LETTER_PROTOCOL_IPC_CHILD,
+                  NULL,
+                  NULL)) {
+    FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
+                  fio___srvdata.pid,
+                  FIO_POSTOFFICE.ipc_url);
+    kill(fio___srvdata.root_pid, SIGINT);
+    FIO_ASSERT(0, "fatal error encountered");
+  }
   /* TODO! clear master-only subscriptions */
 }
 

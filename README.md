@@ -53,7 +53,7 @@ cls && cl /Ox tests\stl.c /I. && stl.exe
 
 ### Binary-Safe Dynamic Strings
 
-The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar disadvantages):
+The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar cons / pros):
 
 ```c
 /* include Core String functionality */
@@ -79,17 +79,15 @@ void hello_binary_strings(void) {
 
 ### Reference Counting Binary-Safe Dynamic Strings
 
-Easily use a template to create your own binary safe String type that is always `NUL` terminated. Optionally add reference counting to your type with a single line of code.
-
-Or use a template to create your own String type, much better for reference counting:
+Easily use a template to create your own binary safe String type that is always `NUL` terminated. Optionally add reference counting to your type with a single line of code:
 
 ```c
 /* Create a binary safe String type called `my_str_s` */
 #define FIO_STR_NAME my_str
 /* Use a reference counting for `my_str_s` (using the same name convention) */
 #define FIO_REF_NAME my_str
-/* Make the reference counter the only constructor rather then having it as an
- * additional flavor */
+/* Make the reference counter the only constructor
+ * rather then having it as an additional flavor */
 #define FIO_REF_CONSTRUCTOR_ONLY
 #include "fio-stl/include.h" /* or "fio-stl.h" */
 
@@ -136,17 +134,19 @@ void array_example(void) {
 }
 ```
 
-### Hash Maps
+### Hash Map Any Type
 
-This is an example for a key-value String Hash Map, also sometimes called a "dictionary".
+Define your own Hash Maps for any key-value pair of any type.
+
+In this example we manually construct a dictionary hash map where short String objects are mapped to other (often longer) String objects.
 
 ```c
 /* Create a binary safe String type for Strings that aren't mutated often */
 #define FIO_STR_SMALL str
-#include "fio-stl.h" /* or "fio-stl/include.h" */
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
-/* Set the properties for the key-value Unordered Map type called `dict_s` */
-#define FIO_MAP_NAME                  dict
+/* Defines a key-value Unordered Map type called `dictionary_s` */
+#define FIO_MAP_NAME                  dictionary
 #define FIO_MAP_ORDERED               0
 #define FIO_MAP_VALUE                 str_s
 #define FIO_MAP_VALUE_COPY(dest, src) str_init_copy2(&(dest), &(src))
@@ -156,65 +156,53 @@ This is an example for a key-value String Hash Map, also sometimes called a "dic
 #define FIO_MAP_KEY_COPY              FIO_MAP_VALUE_COPY
 #define FIO_MAP_KEY_DESTROY           FIO_MAP_VALUE_DESTROY
 #define FIO_MAP_KEY_CMP               FIO_MAP_VALUE_CMP
-#include "fio-stl.h"
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 /** set helper for consistent hash values */
-FIO_IFUNC str_s dict_set2(dict_s *m, str_s key, str_s obj) {
-  return dict_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
+FIO_IFUNC str_s dictionary_set2(dictionary_s *m, str_s key, str_s obj) {
+  return dictionary_set(m, str_hash(&key, (uint64_t)m), key, obj, NULL);
 }
 /** get helper for consistent hash values */
-FIO_IFUNC str_s *dict_get2(dict_s *m, str_s key) {
-  return &(dict_get_ptr(m, str_hash(&key, (uint64_t)m), key)->value);
+FIO_IFUNC str_s *dictionary_get2(dictionary_s *m, str_s key) {
+  return &(dictionary_get_ptr(m, str_hash(&key, (uint64_t)m), key)->value);
 }
 
-void dict_example(void) {
-  dict_s dictionary = FIO_MAP_INIT;
+void dictionary_example(void) {
+  dictionary_s dictionary = FIO_MAP_INIT;
   str_s key, val;
   str_init_const(&key, "hello", 5);
   str_init_const(&val, "Hello World!", 12);
-  dict_set2(&dictionary, key, val);
-  fprintf(stdout, "%s\n", str_ptr(dict_get2(&dictionary, key)));
-  dict_destroy(&dictionary);
+  dictionary_set2(&dictionary, key, val);
+  printf("%s\n", str_ptr(dictionary_get2(&dictionary, key)));
+  dictionary_destroy(&dictionary);
 }
 ```
 
-This same example actually has a shortcut that uses the dedicate `fio_keystr_s` type - a string type that is optimized for Hash Maps that use mostly (but not always) short string keys (less than 15 bytes per key on 64 bit systems):
+### Hash Map Binary Safe Strings
 
+Easily define key-value String Hash Map, also sometimes called a "dictionary", using different smart defaults for short keys `FIO_MAP_KEY_KSTR` vs longer keys (or when expecting a sparsely populated map) `FIO_MAP_KEY_BSTR`.
 
 ```c
-/* map words to numbers. */
-#define FIO_MAP_KEYSTR
-#define FIO_UMAP_NAME umap
-#define FIO_MAP_TYPE  uintptr_t
-#include "fio-stl.h" /* or "fio-stl/include.h" */
+/* Set the properties for the key-value Unordered Map type called `dict_s` */
+#define FIO_MAP_NAME       dict
+#define FIO_MAP_KEY_KSTR   /* pre-defined macro for using fio_keystr_s keys. */
+#define FIO_MAP_VALUE_BSTR /* pre-defined macro for using String values. */
+#define FIO_MAP_HASH_FN(str)                                                   \
+  fio_risky_hash(str.buf, str.len, (uint64_t)&fio_risky_hash)
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
-/** a helper to calculate hash and set any string as a key. */
-FIO_IFUNC void umap_set2(umap_s *map, char *key, size_t key_len, uintptr_t obj) {
-  umap_set(map, fio_risky_hash(key, key_len, (uint64_t)map), fio_keystr(key, key_len), obj, NULL);
-}
-/** a helper to calculate hash and set a constant string as a key. */
-FIO_IFUNC void umap_set3(umap_s *map, char *key, size_t key_len, uintptr_t obj) {
-  umap_set(map, fio_risky_hash(key, key_len, (uint64_t)map), fio_keystr_const(key, key_len), obj, NULL);
-}
-
-/** a helper to calculate hash and get the value of a key. */
-FIO_IFUNC uintptr_t umap_get2(umap_s *map, char *key, size_t key_len) {
-  uint64_t hash = fio_risky_hash(key, key_len, (uint64_t)map);
-  return umap_get(map, hash, fio_keystr(key, key_len));
-}
-/* example adding strings to map and printing data. */
-void example(void) {
-  umap_s map = FIO_MAP_INIT;
-  umap_set3(&map, "One", 3, 1); /* use `umap_set3` since this is a `const char *` string */
-  umap_set3(&map, "Two", 3, 2);
-  umap_set3(&map, "Three", 5, 3);
-  FIO_MAP_EACH(umap, &map, pos) {
-    /* note that key strings are NOT nul terminated! (minimizes allocations) */
-    fio_buf_info_s key = fio_keystr_info(&pos->obj.key);
-    uintptr_t value = pos->obj.value;
-    printf("%.*s: %llu\n", (int)key.len, key.buf, (unsigned long long)value);
-  }
-  umap_destroy(&map);
-  return 0;
+void easy_dict_example(void) {
+  dict_s dictionary = FIO_MAP_INIT;
+  dict_set(&dictionary,
+           FIO_STR_INFO1("Hello"),
+           FIO_STR_INFO1("Hello World!"),
+           NULL);
+  dict_set(&dictionary,
+           FIO_STR_INFO1("42"),
+           FIO_STR_INFO1("Meaning of life..."),
+           NULL);
+  printf("Hello: %s\n", dict_get(&dictionary, FIO_STR_INFO1("Hello")).buf);
+  printf("42:    %s\n", dict_get(&dictionary, FIO_STR_INFO1("42")).buf);
+  dict_destroy(&dictionary);
 }
 ```
 

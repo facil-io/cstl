@@ -584,7 +584,7 @@ typedef struct {
 
 /* unordered `env` dictionary style map */
 #define FIO_UMAP_NAME fio___srv_env
-#define FIO_MAP_KEYSTR
+#define FIO_MAP_KEY_KSTR
 #define FIO_MAP_VALUE fio___srv_env_obj_s
 #define FIO_MAP_VALUE_DESTROY(o)                                               \
   do {                                                                         \
@@ -1287,74 +1287,69 @@ static void fio___srv_wait_for_worker(void *thr_) {
   fio_thread_join(&t);
 }
 
-static fio_lock_i fio___srv_spawn_GIL = FIO_LOCK_INIT;
-
 /** Worker sentinel */
-static void *fio___srv_worker_sentinel(void *thr_ptr) {
-  (void)thr_ptr;
-  pid_t pid = fio_thread_fork();
-  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
-  if (pid) {
-    int status = 0;
-    fio_thread_t thr = fio_thread_current();
-    (void)status;
-    fio_state_callback_force(FIO_CALL_IN_MASTER);
-    fio_state_callback_add(FIO_CALL_ON_FINISH,
-                           fio___srv_wait_for_worker,
-                           (void *)thr);
-    fio_unlock(&fio___srv_spawn_GIL);
-    if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
-      FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
-    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-      FIO_LOG_WARNING("abnormal worker exit detected");
-      fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
-    }
-    if (!fio___srvdata.stop) {
-      FIO_ASSERT_DEBUG(
-          0,
-          "DEBUG mode prevents worker re-spawning, now crashing parent.");
-      fio_state_callback_remove(FIO_CALL_ON_FINISH,
-                                fio___srv_wait_for_worker,
-                                (void *)thr);
-      fio_thread_detach(&thr);
-      fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
-    }
-    return NULL;
+static void *fio___srv_worker_sentinel(void *pid_data) {
+  pid_t pid = (pid_t)(uintptr_t)pid_data;
+  int status = 0;
+  (void)status;
+  fio_thread_t thr = fio_thread_current();
+  fio_state_callback_add(FIO_CALL_ON_FINISH,
+                         fio___srv_wait_for_worker,
+                         (void *)thr);
+  if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
+    FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
+  if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+    FIO_LOG_WARNING("abnormal worker exit detected");
+    fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
   }
-  fio_unlock(&fio___srv_spawn_GIL);
-  fio___srvdata.pid = getpid();
-  fio___srvdata.is_worker = 1;
-  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
-  fio_state_callback_force(FIO_CALL_IN_CHILD);
-  fio___srv_work(1);
-  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
-  exit(0);
+  if (!fio___srvdata.stop) {
+    FIO_ASSERT_DEBUG(
+        0,
+        "DEBUG mode prevents worker re-spawning, now crashing parent.");
+    fio_state_callback_remove(FIO_CALL_ON_FINISH,
+                              fio___srv_wait_for_worker,
+                              (void *)thr);
+    fio_thread_detach(&thr);
+    fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
+  }
   return NULL;
 }
 
-static void fio___srv_spawn_worker(void *thr_ptr, void *ignr_2) {
+static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
   fio_thread_t t;
-  fio_thread_t *pt = (fio_thread_t *)thr_ptr;
-  if (!pt)
-    pt = &t;
+
   if (fio___srvdata.root_pid != fio___srvdata.pid)
     return;
 
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
   fio_queue_perform_all(fio___srv_tasks);
-
-  fio_lock(&fio___srv_spawn_GIL);
-  if (fio_thread_create(pt, fio___srv_worker_sentinel, thr_ptr)) {
-    fio_unlock(&fio___srv_spawn_GIL);
+  /* perform actual fork */
+  pid_t pid = fio_thread_fork();
+  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  if (!pid)
+    goto is_worker_process;
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_MASTER);
+  if (fio_thread_create(&t,
+                        fio___srv_worker_sentinel,
+                        (void *)(uintptr_t)pid)) {
     FIO_LOG_FATAL(
         "sentinel thread creation failed, no worker will be spawned.");
     fio_srv_stop();
   }
-  fio_lock(&fio___srv_spawn_GIL);
-  fio_unlock(&fio___srv_spawn_GIL);
-  (void)ignr_2;
+  return;
+
+is_worker_process:
+  fio___srvdata.pid = getpid();
+  fio___srvdata.is_worker = 1;
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_CHILD);
+  fio___srv_work(1);
+  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
+  exit(0);
 }
 
 /* *****************************************************************************
@@ -1591,7 +1586,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
   if (s->on_finish)
     s->on_finish(s->udata);
-  if (!s->on_root || fio___srvdata.pid == fio___srvdata.root_pid)
+  if ((!s->on_root && fio_srv_is_worker()) ||
+      (s->on_root && fio_srv_is_master()))
     FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
 }
 
@@ -1602,7 +1598,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
 #ifdef AF_UNIX
   /* delete the unix socket file, if any. */
   fio_url_s u = fio_url_parse(l->url, strlen(l->url));
-  if (!u.host.buf && !u.port.buf && u.path.buf) {
+  if (fio_srv_is_master() && !u.host.buf && !u.port.buf && u.path.buf) {
     unlink(u.path.buf);
   }
 #endif

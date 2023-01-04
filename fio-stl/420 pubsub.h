@@ -703,7 +703,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #undef FIO___PUBSUB_MASTER_MAP_HASH
 #undef FIO___PUBSUB_MASTER_MAP_CMP
 #else
-#define FIO_MAP_KEYSTR
+#define FIO_MAP_KEY_KSTR
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
@@ -1179,8 +1179,7 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
-/** Starts listening to IPC connections on a
- * local socket. */
+/** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
   if (fio_srv_is_worker()) {
@@ -1681,10 +1680,16 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
-  fio_connect(FIO_POSTOFFICE.ipc_url,
-              &FIO_LETTER_PROTOCOL_IPC_CHILD,
-              NULL,
-              NULL);
+  if (fio_connect(FIO_POSTOFFICE.ipc_url,
+                  &FIO_LETTER_PROTOCOL_IPC_CHILD,
+                  NULL,
+                  NULL)) {
+    FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
+                  fio___srvdata.pid,
+                  FIO_POSTOFFICE.ipc_url);
+    kill(fio___srvdata.root_pid, SIGINT);
+    FIO_ASSERT(0, "fatal error encountered");
+  }
   /* TODO! clear master-only subscriptions */
 }
 

@@ -2141,7 +2141,8 @@ Pointer Tagging
 
 /* Modules that require the String Core API */
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
-    defined(FIO_MAP_KEYSTR) || !defined(FIO_MAP_KEY) ||                        \
+    defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
+    (defined(FIO_MAP_VALUE) && !defined(FIO_MAP_KEY)) ||                       \
     defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER) || defined(FIO_FIOBJ)
 #ifndef FIO_STR
 #define FIO_STR

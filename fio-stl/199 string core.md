@@ -641,7 +641,7 @@ It is very common for Hash Maps to contain String keys. When the String keys are
 
 The `fio_keystr_s` type included with the String Core performs exactly this optimization. When the majority of the Strings are short (`len <= 14` on 64 bit machines or `len <= 10` on 32 bit machines) than the strings are stored inside the Map's memory rather than allocated separately.
 
-See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEYSTR` MACRO.
+See example at the end of this section. The example shows how to use the `fio_keystr_s` type and the `FIO_MAP_KEY_KSTR` MACRO.
 
 #### `FIO_MAP_KEY_STR`
 
@@ -676,10 +676,12 @@ Do **not** `fio_keystr_destroy` this key.
 #### `fio_keystr_copy`
 
 ```c
-fio_keystr_s fio_keystr_copy(fio_keystr_s org, void *(*alloc_func)(size_t len));
+fio_keystr_s fio_keystr_copy(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
 ```
 
 Returns a copy of `fio_keystr_s` - used internally by the hash map.
+
+**Note**: when `.capa == FIO_KEYSTR_CONST` then the new `fio_keystr_s` will most likely point to the original pointer (which much remain valid in memory for the lifetime of the key string). Short enough strings are always copied to allow for improved cache locality.
 
 #### `fio_keystr_destroy`
 
@@ -697,31 +699,39 @@ int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 
 Compares two Key Strings - used internally by the hash map.
 
+#### `FIO_KEYSTR_CONST`
+
+```c
+#define FIO_KEYSTR_CONST ((size_t)-1LL)
+```
+
 ### `fio_keystr` Example
 
 This example maps words to numbers. Note that this will work also with binary data and dynamic strings.
 
 ```c
 /* map words to numbers. */
+#define FIO_MAP_KEY_KSTR
 #define FIO_UMAP_NAME umap
-#define FIO_MAP_KEYSTR
 #define FIO_MAP_VALUE uintptr_t
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)&umap_destroy)
-#include "fio-stl.h"
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
 /* example adding strings to map and printing data. */
-void example(void) {
+void map_keystr_example(void) {
   umap_s map = FIO_MAP_INIT;
-  umap_set(&map, FIO_BUF_INFO1("One"), 1, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Two"), 2, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Three"), 3, NULL);
-  umap_set(&map, FIO_BUF_INFO1("Infinity"), (uintptr_t)-1, NULL);
-  FIO_MAP_EACH(umap, &map, i) {
-    printf("%s: %llu\n",
-           (int)i.key.len,
-           i.key.buf,
-           (unsigned long long)i.value);
+  /* FIO_KEYSTR_CONST prevents copying of longer constant strings */
+  umap_set(&map, FIO_STR_INFO3("One", 3, FIO_KEYSTR_CONST), 1, NULL);
+  umap_set(&map, FIO_STR_INFO3("Two", 3, FIO_KEYSTR_CONST), 2, NULL);
+  umap_set(&map, FIO_STR_INFO3("Three", 5, FIO_KEYSTR_CONST), 3, NULL);
+  FIO_MAP_EACH(umap, &map, pos) {
+    uintptr_t value = pos.value;
+    /* note that key strings are NOT nul terminated! (minimizes allocations) */
+    printf("%.*s: %llu\n",
+           (int)pos.key.len,
+           pos.key.buf,
+           (unsigned long long)value);
   }
   umap_destroy(&map);
 }
