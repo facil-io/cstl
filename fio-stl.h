@@ -790,7 +790,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   if (l < 64)
     goto small_memcpy_64;
 
-  /* 64(?) byte blocks */
+  /* 64 byte blocks */
   for (;;) {
     fio_memcpy64(d, s);
     l -= 64;
@@ -14393,8 +14393,50 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
   }
 
 #ifndef DEBUG
-  fprintf(stderr, "* Speed testing memset:\n");
   const size_t base_repetitions = 8192;
+  fprintf(stderr, "* Speed testing core memcpy primitives:\n");
+  {
+    struct {
+      void *(*fn)(void *, const void *);
+      size_t bytes;
+    } tests[] = {
+        {fio_memcpy8, 8},
+        {fio_memcpy16, 16},
+        {fio_memcpy32, 32},
+        {fio_memcpy64, 64},
+        {fio_memcpy128, 128},
+        {fio_memcpy256, 256},
+        {fio_memcpy512, 512},
+        {fio_memcpy1024, 1024},
+        {fio_memcpy2048, 2048},
+        {fio_memcpy4096, 4096},
+        {NULL},
+    };
+    char buf[4096 * 2];
+    memset(buf, 0x80, 4096 * 2);
+    for (size_t i = 0; tests[i].bytes; ++i) {
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        tests[i].fn(buf, buf + 4096);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tfio_memcpy%zu\tmemcpy(a,b,%zu)   \t%zuus\t",
+              tests[i].bytes,
+              tests[i].bytes,
+              (size_t)(end - start));
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        memcpy(buf, buf + 4096, tests[i].bytes);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr, "%zuus\n", (size_t)(end - start));
+    }
+  }
+
+  fprintf(stderr, "* Speed testing memset:\n");
 
   for (size_t len_i = 5; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions

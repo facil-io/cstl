@@ -658,7 +658,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   if (l < 64)
     goto small_memcpy_64;
 
-  /* 64(?) byte blocks */
+  /* 64 byte blocks */
   for (;;) {
     fio_memcpy64(d, s);
     l -= 64;
