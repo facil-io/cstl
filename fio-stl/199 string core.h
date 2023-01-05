@@ -621,12 +621,12 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 SFUNC void FIO_BSTR___LEAK_TESTER(int add);
 FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #else
 #define FIO_BSTR___LEAK_TESTER(i)
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
   FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s))
@@ -2200,7 +2200,7 @@ copy_the_string:
   goto update_metadata;
 }
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 /* leak tester implementation */
 SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
   static size_t counter = 0;
@@ -2219,7 +2219,7 @@ SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
                   counter);
   }
 }
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************
 Testing

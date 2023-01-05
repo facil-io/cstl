@@ -1971,13 +1971,11 @@ End persistent segment (end include-once guard)
 
 
 
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /* *****************************************************************************
 Memory allocation macros
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 /* secure by default */
@@ -2015,8 +2013,7 @@ Memory allocation macros
 
 /* *****************************************************************************
 Locking selector
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #ifndef FIO_USE_THREAD_MUTEX
 #define FIO_USE_THREAD_MUTEX 0
@@ -2186,7 +2183,7 @@ Pointer Tagging
 
 ***************************************************************************** */
 /* Testing Dependencies */
-#if defined(FIO_TEST_CSTL)
+#if defined(FIO_TEST_CSTL) || defined(FIO_LEAK_COUNTER)
 #ifndef FIO_TEST_REPEAT
 #define FIO_TEST_REPEAT 4096
 #endif
@@ -2389,7 +2386,7 @@ Copyright and License: see header file (000 header.h) or top of file
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || FIO_LEAK_COUNTER)
+#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOG___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
@@ -12817,7 +12814,7 @@ Lock type choice
 Allocator debugging helpers
 ***************************************************************************** */
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 /* maximum block allocation count. */
 static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
 
@@ -12925,7 +12922,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
             free)) " called more than " FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME, \
                                                                malloc)));       \
   } while (0)
-#else /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)              ((void)0)
@@ -12939,7 +12936,7 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
 #define FIO_MEMORY_PRINT_STATS_END()                ((void)0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                  ((void)0)
 #define FIO_MEMORY_ON_FREE_FUNC()                   ((void)0)
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************
 
@@ -19342,12 +19339,12 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 Binary String Type - Embedded Strings
 ***************************************************************************** */
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 SFUNC void FIO_BSTR___LEAK_TESTER(int add);
 FIO_DESTRUCTOR(fio_bstr___leak_test) { FIO_BSTR___LEAK_TESTER(0); }
 #else
 #define FIO_BSTR___LEAK_TESTER(i)
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
   FIO_PTR_MATH_SUB(fio___bstr_meta_s, bstr, sizeof(fio___bstr_meta_s))
@@ -20921,7 +20918,7 @@ copy_the_string:
   goto update_metadata;
 }
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 /* leak tester implementation */
 SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
   static size_t counter = 0;
@@ -20940,7 +20937,7 @@ SFUNC void FIO_BSTR___LEAK_TESTER(int add) {
                   counter);
   }
 }
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /* *****************************************************************************
 Testing
@@ -27257,7 +27254,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO_REF_ON_ALLOC()                                                     \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
@@ -27276,7 +27273,7 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
 #else
 #define FIO_REF_ON_ALLOC()
 #define FIO_REF_ON_FREE()
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -33322,7 +33319,7 @@ General Requirements / Macros
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if defined(TEST) || defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 #define FIOBJ_MARK_MEMORY 1
 #endif
 
@@ -33339,11 +33336,11 @@ size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
            ? 4 /* FIO_LOG_LEVEL_INFO */                                        \
            : 3 /* FIO_LOG_LEVEL_WARNING */),                                   \
       ((FIOBJ_MARK_MEMORY_ALLOC_COUNTER == FIOBJ_MARK_MEMORY_FREE_COUNTER)     \
-           ? "INFO: total FIOBJ allocations: %zu (%zu/%zu)"                    \
-           : "WARNING: LEAKED! FIOBJ allocations: %zu (%zu/%zu)"),             \
+           ? "INFO: total remaining FIOBJ allocations: %zu (%zu - %zu)"        \
+           : "WARNING: LEAKED! FIOBJ allocations: %zu (%zu - %zu)"),           \
       FIOBJ_MARK_MEMORY_ALLOC_COUNTER - FIOBJ_MARK_MEMORY_FREE_COUNTER,        \
-      FIOBJ_MARK_MEMORY_FREE_COUNTER,                                          \
-      FIOBJ_MARK_MEMORY_ALLOC_COUNTER)
+      FIOBJ_MARK_MEMORY_ALLOC_COUNTER,                                         \
+      FIOBJ_MARK_MEMORY_FREE_COUNTER)
 #define FIOBJ_MARK_MEMORY_ENABLED 1
 
 #else

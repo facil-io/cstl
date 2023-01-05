@@ -102,7 +102,7 @@ General Requirements / Macros
 /* *****************************************************************************
 Debugging / Leak Detection
 ***************************************************************************** */
-#if defined(TEST) || defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 #define FIOBJ_MARK_MEMORY 1
 #endif
 
@@ -119,11 +119,11 @@ size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
            ? 4 /* FIO_LOG_LEVEL_INFO */                                        \
            : 3 /* FIO_LOG_LEVEL_WARNING */),                                   \
       ((FIOBJ_MARK_MEMORY_ALLOC_COUNTER == FIOBJ_MARK_MEMORY_FREE_COUNTER)     \
-           ? "INFO: total FIOBJ allocations: %zu (%zu/%zu)"                    \
-           : "WARNING: LEAKED! FIOBJ allocations: %zu (%zu/%zu)"),             \
+           ? "INFO: total remaining FIOBJ allocations: %zu (%zu - %zu)"        \
+           : "WARNING: LEAKED! FIOBJ allocations: %zu (%zu - %zu)"),           \
       FIOBJ_MARK_MEMORY_ALLOC_COUNTER - FIOBJ_MARK_MEMORY_FREE_COUNTER,        \
-      FIOBJ_MARK_MEMORY_FREE_COUNTER,                                          \
-      FIOBJ_MARK_MEMORY_ALLOC_COUNTER)
+      FIOBJ_MARK_MEMORY_ALLOC_COUNTER,                                         \
+      FIOBJ_MARK_MEMORY_FREE_COUNTER)
 #define FIOBJ_MARK_MEMORY_ENABLED 1
 
 #else

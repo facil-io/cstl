@@ -79,7 +79,11 @@ void hello_binary_strings(void) {
 
 ### Reference Counting Binary-Safe Dynamic Strings
 
-Easily use a template to create your own binary safe String type that is always `NUL` terminated. Optionally add reference counting to your type with a single line of code:
+Easily use a template to create your own binary safe String type that is always `NUL` terminated.
+
+Optionally add reference counting to your type with a single line of code.
+
+**Note**: unlike `copy` which creates an independent copy, a `dup` operation duplicates the handle (does not copy the data), so both handles point to the same object.
 
 ```c
 /* Create a binary safe String type called `my_str_s` */
@@ -94,13 +98,13 @@ Easily use a template to create your own binary safe String type that is always 
 void reference_counted_shared_strings(void) {
   my_str_s *msg = my_str_new();
   my_str_write(msg, "Hello World", 11);
-  /* increase reference - but the string data is shared(!) */
+  /* increase reference - duplicates the handle, but the string data is shared(!) */
   my_str_s *ref = my_str_dup(msg);
   my_str_write(ref, ", written to both handles.", 26);
   printf("%s\n", my_str_ptr(msg));
   printf("%s\n", my_str_ptr(ref));
   my_str_free(msg);
-  printf("Still valid, as we had 2 references: %s\n", my_str_ptr(ref));
+  printf("Still valid, as we had 2 references:\n\t%s\n", my_str_ptr(ref));
   my_str_free(ref);
 }
 ```

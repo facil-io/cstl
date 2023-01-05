@@ -141,7 +141,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if defined(DEBUG) || FIO_LEAK_COUNTER
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO_REF_ON_ALLOC()                                                     \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
@@ -160,7 +160,7 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
 #else
 #define FIO_REF_ON_ALLOC()
 #define FIO_REF_ON_FREE()
-#endif /* defined(DEBUG) || FIO_LEAK_COUNTER */
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE

@@ -32,7 +32,7 @@ Copyright and License: see header file (000 header.h) or top of file
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || FIO_LEAK_COUNTER)
+#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOG___H
 
 #if FIO_LOG_LENGTH_LIMIT > 128
