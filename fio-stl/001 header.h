@@ -1591,6 +1591,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
+#define S_IRWXO       (S_IRUSR | S_IWUSR)
+#define S_IRWXG       (S_IRUSR | S_IWUSR)
+#define S_IRWXU       (S_IRUSR | S_IWUSR)
 #endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY

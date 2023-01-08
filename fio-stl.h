@@ -1723,6 +1723,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
+#define S_IRWXO       (S_IRUSR | S_IWUSR)
+#define S_IRWXG       (S_IRUSR | S_IWUSR)
+#define S_IRWXU       (S_IRUSR | S_IWUSR)
 #endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
@@ -16151,7 +16154,7 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
 #ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
-SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock);
+SFUNC int fio_sock_open_unix(const char *address, uint16_t flags);
 #endif
 
 /** Sets a file descriptor / socket to non blocking state. */
@@ -16191,11 +16194,12 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
                             uint16_t flags) {
   struct addrinfo *addr = NULL;
   int fd;
-  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP
 #ifdef AF_UNIX
-                    | (uint16_t)FIO_SOCK_UNIX
+  if ((flags & FIO_SOCK_UNIX))
+    return fio_sock_open_unix(address, flags);
 #endif
-                    ))) {
+
+  switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP))) {
   case FIO_SOCK_UDP:
     addr = fio_sock_address_new(address, port, SOCK_DGRAM);
     if (!addr) {
@@ -16229,13 +16233,6 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     }
     fio_sock_address_free(addr);
     return fd;
-
-#ifdef AF_UNIX
-  case FIO_SOCK_UNIX:
-    return fio_sock_open_unix(address,
-                              (flags & FIO_SOCK_CLIENT),
-                              (flags & FIO_SOCK_NONBLOCK));
-#endif
   }
 
   FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
@@ -16282,7 +16279,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
 #ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* unix socket */
-    flags &= FIO_SOCK_SERVER | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK;
+    flags &= ~((uint16_t)(FIO_SOCK_UNIX | FIO_SOCK_TCP));
     flags |= FIO_SOCK_UNIX;
     if (u.path.len >= 2048) {
       errno = EINVAL;
@@ -16295,50 +16292,47 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
     FIO_MEMCPY(buf, u.path.buf, u.path.len);
     buf[u.path.len] = 0;
     pr = NULL;
-  } else
+    return fio_sock_open_unix(buf, flags);
+  }
 #endif
-  {
-    if (!u.port.len)
-      u.port = u.scheme;
-    if (!u.port.len) {
-      pr = NULL;
-    } else {
-      if (u.port.len >= 64) {
-        errno = EINVAL;
-        FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
-                      url);
-        return -1;
-      }
-      FIO_MEMCPY(port, u.port.buf, u.port.len);
-      port[u.port.len] = 0;
-      if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
-        if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
-            (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
-          flags |= FIO_SOCK_TCP;
-        else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
-                 (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
-          flags |= FIO_SOCK_UDP;
-        else if ((u.scheme.len == 4 || u.scheme.len == 5) &&
-                 (u.scheme.buf[0] | 32) == 'h' &&
-                 (u.scheme.buf[1] | 32) == 't' &&
-                 (u.scheme.buf[2] | 32) == 't' &&
-                 (u.scheme.buf[3] | 32) == 'p' &&
-                 (u.scheme.len == 4 ||
-                  (u.scheme.len == 5 && (u.scheme.buf[4] | 32) == 's')))
-          flags |= FIO_SOCK_TCP;
-      }
+  if (!u.port.len)
+    u.port = u.scheme;
+  if (!u.port.len) {
+    pr = NULL;
+  } else {
+    if (u.port.len >= 64) {
+      errno = EINVAL;
+      FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
+                    url);
+      return -1;
     }
-    if (u.host.len) {
-      if (u.host.len >= 2048) {
-        errno = EINVAL;
-        FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
-        return -1;
-      }
-      FIO_MEMCPY(buf, u.host.buf, u.host.len);
-      buf[u.host.len] = 0;
-    } else {
-      addr = NULL;
+    FIO_MEMCPY(port, u.port.buf, u.port.len);
+    port[u.port.len] = 0;
+    if (!(flags & (FIO_SOCK_TCP | FIO_SOCK_UDP))) {
+      if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 't' &&
+          (u.scheme.buf[1] | 32) == 'c' && (u.scheme.buf[2] | 32) == 'p')
+        flags |= FIO_SOCK_TCP;
+      else if (u.scheme.len == 3 && (u.scheme.buf[0] | 32) == 'u' &&
+               (u.scheme.buf[1] | 32) == 'd' && (u.scheme.buf[2] | 32) == 'p')
+        flags |= FIO_SOCK_UDP;
+      else if ((u.scheme.len == 4 || u.scheme.len == 5) &&
+               (u.scheme.buf[0] | 32) == 'h' && (u.scheme.buf[1] | 32) == 't' &&
+               (u.scheme.buf[2] | 32) == 't' && (u.scheme.buf[3] | 32) == 'p' &&
+               (u.scheme.len == 4 ||
+                (u.scheme.len == 5 && (u.scheme.buf[4] | 32) == 's')))
+        flags |= FIO_SOCK_TCP;
     }
+  }
+  if (u.host.len) {
+    if (u.host.len >= 2048) {
+      errno = EINVAL;
+      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      return -1;
+    }
+    FIO_MEMCPY(buf, u.host.buf, u.host.len);
+    buf[u.host.len] = 0;
+  } else {
+    addr = NULL;
   }
   return fio_sock_open(addr, pr, flags);
 }
@@ -16557,7 +16551,7 @@ SFUNC size_t fio_sock_maximize_limits(void) {
 
 #ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
-SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
+SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   /* Unix socket */
   struct sockaddr_un addr = {0};
   size_t addr_len = strlen(address);
@@ -16575,22 +16569,21 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
   addr.sun_len = addr_len;
 #endif
   // get the file descriptor
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd =
+      socket(AF_UNIX, (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM, 0);
   if (fd == -1) {
-    FIO_LOG_DEBUG("couldn't open unix socket (client? == %d) %s",
-                  is_client,
+    FIO_LOG_DEBUG("couldn't open unix socket (flags == %d) %s",
+                  (int)flags,
                   strerror(errno));
     return -1;
   }
-  /* chmod for foreign connections */
-  fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
-  if (nonblock && fio_sock_set_non_block(fd) == -1) {
-    FIO_LOG_DEBUG("couldn't set socket to nonblocking mode");
+  if ((flags & FIO_SOCK_NONBLOCK) && fio_sock_set_non_block(fd) == -1) {
+    FIO_LOG_DEBUG("couldn't set socket to non-blocking mode");
     fio_sock_close(fd);
     unlink(addr.sun_path);
     return -1;
   }
-  if (is_client) {
+  if ((flags & FIO_SOCK_CLIENT)) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
         errno != EINPROGRESS) {
       FIO_LOG_DEBUG("couldn't connect unix client @ %s : %s",
@@ -16604,13 +16597,12 @@ SFUNC int fio_sock_open_unix(const char *address, int is_client, int nonblock) {
     unlink(addr.sun_path);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
-      // umask(old_umask);
       fio_sock_close(fd);
       unlink(addr.sun_path);
       return -1;
     }
-    // umask(old_umask);
-    if (listen(fd, SOMAXCONN) < 0) {
+    chmod(address, S_IRWXO | S_IRWXG | S_IRWXU); /* TODO? allow all? */
+    if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
       unlink(addr.sun_path);
