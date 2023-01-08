@@ -783,29 +783,42 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 16)
-    goto small_memcpy_16;
   if (l < 32)
-    goto small_memcpy_32;
-  if (l < 64)
-    goto small_memcpy_64;
+    goto small_memcpy;
 
-  /* 64 byte blocks */
-  for (;;) {
-    fio_memcpy64(d, s);
-    l -= 64;
-    if (l < 64)
-      break;
-    s += 64;
-    d += 64;
+  while (l > 255) {
+    fio_memcpy256(d, s);
+    l -= 256;
+    d += 256;
+    s += 256;
   }
-  /* leftover */
-  s += 63 & l;
-  d += 63 & l;
-  fio_memcpy64(d, s);
-  return (void *)(d += 64);
+  if (l & 128) {
+    fio_memcpy128(d, s);
+    d += 128;
+    s += 128;
+  }
+  if (l & 64) {
+    fio_memcpy64(d, s);
+    d += 64;
+    s += 64;
+  }
+  if (l & 32) {
+    fio_memcpy32(d, s);
+    d += 32;
+    s += 32;
+  }
+  d -= 32;
+  s -= 32;
+  d += l & 31U;
+  s += l & 31U;
+  fio_memcpy32(d, s);
+  return (void *)(d += 32);
 
-small_memcpy_16:
+small_memcpy:
+  if ((l & 16)) {
+    fio_memcpy16(d, s);
+    (d += 16), (s += 16);
+  }
   if ((l & 8)) {
     fio_memcpy8(d, s);
     (d += 8), (s += 8);
@@ -821,24 +834,6 @@ small_memcpy_16:
   if ((l & 1))
     *d++ = *s;
   return (void *)d;
-
-small_memcpy_32:
-  /* 16 byte block */
-  fio_memcpy16(d, s);
-  /* leftover */
-  s += (l & 15);
-  d += (l & 15);
-  fio_memcpy16(d, s);
-  return (void *)(d += 16);
-
-small_memcpy_64:
-  /* 32 byte block */
-  fio_memcpy32(d, s);
-  /* leftover */
-  s += (l & 31);
-  d += (l & 31);
-  fio_memcpy32(d, s);
-  return (void *)(d += 32);
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
@@ -847,52 +842,43 @@ FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
                                       size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[8] FIO_ALIGN(16);
-  if (l < 16) {
-    if ((l & 8)) {
-      fio_memcpy8(t, s);
-      fio_memcpy8(d, t);
-      (d += 8), (s += 8);
-    }
-    if ((l & 4)) {
-      fio_memcpy4(t, s);
-      fio_memcpy4(d, t);
-      (d += 4), (s += 4);
-    }
-    if ((l & 2)) {
-      fio_memcpy2(t, s);
-      fio_memcpy2(d, t);
-      (d += 2), (s += 2);
-    }
-    if ((l & 1))
-      *d++ = *s;
-    return (void *)d;
-  }
-  if (l < 32) {
-    /* 16 byte block */
-    fio_memcpy16(t, s);
-    fio_memcpy16(t + 2, s + (l & 15));
-    fio_memcpy16(d, t);
-    d += (l & 15);
-    fio_memcpy16(d, t + 2);
-    return (void *)(d += 16);
-  }
-  if (l < 64) {
-    /* 32 byte block */
-    fio_memcpy32(t, s);
-    fio_memcpy32(t + 4, s + (l & 31));
-    fio_memcpy32(d, t);
-    d += (l & 31);
-    fio_memcpy32(d, t + 4);
-    return (void *)(d += 32);
-  }
-  do {
-    /* 64 byte block? */
+  uint64_t t[32] FIO_ALIGN(16);
+  while (l > 63) {
     fio_memcpy64(t, s);
     fio_memcpy64(d, t);
-    (s += 64), (d += 64), (l -= 64);
-  } while (l > 63);
-  return fio_memcpy_buffered_x(d, s, l);
+    l -= 64;
+    d += 64;
+    s += 64;
+  }
+  if (l & 32) {
+    fio_memcpy32(t, s);
+    fio_memcpy32(d, t);
+    d += 32;
+    s += 32;
+  }
+  if ((l & 16)) {
+    fio_memcpy16(t, s);
+    fio_memcpy16(d, t);
+    (d += 16), (s += 16);
+  }
+  if ((l & 8)) {
+    fio_memcpy8(t, s);
+    fio_memcpy8(d, t);
+    (d += 8), (s += 8);
+  }
+  if ((l & 4)) {
+    fio_memcpy4(t, s);
+    fio_memcpy4(d, t);
+    (d += 4), (s += 4);
+  }
+  if ((l & 2)) {
+    fio_memcpy2(t, s);
+    fio_memcpy2(d, t);
+    (d += 2), (s += 2);
+  }
+  if ((l & 1))
+    *d++ = *s;
+  return (void *)d;
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
@@ -1038,7 +1024,7 @@ small_memset:
 FIO_MEMCPY / fio_memcpy - memcpy fallbacks
 ***************************************************************************** */
 
-#define FIO___MEMCPY_BLOCKx_NUM 63ULL
+#define FIO___MEMCPY_BLOCKx_NUM 255ULL
 
 /** memcpy / memmove alternative that should work with unaligned memory */
 FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {

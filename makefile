@@ -119,7 +119,7 @@ endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
 OPTIMIZATION=-O3
 # optimization level in debug mode. i.e.: -fsanitize=thread
-OPTIMIZATION_DEBUG=-O0 -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
+OPTIMIZATION_DEBUG=-O0 -g -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
@@ -721,7 +721,7 @@ set_debug_flags:
 	$(eval OPTIMIZATION=$(OPTIMIZATION_DEBUG))
 	$(eval CFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
 	$(eval CXXFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
-	$(eval LINKER_FLAGS=-coverage -DDEBUG=1 $(LINKER_FLAGS))
+	$(eval LINKER_FLAGS=-coverage -g -DDEBUG=1 $(LINKER_FLAGS))
 	@echo "* Set debug flags."
 
 $(TMP_ROOT)/%.d: ;
@@ -808,6 +808,8 @@ lib: create_tree build_lib_objects link_lib disassemble.all documentation.all;
 # - tests/XXX        compile and runs XXX.c
 #
 #############################################################################
+
+.SECONDARY: ;
 
 tests_set_env.%: create_tree
 	$(eval CFLAGS+=-DTEST=1 -DFIO_WEAK_TLS)
