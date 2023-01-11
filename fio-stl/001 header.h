@@ -651,7 +651,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 32)
+  if (l < 64)
     goto small_memcpy;
 
   while (l > 255) {
@@ -683,13 +683,26 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   return (void *)(d += 32);
 
 small_memcpy:
-  if ((l & 16)) {
-    fio_memcpy16(d, s);
-    (d += 16), (s += 16);
+  if (l > 31) {
+    fio_memcpy32(d, s);
+    d += l & 31;
+    s += l & 31;
+    fio_memcpy32(d, s);
+    return (void *)(d += 32);
   }
-  if ((l & 8)) {
+  if (l > 15) {
+    fio_memcpy16(d, s);
+    d += l & 15;
+    s += l & 15;
+    fio_memcpy16(d, s);
+    return (void *)(d += 16);
+  }
+  if (l > 7) {
     fio_memcpy8(d, s);
-    (d += 8), (s += 8);
+    d += l & 7;
+    s += l & 7;
+    fio_memcpy8(d, s);
+    return (void *)(d += 8);
   }
   if ((l & 4)) {
     fio_memcpy4(d, s);

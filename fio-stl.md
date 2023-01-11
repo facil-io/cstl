@@ -3787,7 +3787,9 @@ The `flag` integer can be a combination of any of the following flags:
 
 *  `FIO_SOCK_UDP` - Creates a UDP socket.
 
-*  `FIO_SOCK_UNIX ` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
+*  `FIO_SOCK_UNIX` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
+
+*  `FIO_SOCK_UNIX_PRIVATE` - Same as `FIO_SOCK_UNIX`, only does not use `umask` and `chmod` to make the socket publicly available.
 
 *  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
 
@@ -3930,7 +3932,18 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 
 Creates a new Unix socket and binds it to a local address.
 
-**Note**: available only on POSIX systems.
+**Note**: not available on all systems.
+
+
+#### `FIO_SOCK_AVOID_UMASK`
+
+This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).
+
+Using `umask` in multi-threaded environments could cause `umask` data corruption due to race condition (as two calls are actually required, making the operation non-atomic).
+
+If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
+
+This, however, may effect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
 
 -------------------------------------------------------------------------------
 ## Data Stream Container

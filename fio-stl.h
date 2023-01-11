@@ -783,7 +783,7 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 32)
+  if (l < 64)
     goto small_memcpy;
 
   while (l > 255) {
@@ -815,13 +815,26 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   return (void *)(d += 32);
 
 small_memcpy:
-  if ((l & 16)) {
-    fio_memcpy16(d, s);
-    (d += 16), (s += 16);
+  if (l > 31) {
+    fio_memcpy32(d, s);
+    d += l & 31;
+    s += l & 31;
+    fio_memcpy32(d, s);
+    return (void *)(d += 32);
   }
-  if ((l & 8)) {
+  if (l > 15) {
+    fio_memcpy16(d, s);
+    d += l & 15;
+    s += l & 15;
+    fio_memcpy16(d, s);
+    return (void *)(d += 16);
+  }
+  if (l > 7) {
     fio_memcpy8(d, s);
-    (d += 8), (s += 8);
+    d += l & 7;
+    s += l & 7;
+    fio_memcpy8(d, s);
+    return (void *)(d += 8);
   }
   if ((l & 4)) {
     fio_memcpy4(d, s);
@@ -16100,8 +16113,10 @@ typedef enum {
   FIO_SOCK_UDP = 8,
 #ifdef AF_UNIX
   FIO_SOCK_UNIX = 16,
+  FIO_SOCK_UNIX_PRIVATE = (16 | 32),
 #else
-#define FIO_SOCK_UNIX 0
+#define FIO_SOCK_UNIX         0
+#define FIO_SOCK_UNIX_PRIVATE 0
 #endif
 } fio_sock_open_flags_e;
 
@@ -16138,10 +16153,8 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
-#ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
 SFUNC int fio_sock_open_unix(const char *address, uint16_t flags);
-#endif
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd);
@@ -16264,7 +16277,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
   fio_url_s u = fio_url_parse(url, strlen(url));
 #ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
-    /* unix socket */
+    /* Unix socket - force flag validation */
     flags &= ~((uint16_t)(FIO_SOCK_UNIX | FIO_SOCK_TCP));
     flags |= FIO_SOCK_UNIX;
     if (u.path.len >= 2048) {
@@ -16576,18 +16589,31 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
                     addr.sun_path,
                     strerror(errno));
       fio_sock_close(fd);
-      unlink(addr.sun_path);
       return -1;
     }
   } else {
     unlink(addr.sun_path);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+    int btmp; // the bind result
+#ifndef FIO_SOCK_AVOID_UMASK
+    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
+      int umask_org = umask(0x1FF);
+      btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+      umask(umask_org);
+      FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
+                    umask_org);
+    } else
+#endif /* FIO_SOCK_AVOID_UMASK */
+      /* else */ btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (btmp == -1) {
       FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
       fio_sock_close(fd);
       unlink(addr.sun_path);
       return -1;
     }
-    chmod(address, S_IRWXO | S_IRWXG | S_IRWXU); /* TODO? allow all? */
+    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX){
+          chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
+          fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
+        }
     if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
@@ -16597,13 +16623,12 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   }
   return fd;
 }
-#elif FIO_OS_WIN
-
-/* TODO: UNIX Sockets?
- * https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
- */
-
-#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+#else
+SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
+  (void)address, (void)flags;
+  FIO_ASSERT(0, "this system does not support Unix sockets.");
+}
+#endif /* AF_UNIX */
 
 /* *****************************************************************************
 WinSock initialization
@@ -16631,11 +16656,6 @@ Socket helper testing
 FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
   fprintf(stderr,
           "* Testing socket helpers (FIO_SOCK) - partial tests only!\n");
-#ifdef __cplusplus
-  FIO_LOG_WARNING("fio_sock_poll test only runs in C - the FIO_SOCK_POLL_LIST "
-                  "macro doesn't work in C++ and writing the test without it "
-                  "is a headache.");
-#else
   struct {
     const char *address;
     const char *port;
@@ -16774,7 +16794,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     fio_sock_close(srv);
     fio_sock_close(cl);
   }
-#endif /* !__cplusplus */
 }
 
 #endif /* FIO_TEST_CSTL */
