@@ -62,7 +62,7 @@ static fio_protocol_s HTTP_PROTOCOL_1 = {
 IO "Objects"and helpers
 ***************************************************************************** */
 #include "../extras/http/http-handle.c"
-#include "../extras/parsers/http1_parser.h"
+#include "../extras/http/http1-parser.h"
 
 typedef struct {
   http1_parser_s parser;

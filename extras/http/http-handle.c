@@ -47,13 +47,13 @@ FIO_SFUNC void *http_keystr_alloc(size_t capa) { return http_mem_malloc(capa); }
 #define FIO_ARRAY_TYPE              fio_keystr_s
 #define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj), http_keystr_free)
 #define FIO_ARRAY_TYPE_CMP(a, b)    fio_keystr_is_eq((a), (b))
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 #define FIO_MAP_NAME http_cmap
 #define FIO_MAP_VALUE_BSTR
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 #define FIO_MAP_NAME  http_hmap
 #define FIO_MAP_VALUE http_sary_s
@@ -65,7 +65,7 @@ FIO_SFUNC void *http_keystr_alloc(size_t capa) { return http_mem_malloc(capa); }
 #define FIO_MAP_VALUE_DESTROY(o) http_sary_destroy(&(o))
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 /** set `add` to positive to add multiple values or negative to overwrite. */
 FIO_IFUNC fio_str_info_s http_hmap_set2(http_hmap_s *map,
@@ -194,7 +194,7 @@ void http_destroy(http_s *h) {
 #define FIO_REF_INIT(h)                                                        \
   h = (http_s) { .received_at = http_get_timestump(), .body.fd = -1 }
 #define FIO_REF_DESTROY(h) http_destroy(&(h))
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 /** Create a new http_s handle. */
 http_s *http_new(void) { return http_new2(); }
@@ -1351,20 +1351,24 @@ void http_test FIO_NOOP(void) {
                       "always/allocate/memory?query=0",
                       82);
     /* path */
-    http_path_set(h, url.path);
+    http_path_set(h, FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(http_path_get(h).len == url.path.len &&
                    !memcmp(http_path_get(h).buf, url.path.buf, url.path.len),
                "path set round-trip error");
     FIO_ASSERT(http_path_get(h).buf != url.path.buf, "path copy error");
     /* query */
-    http_query_set(h, url.query);
+    http_query_set(h, FIO_BUF2STR_INFO(url.query));
     FIO_ASSERT(http_query_get(h).len == url.query.len &&
                    !memcmp(http_query_get(h).buf, url.query.buf, url.query.len),
                "query set round-trip error");
     FIO_ASSERT(http_query_get(h).buf != url.query.buf, "query copy error");
     /* host header */
-    http_request_header_add(h, FIO_STR_INFO2("host", 4), url.host);
-    http_request_header_add(h, FIO_STR_INFO2("host", 4), url.path);
+    http_request_header_add(h,
+                            FIO_STR_INFO2("host", 4),
+                            FIO_BUF2STR_INFO(url.host));
+    http_request_header_add(h,
+                            FIO_STR_INFO2("host", 4),
+                            FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(
         (http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).len ==
              url.host.len &&
@@ -1377,7 +1381,9 @@ void http_test FIO_NOOP(void) {
     FIO_ASSERT(http_request_header_get(h, FIO_STR_INFO2("host", 4), 0).buf !=
                    url.host.buf,
                "host copy error");
-    http_request_header_add(h, FIO_STR_INFO2("host", 4), url.path);
+    http_request_header_add(h,
+                            FIO_STR_INFO2("host", 4),
+                            FIO_BUF2STR_INFO(url.path));
     FIO_ASSERT(
         http_request_header_get(h, FIO_STR_INFO2("host", 4), 1).len ==
                 url.path.len &&

@@ -132,7 +132,7 @@ void run_my_json_minifier(char *json, size_t len) {
   if (!p.done)
     FIO_LOG_WARNING(
         "JSON parsing was incomplete, minification output is partial");
-  fprintf(stderr, "%s\n", fio_str2ptr(&p.out));
+  fprintf(stderr, "%s\n", fio_str_ptr(&p.out));
   fio_str_destroy(&p.out);
 }
 
@@ -177,10 +177,10 @@ int main(int argc, char const *argv[]) {
     }
   }
 
-  FIO_LOG_DEBUG2("attempting to parse:\n%s\n", fio_str2ptr(&json));
+  FIO_LOG_DEBUG2("attempting to parse:\n%s\n", fio_str_ptr(&json));
 
   // Parsing the JSON and cleanup
-  run_my_json_minifier(fio_str2ptr(&json), fio_str_len(&json));
+  run_my_json_minifier(fio_str_ptr(&json), fio_str_len(&json));
   fio_str_destroy(&json);
   return 0;
 }
