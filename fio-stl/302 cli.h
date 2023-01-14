@@ -210,7 +210,7 @@ typedef struct {
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
        : ((s).len ^ ((s).len << 19)))
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;

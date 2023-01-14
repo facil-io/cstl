@@ -8,7 +8,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H_HTTP_HANDLE_H
 
 #ifndef FIO_VERSION_MAJOR
-#include <fio-stl.h> /* include the facil.io CSTL before http-handle.h */
+#include <fio-stl/include.h> /* include the facil.io CSTL before http-handle.h */
 #endif
 
 /* support C++ */

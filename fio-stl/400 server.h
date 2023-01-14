@@ -594,7 +594,7 @@ typedef struct {
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -668,7 +668,7 @@ IO Validity Map - Type
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #else
 typedef void *fio_validity_map_s;
@@ -907,7 +907,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
 #define FIO_STL_KEEP__     1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static void fio___protocol_set_task(void *io_, void *old_) {

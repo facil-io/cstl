@@ -352,13 +352,8 @@ SFUNC int fio_filename_tmp(void) {
   int fd;
   char name_template[512];
   size_t len = 0;
-#if FIO_OS_WIN
-  const char sep = '\\';
+  const char sep = FIO_FOLDER_SEPARATOR;
   const char *tmp = NULL;
-#else
-  const char sep = '/';
-  const char *tmp = NULL;
-#endif
 
   if (!tmp)
     tmp = getenv("TMPDIR");
@@ -382,8 +377,8 @@ SFUNC int fio_filename_tmp(void) {
     name_template[len++] = sep;
   }
 
-  FIO_MEMCPY(name_template + len, "facil_io_tmpfile_", 17);
-  len += 17;
+  FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
+  len += 13;
   do {
 #ifdef O_TMPFILE
     uint64_t r = fio_rand64();

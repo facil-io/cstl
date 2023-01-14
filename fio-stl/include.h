@@ -3,8 +3,8 @@
 /* *****************************************************************************
                     Including requested facil.io C STL modules
 ***************************************************************************** */
-#ifndef FIO___INCLUDE_FILE
-#define FIO___INCLUDE_FILE "./include.h"
+#ifndef FIO_INCLUDE_FILE
+#define FIO_INCLUDE_FILE <fio-stl/include.h>
 #endif
 #ifndef FIO___CSTL_NON_COMBINED_INCLUSION
 #define FIO___CSTL_NON_COMBINED_INCLUSION

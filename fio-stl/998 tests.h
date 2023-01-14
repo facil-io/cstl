@@ -37,7 +37,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
 #define FIO_TIME
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
@@ -67,7 +67,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
@@ -90,7 +90,7 @@ static int ary____test_was_destroyed = 0;
   } while (0)
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_ARRAY_NAME                 ary2____test
 #define FIO_ARRAY_TYPE                 uint8_t
@@ -100,58 +100,58 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
 #define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* test all defaults */
 #define FIO_ARRAY_NAME ary3____test
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_UMAP_NAME   uset___test_size_t
 #define FIO_MEMORY_NAME uset___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_UMAP_NAME   umap___test_size
 #define FIO_MEMORY_NAME umap___test_size_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_t
 #define FIO_MEMORY_NAME omap___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_ORDERED 1
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_lru
 #define FIO_MEMORY_NAME omap___test_size_lru_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_LRU     (1UL << 24)
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_STR_NAME fio_big_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_STR_SMALL fio_small_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 Linked List - Test
@@ -166,7 +166,7 @@ typedef struct {
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
@@ -595,7 +595,7 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 }
 
 void fio_test_dynamic_types(void) {
-  char *filename = (char *)FIO___INCLUDE_FILE;
+  char *filename = (char *)FIO_INCLUDE_FILE;
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();

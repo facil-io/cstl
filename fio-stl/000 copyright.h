@@ -127,6 +127,6 @@ library for the first time.
 #ifndef H___FIO_CSTL_COMBINED___H
 #define H___FIO_CSTL_COMBINED___H
 #endif /* H___FIO_CSTL_COMBINED___H */
-#ifndef FIO___INCLUDE_FILE
-#define FIO___INCLUDE_FILE __FILE__
+#ifndef FIO_INCLUDE_FILE
+#define FIO_INCLUDE_FILE "fio-stl.h"
 #endif

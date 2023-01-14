@@ -456,7 +456,7 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Distribution Channel: manages subscriptions to named channels. */
@@ -475,7 +475,7 @@ typedef struct fio_channel_s {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Subscription: contains subscriber data. */
@@ -496,7 +496,7 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Channel Map: maps named channels. */
@@ -529,7 +529,7 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* *****************************************************************************
@@ -708,7 +708,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #endif
 
@@ -1090,7 +1090,7 @@ delivery.
 #define FIO_MAP_KEY    uint64_t
 #define FIO_MAP_LRU    (1ULL << 16)
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 FIO_SFUNC struct {
@@ -1653,7 +1653,7 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
   fio_string_write2(&url,
                     NULL,
-                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
+                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmp_"),
                     FIO_STRING_WRITE_HEX(fio_rand64()),
                     FIO_STRING_WRITE_STR1((char *)".sock"));
   fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_ipc_listen, NULL);

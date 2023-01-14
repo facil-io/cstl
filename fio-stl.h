@@ -127,8 +127,8 @@ library for the first time.
 #ifndef H___FIO_CSTL_COMBINED___H
 #define H___FIO_CSTL_COMBINED___H
 #endif /* H___FIO_CSTL_COMBINED___H */
-#ifndef FIO___INCLUDE_FILE
-#define FIO___INCLUDE_FILE __FILE__
+#ifndef FIO_INCLUDE_FILE
+#define FIO_INCLUDE_FILE "fio-stl.h"
 #endif
 /* *****************************************************************************
 C++ extern start
@@ -18529,13 +18529,8 @@ SFUNC int fio_filename_tmp(void) {
   int fd;
   char name_template[512];
   size_t len = 0;
-#if FIO_OS_WIN
-  const char sep = '\\';
+  const char sep = FIO_FOLDER_SEPARATOR;
   const char *tmp = NULL;
-#else
-  const char sep = '/';
-  const char *tmp = NULL;
-#endif
 
   if (!tmp)
     tmp = getenv("TMPDIR");
@@ -18559,8 +18554,8 @@ SFUNC int fio_filename_tmp(void) {
     name_template[len++] = sep;
   }
 
-  FIO_MEMCPY(name_template + len, "facil_io_tmpfile_", 17);
-  len += 17;
+  FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
+  len += 13;
   do {
 #ifdef O_TMPFILE
     uint64_t r = fio_rand64();
@@ -27883,7 +27878,7 @@ typedef struct {
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
        : ((s).len ^ ((s).len << 19)))
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
@@ -29998,7 +29993,7 @@ typedef struct {
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -30072,7 +30067,7 @@ IO Validity Map - Type
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #else
 typedef void *fio_validity_map_s;
@@ -30311,7 +30306,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
 #define FIO_STL_KEEP__     1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 static void fio___protocol_set_task(void *io_, void *old_) {
@@ -31696,7 +31691,7 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Distribution Channel: manages subscriptions to named channels. */
@@ -31715,7 +31710,7 @@ typedef struct fio_channel_s {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Subscription: contains subscriber data. */
@@ -31736,7 +31731,7 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /** The Channel Map: maps named channels. */
@@ -31769,7 +31764,7 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* *****************************************************************************
@@ -31948,7 +31943,7 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #endif
 
@@ -32330,7 +32325,7 @@ delivery.
 #define FIO_MAP_KEY    uint64_t
 #define FIO_MAP_LRU    (1ULL << 16)
 #define FIO_STL_KEEP__ 1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 FIO_SFUNC struct {
@@ -32893,7 +32888,7 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
   fio_string_write2(&url,
                     NULL,
-                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmpfile_"),
+                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmp_"),
                     FIO_STRING_WRITE_HEX(fio_rand64()),
                     FIO_STRING_WRITE_STR1((char *)".sock"));
   fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_ipc_listen, NULL);
@@ -33536,7 +33531,7 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Integers
@@ -33607,7 +33602,7 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
@@ -33732,7 +33727,7 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Hash Maps
@@ -33765,7 +33760,7 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE          FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 /** Calculates an object's hash value for a specific hash map object. */
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
 
@@ -34118,7 +34113,7 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -34191,7 +34186,7 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /** Creates a new Float object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(double i) {
@@ -34543,13 +34538,13 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -34981,7 +34976,7 @@ FIOBJ JSON parsing
 
 #define FIO_JSON
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* FIOBJ JSON parser */
@@ -35898,7 +35893,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIOBJ_MALLOC /* define to test with custom allocator */
 #endif
 #define FIO_TIME
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Add non-type options to minimize `#include` instructions */
 #define FIO_ATOL
@@ -35928,7 +35923,7 @@ FIO_SFUNC void fio_test_dynamic_types(void);
 #define FIO_SORT_TYPE size_t
 #define FIO_SORT_TEST 1
 // #define FIO_LOCK2 /* a signal based blocking lock is WIP */
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
@@ -35951,7 +35946,7 @@ static int ary____test_was_destroyed = 0;
   } while (0)
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_ARRAY_NAME                 ary2____test
 #define FIO_ARRAY_TYPE                 uint8_t
@@ -35961,58 +35956,58 @@ static int ary____test_was_destroyed = 0;
 #define FIO_ARRAY_TYPE_CMP(a, b)       (a) == (b)
 #define FIO_PTR_TAG(p)                 fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p)               fio___dynamic_types_test_untag(((uintptr_t)p))
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* test all defaults */
 #define FIO_ARRAY_NAME ary3____test
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_UMAP_NAME   uset___test_size_t
 #define FIO_MEMORY_NAME uset___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_UMAP_NAME   umap___test_size
 #define FIO_MEMORY_NAME umap___test_size_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_t
 #define FIO_MEMORY_NAME omap___test_size_t_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_ORDERED 1
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #define FIO_OMAP_NAME   omap___test_size_lru
 #define FIO_MEMORY_NAME omap___test_size_lru_mem
 #define FIO_MAP_KEY     size_t
 #define FIO_MAP_VALUE   size_t
 #define FIO_MAP_LRU     (1UL << 24)
 #define FIO_MAP_TEST
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_STR_NAME fio_big_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_STR_SMALL fio_small_str
 #define FIO_STR_WRITE_TEST_FUNC
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_safe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MEMORY_NAME                   fio_mem_test_unsafe
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #undef FIO_MEMORY_USE_THREAD_MUTEX
 #define FIO_MEMORY_USE_THREAD_MUTEX 0
 #define FIO_MEMORY_ARENA_COUNT      4
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 Linked List - Test
@@ -36027,7 +36022,7 @@ typedef struct {
 #define FIO_PTR_TAG(p)   fio___dynamic_types_test_tag(((uintptr_t)p))
 #define FIO_PTR_UNTAG(p) fio___dynamic_types_test_untag(((uintptr_t)p))
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 FIO_SFUNC void fio___dynamic_types_test___linked_list_test(void) {
   fprintf(stderr, "* Testing linked lists.\n");
@@ -36456,7 +36451,7 @@ FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
 }
 
 void fio_test_dynamic_types(void) {
-  char *filename = (char *)FIO___INCLUDE_FILE;
+  char *filename = (char *)FIO_INCLUDE_FILE;
   while (filename[0] == '.' && filename[1] == '/')
     filename += 2;
   fio____test_dynamic_types__stack_poisoner();
@@ -36639,7 +36634,7 @@ Everything, and the Kitchen Sink
 #define FIO_TIME
 #define FIO_URL
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MALLOC
 #define FIO_PUBSUB
@@ -36648,11 +36643,11 @@ Everything, and the Kitchen Sink
 #define FIO_STR
 #define FIO_STREAM
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIOBJ_MALLOC
 #define FIO_FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN
@@ -36669,8 +36664,8 @@ Everything, and the Kitchen Sink
 /* *****************************************************************************
                     Including requested facil.io C STL modules
 ***************************************************************************** */
-#ifndef FIO___INCLUDE_FILE
-#define FIO___INCLUDE_FILE "./include.h"
+#ifndef FIO_INCLUDE_FILE
+#define FIO_INCLUDE_FILE <fio-stl/include.h>
 #endif
 #ifndef FIO___CSTL_NON_COMBINED_INCLUSION
 #define FIO___CSTL_NON_COMBINED_INCLUSION

@@ -322,7 +322,7 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Integers
@@ -393,7 +393,7 @@ FIOBJ Strings
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
@@ -518,7 +518,7 @@ FIOBJ Arrays
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 FIOBJ Hash Maps
@@ -551,7 +551,7 @@ FIOBJ Hash Maps
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE          FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 /** Calculates an object's hash value for a specific hash map object. */
 FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
 
@@ -904,7 +904,7 @@ FIOBJ Integers
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -977,7 +977,7 @@ FIOBJ Floats
 #define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
 #define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_TYPE FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 /** Creates a new Float object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(double i) {
@@ -1329,13 +1329,13 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
 #define FIO_STL_KEEP__           1
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 typedef struct {
@@ -1767,7 +1767,7 @@ FIOBJ JSON parsing
 
 #define FIO_JSON
 #define FIO_STL_KEEP__
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 #undef FIO_STL_KEEP__
 
 /* FIOBJ JSON parser */

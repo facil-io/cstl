@@ -42,7 +42,7 @@ Everything, and the Kitchen Sink
 #define FIO_TIME
 #define FIO_URL
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIO_MALLOC
 #define FIO_PUBSUB
@@ -51,11 +51,11 @@ Everything, and the Kitchen Sink
 #define FIO_STR
 #define FIO_STREAM
 
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #define FIOBJ_MALLOC
 #define FIO_FIOBJ
-#include FIO___INCLUDE_FILE
+#include FIO_INCLUDE_FILE
 
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN

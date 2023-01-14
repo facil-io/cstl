@@ -7,10 +7,17 @@ Includes
 ***************************************************************************** */
 #if DEBUG
 /* count leaks. */
+#undef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
 #endif /* DEBUG */
+
 #define FIO_MEMORY_NAME http_mem
+#ifdef FIO_INCLUDE_FILE
+#include FIO_INCLUDE_FILE
+#else
 #include "fio-stl/include.h"
+#endif
+
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
@@ -24,7 +31,7 @@ Includes
 #define FIO_SOCK
 #define FIO_FILES
 #define FIO_STR
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
 Helper types

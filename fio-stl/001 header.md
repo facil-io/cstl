@@ -218,6 +218,12 @@ Translates to the STL's build version **string** (i.e., `"beta.1"`), if any.
 
 Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
+### Inclusion Macros
+
+#### `FIO_INCLUDE_FILE`
+
+The facil.io C STL can be used as either a single header library (`fio-stl.h`) or a multi-header library (`fio-stl/include.h`). The `FIO_INCLUDE_FILE` macro will remember which approach was first used and will use the same approach for subsequent inclusions.
+
 -------------------------------------------------------------------------------
 
 ### Pointer Arithmetics
