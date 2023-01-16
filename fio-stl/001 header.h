@@ -1933,7 +1933,8 @@ Locking selector
 /* *****************************************************************************
 Special `extern` support for FIO_EVERYTHING - Everything, and the Kitchen Sink
 ***************************************************************************** */
-#if defined(FIO_EVERYTHING) && !defined(H___FIO_EVERYTHING___H) &&             \
+#if (defined(FIO_EVERYTHING) || defined(FIO_CORE) || defined(FIO_BASIC) ||     \
+     defined(FIO_CRYPT) || defined(FIO_SERVER_COMPLETE)) &&                    \
     !defined(FIO_STL_KEEP__)
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
@@ -2196,7 +2197,7 @@ Pointer Tagging
 /* Modules that require FIO_BITWISE (includes FIO_RAND requirements) */
 #if defined(FIO_STR_NAME) || defined(FIO_RAND) || defined(FIO_JSON) ||         \
     defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
-    defined(FIO_MATH) || defined(FIO_CHACHA)
+    defined(FIO_MATH) || defined(FIO_CHACHA) || defined(FIO_HTTP1_PARSER)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -2217,7 +2218,7 @@ Pointer Tagging
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR) || defined(FIO_QUEUE) || defined(FIO_TIME) ||             \
     defined(FIO_CLI) || defined(FIO_JSON) || defined(FIO_FILES) ||             \
-    defined(FIO_FIOBJ) || defined(FIO_TEST_CSTL)
+    defined(FIO_FIOBJ) || defined(FIO_HTTP1_PARSER) || defined(FIO_TEST_CSTL)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif

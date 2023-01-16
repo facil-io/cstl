@@ -4,7 +4,7 @@
                     Including requested facil.io C STL modules
 ***************************************************************************** */
 #ifndef FIO_INCLUDE_FILE
-#define FIO_INCLUDE_FILE <fio-stl/include.h>
+#define FIO_INCLUDE_FILE "fio-stl/include.h"
 #endif
 #ifndef FIO___CSTL_NON_COMBINED_INCLUSION
 #define FIO___CSTL_NON_COMBINED_INCLUSION
@@ -119,6 +119,11 @@
 #if defined(FIO_PUBSUB) && !defined(FIO_STL_KEEP__)
 #include "420 pubsub.h"
 #endif
+
+#ifdef FIO_HTTP1_PARSER
+#include "431 http1 parser.h"
+#endif
+
 #if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
 #include "500 fiobj.h"
 #endif

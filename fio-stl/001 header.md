@@ -108,12 +108,6 @@ To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to
 
 The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
 
-#### `FIO_EVERYTHING`
-
-Adds all the code facil.io C STL has to offer. Custom types (templates) can't be created without specific instruction, but all functionality that can be included is included.
-
-Note, `FIO_EVERYTHING` functions will always be `static` unless `FIO_EXTERN` was defined for specific functionality or `FIO_EXTERN` was defined in a persistent way (with a numerical value of `2` or greater).
-
 #### `FIO_EXTERN`
 
 If defined, the the Simple Template Library will generate non-static code.
@@ -165,6 +159,33 @@ If set to true (`1`) this MACRO will attempt to detect support of unaligned memo
 #### `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED`
 
 If set to true (`1`) this MACRO will indicate that the facil.io library should allow for unaligned memory access, skipping memory alignment requirements in some cases (such as the in the `fio_buf2uXX` function implementation).
+
+### Multi-Module Inclusion Helpers
+
+#### `FIO_CORE`
+
+When `FIO_CORE` is defined, all core modules are included, such as `FIO_STR`, `FIO_ATOL`, and non-typed helpers.
+
+#### `FIO_BASIC`
+
+When `FIO_BASIC` is defined, the `FIOBJ` types, multi threading, and CLI modules are included in addition to the core modules.
+
+#### `FIO_CRYPT`
+
+When `FIO_CRYPT` is defined, all hash and cryptographic modules are included.
+
+#### `FIO_SERVER_COMPLETE`
+
+When `FIO_SERVER_COMPLETE` is defined all Server related modules are included.
+
+#### `FIO_EVERYTHING`
+
+Adds all the code facil.io C STL has to offer.
+
+Custom types (templates) can't be created without specific instruction, but all functionality that can be included is included.
+
+Note, `FIO_EVERYTHING` functions will always be `static` unless `FIO_EXTERN` was defined for specific functionality or `FIO_EXTERN` was defined in a persistent way (with a numerical value of `2` or greater).
+
 
 -------------------------------------------------------------------------------
 

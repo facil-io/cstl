@@ -143,9 +143,11 @@ Reference Counter (Wrapper) Implementation
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
-#define FIO_REF_ON_ALLOC()                                                     \
+#undef FIO___REF_ON_ALLOC
+#define FIO___REF_ON_ALLOC()                                                   \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
-#define FIO_REF_ON_FREE()                                                      \
+#undef FIO___REF_ON_FREE
+#define FIO___REF_ON_FREE()                                                    \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 
 FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
@@ -158,8 +160,10 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
   }
 }
 #else
-#define FIO_REF_ON_ALLOC()
-#define FIO_REF_ON_FREE()
+#undef FIO___REF_ON_ALLOC
+#define FIO___REF_ON_ALLOC()
+#undef FIO___REF_ON_FREE
+#define FIO___REF_ON_FREE()
 #endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
@@ -180,7 +184,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
-  FIO_REF_ON_ALLOC();
+  FIO___REF_ON_ALLOC();
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -205,7 +209,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
-  FIO_REF_ON_FREE();
+  FIO___REF_ON_FREE();
 }
 
 #ifdef FIO_REF_METADATA

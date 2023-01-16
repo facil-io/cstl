@@ -2065,7 +2065,8 @@ Locking selector
 /* *****************************************************************************
 Special `extern` support for FIO_EVERYTHING - Everything, and the Kitchen Sink
 ***************************************************************************** */
-#if defined(FIO_EVERYTHING) && !defined(H___FIO_EVERYTHING___H) &&             \
+#if (defined(FIO_EVERYTHING) || defined(FIO_CORE) || defined(FIO_BASIC) ||     \
+     defined(FIO_CRYPT) || defined(FIO_SERVER_COMPLETE)) &&                    \
     !defined(FIO_STL_KEEP__)
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
@@ -2328,7 +2329,7 @@ Pointer Tagging
 /* Modules that require FIO_BITWISE (includes FIO_RAND requirements) */
 #if defined(FIO_STR_NAME) || defined(FIO_RAND) || defined(FIO_JSON) ||         \
     defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
-    defined(FIO_MATH) || defined(FIO_CHACHA)
+    defined(FIO_MATH) || defined(FIO_CHACHA) || defined(FIO_HTTP1_PARSER)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif
@@ -2349,7 +2350,7 @@ Pointer Tagging
 /* Modules that require FIO_ATOL */
 #if defined(FIO_STR) || defined(FIO_QUEUE) || defined(FIO_TIME) ||             \
     defined(FIO_CLI) || defined(FIO_JSON) || defined(FIO_FILES) ||             \
-    defined(FIO_FIOBJ) || defined(FIO_TEST_CSTL)
+    defined(FIO_FIOBJ) || defined(FIO_HTTP1_PARSER) || defined(FIO_TEST_CSTL)
 #ifndef FIO_ATOL
 #define FIO_ATOL
 #endif
@@ -5380,17 +5381,27 @@ SFUNC uint64_t fio_atol10u(char **pstr) {
 SFUNC uint64_t fio_atol16u(char **pstr) {
   uint64_t r = 0;
   size_t d;
-  *pstr += (**pstr == '0');
-  *pstr += (**pstr | 32) == 'x' && fio_c2i((unsigned char)(pstr[0][1])) < 16;
-  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 16) {
-    r <<= 4;
+  unsigned char *p = (unsigned char *)*pstr;
+  p += ((p[0] == '0') & ((p[1] | 32) == 'x')) << 1;
+  if ((d = fio_c2i(*p)) > 15)
+    goto possible_misread;
+  for (;;) {
     r |= d;
-    ++*pstr;
-    if ((r & UINT64_C(0xF000000000000000)))
+    ++p;
+    d = (size_t)fio_c2i(*p);
+    if (d > 15)
       break;
+    if ((r & UINT64_C(0xF000000000000000))) {
+      errno = E2BIG;
+      break;
+    }
+    r <<= 4;
   }
-  if ((fio_c2i(**pstr)) < 16)
-    errno = E2BIG;
+  *pstr = (char *)p;
+  return r;
+possible_misread:
+  /* if 0x was read, move to X. */
+  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
   return r;
 }
 
@@ -27248,9 +27259,11 @@ Reference Counter (Wrapper) Implementation
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
 static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
-#define FIO_REF_ON_ALLOC()                                                     \
+#undef FIO___REF_ON_ALLOC
+#define FIO___REF_ON_ALLOC()                                                   \
   fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
-#define FIO_REF_ON_FREE()                                                      \
+#undef FIO___REF_ON_FREE
+#define FIO___REF_ON_FREE()                                                    \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 
 FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
@@ -27263,8 +27276,10 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
   }
 }
 #else
-#define FIO_REF_ON_ALLOC()
-#define FIO_REF_ON_FREE()
+#undef FIO___REF_ON_ALLOC
+#define FIO___REF_ON_ALLOC()
+#undef FIO___REF_ON_FREE
+#define FIO___REF_ON_FREE()
 #endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 
 /** Allocates a reference counted object. */
@@ -27285,7 +27300,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
-  FIO_REF_ON_ALLOC();
+  FIO___REF_ON_ALLOC();
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -27310,7 +27325,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
-  FIO_REF_ON_FREE();
+  FIO___REF_ON_FREE();
 }
 
 #ifdef FIO_REF_METADATA
@@ -33210,6 +33225,466 @@ Pub/Sub Cleanup
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
     !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MODULE_NAME module /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                HTTP/1.1 Parser
+
+
+
+
+Copyright and License: see header file (000 header.h) or top of file
+***************************************************************************** */
+#if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H)
+#define H___FIO_HTTP1_PARSER___H
+/* *****************************************************************************
+The HTTP/1.1 provides static functions only, always as part or implementation.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+HTTP/1.x Parser API
+***************************************************************************** */
+
+/** The HTTP/1.1 parser type */
+typedef struct http1_parser_s http1_parser_s;
+/** Initialization value for the parser */
+#define HTTP1_PARSER_INIT ((http1_parser_s){0})
+
+/**
+ * Parses HTTP/1.x data, calling any callbacks.
+ *
+ * Returns bytes consumed or `HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
+ */
+static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata);
+
+/** The error return value for http1_parse. */
+#define HTTP1_PARSER_ERROR ((size_t)-1)
+
+/* *****************************************************************************
+HTTP/1.x callbacks (to be implemented by parser user)
+***************************************************************************** */
+
+/** called when either a request or a response was received. */
+static int http1_on_complete(void *udata);
+/** called when a request method is parsed. */
+static int http1_on_method(fio_buf_info_s method, void *udata);
+/** called when a response status is parsed. the status_str is the string
+ * without the prefixed numerical status indicator.*/
+static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata);
+/** called when a request URL is parsed. */
+static int http1_on_url(fio_buf_info_s path, void *udata);
+/** called when a the HTTP/1.x version is parsed. */
+static int http1_on_version(fio_buf_info_s version, void *udata);
+/** called when a header is parsed. */
+static int http1_on_header(fio_buf_info_s name,
+                           fio_buf_info_s value,
+                           void *udata);
+/** called when the special content-length header is parsed. */
+static int http1_on_header_content_length(fio_buf_info_s name,
+                                          fio_buf_info_s value,
+                                          size_t content_length,
+                                          void *udata);
+/** called when `Expect` arrives and may require a 100 continue response. */
+static int http1_on_expect(fio_buf_info_s expected, void *udata);
+/** called when a body chunk is parsed. */
+static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
+
+/* *****************************************************************************
+Implementation Stage Helpers
+***************************************************************************** */
+
+/* parsing stage 0 - read first line (proxy?). */
+static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata);
+/* parsing stage 1 - read headers. */
+static int http1___read_header(http1_parser_s *p,
+                               fio_buf_info_s *buf,
+                               void *udata);
+/* parsing stage 2 - read body. */
+static int http1___read_body(http1_parser_s *p,
+                             fio_buf_info_s *buf,
+                             void *udata);
+/* parsing stage 2 - read chunked body. */
+static int http1___read_body_chunked(http1_parser_s *p,
+                                     fio_buf_info_s *buf,
+                                     void *udata);
+/* parsing stage 1 - read headers. */
+static int http1___read_trailer(http1_parser_s *p,
+                                fio_buf_info_s *buf,
+                                void *udata);
+
+/* *****************************************************************************
+Main Parsing Loop
+***************************************************************************** */
+
+/** The HTTP/1.1 parser type implementation */
+struct http1_parser_s {
+  int (*fn)(http1_parser_s *, fio_buf_info_s *, void *);
+  size_t expected;
+};
+
+static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata) {
+  int i = 0;
+  char *buf_start = buf.buf;
+  if (!p->fn)
+    p->fn = http1___start;
+  while (buf.len && !(i = p->fn(p, &buf, udata)))
+    ;
+  if (i < 0)
+    return HTTP1_PARSER_ERROR;
+  return buf.buf - buf_start;
+}
+#define HTTP1___EXPECTED_CHUNKED ((size_t)(-1))
+
+/* *****************************************************************************
+Reading the first line
+***************************************************************************** */
+
+/* parsing stage 0 - read first line (TODO: proxy protocol support?). */
+static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
+  /* find line start/end and test */
+  char *start = buf->buf;
+  char *tmp;
+  while ((start[0] == ' ' || start[0] == '\r' || start[0] == '\n') &&
+         start < buf->buf + buf->len) /* skip white space */
+    ++start;
+  if (start == buf->buf + buf->len) {
+    buf->buf = start;
+    return 2;
+  }
+  char *eol = FIO_MEMCHR(start, '\n', buf->len);
+  if (!eol)
+    return 1;
+  if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */
+    return -1;
+
+  /* prep next stage */
+  buf->len -= (eol - buf->buf) + 1;
+  buf->buf = eol + 1;
+  p->fn = http1___read_header;
+  eol -= eol[-1] == '\r';
+
+  /* parse first line */
+  if (start[0] > ('0' - 1) && start[0] < ('9' + 1))
+    goto parse_response_line;
+  /* request: method path version */
+  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+    return -1;
+  if (http1_on_method(FIO_BUF_INFO2(start, tmp - start), udata))
+    return -1;
+  start = tmp + 1;
+  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+    return -1;
+  if (http1_on_url(FIO_BUF_INFO2(start, tmp - start), udata))
+    return -1;
+  start = tmp + 1;
+  if (start >= eol)
+    return -1;
+  if (http1_on_version(FIO_BUF_INFO2(start, (eol - start)), udata))
+    return -1;
+  return 0;
+
+parse_response_line:
+  /* response: version code text */
+  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+    return -1;
+  if (http1_on_version(FIO_BUF_INFO2(start, (tmp - start)), udata))
+    return -1;
+  start = tmp + 1;
+  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+    return -1;
+  if (http1_on_status(fio_atol10(&start),
+                      FIO_BUF_INFO2((tmp + 1), eol - tmp),
+                      udata))
+    return -1;
+  return 0;
+}
+
+/* *****************************************************************************
+Reading Headers
+***************************************************************************** */
+
+static uint8_t http1_tolower(uint8_t c) {
+  if (((c >= 'A') & (c <= 'Z')))
+    c |= 32;
+  return c;
+}
+
+/* seeks to the ':' divisor while testing and converting to downcase. */
+static int http1___seek_header_div(char **p, char *end) {
+  static const _Bool forbidden_name_chars[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (;;) {
+    if (forbidden_name_chars[((uint8_t)(**p))])
+      return -1;
+    **p = (char)http1_tolower((uint8_t)(**p));
+    ++*p;
+    if (*p == end)
+      return -1;
+    if (**p == ':')
+      return 0;
+  }
+}
+
+static inline int http1___read_header_line(
+    http1_parser_s *p,
+    fio_buf_info_s *buf,
+    void *udata,
+    int (*handler)(http1_parser_s *, fio_buf_info_s, fio_buf_info_s, void *)) {
+  char *start = buf->buf;
+  char *eol = FIO_MEMCHR(start, '\n', buf->len);
+  char *div;
+  fio_buf_info_s name, value;
+  if (!eol)
+    return 1;
+
+  buf->len -= (eol - buf->buf) + 1;
+  buf->buf = eol + 1;
+  eol -= eol[-1] == '\r';
+  if (eol == start)
+    goto headers_finished;
+
+  div = start;
+  if (http1___seek_header_div(&div, eol))
+    return -1;
+  name = FIO_BUF_INFO2(start, (div - start));
+  do {
+    ++div;
+  } while (*div == ' ' || *div == '\t');
+  if (div == eol)
+    goto empty_value;
+  while (eol[-1] == ' ' || eol[-1] == '\t')
+    --eol;
+  value = FIO_BUF_INFO2(div, (eol - div));
+  return handler(p, name, value, udata);
+
+empty_value:
+  value = FIO_BUF_INFO2(NULL, 0);
+  return handler(p, name, value, udata);
+
+headers_finished:
+  if (!p->expected) {
+    http1_on_complete(udata);
+    p->fn = http1___start;
+    return 1;
+  }
+  p->fn = (p->expected == HTTP1___EXPECTED_CHUNKED) ? http1___read_body_chunked
+                                                    : http1___read_body;
+  return 0;
+}
+
+/* parsing stage 1 - read headers. */
+static inline int http1___read_on_header(http1_parser_s *p,
+                                         fio_buf_info_s name,
+                                         fio_buf_info_s value,
+                                         void *udata) {
+  /* test for special headers */
+  switch (name.len) {
+  case 6: /* test for "expect" */
+    if (fio_buf2u32_local(name.buf) == fio_buf2u32_local("expe") &&
+        fio_buf2u32_local(name.buf + 2) ==
+            fio_buf2u32_local("pect")) { /* Expect */
+      return 0 - http1_on_expect(value, udata);
+    }
+    break;
+  case 14: /* test for "content-length" */
+    if (fio_buf2u64_local(name.buf) == fio_buf2u64_local("content-") &&
+        fio_buf2u64_local(name.buf + 6) == fio_buf2u64_local("t-length")) {
+      char *tmp = value.buf;
+      uint64_t clen = fio_atol10u(&tmp);
+      if (tmp != value.buf + value.len)
+        return -1;
+      if (p->expected)
+        return 0 - (p->expected != clen);
+      p->expected = clen;
+      return 0 -
+             (http1_on_header_content_length(name, value, clen, udata) == -1);
+    }
+    break;
+  case 17: /* test for "transfer-encoding" (chunked?) */
+    if (value.len >= 7 && (name.buf[16] == 'g') &&
+        ((fio_buf2u64_local(name.buf) == fio_buf2u64_local("transfer")) &
+         (fio_buf2u64_local(name.buf + 8) == fio_buf2u64_local("-encodin")))) {
+      char *c_start = value.buf + value.len - 7;
+      if ((fio_buf2u32_local(c_start) | 0x20202020UL) ==
+              fio_buf2u32_local("chun") &&
+          (fio_buf2u32_local(c_start + 3) | 0x20202020UL) ==
+              fio_buf2u32_local("nked")) {
+        if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
+          return -1;
+        p->expected = HTTP1___EXPECTED_CHUNKED;
+        /* endpoint does not need to know if the body was chunked or not */
+        if (value.len == 7)
+          return 0;
+        while (
+            (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t') &&
+            c_start > value.buf)
+          --c_start;
+        if (c_start == value.buf)
+          return 0;
+        value.len = c_start - value.buf;
+      }
+    }
+    break;
+  }
+  /* perform callback */
+  return http1_on_header(name, value, udata);
+}
+
+/* parsing stage 1 - read headers. */
+static inline int http1___read_on_trailer(http1_parser_s *p,
+                                          fio_buf_info_s name,
+                                          fio_buf_info_s value,
+                                          void *udata) {
+  (void)p;
+  fio_buf_info_s forbidden[] = {
+      FIO_BUF_INFO1("authorization"),
+      FIO_BUF_INFO1("cache-control"),
+      FIO_BUF_INFO1("content-encoding"),
+      FIO_BUF_INFO1("content-length"),
+      FIO_BUF_INFO1("content-range"),
+      FIO_BUF_INFO1("content-type"),
+      FIO_BUF_INFO1("expect"),
+      FIO_BUF_INFO1("host"),
+      FIO_BUF_INFO1("max-forwards"),
+      FIO_BUF_INFO1("set-cookie"),
+      FIO_BUF_INFO1("te"),
+      FIO_BUF_INFO1("trailer"),
+      FIO_BUF_INFO1("transfer-encoding"),
+      FIO_BUF_INFO2(NULL, 0),
+  }; /* known forbidden headers in trailer */
+  for (size_t i = 0; forbidden[i].buf; ++i) {
+    if (FIO_BUF_INFO_IS_EQ(name, forbidden[i]))
+      return -1;
+  }
+  return http1_on_header(name, value, udata);
+}
+
+/* parsing stage 1 - read headers. */
+static int http1___read_header(http1_parser_s *p,
+                               fio_buf_info_s *buf,
+                               void *udata) {
+  return http1___read_header_line(p, buf, udata, http1___read_on_header);
+}
+
+/* parsing stage 1 - read headers. */
+static int http1___read_trailer(http1_parser_s *p,
+                                fio_buf_info_s *buf,
+                                void *udata) {
+  return http1___read_header_line(p, buf, udata, http1___read_on_trailer);
+}
+
+/* *****************************************************************************
+Reading the Body
+***************************************************************************** */
+
+/* parsing stage 2 - read body - known content length. */
+static int http1___read_body(http1_parser_s *p,
+                             fio_buf_info_s *buf,
+                             void *udata) {
+  if (buf->len >= p->expected) {
+    buf->len = p->expected;
+    if (http1_on_body_chunk(*buf, udata))
+      return -1;
+    buf->buf += buf->len;
+    http1_on_complete(udata);
+    p->fn = http1___start;
+    return 1;
+  }
+  if (http1_on_body_chunk(*buf, udata))
+    return -1;
+  buf->buf += buf->len;
+  return 1;
+}
+
+/* parsing stage 2 - read chunked body - read chunk data. */
+static int http1___read_body_chunked_read(http1_parser_s *p,
+                                          fio_buf_info_s *buf,
+                                          void *udata) {
+  fio_buf_info_s b = *buf;
+  if (b.len > p->expected)
+    b.len = p->expected;
+  if (http1_on_body_chunk(b, udata))
+    return -1;
+  buf->buf += b.len;
+  buf->len -= b.len;
+  p->expected -= b.len;
+  p->fn =
+      p->expected ? http1___read_body_chunked_read : http1___read_body_chunked;
+  return 0;
+}
+
+/* parsing stage 2 - read chunked body - read next chunk length. */
+static int http1___read_body_chunked(http1_parser_s *p,
+                                     fio_buf_info_s *buf,
+                                     void *udata) {
+  (void)udata;
+  if (buf->len < 3)
+    return 1;
+  buf->len -= buf->buf[0] == '\r';
+  buf->buf += buf->buf[0] == '\r';
+  buf->len -= buf->buf[0] == '\n';
+  buf->buf += buf->buf[0] == '\n';
+  char *pos = buf->buf;
+  char *eol = FIO_MEMCHR(pos, '\n', buf->len);
+  if (!eol)
+    return 1;
+  p->expected = fio_atol16u(&pos);
+  if (pos + (eol[-1] == '\r') != eol)
+    return -1;
+  ++eol;
+  buf->len -= eol - buf->buf;
+  buf->buf = eol;
+  if (!p->expected && (eol[0] == '\r' || eol[0] == '\n')) {
+    buf->len -= buf->buf[0] == '\r';
+    buf->buf += buf->buf[0] == '\r';
+    buf->len -= buf->buf[0] == '\n';
+    buf->buf += buf->buf[0] == '\n';
+    p->fn = http1___start;
+    http1_on_complete(udata);
+    return 1;
+  }
+  p->fn = p->expected ? http1___read_body_chunked_read : http1___read_trailer;
+  return 0;
+}
+
+/* *****************************************************************************
+Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
+  /*
+   * TODO: test HTTP parser here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_HTTP1_PARSER */
+#undef FIO_HTTP1_PARSER
+/* ************************************************************************* */
+#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
+    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
 #define FIO___DEV___   /* Development inclusion - ignore line */
 #define FIO_FIOBJ      /* Development inclusion - ignore line */
 #include "./include.h" /* Development inclusion - ignore line */
@@ -36612,43 +37087,89 @@ Everything, and the Kitchen Sink
 #undef FIO_EVERYTHING
 #define H___FIO_EVERYTHING___H
 
+#define FIO_BASIC
+#define FIO_CORE
+#define FIO_CRYPT
+#define FIO_SERVER_COMPLETE
+
+#endif /* FIO_EVERYTHING */
+
+/* *****************************************************************************
+Basic Elements
+***************************************************************************** */
+#if defined(FIO_BASIC) || defined(FIO_SERVER_COMPLETE)
+
+#define FIO_CLI
+#define FIO_LOG
+#include FIO_INCLUDE_FILE
+
+#define FIO_FIOBJ
+#define FIOBJ_MALLOC
+#include FIO_INCLUDE_FILE
+
+#define FIO_CORE
+#define FIO_MALLOC
+#define FIO_THREADS
+
+#undef FIO_BASIC
+#endif /* FIO_BASIC */
+
+/* *****************************************************************************
+Core Elements
+***************************************************************************** */
+#if defined(FIO_CORE)
 #define FIO_ATOL
 #define FIO_ATOMIC
 #define FIO_BITMAP
 #define FIO_BITWISE
-#define FIO_CHACHA
-#define FIO_CLI
 #define FIO_FILES
 #define FIO_GLOB_MATCH
 #define FIO_LOG
 #define FIO_MATH
 #define FIO_RAND
-#define FIO_RISKY_HASH
-#define FIO_SHA1
-#define FIO_SHA2
-// #define FIO_ED25519
-#define FIO_SIGNAL
-#define FIO_SOCK
 #define FIO_STATE
-#define FIO_THREADS
+#define FIO_STR
 #define FIO_TIME
 #define FIO_URL
 
 #include FIO_INCLUDE_FILE
 
-#define FIO_MALLOC
+#undef FIO_CORE
+#endif /* FIO_CORE */
+
+/* *****************************************************************************
+Core Elements
+***************************************************************************** */
+#if defined(FIO_CRYPT)
+#define FIO_CHACHA
+#define FIO_ED25519
+#define FIO_SHA1
+#define FIO_SHA2
+
+#include FIO_INCLUDE_FILE
+
+#undef FIO_CRYPT
+#endif /* FIO_CRYPT */
+/* *****************************************************************************
+Server Elements
+***************************************************************************** */
+#if defined(FIO_SERVER_COMPLETE)
+
+// #define FIO_HTTP1_PARSER
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER
-#define FIO_STR
+#define FIO_SIGNAL
+#define FIO_SOCK
 #define FIO_STREAM
 
-#include FIO_INCLUDE_FILE
+#undef FIO_SERVER_COMPLETE
+#endif /* FIO_SERVER_COMPLETE */
 
-#define FIOBJ_MALLOC
-#define FIO_FIOBJ
-#include FIO_INCLUDE_FILE
-
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#if !defined(FIO_STL_KEEP__)
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN
 #undef FIO_EVERYTHING___REMOVE_EXTERN
@@ -36657,15 +37178,14 @@ Everything, and the Kitchen Sink
 #undef FIO_EXTERN_COMPLETE
 #undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
 #endif
-
-#endif /* FIO_EVERYTHING */
+#endif /* FIO_STL_KEEP__ */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H)
 /* *****************************************************************************
                     Including requested facil.io C STL modules
 ***************************************************************************** */
 #ifndef FIO_INCLUDE_FILE
-#define FIO_INCLUDE_FILE <fio-stl/include.h>
+#define FIO_INCLUDE_FILE "fio-stl/include.h"
 #endif
 #ifndef FIO___CSTL_NON_COMBINED_INCLUSION
 #define FIO___CSTL_NON_COMBINED_INCLUSION
@@ -36780,6 +37300,11 @@ Everything, and the Kitchen Sink
 #if defined(FIO_PUBSUB) && !defined(FIO_STL_KEEP__)
 #include "420 pubsub.h"
 #endif
+
+#ifdef FIO_HTTP1_PARSER
+#include "431 http1 parser.h"
+#endif
+
 #if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
 #include "500 fiobj.h"
 #endif

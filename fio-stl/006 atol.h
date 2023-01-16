@@ -470,17 +470,27 @@ SFUNC uint64_t fio_atol10u(char **pstr) {
 SFUNC uint64_t fio_atol16u(char **pstr) {
   uint64_t r = 0;
   size_t d;
-  *pstr += (**pstr == '0');
-  *pstr += (**pstr | 32) == 'x' && fio_c2i((unsigned char)(pstr[0][1])) < 16;
-  while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < 16) {
-    r <<= 4;
+  unsigned char *p = (unsigned char *)*pstr;
+  p += ((p[0] == '0') & ((p[1] | 32) == 'x')) << 1;
+  if ((d = fio_c2i(*p)) > 15)
+    goto possible_misread;
+  for (;;) {
     r |= d;
-    ++*pstr;
-    if ((r & UINT64_C(0xF000000000000000)))
+    ++p;
+    d = (size_t)fio_c2i(*p);
+    if (d > 15)
       break;
+    if ((r & UINT64_C(0xF000000000000000))) {
+      errno = E2BIG;
+      break;
+    }
+    r <<= 4;
   }
-  if ((fio_c2i(**pstr)) < 16)
-    errno = E2BIG;
+  *pstr = (char *)p;
+  return r;
+possible_misread:
+  /* if 0x was read, move to X. */
+  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
   return r;
 }
 

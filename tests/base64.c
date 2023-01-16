@@ -47,7 +47,7 @@ int main(int argc, char const *argv[]) {
       fn(&out, str, len);
       fio_str_write(&out, "\n", 1);
     }
-    fprintf(stdout, "%s", fio_str2ptr(&out));
+    fprintf(stdout, "%s", fio_str_ptr(&out));
     fio_str_resize(&out, 0);
     /* don't process stdio */
     if (!fio_cli_get("-f"))
@@ -58,9 +58,9 @@ int main(int argc, char const *argv[]) {
   if (fio_cli_get("-f")) {
     fio_str_s in = FIO_STR_INIT;
     if (fio_str_readfile(&in, fio_cli_get("-f"), 0, 0).buf) {
-      fn(&out, fio_str2ptr(&in), fio_str_len(&in));
+      fn(&out, fio_str_ptr(&in), fio_str_len(&in));
       fio_str_destroy(&in);
-      fprintf(stdout, "%s\n", fio_str2ptr(&out));
+      fprintf(stdout, "%s\n", fio_str_ptr(&out));
       fio_str_resize(&out, 0);
     } else {
       fprintf(stderr, "Couldn't load file: %s\n", fio_cli_get("-f"));
@@ -83,9 +83,9 @@ int main(int argc, char const *argv[]) {
       fn(&out, buffer, l);
     if (fio_str_len(&out)) {
       if (l < 960)
-        fprintf(stdout, "%s\n", fio_str2ptr(&out));
+        fprintf(stdout, "%s\n", fio_str_ptr(&out));
       else
-        fprintf(stdout, "%s", fio_str2ptr(&out));
+        fprintf(stdout, "%s", fio_str_ptr(&out));
     }
     fio_str_resize(&out, 0);
     fflush(stdout);
