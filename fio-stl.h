@@ -1263,13 +1263,9 @@ fio_memcmp
 #endif
 #endif /* FIO_MEMCMP */
 
-/**
- * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
- *
- * Note: returns 0 if data in b is bigger than or equal(!).
- */
+/** Same as `memcmp`. Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`. */
 FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  if (a_ == b_)
+  if (a_ == b_ || !len)
     return 0;
   char *a = (char *)a_;
   char *b = (char *)b_;
@@ -1304,10 +1300,6 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   }
 
 review_diff:
-  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
-    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
-    ub[i] = fio_lton64(ub[i]);
-  }
   if (ua[2] != ub[2]) {
     ua[3] = ua[2];
     ub[3] = ub[2];
@@ -1320,12 +1312,35 @@ review_diff:
     ua[3] = ua[0];
     ub[3] = ub[0];
   }
+review_diff8:
+  ua[3] = fio_lton64(ua[3]); /* comparison needs network byte order */
+  ub[3] = fio_lton64(ub[3]);
   return (int)1 - (int)((ub[3] > ua[3]) << 1);
 
 mini_cmp:
+  if (len > 7) {
+    len -= 8;
+    for (;;) {
+      fio_memcpy8(ua + 3, a);
+      fio_memcpy8(ub + 3, b);
+      if (ub[3] != ua[3])
+        goto review_diff8;
+      if (!len)
+        return 0;
+      if (len > 7) {
+        a += 8;
+        b += 8;
+        len -= 8;
+        continue;
+      }
+      a += len & 7;
+      b += len & 7;
+      len = 0;
+    }
+  }
   while (len--) {
     if (a[0] != b[0])
-      return a[0] - b[0];
+      return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
     ++a;
     ++b;
   }
@@ -14490,7 +14505,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  len);
     }
   }
-
+  { /* test fio_memcmp */
+    for (size_t i = 0; i < 4096; ++i) {
+      uint64_t a = fio_rand64(), b = fio_rand64();
+      int s = memcmp(&a, &b, sizeof(a));
+      int f = fio_memcmp(&a, &b, sizeof(a));
+      FIO_ASSERT((s < 0 && f < 0) || (s > 0 && f > 0) || (!s && !f),
+                 "fio_memcmp != memcmp (result meaning, not value).");
+    }
+  }
 #ifndef DEBUG
   const size_t base_repetitions = 8192;
   fprintf(stderr, "* Speed testing core memcpy primitives:\n");

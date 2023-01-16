@@ -2480,7 +2480,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  len);
     }
   }
-
+  { /* test fio_memcmp */
+    for (size_t i = 0; i < 4096; ++i) {
+      uint64_t a = fio_rand64(), b = fio_rand64();
+      int s = memcmp(&a, &b, sizeof(a));
+      int f = fio_memcmp(&a, &b, sizeof(a));
+      FIO_ASSERT((s < 0 && f < 0) || (s > 0 && f > 0) || (!s && !f),
+                 "fio_memcmp != memcmp (result meaning, not value).");
+    }
+  }
 #ifndef DEBUG
   const size_t base_repetitions = 8192;
   fprintf(stderr, "* Speed testing core memcpy primitives:\n");

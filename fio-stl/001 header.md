@@ -630,6 +630,16 @@ If `token` is found, returns the address of the token's first appearance. Otherw
 
 On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
+#### `fio_memcmp`
+
+```c
+static int fio_memcmp(const void *a, const void *b, size_t len);
+```
+
+A fallback for `memcmp`, comparing two memory regions by byte values.
+
+Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
+
 -------------------------------------------------------------------------------
 
 ## Naming and Misc. Macros

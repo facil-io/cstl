@@ -35,7 +35,7 @@ Parser Settings
 #endif
 
 #ifndef HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING
-#define HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING 1
+#define HTTP_ADD_CONTENT_LENGTH_HEADER_IF_MISSING 0
 #endif
 
 #ifndef FIO_MEMCHAR
@@ -45,7 +45,7 @@ Parser Settings
 
 #ifndef HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED
 /** Preforms some optimizations assuming unaligned memory access is okay. */
-#define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 0
+#define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 1
 #endif
 
 #ifndef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
@@ -1680,11 +1680,11 @@ static int http1_on_error(http1_parser_s *parser) {
 #define HTTP1_TEST_STRING_FIELD(field, i)                                      \
   HTTP1_TEST_ASSERT((!http1_test_data[i].expect.field &&                       \
                      !http1_test_data[i].result.field) ||                      \
-                        http1_test_data[i].expect.field &&                     \
-                            http1_test_data[i].result.field &&                 \
-                            !memcmp(http1_test_data[i].expect.field,           \
-                                    http1_test_data[i].result.field,           \
-                                    strlen(http1_test_data[i].expect.field)),  \
+                        (http1_test_data[i].expect.field &&                    \
+                         http1_test_data[i].result.field &&                    \
+                         !memcmp(http1_test_data[i].expect.field,              \
+                                 http1_test_data[i].result.field,              \
+                                 strlen(http1_test_data[i].expect.field))),    \
                     "string field error for %s - " #field " \n%s\n%s",         \
                     http1_test_data[i].test_name,                              \
                     http1_test_data[i].expect.field,                           \
@@ -1776,6 +1776,31 @@ static void http1_parser_test(void) {
                       "Expected header missing:\n\t%s: %s",
                       http1_test_data[i].expect.headers[r].name,
                       http1_test_data[i].expect.headers[r].val);
+
+    /* test performance */
+    w = 0;
+    for (int j = 0; http1_test_data[i].request[j]; ++j) {
+      memcpy(buf + w,
+             http1_test_data[i].request[j],
+             strlen(http1_test_data[i].request[j]));
+      w += strlen(http1_test_data[i].request[j]);
+    }
+    uint64_t start = fio_time_milli();
+    for (size_t repetition = 0; repetition < 1000000; ++repetition) {
+      parser = (http1_parser_s)HTTP1_PARSER_INIT;
+      http1_test_temp_buf_pos = 0;
+      http1_test_data[http1_test_pos].result.body_len = 0;
+      memset(http1_test_data[http1_test_pos].result.headers,
+             0,
+             sizeof(http1_test_data[http1_test_pos].result.headers));
+      FIO_COMPILER_GUARD;
+      http1_parse(&parser, buf, w);
+    }
+    uint64_t end = fio_time_milli();
+    fprintf(stderr,
+            "* %zums per 500k %s\n\n",
+            (size_t)(end - start),
+            http1_test_data[i].test_name);
     /* advance counter */
     ++http1_test_pos;
   }
