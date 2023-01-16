@@ -698,7 +698,7 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
 #ifdef DEBUG
   {
     FIO_NAME(FIO_STR_NAME, s) tmp = {0};
-    FIO_ASSERT(!memcmp(&tmp, s, sizeof(tmp)),
+    FIO_ASSERT(!FIO_MEMCMP(&tmp, s, sizeof(tmp)),
                "new " FIO_MACRO2STR(
                    FIO_NAME(FIO_STR_NAME, s)) " object not initialized!");
   }

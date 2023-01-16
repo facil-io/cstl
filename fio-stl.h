@@ -1249,6 +1249,89 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   return NULL;
 #undef FIO___MEMCHR_BITMAP_TEST
 }
+
+/* *****************************************************************************
+fio_memcmp
+***************************************************************************** */
+#ifndef FIO_MEMCMP
+#if __has_builtin(__builtin_memcmp)
+/** `memcmp` selector macro */
+#define FIO_MEMCMP __builtin_memcmp
+#else
+/** `memcmp` selector macro */
+#define FIO_MEMCMP memcmp
+#endif
+#endif /* FIO_MEMCMP */
+
+/**
+ * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
+ *
+ * Note: returns 0 if data in b is bigger than or equal(!).
+ */
+FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
+  if (a_ == b_)
+    return 0;
+  char *a = (char *)a_;
+  char *b = (char *)b_;
+  uint64_t ua[4] FIO_ALIGN(16) = {0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0};
+  uint64_t flag = 0;
+  if (len < 32)
+    goto mini_cmp;
+
+  len -= 32;
+  for (;;) {
+    for (size_t i = 0; i < 4; ++i) {
+      fio_memcpy8(ua + i, a);
+      fio_memcpy8(ub + i, b);
+      flag |= (ua[i] ^ ub[i]);
+      a += 8;
+      b += 8;
+    }
+    if (flag)
+      goto review_diff;
+    if (len > 31) {
+      len -= 32;
+      continue;
+    }
+    if (!len)
+      return 0;
+    a -= 32;
+    b -= 32;
+    a += len & 31;
+    b += len & 31;
+    len = 0;
+  }
+
+review_diff:
+  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
+    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
+    ub[i] = fio_lton64(ub[i]);
+  }
+  if (ua[2] != ub[2]) {
+    ua[3] = ua[2];
+    ub[3] = ub[2];
+  }
+  if (ua[1] != ub[1]) {
+    ua[3] = ua[1];
+    ub[3] = ub[1];
+  }
+  if (ua[0] != ub[0]) {
+    ua[3] = ua[0];
+    ub[3] = ub[0];
+  }
+  return (int)1 - (int)((ub[3] > ua[3]) << 1);
+
+mini_cmp:
+  while (len--) {
+    if (a[0] != b[0])
+      return a[0] - b[0];
+    ++a;
+    ++b;
+  }
+  return 0;
+}
+
 /* *****************************************************************************
 Pointer Math
 ***************************************************************************** */
@@ -1514,7 +1597,7 @@ typedef struct fio_buf_info_s {
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+                            !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len)))
 
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
@@ -6477,7 +6560,7 @@ FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) {
 /** Locks a simple Mutex, returning -1 on error. */
 FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
   const fio_thread_mutex_t zero = {0};
-  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
   EnterCriticalSection(m);
   return 0;
@@ -6486,7 +6569,7 @@ FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
 /** Attempts to lock a simple Mutex, returning zero on success. */
 FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
   const fio_thread_mutex_t zero = {0};
-  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
   return TryEnterCriticalSection(m) - 1;
 }
@@ -6582,9 +6665,9 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
   /* lazy initialization */
   fio_thread_mutex_t zero = {0};
   fio_lock(&lock);
-  if (!memcmp(m,
-              &zero,
-              sizeof(zero))) { /* retest, as this may have changed... */
+  if (!FIO_MEMCMP(m,
+                  &zero,
+                  sizeof(zero))) { /* retest, as this may have changed... */
     r = fio_thread_mutex_init(m);
   }
   fio_unlock(&lock);
@@ -12055,20 +12138,26 @@ Memory Helpers - API
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
+FIO_SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
  * A somewhat naive implementation of `memcpy`.
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
+FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
 
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
  */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
+FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
+
+/**
+ * A comparison function. This is a fallback for `memcmp`, but `memcmp`
+ * should be faster.
+ */
+FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len);
 
 #endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 /* *****************************************************************************
@@ -14620,6 +14709,65 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     //         (size_t)(end - start), repetitions);
 
     free(mem);
+  }
+
+  fprintf(stderr, "* Speed testing memcmp:\n");
+
+  for (int len_i = 5; len_i < 21; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
+    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
+         ++mem_len) {
+      char *mem = malloc(mem_len << 1);
+      FIO_ASSERT_ALLOC(mem);
+      uint64_t sig = (uintptr_t)mem;
+      sig ^= sig >> 13;
+      sig ^= sig << 17;
+      sig ^= sig << 29;
+      sig ^= sig << 31;
+      fio_memset(mem, sig, mem_len);
+      fio_memset(mem + mem_len, sig, mem_len);
+
+      FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu)",
+                 mem_len);
+      mem[mem_len - 2]--;
+      FIO_ASSERT(fio_memcmp(mem + mem_len, mem, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu)",
+                 mem_len);
+      mem[mem_len - 2]++;
+
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+        if (cmp)
+          ++(mem[mem_len - (1 + cmp)]);
+        (void)cmp;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tfio_memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              mem_len,
+              (size_t)(end - start),
+              repetitions);
+
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        int cmp = memcmp(mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+        if (cmp)
+          ++(mem[mem_len - (1 + cmp)]);
+        (void)cmp;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tsystem memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              mem_len,
+              (size_t)(end - start),
+              repetitions);
+      free(mem);
+    }
   }
 #endif /* DEBUG */
   ((void)start), ((void)end);
@@ -20108,6 +20256,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   if (len < 32)
     goto mini_cmp;
 
+  len -= 32;
   for (;;) {
     for (size_t i = 0; i < 4; ++i) {
       fio_memcpy8(ua + i, a.buf);
@@ -22076,7 +22225,7 @@ FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
 #ifdef DEBUG
   {
     FIO_NAME(FIO_STR_NAME, s) tmp = {0};
-    FIO_ASSERT(!memcmp(&tmp, s, sizeof(tmp)),
+    FIO_ASSERT(!FIO_MEMCMP(&tmp, s, sizeof(tmp)),
                "new " FIO_MACRO2STR(
                    FIO_NAME(FIO_STR_NAME, s)) " object not initialized!");
   }
@@ -24697,7 +24846,9 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
   FIO_MEMSET(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \
-  (!memcmp(&o, FIO_MEMSET(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
+  (!FIO_MEMCMP(&o,                                                             \
+               FIO_MEMSET(&v, (int)(val), sizeof(v)),                          \
+               sizeof(FIO_ARRAY_TYPE)))
 
 FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task))(
     FIO_NAME(FIO_ARRAY_NAME, each_s) * i) {
@@ -27887,7 +28038,7 @@ typedef struct {
 #define FIO_MAP_KEY_CMP(o1, o2)                                                \
   (o1.len == o2.len &&                                                         \
    (!o1.len || o1.buf == o2.buf ||                                             \
-    (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
+    (o1.buf && o2.buf && !FIO_MEMCMP(o1.buf, o2.buf, o1.len))))
 #define FIO_MAP_HASH_FN(s)                                                     \
   ((s).buf                                                                     \
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
@@ -31756,7 +31907,7 @@ FIO_IFUNC int fio_channel___cmp(fio_channel_s *a, fio_channel_s *b) {
   /* when letter publishing, the channel name is stored in subscriptions.next */
   return a->filter == b->filter && a->name_len == b->name_len &&
          (!a->name_len ||
-          !memcmp(
+          !FIO_MEMCMP(
               a->name,
               (b->subscriptions.prev ? b->name : (char *)b->subscriptions.next),
               a->name_len));
@@ -37080,6 +37231,7 @@ C++ extern end
 }
 #endif
 
+#if !defined(FIO_STL_KEEP__)
 /* *****************************************************************************
 Everything, and the Kitchen Sink
 ***************************************************************************** */
@@ -37094,10 +37246,15 @@ Everything, and the Kitchen Sink
 
 #endif /* FIO_EVERYTHING */
 
+#ifdef FIO_BASIC
+#define FIO_SERVER_COMPLETE
+#endif
+
 /* *****************************************************************************
 Basic Elements
 ***************************************************************************** */
-#if defined(FIO_BASIC) || defined(FIO_SERVER_COMPLETE)
+#if defined(FIO_BASIC)
+#undef FIO_BASIC
 
 #define FIO_CLI
 #define FIO_LOG
@@ -37111,13 +37268,14 @@ Basic Elements
 #define FIO_MALLOC
 #define FIO_THREADS
 
-#undef FIO_BASIC
 #endif /* FIO_BASIC */
 
 /* *****************************************************************************
 Core Elements
 ***************************************************************************** */
 #if defined(FIO_CORE)
+#undef FIO_CORE
+
 #define FIO_ATOL
 #define FIO_ATOMIC
 #define FIO_BITMAP
@@ -37134,13 +37292,13 @@ Core Elements
 
 #include FIO_INCLUDE_FILE
 
-#undef FIO_CORE
 #endif /* FIO_CORE */
 
 /* *****************************************************************************
 Core Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
+#undef FIO_CRYPT
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
@@ -37148,12 +37306,12 @@ Core Elements
 
 #include FIO_INCLUDE_FILE
 
-#undef FIO_CRYPT
 #endif /* FIO_CRYPT */
 /* *****************************************************************************
 Server Elements
 ***************************************************************************** */
 #if defined(FIO_SERVER_COMPLETE)
+#undef FIO_SERVER_COMPLETE
 
 // #define FIO_HTTP1_PARSER
 #define FIO_PUBSUB
@@ -37163,13 +37321,12 @@ Server Elements
 #define FIO_SOCK
 #define FIO_STREAM
 
-#undef FIO_SERVER_COMPLETE
+#include FIO_INCLUDE_FILE
 #endif /* FIO_SERVER_COMPLETE */
 
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-#if !defined(FIO_STL_KEEP__)
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN
 #undef FIO_EVERYTHING___REMOVE_EXTERN
@@ -37178,6 +37335,7 @@ Cleanup
 #undef FIO_EXTERN_COMPLETE
 #undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
 #endif
+
 #endif /* FIO_STL_KEEP__ */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H)

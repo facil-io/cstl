@@ -506,7 +506,7 @@ FIO_IFUNC int fio_channel___cmp(fio_channel_s *a, fio_channel_s *b) {
   /* when letter publishing, the channel name is stored in subscriptions.next */
   return a->filter == b->filter && a->name_len == b->name_len &&
          (!a->name_len ||
-          !memcmp(
+          !FIO_MEMCMP(
               a->name,
               (b->subscriptions.prev ? b->name : (char *)b->subscriptions.next),
               a->name_len));

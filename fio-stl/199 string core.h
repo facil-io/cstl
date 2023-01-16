@@ -1387,6 +1387,7 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   if (len < 32)
     goto mini_cmp;
 
+  len -= 32;
   for (;;) {
     for (size_t i = 0; i < 4; ++i) {
       fio_memcpy8(ua + i, a.buf);

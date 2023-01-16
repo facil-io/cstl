@@ -1414,7 +1414,9 @@ IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 #define FIO_ARRAY_TEST_OBJ_SET(dest, val)                                      \
   FIO_MEMSET(&(dest), (int)(val), sizeof(FIO_ARRAY_TYPE))
 #define FIO_ARRAY_TEST_OBJ_IS(val)                                             \
-  (!memcmp(&o, FIO_MEMSET(&v, (int)(val), sizeof(v)), sizeof(FIO_ARRAY_TYPE)))
+  (!FIO_MEMCMP(&o,                                                             \
+               FIO_MEMSET(&v, (int)(val), sizeof(v)),                          \
+               sizeof(FIO_ARRAY_TYPE)))
 
 FIO_SFUNC int FIO_NAME_TEST(stl, FIO_NAME(FIO_ARRAY_NAME, test_task))(
     FIO_NAME(FIO_ARRAY_NAME, each_s) * i) {

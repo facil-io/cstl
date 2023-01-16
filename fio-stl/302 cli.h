@@ -204,7 +204,7 @@ typedef struct {
 #define FIO_MAP_KEY_CMP(o1, o2)                                                \
   (o1.len == o2.len &&                                                         \
    (!o1.len || o1.buf == o2.buf ||                                             \
-    (o1.buf && o2.buf && !memcmp(o1.buf, o2.buf, o1.len))))
+    (o1.buf && o2.buf && !FIO_MEMCMP(o1.buf, o2.buf, o1.len))))
 #define FIO_MAP_HASH_FN(s)                                                     \
   ((s).buf                                                                     \
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \

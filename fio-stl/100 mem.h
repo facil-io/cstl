@@ -128,20 +128,26 @@ Memory Helpers - API
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
+FIO_SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
  * A somewhat naive implementation of `memcpy`.
  *
  * Probably slower than the one included with your compiler's C library.
  */
-SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
+FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes);
 
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
  */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
+FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
+
+/**
+ * A comparison function. This is a fallback for `memcmp`, but `memcmp`
+ * should be faster.
+ */
+FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len);
 
 #endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 /* *****************************************************************************
@@ -2693,6 +2699,65 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     //         (size_t)(end - start), repetitions);
 
     free(mem);
+  }
+
+  fprintf(stderr, "* Speed testing memcmp:\n");
+
+  for (int len_i = 5; len_i < 21; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
+    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
+         ++mem_len) {
+      char *mem = malloc(mem_len << 1);
+      FIO_ASSERT_ALLOC(mem);
+      uint64_t sig = (uintptr_t)mem;
+      sig ^= sig >> 13;
+      sig ^= sig << 17;
+      sig ^= sig << 29;
+      sig ^= sig << 31;
+      fio_memset(mem, sig, mem_len);
+      fio_memset(mem + mem_len, sig, mem_len);
+
+      FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu)",
+                 mem_len);
+      mem[mem_len - 2]--;
+      FIO_ASSERT(fio_memcmp(mem + mem_len, mem, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu)",
+                 mem_len);
+      mem[mem_len - 2]++;
+
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+        if (cmp)
+          ++(mem[mem_len - (1 + cmp)]);
+        (void)cmp;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tfio_memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              mem_len,
+              (size_t)(end - start),
+              repetitions);
+
+      start = fio_time_micro();
+      for (size_t i = 0; i < repetitions; ++i) {
+        int cmp = memcmp(mem + mem_len, mem, mem_len);
+        FIO_COMPILER_GUARD;
+        if (cmp)
+          ++(mem[mem_len - (1 + cmp)]);
+        (void)cmp;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tsystem memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              mem_len,
+              (size_t)(end - start),
+              repetitions);
+      free(mem);
+    }
   }
 #endif /* DEBUG */
   ((void)start), ((void)end);

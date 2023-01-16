@@ -13,6 +13,7 @@ C++ extern end
 }
 #endif
 
+#if !defined(FIO_STL_KEEP__)
 /* *****************************************************************************
 Everything, and the Kitchen Sink
 ***************************************************************************** */
@@ -27,10 +28,15 @@ Everything, and the Kitchen Sink
 
 #endif /* FIO_EVERYTHING */
 
+#ifdef FIO_BASIC
+#define FIO_SERVER_COMPLETE
+#endif
+
 /* *****************************************************************************
 Basic Elements
 ***************************************************************************** */
-#if defined(FIO_BASIC) || defined(FIO_SERVER_COMPLETE)
+#if defined(FIO_BASIC)
+#undef FIO_BASIC
 
 #define FIO_CLI
 #define FIO_LOG
@@ -44,13 +50,14 @@ Basic Elements
 #define FIO_MALLOC
 #define FIO_THREADS
 
-#undef FIO_BASIC
 #endif /* FIO_BASIC */
 
 /* *****************************************************************************
 Core Elements
 ***************************************************************************** */
 #if defined(FIO_CORE)
+#undef FIO_CORE
+
 #define FIO_ATOL
 #define FIO_ATOMIC
 #define FIO_BITMAP
@@ -67,13 +74,13 @@ Core Elements
 
 #include FIO_INCLUDE_FILE
 
-#undef FIO_CORE
 #endif /* FIO_CORE */
 
 /* *****************************************************************************
 Core Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
+#undef FIO_CRYPT
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
@@ -81,12 +88,12 @@ Core Elements
 
 #include FIO_INCLUDE_FILE
 
-#undef FIO_CRYPT
 #endif /* FIO_CRYPT */
 /* *****************************************************************************
 Server Elements
 ***************************************************************************** */
 #if defined(FIO_SERVER_COMPLETE)
+#undef FIO_SERVER_COMPLETE
 
 // #define FIO_HTTP1_PARSER
 #define FIO_PUBSUB
@@ -96,13 +103,12 @@ Server Elements
 #define FIO_SOCK
 #define FIO_STREAM
 
-#undef FIO_SERVER_COMPLETE
+#include FIO_INCLUDE_FILE
 #endif /* FIO_SERVER_COMPLETE */
 
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-#if !defined(FIO_STL_KEEP__)
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN
 #undef FIO_EVERYTHING___REMOVE_EXTERN
@@ -111,4 +117,5 @@ Cleanup
 #undef FIO_EXTERN_COMPLETE
 #undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
 #endif
+
 #endif /* FIO_STL_KEEP__ */

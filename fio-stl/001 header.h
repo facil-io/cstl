@@ -1117,6 +1117,89 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   return NULL;
 #undef FIO___MEMCHR_BITMAP_TEST
 }
+
+/* *****************************************************************************
+fio_memcmp
+***************************************************************************** */
+#ifndef FIO_MEMCMP
+#if __has_builtin(__builtin_memcmp)
+/** `memcmp` selector macro */
+#define FIO_MEMCMP __builtin_memcmp
+#else
+/** `memcmp` selector macro */
+#define FIO_MEMCMP memcmp
+#endif
+#endif /* FIO_MEMCMP */
+
+/**
+ * Compares two `fio_buf_info_s`, returning 1 if data in a is bigger than b.
+ *
+ * Note: returns 0 if data in b is bigger than or equal(!).
+ */
+FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
+  if (a_ == b_)
+    return 0;
+  char *a = (char *)a_;
+  char *b = (char *)b_;
+  uint64_t ua[4] FIO_ALIGN(16) = {0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0};
+  uint64_t flag = 0;
+  if (len < 32)
+    goto mini_cmp;
+
+  len -= 32;
+  for (;;) {
+    for (size_t i = 0; i < 4; ++i) {
+      fio_memcpy8(ua + i, a);
+      fio_memcpy8(ub + i, b);
+      flag |= (ua[i] ^ ub[i]);
+      a += 8;
+      b += 8;
+    }
+    if (flag)
+      goto review_diff;
+    if (len > 31) {
+      len -= 32;
+      continue;
+    }
+    if (!len)
+      return 0;
+    a -= 32;
+    b -= 32;
+    a += len & 31;
+    b += len & 31;
+    len = 0;
+  }
+
+review_diff:
+  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
+    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
+    ub[i] = fio_lton64(ub[i]);
+  }
+  if (ua[2] != ub[2]) {
+    ua[3] = ua[2];
+    ub[3] = ub[2];
+  }
+  if (ua[1] != ub[1]) {
+    ua[3] = ua[1];
+    ub[3] = ub[1];
+  }
+  if (ua[0] != ub[0]) {
+    ua[3] = ua[0];
+    ub[3] = ub[0];
+  }
+  return (int)1 - (int)((ub[3] > ua[3]) << 1);
+
+mini_cmp:
+  while (len--) {
+    if (a[0] != b[0])
+      return a[0] - b[0];
+    ++a;
+    ++b;
+  }
+  return 0;
+}
+
 /* *****************************************************************************
 Pointer Math
 ***************************************************************************** */
@@ -1382,7 +1465,7 @@ typedef struct fio_buf_info_s {
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+                            !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len)))
 
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))

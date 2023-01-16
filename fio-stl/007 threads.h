@@ -306,7 +306,7 @@ FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) {
 /** Locks a simple Mutex, returning -1 on error. */
 FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
   const fio_thread_mutex_t zero = {0};
-  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
   EnterCriticalSection(m);
   return 0;
@@ -315,7 +315,7 @@ FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
 /** Attempts to lock a simple Mutex, returning zero on success. */
 FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
   const fio_thread_mutex_t zero = {0};
-  if (!memcmp(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
     return -1;
   return TryEnterCriticalSection(m) - 1;
 }
@@ -411,9 +411,9 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
   /* lazy initialization */
   fio_thread_mutex_t zero = {0};
   fio_lock(&lock);
-  if (!memcmp(m,
-              &zero,
-              sizeof(zero))) { /* retest, as this may have changed... */
+  if (!FIO_MEMCMP(m,
+                  &zero,
+                  sizeof(zero))) { /* retest, as this may have changed... */
     r = fio_thread_mutex_init(m);
   }
   fio_unlock(&lock);
