@@ -1178,6 +1178,7 @@ FIO_SFUNC size_t fio___msb_index_unsafe(uint64_t i) {
   return fio___single_bit_index_unsafe(i);
 #endif /* __builtin vs. map */
 }
+
 /**
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
@@ -1186,10 +1187,12 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
   const char *r = (const char *)buffer;
-  uint64_t umask = ((uint64_t)((uint8_t)token)) & 0xFFU;
+  uint64_t umask = ((uint64_t)((uint8_t)token));
   umask |= (umask << 32); /* make each byte in umask == token */
   umask |= (umask << 16);
   umask |= (umask << 8);
+  if (len < 64)
+    goto small_memchr;
 
 #define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
   do {                                                                         \
@@ -1210,10 +1213,12 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     flag = 0;                                                                  \
     for (size_t i = 0; i < group_size; ++i) { /* combine group to bitmap  */   \
       u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
+      u[i] >>= 7;               /* move all 0x80 to 0x01 */                    \
       u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
       u[i] |= u[i] >> 14;                                                      \
       u[i] |= u[i] >> 28;                                                      \
-      flag |= (u[i] & 0xFFU) << (i << 3); /* placed packed bitmap in u64 */    \
+      u[i] &= 0xFFU;                                                           \
+      flag |= (u[i] << (i << 3)); /* placed packed bitmap in u64 */            \
     }                                                                          \
     return (void *)(r + fio___lsb_index_unsafe(flag));                         \
   } while (0)
@@ -1234,20 +1239,33 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if ((len & 32)) {
     FIO___MEMCHR_BITMAP_TEST(4);
   }
-  if ((len & 16)) {
-    FIO___MEMCHR_BITMAP_TEST(2);
+  r -= 32;
+  r += len & 31;
+  FIO___MEMCHR_BITMAP_TEST(4);
+  return NULL;
+
+small_memchr:
+  if (len > 15) {
+    for (;;) {
+      len -= 16;
+      FIO___MEMCHR_BITMAP_TEST(2);
+      if (!len)
+        return NULL;
+      if (len > 15)
+        continue;
+      r -= 16;
+      r += len & 15;
+      len = 16;
+    }
   }
-  if ((len & 8)) {
-    FIO___MEMCHR_BITMAP_TEST(1);
-  }
-  while ((len & 7)) {
+#undef FIO___MEMCHR_BITMAP_TEST
+
+  while (len--) {
     if (*r == token)
       return (void *)r;
     ++r;
-    --len;
   }
   return NULL;
-#undef FIO___MEMCHR_BITMAP_TEST
 }
 
 /* *****************************************************************************
@@ -1275,8 +1293,8 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   if (len < 32)
     goto mini_cmp;
 
-  len -= 32;
   for (;;) {
+    len -= 32;
     for (size_t i = 0; i < 4; ++i) {
       fio_memcpy8(ua + i, a);
       fio_memcpy8(ub + i, b);
@@ -1286,17 +1304,15 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     }
     if (flag)
       goto review_diff;
-    if (len > 31) {
-      len -= 32;
+    if (len > 31)
       continue;
-    }
     if (!len)
       return 0;
     a -= 32;
     b -= 32;
     a += len & 31;
     b += len & 31;
-    len = 0;
+    len = 32;
   }
 
 review_diff:
@@ -1319,8 +1335,8 @@ review_diff8:
 
 mini_cmp:
   if (len > 7) {
-    len -= 8;
     for (;;) {
+      len -= 8;
       fio_memcpy8(ua + 3, a);
       fio_memcpy8(ub + 3, b);
       if (ub[3] != ua[3])
@@ -1330,12 +1346,11 @@ mini_cmp:
       if (len > 7) {
         a += 8;
         b += 8;
-        len -= 8;
         continue;
       }
       a += len & 7;
       b += len & 7;
-      len = 0;
+      len = 8;
     }
   }
   while (len--) {
@@ -20304,22 +20319,44 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   }
 
 review_diff:
-  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
-    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
-    ub[i] = fio_lton64(ub[i]);
-  }
-  if (ua[0] != ub[0]) {
-    return ua[0] > ub[0];
+  if (ua[2] != ub[2]) {
+    ua[3] = ua[2];
+    ub[3] = ub[2];
   }
   if (ua[1] != ub[1]) {
-    return ua[1] > ub[1];
+    ua[3] = ua[1];
+    ub[3] = ub[1];
   }
-  if (ua[2] != ub[2]) {
-    return ua[2] > ub[2];
+  if (ua[0] != ub[0]) {
+    ua[3] = ua[0];
+    ub[3] = ub[0];
   }
+review_diff8:
+  ua[3] = fio_lton64(ua[3]); /* comparison requires network byte order */
+  ub[3] = fio_lton64(ub[3]);
   return ua[3] > ub[3];
 
 mini_cmp:
+  if (len > 7) {
+    len -= 8;
+    for (;;) {
+      fio_memcpy8(ua + 3, a.buf);
+      fio_memcpy8(ub + 3, b.buf);
+      if (ua[3] != ub[3])
+        goto review_diff8;
+      if (len > 7) {
+        a.buf += 8;
+        b.buf += 8;
+        len -= 8;
+        continue;
+      }
+      if (!len)
+        return a_len_is_bigger;
+      a.buf += len & 7;
+      b.buf += len & 7;
+      len = 0;
+    }
+  }
   while (len--) {
     if (a.buf[0] != b.buf[0])
       return a.buf[0] > b.buf[0];
@@ -33630,7 +33667,7 @@ static inline int http1___read_header_line(
 
   buf->len -= (eol - buf->buf) + 1;
   buf->buf = eol + 1;
-  eol -= eol[-1] == '\r';
+  eol -= (eol[-1] == '\r');
   if (eol == start)
     goto headers_finished;
 

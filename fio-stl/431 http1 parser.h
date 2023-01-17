@@ -232,7 +232,7 @@ static inline int http1___read_header_line(
 
   buf->len -= (eol - buf->buf) + 1;
   buf->buf = eol + 1;
-  eol -= eol[-1] == '\r';
+  eol -= (eol[-1] == '\r');
   if (eol == start)
     goto headers_finished;
 
