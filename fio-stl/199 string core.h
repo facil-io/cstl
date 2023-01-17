@@ -1412,22 +1412,44 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   }
 
 review_diff:
-  for (size_t i = 0; i < 4; ++i) { /* compiler can vectorize this loop */
-    ua[i] = fio_lton64(ua[i]);     /* comparison needs network byte order */
-    ub[i] = fio_lton64(ub[i]);
-  }
-  if (ua[0] != ub[0]) {
-    return ua[0] > ub[0];
+  if (ua[2] != ub[2]) {
+    ua[3] = ua[2];
+    ub[3] = ub[2];
   }
   if (ua[1] != ub[1]) {
-    return ua[1] > ub[1];
+    ua[3] = ua[1];
+    ub[3] = ub[1];
   }
-  if (ua[2] != ub[2]) {
-    return ua[2] > ub[2];
+  if (ua[0] != ub[0]) {
+    ua[3] = ua[0];
+    ub[3] = ub[0];
   }
+review_diff8:
+  ua[3] = fio_lton64(ua[3]); /* comparison requires network byte order */
+  ub[3] = fio_lton64(ub[3]);
   return ua[3] > ub[3];
 
 mini_cmp:
+  if (len > 7) {
+    len -= 8;
+    for (;;) {
+      fio_memcpy8(ua + 3, a.buf);
+      fio_memcpy8(ub + 3, b.buf);
+      if (ua[3] != ub[3])
+        goto review_diff8;
+      if (len > 7) {
+        a.buf += 8;
+        b.buf += 8;
+        len -= 8;
+        continue;
+      }
+      if (!len)
+        return a_len_is_bigger;
+      a.buf += len & 7;
+      b.buf += len & 7;
+      len = 0;
+    }
+  }
   while (len--) {
     if (a.buf[0] != b.buf[0])
       return a.buf[0] > b.buf[0];
