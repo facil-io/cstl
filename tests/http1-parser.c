@@ -1,4 +1,4 @@
-#define FIO_MEMCHR fio_memchr
+// #define FIO_MEMCHR fio_memchr
 #define FIO_LOG
 #define FIO_HTTP1_PARSER
 #include "../fio-stl/include.h"
@@ -64,7 +64,9 @@ static struct {
 } http1_test_data[] = {
     {
         .test_name = "simple empty request",
-        .request = {"GET / HTTP/1.1\r\nHost:localhost\r\n\r\n"},
+        .request = {"GET / HTTP/1.1\r\n"
+                    "Host:localhost\r\nX-Test0:42\r\n"
+                    "X-Test1:42\r\nX-Test2:42\r\n\r\n"},
         .expect =
             {
                 .body = "",
@@ -76,7 +78,19 @@ static struct {
                 .headers = {{.name = "host",
                              .name_len = 4,
                              .val = "localhost",
-                             .val_len = 9}},
+                             .val_len = 9},
+                            {.name = "x-test0",
+                             .name_len = 7,
+                             .val = "42",
+                             .val_len = 2},
+                            {.name = "x-test1",
+                             .name_len = 7,
+                             .val = "42",
+                             .val_len = 2},
+                            {.name = "x-test2",
+                             .name_len = 7,
+                             .val = "42",
+                             .val_len = 2}},
             },
     },
     {

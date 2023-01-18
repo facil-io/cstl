@@ -110,9 +110,11 @@ struct http1_parser_s {
 static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata) {
   int i = 0;
   char *buf_start = buf.buf;
+  if (!buf.len)
+    return 0;
   if (!p->fn)
     p->fn = http1___start;
-  while (buf.len && !(i = p->fn(p, &buf, udata)))
+  while (!(i = p->fn(p, &buf, udata)))
     ;
   if (i < 0)
     return HTTP1_PARSER_ERROR;
@@ -197,80 +199,11 @@ parse_response_line:
 Reading Headers
 ***************************************************************************** */
 
-/* returns either a lower case (ASCI) or the original char. */
-static uint8_t http1_tolower(uint8_t c) {
-  if ((c - ((uint8_t)'A' - 1U)) < ((uint8_t)'Z' - (uint8_t)'A'))
-    c |= 32;
-  return c;
-}
-
-/* seeks to the ':' divisor while testing and converting to downcase. */
-static char *http1___seek_header_div(char *p) {
-  static const _Bool forbidden_name_chars[256] = {
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  for (;;) {
-    if (forbidden_name_chars[((uint8_t)(*p))])
-      return p;
-    *p = (char)http1_tolower((uint8_t)(*p));
-    ++p;
-  }
-}
-
-/* extract header name and value from a line and pass info to handler */
-static inline int http1___read_header_line(
-    http1_parser_s *p,
-    fio_buf_info_s *buf,
-    void *udata,
-    int (*handler)(http1_parser_s *, fio_buf_info_s, fio_buf_info_s, void *)) {
-  char *start = buf->buf;
-  char *eol = FIO_MEMCHR(start, '\n', buf->len);
-  char *div;
-  fio_buf_info_s name, value;
-  if (!eol)
-    return 1;
-
-  buf->len -= (eol - buf->buf) + 1;
-  buf->buf = eol + 1;
-  eol -= (eol[-1] == '\r');
-  if (eol == start)
-    goto headers_finished;
-
-  div = http1___seek_header_div(start);
-  if (div[0] != ':')
-    return -1;
-  name = FIO_BUF_INFO2(start, (div - start));
-  do {
-    ++div;
-  } while (*div == ' ' || *div == '\t');
-
-  if (div != eol)
-    while (eol[-1] == ' ' || eol[-1] == '\t')
-      --eol;
-  value = FIO_BUF_INFO2((div == eol) ? NULL : div, (eol - div));
-  return handler(p, name, value, udata);
-
-headers_finished:
-  p->fn = (!p->expected)         ? http1___finish
-          : (!(p->expected + 1)) ? http1___read_body_chunked
-                                 : http1___read_body;
-  return 0;
-}
-
-/* handle main header. */
-static inline int http1___read_on_header(http1_parser_s *p,
-                                         fio_buf_info_s name,
-                                         fio_buf_info_s value,
-                                         void *udata) {
+/* handle headers before calling callback. */
+static inline int http1___on_header(http1_parser_s *p,
+                                    fio_buf_info_s name,
+                                    fio_buf_info_s value,
+                                    void *udata) {
   /* test for special headers */
   switch (name.len) {
   case 6: /* test for "expect" */
@@ -321,14 +254,14 @@ static inline int http1___read_on_header(http1_parser_s *p,
     break;
   }
   /* perform callback */
-  return http1_on_header(name, value, udata);
+  return 0 - (http1_on_header(name, value, udata) == -1);
 }
 
-/* handle trailers (chunked encoding only). */
-static inline int http1___read_on_trailer(http1_parser_s *p,
-                                          fio_buf_info_s name,
-                                          fio_buf_info_s value,
-                                          void *udata) {
+/* handle trailers (chunked encoding only) before calling callback. */
+static inline int http1___on_trailer(http1_parser_s *p,
+                                     fio_buf_info_s name,
+                                     fio_buf_info_s value,
+                                     void *udata) {
   (void)p;
   fio_buf_info_s forbidden[] = {
       FIO_BUF_INFO1("authorization"),
@@ -353,18 +286,93 @@ static inline int http1___read_on_trailer(http1_parser_s *p,
   return http1_on_header(name, value, udata);
 }
 
+/* returns either a lower case (ASCI) or the original char. */
+static uint8_t http1_tolower(uint8_t c) {
+  if ((c - ((uint8_t)'A' - 1U)) < ((uint8_t)'Z' - (uint8_t)'A'))
+    c |= 32;
+  return c;
+}
+
+/* seeks to the ':' divisor while testing and converting to downcase. */
+static char *http1___seek_header_div(char *p) {
+  /* this is the subset of the forbidden chars that allows UTF-8 headers */
+  static const _Bool forbidden_name_chars[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (;;) {
+    *p = (char)http1_tolower((uint8_t)(*p));
+    ++p;
+    if (FIO_UNLIKELY(forbidden_name_chars[((uint8_t)(*p))]))
+      return p;
+  }
+}
+
+/* extract header name and value from a line and pass info to handler */
+static inline int http1___read_header_line(
+    http1_parser_s *p,
+    fio_buf_info_s *buf,
+    void *udata,
+    int (*handler)(http1_parser_s *, fio_buf_info_s, fio_buf_info_s, void *)) {
+  int r;
+  for (;;) {
+    char *start = buf->buf;
+    char *eol = FIO_MEMCHR(start, '\n', buf->len);
+    char *div;
+    fio_buf_info_s name, value;
+    if (!eol)
+      return 1;
+
+    buf->len -= (eol - buf->buf) + 1;
+    buf->buf = eol + 1;
+    eol -= (eol[-1] == '\r');
+    if (FIO_UNLIKELY(eol == start))
+      goto headers_finished;
+
+    div = http1___seek_header_div(start);
+    if (div[0] != ':')
+      return -1;
+    name = FIO_BUF_INFO2(start, (div - start));
+    do {
+      ++div;
+    } while (*div == ' ' || *div == '\t');
+
+    if (div != eol)
+      while (eol[-1] == ' ' || eol[-1] == '\t')
+        --eol;
+    value = FIO_BUF_INFO2((div == eol) ? NULL : div, (eol - div));
+    r = handler(p, name, value, udata);
+    if (FIO_UNLIKELY(r))
+      return r;
+  }
+
+headers_finished:
+  p->fn = (!p->expected)         ? http1___finish
+          : (!(p->expected + 1)) ? http1___read_body_chunked
+                                 : http1___read_body;
+  return 0;
+}
+
 /* parsing stage 1 - read headers. */
 static int http1___read_header(http1_parser_s *p,
                                fio_buf_info_s *buf,
                                void *udata) {
-  return http1___read_header_line(p, buf, udata, http1___read_on_header);
+  return http1___read_header_line(p, buf, udata, http1___on_header);
 }
 
 /* parsing stage 1 - read headers. */
 static int http1___read_trailer(http1_parser_s *p,
                                 fio_buf_info_s *buf,
                                 void *udata) {
-  return http1___read_header_line(p, buf, udata, http1___read_on_trailer);
+  return http1___read_header_line(p, buf, udata, http1___on_trailer);
 }
 
 /* *****************************************************************************
@@ -375,6 +383,8 @@ Reading the Body
 static int http1___read_body(http1_parser_s *p,
                              fio_buf_info_s *buf,
                              void *udata) {
+  if (!buf->len)
+    return 1;
   if (buf->len >= p->expected) {
     buf->len = p->expected;
     if (http1_on_body_chunk(*buf, udata))
@@ -397,6 +407,8 @@ Reading the Body (chunked)
 static int http1___read_body_chunked_read(http1_parser_s *p,
                                           fio_buf_info_s *buf,
                                           void *udata) {
+  if (!buf->len)
+    return 1;
   if (buf->len >= p->expected) {
     if (http1_on_body_chunk(FIO_BUF_INFO2(buf->buf, p->expected), udata))
       return -1;
