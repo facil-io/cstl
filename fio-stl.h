@@ -729,6 +729,16 @@ Memory Copying Primitives
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
+#ifndef FIO_MEMMOVE
+/** `memmov` selector macro */
+#if __has_builtin(__builtin_memmove)
+#define FIO_MEMMOVE __builtin_memmove
+#else
+/** `memmov` selector macro */
+#define FIO_MEMMOVE memmove
+#endif
+#endif /* FIO_MEMMOVE */
+
 FIO_SFUNC void *fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)s);
   return d;
@@ -992,7 +1002,7 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 
 /** an 8 byte value memset implementation. */
-FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+FIO_SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
   if (data < 0x100) { /* if a single byte value, match memset */
     data |= (data << 8);
@@ -1018,7 +1028,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   for (size_t i = 0; i < 32; i += 8) {
     fio_memcpy8(d + i, &data);
   }
-  return;
+  return dest_;
 
 small_memset:
   if (bytes & 16) {
@@ -1031,6 +1041,7 @@ small_memset:
     d += 8;
   }
   fio_memcpy7x(d, &data, bytes);
+  return dest_;
 }
 
 /* *****************************************************************************
@@ -4252,7 +4263,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       fio_xmask(buf + i, len, mask);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask rountrip error");
       fio_xmask(buf + i, len, mask);
-      memmove(buf + i + 1, buf + i, len);
+      FIO_MEMMOVE(buf + i + 1, buf + i, len);
       fio_xmask(buf + i + 1, len, mask);
       FIO_ASSERT(!memcmp(buf + i + 1, data, len),
                  "fio_xmask rountrip (with move) error");
@@ -4269,7 +4280,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       fio_xmask2(buf + i, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask2 rountrip error");
       fio_xmask2(buf + i, len, mask, counter);
-      memmove(buf + i + 1, buf + i, len);
+      FIO_MEMMOVE(buf + i + 1, buf + i, len);
       fio_xmask2(buf + i + 1, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i + 1, data, len), "fio_xmask2 with move error");
     }
@@ -12168,7 +12179,7 @@ Memory Helpers - API
  *
  * Probably slower than the one included with your compiler's C library.
  */
-FIO_SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
+FIO_SFUNC void *fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
  * A somewhat naive implementation of `memcpy`.
@@ -20408,7 +20419,7 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
     }
   }
   if (move_len)
-    memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
+    FIO_MEMMOVE(dest->buf + start_pos + len, dest->buf + move_start, move_len);
   if (len)
     FIO_MEMCPY(dest->buf + start_pos, src, len);
   dest->len = start_pos + len + move_len;
@@ -20694,7 +20705,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
         escape_pos = end;
       const size_t valid_len = escape_pos - src;
       if (writer + at != src && valid_len)
-        memmove(writer + at, src, valid_len);
+        FIO_MEMMOVE(writer + at, src, valid_len);
       at += valid_len;
       src = escape_pos;
     }
@@ -24265,9 +24276,9 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
 
   if (!FIO_ARRAY_IS_EMBEDDED(dest) && dest->start + total > capa) {
     /* we need to move the existing items due to the offset */
-    memmove(dest->ary,
-            dest->ary + dest->start,
-            (dest->end - dest->start) * sizeof(*dest->ary));
+    FIO_MEMMOVE(dest->ary,
+                dest->ary + dest->start,
+                (dest->end - dest->start) * sizeof(*dest->ary));
     dest->start = 0;
     dest->end = offset;
   }
@@ -24364,7 +24375,7 @@ expansion:
     uint8_t was_moved = 0;
     /* test if we need to move objects to make room at the end */
     if (ary->start + index >= ary->capa) {
-      memmove(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
+      FIO_MEMMOVE(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
       ary->start = 0;
       ary->end = index + 1;
       was_moved = 1;
@@ -24399,7 +24410,7 @@ negative_expansion:
     goto negative_expansion_embedded;
   a = ary->ary;
   if (index > (int32_t)ary->start) {
-    memmove(a + index, a + ary->start, count * sizeof(*a));
+    FIO_MEMMOVE(a + index, a + ary->start, count * sizeof(*a));
     ary->end = index + count;
     ary->start = index;
   }
@@ -24418,7 +24429,7 @@ negative_expansion:
 
 negative_expansion_embedded:
   a = FIO_ARRAY2EMBEDDED(ary)->embedded;
-  memmove(a + index, a, count * count * sizeof(*a));
+  FIO_MEMMOVE(a + index, a, count * count * sizeof(*a));
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
   FIO_MEMSET(a, 0, index * (sizeof(a)));
 #else
@@ -24525,7 +24536,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
   }
 
   if ((uint32_t)(index + 1) < count) {
-    memmove(a + index, a + index + 1, (count - (index + 1)) * sizeof(*a));
+    FIO_MEMMOVE(a + index, a + index + 1, (count - (index + 1)) * sizeof(*a));
   }
   FIO_ARRAY_TYPE_COPY((a + (count - 1))[0], FIO_ARRAY_TYPE_INVALID);
 
@@ -24647,9 +24658,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
         const uint32_t new_start = (ary->start >> 2);
         const uint32_t count = ary->end - ary->start;
         if (count)
-          memmove(ary->ary + new_start,
-                  ary->ary + ary->start,
-                  count * sizeof(*ary->ary));
+          FIO_MEMMOVE(ary->ary + new_start,
+                      ary->ary + ary->start,
+                      count * sizeof(*ary->ary));
         ary->end = count + new_start;
         ary->start = new_start;
       }
@@ -24746,9 +24757,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
         const uint32_t count = ary->end - ary->start;
         const uint32_t new_start = new_end - count;
         if (count)
-          memmove(ary->ary + new_start,
-                  ary->ary + ary->start,
-                  count * sizeof(*ary->ary));
+          FIO_MEMMOVE(ary->ary + new_start,
+                      ary->ary + ary->start,
+                      count * sizeof(*ary->ary));
         ary->end = new_end;
         ary->start = new_start;
       }
@@ -24760,9 +24771,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
     if (ary->start == FIO_ARRAY_EMBEDDED_CAPA)
       goto needs_memory_embed;
     if (ary->start)
-      memmove(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
-              FIO_ARRAY2EMBEDDED(ary)->embedded,
-              sizeof(*ary->ary) * ary->start);
+      FIO_MEMMOVE(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
+                  FIO_ARRAY2EMBEDDED(ary)->embedded,
+                  sizeof(*ary->ary) * ary->start);
     ++ary->start;
     FIO_ARRAY_TYPE_COPY(FIO_ARRAY2EMBEDDED(ary)->embedded[0], data);
     return FIO_ARRAY2EMBEDDED(ary)->embedded;
@@ -24822,11 +24833,11 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
     }
     --ary->start;
     if (ary->start)
-      memmove(FIO_ARRAY2EMBEDDED(ary)->embedded,
-              FIO_ARRAY2EMBEDDED(ary)->embedded +
-                  FIO_ARRAY2EMBEDDED(ary)->start,
-              FIO_ARRAY2EMBEDDED(ary)->start *
-                  sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
+      FIO_MEMMOVE(FIO_ARRAY2EMBEDDED(ary)->embedded,
+                  FIO_ARRAY2EMBEDDED(ary)->embedded +
+                      FIO_ARRAY2EMBEDDED(ary)->start,
+                  FIO_ARRAY2EMBEDDED(ary)->start *
+                      sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
     FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
                0,
                sizeof(*ary->ary));
@@ -29517,8 +29528,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       }
     }
     if (i < r && i != w) {
-      memmove(pfd + w, pfd + i, ((r - i) * sizeof(*pfd)));
-      memmove(uary + w, uary + i, ((r - i) * sizeof(*uary)));
+      FIO_MEMMOVE(pfd + w, pfd + i, ((r - i) * sizeof(*pfd)));
+      FIO_MEMMOVE(uary + w, uary + i, ((r - i) * sizeof(*uary)));
     }
   }
   w += r - i;
@@ -33852,26 +33863,33 @@ static int http1___read_body_chunked(http1_parser_s *p,
   buf->buf += buf->buf[0] == '\r';
   buf->len -= buf->buf[0] == '\n';
   buf->buf += buf->buf[0] == '\n';
-  char *pos = buf->buf;
-  char *eol = FIO_MEMCHR(pos, '\n', buf->len);
-  if (!eol)
+  char *eol = buf->buf;
+  size_t expected = fio_atol16u(&eol);
+  eol += (eol[0] == '\r');
+  if (eol >= buf->buf + buf->len)
     return 1;
-  p->expected = fio_atol16u(&pos);
-  if (pos + (eol[-1] == '\r') != eol)
+  if (eol[0] != '\n')
     return -1;
   ++eol;
-  buf->len -= eol - buf->buf;
-  buf->buf = eol;
-  if (!p->expected && (eol[0] == '\r' || eol[0] == '\n')) {
-    buf->len -= buf->buf[0] == '\r';
-    buf->buf += buf->buf[0] == '\r';
-    buf->len -= buf->buf[0] == '\n';
-    buf->buf += buf->buf[0] == '\n';
+  p->expected = expected;
+  if (p->expected) {
+    buf->len -= eol - buf->buf;
+    buf->buf = eol;
+    p->fn = http1___read_body_chunked_read;
+    return 0;
+  }
+  if ((eol + 1 < buf->buf + buf->len) && (eol[0] == '\r' || eol[0] == '\n')) {
+    eol += (eol[0] == '\r');
+    ++eol;
+    buf->len -= eol - buf->buf;
+    buf->buf = eol;
     p->fn = http1___start;
     http1_on_complete(udata);
     return 1;
   }
-  p->fn = p->expected ? http1___read_body_chunked_read : http1___read_trailer;
+  buf->len -= eol - buf->buf;
+  buf->buf = eol;
+  p->fn = http1___read_trailer;
   return 0;
 }
 

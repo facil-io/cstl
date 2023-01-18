@@ -597,6 +597,16 @@ Memory Copying Primitives
   }
 #endif /* __has_builtin(__builtin_memcpy) */
 
+#ifndef FIO_MEMMOVE
+/** `memmov` selector macro */
+#if __has_builtin(__builtin_memmove)
+#define FIO_MEMMOVE __builtin_memmove
+#else
+/** `memmov` selector macro */
+#define FIO_MEMMOVE memmove
+#endif
+#endif /* FIO_MEMMOVE */
+
 FIO_SFUNC void *fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)s);
   return d;
@@ -860,7 +870,7 @@ FIO_MEMSET / fio_memset - memset fallbacks
 #endif
 
 /** an 8 byte value memset implementation. */
-FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+FIO_SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   char *d = (char *)dest_;
   if (data < 0x100) { /* if a single byte value, match memset */
     data |= (data << 8);
@@ -886,7 +896,7 @@ FIO_SFUNC void fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
   for (size_t i = 0; i < 32; i += 8) {
     fio_memcpy8(d + i, &data);
   }
-  return;
+  return dest_;
 
 small_memset:
   if (bytes & 16) {
@@ -899,6 +909,7 @@ small_memset:
     d += 8;
   }
   fio_memcpy7x(d, &data, bytes);
+  return dest_;
 }
 
 /* *****************************************************************************

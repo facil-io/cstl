@@ -38,6 +38,7 @@ Used facil.io Modules
 // #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #define FIO_LEAK_COUNTER 1
 #define FIO_EVERYTHING
+#define FIO_HTTP1_PARSER
 #include "fio-stl.h"
 
 /* *****************************************************************************
@@ -62,7 +63,6 @@ static fio_protocol_s HTTP_PROTOCOL_1 = {
 IO "Objects"and helpers
 ***************************************************************************** */
 #include "../extras/http/http-handle.c"
-#include "../extras/http/http1-parser.h"
 
 typedef struct {
   http1_parser_s parser;
@@ -216,24 +216,42 @@ int main(int argc, char const *argv[]) {
 IO callback(s)
 ***************************************************************************** */
 
+/** called when a protocol error occurred. */
+static int http1_on_error(void *udata) {
+  client_s *c = (client_s *)udata;
+  if (c->h) {
+    http_status_set(c->h, 400);
+    http_write(c->h,
+               .data = "Bad Request... be nicer next time!",
+               .len = 34,
+               .finish = 1);
+  }
+  fio_close(c->io);
+  return -1;
+}
+
 /** Called there's incoming data (from STDIN / the client socket. */
 FIO_SFUNC void on_data__internal(client_s *c) {
-  size_t tmp;
-  if ((tmp = http1_parse(&c->parser,
-                         c->buf + c->buf_con,
-                         (size_t)(c->buf_pos - c->buf_con)))) {
-    c->buf_con += tmp;
-    if (!http1_complete(&c->parser))
-      return;
-    if (c->buf_con == c->buf_pos)
-      c->buf_pos = c->buf_con = 0;
-    else {
-      c->buf_pos = c->buf_pos - c->buf_con;
-      memmove(c->buf, c->buf + c->buf_con, c->buf_pos);
-      c->buf_con = 0;
-    }
+  size_t tmp = http1_parse(
+      &c->parser,
+      FIO_BUF_INFO2(c->buf + c->buf_con, (size_t)(c->buf_pos - c->buf_con)),
+      c);
+  if (!tmp)
+    return;
+  if (tmp == HTTP1_PARSER_ERROR) {
+    http1_on_error(c);
+    return;
   }
-  return;
+  c->buf_con += tmp;
+  if (c->h)
+    return;
+  if (c->buf_con == c->buf_pos)
+    c->buf_pos = c->buf_con = 0;
+  else {
+    c->buf_pos = c->buf_pos - c->buf_con;
+    FIO_MEMMOVE(c->buf, c->buf + c->buf_con, c->buf_pos);
+    c->buf_con = 0;
+  }
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
@@ -410,98 +428,88 @@ FIO_SFUNC void http_deferred_response(void *h_, void *ignr_) {
     http_finish(h);
 }
 
-/** called when a request was received. */
-static int http1_on_request(http1_parser_s *parser) {
-  client_s *c = (client_s *)parser;
+/** called when either a request or a response was received. */
+static int http1_on_complete(void *udata) {
+  client_s *c = (client_s *)udata;
   http_status_set(c->h, 200);
   http_respond(c->h);
   return 0;
 }
-
-/** called when a response was received. */
-static int http1_on_response(http1_parser_s *parser) {
-  (void)parser;
-  FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
-  return -1;
-}
 /** called when a request method is parsed. */
-static int http1_on_method(http1_parser_s *parser,
-                           char *method,
-                           size_t method_len) {
-  client_s *c = (client_s *)parser;
-  if (!c->h) {
-    c->h = http_new();
-    http_controller_set(c->h, &HTTP1_CONTROLLER, client_dup(c));
-  }
-  http_method_set(c->h, FIO_STR_INFO2(method, method_len));
+static int http1_on_method(fio_buf_info_s method, void *udata) {
+  client_s *c = (client_s *)udata;
+  if (c->h)
+    return -1;
+  c->h = http_new();
+  http_controller_set(c->h, &HTTP1_CONTROLLER, client_dup(c));
+  http_method_set(c->h, FIO_BUF2STR_INFO(method));
   return 0;
 }
 /** called when a response status is parsed. the status_str is the string
  * without the prefixed numerical status indicator.*/
-static int http1_on_status(http1_parser_s *parser,
-                           size_t status,
-                           char *status_str,
-                           size_t len) {
-  return -1;
-  client_s *c = (client_s *)parser;
-  http_status_set(c->h, status);
-  (void)parser;
-  (void)status;
-  (void)status_str;
-  (void)len;
+static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata) {
+  FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
+  return -1; /* do not accept responses */
+  (void)istatus, (void)status, (void)udata;
 }
-/** called when a request path (excluding query) is parsed. */
-static int http1_on_path(http1_parser_s *parser, char *path, size_t path_len) {
-  client_s *c = (client_s *)parser;
-  http_path_set(c->h, FIO_STR_INFO2(path, path_len));
-  return 0;
-}
-/** called when a request path (excluding query) is parsed. */
-static int http1_on_query(http1_parser_s *parser,
-                          char *query,
-                          size_t query_len) {
-  client_s *c = (client_s *)parser;
-  http_query_set(c->h, FIO_STR_INFO2(query, query_len));
+/** called when a request URL is parsed. */
+static int http1_on_url(fio_buf_info_s url, void *udata) {
+  client_s *c = (client_s *)udata;
+  fio_url_s u = fio_url_parse(url.buf, url.len);
+  http_path_set(c->h, FIO_BUF2STR_INFO(u.path));
+  if (u.host.len)
+    http_request_header_set(c->h,
+                            FIO_STR_INFO1("host"),
+                            FIO_BUF2STR_INFO(u.host));
+  if (u.query.len)
+    http_path_set(c->h, FIO_BUF2STR_INFO(u.query));
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
-static int http1_on_version(http1_parser_s *parser, char *version, size_t len) {
-  client_s *c = (client_s *)parser;
-  http_version_set(c->h, FIO_STR_INFO2(version, len));
+static int http1_on_version(fio_buf_info_s version, void *udata) {
+  client_s *c = (client_s *)udata;
+  http_version_set(c->h, FIO_BUF2STR_INFO(version));
   return 0;
 }
 /** called when a header is parsed. */
-static int http1_on_header(http1_parser_s *parser,
-                           char *name,
-                           size_t name_len,
-                           char *value,
-                           size_t value_len) {
-  client_s *c = (client_s *)parser;
+static int http1_on_header(fio_buf_info_s name,
+                           fio_buf_info_s value,
+                           void *udata) {
+  client_s *c = (client_s *)udata;
   http_request_header_add(c->h,
-                          FIO_STR_INFO2(name, name_len),
-                          FIO_STR_INFO2(value, value_len));
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
   return 0;
 }
+/** called when the special content-length header is parsed. */
+static int http1_on_header_content_length(fio_buf_info_s name,
+                                          fio_buf_info_s value,
+                                          size_t content_length,
+                                          void *udata) {
+  client_s *c = (client_s *)udata;
+  if (content_length > HTTP_MAX_BODY_SIZE)
+    return -1; /* TODO: send "payload too big" response */
+  if (content_length)
+    http_body_expect(c->h, content_length);
+  http_request_header_add(c->h,
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
+  return 0;
+  (void)name, (void)value;
+}
+/** called when `Expect` arrives and may require a 100 continue response. */
+static int http1_on_expect(fio_buf_info_s expected, void *udata) {
+  client_s *c = (client_s *)udata;
+  fio_write2(c->io, .buf = "100 Continue\r\n", .len = 14, .copy = 0);
+  return 0; /* TODO: improve support for `expect` */
+  (void)expected;
+}
+
 /** called when a body chunk is parsed. */
-static int http1_on_body_chunk(http1_parser_s *parser,
-                               char *data,
-                               size_t data_len) {
-  client_s *c = (client_s *)parser;
-  if (data_len + http_body_length(c->h) > HTTP_MAX_BODY_SIZE)
+static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
+  client_s *c = (client_s *)udata;
+  if (chunk.len + http_body_length(c->h) > HTTP_MAX_BODY_SIZE)
     return -1;
-  http_body_write(c->h, data, data_len);
+  http_body_write(c->h, chunk.buf, chunk.len);
   return 0;
-}
-/** called when a protocol error occurred. */
-static int http1_on_error(http1_parser_s *parser) {
-  client_s *c = (client_s *)parser;
-  if (c->h) {
-    http_status_set(c->h, 400);
-    http_write(c->h,
-               .data = "Bad Request... be nicer next time!",
-               .len = 34,
-               .finish = 1);
-  }
-  fio_close(c->io);
-  return -1;
 }

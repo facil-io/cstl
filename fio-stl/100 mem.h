@@ -128,7 +128,7 @@ Memory Helpers - API
  *
  * Probably slower than the one included with your compiler's C library.
  */
-FIO_SFUNC void fio_memset(void *restrict dest, uint64_t data, size_t bytes);
+FIO_SFUNC void *fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 
 /**
  * A somewhat naive implementation of `memcpy`.

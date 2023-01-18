@@ -197,8 +197,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       }
     }
     if (i < r && i != w) {
-      memmove(pfd + w, pfd + i, ((r - i) * sizeof(*pfd)));
-      memmove(uary + w, uary + i, ((r - i) * sizeof(*uary)));
+      FIO_MEMMOVE(pfd + w, pfd + i, ((r - i) * sizeof(*pfd)));
+      FIO_MEMMOVE(uary + w, uary + i, ((r - i) * sizeof(*uary)));
     }
   }
   w += r - i;

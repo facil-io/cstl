@@ -417,26 +417,33 @@ static int http1___read_body_chunked(http1_parser_s *p,
   buf->buf += buf->buf[0] == '\r';
   buf->len -= buf->buf[0] == '\n';
   buf->buf += buf->buf[0] == '\n';
-  char *pos = buf->buf;
-  char *eol = FIO_MEMCHR(pos, '\n', buf->len);
-  if (!eol)
+  char *eol = buf->buf;
+  size_t expected = fio_atol16u(&eol);
+  eol += (eol[0] == '\r');
+  if (eol >= buf->buf + buf->len)
     return 1;
-  p->expected = fio_atol16u(&pos);
-  if (pos + (eol[-1] == '\r') != eol)
+  if (eol[0] != '\n')
     return -1;
   ++eol;
-  buf->len -= eol - buf->buf;
-  buf->buf = eol;
-  if (!p->expected && (eol[0] == '\r' || eol[0] == '\n')) {
-    buf->len -= buf->buf[0] == '\r';
-    buf->buf += buf->buf[0] == '\r';
-    buf->len -= buf->buf[0] == '\n';
-    buf->buf += buf->buf[0] == '\n';
+  p->expected = expected;
+  if (p->expected) {
+    buf->len -= eol - buf->buf;
+    buf->buf = eol;
+    p->fn = http1___read_body_chunked_read;
+    return 0;
+  }
+  if ((eol + 1 < buf->buf + buf->len) && (eol[0] == '\r' || eol[0] == '\n')) {
+    eol += (eol[0] == '\r');
+    ++eol;
+    buf->len -= eol - buf->buf;
+    buf->buf = eol;
     p->fn = http1___start;
     http1_on_complete(udata);
     return 1;
   }
-  p->fn = p->expected ? http1___read_body_chunked_read : http1___read_trailer;
+  buf->len -= eol - buf->buf;
+  buf->buf = eol;
+  p->fn = http1___read_trailer;
   return 0;
 }
 

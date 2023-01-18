@@ -540,6 +540,18 @@ This macro makes it easy to override the `memcpy` implementation used by the lib
 
 By default this will be set to either `memcpy` or `__builtin_memcpy` (if available). It can also be set to `fio_memcpy` if need be.
 
+#### `FIO_MEMMOVE`
+
+```c
+#ifndef
+#define FIO_MEMMOVE memmove // or __builtin_memmove if available
+#endif
+```
+
+This macro makes it easy to override the `memmove` implementation used by the library.
+
+By default this will be set to either `memmove` or `__builtin_memmove` (if available). It can also be set to `fio_memcpy` if need be.
+
 #### `fio_memcpy##`
 
 ```c
@@ -576,7 +588,7 @@ This is provided to allow for easy "tail" processing.
 static void *fio_memcpy(void *dest, const void *src, size_t length);
 ```
 
-A fallback for `memcpy`, copies `length` bytes from `src` to `dest`.
+A fallback for `memcpy` and `memmove`, copies `length` bytes from `src` to `dest`.
 
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
@@ -597,7 +609,7 @@ By default this will be set to either `memset` or `__builtin_memset` (if availab
 #### `fio_memset`
 
 ```c
-static void fio_memset(void *restrict dest, uint64_t token, size_t length);
+static void *fio_memset(void *restrict dest, uint64_t token, size_t length);
 ```
 
 A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
@@ -605,6 +617,8 @@ A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
 The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
 
 On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
+
+Returns `dest` (the pointer originally received).
 
 #### `FIO_MEMCHR`
 

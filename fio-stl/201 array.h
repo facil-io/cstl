@@ -773,9 +773,9 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
 
   if (!FIO_ARRAY_IS_EMBEDDED(dest) && dest->start + total > capa) {
     /* we need to move the existing items due to the offset */
-    memmove(dest->ary,
-            dest->ary + dest->start,
-            (dest->end - dest->start) * sizeof(*dest->ary));
+    FIO_MEMMOVE(dest->ary,
+                dest->ary + dest->start,
+                (dest->end - dest->start) * sizeof(*dest->ary));
     dest->start = 0;
     dest->end = offset;
   }
@@ -872,7 +872,7 @@ expansion:
     uint8_t was_moved = 0;
     /* test if we need to move objects to make room at the end */
     if (ary->start + index >= ary->capa) {
-      memmove(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
+      FIO_MEMMOVE(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
       ary->start = 0;
       ary->end = index + 1;
       was_moved = 1;
@@ -907,7 +907,7 @@ negative_expansion:
     goto negative_expansion_embedded;
   a = ary->ary;
   if (index > (int32_t)ary->start) {
-    memmove(a + index, a + ary->start, count * sizeof(*a));
+    FIO_MEMMOVE(a + index, a + ary->start, count * sizeof(*a));
     ary->end = index + count;
     ary->start = index;
   }
@@ -926,7 +926,7 @@ negative_expansion:
 
 negative_expansion_embedded:
   a = FIO_ARRAY2EMBEDDED(ary)->embedded;
-  memmove(a + index, a, count * count * sizeof(*a));
+  FIO_MEMMOVE(a + index, a, count * count * sizeof(*a));
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
   FIO_MEMSET(a, 0, index * (sizeof(a)));
 #else
@@ -1033,7 +1033,7 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
   }
 
   if ((uint32_t)(index + 1) < count) {
-    memmove(a + index, a + index + 1, (count - (index + 1)) * sizeof(*a));
+    FIO_MEMMOVE(a + index, a + index + 1, (count - (index + 1)) * sizeof(*a));
   }
   FIO_ARRAY_TYPE_COPY((a + (count - 1))[0], FIO_ARRAY_TYPE_INVALID);
 
@@ -1155,9 +1155,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
         const uint32_t new_start = (ary->start >> 2);
         const uint32_t count = ary->end - ary->start;
         if (count)
-          memmove(ary->ary + new_start,
-                  ary->ary + ary->start,
-                  count * sizeof(*ary->ary));
+          FIO_MEMMOVE(ary->ary + new_start,
+                      ary->ary + ary->start,
+                      count * sizeof(*ary->ary));
         ary->end = count + new_start;
         ary->start = new_start;
       }
@@ -1254,9 +1254,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
         const uint32_t count = ary->end - ary->start;
         const uint32_t new_start = new_end - count;
         if (count)
-          memmove(ary->ary + new_start,
-                  ary->ary + ary->start,
-                  count * sizeof(*ary->ary));
+          FIO_MEMMOVE(ary->ary + new_start,
+                      ary->ary + ary->start,
+                      count * sizeof(*ary->ary));
         ary->end = new_end;
         ary->start = new_start;
       }
@@ -1268,9 +1268,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
     if (ary->start == FIO_ARRAY_EMBEDDED_CAPA)
       goto needs_memory_embed;
     if (ary->start)
-      memmove(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
-              FIO_ARRAY2EMBEDDED(ary)->embedded,
-              sizeof(*ary->ary) * ary->start);
+      FIO_MEMMOVE(FIO_ARRAY2EMBEDDED(ary)->embedded + 1,
+                  FIO_ARRAY2EMBEDDED(ary)->embedded,
+                  sizeof(*ary->ary) * ary->start);
     ++ary->start;
     FIO_ARRAY_TYPE_COPY(FIO_ARRAY2EMBEDDED(ary)->embedded[0], data);
     return FIO_ARRAY2EMBEDDED(ary)->embedded;
@@ -1330,11 +1330,11 @@ SFUNC int FIO_NAME(FIO_ARRAY_NAME, shift)(FIO_ARRAY_PTR ary_,
     }
     --ary->start;
     if (ary->start)
-      memmove(FIO_ARRAY2EMBEDDED(ary)->embedded,
-              FIO_ARRAY2EMBEDDED(ary)->embedded +
-                  FIO_ARRAY2EMBEDDED(ary)->start,
-              FIO_ARRAY2EMBEDDED(ary)->start *
-                  sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
+      FIO_MEMMOVE(FIO_ARRAY2EMBEDDED(ary)->embedded,
+                  FIO_ARRAY2EMBEDDED(ary)->embedded +
+                      FIO_ARRAY2EMBEDDED(ary)->start,
+                  FIO_ARRAY2EMBEDDED(ary)->start *
+                      sizeof(*FIO_ARRAY2EMBEDDED(ary)->embedded));
     FIO_MEMSET(FIO_ARRAY2EMBEDDED(ary)->embedded + ary->start,
                0,
                sizeof(*ary->ary));

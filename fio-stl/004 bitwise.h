@@ -948,7 +948,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       fio_xmask(buf + i, len, mask);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask rountrip error");
       fio_xmask(buf + i, len, mask);
-      memmove(buf + i + 1, buf + i, len);
+      FIO_MEMMOVE(buf + i + 1, buf + i, len);
       fio_xmask(buf + i + 1, len, mask);
       FIO_ASSERT(!memcmp(buf + i + 1, data, len),
                  "fio_xmask rountrip (with move) error");
@@ -965,7 +965,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
       fio_xmask2(buf + i, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i, data, len), "fio_xmask2 rountrip error");
       fio_xmask2(buf + i, len, mask, counter);
-      memmove(buf + i + 1, buf + i, len);
+      FIO_MEMMOVE(buf + i + 1, buf + i, len);
       fio_xmask2(buf + i + 1, len, mask, counter);
       FIO_ASSERT(!memcmp(buf + i + 1, data, len), "fio_xmask2 with move error");
     }

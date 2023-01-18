@@ -1501,7 +1501,7 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
     }
   }
   if (move_len)
-    memmove(dest->buf + start_pos + len, dest->buf + move_start, move_len);
+    FIO_MEMMOVE(dest->buf + start_pos + len, dest->buf + move_start, move_len);
   if (len)
     FIO_MEMCPY(dest->buf + start_pos, src, len);
   dest->len = start_pos + len + move_len;
@@ -1787,7 +1787,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
         escape_pos = end;
       const size_t valid_len = escape_pos - src;
       if (writer + at != src && valid_len)
-        memmove(writer + at, src, valid_len);
+        FIO_MEMMOVE(writer + at, src, valid_len);
       at += valid_len;
       src = escape_pos;
     }
