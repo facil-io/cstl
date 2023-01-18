@@ -1,3 +1,5 @@
+#define FIO_MEMCHR fio_memchr
+#define FIO_LOG
 #define FIO_HTTP1_PARSER
 #include "../fio-stl/include.h"
 
@@ -666,6 +668,7 @@ static int http1_on_header_content_length(fio_buf_info_s name,
 /** called when a body chunk is parsed. */
 static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   (void)udata;
+  FIO_LOG_DEBUG("body chunk (%zu): %s", chunk.len, chunk.buf);
   http1_test_data[http1_test_pos]
       .result.body[http1_test_data[http1_test_pos].result.body_len] = 0;
   FIO_ASSERT(chunk.len + http1_test_data[http1_test_pos].result.body_len <=
@@ -755,6 +758,7 @@ static void http1_parser_test(void) {
              strlen(http1_test_data[i].request[j]));
       w += strlen(http1_test_data[i].request[j]);
     }
+#ifndef DEBUG
     uint64_t start = fio_time_milli();
     for (size_t repetition = 0; repetition < 1000000; ++repetition) {
       parser = (http1_parser_s){0};
@@ -771,6 +775,7 @@ static void http1_parser_test(void) {
             "* %zums per 500k %s\n\n",
             (size_t)(end - start),
             http1_test_data[i].test_name);
+#endif /* DEBUG */
     /* advance counter */
     ++http1_test_pos;
   }

@@ -45,7 +45,7 @@ Parser Settings
 
 #ifndef HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED
 /** Preforms some optimizations assuming unaligned memory access is okay. */
-#define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 1
+#define HTTP1_UNALIGNED_MEMORY_ACCESS_ENABLED 0
 #endif
 
 #ifndef HTTP1_ALLOW_CHUNKED_IN_MIDDLE_OF_HEADER
@@ -1649,6 +1649,7 @@ static int http1_on_body_chunk(http1_parser_s *parser,
                                char *data,
                                size_t data_len) {
   (void)parser;
+  FIO_LOG_DEBUG("body chunk (%zu): %s", data_len, data);
   http1_test_data[http1_test_pos]
       .result.body[http1_test_data[http1_test_pos].result.body_len] = 0;
   HTTP1_TEST_ASSERT(data_len +
@@ -1778,6 +1779,7 @@ static void http1_parser_test(void) {
                       http1_test_data[i].expect.headers[r].val);
 
     /* test performance */
+#ifndef DEBUG
     w = 0;
     for (int j = 0; http1_test_data[i].request[j]; ++j) {
       memcpy(buf + w,
@@ -1801,6 +1803,7 @@ static void http1_parser_test(void) {
             "* %zums per 500k %s\n\n",
             (size_t)(end - start),
             http1_test_data[i].test_name);
+#endif /* DEBUG */
     /* advance counter */
     ++http1_test_pos;
   }

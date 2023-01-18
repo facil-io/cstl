@@ -94,6 +94,8 @@ static int http1___read_body_chunked(http1_parser_s *p,
 static int http1___read_trailer(http1_parser_s *p,
                                 fio_buf_info_s *buf,
                                 void *udata);
+/* completed parsing. */
+static int http1___finish(http1_parser_s *p, fio_buf_info_s *buf, void *udata);
 
 /* *****************************************************************************
 Main Parsing Loop
@@ -118,6 +120,14 @@ static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata) {
 }
 #define HTTP1___EXPECTED_CHUNKED ((size_t)(-1))
 
+/* completed parsing. */
+static int http1___finish(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
+  (void)buf;
+  *p = (http1_parser_s){0};
+  http1_on_complete(udata);
+  return 1;
+}
+
 /* *****************************************************************************
 Reading the first line
 ***************************************************************************** */
@@ -132,7 +142,8 @@ static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
     ++start;
   if (start == buf->buf + buf->len) {
     buf->buf = start;
-    return 2;
+    p->fn = http1___finish;
+    return 0;
   }
   char *eol = FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
@@ -186,14 +197,15 @@ parse_response_line:
 Reading Headers
 ***************************************************************************** */
 
+/* returns either a lower case (ASCI) or the original char. */
 static uint8_t http1_tolower(uint8_t c) {
-  if (((c >= 'A') & (c <= 'Z')))
+  if ((c - ((uint8_t)'A' - 1U)) < ((uint8_t)'Z' - (uint8_t)'A'))
     c |= 32;
   return c;
 }
 
 /* seeks to the ':' divisor while testing and converting to downcase. */
-static int http1___seek_header_div(char **p, char *end) {
+static char *http1___seek_header_div(char *p) {
   static const _Bool forbidden_name_chars[256] = {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
@@ -207,17 +219,14 @@ static int http1___seek_header_div(char **p, char *end) {
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   for (;;) {
-    if (forbidden_name_chars[((uint8_t)(**p))])
-      return -1;
-    **p = (char)http1_tolower((uint8_t)(**p));
-    ++*p;
-    if (*p == end)
-      return -1;
-    if (**p == ':')
-      return 0;
+    if (forbidden_name_chars[((uint8_t)(*p))])
+      return p;
+    *p = (char)http1_tolower((uint8_t)(*p));
+    ++p;
   }
 }
 
+/* extract header name and value from a line and pass info to handler */
 static inline int http1___read_header_line(
     http1_parser_s *p,
     fio_buf_info_s *buf,
@@ -236,36 +245,28 @@ static inline int http1___read_header_line(
   if (eol == start)
     goto headers_finished;
 
-  div = start;
-  if (http1___seek_header_div(&div, eol))
+  div = http1___seek_header_div(start);
+  if (div[0] != ':')
     return -1;
   name = FIO_BUF_INFO2(start, (div - start));
   do {
     ++div;
   } while (*div == ' ' || *div == '\t');
-  if (div == eol)
-    goto empty_value;
-  while (eol[-1] == ' ' || eol[-1] == '\t')
-    --eol;
-  value = FIO_BUF_INFO2(div, (eol - div));
-  return handler(p, name, value, udata);
 
-empty_value:
-  value = FIO_BUF_INFO2(NULL, 0);
+  if (div != eol)
+    while (eol[-1] == ' ' || eol[-1] == '\t')
+      --eol;
+  value = FIO_BUF_INFO2((div == eol) ? NULL : div, (eol - div));
   return handler(p, name, value, udata);
 
 headers_finished:
-  if (!p->expected) {
-    http1_on_complete(udata);
-    p->fn = http1___start;
-    return 1;
-  }
-  p->fn = (p->expected == HTTP1___EXPECTED_CHUNKED) ? http1___read_body_chunked
-                                                    : http1___read_body;
+  p->fn = (!p->expected)         ? http1___finish
+          : (!(p->expected + 1)) ? http1___read_body_chunked
+                                 : http1___read_body;
   return 0;
 }
 
-/* parsing stage 1 - read headers. */
+/* handle main header. */
 static inline int http1___read_on_header(http1_parser_s *p,
                                          fio_buf_info_s name,
                                          fio_buf_info_s value,
@@ -323,7 +324,7 @@ static inline int http1___read_on_header(http1_parser_s *p,
   return http1_on_header(name, value, udata);
 }
 
-/* parsing stage 1 - read headers. */
+/* handle trailers (chunked encoding only). */
 static inline int http1___read_on_trailer(http1_parser_s *p,
                                           fio_buf_info_s name,
                                           fio_buf_info_s value,
@@ -379,9 +380,8 @@ static int http1___read_body(http1_parser_s *p,
     if (http1_on_body_chunk(*buf, udata))
       return -1;
     buf->buf += buf->len;
-    http1_on_complete(udata);
-    p->fn = http1___start;
-    return 1;
+    p->fn = http1___finish;
+    return 0;
   }
   if (http1_on_body_chunk(*buf, udata))
     return -1;
@@ -389,21 +389,27 @@ static int http1___read_body(http1_parser_s *p,
   return 1;
 }
 
+/* *****************************************************************************
+Reading the Body (chunked)
+***************************************************************************** */
+
 /* parsing stage 2 - read chunked body - read chunk data. */
 static int http1___read_body_chunked_read(http1_parser_s *p,
                                           fio_buf_info_s *buf,
                                           void *udata) {
-  fio_buf_info_s b = *buf;
-  if (b.len > p->expected)
-    b.len = p->expected;
-  if (http1_on_body_chunk(b, udata))
+  if (buf->len >= p->expected) {
+    if (http1_on_body_chunk(FIO_BUF_INFO2(buf->buf, p->expected), udata))
+      return -1;
+    buf->buf += p->expected;
+    buf->len -= p->expected;
+    p->fn = http1___read_body_chunked;
+    return 0;
+  }
+  if (http1_on_body_chunk(buf[0], udata))
     return -1;
-  buf->buf += b.len;
-  buf->len -= b.len;
-  p->expected -= b.len;
-  p->fn =
-      p->expected ? http1___read_body_chunked_read : http1___read_body_chunked;
-  return 0;
+  p->expected -= buf->len;
+  buf->buf += buf->len;
+  return 1;
 }
 
 /* parsing stage 2 - read chunked body - read next chunk length. */
@@ -418,29 +424,33 @@ static int http1___read_body_chunked(http1_parser_s *p,
   buf->len -= buf->buf[0] == '\n';
   buf->buf += buf->buf[0] == '\n';
   char *eol = buf->buf;
-  size_t expected = fio_atol16u(&eol);
+  size_t expected = fio_atol16u(&eol); /* may read overflow, tests after */
+  if (eol == buf->buf)
+    return -1;
   eol += (eol[0] == '\r');
   if (eol >= buf->buf + buf->len)
-    return 1;
+    return 1; /* read overflowed */
   if (eol[0] != '\n')
     return -1;
   ++eol;
   p->expected = expected;
   if (p->expected) {
+    /* further data expected */
     buf->len -= eol - buf->buf;
     buf->buf = eol;
     p->fn = http1___read_body_chunked_read;
     return 0;
   }
   if ((eol + 1 < buf->buf + buf->len) && (eol[0] == '\r' || eol[0] == '\n')) {
+    /* no trailers, finish now. */
     eol += (eol[0] == '\r');
     ++eol;
     buf->len -= eol - buf->buf;
     buf->buf = eol;
-    p->fn = http1___start;
-    http1_on_complete(udata);
-    return 1;
+    p->fn = http1___finish;
+    return 0;
   }
+  /* possible trailers */
   buf->len -= eol - buf->buf;
   buf->buf = eol;
   p->fn = http1___read_trailer;

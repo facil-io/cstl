@@ -456,13 +456,15 @@ static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata) {
 static int http1_on_url(fio_buf_info_s url, void *udata) {
   client_s *c = (client_s *)udata;
   fio_url_s u = fio_url_parse(url.buf, url.len);
+  if (!u.path.len || u.path.buf[0] != '/')
+    return -1;
   http_path_set(c->h, FIO_BUF2STR_INFO(u.path));
+  if (u.query.len)
+    http_path_set(c->h, FIO_BUF2STR_INFO(u.query));
   if (u.host.len)
     http_request_header_set(c->h,
                             FIO_STR_INFO1("host"),
                             FIO_BUF2STR_INFO(u.host));
-  if (u.query.len)
-    http_path_set(c->h, FIO_BUF2STR_INFO(u.query));
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
