@@ -29,104 +29,116 @@ HTTP/1.x Parser API
 ***************************************************************************** */
 
 /** The HTTP/1.1 parser type */
-typedef struct http1_parser_s http1_parser_s;
+typedef struct fio_http1_parser_s fio_http1_parser_s;
 /** Initialization value for the parser */
-#define HTTP1_PARSER_INIT ((http1_parser_s){0})
+#define FIO_HTTP1_PARSER_INIT ((fio_http1_parser_s){0})
 
 /**
  * Parses HTTP/1.x data, calling any callbacks.
  *
- * Returns bytes consumed or `HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
+ * Returns bytes consumed or `FIO_HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
  */
-static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata);
+static size_t fio_http1_parse(fio_http1_parser_s *p,
+                              fio_buf_info_s buf,
+                              void *udata);
 
-/** The error return value for http1_parse. */
-#define HTTP1_PARSER_ERROR ((size_t)-1)
+/** The error return value for fio_http1_parse. */
+#define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
 
 /* *****************************************************************************
 HTTP/1.x callbacks (to be implemented by parser user)
 ***************************************************************************** */
 
 /** called when either a request or a response was received. */
-static int http1_on_complete(void *udata);
+static void fio_http1_on_complete(void *udata);
 /** called when a request method is parsed. */
-static int http1_on_method(fio_buf_info_s method, void *udata);
+static int fio_http1_on_method(fio_buf_info_s method, void *udata);
 /** called when a response status is parsed. the status_str is the string
  * without the prefixed numerical status indicator.*/
-static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata);
+static int fio_http1_on_status(size_t istatus,
+                               fio_buf_info_s status,
+                               void *udata);
 /** called when a request URL is parsed. */
-static int http1_on_url(fio_buf_info_s path, void *udata);
+static int fio_http1_on_url(fio_buf_info_s path, void *udata);
 /** called when a the HTTP/1.x version is parsed. */
-static int http1_on_version(fio_buf_info_s version, void *udata);
+static int fio_http1_on_version(fio_buf_info_s version, void *udata);
 /** called when a header is parsed. */
-static int http1_on_header(fio_buf_info_s name,
-                           fio_buf_info_s value,
-                           void *udata);
+static int fio_http1_on_header(fio_buf_info_s name,
+                               fio_buf_info_s value,
+                               void *udata);
 /** called when the special content-length header is parsed. */
-static int http1_on_header_content_length(fio_buf_info_s name,
-                                          fio_buf_info_s value,
-                                          size_t content_length,
-                                          void *udata);
+static int fio_http1_on_header_content_length(fio_buf_info_s name,
+                                              fio_buf_info_s value,
+                                              size_t content_length,
+                                              void *udata);
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int http1_on_expect(fio_buf_info_s expected, void *udata);
+static int fio_http1_on_expect(fio_buf_info_s expected, void *udata);
 /** called when a body chunk is parsed. */
-static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
+static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
 
 /* *****************************************************************************
 Implementation Stage Helpers
 ***************************************************************************** */
 
 /* parsing stage 0 - read first line (proxy?). */
-static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata);
-/* parsing stage 1 - read headers. */
-static int http1___read_header(http1_parser_s *p,
-                               fio_buf_info_s *buf,
-                               void *udata);
-/* parsing stage 2 - read body. */
-static int http1___read_body(http1_parser_s *p,
+static int fio_http1___start(fio_http1_parser_s *p,
                              fio_buf_info_s *buf,
                              void *udata);
-/* parsing stage 2 - read chunked body. */
-static int http1___read_body_chunked(http1_parser_s *p,
-                                     fio_buf_info_s *buf,
-                                     void *udata);
 /* parsing stage 1 - read headers. */
-static int http1___read_trailer(http1_parser_s *p,
-                                fio_buf_info_s *buf,
-                                void *udata);
+static int fio_http1___read_header(fio_http1_parser_s *p,
+                                   fio_buf_info_s *buf,
+                                   void *udata);
+/* parsing stage 2 - read body. */
+static int fio_http1___read_body(fio_http1_parser_s *p,
+                                 fio_buf_info_s *buf,
+                                 void *udata);
+/* parsing stage 2 - read chunked body. */
+static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
+                                         fio_buf_info_s *buf,
+                                         void *udata);
+/* parsing stage 1 - read headers. */
+static int fio_http1___read_trailer(fio_http1_parser_s *p,
+                                    fio_buf_info_s *buf,
+                                    void *udata);
 /* completed parsing. */
-static int http1___finish(http1_parser_s *p, fio_buf_info_s *buf, void *udata);
+static int fio_http1___finish(fio_http1_parser_s *p,
+                              fio_buf_info_s *buf,
+                              void *udata);
 
 /* *****************************************************************************
 Main Parsing Loop
 ***************************************************************************** */
 
 /** The HTTP/1.1 parser type implementation */
-struct http1_parser_s {
-  int (*fn)(http1_parser_s *, fio_buf_info_s *, void *);
+struct fio_http1_parser_s {
+  int (*fn)(fio_http1_parser_s *, fio_buf_info_s *, void *);
   size_t expected;
 };
 
-static size_t http1_parse(http1_parser_s *p, fio_buf_info_s buf, void *udata) {
+static size_t fio_http1_parse(fio_http1_parser_s *p,
+                              fio_buf_info_s buf,
+                              void *udata) {
   int i = 0;
   char *buf_start = buf.buf;
   if (!buf.len)
     return 0;
   if (!p->fn)
-    p->fn = http1___start;
+    p->fn = fio_http1___start;
   while (!(i = p->fn(p, &buf, udata)))
     ;
   if (i < 0)
-    return HTTP1_PARSER_ERROR;
+    return FIO_HTTP1_PARSER_ERROR;
   return buf.buf - buf_start;
 }
 #define HTTP1___EXPECTED_CHUNKED ((size_t)(-1))
 
 /* completed parsing. */
-static int http1___finish(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
+static int fio_http1___finish(fio_http1_parser_s *p,
+                              fio_buf_info_s *buf,
+                              void *udata) {
   (void)buf;
-  *p = (http1_parser_s){0};
-  http1_on_complete(udata);
+  *p = (fio_http1_parser_s){0};
+  fio_http1_on_complete(udata);
   return 1;
 }
 
@@ -135,7 +147,9 @@ Reading the first line
 ***************************************************************************** */
 
 /* parsing stage 0 - read first line (TODO: proxy protocol support?). */
-static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
+static int fio_http1___start(fio_http1_parser_s *p,
+                             fio_buf_info_s *buf,
+                             void *udata) {
   /* find line start/end and test */
   char *start = buf->buf;
   char *tmp;
@@ -144,8 +158,7 @@ static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
     ++start;
   if (start == buf->buf + buf->len) {
     buf->buf = start;
-    p->fn = http1___finish;
-    return 0;
+    return fio_http1___finish(p, buf, udata);
   }
   char *eol = FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
@@ -156,7 +169,6 @@ static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
   /* prep next stage */
   buf->len -= (eol - buf->buf) + 1;
   buf->buf = eol + 1;
-  p->fn = http1___read_header;
   eol -= eol[-1] == '\r';
 
   /* parse first line */
@@ -165,34 +177,34 @@ static int http1___start(http1_parser_s *p, fio_buf_info_s *buf, void *udata) {
   /* request: method path version */
   if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (http1_on_method(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_method(FIO_BUF_INFO2(start, tmp - start), udata))
     return -1;
   start = tmp + 1;
   if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (http1_on_url(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_url(FIO_BUF_INFO2(start, tmp - start), udata))
     return -1;
   start = tmp + 1;
   if (start >= eol)
     return -1;
-  if (http1_on_version(FIO_BUF_INFO2(start, (eol - start)), udata))
+  if (fio_http1_on_version(FIO_BUF_INFO2(start, (eol - start)), udata))
     return -1;
-  return 0;
+  return (p->fn = fio_http1___read_header)(p, buf, udata);
 
 parse_response_line:
   /* response: version code text */
   if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (http1_on_version(FIO_BUF_INFO2(start, (tmp - start)), udata))
+  if (fio_http1_on_version(FIO_BUF_INFO2(start, (tmp - start)), udata))
     return -1;
   start = tmp + 1;
   if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (http1_on_status(fio_atol10(&start),
-                      FIO_BUF_INFO2((tmp + 1), eol - tmp),
-                      udata))
+  if (fio_http1_on_status(fio_atol10(&start),
+                          FIO_BUF_INFO2((tmp + 1), eol - tmp),
+                          udata))
     return -1;
-  return 0;
+  return (p->fn = fio_http1___read_header)(p, buf, udata);
 }
 
 /* *****************************************************************************
@@ -200,17 +212,17 @@ Reading Headers
 ***************************************************************************** */
 
 /* handle headers before calling callback. */
-static inline int http1___on_header(http1_parser_s *p,
-                                    fio_buf_info_s name,
-                                    fio_buf_info_s value,
-                                    void *udata) {
+static inline int fio_http1___on_header(fio_http1_parser_s *p,
+                                        fio_buf_info_s name,
+                                        fio_buf_info_s value,
+                                        void *udata) {
   /* test for special headers */
   switch (name.len) {
   case 6: /* test for "expect" */
     if (fio_buf2u32_local(name.buf) == fio_buf2u32_local("expe") &&
         fio_buf2u32_local(name.buf + 2) ==
             fio_buf2u32_local("pect")) { /* Expect */
-      return 0 - http1_on_expect(value, udata);
+      return 0 - fio_http1_on_expect(value, udata);
     }
     break;
   case 14: /* test for "content-length" */
@@ -224,7 +236,8 @@ static inline int http1___on_header(http1_parser_s *p,
         return 0 - (p->expected != clen);
       p->expected = clen;
       return 0 -
-             (http1_on_header_content_length(name, value, clen, udata) == -1);
+             (fio_http1_on_header_content_length(name, value, clen, udata) ==
+              -1);
     }
     break;
   case 17: /* test for "transfer-encoding" (chunked?) */
@@ -254,14 +267,14 @@ static inline int http1___on_header(http1_parser_s *p,
     break;
   }
   /* perform callback */
-  return 0 - (http1_on_header(name, value, udata) == -1);
+  return 0 - (fio_http1_on_header(name, value, udata) == -1);
 }
 
 /* handle trailers (chunked encoding only) before calling callback. */
-static inline int http1___on_trailer(http1_parser_s *p,
-                                     fio_buf_info_s name,
-                                     fio_buf_info_s value,
-                                     void *udata) {
+static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
+                                         fio_buf_info_s name,
+                                         fio_buf_info_s value,
+                                         void *udata) {
   (void)p;
   fio_buf_info_s forbidden[] = {
       FIO_BUF_INFO1("authorization"),
@@ -283,18 +296,18 @@ static inline int http1___on_trailer(http1_parser_s *p,
     if (FIO_BUF_INFO_IS_EQ(name, forbidden[i]))
       return -1;
   }
-  return http1_on_header(name, value, udata);
+  return fio_http1_on_header(name, value, udata);
 }
 
 /* returns either a lower case (ASCI) or the original char. */
-static uint8_t http1_tolower(uint8_t c) {
+static uint8_t fio_http1_tolower(uint8_t c) {
   if ((c - ((uint8_t)'A' - 1U)) < ((uint8_t)'Z' - (uint8_t)'A'))
     c |= 32;
   return c;
 }
 
 /* seeks to the ':' divisor while testing and converting to downcase. */
-static char *http1___seek_header_div(char *p) {
+static char *fio_http1___seek_header_div(char *p) {
   /* this is the subset of the forbidden chars that allows UTF-8 headers */
   static const _Bool forbidden_name_chars[256] = {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -309,7 +322,7 @@ static char *http1___seek_header_div(char *p) {
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   for (;;) {
-    *p = (char)http1_tolower((uint8_t)(*p));
+    *p = (char)fio_http1_tolower((uint8_t)(*p));
     ++p;
     if (FIO_UNLIKELY(forbidden_name_chars[((uint8_t)(*p))]))
       return p;
@@ -317,11 +330,14 @@ static char *http1___seek_header_div(char *p) {
 }
 
 /* extract header name and value from a line and pass info to handler */
-static inline int http1___read_header_line(
-    http1_parser_s *p,
+static inline int fio_http1___read_header_line(
+    fio_http1_parser_s *p,
     fio_buf_info_s *buf,
     void *udata,
-    int (*handler)(http1_parser_s *, fio_buf_info_s, fio_buf_info_s, void *)) {
+    int (*handler)(fio_http1_parser_s *,
+                   fio_buf_info_s,
+                   fio_buf_info_s,
+                   void *)) {
   int r;
   for (;;) {
     char *start = buf->buf;
@@ -337,7 +353,7 @@ static inline int http1___read_header_line(
     if (FIO_UNLIKELY(eol == start))
       goto headers_finished;
 
-    div = http1___seek_header_div(start);
+    div = fio_http1___seek_header_div(start);
     if (div[0] != ':')
       return -1;
     name = FIO_BUF_INFO2(start, (div - start));
@@ -355,24 +371,24 @@ static inline int http1___read_header_line(
   }
 
 headers_finished:
-  p->fn = (!p->expected)         ? http1___finish
-          : (!(p->expected + 1)) ? http1___read_body_chunked
-                                 : http1___read_body;
-  return 0;
+  p->fn = (!p->expected)         ? fio_http1___finish
+          : (!(p->expected + 1)) ? fio_http1___read_body_chunked
+                                 : fio_http1___read_body;
+  return p->fn(p, buf, udata);
 }
 
 /* parsing stage 1 - read headers. */
-static int http1___read_header(http1_parser_s *p,
-                               fio_buf_info_s *buf,
-                               void *udata) {
-  return http1___read_header_line(p, buf, udata, http1___on_header);
+static int fio_http1___read_header(fio_http1_parser_s *p,
+                                   fio_buf_info_s *buf,
+                                   void *udata) {
+  return fio_http1___read_header_line(p, buf, udata, fio_http1___on_header);
 }
 
 /* parsing stage 1 - read headers. */
-static int http1___read_trailer(http1_parser_s *p,
-                                fio_buf_info_s *buf,
-                                void *udata) {
-  return http1___read_header_line(p, buf, udata, http1___on_trailer);
+static int fio_http1___read_trailer(fio_http1_parser_s *p,
+                                    fio_buf_info_s *buf,
+                                    void *udata) {
+  return fio_http1___read_header_line(p, buf, udata, fio_http1___on_trailer);
 }
 
 /* *****************************************************************************
@@ -380,20 +396,19 @@ Reading the Body
 ***************************************************************************** */
 
 /* parsing stage 2 - read body - known content length. */
-static int http1___read_body(http1_parser_s *p,
-                             fio_buf_info_s *buf,
-                             void *udata) {
+static int fio_http1___read_body(fio_http1_parser_s *p,
+                                 fio_buf_info_s *buf,
+                                 void *udata) {
   if (!buf->len)
     return 1;
   if (buf->len >= p->expected) {
     buf->len = p->expected;
-    if (http1_on_body_chunk(*buf, udata))
+    if (fio_http1_on_body_chunk(*buf, udata))
       return -1;
     buf->buf += buf->len;
-    p->fn = http1___finish;
-    return 0;
+    return fio_http1___finish(p, buf, udata);
   }
-  if (http1_on_body_chunk(*buf, udata))
+  if (fio_http1_on_body_chunk(*buf, udata))
     return -1;
   buf->buf += buf->len;
   return 1;
@@ -404,20 +419,20 @@ Reading the Body (chunked)
 ***************************************************************************** */
 
 /* parsing stage 2 - read chunked body - read chunk data. */
-static int http1___read_body_chunked_read(http1_parser_s *p,
-                                          fio_buf_info_s *buf,
-                                          void *udata) {
+static int fio_http1___read_body_chunked_read(fio_http1_parser_s *p,
+                                              fio_buf_info_s *buf,
+                                              void *udata) {
   if (!buf->len)
     return 1;
   if (buf->len >= p->expected) {
-    if (http1_on_body_chunk(FIO_BUF_INFO2(buf->buf, p->expected), udata))
+    if (fio_http1_on_body_chunk(FIO_BUF_INFO2(buf->buf, p->expected), udata))
       return -1;
     buf->buf += p->expected;
     buf->len -= p->expected;
-    p->fn = http1___read_body_chunked;
+    p->fn = fio_http1___read_body_chunked;
     return 0;
   }
-  if (http1_on_body_chunk(buf[0], udata))
+  if (fio_http1_on_body_chunk(buf[0], udata))
     return -1;
   p->expected -= buf->len;
   buf->buf += buf->len;
@@ -425,16 +440,22 @@ static int http1___read_body_chunked_read(http1_parser_s *p,
 }
 
 /* parsing stage 2 - read chunked body - read next chunk length. */
-static int http1___read_body_chunked(http1_parser_s *p,
-                                     fio_buf_info_s *buf,
-                                     void *udata) {
+static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
+                                         fio_buf_info_s *buf,
+                                         void *udata) {
   (void)udata;
   if (buf->len < 3)
     return 1;
-  buf->len -= buf->buf[0] == '\r';
-  buf->buf += buf->buf[0] == '\r';
-  buf->len -= buf->buf[0] == '\n';
-  buf->buf += buf->buf[0] == '\n';
+  { /* remove possible extra EOL after chunk payload */
+    size_t tmp = (buf->buf[0] == '\r');
+    tmp += (buf->buf[tmp] == '\n');
+    buf->len -= tmp;
+    buf->buf += tmp;
+  }
+
+  // if (!FIO_MEMCHR(buf->buf, '\n', buf->len)) /* prevent read overflow? */
+  //   return 1;
+
   char *eol = buf->buf;
   size_t expected = fio_atol16u(&eol); /* may read overflow, tests after */
   if (eol == buf->buf)
@@ -450,8 +471,7 @@ static int http1___read_body_chunked(http1_parser_s *p,
     /* further data expected */
     buf->len -= eol - buf->buf;
     buf->buf = eol;
-    p->fn = http1___read_body_chunked_read;
-    return 0;
+    return (p->fn = fio_http1___read_body_chunked_read)(p, buf, udata);
   }
   if ((eol + 1 < buf->buf + buf->len) && (eol[0] == '\r' || eol[0] == '\n')) {
     /* no trailers, finish now. */
@@ -459,14 +479,12 @@ static int http1___read_body_chunked(http1_parser_s *p,
     ++eol;
     buf->len -= eol - buf->buf;
     buf->buf = eol;
-    p->fn = http1___finish;
-    return 0;
+    return fio_http1___finish(p, buf, udata);
   }
   /* possible trailers */
   buf->len -= eol - buf->buf;
   buf->buf = eol;
-  p->fn = http1___read_trailer;
-  return 0;
+  return (p->fn = fio_http1___read_trailer)(p, buf, udata);
 }
 
 /* *****************************************************************************

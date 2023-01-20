@@ -78,6 +78,8 @@ The `tcp` / `udp` information **may** appear in the URL schema if missing from t
 If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or 
 `FIO_SOCK_UDP` that were originally given.
 
+**Note**: a `file://` or `unix://` (or even a simple `./file.sock`) URL will create a publicly available Unix Socket (permissions set to allow everyone RW access). To create a private Unix Socket (one with permissions equal to the processes `umask`), use a `prive://` schema (i.e., `priv://my.sock`).
+
 #### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
 
 ```c

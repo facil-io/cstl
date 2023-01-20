@@ -2321,7 +2321,8 @@ Pointer Tagging
 /* Modules that require FIO_BITWISE (includes FIO_RAND requirements) */
 #if defined(FIO_STR_NAME) || defined(FIO_RAND) || defined(FIO_JSON) ||         \
     defined(FIO_MAP_NAME) || defined(FIO_UMAP_NAME) || defined(FIO_SHA1) ||    \
-    defined(FIO_MATH) || defined(FIO_CHACHA) || defined(FIO_HTTP1_PARSER)
+    defined(FIO_MATH) || defined(FIO_CHACHA) || defined(FIO_HTTP1_PARSER) ||   \
+    defined(FIO_SOCK)
 #ifndef FIO_BITWISE
 #define FIO_BITWISE
 #endif

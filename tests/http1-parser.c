@@ -40,9 +40,9 @@ HTTP/1.1 TESTING
 #define FIO_TIME
 #include "../fio-stl/include.h"
 
-static size_t http1_test_pos;
-static char http1_test_temp_buf[8092];
-static size_t http1_test_temp_buf_pos;
+static size_t fio_http1_test_pos;
+static char fio_http1_test_temp_buf[8092];
+static size_t fio_http1_test_temp_buf_pos;
 static struct {
   char *test_name;
   char *request[16];
@@ -54,14 +54,14 @@ static struct {
     const char *path;
     const char *query;
     const char *version;
-    struct http1_test_header_s {
+    struct fio_http1_test_header_s {
       const char *name;
       size_t name_len;
       const char *val;
       size_t val_len;
     } headers[12];
   } result, expect;
-} http1_test_data[] = {
+} fio_http1_test_data[] = {
     {
         .test_name = "simple empty request",
         .request = {"GET / HTTP/1.1\r\n"
@@ -591,153 +591,165 @@ static struct {
 };
 
 /** called when a request was received. */
-static int http1_on_complete(void *udata) {
+static void fio_http1_on_complete(void *udata) {
   (void)udata;
-  return 0;
 }
 /** called when a request method is parsed. */
-static int http1_on_method(fio_buf_info_s method, void *udata) {
+static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
   (void)udata;
-  http1_test_data[http1_test_pos].result.method = method.buf;
+  fio_http1_test_data[fio_http1_test_pos].result.method = method.buf;
   FIO_ASSERT(method.len ==
-                 strlen(http1_test_data[http1_test_pos].expect.method),
+                 strlen(fio_http1_test_data[fio_http1_test_pos].expect.method),
              "method.len test error for: %s",
-             http1_test_data[http1_test_pos].test_name);
+             fio_http1_test_data[fio_http1_test_pos].test_name);
   return 0;
 }
 /** called when a response status is parsed. the status_str is the string
  * without the prefixed numerical status indicator.*/
-static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata) {
+static int fio_http1_on_status(size_t istatus,
+                               fio_buf_info_s status,
+                               void *udata) {
   (void)udata;
-  http1_test_data[http1_test_pos].result.status = istatus;
-  http1_test_data[http1_test_pos].result.method = status.buf;
+  fio_http1_test_data[fio_http1_test_pos].result.status = istatus;
+  fio_http1_test_data[fio_http1_test_pos].result.method = status.buf;
   FIO_ASSERT(status.len ==
-                 strlen(http1_test_data[http1_test_pos].expect.method),
+                 strlen(fio_http1_test_data[fio_http1_test_pos].expect.method),
              "status length test error for: %s",
-             http1_test_data[http1_test_pos].test_name);
+             fio_http1_test_data[fio_http1_test_pos].test_name);
   return 0;
 }
 /** called when a request path (excluding query) is parsed. */
-static int http1_on_url(fio_buf_info_s path, void *udata) {
+static int fio_http1_on_url(fio_buf_info_s path, void *udata) {
   (void)udata;
   fio_url_s u = fio_url_parse(path.buf, path.len);
-  http1_test_data[http1_test_pos].result.path = u.path.buf;
-  FIO_ASSERT(u.path.len == strlen(http1_test_data[http1_test_pos].expect.path),
+  fio_http1_test_data[fio_http1_test_pos].result.path = u.path.buf;
+  FIO_ASSERT(u.path.len ==
+                 strlen(fio_http1_test_data[fio_http1_test_pos].expect.path),
              "path length test error for: %s",
-             http1_test_data[http1_test_pos].test_name);
-  if (http1_test_data[http1_test_pos].expect.query) {
-    http1_test_data[http1_test_pos].result.query = u.query.buf;
+             fio_http1_test_data[fio_http1_test_pos].test_name);
+  if (fio_http1_test_data[fio_http1_test_pos].expect.query) {
+    fio_http1_test_data[fio_http1_test_pos].result.query = u.query.buf;
     FIO_ASSERT(u.query.len ==
-                   strlen(http1_test_data[http1_test_pos].expect.query),
+                   strlen(fio_http1_test_data[fio_http1_test_pos].expect.query),
                "query length test error for: %s",
-               http1_test_data[http1_test_pos].test_name);
+               fio_http1_test_data[fio_http1_test_pos].test_name);
   }
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
-static int http1_on_version(fio_buf_info_s version, void *udata) {
+static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
   (void)udata;
-  http1_test_data[http1_test_pos].result.version = version.buf;
+  fio_http1_test_data[fio_http1_test_pos].result.version = version.buf;
   FIO_ASSERT(version.len ==
-                 strlen(http1_test_data[http1_test_pos].expect.version),
+                 strlen(fio_http1_test_data[fio_http1_test_pos].expect.version),
              "version length test error for: %s",
-             http1_test_data[http1_test_pos].test_name);
+             fio_http1_test_data[fio_http1_test_pos].test_name);
   return 0;
 }
 /** called when a header is parsed. */
-static int http1_on_header(fio_buf_info_s name,
-                           fio_buf_info_s value,
-                           void *udata) {
+static int fio_http1_on_header(fio_buf_info_s name,
+                               fio_buf_info_s value,
+                               void *udata) {
   (void)udata;
   size_t pos = 0;
-  while (pos < 12 && http1_test_data[http1_test_pos].result.headers[pos].name)
+  while (pos < 12 &&
+         fio_http1_test_data[fio_http1_test_pos].result.headers[pos].name)
     ++pos;
   FIO_ASSERT(pos < 12,
              "header result overflow for: %s",
-             http1_test_data[http1_test_pos].test_name);
-  memcpy(http1_test_temp_buf + http1_test_temp_buf_pos, name.buf, name.len);
-  name.buf = http1_test_temp_buf + http1_test_temp_buf_pos;
-  http1_test_temp_buf_pos += name.len;
-  http1_test_temp_buf[http1_test_temp_buf_pos++] = 0;
-  memcpy(http1_test_temp_buf + http1_test_temp_buf_pos, value.buf, value.len);
-  value.buf = http1_test_temp_buf + http1_test_temp_buf_pos;
-  http1_test_temp_buf_pos += value.len;
-  http1_test_temp_buf[http1_test_temp_buf_pos++] = 0;
-  http1_test_data[http1_test_pos].result.headers[pos].name = name.buf;
-  http1_test_data[http1_test_pos].result.headers[pos].name_len = name.len;
-  http1_test_data[http1_test_pos].result.headers[pos].val = value.buf;
-  http1_test_data[http1_test_pos].result.headers[pos].val_len = value.len;
+             fio_http1_test_data[fio_http1_test_pos].test_name);
+  memcpy(fio_http1_test_temp_buf + fio_http1_test_temp_buf_pos,
+         name.buf,
+         name.len);
+  name.buf = fio_http1_test_temp_buf + fio_http1_test_temp_buf_pos;
+  fio_http1_test_temp_buf_pos += name.len;
+  fio_http1_test_temp_buf[fio_http1_test_temp_buf_pos++] = 0;
+  memcpy(fio_http1_test_temp_buf + fio_http1_test_temp_buf_pos,
+         value.buf,
+         value.len);
+  value.buf = fio_http1_test_temp_buf + fio_http1_test_temp_buf_pos;
+  fio_http1_test_temp_buf_pos += value.len;
+  fio_http1_test_temp_buf[fio_http1_test_temp_buf_pos++] = 0;
+  fio_http1_test_data[fio_http1_test_pos].result.headers[pos].name = name.buf;
+  fio_http1_test_data[fio_http1_test_pos].result.headers[pos].name_len =
+      name.len;
+  fio_http1_test_data[fio_http1_test_pos].result.headers[pos].val = value.buf;
+  fio_http1_test_data[fio_http1_test_pos].result.headers[pos].val_len =
+      value.len;
   return 0;
 }
 
 /** called when the special content-length header is parsed. */
-static int http1_on_header_content_length(fio_buf_info_s name,
-                                          fio_buf_info_s value,
-                                          size_t content_length,
-                                          void *udata) {
+static int fio_http1_on_header_content_length(fio_buf_info_s name,
+                                              fio_buf_info_s value,
+                                              size_t content_length,
+                                              void *udata) {
   (void)content_length;
-  return http1_on_header(name, value, udata);
+  return fio_http1_on_header(name, value, udata);
 }
 
 /** called when a body chunk is parsed. */
-static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
+static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   (void)udata;
   FIO_LOG_DEBUG("body chunk (%zu): %s", chunk.len, chunk.buf);
-  http1_test_data[http1_test_pos]
-      .result.body[http1_test_data[http1_test_pos].result.body_len] = 0;
-  FIO_ASSERT(chunk.len + http1_test_data[http1_test_pos].result.body_len <=
-                 http1_test_data[http1_test_pos].expect.body_len,
+  fio_http1_test_data[fio_http1_test_pos]
+      .result.body[fio_http1_test_data[fio_http1_test_pos].result.body_len] = 0;
+  FIO_ASSERT(chunk.len +
+                     fio_http1_test_data[fio_http1_test_pos].result.body_len <=
+                 fio_http1_test_data[fio_http1_test_pos].expect.body_len,
              "body overflow for: %s"
              "\r\n Expect:\n%s\nGot:\n%s%s\n",
-             http1_test_data[http1_test_pos].test_name,
-             http1_test_data[http1_test_pos].expect.body,
-             http1_test_data[http1_test_pos].result.body,
+             fio_http1_test_data[fio_http1_test_pos].test_name,
+             fio_http1_test_data[fio_http1_test_pos].expect.body,
+             fio_http1_test_data[fio_http1_test_pos].result.body,
              chunk.buf);
-  memcpy(http1_test_data[http1_test_pos].result.body +
-             http1_test_data[http1_test_pos].result.body_len,
+  memcpy(fio_http1_test_data[fio_http1_test_pos].result.body +
+             fio_http1_test_data[fio_http1_test_pos].result.body_len,
          chunk.buf,
          chunk.len);
-  http1_test_data[http1_test_pos].result.body_len += chunk.len;
-  http1_test_data[http1_test_pos]
-      .result.body[http1_test_data[http1_test_pos].result.body_len] = 0;
+  fio_http1_test_data[fio_http1_test_pos].result.body_len += chunk.len;
+  fio_http1_test_data[fio_http1_test_pos]
+      .result.body[fio_http1_test_data[fio_http1_test_pos].result.body_len] = 0;
   return 0;
 }
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int http1_on_expect(fio_buf_info_s expected, void *udata) {
+static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
   (void)expected, (void)udata;
   return 0;
 }
 
 #define HTTP1_TEST_STRING_FIELD(field, i)                                      \
-  FIO_ASSERT((!http1_test_data[i].expect.field &&                              \
-              !http1_test_data[i].result.field) ||                             \
-                 (http1_test_data[i].expect.field &&                           \
-                  http1_test_data[i].result.field &&                           \
-                  !memcmp(http1_test_data[i].expect.field,                     \
-                          http1_test_data[i].result.field,                     \
-                          strlen(http1_test_data[i].expect.field))),           \
+  FIO_ASSERT((!fio_http1_test_data[i].expect.field &&                          \
+              !fio_http1_test_data[i].result.field) ||                         \
+                 (fio_http1_test_data[i].expect.field &&                       \
+                  fio_http1_test_data[i].result.field &&                       \
+                  !memcmp(fio_http1_test_data[i].expect.field,                 \
+                          fio_http1_test_data[i].result.field,                 \
+                          strlen(fio_http1_test_data[i].expect.field))),       \
              "string field error for %s - " #field " \n%s\n%s",                \
-             http1_test_data[i].test_name,                                     \
-             http1_test_data[i].expect.field,                                  \
-             http1_test_data[i].result.field);
-static void http1_parser_test(void) {
-  http1_test_pos = 0;
+             fio_http1_test_data[i].test_name,                                 \
+             fio_http1_test_data[i].expect.field,                              \
+             fio_http1_test_data[i].result.field);
+static void fio_http1_parser_test(void) {
+  fio_http1_test_pos = 0;
 
-  for (size_t i = 0; http1_test_data[i].request[0]; ++i) {
-    fprintf(stderr, "* http1 parser test: %s\n", http1_test_data[i].test_name);
+  for (size_t i = 0; fio_http1_test_data[i].request[0]; ++i) {
+    fprintf(stderr,
+            "* http1 parser test: %s\n",
+            fio_http1_test_data[i].test_name);
     /* parse each request / response */
-    http1_parser_s parser = {0};
+    fio_http1_parser_s parser = {0};
     char buf[4096];
     size_t r = 0;
     size_t w = 0;
-    http1_test_temp_buf_pos = 0;
-    for (int j = 0; http1_test_data[i].request[j]; ++j) {
+    fio_http1_test_temp_buf_pos = 0;
+    for (int j = 0; fio_http1_test_data[i].request[j]; ++j) {
       memcpy(buf + w,
-             http1_test_data[i].request[j],
-             strlen(http1_test_data[i].request[j]));
-      w += strlen(http1_test_data[i].request[j]);
-      size_t p = http1_parse(&parser, FIO_BUF_INFO2(buf + r, w - r), NULL);
-      if (p == HTTP1_PARSER_ERROR) {
+             fio_http1_test_data[i].request[j],
+             strlen(fio_http1_test_data[i].request[j]));
+      w += strlen(fio_http1_test_data[i].request[j]);
+      size_t p = fio_http1_parse(&parser, FIO_BUF_INFO2(buf + r, w - r), NULL);
+      if (p == FIO_HTTP1_PARSER_ERROR) {
         p = 0;
         FIO_LOG_WARNING("(HTTP/1.1 parser) was an error expected.");
       }
@@ -750,48 +762,49 @@ static void http1_parser_test(void) {
     HTTP1_TEST_STRING_FIELD(path, i);
     HTTP1_TEST_STRING_FIELD(version, i);
     r = 0;
-    while (http1_test_data[i].result.headers[r].name) {
+    while (fio_http1_test_data[i].result.headers[r].name) {
       HTTP1_TEST_STRING_FIELD(headers[r].name, i);
       HTTP1_TEST_STRING_FIELD(headers[r].val, i);
-      FIO_ASSERT(http1_test_data[i].expect.headers[r].val_len ==
-                         http1_test_data[i].result.headers[r].val_len &&
-                     http1_test_data[i].expect.headers[r].name_len ==
-                         http1_test_data[i].result.headers[r].name_len,
+      FIO_ASSERT(fio_http1_test_data[i].expect.headers[r].val_len ==
+                         fio_http1_test_data[i].result.headers[r].val_len &&
+                     fio_http1_test_data[i].expect.headers[r].name_len ==
+                         fio_http1_test_data[i].result.headers[r].name_len,
                  "--- name / value length error");
       ++r;
     }
-    FIO_ASSERT(!http1_test_data[i].expect.headers[r].name,
+    FIO_ASSERT(!fio_http1_test_data[i].expect.headers[r].name,
                "Expected header missing:\n\t%s: %s",
-               http1_test_data[i].expect.headers[r].name,
-               http1_test_data[i].expect.headers[r].val);
+               fio_http1_test_data[i].expect.headers[r].name,
+               fio_http1_test_data[i].expect.headers[r].val);
     /* test performance */
     w = 0;
-    for (int j = 0; http1_test_data[i].request[j]; ++j) {
+    for (int j = 0; fio_http1_test_data[i].request[j]; ++j) {
       memcpy(buf + w,
-             http1_test_data[i].request[j],
-             strlen(http1_test_data[i].request[j]));
-      w += strlen(http1_test_data[i].request[j]);
+             fio_http1_test_data[i].request[j],
+             strlen(fio_http1_test_data[i].request[j]));
+      w += strlen(fio_http1_test_data[i].request[j]);
     }
 #ifndef DEBUG
     uint64_t start = fio_time_milli();
     for (size_t repetition = 0; repetition < 1000000; ++repetition) {
-      parser = (http1_parser_s){0};
-      http1_test_temp_buf_pos = 0;
-      http1_test_data[http1_test_pos].result.body_len = 0;
-      FIO_MEMSET(http1_test_data[http1_test_pos].result.headers,
-                 0,
-                 sizeof(http1_test_data[http1_test_pos].result.headers));
+      parser = (fio_http1_parser_s){0};
+      fio_http1_test_temp_buf_pos = 0;
+      fio_http1_test_data[fio_http1_test_pos].result.body_len = 0;
+      FIO_MEMSET(
+          fio_http1_test_data[fio_http1_test_pos].result.headers,
+          0,
+          sizeof(fio_http1_test_data[fio_http1_test_pos].result.headers));
       FIO_COMPILER_GUARD;
-      http1_parse(&parser, FIO_BUF_INFO2(buf, w), NULL);
+      fio_http1_parse(&parser, FIO_BUF_INFO2(buf, w), NULL);
     }
     uint64_t end = fio_time_milli();
     fprintf(stderr,
             "* %zums per 500k %s\n\n",
             (size_t)(end - start),
-            http1_test_data[i].test_name);
+            fio_http1_test_data[i].test_name);
 #endif /* DEBUG */
     /* advance counter */
-    ++http1_test_pos;
+    ++fio_http1_test_pos;
   }
 }
 
@@ -802,6 +815,6 @@ Main
 int main(int argc, char const *argv[]) {
   (void)argc;
   (void)argv;
-  http1_parser_test();
+  fio_http1_parser_test();
   return 0;
 }

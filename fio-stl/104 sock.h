@@ -277,7 +277,10 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* Unix socket - force flag validation */
     flags &= ~((uint16_t)(FIO_SOCK_UNIX | FIO_SOCK_TCP));
-    flags |= FIO_SOCK_UNIX;
+    flags |= (u.scheme.len == 4 &&
+              fio_buf2u32_local(u.scheme.buf) == fio_buf2u32_local("priv"))
+                 ? FIO_SOCK_UNIX_PRIVATE
+                 : FIO_SOCK_UNIX;
     if (u.path.len >= 2048) {
       errno = EINVAL;
       FIO_LOG_ERROR(
@@ -592,7 +595,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   } else {
     unlink(addr.sun_path);
     int btmp; // the bind result
-#ifndef FIO_SOCK_AVOID_UMASK
+#if !defined(FIO_SOCK_AVOID_UMASK)
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       int umask_org = umask(0x1FF);
       btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
@@ -608,10 +611,10 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
       unlink(addr.sun_path);
       return -1;
     }
-    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX){
-          chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
-          fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
-        }
+    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
+      chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
+      fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
+    }
     if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);

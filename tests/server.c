@@ -65,7 +65,7 @@ IO "Objects"and helpers
 #include "../extras/http/http-handle.c"
 
 typedef struct {
-  http1_parser_s parser;
+  fio_http1_parser_s parser;
   fio_s *io;
   http_s *h;
   int buf_pos;
@@ -217,7 +217,7 @@ IO callback(s)
 ***************************************************************************** */
 
 /** called when a protocol error occurred. */
-static int http1_on_error(void *udata) {
+static int fio_http1_on_error(void *udata) {
   client_s *c = (client_s *)udata;
   if (c->h) {
     http_status_set(c->h, 400);
@@ -232,14 +232,14 @@ static int http1_on_error(void *udata) {
 
 /** Called there's incoming data (from STDIN / the client socket. */
 FIO_SFUNC void on_data__internal(client_s *c) {
-  size_t tmp = http1_parse(
+  size_t tmp = fio_http1_parse(
       &c->parser,
       FIO_BUF_INFO2(c->buf + c->buf_con, (size_t)(c->buf_pos - c->buf_con)),
       c);
   if (!tmp)
     return;
-  if (tmp == HTTP1_PARSER_ERROR) {
-    http1_on_error(c);
+  if (tmp == FIO_HTTP1_PARSER_ERROR) {
+    fio_http1_on_error(c);
     return;
   }
   c->buf_con += tmp;
@@ -269,7 +269,7 @@ HTTP/1.1 Protocol Controller
 ***************************************************************************** */
 
 /** Informs the controller that a request is starting. */
-static int http1_start_request(http_s *h, int reserved, int streaming) {
+static int fio_http1_start_request(http_s *h, int reserved, int streaming) {
   (void)reserved;
   (void)streaming;
   client_s *c = http_controller_data(h);
@@ -278,7 +278,7 @@ static int http1_start_request(http_s *h, int reserved, int streaming) {
   return -1;
 }
 /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-static void http1_on_unlinked(http_s *h, void *c_) {
+static void fio_http1_on_unlinked(http_s *h, void *c_) {
   client_s *c = c_; // client_s *c = http_controller_data(h);
   if (c->h == h)
     c->h = NULL;
@@ -287,7 +287,7 @@ static void http1_on_unlinked(http_s *h, void *c_) {
 }
 
 /** Informs the controller that a response is starting. */
-static int http1_start_response(http_s *h, int status, int streaming) {
+static int fio_http1_start_response(http_s *h, int status, int streaming) {
   (void)status;
   client_s *c = http_controller_data(h);
   if (!c->io)
@@ -299,7 +299,7 @@ static int http1_start_response(http_s *h, int status, int streaming) {
 }
 
 /** called by the HTTP handle for each header. */
-static int http1___write_header_callback(http_s *h,
+static int fio_http1___write_header_callback(http_s *h,
                                          fio_str_info_s name,
                                          fio_str_info_s value,
                                          void *out_) {
@@ -324,7 +324,7 @@ static int http1___write_header_callback(http_s *h,
 }
 
 /** Informs the controller that all headers were provided. */
-static void http1_send_headers(http_s *h) {
+static void fio_http1_send_headers(http_s *h) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     return;
@@ -347,9 +347,9 @@ static void http1_send_headers(http_s *h) {
                       FIO_STRING_WRITE_STR2("\r\n", 2));
   }
   /* write headers */
-  http_response_header_each(h, http1___write_header_callback, &buf);
+  http_response_header_each(h, fio_http1___write_header_callback, &buf);
   /* write cookies */
-  http_set_cookie_each(h, http1___write_header_callback, &buf);
+  http_set_cookie_each(h, fio_http1___write_header_callback, &buf);
   /* add streaming headers? */
   if (http_is_streaming(h))
     fio_string_write(&buf,
@@ -366,7 +366,7 @@ static void http1_send_headers(http_s *h) {
 }
 
 /** called by the HTTP handle for each body chunk (or to finish a response. */
-static void http1_write_body(http_s *h, http_write_args_s args) {
+static void fio_http1_write_body(http_s *h, http_write_args_s args) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     return;
@@ -394,7 +394,7 @@ static void http1_write_body(http_s *h, http_write_args_s args) {
   return;
 }
 
-static void http1_on_finish(http_s *h) {
+static void fio_http1_on_finish(http_s *h) {
   client_s *c = http_controller_data(h);
   if (!c->io)
     goto finish;
@@ -408,12 +408,12 @@ finish:
 }
 
 static http_controller_s HTTP1_CONTROLLER = {
-    .on_unlinked = http1_on_unlinked,
-    .start_response = http1_start_response,
-    .start_request = http1_start_request,
-    .send_headers = http1_send_headers,
-    .write_body = http1_write_body,
-    .on_finish = http1_on_finish,
+    .on_unlinked = fio_http1_on_unlinked,
+    .start_response = fio_http1_start_response,
+    .start_request = fio_http1_start_request,
+    .send_headers = fio_http1_send_headers,
+    .write_body = fio_http1_write_body,
+    .on_finish = fio_http1_on_finish,
 };
 
 /* *****************************************************************************
@@ -429,31 +429,31 @@ FIO_SFUNC void http_deferred_response(void *h_, void *ignr_) {
 }
 
 /** called when either a request or a response was received. */
-static int http1_on_complete(void *udata) {
+static void fio_http1_on_complete(void *udata) {
   client_s *c = (client_s *)udata;
   http_status_set(c->h, 200);
   http_respond(c->h);
-  return 0;
 }
 /** called when a request method is parsed. */
-static int http1_on_method(fio_buf_info_s method, void *udata) {
+static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
   client_s *c = (client_s *)udata;
   if (c->h)
     return -1;
   c->h = http_new();
+  // http_destroy(c->h);
   http_controller_set(c->h, &HTTP1_CONTROLLER, client_dup(c));
   http_method_set(c->h, FIO_BUF2STR_INFO(method));
   return 0;
 }
 /** called when a response status is parsed. the status_str is the string
  * without the prefixed numerical status indicator.*/
-static int http1_on_status(size_t istatus, fio_buf_info_s status, void *udata) {
+static int fio_http1_on_status(size_t istatus, fio_buf_info_s status, void *udata) {
   FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
   return -1; /* do not accept responses */
   (void)istatus, (void)status, (void)udata;
 }
 /** called when a request URL is parsed. */
-static int http1_on_url(fio_buf_info_s url, void *udata) {
+static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
   client_s *c = (client_s *)udata;
   fio_url_s u = fio_url_parse(url.buf, url.len);
   if (!u.path.len || u.path.buf[0] != '/')
@@ -468,13 +468,13 @@ static int http1_on_url(fio_buf_info_s url, void *udata) {
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
-static int http1_on_version(fio_buf_info_s version, void *udata) {
+static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
   client_s *c = (client_s *)udata;
   http_version_set(c->h, FIO_BUF2STR_INFO(version));
   return 0;
 }
 /** called when a header is parsed. */
-static int http1_on_header(fio_buf_info_s name,
+static int fio_http1_on_header(fio_buf_info_s name,
                            fio_buf_info_s value,
                            void *udata) {
   client_s *c = (client_s *)udata;
@@ -484,7 +484,7 @@ static int http1_on_header(fio_buf_info_s name,
   return 0;
 }
 /** called when the special content-length header is parsed. */
-static int http1_on_header_content_length(fio_buf_info_s name,
+static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                           fio_buf_info_s value,
                                           size_t content_length,
                                           void *udata) {
@@ -500,7 +500,7 @@ static int http1_on_header_content_length(fio_buf_info_s name,
   (void)name, (void)value;
 }
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int http1_on_expect(fio_buf_info_s expected, void *udata) {
+static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
   client_s *c = (client_s *)udata;
   fio_write2(c->io, .buf = "100 Continue\r\n", .len = 14, .copy = 0);
   return 0; /* TODO: improve support for `expect` */
@@ -508,7 +508,7 @@ static int http1_on_expect(fio_buf_info_s expected, void *udata) {
 }
 
 /** called when a body chunk is parsed. */
-static int http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
+static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   client_s *c = (client_s *)udata;
   if (chunk.len + http_body_length(c->h) > HTTP_MAX_BODY_SIZE)
     return -1;

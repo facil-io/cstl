@@ -1653,7 +1653,7 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
   fio_string_write2(&url,
                     NULL,
-                    FIO_STRING_WRITE_STR1((char *)"unix://facil_io_tmp_"),
+                    FIO_STRING_WRITE_STR1((char *)"priv://facil_io_tmp_"),
                     FIO_STRING_WRITE_HEX(fio_rand64()),
                     FIO_STRING_WRITE_STR1((char *)".sock"));
   fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_ipc_listen, NULL);

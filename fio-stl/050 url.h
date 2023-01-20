@@ -66,6 +66,8 @@ typedef struct {
  *   i.e.: http://example.com/index.html?page=1#list
  *
  * Invalid formats might produce unexpected results. No error testing performed.
+ *
+ * NOTE: the `unix`, `file` and `priv` schemas are reserved for file paths.
  */
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len);
 
@@ -298,15 +300,19 @@ start_target:
 
 finish:
 
-  if (r.scheme.len == 4 && r.host.buf &&
-      (((r.scheme.buf[0] | 32) == 'f' && (r.scheme.buf[1] | 32) == 'i' &&
-        (r.scheme.buf[2] | 32) == 'l' && (r.scheme.buf[3] | 32) == 'e') ||
-       ((r.scheme.buf[0] | 32) == 'u' && (r.scheme.buf[1] | 32) == 'n' &&
-        (r.scheme.buf[2] | 32) == 'i' && (r.scheme.buf[3] | 32) == 'x'))) {
-    r.path.len = end - (r.scheme.buf + 7);
-    r.path.buf = r.scheme.buf + 7;
-    r.user.len = r.password.len = r.port.len = r.host.len = r.query.len =
-        r.target.len = 0;
+  if (r.scheme.len == 4 && r.host.buf) {
+    uint32_t s, file, unix, priv;
+    fio_memcpy4(&file, "file");
+    fio_memcpy4(&unix, "unix");
+    fio_memcpy4(&priv, "priv");
+    fio_memcpy4(&s, r.scheme.buf);
+    s |= 0x20202020U; /* downcase */
+    if (s == file || s == unix || s == priv) {
+      r.path.len = end - (r.scheme.buf + 7);
+      r.path.buf = r.scheme.buf + 7;
+      r.user.len = r.password.len = r.port.len = r.host.len = r.query.len =
+          r.target.len = 0;
+    }
   } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
     r.path.len = end - r.host.buf;
     r.path.buf = r.host.buf;
