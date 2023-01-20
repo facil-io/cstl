@@ -10836,13 +10836,13 @@ start_target:
 finish:
 
   if (r.scheme.len == 4 && r.host.buf) {
-    uint32_t s, file, unix, priv;
-    fio_memcpy4(&file, "file");
-    fio_memcpy4(&unix, "unix");
-    fio_memcpy4(&priv, "priv");
+    uint32_t s, file_str, unix_str, priv_str;
+    fio_memcpy4(&file_str, "file");
+    fio_memcpy4(&unix_str, "unix");
+    fio_memcpy4(&priv_str, "priv");
     fio_memcpy4(&s, r.scheme.buf);
     s |= 0x20202020U; /* downcase */
-    if (s == file || s == unix || s == priv) {
+    if (s == file_str || s == unix_str || s == priv_str) {
       r.path.len = end - (r.scheme.buf + 7);
       r.path.buf = r.scheme.buf + 7;
       r.user.len = r.password.len = r.port.len = r.host.len = r.query.len =
