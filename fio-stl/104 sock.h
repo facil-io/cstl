@@ -29,6 +29,9 @@ OS specific patches.
 #include <iphlpapi.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifdef AF_UNIX
+#include <afunix.h>
+#endif
 #ifndef FIO_SOCK_FD_ISVALID
 #define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x7FFFFFFF)
 #endif

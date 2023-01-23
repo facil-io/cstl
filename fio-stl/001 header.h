@@ -1640,8 +1640,9 @@ Patches for Windows
 #include <fcntl.h>
 #include <io.h>
 #include <processthreadsapi.h>
-#include <sys/stat.h>
 #include <sys/types.h>
+
+#include <sys/stat.h>
 #include <sysinfoapi.h>
 #include <time.h>
 #include <winsock2.h> /* struct timeval is here... why? Microsoft. */

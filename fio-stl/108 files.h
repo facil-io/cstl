@@ -65,14 +65,14 @@ FIO_IFUNC size_t fio_fd_size(int fd);
  *
  * See: https://www.man7.org/linux/man-pages/man7/inode.7.html
  */
-FIO_IFUNC mode_t fio_filename_type(const char *filename);
+FIO_IFUNC size_t fio_filename_type(const char *filename);
 
 /**
  * Returns the file type (or 0 on both error).
  *
  * See: https://www.man7.org/linux/man-pages/man7/inode.7.html
  */
-FIO_IFUNC mode_t fio_fd_type(int fd);
+FIO_IFUNC size_t fio_fd_type(int fd);
 
 /** Tests if `filename` references a folder. Returns -1 on error. */
 #define fio_filename_is_folder(filename)                                       \
@@ -257,22 +257,22 @@ FIO_IFUNC size_t fio_fd_size(int fd) {
   // S_ISDIR(stat.st_mode)
 }
 
-FIO_IFUNC mode_t fio_filename_type(const char *filename) {
+FIO_IFUNC size_t fio_filename_type(const char *filename) {
   size_t r = 0;
   struct stat stt;
   if (stat(filename, &stt))
     return r;
-  return ((stt.st_mode & S_IFMT));
+  return (r = (size_t)((stt.st_mode & S_IFMT)));
 }
 
-FIO_IFUNC mode_t fio_fd_type(int fd) {
+FIO_IFUNC size_t fio_fd_type(int fd) {
   size_t r = 0;
   struct stat stt;
   if (fd == -1)
     return r;
   if (fstat(fd, &stt))
     return r;
-  return ((stt.st_mode & S_IFMT));
+  return (r = (size_t)((stt.st_mode & S_IFMT)));
 }
 
 /* *****************************************************************************
