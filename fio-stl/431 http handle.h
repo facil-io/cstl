@@ -445,7 +445,7 @@ struct fio_http_controller_s {
 HTTP Handle Implementation - inlined static functions
 ***************************************************************************** */
 
-#define FIO___HTTP_GETSET_PTR(type, name, index_)                              \
+#define FIO___HTTP_GETSET_PTR(type, name, index_, pre_set_code)                \
   /** Used internally to set / get the propecrty at its known pointer index.   \
    */                                                                          \
   FIO_IFUNC type *fio_http_##name##_get(fio_http_s *h) {                       \
@@ -454,15 +454,22 @@ HTTP Handle Implementation - inlined static functions
   /** Used internally to set / get the propercty at its known pointer index.   \
    */                                                                          \
   FIO_IFUNC type *fio_http_##name##_set(fio_http_s *h, type *ptr) {            \
+    pre_set_code;                                                              \
     return (((type **)h)[index_] = ptr);                                       \
   }
 
+SFUNC void fio___http_controller_validate(fio_http_controller_s *c);
+
 /* Create fio_http_udata_(get|set) functions */
-FIO___HTTP_GETSET_PTR(void, udata, 0)
+FIO___HTTP_GETSET_PTR(void, udata, 0, (void)0)
 /* Create fio_http_cdata_(get|set) functions */
-FIO___HTTP_GETSET_PTR(void, cdata, 1)
+FIO___HTTP_GETSET_PTR(void, cdata, 1, (void)0)
 /* Create fio_http_controller_(get|set) functions */
-FIO___HTTP_GETSET_PTR(fio_http_controller_s, controller, 2)
+FIO___HTTP_GETSET_PTR(fio_http_controller_s,
+                      controller,
+                      2,
+                      if (!ptr->private_flags)
+                          fio___http_controller_validate(ptr))
 
 #undef FIO___HTTP_GETSET_PTR
 /*
@@ -615,9 +622,9 @@ remove_key:
   return r;
 }
 
-FIO_IFUNC fio_str_info_s http_hmap_get2(fio___http_hmap_s *map,
-                                        fio_str_info_s key,
-                                        int32_t index) {
+FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
+                                              fio_str_info_s key,
+                                              int32_t index) {
   fio_str_info_s r = {0};
   fio___http_sary_s *a =
       fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
@@ -674,6 +681,48 @@ Cookie Maps
 #define FIO_MAP_HASH_FN(k)                                                     \
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
 #include FIO_INCLUDE_FILE
+
+/* *****************************************************************************
+Controller Validation
+***************************************************************************** */
+
+FIO_SFUNC void fio___mock_c_on_unlinked(fio_http_s *h, void *cdata) {
+  (void)h, (void)cdata;
+}
+FIO_SFUNC int fio___mock_c_start_response(fio_http_s *h,
+                                          int status,
+                                          int streaming) {
+  return -1;
+  (void)h, (void)status, (void)streaming;
+}
+FIO_SFUNC void fio___mock_c_send_headers(fio_http_s *h) { (void)h; }
+FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
+                                       fio_http_write_args_s args) {
+  if (args.data) {
+    if (args.dealloc)
+      args.dealloc((void *)args.data);
+  } else if (args.fd != -1) {
+    close(args.fd);
+  }
+  (void)h;
+}
+
+FIO_SFUNC void fio___mock_c_on_finish(fio_http_s *h) { (void)h; }
+
+SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
+  if (!c->on_unlinked)
+    c->on_unlinked = fio___mock_c_on_unlinked;
+  if (!c->start_response)
+    c->start_response = fio___mock_c_start_response;
+  if (!c->start_request)
+    c->start_request = fio___mock_c_start_response;
+  if (!c->send_headers)
+    c->send_headers = fio___mock_c_send_headers;
+  if (!c->write_body)
+    c->write_body = fio___mock_c_write_body;
+  if (!c->on_finish)
+    c->on_finish = fio___mock_c_on_finish;
+}
 
 /* *****************************************************************************
 HTTP Handle Type
@@ -744,8 +793,35 @@ SFUNC void fio_http_free(fio_http_s *h) { fio_http_free2(h); }
 SFUNC fio_http_s *fio_http_dup(fio_http_s *h) { return fio_http_dup2(h); }
 
 #undef FIO_STL_KEEP__
+
 /* *****************************************************************************
-Short String Property Set / Get
+ETag Helper
+***************************************************************************** */
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
+  if (!h->status)
+    return 0;
+  fio_str_info_s method = fio_keystr_info(&h->method);
+  if ((method.len < 3) | (method.len > 4))
+    return 0;
+  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 't')) &&
+      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
+    return 0;
+  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
+                                             FIO_STR_INFO2((char *)"etag", 4),
+                                             0);
+  if (!etag.len)
+    return 0;
+  fio_str_info_s cond =
+      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                           FIO_STR_INFO2((char *)"if-none-match", 13),
+                           0);
+  return FIO_STR_INFO_IS_EQ(etag, cond);
+}
+
+/* *****************************************************************************
+Simple Property Set / Get
 ***************************************************************************** */
 
 #define HTTP___MAKE_GET_SET(property)                                          \
@@ -768,10 +844,109 @@ HTTP___MAKE_GET_SET(query)
 HTTP___MAKE_GET_SET(version)
 
 #undef HTTP___MAKE_GET_SET
+
+/** Gets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_get(fio_http_s *h) { return h->status; }
+
+/** Sets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (h->status = status);
+}
+/* *****************************************************************************
+Handler State
+***************************************************************************** */
+
+/** Returns true if the HTTP handle's response was sent. */
+SFUNC int fio_http_is_finished(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (FIO_HTTP_STATE_STREAMING == (h->state & FIO_HTTP_STATE_FINISHED));
+}
+
+/** Returns true if the HTTP handle's response is streaming. */
+SFUNC int fio_http_is_streaming(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (FIO_HTTP_STATE_STREAMING == (h->state & FIO_HTTP_STATE_STREAMING));
+}
+
 /* *****************************************************************************
 Header Data Management
 ***************************************************************************** */
 
+/**
+ * Gets the header information associated with the HTTP handle.
+ *
+ * Since more than a single value may be associated with a header name, the
+ * index may be used to collect subsequent values.
+ *
+ * An empty value is returned if no header value is available (or index is
+ * exceeded).
+ */
+
+#define FIO___HTTP_HEADER_SET_FN(category, name_, headers, add_val)            \
+  /** Sets the header information associated with the HTTP handle. */          \
+  fio_str_info_s http_##category##_header_##name_(fio_http_s *h,               \
+                                                  fio_str_info_s name,         \
+                                                  fio_str_info_s value) {      \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");                                  \
+    return fio___http_hmap_set2(headers(h), name, value, add_val);             \
+  }
+FIO___HTTP_HEADER_SET_FN(request, set, HTTP_HDR_REQUEST, -1)
+FIO___HTTP_HEADER_SET_FN(request, set_if_missing, HTTP_HDR_REQUEST, 0)
+FIO___HTTP_HEADER_SET_FN(request, add, HTTP_HDR_REQUEST, 1)
+FIO___HTTP_HEADER_SET_FN(response, set, HTTP_HDR_RESPONSE, -1)
+FIO___HTTP_HEADER_SET_FN(response, set_if_missing, HTTP_HDR_RESPONSE, 0)
+FIO___HTTP_HEADER_SET_FN(response, add, HTTP_HDR_RESPONSE, 1)
+#undef FIO___HTTP_HEADER_SET_FN
+
+fio_str_info_s fio_http_request_header_get(fio_http_s *h,
+                                           fio_str_info_s name,
+                                           size_t index) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, index);
+}
+fio_str_info_s fio_http_response_header_get(fio_http_s *h,
+                                            fio_str_info_s name,
+                                            size_t index) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, index);
+}
+
+/** Iterates through all headers. A non-zero return will stop iteration. */
+size_t fio_http_request_header_each(fio_http_s *h,
+                                    int (*callback)(fio_http_s *,
+                                                    fio_str_info_s name,
+                                                    fio_str_info_s value,
+                                                    void *udata),
+                                    void *udata) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  if (!callback)
+    return fio___http_hmap_count(HTTP_HDR_REQUEST(h));
+  fio___http_hmap_each_info_s d = {.h = h,
+                                   .callback = callback,
+                                   .udata = udata};
+  return fio___http_hmap_each(HTTP_HDR_REQUEST(h),
+                              http___h_each_task_wrapper,
+                              &d,
+                              0);
+}
+
+/** Iterates through all headers. A non-zero return will stop iteration. */
+size_t fio_http_response_header_each(
+    fio_http_s *h,
+    int (*callback)(fio_http_s *, fio_str_info_s, fio_str_info_s, void *),
+    void *udata) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  if (!callback)
+    return fio___http_hmap_count(HTTP_HDR_RESPONSE(h));
+  fio___http_hmap_each_info_s d = {.h = h,
+                                   .callback = callback,
+                                   .udata = udata};
+  return fio___http_hmap_each(HTTP_HDR_RESPONSE(h),
+                              http___h_each_task_wrapper,
+                              &d,
+                              0);
+}
 /* *****************************************************************************
 
 
@@ -788,147 +963,13 @@ Header Data Management
 
 ***************************************************************************** */
 
-/**
- * Gets the header information associated with the HTTP handle.
- *
- * Since more than a single value may be associated with a header name, the
- * index may be used to collect subsequent values.
- *
- * An empty value is returned if no header value is available (or index is
- * exceeded).
- */
-SFUNC fio_str_info_s fio_http_request_header_get(fio_http_s *,
-                                                 fio_str_info_s name,
-                                                 size_t index);
-
-/** Sets the header information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_request_header_set(fio_http_s *,
-                                                 fio_str_info_s name,
-                                                 fio_str_info_s value);
-
-/** Sets the header information associated with the HTTP handle. */
-SFUNC fio_str_info_s
-fio_http_request_header_set_if_missing(fio_http_s *,
-                                       fio_str_info_s name,
-                                       fio_str_info_s value);
-
-/** Adds to the header information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_request_header_add(fio_http_s *,
-                                                 fio_str_info_s name,
-                                                 fio_str_info_s value);
-
-/**
- * Iterates through all request headers (except cookies!).
- *
- * A non-zero return will stop iteration.
- * */
-SFUNC size_t fio_http_request_header_each(fio_http_s *,
-                                          int (*callback)(fio_http_s *,
-                                                          fio_str_info_s name,
-                                                          fio_str_info_s value,
-                                                          void *udata),
-                                          void *udata);
-
-/** Gets the body (payload) length associated with the HTTP handle. */
-SFUNC size_t fio_http_body_length(fio_http_s *);
-
-/** Adjusts the body's reading position. Negative values start at the end. */
-SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
-
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
-SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
-
-/**
- * Reads from the body until finding `token`, reaching `limit` or EOF.
- *
- * Note: `limit` is ignored if the
- */
-SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
-                                              char token,
-                                              size_t limit);
-
-/** Allocates a body (payload) of (at least) the `expected_length`. */
-SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
-
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
-
 /* *****************************************************************************
 Cookies
 ***************************************************************************** */
 
-/**
- * This is a helper for setting cookie data.
- *
- * This struct is used together with the `fio_http_cookie_set` macro. i.e.:
- *
- *       fio_http_set_cookie(h,
- *                      .name = "my_cookie",
- *                      .value = "data");
- *
- */
-typedef struct {
-  /** The cookie's name. */
-  const char *name;
-  /** The cookie's value (leave blank to delete cookie). */
-  const char *value;
-  /** The cookie's domain (optional). */
-  const char *domain;
-  /** The cookie's path (optional). */
-  const char *path;
-  /** The cookie name's size in bytes or a terminating NUL will be assumed.*/
-  size_t name_len;
-  /** The cookie value's size in bytes or a terminating NUL will be assumed.*/
-  size_t value_len;
-  /** The cookie domain's size in bytes or a terminating NUL will be assumed.*/
-  size_t domain_len;
-  /** The cookie path's size in bytes or a terminating NULL will be assumed.*/
-  size_t path_len;
-  /** Max Age (how long should the cookie persist), in seconds (0 == session).*/
-  int max_age;
-  /**
-   * The SameSite settings.
-   *
-   * See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
-   */
-  enum {
-    /** allow the browser to dictate this property */
-    HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT = 0,
-    /** The browser sends the cookie with cross-site and same-site requests. */
-    HTTP_COOKIE_SAME_SITE_NONE,
-    /**
-     * The cookie is withheld on cross-site sub-requests.
-     *
-     * The cookie is sent when a user navigates to the URL from an external
-     * site.
-     */
-    HTTP_COOKIE_SAME_SITE_LAX,
-    /** The browser sends the cookie only for same-site requests. */
-    HTTP_COOKIE_SAME_SITE_STRICT,
-  } same_site;
-  /** Limit cookie to secure connections.*/
-  unsigned secure : 1;
-  /** Limit cookie to HTTP (intended to prevent JavaScript access/hijacking).*/
-  unsigned http_only : 1;
-} fio_http_cookie_args_s;
-
-/**
- * Sets a response cookie.
- *
- * Returns -1 on error and 0 on success.
- *
- * Note: Long cookie names and long cookie values will be considered a security
- * violation and an error will be returned. Many browsers and proxies impose
- * limits on headers and cookies, cookies often limited to 4Kb in total for both
- * name and value.
- */
+int fio_http_cookie_set___(void); /* IDE Marker */
+/* Sets a response cookie. */
 SFUNC int fio_http_cookie_set(fio_http_s *h, fio_http_cookie_args_s);
-
-#ifndef __cplusplus
-/** Named arguments helper. See fio_http_cookie_args_s for details. */
-#define fio_http_cookie_set(http___handle, ...)                                \
-  fio_http_cookie_set((http___handle), (fio_http_cookie_args_s){__VA_ARGS__})
-#endif
 
 /** Returns a cookie value (either received of newly set), if any. */
 SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *,
@@ -957,118 +998,63 @@ fio_http_set_cookie_each(fio_http_s *h,
                          void *udata);
 
 /* *****************************************************************************
-Responding to an HTTP event.
+Body Management
 ***************************************************************************** */
 
-/** Returns true if the HTTP handle's response was sent. */
-SFUNC int fio_http_is_finished(fio_http_s *);
+/** Gets the body (payload) length associated with the HTTP handle. */
+SFUNC size_t fio_http_body_length(fio_http_s *);
 
-/** Returns true if the HTTP handle's response is streaming. */
-SFUNC int fio_http_is_streaming(fio_http_s *);
+/** Adjusts the body's reading position. Negative values start at the end. */
+SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
 
-/** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_get(fio_http_s *);
-
-/** Sets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
+/** Reads up to `length` of data from the body, returns nothing on EOF. */
+SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
 
 /**
- * Gets the header information associated with the HTTP handle.
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
  *
- * Since more than a single value may be associated with a header name, the
- * index may be used to collect subsequent values.
- *
- * An empty value is returned if no header value is available (or index is
- * exceeded).
- *
- * If the response headers were already sent, the returned value is always
- * empty.
+ * Note: `limit` is ignored if the
  */
-SFUNC fio_str_info_s fio_http_response_header_get(fio_http_s *,
-                                                  fio_str_info_s name,
-                                                  size_t index);
+SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
+                                              char token,
+                                              size_t limit);
 
-/**
- * Sets the header information associated with the HTTP handle.
- *
- * If the response headers were already sent, the returned value is always
- * empty.
- */
-SFUNC fio_str_info_s fio_http_response_header_set(fio_http_s *,
-                                                  fio_str_info_s name,
-                                                  fio_str_info_s value);
-/**
- * Sets the header information associated with the HTTP handle.
- *
- * If the response headers were already sent, the returned value is always
- * empty.
- */
-SFUNC fio_str_info_s
-fio_http_response_header_set_if_missing(fio_http_s *,
-                                        fio_str_info_s name,
-                                        fio_str_info_s value);
+/** Allocates a body (payload) of (at least) the `expected_length`. */
+SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
 
-/**
- * Adds to the header information associated with the HTTP handle.
- *
- * If the response headers were already sent, the returned value is always
- * empty.
- */
-SFUNC fio_str_info_s fio_http_response_header_add(fio_http_s *,
-                                                  fio_str_info_s name,
-                                                  fio_str_info_s value);
+/** Writes `data` to the body (payload) associated with the HTTP handle. */
+SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 
-/**
- * Iterates through all response headers (except cookies!).
- *
- * A non-zero return will stop iteration.
- * */
-SFUNC size_t fio_http_response_header_each(fio_http_s *,
-                                           int (*callback)(fio_http_s *,
-                                                           fio_str_info_s name,
-                                                           fio_str_info_s value,
-                                                           void *udata),
-                                           void *udata);
+/* *****************************************************************************
+A Response Payload
+***************************************************************************** */
 
-/** Arguments for the fio_http_write function. */
-typedef struct fio_http_write_args_s {
-  /** The data to be written. */
-  const void *data;
-  /** The length of the data to be written. */
-  size_t len;
-  /** If streaming a file, set this value. The file is always closed. */
-  int fd;
-  /** If the data is a buffer, this callback may be set to free it once sent. */
-  void (*dealloc)(void *);
-  /** If the data is a buffer / a file - should it be copied? */
-  int copy;
-  /**
-   * If `finish` is set, this data marks the end of the response.
-   *
-   * Otherwise the response will stream the data.
-   */
-  int finish;
-} fio_http_write_args_s;
-
+void fio_http_write___(void); /* IDE Marker */
 /**
  * Writes `data` to the response body associated with the HTTP handle after
  * sending all headers (no further headers may be sent).
  */
-SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
-
-#ifndef __cplusplus
-/** Named arguments helper. See fio_http_write and fio_http_write_args_s. */
-#define fio_http_write(http_handle, ...)                                       \
-  fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
-#define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
-#endif
+SFUNC void fio_http_write FIO_NOOP(fio_http_s *, fio_http_write_args_s args);
 
 /* *****************************************************************************
-General Helpers
+
+
+
+
+
+
+                                TODO WIP Marker!!!
+
+
+
+
+
+
 ***************************************************************************** */
 
-/** Returns a human readable string related to the HTTP status number. */
-SFUNC fio_str_info_s fio_http_status2str(size_t status);
+/* *****************************************************************************
+HTTP Logging
+***************************************************************************** */
 
 /** Logs an HTTP (response) to STDOUT. */
 SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
@@ -1145,20 +1131,110 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
 }
 
 /* *****************************************************************************
-
-
-
-
-
-
-                                TODO WIP Marker!!!
-
-
-
-
-
-
+Status Strings
 ***************************************************************************** */
+
+/** Returns a human readable string related to the HTTP status number. */
+SFUNC fio_str_info_s fio_http_status2str(size_t status) {
+  fio_str_info_s r = {0};
+#define HTTP_RETURN_STATUS(str)                                                \
+  do {                                                                         \
+    r.len = strlen(str);                                                       \
+    r.buf = (char *)str;                                                       \
+    return r;                                                                  \
+  } while (0);
+  switch (status) {
+  // clang-format off
+  case 100: HTTP_RETURN_STATUS("Continue");
+  case 101: HTTP_RETURN_STATUS("Switching Protocols");
+  case 102: HTTP_RETURN_STATUS("Processing");
+  case 103: HTTP_RETURN_STATUS("Early Hints");
+  case 110: HTTP_RETURN_STATUS("Response is Stale"); /* caching code*/
+  case 111: HTTP_RETURN_STATUS("Re-validation Failed"); /* caching code*/
+  case 112: HTTP_RETURN_STATUS("Disconnected Operation"); /* caching code*/
+  case 113: HTTP_RETURN_STATUS("Heuristic Expiration"); /* caching code*/
+  case 199: HTTP_RETURN_STATUS("Miscellaneous Warning"); /* caching code*/
+  case 200: HTTP_RETURN_STATUS("OK");
+  case 201: HTTP_RETURN_STATUS("Created");
+  case 202: HTTP_RETURN_STATUS("Accepted");
+  case 203: HTTP_RETURN_STATUS("Non-Authoritative Information");
+  case 204: HTTP_RETURN_STATUS("No Content");
+  case 205: HTTP_RETURN_STATUS("Reset Content");
+  case 206: HTTP_RETURN_STATUS("Partial Content");
+  case 207: HTTP_RETURN_STATUS("Multi-Status");
+  case 208: HTTP_RETURN_STATUS("Already Reported");
+  case 214: HTTP_RETURN_STATUS("Transformation Applied"); /* caching code*/
+  case 218: HTTP_RETURN_STATUS("This is fine (Apache Web Server)"); /* unofficial */
+  case 226: HTTP_RETURN_STATUS("IM Used");
+  case 299: HTTP_RETURN_STATUS("Miscellaneous Persistent Warning"); /* caching code*/
+  case 300: HTTP_RETURN_STATUS("Multiple Choices");
+  case 301: HTTP_RETURN_STATUS("Moved Permanently");
+  case 302: HTTP_RETURN_STATUS("Found");
+  case 303: HTTP_RETURN_STATUS("See Other");
+  case 304: HTTP_RETURN_STATUS("Not Modified");
+  case 305: HTTP_RETURN_STATUS("Use Proxy");
+  case 307: HTTP_RETURN_STATUS("Temporary Redirect");
+  case 308: HTTP_RETURN_STATUS("Permanent Redirect");
+  case 400: HTTP_RETURN_STATUS("Bad Request");
+  case 401: HTTP_RETURN_STATUS("Unauthorized");
+  case 402: HTTP_RETURN_STATUS("Payment Required");
+  case 403: HTTP_RETURN_STATUS("Forbidden");
+  case 404: HTTP_RETURN_STATUS("Not Found");
+  case 405: HTTP_RETURN_STATUS("Method Not Allowed");
+  case 406: HTTP_RETURN_STATUS("Not Acceptable");
+  case 407: HTTP_RETURN_STATUS("Proxy Authentication Required");
+  case 408: HTTP_RETURN_STATUS("Request Timeout");
+  case 409: HTTP_RETURN_STATUS("Conflict");
+  case 410: HTTP_RETURN_STATUS("Gone");
+  case 411: HTTP_RETURN_STATUS("Length Required");
+  case 412: HTTP_RETURN_STATUS("Precondition Failed");
+  case 413: HTTP_RETURN_STATUS("Content Too Large");
+  case 414: HTTP_RETURN_STATUS("URI Too Long");
+  case 415: HTTP_RETURN_STATUS("Unsupported Media Type");
+  case 416: HTTP_RETURN_STATUS("Range Not Satisfiable");
+  case 417: HTTP_RETURN_STATUS("Expectation Failed");
+  case 419: HTTP_RETURN_STATUS("Page Expired (Laravel Framework)"); /* unofficial */
+  case 420: HTTP_RETURN_STATUS("Enhance Your Calm (Twitter) - Method Failure (Spring Framework)"); /* unofficial */
+  case 421: HTTP_RETURN_STATUS("Misdirected Request");
+  case 422: HTTP_RETURN_STATUS("Unprocessable Content");
+  case 423: HTTP_RETURN_STATUS("Locked");
+  case 424: HTTP_RETURN_STATUS("Failed Dependency");
+  case 425: HTTP_RETURN_STATUS("Too Early");
+  case 426: HTTP_RETURN_STATUS("Upgrade Required");
+  case 427: HTTP_RETURN_STATUS("Unassigned");
+  case 428: HTTP_RETURN_STATUS("Precondition Required");
+  case 429: HTTP_RETURN_STATUS("Too Many Requests");
+  case 430: HTTP_RETURN_STATUS("Request Header Fields Too Large (Shopify)"); /* unofficial */
+  case 431: HTTP_RETURN_STATUS("Request Header Fields Too Large");
+  case 444: HTTP_RETURN_STATUS("No Response"); /* nginx code */
+  case 450: HTTP_RETURN_STATUS("Blocked by Windows Parental Controls (Microsoft)"); /* unofficial */
+  case 451: HTTP_RETURN_STATUS("Unavailable For Legal Reasons");
+  case 494: HTTP_RETURN_STATUS("Request header too large"); /* nginx code */
+  case 495: HTTP_RETURN_STATUS("SSL Certificate Error"); /* nginx code */
+  case 496: HTTP_RETURN_STATUS("SSL Certificate Required"); /* nginx code */
+  case 497: HTTP_RETURN_STATUS("HTTP Request Sent to HTTPS Port"); /* nginx code */
+  case 498: HTTP_RETURN_STATUS("Invalid Token (Esri)"); /* unofficial */
+  case 499: HTTP_RETURN_STATUS("Client Closed Request"); /* nginx code */
+  case 500: HTTP_RETURN_STATUS("Internal Server Error");
+  case 501: HTTP_RETURN_STATUS("Not Implemented");
+  case 502: HTTP_RETURN_STATUS("Bad Gateway");
+  case 503: HTTP_RETURN_STATUS("Service Unavailable");
+  case 504: HTTP_RETURN_STATUS("Gateway Timeout");
+  case 505: HTTP_RETURN_STATUS("HTTP Version Not Supported");
+  case 506: HTTP_RETURN_STATUS("Variant Also Negotiates");
+  case 507: HTTP_RETURN_STATUS("Insufficient Storage");
+  case 508: HTTP_RETURN_STATUS("Loop Detected");
+  case 509: HTTP_RETURN_STATUS("Bandwidth Limit Exceeded (Apache Web Server/cPanel)"); /* unofficial */
+  case 510: HTTP_RETURN_STATUS("Not Extended");
+  case 511: HTTP_RETURN_STATUS("Network Authentication Required");
+  case 529: HTTP_RETURN_STATUS("Site is overloaded (Qualys)"); /* unofficial */
+  case 530: HTTP_RETURN_STATUS("Site is frozen (Pantheon web)"); /* unofficial */
+  case 598: HTTP_RETURN_STATUS("Network read timeout error"); /* unofficial */
+    // clang-format on
+  }
+  HTTP_RETURN_STATUS("Unknown");
+#undef HTTP_RETURN_STATUS
+}
 
 /* *****************************************************************************
 HTTP Handle Testing
