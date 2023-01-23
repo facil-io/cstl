@@ -1648,8 +1648,7 @@ Patches for Windows
 
 /* *****************************************************************************
 Windows initialization
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
@@ -1673,8 +1672,7 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 
 /* *****************************************************************************
 Inlined patched and MACRO statements
-*****************************************************************************
-*/
+***************************************************************************** */
 
 FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
@@ -1701,6 +1699,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #if !defined(stat)
 #define stat _stat
 #endif /* stat */
+#if !defined(unlink)
+#define unlink _unlink
+#endif /* unlink */
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -1727,9 +1728,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
-#define S_IRWXO       (S_IRUSR | S_IWUSR)
-#define S_IRWXG       (S_IRUSR | S_IWUSR)
-#define S_IRWXU       (S_IRUSR | S_IWUSR)
+#define S_IRWXO       (_S_IREAD | _S_IWRITE)
+#define S_IRWXG       (_S_IREAD | _S_IWRITE)
+#define S_IRWXU       (_S_IREAD | _S_IWRITE)
 #endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
@@ -1776,6 +1777,8 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
 #define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
+#define getpid()      GetCurrentProcess()
+typedef HANDLE pid_t;
 #endif
 
 /* *****************************************************************************

@@ -415,6 +415,8 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
+  if (!len)
+    return;
   if (len == 1) { /* route to the correct function */
     dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
     return;
@@ -470,7 +472,7 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
     dest[5] += tmp[1] + c;
   } else { /* long MUL is just too long to write */
     uint64_t c = 0;
-#if !defined(__cplusplus) || __cplusplus > 201402L
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
     uint64_t abwmul[len * 2];
 #else
     uint64_t abwmul[512];
@@ -516,7 +518,9 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
-#if !defined(__cplusplus) || __cplusplus > 201402L
+  if (!len)
+    return;
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t t[len];
   uint64_t r[len];
   uint64_t q[len];

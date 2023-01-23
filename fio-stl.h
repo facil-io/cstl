@@ -1780,8 +1780,7 @@ Patches for Windows
 
 /* *****************************************************************************
 Windows initialization
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
@@ -1805,8 +1804,7 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 
 /* *****************************************************************************
 Inlined patched and MACRO statements
-*****************************************************************************
-*/
+***************************************************************************** */
 
 FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
@@ -1833,6 +1831,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #if !defined(stat)
 #define stat _stat
 #endif /* stat */
+#if !defined(unlink)
+#define unlink _unlink
+#endif /* unlink */
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -1859,9 +1860,9 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define S_IWRITE      _S_IWRITE
 #define S_IRUSR       _S_IREAD
 #define S_IWUSR       _S_IWRITE
-#define S_IRWXO       (S_IRUSR | S_IWUSR)
-#define S_IRWXG       (S_IRUSR | S_IWUSR)
-#define S_IRWXU       (S_IRUSR | S_IWUSR)
+#define S_IRWXO       (_S_IREAD | _S_IWRITE)
+#define S_IRWXG       (_S_IREAD | _S_IWRITE)
+#define S_IRWXU       (_S_IREAD | _S_IWRITE)
 #endif /* O_APPEND */
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
@@ -1908,6 +1909,8 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
 #define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
+#define getpid()      GetCurrentProcess()
+typedef HANDLE pid_t;
 #endif
 
 /* *****************************************************************************
@@ -4723,6 +4726,8 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
+  if (!len)
+    return;
   if (len == 1) { /* route to the correct function */
     dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
     return;
@@ -4778,7 +4783,7 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
     dest[5] += tmp[1] + c;
   } else { /* long MUL is just too long to write */
     uint64_t c = 0;
-#if !defined(__cplusplus) || __cplusplus > 201402L
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
     uint64_t abwmul[len * 2];
 #else
     uint64_t abwmul[512];
@@ -4824,7 +4829,9 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
-#if !defined(__cplusplus) || __cplusplus > 201402L
+  if (!len)
+    return;
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t t[len];
   uint64_t r[len];
   uint64_t q[len];
@@ -16244,6 +16251,9 @@ OS specific patches.
 #include <iphlpapi.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifdef AF_UNIX
+#include <afunix.h>
+#endif
 #ifndef FIO_SOCK_FD_ISVALID
 #define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x7FFFFFFF)
 #endif
