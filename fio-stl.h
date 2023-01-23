@@ -200,7 +200,8 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #if defined(__GNUC__) || defined(__clang__)
 #define FIO_ALIGN(bytes) __attribute__((aligned(bytes)))
 #elif defined(__INTEL_COMPILER) || defined(_MSC_VER)
-#define FIO_ALIGN(bytes) __declspec(align(bytes))
+#define FIO_ALIGN(bytes)
+// #define FIO_ALIGN(bytes) __declspec(align(bytes))
 #else
 #define FIO_ALIGN(bytes)
 #endif
