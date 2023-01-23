@@ -2581,7 +2581,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_LOG_DEBUG("readfile returned %zu bytes, starting with:\n%s",
                   fio_bstr_len(s),
                   s);
-    char *find_z = FIO_MEMCHR(s, 'Z', fio_bstr_len(s));
+    char *find_z = (char *)FIO_MEMCHR(s, 'Z', fio_bstr_len(s));
     if (find_z) {
       int fd = open(__FILE__, 0, "r"); // fio_filename_open(__FILE__, 0);
       FIO_ASSERT(fd != -1, "couldn't open file for testing: " __FILE__);

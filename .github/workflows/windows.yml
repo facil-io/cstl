@@ -1,0 +1,21 @@
+name: Windows C/C++ CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test STL (debug) - no allocators
+      run: cl /O0 tests\stl.c /I. -DFIO_MEMORY_DISABLE=1 -DDEBUG && stl.exe
+    - name: Test STL
+      run: cl /Ox tests\stl.c /I. && stl.exe
+    - name: Test fio_mallc speed
+      run: cl /Ox tests\malloc.c /I. && malloc.exe

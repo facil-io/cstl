@@ -1086,9 +1086,8 @@ void http_write_log(http_s *h, fio_buf_info_s peer_addr) {
     }
   }
   memcpy(buf.buf + buf.len, " - - [", 6);
-  buf.len += 6;
-  memcpy(buf.buf + buf.len, date.buf, date.len);
-  buf.len += date.len;
+  memcpy(buf.buf + 6, date.buf, date.len);
+  buf.len += date.len + 6;
   fio_string_write2(&buf,
                     NULL,
                     FIO_STRING_WRITE_STR2("] \"", 3),

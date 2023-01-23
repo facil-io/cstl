@@ -2660,9 +2660,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
-    // FIO_ASSERT(fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
-    //                fio_memchr((char *)mem + 1, 0, mem_len),
-    //            "fio_memchr (partial math) != alternative approach");
 
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
@@ -2693,19 +2690,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
             (size_t)(end - start),
             repetitions);
 
-    // start = fio_time_micro();
-    // for (size_t i = 0; i < repetitions; ++i) {
-    //   FIO_ASSERT((char *)fio___alt_memchr((char *)mem + 1, 0, mem_len) ==
-    //                  ((char *)mem + token_index),
-    //              "fio___alt_memchr failed?");
-    //   FIO_COMPILER_GUARD;
-    // }
-    // end = fio_time_micro();
-    // fprintf(stderr,
-    //         "\tfio_alt_memchr\t(%zu bytes):\t%zu us\t/ %zu\n",
-    //         token_index,
-    //         (size_t)(end - start), repetitions);
-
     free(mem);
   }
 
@@ -2716,7 +2700,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
          ++mem_len) {
-      char *mem = malloc(mem_len << 1);
+      char *mem = (char *)malloc(mem_len << 1);
       FIO_ASSERT_ALLOC(mem);
       uint64_t sig = (uintptr_t)mem;
       sig ^= sig >> 13;
