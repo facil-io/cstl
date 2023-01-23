@@ -14,8 +14,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: ilammy/msvc-dev-cmd@v1
-    - name: Test STL (Linux subsystem) - no allocators
-      run: make db/test
     - name: Test STL (debug) - no allocators
       run: cl /O0 tests\stl.c /I. -DFIO_MEMORY_DISABLE=1 -DDEBUG && stl.exe
     - name: Test STL
