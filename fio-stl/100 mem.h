@@ -2644,7 +2644,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
   fprintf(stderr, "* Speed testing memchr:\n");
 
-  for (int len_i = 5; len_i < 20; ++len_i) {
+  for (int len_i = 2; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
@@ -2671,10 +2671,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     end = fio_time_micro();
 
     fprintf(stderr,
-            "\tfio_memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
+            "\tfio_memchr\t(%zu bytes):\t%zuus\t/ %zu (len: %zu)\n",
             token_index,
             (size_t)(end - start),
-            repetitions);
+            repetitions,
+            mem_len);
 
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {

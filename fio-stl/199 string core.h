@@ -114,7 +114,10 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
 typedef struct {
   size_t klass;
   union {
-    fio_str_info_s str;
+    struct {
+      size_t len;
+      const char *buf;
+    } str;
     double f;
     int64_t i;
     uint64_t u;
@@ -165,7 +168,8 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
 
 /** A macro to add a String with known length to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR_INFO(str_)                                        \
-  ((fio_string_write_s){.klass = 1, .info.str = str_})
+  ((fio_string_write_s){.klass = 1,                                            \
+                        .info.str = {.len = (str_).len, .buf = (str_).buf}})
 
 /** A macro to add a signed number to `fio_string_write2`. */
 #define FIO_STRING_WRITE_NUM(num)                                              \

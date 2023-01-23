@@ -1137,13 +1137,25 @@ small_memchr:
       len = 16;
     }
   }
-#undef FIO___MEMCHR_BITMAP_TEST
-
-  while (len--) {
-    if (*r == token)
-      return (void *)r;
-    ++r;
+  if (len > 7) {
+    FIO___MEMCHR_BITMAP_TEST(1);
+    r -= 8;
+    r += len & 7;
+    FIO___MEMCHR_BITMAP_TEST(1);
+    return NULL;
   }
+#undef FIO___MEMCHR_BITMAP_TEST
+  /* clang-format off */
+  switch(len) {
+  case 7: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 6: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 5: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 4: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 3: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 2: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 1: if (*r == token) return (void *)r; ++r;
+  }
+  /* clang-format on */
   return NULL;
 }
 

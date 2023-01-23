@@ -769,6 +769,398 @@ HTTP___MAKE_GET_SET(version)
 
 #undef HTTP___MAKE_GET_SET
 /* *****************************************************************************
+Header Data Management
+***************************************************************************** */
+
+/* *****************************************************************************
+
+
+
+
+
+
+                                TODO WIP Marker!!!
+
+
+
+
+
+
+***************************************************************************** */
+
+/**
+ * Gets the header information associated with the HTTP handle.
+ *
+ * Since more than a single value may be associated with a header name, the
+ * index may be used to collect subsequent values.
+ *
+ * An empty value is returned if no header value is available (or index is
+ * exceeded).
+ */
+SFUNC fio_str_info_s fio_http_request_header_get(fio_http_s *,
+                                                 fio_str_info_s name,
+                                                 size_t index);
+
+/** Sets the header information associated with the HTTP handle. */
+SFUNC fio_str_info_s fio_http_request_header_set(fio_http_s *,
+                                                 fio_str_info_s name,
+                                                 fio_str_info_s value);
+
+/** Sets the header information associated with the HTTP handle. */
+SFUNC fio_str_info_s
+fio_http_request_header_set_if_missing(fio_http_s *,
+                                       fio_str_info_s name,
+                                       fio_str_info_s value);
+
+/** Adds to the header information associated with the HTTP handle. */
+SFUNC fio_str_info_s fio_http_request_header_add(fio_http_s *,
+                                                 fio_str_info_s name,
+                                                 fio_str_info_s value);
+
+/**
+ * Iterates through all request headers (except cookies!).
+ *
+ * A non-zero return will stop iteration.
+ * */
+SFUNC size_t fio_http_request_header_each(fio_http_s *,
+                                          int (*callback)(fio_http_s *,
+                                                          fio_str_info_s name,
+                                                          fio_str_info_s value,
+                                                          void *udata),
+                                          void *udata);
+
+/** Gets the body (payload) length associated with the HTTP handle. */
+SFUNC size_t fio_http_body_length(fio_http_s *);
+
+/** Adjusts the body's reading position. Negative values start at the end. */
+SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
+
+/** Reads up to `length` of data from the body, returns nothing on EOF. */
+SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
+
+/**
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
+ *
+ * Note: `limit` is ignored if the
+ */
+SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
+                                              char token,
+                                              size_t limit);
+
+/** Allocates a body (payload) of (at least) the `expected_length`. */
+SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
+
+/** Writes `data` to the body (payload) associated with the HTTP handle. */
+SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
+
+/* *****************************************************************************
+Cookies
+***************************************************************************** */
+
+/**
+ * This is a helper for setting cookie data.
+ *
+ * This struct is used together with the `fio_http_cookie_set` macro. i.e.:
+ *
+ *       fio_http_set_cookie(h,
+ *                      .name = "my_cookie",
+ *                      .value = "data");
+ *
+ */
+typedef struct {
+  /** The cookie's name. */
+  const char *name;
+  /** The cookie's value (leave blank to delete cookie). */
+  const char *value;
+  /** The cookie's domain (optional). */
+  const char *domain;
+  /** The cookie's path (optional). */
+  const char *path;
+  /** The cookie name's size in bytes or a terminating NUL will be assumed.*/
+  size_t name_len;
+  /** The cookie value's size in bytes or a terminating NUL will be assumed.*/
+  size_t value_len;
+  /** The cookie domain's size in bytes or a terminating NUL will be assumed.*/
+  size_t domain_len;
+  /** The cookie path's size in bytes or a terminating NULL will be assumed.*/
+  size_t path_len;
+  /** Max Age (how long should the cookie persist), in seconds (0 == session).*/
+  int max_age;
+  /**
+   * The SameSite settings.
+   *
+   * See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
+   */
+  enum {
+    /** allow the browser to dictate this property */
+    HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT = 0,
+    /** The browser sends the cookie with cross-site and same-site requests. */
+    HTTP_COOKIE_SAME_SITE_NONE,
+    /**
+     * The cookie is withheld on cross-site sub-requests.
+     *
+     * The cookie is sent when a user navigates to the URL from an external
+     * site.
+     */
+    HTTP_COOKIE_SAME_SITE_LAX,
+    /** The browser sends the cookie only for same-site requests. */
+    HTTP_COOKIE_SAME_SITE_STRICT,
+  } same_site;
+  /** Limit cookie to secure connections.*/
+  unsigned secure : 1;
+  /** Limit cookie to HTTP (intended to prevent JavaScript access/hijacking).*/
+  unsigned http_only : 1;
+} fio_http_cookie_args_s;
+
+/**
+ * Sets a response cookie.
+ *
+ * Returns -1 on error and 0 on success.
+ *
+ * Note: Long cookie names and long cookie values will be considered a security
+ * violation and an error will be returned. Many browsers and proxies impose
+ * limits on headers and cookies, cookies often limited to 4Kb in total for both
+ * name and value.
+ */
+SFUNC int fio_http_cookie_set(fio_http_s *h, fio_http_cookie_args_s);
+
+#ifndef __cplusplus
+/** Named arguments helper. See fio_http_cookie_args_s for details. */
+#define fio_http_cookie_set(http___handle, ...)                                \
+  fio_http_cookie_set((http___handle), (fio_http_cookie_args_s){__VA_ARGS__})
+#endif
+
+/** Returns a cookie value (either received of newly set), if any. */
+SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *,
+                                         const char *name,
+                                         size_t name_len);
+
+/** Iterates through all cookies. A non-zero return will stop iteration. */
+SFUNC size_t fio_http_cookie_each(fio_http_s *,
+                                  int (*callback)(fio_http_s *,
+                                                  fio_str_info_s name,
+                                                  fio_str_info_s value,
+                                                  void *udata),
+                                  void *udata);
+
+/**
+ * Iterates through all response set cookies.
+ *
+ * A non-zero return value from the callback will stop iteration.
+ */
+SFUNC size_t
+fio_http_set_cookie_each(fio_http_s *h,
+                         int (*callback)(fio_http_s *,
+                                         fio_str_info_s set_cookie_header,
+                                         fio_str_info_s value,
+                                         void *udata),
+                         void *udata);
+
+/* *****************************************************************************
+Responding to an HTTP event.
+***************************************************************************** */
+
+/** Returns true if the HTTP handle's response was sent. */
+SFUNC int fio_http_is_finished(fio_http_s *);
+
+/** Returns true if the HTTP handle's response is streaming. */
+SFUNC int fio_http_is_streaming(fio_http_s *);
+
+/** Gets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_get(fio_http_s *);
+
+/** Sets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
+
+/**
+ * Gets the header information associated with the HTTP handle.
+ *
+ * Since more than a single value may be associated with a header name, the
+ * index may be used to collect subsequent values.
+ *
+ * An empty value is returned if no header value is available (or index is
+ * exceeded).
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+SFUNC fio_str_info_s fio_http_response_header_get(fio_http_s *,
+                                                  fio_str_info_s name,
+                                                  size_t index);
+
+/**
+ * Sets the header information associated with the HTTP handle.
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+SFUNC fio_str_info_s fio_http_response_header_set(fio_http_s *,
+                                                  fio_str_info_s name,
+                                                  fio_str_info_s value);
+/**
+ * Sets the header information associated with the HTTP handle.
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+SFUNC fio_str_info_s
+fio_http_response_header_set_if_missing(fio_http_s *,
+                                        fio_str_info_s name,
+                                        fio_str_info_s value);
+
+/**
+ * Adds to the header information associated with the HTTP handle.
+ *
+ * If the response headers were already sent, the returned value is always
+ * empty.
+ */
+SFUNC fio_str_info_s fio_http_response_header_add(fio_http_s *,
+                                                  fio_str_info_s name,
+                                                  fio_str_info_s value);
+
+/**
+ * Iterates through all response headers (except cookies!).
+ *
+ * A non-zero return will stop iteration.
+ * */
+SFUNC size_t fio_http_response_header_each(fio_http_s *,
+                                           int (*callback)(fio_http_s *,
+                                                           fio_str_info_s name,
+                                                           fio_str_info_s value,
+                                                           void *udata),
+                                           void *udata);
+
+/** Arguments for the fio_http_write function. */
+typedef struct fio_http_write_args_s {
+  /** The data to be written. */
+  const void *data;
+  /** The length of the data to be written. */
+  size_t len;
+  /** If streaming a file, set this value. The file is always closed. */
+  int fd;
+  /** If the data is a buffer, this callback may be set to free it once sent. */
+  void (*dealloc)(void *);
+  /** If the data is a buffer / a file - should it be copied? */
+  int copy;
+  /**
+   * If `finish` is set, this data marks the end of the response.
+   *
+   * Otherwise the response will stream the data.
+   */
+  int finish;
+} fio_http_write_args_s;
+
+/**
+ * Writes `data` to the response body associated with the HTTP handle after
+ * sending all headers (no further headers may be sent).
+ */
+SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
+
+#ifndef __cplusplus
+/** Named arguments helper. See fio_http_write and fio_http_write_args_s. */
+#define fio_http_write(http_handle, ...)                                       \
+  fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
+#define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
+#endif
+
+/* *****************************************************************************
+General Helpers
+***************************************************************************** */
+
+/** Returns a human readable string related to the HTTP status number. */
+SFUNC fio_str_info_s fio_http_status2str(size_t status);
+
+/** Logs an HTTP (response) to STDOUT. */
+SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
+  char buf_mem[1024];
+  fio_str_info_s buf = FIO_STR_INFO3(buf_mem, 0, 1023);
+  intptr_t bytes_sent = h->sent;
+  uint64_t milli_start, milli_end;
+  milli_start = h->received_at;
+  milli_end = fio_http_get_timestump();
+  fio_str_info_s date = fio_http_date(milli_end);
+
+  { /* try to gather address from request headers */
+    /* TODO Guess IP address from headers (forwarded) where possible */
+    /* if we failed */
+    fio_str_info_s forwarded =
+        fio_http_request_header_get(h,
+                                    FIO_STR_INFO2((char *)"forwarded", 9),
+                                    -1);
+    if (forwarded.len) {
+      forwarded.len &= 1023; /* limit possible attack surface */
+      for (; forwarded.len > 5;) {
+        if ((forwarded.buf[0] | 32) != 'f' || (forwarded.buf[1] | 32) != 'o' ||
+            (forwarded.buf[2] | 32) != 'r' || forwarded.buf[3] != '=') {
+          ++forwarded.buf;
+          --forwarded.len;
+          continue;
+        }
+        forwarded.buf += 4 + (forwarded.buf[4] == '"');
+        char *end = forwarded.buf;
+        while (*end && *end != '"' && *end != ',' && *end != ' ' &&
+               *end != ';' && (end - forwarded.buf) < 48)
+          ++end;
+        buf.len = (size_t)(end - forwarded.buf);
+        if (buf.len)
+          memcpy(buf.buf, forwarded.buf, buf.len);
+        break;
+      }
+    }
+    if (!buf.len) {
+      if (peer_addr.len) {
+        memcpy(buf.buf, peer_addr.buf, peer_addr.len);
+        buf.len = peer_addr.len;
+      } else {
+        memcpy(buf.buf, "[unknown]", 9);
+        buf.len = 9;
+      }
+    }
+  }
+  memcpy(buf.buf + buf.len, " - - [", 6);
+  memcpy(buf.buf + 6, date.buf, date.len);
+  buf.len += date.len + 6;
+  fio_string_write2(&buf,
+                    NULL,
+                    FIO_STRING_WRITE_STR2((const char *)"] \"", 3),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
+                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
+                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
+                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->version)),
+                    FIO_STRING_WRITE_STR2((const char *)"\" ", 2),
+                    FIO_STRING_WRITE_NUM(h->status),
+                    FIO_STRING_WRITE_STR2(" ", 1),
+                    ((bytes_sent > 0)
+                         ? (FIO_STRING_WRITE_UNUM(bytes_sent))
+                         : (FIO_STRING_WRITE_STR2((const char *)"---", 3))),
+                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
+                    FIO_STRING_WRITE_NUM((milli_end - milli_start)),
+                    FIO_STRING_WRITE_STR2((const char *)"ms\r\n", 4));
+
+  if (buf.buf[buf.len - 1] != '\n')
+    buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
+
+  fwrite(buf.buf, 1, buf.len, stdout);
+}
+
+/* *****************************************************************************
+
+
+
+
+
+
+                                TODO WIP Marker!!!
+
+
+
+
+
+
+***************************************************************************** */
+
+/* *****************************************************************************
 HTTP Handle Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
