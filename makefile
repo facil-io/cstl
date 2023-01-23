@@ -227,7 +227,7 @@ BUILDTREE=$(TMP_ROOT) $(TMP_ROOT)/$(TEST_ROOT) $(foreach dir, $(FOLDERS), $(adds
 
 ifeq ($(OS),Windows_NT)
 # Windows libraries
-BUILDTREE=$(subst /,\,$(BUILDTREE))
+# BUILDTREE=$(subst /,\,$(BUILDTREE))
 endif
 
 CCL=$(CC)
