@@ -598,7 +598,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   } else {
     unlink(addr.sun_path);
     int btmp; // the bind result
-#if !defined(FIO_SOCK_AVOID_UMASK)
+#if !defined(FIO_SOCK_AVOID_UMASK) && !defined(FIO_OS_WIN)
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       int umask_org = umask(0x1FF);
       btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
@@ -614,10 +614,12 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
       unlink(addr.sun_path);
       return -1;
     }
+#ifndef FIO_OS_WIN
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
       fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
     }
+#endif
     if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);

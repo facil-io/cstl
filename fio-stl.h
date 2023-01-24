@@ -1199,10 +1199,10 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
   const char *r = (const char *)buffer;
-  uint64_t umask = ((uint64_t)((uint8_t)token));
-  umask |= (umask << 32); /* make each byte in umask == token */
-  umask |= (umask << 16);
-  umask |= (umask << 8);
+  uint64_t umsk = ((uint64_t)((uint8_t)token));
+  umsk |= (umsk << 32); /* make each byte in umsk == token */
+  umsk |= (umsk << 16);
+  umsk |= (umsk << 8);
   if (len < 64)
     goto small_memchr;
 
@@ -1211,7 +1211,7 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     uint64_t flag = 0, v, u[group_size];                                       \
     for (size_t i = 0; i < group_size; ++i) { /* partial math */               \
       fio_memcpy8(u + i, r + (i << 3));                                        \
-      u[i] ^= umask;                           /* byte match == 0x00 */        \
+      u[i] ^= umsk;                            /* byte match == 0x00 */        \
       v = u[i] - UINT64_C(0x0101010101010101); /* v: less than 0x80 => 0x80 */ \
       u[i] = ~u[i]; /* u[i]: if the MSB was zero (less than 0x80) */           \
       u[i] &= UINT64_C(0x8080808080808080);                                    \
@@ -16830,7 +16830,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   } else {
     unlink(addr.sun_path);
     int btmp; // the bind result
-#if !defined(FIO_SOCK_AVOID_UMASK)
+#if !defined(FIO_SOCK_AVOID_UMASK) && !defined(FIO_OS_WIN)
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       int umask_org = umask(0x1FF);
       btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
@@ -16846,10 +16846,12 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
       unlink(addr.sun_path);
       return -1;
     }
+#ifndef FIO_OS_WIN
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
       fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
     }
+#endif
     if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);

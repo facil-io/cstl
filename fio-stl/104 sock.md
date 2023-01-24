@@ -184,7 +184,7 @@ int fio_sock_open_unix(const char *address, int is_client, int nonblock);
 
 Creates a new Unix socket and binds it to a local address.
 
-**Note**: not available on all systems.
+**Note**: not available on all systems. On Windows, when Unix Sockets are available (which isn't always), the permissions for the socket are system defined (facil.io doesn't change them).
 
 
 #### `FIO_SOCK_AVOID_UMASK`
@@ -196,5 +196,7 @@ Using `umask` in multi-threaded environments could cause `umask` data corruption
 If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
 
 This, however, may effect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
+
+**Note**: on Windows facil.io behaves as if this flag was set.
 
 -------------------------------------------------------------------------------
