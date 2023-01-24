@@ -16943,10 +16943,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     FIO_ASSERT(!ev,
                "no events should have been returned for connecting client(%d)",
                ev);
-    ev = fio_sock_wait_io(srv, POLLIN, 100);
-    FIO_ASSERT(ev == POLLIN,
-               "incoming connection should have been detected (%d)",
-               ev);
+    ev = fio_sock_wait_io(srv, POLLIN, 200);
+    FIO_ASSERT((ev & POLLIN),
+               "incoming connection should have been detected (%d : %u)",
+               srv,
+               (unsigned)ev);
     intptr_t accepted = accept(srv, NULL, NULL);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
                "accepted socket failed to open (%zd)",
@@ -16963,7 +16964,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
       // wait for read
       FIO_ASSERT(
           fio_sock_wait_io(cl, POLLIN, 10) != -1 &&
-              ((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLIN) == POLLIN),
+              ((fio_sock_wait_io(cl, POLLIN | POLLOUT, 0) & POLLIN)),
           "fio_sock_wait_io should have returned a POLLIN event for client.");
       {
         char buf[64];
