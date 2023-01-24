@@ -1708,7 +1708,7 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define getpid _getpid
 #endif /* getpid */
 #ifndef pid_t
-#define _pid_t pid_t
+#define pid_t int
 #endif /* pid_t */
 
 #ifndef O_APPEND
