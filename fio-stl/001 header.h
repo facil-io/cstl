@@ -1704,6 +1704,13 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define unlink _unlink
 #endif /* unlink */
 
+#ifndef getpid
+#define getpid _getpid
+#endif /* getpid */
+#ifndef pid_t
+#define _pid_t pid_t
+#endif /* pid_t */
+
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
@@ -1782,8 +1789,6 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
 #define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
-#define getpid        GetCurrentProcess
-typedef HANDLE pid_t;
 #endif
 
 /* *****************************************************************************

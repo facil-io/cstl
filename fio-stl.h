@@ -1836,6 +1836,13 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define unlink _unlink
 #endif /* unlink */
 
+#ifndef getpid
+#define getpid _getpid
+#endif /* getpid */
+#ifndef pid_t
+#define _pid_t pid_t
+#endif /* pid_t */
+
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
 #define O_BINARY      _O_BINARY
@@ -1914,8 +1921,6 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
 #define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
-#define getpid        GetCurrentProcess
-typedef HANDLE pid_t;
 #endif
 
 /* *****************************************************************************
@@ -11975,7 +11980,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
 
   FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
-                  (int)(uintptr_t)(getpid()),
+                  (int)(getpid()),
                   fio___state_tasks_names[e]);
 
   /* copy task queue */
@@ -33676,6 +33681,27 @@ Cookies
 ***************************************************************************** */
 
 /**
+ * Possible values for the `same_site` property in the cookie settings.
+ *
+ * See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
+ */
+typedef enum fio_http_cookie_same_site_e {
+  /** allow the browser to dictate this property */
+  FIO_HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT = 0,
+  /** The browser sends the cookie with cross-site and same-site requests. */
+  FIO_HTTP_COOKIE_SAME_SITE_NONE,
+  /**
+   * The cookie is withheld on cross-site sub-requests.
+   *
+   * The cookie is sent when a user navigates to the URL from an external
+   * site.
+   */
+  FIO_HTTP_COOKIE_SAME_SITE_LAX,
+  /** The browser sends the cookie only for same-site requests. */
+  FIO_HTTP_COOKIE_SAME_SITE_STRICT,
+} fio_http_cookie_same_site_e;
+
+/**
  * This is a helper for setting cookie data.
  *
  * This struct is used together with the `fio_http_cookie_set` macro. i.e.:
@@ -33685,7 +33711,7 @@ Cookies
  *                      .value = "data");
  *
  */
-typedef struct {
+typedef struct fio_http_cookie_args_s {
   /** The cookie's name. */
   const char *name;
   /** The cookie's value (leave blank to delete cookie). */
@@ -33704,26 +33730,8 @@ typedef struct {
   size_t path_len;
   /** Max Age (how long should the cookie persist), in seconds (0 == session).*/
   int max_age;
-  /**
-   * The SameSite settings.
-   *
-   * See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
-   */
-  enum {
-    /** allow the browser to dictate this property */
-    HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT = 0,
-    /** The browser sends the cookie with cross-site and same-site requests. */
-    HTTP_COOKIE_SAME_SITE_NONE,
-    /**
-     * The cookie is withheld on cross-site sub-requests.
-     *
-     * The cookie is sent when a user navigates to the URL from an external
-     * site.
-     */
-    HTTP_COOKIE_SAME_SITE_LAX,
-    /** The browser sends the cookie only for same-site requests. */
-    HTTP_COOKIE_SAME_SITE_STRICT,
-  } same_site;
+  /** SameSite value. */
+  fio_http_cookie_same_site_e same_site;
   /** Limit cookie to secure connections.*/
   unsigned secure : 1;
   /** Limit cookie to HTTP (intended to prevent JavaScript access/hijacking).*/
@@ -34268,33 +34276,6 @@ SFUNC void fio_http_free(fio_http_s *h) { fio_http_free2(h); }
 SFUNC fio_http_s *fio_http_dup(fio_http_s *h) { return fio_http_dup2(h); }
 
 #undef FIO_STL_KEEP__
-
-/* *****************************************************************************
-ETag Helper
-***************************************************************************** */
-FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  if (!h->status)
-    return 0;
-  fio_str_info_s method = fio_keystr_info(&h->method);
-  if ((method.len < 3) | (method.len > 4))
-    return 0;
-  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 't')) &&
-      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
-    return 0;
-  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
-                                             FIO_STR_INFO2((char *)"etag", 4),
-                                             0);
-  if (!etag.len)
-    return 0;
-  fio_str_info_s cond =
-      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
-                           FIO_STR_INFO2((char *)"if-none-match", 13),
-                           0);
-  return FIO_STR_INFO_IS_EQ(etag, cond);
-}
-
 /* *****************************************************************************
 Simple Property Set / Get
 ***************************************************************************** */
@@ -34422,42 +34403,284 @@ size_t fio_http_response_header_each(
                               &d,
                               0);
 }
-/* *****************************************************************************
-
-
-
-
-
-
-                                TODO WIP Marker!!!
-
-
-
-
-
-
-***************************************************************************** */
 
 /* *****************************************************************************
-Cookies
+Cookies (TODO!)
 ***************************************************************************** */
+
+/** (Helper) HTTP Cookie Parser */
+FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
+  /* loop and read Cookie: name=value; name2=value2; name3=value3 */
+  while (s.len) {
+    fio_str_info_s k = {0}, v = {0};
+    /* remove white-space */
+    while ((s.buf[0] == ' ' || s.buf[0] == '\t') && s.len) {
+      ++s.buf;
+      --s.len;
+    }
+    if (!s.len)
+      return;
+    char *div = (char *)memchr(s.buf, '=', s.len);
+    char *end = (char *)memchr(s.buf, ';', s.len);
+    if (!end)
+      end = s.buf + s.len;
+    v.buf = s.buf;
+    if (div) {
+      /* cookie name may be an empty string */
+      k.buf = s.buf;
+      k.len = div - s.buf;
+      v.buf = div + 1;
+    }
+    v.len = end - v.buf;
+    s.len = (s.buf + s.len) - end;
+    s.buf = end;
+    /* skip the ';' if exists (if len is not zero, !!s.len == 1). */
+    s.buf += !!s.len;
+    s.len -= !!s.len;
+    fio___http_cmap_set_if_missing(h->cookies, k, v);
+  }
+}
+
+/** (Helper) Parses all HTTP Cookies */
+FIO_SFUNC void fio___http_cookie_collect(fio_http_s *h) {
+  fio___http_sary_s *header = NULL;
+  {
+    header = fio___http_hmap_node2val_ptr(
+        fio___http_hmap_get_ptr(h->headers, FIO_STR_INFO1((char *)"cookie")));
+  }
+  if (!header)
+    return;
+  FIO_ARRAY_EACH(fio___http_sary, header, pos) {
+    fio___http_cookie_parse_cookie(h, fio_bstr_info(*pos));
+  }
+  return;
+}
 
 int fio_http_cookie_set___(void); /* IDE Marker */
 /* Sets a response cookie. */
-SFUNC int fio_http_cookie_set(fio_http_s *h, fio_http_cookie_args_s);
+SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
+                                       fio_http_cookie_args_s cookie) {
+  FIO_ASSERT_DEBUG(h, "Can't set cookie for NULL HTTP handler!");
+  if (!h || (h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_STREAMING)))
+    return -1;
+  /* promises that some warnings print only once. */
+  static unsigned int warn_illegal = 0;
+  unsigned int need2warn = 0;
+
+  /* valid / invalid characters in cookies, create with Ruby using:
+      a = []
+      256.times {|i| a[i] = 1;}
+      ('a'.ord..'z'.ord).each {|i| a[i] = 0;}
+      ('A'.ord..'Z'.ord).each {|i| a[i] = 0;}
+      ('0'.ord..'9'.ord).each {|i| a[i] = 0;}
+      "!#$%&'*+-.^_`|~".bytes.each {|i| a[i] = 0;}
+      p a; nil
+      "!#$%&'()*+-./:<=>?@[]^_`{|}~".bytes.each {|i| a[i] = 0;} # for values
+      p a; nil
+  */
+  static const char invalid_cookie_name_char[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  static const char invalid_cookie_value_char[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  /* write name and value while auto-correcting encoding issues */
+  if ((cookie.name_len + cookie.value_len + cookie.domain_len +
+       cookie.path_len + 128) > 5119) {
+    FIO_LOG_ERROR("cookie data too long!");
+  }
+  char tmp_buf[5120];
+  fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
+
+#define copy_cookie_ch(ch_var)                                                 \
+  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var[tmp]]) {          \
+    t.buf[t.len++] = cookie.ch_var[tmp];                                       \
+  } else {                                                                     \
+    need2warn |= 1;                                                            \
+    t.buf[t.len++] = '%';                                                      \
+    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var[tmp] >> 4) & 0x0F);       \
+    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var[tmp] & 0x0F);              \
+  }                                                                            \
+  tmp += 1;                                                                    \
+  if (t.capa <= t.len + 3) {                                                   \
+    ((t.buf == tmp_buf)                                                        \
+         ? FIO_STRING_ALLOC_COPY                                               \
+         : FIO_STRING_REALLOC)(&t, fio_string_capa4len(t.len + 3));            \
+  }
+
+  if (cookie.name) {
+    size_t tmp = 0;
+    if (cookie.name_len) {
+      while (tmp < cookie.name_len) {
+        copy_cookie_ch(name);
+      }
+    } else {
+      while (cookie.name[tmp]) {
+        copy_cookie_ch(name);
+      }
+    }
+    if (need2warn && !warn_illegal) {
+      warn_illegal |= 1;
+      FIO_LOG_WARNING("illegal char 0x%.2x in cookie name (in %s)\n"
+                      "         automatic %% encoding applied",
+                      cookie.name[tmp],
+                      cookie.name);
+    }
+  }
+  t.buf[t.len++] = '=';
+  if (cookie.value) {
+    size_t tmp = 0;
+    if (cookie.value_len) {
+      while (tmp < cookie.value_len) {
+        copy_cookie_ch(value);
+      }
+    } else {
+      while (cookie.value[tmp]) {
+        copy_cookie_ch(value);
+      }
+    }
+    if (need2warn && !warn_illegal) {
+      warn_illegal |= 1;
+      FIO_LOG_WARNING("illegal char 0x%.2x in cookie value (in %s)\n"
+                      "         automatic %% encoding applied",
+                      cookie.value[tmp],
+                      cookie.value);
+    }
+  } else
+    cookie.max_age = -1;
+#undef copy_cookie_ch
+
+  /* server cookie data */
+  t.buf[t.len++] = ';';
+  t.buf[t.len++] = ' ';
+
+  if (cookie.max_age) {
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"Max-Age=", 8),
+        FIO_STRING_WRITE_NUM(cookie.max_age),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
+  }
+
+  if (cookie.domain && cookie.domain_len) {
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"domain=", 7),
+        FIO_STRING_WRITE_STR2((char *)cookie.domain, cookie.domain_len),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
+  }
+  if (cookie.path && cookie.path_len) {
+    fio_string_write2(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        FIO_STRING_WRITE_STR2((char *)"path=", 5),
+        FIO_STRING_WRITE_STR2((char *)cookie.path, cookie.path_len),
+        FIO_STRING_WRITE_STR2((char *)"; ", 2));
+  }
+  if (cookie.http_only) {
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "HttpOnly; ",
+        10);
+  }
+  if (cookie.secure) {
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "secure; ",
+        8);
+  }
+  switch (cookie.same_site) {
+  case FIO_HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT: /* fall through */
+  default: break;
+  case FIO_HTTP_COOKIE_SAME_SITE_NONE:
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=None;",
+        14);
+    break;
+  case FIO_HTTP_COOKIE_SAME_SITE_LAX:
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=Lax;",
+        13);
+    break;
+  case FIO_HTTP_COOKIE_SAME_SITE_STRICT:
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "SameSite=Strict;",
+        16);
+    break;
+  }
+  if (t.buf[t.len - 1] == ' ')
+    --t.len;
+
+  /* set the "write" cookie store data */
+  fio___http_cmap_set(h->cookies + 1,
+                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+                      t,
+                      NULL);
+  /* set the "read" cookie store data */
+  fio___http_cmap_set(h->cookies,
+                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
+                      FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
+                      NULL);
+  if (t.buf != tmp_buf)
+    FIO_STRING_FREE2(t);
+  return 0;
+}
 
 /** Returns a cookie value (either received of newly set), if any. */
-SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *,
+SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *h,
                                          const char *name,
-                                         size_t name_len);
+                                         size_t name_len) {
+  if (!(fio_atomic_or(&h->state, FIO_HTTP_STATE_COOKIES_PARSED) &
+        FIO_HTTP_STATE_COOKIES_PARSED))
+    fio___http_cookie_collect(h);
+  fio_str_info_s r =
+      fio___http_cmap_get(h->cookies, FIO_STR_INFO2((char *)name, name_len));
+  return r;
+}
 
 /** Iterates through all cookies. A non-zero return will stop iteration. */
-SFUNC size_t fio_http_cookie_each(fio_http_s *,
+SFUNC size_t fio_http_cookie_each(fio_http_s *h,
                                   int (*callback)(fio_http_s *,
                                                   fio_str_info_s name,
                                                   fio_str_info_s value,
                                                   void *udata),
-                                  void *udata);
+                                  void *udata) {
+  size_t i = 0;
+  FIO_MAP_EACH(fio___http_cmap, h->cookies, pos) {
+    ++i;
+    if (callback(h, pos.key, pos.value, udata))
+      return i;
+  }
+  return i;
+}
 
 /**
  * Iterates through all response set cookies.
@@ -34466,50 +34689,21 @@ SFUNC size_t fio_http_cookie_each(fio_http_s *,
  */
 SFUNC size_t
 fio_http_set_cookie_each(fio_http_s *h,
-                         int (*callback)(fio_http_s *,
+                         int (*callback)(fio_http_s *h,
                                          fio_str_info_s set_cookie_header,
                                          fio_str_info_s value,
                                          void *udata),
-                         void *udata);
-
-/* *****************************************************************************
-Body Management
-***************************************************************************** */
-
-/** Gets the body (payload) length associated with the HTTP handle. */
-SFUNC size_t fio_http_body_length(fio_http_s *);
-
-/** Adjusts the body's reading position. Negative values start at the end. */
-SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
-
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
-SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
-
-/**
- * Reads from the body until finding `token`, reaching `limit` or EOF.
- *
- * Note: `limit` is ignored if the
- */
-SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
-                                              char token,
-                                              size_t limit);
-
-/** Allocates a body (payload) of (at least) the `expected_length`. */
-SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
-
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
-
-/* *****************************************************************************
-A Response Payload
-***************************************************************************** */
-
-void fio_http_write___(void); /* IDE Marker */
-/**
- * Writes `data` to the response body associated with the HTTP handle after
- * sending all headers (no further headers may be sent).
- */
-SFUNC void fio_http_write FIO_NOOP(fio_http_s *, fio_http_write_args_s args);
+                         void *udata) {
+  size_t i = 0;
+  fio___http_cmap_s *set_cookies = h->cookies + 1;
+  fio_str_info_s header_name = FIO_STR_INFO2((char *)"set-cookie", 10);
+  FIO_MAP_EACH(fio___http_cmap, set_cookies, pos) {
+    ++i;
+    if (callback(h, header_name, pos.value, udata))
+      return i;
+  }
+  return i;
+}
 
 /* *****************************************************************************
 
@@ -34526,6 +34720,139 @@ SFUNC void fio_http_write FIO_NOOP(fio_http_s *, fio_http_write_args_s args);
 
 
 ***************************************************************************** */
+/* *****************************************************************************
+Body Management (TODO!)
+***************************************************************************** */
+
+/** Gets the body (payload) length associated with the HTTP handle. */
+SFUNC size_t fio_http_body_length(fio_http_s *h);
+
+/** Adjusts the body's reading position. Negative values start at the end. */
+SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos);
+
+/** Reads up to `length` of data from the body, returns nothing on EOF. */
+SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length);
+
+/**
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
+ *
+ * Note: `limit` is ignored if the
+ */
+SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
+                                              char token,
+                                              size_t limit);
+
+/** Allocates a body (payload) of (at least) the `expected_length`. */
+SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length);
+
+/** Writes `data` to the body (payload) associated with the HTTP handle. */
+SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len);
+
+/* *****************************************************************************
+
+
+
+
+
+
+                                TODO WIP Marker!!!
+
+
+
+
+
+
+***************************************************************************** */
+
+/* *****************************************************************************
+A Response Payload
+***************************************************************************** */
+
+/** ETag Helper */
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
+  if (!h->status)
+    return 0;
+  fio_str_info_s method = fio_keystr_info(&h->method);
+  if ((method.len < 3) | (method.len > 4))
+    return 0;
+  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 't')) &&
+      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
+    return 0;
+  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
+                                             FIO_STR_INFO2((char *)"etag", 4),
+                                             0);
+  if (!etag.len)
+    return 0;
+  fio_str_info_s cond =
+      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                           FIO_STR_INFO2((char *)"if-none-match", 13),
+                           0);
+  return FIO_STR_INFO_IS_EQ(etag, cond);
+}
+
+void fio_http_write___(void); /* IDE Marker */
+/**
+ * Writes `data` to the response body associated with the HTTP handle after
+ * sending all headers (no further headers may be sent).
+ */
+SFUNC void fio_http_write FIO_NOOP(fio_http_s *h, fio_http_write_args_s args) {
+  fio_http_controller_s *c;
+  fio___http_hmap_s *hdrs;
+  if (!h || (fio_http_is_finished(h) | (!h->controller)))
+    goto handle_error;
+  c = h->controller;
+  hdrs = h->headers + (!!h->status);
+  if (!(h->state & FIO_HTTP_STATE_STREAMING)) { /* first call to http_write */
+    /* if response has an `etag` header matching `if-none-match`, skip */
+    if (fio___http_response_etag_if_none_match(h)) {
+      h->status = 304;
+      if (args.fd)
+        close(args.fd);
+      if (args.dealloc && args.data)
+        args.dealloc((void *)args.data);
+      args.len = args.fd = 0;
+      args.data = NULL;
+      args.finish = 1;
+    }
+    /* test if streaming / single body response */
+    if (args.finish) {
+      /* validate / set Content-Length (not streaming) */
+      char ibuf[32];
+      fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
+      fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+      fio_string_write_u(&v, NULL, args.len);
+      fio___http_hmap_set2(hdrs, k, v, -1);
+    } else {
+      h->state |= FIO_HTTP_STATE_STREAMING;
+    }
+    /* validate Date header */
+    fio___http_hmap_set2(hdrs,
+                         FIO_STR_INFO2((char *)"date", 4),
+                         fio_http_date(fio_http_get_timestump()),
+                         0);
+
+    /* start a response, unless status == 0 (which starts a request). */
+    (&c->start_response)[h->status == 0](h, h->status, !args.finish);
+    c->send_headers(h);
+  }
+  if (args.data || args.fd) {
+    c->write_body(h, args);
+    h->sent += args.len;
+  }
+  if (args.finish) {
+    h->state |= FIO_HTTP_STATE_FINISHED;
+    c->on_finish(h);
+  }
+  return;
+
+handle_error:
+  if (args.fd)
+    close(args.fd);
+  if (args.dealloc && args.data)
+    args.dealloc((void *)args.data);
+}
 
 /* *****************************************************************************
 HTTP Logging

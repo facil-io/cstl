@@ -254,7 +254,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
 
   FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
-                  (int)(uintptr_t)(getpid()),
+                  (int)(getpid()),
                   fio___state_tasks_names[e]);
 
   /* copy task queue */
