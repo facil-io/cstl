@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: POSIX C/C++ CI
 
 on:
   push:
