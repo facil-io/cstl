@@ -18714,9 +18714,9 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
     return fd;
   char *path = NULL;
   size_t path_len = 0;
-  const char sep = FIO_FOLDER_SEPARATOR;
 
-  if (filename[0] == '~' && filename[1] == sep) {
+  if (filename[0] == '~' &&
+      (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/')) {
     char *home = getenv("HOME");
     if (home) {
       size_t filename_len = strlen(filename);
@@ -18728,7 +18728,8 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
                       (filename_len >= 16 ? filename : home));
         return fd;
       }
-      if (home[home_len - 1] == sep)
+      if (home[home_len - 1] == FIO_FOLDER_SEPARATOR ||
+          home[home_len - 1] == '/')
         --home_len;
       path_len = home_len + filename_len - 1;
       path =
@@ -18845,6 +18846,9 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
       if (!r.ext.len)
         r.ext.buf = NULL;
       return r;
+#ifdef FIO_OS_WIN
+    case '/': /* pass through (on windows test both variants) */
+#endif
     case FIO_FOLDER_SEPARATOR:
       r.folder.buf = (char *)filename;
       r.folder.len = (size_t)(pos - filename) + 1;

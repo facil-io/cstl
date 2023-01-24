@@ -15,7 +15,7 @@ int fio_filename_open(const char *filename, int flags);
 
 Opens `filename`, returning the same as values as `open` on POSIX systems.
 
-If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing for `"~\"`).
+If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing also for `"~\"`).
 
 #### `fio_filename_is_unsafe`
 
@@ -43,7 +43,7 @@ int fio_filename_overwrite(const char *filename, const void *buf, size_t len);
 
 Overwrites `filename` with the data in the buffer.
 
-If `path` starts with a `"~/"` than it will be relative to the user's home folder (on Windows, testing for `"~\"`).
+If `path` starts with a `"~/"` than it will be relative to the user's home folder (on Windows, testing also for `"~\"`).
 
 Returns -1 on error or 0 on success. On error, the state of the file is undefined (may be doesn't exit / nothing written / partially written).
 
@@ -101,6 +101,8 @@ Parses a file name to folder, base name and extension (zero-copy).
 ```
 
 Selects the folder separation character according to the detected OS.
+
+**Note**: on windows both separators will be tested for.
 
 #### `fio_fd_find_next`
 
