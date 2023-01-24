@@ -244,6 +244,8 @@ SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
   fio___poll_i_s i = {.fd = fd};
   FIO___LOCK_LOCK(p->lock);
   fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  if (!ptr->flags)
+    r = -1;
   ptr->flags = 0;
   FIO___LOCK_UNLOCK(p->lock);
   return r;

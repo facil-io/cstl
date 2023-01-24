@@ -154,6 +154,8 @@ File Helper Inline Implementation
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
+  if (fd == -1 || !buf_ || !len)
+    return -1;
   ssize_t total = 0;
   const char *buf = (const char *)buf_;
   const size_t write_limit = (1ULL << 17);
@@ -213,6 +215,10 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+  if (fd == -1 || !len || !buf) {
+    errno = ENOENT;
+    return 0;
+  }
   char *d = (char *)buf;
   size_t r = 0;
   for (;;) {

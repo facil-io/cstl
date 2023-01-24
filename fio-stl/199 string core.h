@@ -2096,7 +2096,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
   int r = 0;
   size_t file_len = fio_fd_size(fd);
   start_at = fio___string_fd_normalise_offset(start_at, file_len);
-  if (limit < 1 || file_len < (size_t)(limit + start_at)) {
+  if (!limit || file_len < (size_t)(limit + start_at)) {
     limit = (intptr_t)file_len - start_at;
   }
   if (!dest || !file_len || !limit || (size_t)start_at >= file_len) {

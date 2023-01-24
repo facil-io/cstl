@@ -1840,7 +1840,7 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define getpid _getpid
 #endif /* getpid */
 #ifndef pid_t
-#define _pid_t pid_t
+#define pid_t int
 #endif /* pid_t */
 
 #ifndef O_APPEND
@@ -18567,6 +18567,8 @@ File Helper Inline Implementation
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
+  if (fd == -1 || !buf_ || !len)
+    return -1;
   ssize_t total = 0;
   const char *buf = (const char *)buf_;
   const size_t write_limit = (1ULL << 17);
@@ -18626,6 +18628,10 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+  if (fd == -1 || !len || !buf) {
+    errno = ENOENT;
+    return 0;
+  }
   char *d = (char *)buf;
   size_t r = 0;
   for (;;) {
@@ -21042,7 +21048,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
   int r = 0;
   size_t file_len = fio_fd_size(fd);
   start_at = fio___string_fd_normalise_offset(start_at, file_len);
-  if (limit < 1 || file_len < (size_t)(limit + start_at)) {
+  if (!limit || file_len < (size_t)(limit + start_at)) {
     limit = (intptr_t)file_len - start_at;
   }
   if (!dest || !file_len || !limit || (size_t)start_at >= file_len) {
@@ -29607,6 +29613,8 @@ SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
   fio___poll_i_s i = {.fd = fd};
   FIO___LOCK_LOCK(p->lock);
   fio___poll_i_s *ptr = fio___poll_map_set(&p->map, i, 0);
+  if (!ptr->flags)
+    r = -1;
   ptr->flags = 0;
   FIO___LOCK_UNLOCK(p->lock);
   return r;
@@ -34233,7 +34241,6 @@ struct fio_http_s {
     char *buf;
     size_t len;
     size_t pos;
-    size_t capa;
     int fd;
   } body;
 };
@@ -34721,32 +34728,38 @@ fio_http_set_cookie_each(fio_http_s *h,
 
 ***************************************************************************** */
 /* *****************************************************************************
-Body Management (TODO!)
+Body Management - buffer
 ***************************************************************************** */
 
-/** Gets the body (payload) length associated with the HTTP handle. */
-SFUNC size_t fio_http_body_length(fio_http_s *h);
+FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
+  h->body.fd = fio_filename_tmp();
+  fio_buf_info_s b = fio_bstr_buf(h->body.buf);
+  fio_fd_write(h->body.fd, b.buf, b.len);
+  return 0 - (h->body.fd == -1);
+}
 
-/** Adjusts the body's reading position. Negative values start at the end. */
-SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos);
+FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t length);
+FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
+                                                        char token,
+                                                        size_t limit);
+FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h,
+                                          size_t expected_length);
+FIO_SFUNC void fio___http_body_write_buf(fio_http_s *h,
+                                         const void *data,
+                                         size_t len);
 
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
-SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length);
+/* *****************************************************************************
+Body Management - file descriptor (TODO!)
+***************************************************************************** */
 
-/**
- * Reads from the body until finding `token`, reaching `limit` or EOF.
- *
- * Note: `limit` is ignored if the
- */
-SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
-                                              char token,
-                                              size_t limit);
-
-/** Allocates a body (payload) of (at least) the `expected_length`. */
-SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length);
-
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len);
+FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t length);
+FIO_SFUNC fio_str_info_s fio___http_body_read_until_fd(fio_http_s *h,
+                                                       char token,
+                                                       size_t limit);
+FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t expected_length);
+FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
+                                        const void *data,
+                                        size_t len);
 
 /* *****************************************************************************
 
@@ -34763,6 +34776,56 @@ SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len);
 
 
 ***************************************************************************** */
+
+/* *****************************************************************************
+Body Management - Public API
+***************************************************************************** */
+
+/** Gets the body (payload) length associated with the HTTP handle. */
+SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
+
+/** Adjusts the body's reading position. Negative values start at the end. */
+SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
+  if (pos < 0) {
+    pos += h->body.len;
+    if (pos < 0)
+      pos = 0;
+  }
+  h->body.pos = pos;
+  if (pos >= h->body.len)
+    return (h->body.pos = h->body.len);
+  return pos;
+}
+
+/** Reads up to `length` of data from the body, returns nothing on EOF. */
+SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
+  return ((h->body.fd == -1) ? fio___http_body_read_buf
+                             : fio___http_body_read_fd)(h, length);
+}
+
+/**
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
+ *
+ * Note: `limit` is ignored if the
+ */
+SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
+                                              char token,
+                                              size_t limit) {
+  return ((h->body.fd == -1) ? fio___http_body_read_until_buf
+                             : fio___http_body_read_until_fd)(h, token, limit);
+}
+
+/** Allocates a body (payload) of (at least) the `expected_length`. */
+SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
+  ((h->body.fd == -1) ? fio___http_body_expect_buf
+                      : fio___http_body_expect_fd)(h, expected_length);
+}
+
+/** Writes `data` to the body (payload) associated with the HTTP handle. */
+SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  ((h->body.fd == -1) ? fio___http_body_write_buf
+                      : fio___http_body_write_fd)(h, data, len);
+}
 
 /* *****************************************************************************
 A Response Payload

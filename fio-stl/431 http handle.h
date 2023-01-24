@@ -753,7 +753,6 @@ struct fio_http_s {
     char *buf;
     size_t len;
     size_t pos;
-    size_t capa;
     int fd;
   } body;
 };
@@ -1241,32 +1240,38 @@ fio_http_set_cookie_each(fio_http_s *h,
 
 ***************************************************************************** */
 /* *****************************************************************************
-Body Management (TODO!)
+Body Management - buffer
 ***************************************************************************** */
 
-/** Gets the body (payload) length associated with the HTTP handle. */
-SFUNC size_t fio_http_body_length(fio_http_s *h);
+FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
+  h->body.fd = fio_filename_tmp();
+  fio_buf_info_s b = fio_bstr_buf(h->body.buf);
+  fio_fd_write(h->body.fd, b.buf, b.len);
+  return 0 - (h->body.fd == -1);
+}
 
-/** Adjusts the body's reading position. Negative values start at the end. */
-SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos);
+FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t length);
+FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
+                                                        char token,
+                                                        size_t limit);
+FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h,
+                                          size_t expected_length);
+FIO_SFUNC void fio___http_body_write_buf(fio_http_s *h,
+                                         const void *data,
+                                         size_t len);
 
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
-SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length);
+/* *****************************************************************************
+Body Management - file descriptor (TODO!)
+***************************************************************************** */
 
-/**
- * Reads from the body until finding `token`, reaching `limit` or EOF.
- *
- * Note: `limit` is ignored if the
- */
-SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
-                                              char token,
-                                              size_t limit);
-
-/** Allocates a body (payload) of (at least) the `expected_length`. */
-SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length);
-
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len);
+FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t length);
+FIO_SFUNC fio_str_info_s fio___http_body_read_until_fd(fio_http_s *h,
+                                                       char token,
+                                                       size_t limit);
+FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t expected_length);
+FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
+                                        const void *data,
+                                        size_t len);
 
 /* *****************************************************************************
 
@@ -1283,6 +1288,56 @@ SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len);
 
 
 ***************************************************************************** */
+
+/* *****************************************************************************
+Body Management - Public API
+***************************************************************************** */
+
+/** Gets the body (payload) length associated with the HTTP handle. */
+SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
+
+/** Adjusts the body's reading position. Negative values start at the end. */
+SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
+  if (pos < 0) {
+    pos += h->body.len;
+    if (pos < 0)
+      pos = 0;
+  }
+  h->body.pos = pos;
+  if (pos >= h->body.len)
+    return (h->body.pos = h->body.len);
+  return pos;
+}
+
+/** Reads up to `length` of data from the body, returns nothing on EOF. */
+SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
+  return ((h->body.fd == -1) ? fio___http_body_read_buf
+                             : fio___http_body_read_fd)(h, length);
+}
+
+/**
+ * Reads from the body until finding `token`, reaching `limit` or EOF.
+ *
+ * Note: `limit` is ignored if the
+ */
+SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
+                                              char token,
+                                              size_t limit) {
+  return ((h->body.fd == -1) ? fio___http_body_read_until_buf
+                             : fio___http_body_read_until_fd)(h, token, limit);
+}
+
+/** Allocates a body (payload) of (at least) the `expected_length`. */
+SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
+  ((h->body.fd == -1) ? fio___http_body_expect_buf
+                      : fio___http_body_expect_fd)(h, expected_length);
+}
+
+/** Writes `data` to the body (payload) associated with the HTTP handle. */
+SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  ((h->body.fd == -1) ? fio___http_body_write_buf
+                      : fio___http_body_write_fd)(h, data, len);
+}
 
 /* *****************************************************************************
 A Response Payload
