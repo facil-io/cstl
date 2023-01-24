@@ -502,7 +502,13 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 
 /** Returns 0 on timeout, -1 on error or the events that are valid. */
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
-  short r;
+  short r = 0;
+#ifdef FIO_OS_WIN
+  if (fd == -1) {
+    FIO_THREAD_WAIT((timeout * 1000000));
+    return r;
+  }
+#endif
   struct pollfd pfd = {.fd = fd, .events = events};
   r = (short)poll(&pfd, 1, timeout);
   if (r == 1)
