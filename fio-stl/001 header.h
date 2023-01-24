@@ -1725,14 +1725,18 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define O_U16TEXT     _O_U16TEXT
 #define O_U8TEXT      _O_U8TEXT
 #define O_WTEXT       _O_WTEXT
-#define S_IREAD       _S_IREAD
-#define S_IWRITE      _S_IWRITE
-#define S_IRUSR       _S_IREAD
-#define S_IWUSR       _S_IWRITE
-#define S_IRWXO       (_S_IREAD | _S_IWRITE)
-#define S_IRWXG       (_S_IREAD | _S_IWRITE)
-#define S_IRWXU       (_S_IREAD | _S_IWRITE)
 #endif /* O_APPEND */
+
+#ifndef S_IWUSR
+#define S_IREAD  _S_IREAD
+#define S_IWRITE _S_IWRITE
+#define S_IRUSR  _S_IREAD
+#define S_IWUSR  _S_IWRITE
+#define S_IRWXO  (_S_IREAD | _S_IWRITE)
+#define S_IRWXG  (_S_IREAD | _S_IWRITE)
+#define S_IRWXU  (_S_IREAD | _S_IWRITE)
+#endif /* S_IWUSR */
+
 #ifndef O_TMPFILE
 #define O_TMPFILE O_TEMPORARY
 #endif
@@ -1778,7 +1782,7 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 /* patch clock_gettime */
 #define clock_gettime fio_clock_gettime
 #define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
-#define getpid()      GetCurrentProcess()
+#define getpid        GetCurrentProcess
 typedef HANDLE pid_t;
 #endif
 
