@@ -416,7 +416,11 @@ static void *fio___lock_mytask_lock2(void *s) {
 #endif
 
 static void *fio___lock_mytask_mutex(void *s) {
+#if FIO_OS_WIN
+  static fio_thread_mutex_t mutex;
+#else
   static fio_thread_mutex_t mutex = FIO_THREAD_MUTEX_INIT;
+#endif
   fio_thread_mutex_lock(&mutex);
   if (s)
     fio___lock_speedtest_task_inner(s);

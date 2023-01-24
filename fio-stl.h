@@ -11975,7 +11975,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
 
   FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
-                  (int)(getpid()),
+                  (int)(uintptr_t)(getpid()),
                   fio___state_tasks_names[e]);
 
   /* copy task queue */
@@ -30367,7 +30367,9 @@ static struct {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
+#if !FIO_OS_WIN
     .env = FIO___SRV_ENV_SAFE_INIT,
+#endif
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
@@ -38299,7 +38301,11 @@ static void *fio___lock_mytask_lock2(void *s) {
 #endif
 
 static void *fio___lock_mytask_mutex(void *s) {
+#if FIO_OS_WIN
+  static fio_thread_mutex_t mutex;
+#else
   static fio_thread_mutex_t mutex = FIO_THREAD_MUTEX_INIT;
+#endif
   fio_thread_mutex_lock(&mutex);
   if (s)
     fio___lock_speedtest_task_inner(s);

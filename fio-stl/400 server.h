@@ -704,7 +704,9 @@ static struct {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
 #endif
+#if !FIO_OS_WIN
     .env = FIO___SRV_ENV_SAFE_INIT,
+#endif
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
