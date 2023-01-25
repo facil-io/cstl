@@ -1633,7 +1633,7 @@ Patches for Windows
 ***************************************************************************** */
 #if FIO_OS_WIN
 #if _MSC_VER
-#pragma message("warning: some functionality is enabled by patchwork.")
+#pragma message("Warning: some functionality is enabled by patchwork.")
 #else
 #warning some functionality is enabled by patchwork.
 #endif

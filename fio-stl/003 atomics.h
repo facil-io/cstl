@@ -140,7 +140,7 @@ Copyright and License: see header file (000 header.h) or top of file
 #define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
 
 #elif _MSC_VER
-#pragma message ("WARNING: WinAPI atomics have less features, but this is what this compiler has, so...")
+#pragma message ("Warning: WinAPI atomics have less features, but this is what this compiler has, so...")
 #include <intrin.h>
 #define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                   \
   ((sizeof(*ptr) == 1)                                                         \

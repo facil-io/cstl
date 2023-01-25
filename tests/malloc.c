@@ -346,7 +346,7 @@ int main(int argc, char const *argv[]) {
   fprintf(stderr, "========================================\n");
   if (fio_realloc_is_safe()) {
     fprintf(stderr,
-            "NOTE: This tests uses a facil.io allocator thatinitializes all  "
+            "NOTE: This tests uses a facil.io allocator that initializes all  "
             "memory to zero, always.\n"
             "\n      In contrast, the system allocator may return (and retain) "
             "junk data.\n"
@@ -360,7 +360,7 @@ int main(int argc, char const *argv[]) {
             "but shouldn't be).\n"
             "\n     When initializing memory, which is facil.io's recommended "
             "default,\n"
-            "     theres an added performance cost.\n\n");
+            "     there's an added performance cost.\n\n");
   }
   fprintf(stderr,
           "Test allocation ranges: %zu - %zu bytes.\n",
