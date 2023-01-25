@@ -19408,8 +19408,8 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len);
 
 /** Copies a `fio_bstr` using "copy on write". */
 FIO_IFUNC char *fio_bstr_copy(char *bstr);
-/** Frees a binary string allocated by a `fio_bstr` function. */
-FIO_IFUNC void fio_bstr_free(char *bstr);
+/** Frees a binary string allocated by a `fio_bstr` function. Returns NULL.*/
+FIO_IFUNC char *fio_bstr_free(char *bstr);
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr);
@@ -19616,14 +19616,15 @@ copy_anyway:
 }
 
 /** Frees a binary string allocated by a `fio_bstr` function. */
-FIO_IFUNC void fio_bstr_free(char *bstr) {
+FIO_IFUNC char *fio_bstr_free(char *bstr) {
   if (!bstr)
-    return;
+    return NULL;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
-    return;
+    return NULL;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
   FIO_BSTR___LEAK_TESTER(-1);
+  return NULL;
 }
 
 /** internal helper - sets the length of the fio_bstr. */
@@ -33553,6 +33554,16 @@ HTTP Handle Settings
 #define FIO_HTTP_BODY_RAM_LIMIT (1 << 17)
 #endif
 
+#ifndef FIO_HTTP_CACHE_LIMIT
+/** Each of the 3 HTTP String Caches will be limited to this String count. */
+#define FIO_HTTP_CACHE_LIMIT (1 << 10)
+#endif
+
+#ifndef FIO_HTTP_CACHE_STR_MAX_LEN
+/** The HTTP handle will avoid caching strings longer than this value. */
+#define FIO_HTTP_CACHE_STR_MAX_LEN (1 << 12)
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -33585,13 +33596,13 @@ Opaque User and Controller Data
 ***************************************************************************** */
 
 /** Gets the opaque user pointer associated with the HTTP handle. */
-FIO_IFUNC void *fio_http_udata_get(fio_http_s *);
+FIO_IFUNC void *fio_http_udata(fio_http_s *);
 
 /** Sets the opaque user pointer associated with the HTTP handle. */
 FIO_IFUNC void *fio_http_udata_set(fio_http_s *, void *);
 
 /** Gets the HTTP Controller associated with the HTTP handle. */
-FIO_IFUNC fio_http_controller_s *fio_http_controller_get(fio_http_s *h);
+FIO_IFUNC fio_http_controller_s *fio_http_controller(fio_http_s *h);
 
 /** Gets the HTTP Controller associated with the HTTP handle. */
 FIO_IFUNC fio_http_controller_s *fio_http_controller_set(
@@ -33599,7 +33610,7 @@ FIO_IFUNC fio_http_controller_s *fio_http_controller_set(
     fio_http_controller_s *controller);
 
 /** Returns the existing controller data (`void *` pointer). */
-FIO_IFUNC void *fio_http_cdata_get(fio_http_s *h);
+FIO_IFUNC void *fio_http_cdata(fio_http_s *h);
 
 /** Sets a new controller data (`void *` pointer). */
 FIO_IFUNC void *fio_http_cdata_set(fio_http_s *h, void *cdata);
@@ -33609,25 +33620,25 @@ Data associated with the Request (usually set by the HTTP protocol)
 ***************************************************************************** */
 
 /** Gets the method information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_method_get(fio_http_s *);
+SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
 
 /** Gets the path information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_path_get(fio_http_s *);
+SFUNC fio_str_info_s fio_http_path(fio_http_s *);
 
 /** Sets the path information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_path_set(fio_http_s *, fio_str_info_s);
 
 /** Gets the query information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_query_get(fio_http_s *);
+SFUNC fio_str_info_s fio_http_query(fio_http_s *);
 
 /** Sets the query information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_query_set(fio_http_s *, fio_str_info_s);
 
 /** Gets the version information associated with the HTTP handle. */
-SFUNC fio_str_info_s fio_http_version_get(fio_http_s *);
+SFUNC fio_str_info_s fio_http_version(fio_http_s *);
 
 /** Sets the version information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_version_set(fio_http_s *, fio_str_info_s);
@@ -33641,9 +33652,9 @@ SFUNC fio_str_info_s fio_http_version_set(fio_http_s *, fio_str_info_s);
  * An empty value is returned if no header value is available (or index is
  * exceeded).
  */
-SFUNC fio_str_info_s fio_http_request_header_get(fio_http_s *,
-                                                 fio_str_info_s name,
-                                                 size_t index);
+SFUNC fio_str_info_s fio_http_request_header(fio_http_s *,
+                                             fio_str_info_s name,
+                                             size_t index);
 
 /** Sets the header information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_request_header_set(fio_http_s *,
@@ -33778,9 +33789,9 @@ SFUNC int fio_http_cookie_set(fio_http_s *h, fio_http_cookie_args_s);
 #endif
 
 /** Returns a cookie value (either received of newly set), if any. */
-SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *,
-                                         const char *name,
-                                         size_t name_len);
+SFUNC fio_str_info_s fio_http_cookie(fio_http_s *,
+                                     const char *name,
+                                     size_t name_len);
 
 /** Iterates through all cookies. A non-zero return will stop iteration. */
 SFUNC size_t fio_http_cookie_each(fio_http_s *,
@@ -33814,7 +33825,7 @@ SFUNC int fio_http_is_finished(fio_http_s *);
 SFUNC int fio_http_is_streaming(fio_http_s *);
 
 /** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_get(fio_http_s *);
+SFUNC size_t fio_http_status(fio_http_s *);
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
@@ -33831,9 +33842,9 @@ SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
  * If the response headers were already sent, the returned value is always
  * empty.
  */
-SFUNC fio_str_info_s fio_http_response_header_get(fio_http_s *,
-                                                  fio_str_info_s name,
-                                                  size_t index);
+SFUNC fio_str_info_s fio_http_response_header(fio_http_s *,
+                                              fio_str_info_s name,
+                                              size_t index);
 
 /**
  * Sets the header information associated with the HTTP handle.
@@ -33911,6 +33922,28 @@ SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
 #endif
 
 /* *****************************************************************************
+WebSocket / SSE Helpers
+***************************************************************************** */
+
+/** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
+SFUNC int fio_http_websockets_requested(fio_http_s *);
+
+/** Sets response data to agree to a WebSockets Upgrade.*/
+SFUNC int fio_http_websockets_set_response(fio_http_s *);
+
+/** Sets request data to request a WebSockets Upgrade.*/
+SFUNC void fio_http_websockets_set_request(fio_http_s *);
+
+/** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_requested(fio_http_s *);
+
+/** Sets response data to agree to an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_set_response(fio_http_s *);
+
+/** Sets request data to request an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_set_request(fio_http_s *);
+
+/* *****************************************************************************
 General Helpers
 ***************************************************************************** */
 
@@ -33952,7 +33985,7 @@ HTTP Handle Implementation - inlined static functions
 #define FIO___HTTP_GETSET_PTR(type, name, index_, pre_set_code)                \
   /** Used internally to set / get the propecrty at its known pointer index.   \
    */                                                                          \
-  FIO_IFUNC type *fio_http_##name##_get(fio_http_s *h) {                       \
+  FIO_IFUNC type *fio_http_##name(fio_http_s *h) {                             \
     return ((type **)h)[index_];                                               \
   }                                                                            \
   /** Used internally to set / get the propercty at its known pointer index.   \
@@ -34031,10 +34064,10 @@ String Cache
 ***************************************************************************** */
 
 #define FIO_MAP_NAME fio___http_str_cache
-#define FIO_MAP_LRU  1024
+#define FIO_MAP_LRU  FIO_HTTP_CACHE_LIMIT
 #define FIO_MAP_KEY_BSTR
 #define FIO_MAP_HASH_FN(k)                                                     \
-  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio_http_new)
 #include FIO_INCLUDE_FILE
 
 static fio___http_str_cache_s FIO___HTTP_STRING_CACHE[3] = {{0}};
@@ -34042,17 +34075,26 @@ static fio___http_str_cache_s FIO___HTTP_STRING_CACHE[3] = {{0}};
 #define FIO___HTTP_STR_CACHE_COOKIE 1
 #define FIO___HTTP_STR_CACHE_VALUE  2
 
-static fio_str_info_s fio___http_str_copy(size_t group, fio_str_info_s s) {
-  fio_str_info_s r =
+static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+  fio_str_info_s cached;
+  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
+    goto avoid_caching;
+  cached =
       fio___http_str_cache_set_if_missing(FIO___HTTP_STRING_CACHE + group, s);
-  r.buf = fio_bstr_copy(r.buf);
-  return r;
+  return fio_bstr_copy(cached.buf);
+avoid_caching:
+  return fio_bstr_write(NULL, s.buf, s.len);
 }
 
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
-  fio___http_str_cache_destroy(FIO___HTTP_STRING_CACHE);
-  fio___http_str_cache_destroy(FIO___HTTP_STRING_CACHE + 1);
-  fio___http_str_cache_destroy(FIO___HTTP_STRING_CACHE + 2);
+  for (size_t i = 0; i < 3; ++i) {
+    const char *names[] = {"header names", "cookie names", "header values"};
+    FIO_LOG_DEBUG2("(%d) freeing %zu strings from %s cache",
+                   getpid(),
+                   fio___http_str_cache_count(FIO___HTTP_STRING_CACHE + i),
+                   names[i]);
+    fio___http_str_cache_destroy(FIO___HTTP_STRING_CACHE + i);
+  }
 }
 
 /* *****************************************************************************
@@ -34070,7 +34112,7 @@ Headers Maps
 #define FIO_MAP_KEY_CMP(a, b)        fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)     fio_bstr_free((key))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio___http_str_copy(FIO___HTTP_STR_CACHE_NAME, (src))
+  (dest) = fio___http_str_cached(FIO___HTTP_STR_CACHE_NAME, (src))
 #define FIO_MAP_KEY_DISCARD(key)
 #define FIO_MAP_VALUE fio___http_sary_s
 #define FIO_MAP_VALUE_COPY(a, b)                                               \
@@ -34080,7 +34122,7 @@ Headers Maps
   } while (0) /*no-op*/
 #define FIO_MAP_VALUE_DESTROY(o) fio___http_sary_destroy(&(o))
 #define FIO_MAP_HASH_FN(k)                                                     \
-  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio___http_sary_destroy)
 #include FIO_INCLUDE_FILE
 
 /** set `add` to positive to add multiple values or negative to overwrite. */
@@ -34113,7 +34155,7 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
     if (add < 0) {
       fio___http_sary_destroy(o);
     }
-    r = fio___http_str_copy(FIO___HTTP_STR_CACHE_VALUE, val);
+    r = fio_bstr_info(fio___http_str_cached(FIO___HTTP_STR_CACHE_VALUE, val));
     fio___http_sary_push(o, r.buf);
     return r;
   }
@@ -34178,12 +34220,12 @@ Cookie Maps
 #define FIO_MAP_KEY_CMP(a, b)        fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)     fio_bstr_free((key))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio___http_str_copy(FIO___HTTP_STR_CACHE_COOKIE, (src))
+  (dest) = fio___http_str_cached(FIO___HTTP_STR_CACHE_COOKIE, (src))
 #define FIO_MAP_KEY_DISCARD(key)
 
 #define FIO_MAP_VALUE_BSTR /* not cached */
 #define FIO_MAP_HASH_FN(k)                                                     \
-  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)http_new)
+  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio___http_cmap_destroy)
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -34274,7 +34316,7 @@ void fio_http_destroy(fio_http_s *h) {
   fio___http_hmap_destroy(h->headers + 1);
   fio___http_cmap_destroy(h->cookies);
   fio___http_cmap_destroy(h->cookies + 1);
-  FIO_MEM_FREE(h->body.buf, h->body.capa);
+  fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
   *h = (fio_http_s){.received_at = fio_http_get_timestump(), .body.fd = -1};
@@ -34301,7 +34343,7 @@ Simple Property Set / Get
 ***************************************************************************** */
 
 #define HTTP___MAKE_GET_SET(property)                                          \
-  fio_str_info_s fio_http_##property##_get(fio_http_s *h) {                    \
+  fio_str_info_s fio_http_##property(fio_http_s *h) {                          \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return fio_keystr_info(&h->property);                                      \
   }                                                                            \
@@ -34322,7 +34364,7 @@ HTTP___MAKE_GET_SET(version)
 #undef HTTP___MAKE_GET_SET
 
 /** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_get(fio_http_s *h) { return h->status; }
+SFUNC size_t fio_http_status(fio_http_s *h) { return h->status; }
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
@@ -34375,15 +34417,15 @@ FIO___HTTP_HEADER_SET_FN(response, set_if_missing, HTTP_HDR_RESPONSE, 0)
 FIO___HTTP_HEADER_SET_FN(response, add, HTTP_HDR_RESPONSE, 1)
 #undef FIO___HTTP_HEADER_SET_FN
 
-fio_str_info_s fio_http_request_header_get(fio_http_s *h,
-                                           fio_str_info_s name,
-                                           size_t index) {
+fio_str_info_s fio_http_request_header(fio_http_s *h,
+                                       fio_str_info_s name,
+                                       size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, index);
 }
-fio_str_info_s fio_http_response_header_get(fio_http_s *h,
-                                            fio_str_info_s name,
-                                            size_t index) {
+fio_str_info_s fio_http_response_header(fio_http_s *h,
+                                        fio_str_info_s name,
+                                        size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, index);
 }
@@ -34675,9 +34717,9 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
 }
 
 /** Returns a cookie value (either received of newly set), if any. */
-SFUNC fio_str_info_s fio_http_cookie_get(fio_http_s *h,
-                                         const char *name,
-                                         size_t name_len) {
+SFUNC fio_str_info_s fio_http_cookie(fio_http_s *h,
+                                     const char *name,
+                                     size_t name_len) {
   if (!(fio_atomic_or(&h->state, FIO_HTTP_STATE_COOKIES_PARSED) &
         FIO_HTTP_STATE_COOKIES_PARSED))
     fio___http_cookie_collect(h);
@@ -34726,20 +34768,35 @@ fio_http_set_cookie_each(fio_http_s *h,
 }
 
 /* *****************************************************************************
-
-
-
-
-
-
-                                TODO WIP Marker!!!
-
-
-
-
-
-
+Body Management - file descriptor (TODO!)
 ***************************************************************************** */
+
+FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t len) {
+  h->body.buf = fio_bstr_len_set(h->body.buf, 0);
+  h->body.buf = fio_bstr_readfd(h->body.buf, h->body.fd, h->body.pos, len);
+  fio_str_info_s r = fio_bstr_info(h->body.buf);
+  h->body.pos += r.len;
+  return r;
+}
+FIO_SFUNC fio_str_info_s fio___http_body_read_until_fd(fio_http_s *h,
+                                                       char token,
+                                                       size_t limit) {
+  h->body.buf = fio_bstr_len_set(h->body.buf, 0);
+  h->body.buf =
+      fio_bstr_getdelim_fd(h->body.buf, h->body.fd, h->body.pos, token, limit);
+  fio_str_info_s r = fio_bstr_info(h->body.buf);
+  h->body.pos += r.len;
+  return r;
+}
+FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t len) {
+  (void)h, (void)len;
+}
+FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
+                                        const void *data,
+                                        size_t len) {
+  fio_fd_write(h->body.fd, data, len);
+}
+
 /* *****************************************************************************
 Body Management - buffer
 ***************************************************************************** */
@@ -34750,45 +34807,40 @@ FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   fio_fd_write(h->body.fd, b.buf, b.len);
   return 0 - (h->body.fd == -1);
 }
-
-FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t length);
+FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t len) {
+  fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), len);
+  h->body.pos += len;
+  return r;
+}
 FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
                                                         char token,
-                                                        size_t limit);
-FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h,
-                                          size_t expected_length);
+                                                        size_t limit) {
+  fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
+  char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
+  if (end)
+    r.len = end - r.buf;
+  return r;
+}
+FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {
+  if (len + h->body.len > FIO_HTTP_BODY_RAM_LIMIT) {
+    fio___http_body___move_buf2fd(h);
+    return;
+  }
+  h->body.buf = fio_bstr_reserve(h->body.buf, len);
+}
 FIO_SFUNC void fio___http_body_write_buf(fio_http_s *h,
                                          const void *data,
-                                         size_t len);
-
-/* *****************************************************************************
-Body Management - file descriptor (TODO!)
-***************************************************************************** */
-
-FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t length);
-FIO_SFUNC fio_str_info_s fio___http_body_read_until_fd(fio_http_s *h,
-                                                       char token,
-                                                       size_t limit);
-FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t expected_length);
-FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
-                                        const void *data,
-                                        size_t len);
-
-/* *****************************************************************************
-
-
-
-
-
-
-                                TODO WIP Marker!!!
-
-
-
-
-
-
-***************************************************************************** */
+                                         size_t len) {
+  if (len + h->body.len > FIO_HTTP_BODY_RAM_LIMIT)
+    goto switch_to_fd;
+write_to_buf:
+  h->body.buf = fio_bstr_write(h->body.buf, data, len);
+  return;
+switch_to_fd:
+  if (fio___http_body___move_buf2fd(h))
+    goto write_to_buf;
+  fio___http_body_write_fd(h, data, len);
+}
 
 /* *****************************************************************************
 Body Management - Public API
@@ -34804,16 +34856,22 @@ SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
     if (pos < 0)
       pos = 0;
   }
+  if ((size_t)pos >= h->body.len)
+    pos = h->body.len;
   h->body.pos = pos;
-  if (pos >= h->body.len)
-    return (h->body.pos = h->body.len);
   return pos;
 }
 
 /** Reads up to `length` of data from the body, returns nothing on EOF. */
 SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
-  return ((h->body.fd == -1) ? fio___http_body_read_buf
-                             : fio___http_body_read_fd)(h, length);
+  fio_str_info_s r = {0};
+  if (h->body.pos == h->body.len)
+    return r;
+  if (h->body.pos + length > h->body.len)
+    length = h->body.len - h->body.pos;
+  r = ((h->body.fd == -1) ? fio___http_body_read_buf
+                          : fio___http_body_read_fd)(h, length);
+  return r;
 }
 
 /**
@@ -34824,8 +34882,14 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                               char token,
                                               size_t limit) {
-  return ((h->body.fd == -1) ? fio___http_body_read_until_buf
-                             : fio___http_body_read_until_fd)(h, token, limit);
+  fio_str_info_s r = {0};
+  if (h->body.pos == h->body.len)
+    return r;
+  if (!limit || (h->body.pos + limit) > h->body.len)
+    limit = h->body.len - h->body.pos;
+  r = ((h->body.fd == -1) ? fio___http_body_read_until_buf
+                          : fio___http_body_read_until_fd)(h, token, limit);
+  return r;
 }
 
 /** Allocates a body (payload) of (at least) the `expected_length`. */
@@ -34836,6 +34900,8 @@ SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
 
 /** Writes `data` to the body (payload) associated with the HTTP handle. */
 SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  if (!data || !len)
+    return;
   ((h->body.fd == -1) ? fio___http_body_write_buf
                       : fio___http_body_write_fd)(h, data, len);
 }
@@ -34931,6 +34997,44 @@ handle_error:
 }
 
 /* *****************************************************************************
+WebSocket / SSE Helpers
+***************************************************************************** */
+
+/* *****************************************************************************
+
+
+                                TODO WIP Marker!!!
+
+
+***************************************************************************** */
+
+/** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
+SFUNC int fio_http_websockets_requested(fio_http_s *h);
+
+/** Sets response data to agree to a WebSockets Upgrade.*/
+SFUNC int fio_http_websockets_set_response(fio_http_s *h);
+
+/** Sets request data to request a WebSockets Upgrade.*/
+SFUNC void fio_http_websockets_set_request(fio_http_s *h);
+
+/** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_requested(fio_http_s *h);
+
+/** Sets response data to agree to an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_set_response(fio_http_s *h);
+
+/** Sets request data to request an EventSource (SSE) Upgrade.*/
+SFUNC void fio_http_sse_set_request(fio_http_s *h);
+
+/* *****************************************************************************
+
+
+                                TODO WIP Marker!!!
+
+
+***************************************************************************** */
+
+/* *****************************************************************************
 HTTP Logging
 ***************************************************************************** */
 
@@ -34948,9 +35052,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
     /* TODO Guess IP address from headers (forwarded) where possible */
     /* if we failed */
     fio_str_info_s forwarded =
-        fio_http_request_header_get(h,
-                                    FIO_STR_INFO2((char *)"forwarded", 9),
-                                    -1);
+        fio_http_request_header(h, FIO_STR_INFO2((char *)"forwarded", 9), -1);
     if (forwarded.len) {
       forwarded.len &= 1023; /* limit possible attack surface */
       for (; forwarded.len > 5;) {
@@ -35118,7 +35220,7 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
 HTTP Handle Testing
 ***************************************************************************** */
 #ifdef FIO_TEST_CSTL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, http)(void) {
   /*
    * TODO: test module here
    */
@@ -39124,6 +39226,7 @@ Server Elements
 #undef FIO_SERVER_COMPLETE
 
 // #define FIO_HTTP1_PARSER
+// #define FIO_HTTP_HANDLE
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER
@@ -39269,6 +39372,9 @@ Cleanup
 #include "420 pubsub.h"
 #endif
 
+#ifdef FIO_HTTP_HANDLE
+#include "431 http handle.h"
+#endif
 #ifdef FIO_HTTP1_PARSER
 #include "431 http1 parser.h"
 #endif

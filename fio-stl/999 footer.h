@@ -96,6 +96,7 @@ Server Elements
 #undef FIO_SERVER_COMPLETE
 
 // #define FIO_HTTP1_PARSER
+// #define FIO_HTTP_HANDLE
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER

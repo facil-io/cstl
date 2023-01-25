@@ -120,6 +120,9 @@
 #include "420 pubsub.h"
 #endif
 
+#ifdef FIO_HTTP_HANDLE
+#include "431 http handle.h"
+#endif
 #ifdef FIO_HTTP1_PARSER
 #include "431 http1 parser.h"
 #endif

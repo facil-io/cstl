@@ -443,8 +443,8 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len);
 
 /** Copies a `fio_bstr` using "copy on write". */
 FIO_IFUNC char *fio_bstr_copy(char *bstr);
-/** Frees a binary string allocated by a `fio_bstr` function. */
-FIO_IFUNC void fio_bstr_free(char *bstr);
+/** Frees a binary string allocated by a `fio_bstr` function. Returns NULL.*/
+FIO_IFUNC char *fio_bstr_free(char *bstr);
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr);
@@ -651,14 +651,15 @@ copy_anyway:
 }
 
 /** Frees a binary string allocated by a `fio_bstr` function. */
-FIO_IFUNC void fio_bstr_free(char *bstr) {
+FIO_IFUNC char *fio_bstr_free(char *bstr) {
   if (!bstr)
-    return;
+    return NULL;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
-    return;
+    return NULL;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
   FIO_BSTR___LEAK_TESTER(-1);
+  return NULL;
 }
 
 /** internal helper - sets the length of the fio_bstr. */
