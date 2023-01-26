@@ -18,7 +18,6 @@ C++ extern end
 Everything, and the Kitchen Sink
 ***************************************************************************** */
 #if defined(FIO_EVERYTHING) && !defined(H___FIO_EVERYTHING___H)
-#undef FIO_EVERYTHING
 #define H___FIO_EVERYTHING___H
 
 #define FIO_BASIC
@@ -28,35 +27,33 @@ Everything, and the Kitchen Sink
 
 #endif /* FIO_EVERYTHING */
 
-#ifdef FIO_BASIC
+#if defined(FIO_BASIC) && !defined(H___FIO_BASIC___H)
+#define H___FIO_BASIC___H
+#define FIO_BASIC___PRE
+#define FIO_BASIC___POST
+#define FIO_CORE
 #define FIO_SERVER_COMPLETE
 #endif
 
 /* *****************************************************************************
-Basic Elements
+Basic Elements - Pre Allocator
 ***************************************************************************** */
-#if defined(FIO_BASIC)
-#undef FIO_BASIC
+#if defined(FIO_BASIC___PRE)
+#undef FIO_BASIC___PRE
 
 #define FIO_CLI
 #define FIO_LOG
-#include FIO_INCLUDE_FILE
-
-#define FIO_FIOBJ
-#define FIOBJ_MALLOC
-#include FIO_INCLUDE_FILE
-
-#define FIO_CORE
-#define FIO_MALLOC
 #define FIO_THREADS
+#include FIO_INCLUDE_FILE
 
+#define FIO_MALLOC
 #endif /* FIO_BASIC */
 
 /* *****************************************************************************
 Core Elements
 ***************************************************************************** */
-#if defined(FIO_CORE)
-#undef FIO_CORE
+#if defined(FIO_CORE) && !defined(H___FIO_CORE___H)
+#define H___FIO_CORE___H
 
 #define FIO_ATOL
 #define FIO_ATOMIC
@@ -77,7 +74,19 @@ Core Elements
 #endif /* FIO_CORE */
 
 /* *****************************************************************************
-Core Elements
+Basic Elements - Post Allocator
+***************************************************************************** */
+#if defined(FIO_BASIC___POST)
+#undef FIO_BASIC___POST
+
+#define FIO_FIOBJ
+#define FIOBJ_MALLOC
+#include FIO_INCLUDE_FILE
+
+#endif /* FIO_BASIC */
+
+/* *****************************************************************************
+Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
 #undef FIO_CRYPT
@@ -92,11 +101,14 @@ Core Elements
 /* *****************************************************************************
 Server Elements
 ***************************************************************************** */
-#if defined(FIO_SERVER_COMPLETE)
-#undef FIO_SERVER_COMPLETE
+#if defined(FIO_SERVER_COMPLETE) && !defined(H___FIO_SERVER_COMPLETE___H)
+#define H___FIO_SERVER_COMPLETE___H
 
-// #define FIO_HTTP1_PARSER
-// #define FIO_HTTP_HANDLE
+#define FIO_MEMORY_NAME        fio___server_mem
+#define FIO_MEMORY_ARENA_COUNT 4
+
+#define FIO_HTTP1_PARSER
+#define FIO_HTTP_HANDLE
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER
@@ -118,5 +130,11 @@ Cleanup
 #undef FIO_EXTERN_COMPLETE
 #undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
 #endif
+
+#undef FIO_EVERYTHING
+#undef FIO_BASIC
+#undef FIO_CORE
+#undef FIO_CRYPT
+#undef FIO_SERVER_COMPLETE
 
 #endif /* FIO_STL_KEEP__ */

@@ -120,22 +120,23 @@ FIO_SFUNC void http_respond(fio_http_s *h) {
                            FIO_STR_INFO1("server"),
                            FIO_STR_INFO1("fio-stl"));
 #if HTTP_RESPONSE_ECHO
-  char *out =
-      fio_bstr_write(NULL, fio_http_method(h).buf, fio_http_method(h).len);
-  out = fio_bstr_write(out, " ", 1);
-  out = fio_bstr_write(out, fio_http_path(h).buf, fio_http_path(h).len);
-  if (fio_http_query(h).len) {
-    out = fio_bstr_write(out, "?", 1);
-    out = fio_bstr_write(out, fio_http_query(h).buf, fio_http_query(h).len);
-  }
-  out = fio_bstr_write(out, " ", 1);
-  out = fio_bstr_write(out, fio_http_version(h).buf, fio_http_version(h).len);
-  out = fio_bstr_write(out, "\r\n", 2);
+  char *out = fio_bstr_write2(
+      NULL,
+      FIO_STRING_WRITE_STR2(fio_http_method(h).buf, fio_http_method(h).len),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      FIO_STRING_WRITE_STR2(fio_http_path(h).buf, fio_http_path(h).len),
+      FIO_STRING_WRITE_STR2("?", (fio_http_query(h).len ? 1 : 0)),
+      FIO_STRING_WRITE_STR2(fio_http_query(h).buf, fio_http_query(h).len),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      FIO_STRING_WRITE_STR2(fio_http_version(h).buf, fio_http_version(h).len),
+      FIO_STRING_WRITE_STR2("\r\n", 2));
   fio_http_request_header_each(h, http_write_headers_to_string, &out);
   if (fio_http_body_length(h)) {
-    fio_str_info_s body = fio_http_body_read(h, -1);
-    out = fio_bstr_write(out, "\r\n", 2);
-    out = fio_bstr_write(out, body.buf, body.len);
+    fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+    out = fio_bstr_write2(out,
+                          FIO_STRING_WRITE_STR2("\r\n", 2),
+                          FIO_STRING_WRITE_STR2(body.buf, body.len),
+                          FIO_STRING_WRITE_STR2("\r\n", 2));
   }
   if (1) {
     fio_env_set(((client_s *)fio_http_cdata(h))->io,
@@ -459,7 +460,7 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
     return -1;
   fio_http_path_set(c->h, FIO_BUF2STR_INFO(u.path));
   if (u.query.len)
-    fio_http_path_set(c->h, FIO_BUF2STR_INFO(u.query));
+    fio_http_query_set(c->h, FIO_BUF2STR_INFO(u.query));
   if (u.host.len)
     http_request_header_set(c->h,
                             FIO_STR_INFO1("host"),

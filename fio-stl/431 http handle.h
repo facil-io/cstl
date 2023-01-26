@@ -62,17 +62,30 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_STR_MAX_LEN (1 << 12)
 #endif
 
+#ifndef FIO_HTTP_CACHE_USES_MUTEX
+/** The HTTP cache will use a mutex to allow headers to be set concurrently. */
+#define FIO_HTTP_CACHE_USES_MUTEX 1
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
 
-/** Named arguments for the http_write function. */
+/**
+ * The HTTP Handle type.
+ *
+ * Note that the type is NOT designed to be thread-safe.
+ */
 typedef struct fio_http_s fio_http_s;
 
 /**
  * The HTTP Controller points to all the callbacks required by the HTTP Handler.
  *
  * This allows the HTTP Handler to be somewhat protocol agnostic.
+ *
+ * Note: if the controller callbacks aren't thread-safe, than the `http_write`
+ * function MUST NOT be called from any thread except the thread that the
+ * controller is expecting.
  */
 typedef struct fio_http_controller_s fio_http_controller_s;
 
@@ -568,7 +581,12 @@ String Cache
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio_http_new)
 #include FIO_INCLUDE_FILE
 
-static fio___http_str_cache_s FIO___HTTP_STRING_CACHE[3] = {{0}};
+static struct {
+  fio___http_str_cache_s cache;
+  FIO___LOCK_TYPE lock;
+} FIO___HTTP_STRING_CACHE[3] = {{.lock = FIO___LOCK_INIT},
+                                {.lock = FIO___LOCK_INIT},
+                                {.lock = FIO___LOCK_INIT}};
 #define FIO___HTTP_STR_CACHE_NAME   0
 #define FIO___HTTP_STR_CACHE_COOKIE 1
 #define FIO___HTTP_STR_CACHE_VALUE  2
@@ -577,8 +595,15 @@ static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   fio_str_info_s cached;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
+#if FIO_HTTP_CACHE_USES_MUTEX
+  FIO___LOCK_LOCK(FIO___HTTP_STRING_CACHE[group].lock);
+#endif
   cached =
-      fio___http_str_cache_set_if_missing(FIO___HTTP_STRING_CACHE + group, s);
+      fio___http_str_cache_set_if_missing(&FIO___HTTP_STRING_CACHE[group].cache,
+                                          s);
+#if FIO_HTTP_CACHE_USES_MUTEX
+  FIO___LOCK_UNLOCK(FIO___HTTP_STRING_CACHE[group].lock);
+#endif
   return fio_bstr_copy(cached.buf);
 avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
@@ -587,11 +612,13 @@ avoid_caching:
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
   for (size_t i = 0; i < 3; ++i) {
     const char *names[] = {"header names", "cookie names", "header values"};
-    FIO_LOG_DEBUG2("(%d) freeing %zu strings from %s cache",
-                   getpid(),
-                   fio___http_str_cache_count(FIO___HTTP_STRING_CACHE + i),
-                   names[i]);
-    fio___http_str_cache_destroy(FIO___HTTP_STRING_CACHE + i);
+    FIO_LOG_DEBUG2(
+        "(%d) freeing %zu strings from %s cache",
+        getpid(),
+        fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
+        names[i]);
+    fio___http_str_cache_destroy(&FIO___HTTP_STRING_CACHE[i].cache);
+    FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
   }
 }
 
@@ -1292,7 +1319,9 @@ FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t len) {
 FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
                                         const void *data,
                                         size_t len) {
-  fio_fd_write(h->body.fd, data, len);
+  ssize_t written = fio_fd_write(h->body.fd, data, len);
+  if (written > 0)
+    h->body.len += written;
 }
 
 /* *****************************************************************************
@@ -1333,6 +1362,7 @@ FIO_SFUNC void fio___http_body_write_buf(fio_http_s *h,
     goto switch_to_fd;
 write_to_buf:
   h->body.buf = fio_bstr_write(h->body.buf, data, len);
+  h->body.len += len;
   return;
 switch_to_fd:
   if (fio___http_body___move_buf2fd(h))
