@@ -1,10 +1,9 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_URL        /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_URL                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 

@@ -1,10 +1,9 @@
-/* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___     /* Development inclusion - ignore line */
-#define FIO_STR_NAME fio /* Development inclusion - ignore line */
-#include "./include.h"   /* Development inclusion - ignore line */
-#endif                   /* Development inclusion - ignore line */
+/* ************************************************************************** */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_STR_NAME fio       /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -14,7 +13,7 @@
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_STR_SMALL
 #ifndef FIO_STR_NAME
@@ -1636,7 +1635,6 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, len)(&str),
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
-#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -1648,7 +1646,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(state.len && state.buf,
                "error, no data was read for file %s!",
                __FILE__);
-
+#if defined(H___FIO_CSTL_COMBINED___H)
     FIO_ASSERT(!memcmp(state.buf,
                        "/* "
                        "******************************************************"
@@ -1656,6 +1654,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
                        80),
                "content error, header mismatch!\n %s",
                state.buf);
+#endif /* H___FIO_CSTL_COMBINED___H */
     fprintf(stderr, "* Testing UTF-8 validation and length.\n");
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_valid)(s),
                "`utf8_valid` error, code in this file "
@@ -1704,7 +1703,6 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
-#endif /* FIO___CSTL_NON_COMBINED_INCLUSION */
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
   if (1) {
     /* Testing Static initialization and writing */

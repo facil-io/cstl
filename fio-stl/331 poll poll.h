@@ -1,7 +1,6 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL    /* Dev */
+#if !defined(FIO_INCLUDE_FILE)               /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL /* Dev */
 #define FIO___DEV___    /* Development inclusion - ignore line */
 #define FIO_POLL        /* Development inclusion - ignore line */
 #include "./include.h"  /* Development inclusion - ignore line */
@@ -20,7 +19,7 @@
                         POSIX Portable Polling with `poll`
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef POLLRDHUP
 #define FIO_POLL_EX_FLAGS POLLRDHUP

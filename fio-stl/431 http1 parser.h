@@ -1,6 +1,5 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MODULE_NAME module /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
@@ -15,7 +14,7 @@
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H)
 #define H___FIO_HTTP1_PARSER___H

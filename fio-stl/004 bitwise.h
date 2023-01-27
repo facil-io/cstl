@@ -1,11 +1,10 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_BITWISE    /* Development inclusion - ignore line */
-#define FIO_BITMAP     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_BITWISE            /* Development inclusion - ignore line */
+#define FIO_BITMAP             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
@@ -16,7 +15,7 @@ More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)

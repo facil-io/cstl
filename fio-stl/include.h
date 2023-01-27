@@ -6,9 +6,6 @@
 #ifndef FIO_INCLUDE_FILE
 #define FIO_INCLUDE_FILE "fio-stl/include.h"
 #endif
-#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
-#define FIO___CSTL_NON_COMBINED_INCLUSION
-#endif
 #include "001 header.h"
 
 #ifdef FIO_LOG
@@ -120,11 +117,16 @@
 #include "420 pubsub.h"
 #endif
 
+#ifdef FIO_HTTP1_PARSER
+#include "431 http1 parser.h"
+#endif
+
 #ifdef FIO_HTTP_HANDLE
 #include "431 http handle.h"
 #endif
-#ifdef FIO_HTTP1_PARSER
-#include "431 http1 parser.h"
+
+#ifdef FIO_HTTP
+#include "439 http.h"
 #endif
 
 #if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
@@ -141,10 +143,6 @@
 #endif
 
 #include "999 footer.h"
-
-#ifndef FIO_STL_KEEP__
-#undef FIO___CSTL_NON_COMBINED_INCLUSION
-#endif
 
 #endif /* !H___FIO_CSTL_COMBINED___H */
 /* ************************************************************************* */

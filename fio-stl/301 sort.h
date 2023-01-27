@@ -1,11 +1,10 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___         /* Development inclusion - ignore line */
-#define FIO_SORT_NAME num    /* Development inclusion - ignore line */
-#define FIO_SORT_TYPE size_t /* Development inclusion - ignore line */
-#include "./include.h"       /* Development inclusion - ignore line */
-#endif                       /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SORT_NAME num      /* Development inclusion - ignore line */
+#define FIO_SORT_TYPE size_t   /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -15,7 +14,7 @@
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_SORT_NAME
 

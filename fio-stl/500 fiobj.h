@@ -1,10 +1,9 @@
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_FIOBJ      /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_FIOBJ              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -33,7 +32,7 @@ memory consumption on 64 bit systems and uses 4 bytes on 32 bit systems.
 Note: this code is placed at the end of the STL file, since it leverages most of
 the SLT features and could be affected by their inclusion.
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
 #define H___FIOBJ___H

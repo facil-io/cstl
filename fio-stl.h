@@ -1728,7 +1728,7 @@ Sleep / Thread Scheduling Macros
 
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if (defined(__MACH__) && !defined(CLOCK_REALTIME))
 #warning fio_time functions defined using gettimeofday patch.
@@ -2345,8 +2345,21 @@ Pointer Tagging
 #endif
 #endif
 
+/* HTTP Modules */
+#if defined(FIO_HTTP)
+#ifndef FIO_HTTP1_PARSER
+#define FIO_HTTP1_PARSER
+#endif /* FIO_HTTP1_PARSER */
+#ifndef FIO_HTTP_HANDLE
+#define FIO_HTTP_HANDLE
+#endif /* FIO_HTTP_HANDLE */
+#ifndef FIO_PUBSUB
+#define FIO_PUBSUB
+#endif /* FIO_PUBSUB */
+#endif /* FIO_HTTP */
+
 /* Modules that require FIO_SERVER */
-#if defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB) || defined(FIO_HTTP)
 #ifndef FIO_SERVER
 #define FIO_SERVER
 #endif
@@ -2507,12 +2520,11 @@ Pointer Tagging
 #endif
 #endif /* FIO_ATOL */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_LOG        /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_LOG                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -2534,7 +2546,7 @@ int i = 3;
 FIO_LOG_WARNING("number invalid: %d", i); // => WARNING: number invalid: 3
 ```
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 /**
@@ -2636,13 +2648,12 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #endif /* FIO_LOG */
 #undef FIO_LOG
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_LOCK2      /* Development inclusion - ignore line */
-#define FIO_ATOMIC     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_LOCK2              /* Development inclusion - ignore line */
+#define FIO_ATOMIC             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -2652,7 +2663,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_ATOMIC) && !defined(H___FIO_ATOMIC___H)
@@ -3341,13 +3352,12 @@ SFUNC void fio_unlock2(fio_lock2_s *lock, size_t group) {
 #endif /* FIO_LOCK2 */
 #undef FIO_LOCK2
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_BITWISE    /* Development inclusion - ignore line */
-#define FIO_BITMAP     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_BITWISE            /* Development inclusion - ignore line */
+#define FIO_BITMAP             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
@@ -3358,7 +3368,7 @@ More joyful ideas at:      https://graphics.stanford.edu/~seander/bithacks.html
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 #if defined(FIO_BITWISE) && !defined(H___BITWISE___H)
@@ -4320,12 +4330,11 @@ Bit-Byte operations - cleanup
 #endif /* FIO_BITMAP */
 #undef FIO_BITMAP
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_MATH       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MATH               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -4336,7 +4345,7 @@ Bit-Byte operations - cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
 #define H___FIO_MATH___H 1
@@ -5065,12 +5074,11 @@ Math - cleanup
 #endif /* FIO_MATH */
 #undef FIO_MATH
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_ATOL       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ATOL               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -5080,7 +5088,7 @@ Math - cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_ATOL) && !defined(H___FIO_ATOL_H)
 #define H___FIO_ATOL_H
@@ -6325,12 +6333,11 @@ Numbers <=> Strings - Cleanup
 #endif /* FIO_ATOL */
 #undef FIO_ATOL
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_THREADS    /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_THREADS            /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -6340,7 +6347,7 @@ Numbers <=> Strings - Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_THREADS) && !defined(H___FIO_THREADS___H)
 #define H___FIO_THREADS___H
@@ -6764,12 +6771,11 @@ Module Cleanup
 #endif /* FIO_THREADS */
 #undef FIO_THREADS
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_TIME       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_TIME               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -6779,7 +6785,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_TIME) && !defined(H___FIO_TIME___H)
 #define H___FIO_TIME___H
@@ -7417,12 +7423,11 @@ Time Cleanup
 #undef FIO_TIME
 #endif /* FIO_TIME */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_RAND       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_RAND               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -7433,7 +7438,7 @@ Time Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) / top of file
+Copyright and License: see header file (000 copyright.h) / top of file
 ***************************************************************************** */
 #if defined(FIO_RAND) && !defined(H___FIO_RAND_H)
 #define H___FIO_RAND_H
@@ -8402,12 +8407,11 @@ Random - Cleanup
 #endif /* FIO_RAND */
 #undef FIO_RAND
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_SHA1       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SHA1               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -8417,7 +8421,7 @@ Random - Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SHA1) && !defined(H___FIO_SHA1___H)
 #define H___FIO_SHA1___H
@@ -8670,12 +8674,11 @@ Module Cleanup
 #endif /* FIO_SHA1 */
 #undef FIO_SHA1
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_SHA2       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SHA2               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -8686,7 +8689,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SHA2) && !defined(H___FIO_SHA2___H)
 #define H___FIO_SHA2___H
@@ -9118,12 +9121,11 @@ Module Cleanup
 #endif /* FIO_SHA2 */
 #undef FIO_SHA2
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_CHACHA     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_CHACHA             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -9133,7 +9135,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_CHACHA) && !defined(H___FIO_CHACHA___H)
 #define H___FIO_CHACHA___H 1
@@ -10117,12 +10119,11 @@ Module Cleanup
 #undef FIO_CHACHA
 #endif /* FIO_CHACHA */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_ED25519    /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ED25519            /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -10133,7 +10134,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_ED25519) && !defined(H___FIO_ED25519___H)
 #define H___FIO_ED25519___H
@@ -10187,12 +10188,11 @@ Cleanup
 #undef FIO_ED25519
 #endif /* FIO_ED25519 */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_IMAP_CORE  /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_IMAP_CORE          /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -10564,12 +10564,11 @@ iMap Cleanup
 #endif /* FIO_IMAP_CORE */
 #undef FIO_IMAP_CORE
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_URL        /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_URL                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -11236,12 +11235,11 @@ FIO_URL - Cleanup
 #undef FIO_URL
 #undef FIO_URI
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_JSON       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_JSON               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -11250,7 +11248,7 @@ FIO_URL - Cleanup
                                 JSON Parsing
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_JSON) && !defined(H___FIO_JSON_H)
 #define H___FIO_JSON_H
@@ -11725,12 +11723,11 @@ failed:
 #undef FIO_JSON
 #endif /* FIO_JSON */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_STATE      /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_STATE              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -11740,7 +11737,7 @@ failed:
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO_STL_KEEP__)
 #define H__FIO_STATE__H
@@ -12087,12 +12084,11 @@ Module Cleanup
 #undef FIO_STATE
 #endif /* FIO_STATE */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___        /* Development inclusion - ignore line */
-#define FIO_MEMORY_NAME fio /* Development inclusion - ignore line */
-#include "./include.h"      /* Development inclusion - ignore line */
-#endif                      /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MEMORY_NAME fio    /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -12102,7 +12098,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************
@@ -15158,12 +15154,11 @@ Memory management macros
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_QUEUE      /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_QUEUE              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -15174,7 +15169,7 @@ Memory management macros
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_QUEUE) && !defined(H___FIO_QUEUE___H)
 #define H___FIO_QUEUE___H
@@ -16231,12 +16226,11 @@ Queue/Timer Cleanup
 #undef FIO_QUEUE
 #endif /* FIO_QUEUE */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_SOCK       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SOCK               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -16246,7 +16240,7 @@ Queue/Timer Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SOCK) && !defined(H___FIO_SOCK___H)
 #define H___FIO_SOCK___H
@@ -17049,12 +17043,11 @@ FIO_SOCK - cleanup
 #undef FIO_SOCK
 #endif
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_STREAM     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_STREAM             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -17064,7 +17057,7 @@ FIO_SOCK - cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STREAM) && !defined(H___FIO_STREAM___H)
 #define H___FIO_STREAM___H
@@ -17852,12 +17845,11 @@ Module Cleanup
 #endif /* FIO_STREAM */
 #undef FIO_STREAM
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_SIGNAL     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SIGNAL             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -17867,7 +17859,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SIGNAL) && !defined(H___FIO_SIGNAL___H)
 #define H___FIO_SIGNAL___H
@@ -18191,12 +18183,11 @@ Module Cleanup
 #endif /* FIO_SIGNAL */
 #undef FIO_SIGNAL
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_GLOB_MATCH /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_GLOB_MATCH         /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -18206,7 +18197,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_GLOB_MATCH) && !defined(H___FIO_GLOB_MATCH___H)
 #define H___FIO_GLOB_MATCH___H
@@ -18421,12 +18412,11 @@ Module Cleanup
 #endif /* FIO_GLOB_MATCH */
 #undef FIO_GLOB_MATCH
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_FILES      /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_FILES              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -18436,7 +18426,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FILES) && !defined(H___FIO_FILES___H)
 #define H___FIO_FILES___H
@@ -18964,12 +18954,11 @@ Module Cleanup
 #endif /* FIO_FILES */
 #undef FIO_FILES
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_STR        /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_STR                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -18979,7 +18968,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STR) && !defined(H__FIO_STR__H)
 #define H__FIO_STR__H
@@ -21648,13 +21637,12 @@ String Core Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STR
 #endif /* H__FIO_STR__H */
-/* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___     /* Development inclusion - ignore line */
-#define FIO_STR_NAME fio /* Development inclusion - ignore line */
-#include "./include.h"   /* Development inclusion - ignore line */
-#endif                   /* Development inclusion - ignore line */
+/* ************************************************************************** */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_STR_NAME fio       /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -21664,7 +21652,7 @@ String Core Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_STR_SMALL
 #ifndef FIO_STR_NAME
@@ -23286,7 +23274,6 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, len)(&str),
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
-#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -23298,7 +23285,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(state.len && state.buf,
                "error, no data was read for file %s!",
                __FILE__);
-
+#if defined(H___FIO_CSTL_COMBINED___H)
     FIO_ASSERT(!memcmp(state.buf,
                        "/* "
                        "******************************************************"
@@ -23306,6 +23293,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
                        80),
                "content error, header mismatch!\n %s",
                state.buf);
+#endif /* H___FIO_CSTL_COMBINED___H */
     fprintf(stderr, "* Testing UTF-8 validation and length.\n");
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_valid)(s),
                "`utf8_valid` error, code in this file "
@@ -23354,7 +23342,6 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
-#endif /* FIO___CSTL_NON_COMBINED_INCLUSION */
   FIO_NAME(FIO_STR_NAME, destroy)(&str);
   if (1) {
     /* Testing Static initialization and writing */
@@ -23554,12 +23541,11 @@ String Cleanup
 
 #endif /* FIO_STR_NAME */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___       /* Development inclusion - ignore line */
-#define FIO_ARRAY_NAME ary /* Development inclusion - ignore line */
-#include "./include.h"     /* Development inclusion - ignore line */
-#endif                     /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ARRAY_NAME ary     /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -23569,7 +23555,7 @@ String Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 #ifdef FIO_ARRAY_NAME
@@ -25362,14 +25348,13 @@ Dynamic Arrays - cleanup
 #undef FIO_ARRAY_EMBEDDED_CAPA
 #undef FIO_ARRAY2EMBEDDED
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___        /* Development inclusion - ignore line */
-#define FIO_MAP_NAME map    /* Development inclusion - ignore line */
-#define FIO_MAP_TEST        /* Development inclusion - ignore line */
-#define FIO_MAP_KEY  size_t /* Development inclusion - ignore line */
-#include "./include.h"      /* Development inclusion - ignore line */
-#endif                      /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MAP_NAME map       /* Development inclusion - ignore line */
+#define FIO_MAP_TEST           /* Development inclusion - ignore line */
+#define FIO_MAP_KEY  size_t    /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -25379,7 +25364,7 @@ Dynamic Arrays - cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_UMAP_NAME)
 #define FIO_MAP_NAME FIO_UMAP_NAME
@@ -27217,12 +27202,11 @@ Map Cleanup
 
 #endif /* FIO_MAP_NAME */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___       /* Development inclusion - ignore line */
-#define FIO_LIST_NAME list /* Development inclusion - ignore line */
-#include "./include.h"     /* Development inclusion - ignore line */
-#endif                     /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_LIST_NAME list     /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -27237,7 +27221,7 @@ Map Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 /* *****************************************************************************
@@ -27389,13 +27373,12 @@ Linked Lists (embeded) - cleanup
 #undef FIO_LIST_TYPE_PTR
 #endif
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___          /* Development inclusion - ignore line */
-#define FIO_REF_NAME long_ref /* Development inclusion - ignore line */
-#define FIO_REF_TYPE long     /* Development inclusion - ignore line */
-#include "./include.h"        /* Development inclusion - ignore line */
-#endif                        /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_REF_NAME long_ref  /* Development inclusion - ignore line */
+#define FIO_REF_TYPE long      /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -27405,7 +27388,7 @@ Linked Lists (embeded) - cleanup
                    (must be placed after all type macros)
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_REF_NAME
 
@@ -27645,13 +27628,12 @@ Pointer Tagging Cleanup
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 #endif
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___         /* Development inclusion - ignore line */
-#define FIO_SORT_NAME num    /* Development inclusion - ignore line */
-#define FIO_SORT_TYPE size_t /* Development inclusion - ignore line */
-#include "./include.h"       /* Development inclusion - ignore line */
-#endif                       /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SORT_NAME num      /* Development inclusion - ignore line */
+#define FIO_SORT_TYPE size_t   /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -27661,7 +27643,7 @@ Pointer Tagging Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_SORT_NAME
 
@@ -27956,12 +27938,11 @@ Module Cleanup
 #undef FIO_SORT_NAME
 #endif /* FIO_SORT_NAME */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_CLI        /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_CLI                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -27970,7 +27951,7 @@ Module Cleanup
                   CLI helpers - command line interface parsing
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
 #define H___FIO_CLI___H 1
@@ -28833,12 +28814,11 @@ CLI - cleanup
 #endif /* FIO_CLI */
 #undef FIO_CLI
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_POLL       /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_POLL               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -28848,7 +28828,7 @@ CLI - cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
 
@@ -28992,9 +28972,8 @@ Cleanup
 ***************************************************************************** */
 #endif /* FIO_POLL */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL   /* Dev */
+#if !defined(FIO_INCLUDE_FILE)                /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL /* Dev */
 #define FIO___DEV___    /* Development inclusion - ignore line */
 #define FIO_POLL        /* Development inclusion - ignore line */
 #include "./include.h"  /* Development inclusion - ignore line */
@@ -29015,7 +28994,7 @@ Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #include <sys/epoll.h>
 
@@ -29192,9 +29171,8 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE  /* Dev */
+#if !defined(FIO_INCLUDE_FILE)                 /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE /* Dev */
 #define FIO___DEV___    /* Development inclusion - ignore line */
 #define FIO_POLL        /* Development inclusion - ignore line */
 #include "./include.h"  /* Development inclusion - ignore line */
@@ -29215,7 +29193,7 @@ Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #include <sys/event.h>
 /* *****************************************************************************
@@ -29382,9 +29360,8 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL    /* Dev */
+#if !defined(FIO_INCLUDE_FILE)               /* Dev test - ignore line */
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL /* Dev */
 #define FIO___DEV___    /* Development inclusion - ignore line */
 #define FIO_POLL        /* Development inclusion - ignore line */
 #include "./include.h"  /* Development inclusion - ignore line */
@@ -29403,7 +29380,7 @@ Cleanup
                         POSIX Portable Polling with `poll`
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef POLLRDHUP
 #define FIO_POLL_EX_FLAGS POLLRDHUP
@@ -29689,12 +29666,11 @@ Cleanup
 #undef FIO_POLL
 #endif /* FIO_POLL */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_SERVER     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SERVER             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -29704,7 +29680,7 @@ Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__) &&                         \
     !defined(H___FIO_SERVER___H)
@@ -31527,12 +31503,11 @@ Simple Server Cleanup
 #undef FIO_SERVER
 #endif /* FIO_TEST_CSTL */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_PUBSUB     /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_PUBSUB             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -31543,7 +31518,7 @@ Simple Server Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
     !defined(FIO_STL_KEEP__)
@@ -33501,13 +33476,12 @@ Pub/Sub Cleanup
 #undef FIO_PUBSUB
 #endif /* FIO_PUBSUB */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___    /* Development inclusion - ignore line */
-#define FIO_HTTP_HANDLE /* Development inclusion - ignore line */
-#define FIO_STR         /* Development inclusion - ignore line */
-#include "./include.h"  /* Development inclusion - ignore line */
-#endif                  /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_HTTP_HANDLE        /* Development inclusion - ignore line */
+#define FIO_STR                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -33518,7 +33492,7 @@ Pub/Sub Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__) &&                    \
     !defined(H___FIO_HTTP_HANDLE___H)
@@ -35265,8 +35239,7 @@ Module Cleanup
 #endif /* FIO_HTTP_HANDLE */
 #undef FIO_HTTP_HANDLE
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MODULE_NAME module /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
@@ -35281,7 +35254,7 @@ Module Cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H)
 #define H___FIO_HTTP1_PARSER___H
@@ -35772,12 +35745,215 @@ Cleanup
 #endif /* FIO_HTTP1_PARSER */
 #undef FIO_HTTP1_PARSER
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_FIOBJ      /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_HTTP               /* Development inclusion - ignore line */
+#include "./431 http handle.h" /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                  HTTP Implementation for FIO_SERVER
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO_STL_KEEP__)
+#define H___FIO_HTTP___H
+/* *****************************************************************************
+HTTP Setting Defaults
+***************************************************************************** */
+
+#ifndef FIO_HTTP_DEFAULT_MAX_HEADER_SIZE
+#define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE (1UL << 15)
+#endif
+#ifndef FIO_HTTP_DEFAULT_MAX_LINE_LEN
+#define FIO_HTTP_DEFAULT_MAX_LINE_LEN (1UL << 13)
+#endif
+#ifndef FIO_HTTP_DEFAULT_MAX_BODY_SIZE
+#define FIO_HTTP_DEFAULT_MAX_BODY_SIZE (1UL << 25)
+#endif
+#ifndef FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE
+#define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE (1UL << 18)
+#endif
+#ifndef FIO_HTTP_DEFAULT_TIMEOUT
+#define FIO_HTTP_DEFAULT_TIMEOUT 50
+#endif
+#ifndef FIO_HTTP_DEFAULT_TIMEOUT_LONG
+#define FIO_HTTP_DEFAULT_TIMEOUT_LONG 50
+#endif
+
+/* *****************************************************************************
+HTTP Listen
+***************************************************************************** */
+
+typedef struct fio_http_settings_s {
+  /** Callback for HTTP requests (server) or responses (client). */
+  void (*on_http)(fio_http_s *h);
+  /** Callback for EventSource (SSE) requests. */
+  void (*on_upgrade2sse)(fio_http_s *h);
+  /** Callback for WebSockets Upgrade requests. */
+  void (*on_upgrade2websockets)(fio_http_s *h);
+  /** (optional) the callback to be performed when the HTTP service closes. */
+  void (*on_finish)(struct http_settings_s *settings);
+  /** Opaque user data. */
+  void *udata;
+  /** Optional SSL/TLS support. */
+  struct fio_io_functions *tls_io_func;
+  /** Optional SSL/TLS support. */
+  void *tls;
+  /**
+   * A public folder for file transfers - allows to circumvent any application
+   * layer logic and simply serve static files.
+   *
+   * Supports automatic `gz` pre-compressed alternatives.
+   */
+  fio_str_info_s public_folder;
+  /**
+   * The maximum total of bytes for the overall size of the request string and
+   * headers, combined.
+   *
+   * Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE bytes.
+   */
+  size_t max_header_size;
+  /**
+   * The maximum number of bytes allowed per header / request line.
+   *
+   * Defaults to FIO_HTTP_DEFAULT_MAX_LINE_LEN bytes.
+   */
+  size_t max_line_len;
+  /**
+   * The maximum size of an HTTP request's body (posting / downloading).
+   *
+   * Defaults to FIO_HTTP_DEFAULT_MAX_BODY_SIZE bytes.
+   */
+  size_t max_body_size;
+  /**
+   * The maximum websocket message size/buffer (in bytes) for Websocket
+   * connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
+   */
+  size_t ws_max_msg_size;
+  /** reserved for future use. */
+  intptr_t reserved1;
+  /** reserved for future use. */
+  intptr_t reserved2;
+  /**
+   * An HTTP/1.x connection timeout.
+   *
+   * Defaults to FIO_HTTP_DEFAULT_TIMEOUT seconds.
+   *
+   * Note: the connection might be closed (by other side) before timeout occurs.
+   */
+  uint8_t timeout;
+  /**
+   * Timeout for the WebSocket connections, a ping will be sent whenever the
+   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * Connections are only closed when a ping cannot be sent (the network layer
+   * fails). Pongs are ignored.
+   */
+  uint8_t ws_timeout;
+  /**
+   * Timeout for EventSource (SSE) connections, a ping will be sent whenever the
+   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * Connections are only closed when a ping cannot be sent (the network layer
+   * fails).
+   */
+  uint8_t sse_timeout;
+  /** Logging flag - set to TRUE to log HTTP requests. */
+  uint8_t log;
+} fio_http_settings_s;
+
+/** Listens to HTTP / WebSockets / SSE connections on `url`. */
+SFUNC void fio_http_listen(const char *url, fio_http_settings_s settings);
+
+/** Listens to HTTP / WebSockets / SSE connections on `url`. */
+#define fio_http_listen(...)                                                   \
+  fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
+
+/* *****************************************************************************
+Module Implementation - inlined static functions
+***************************************************************************** */
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+/* *****************************************************************************
+Module Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+/* *****************************************************************************
+HTTP Protocol Container (vtable + settings storage)
+***************************************************************************** */
+
+#define FIO___HTTP_PROTOCOL_HTTP1 0
+#define FIO___HTTP_PROTOCOL_WS    1
+#define FIO___HTTP_PROTOCOL_SSE   2
+#define FIO___HTTP_PROTOCOL_HTTP2 3
+
+typedef struct {
+  http_settings_s settings;
+  fio_protocol_s protocol[4];
+  fio_http_controller_s controller[4];
+} http_protocol_s;
+#include FIO_INCLUDE_FILE
+
+#define FIO_REF_NAME             http_protocol
+#define FIO_REF_CONSTRUCTOR_ONLY 1
+#define FIO_REF_DESTROY(o)                                                     \
+  do {                                                                         \
+    if (o.settings.on_finish)                                                  \
+      o.settings.on_finish(&o.settings);                                       \
+  } while (0)
+#include FIO_INCLUDE_FILE
+
+/* *****************************************************************************
+Module Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, http_listen)(void) {
+  /*
+   * TODO: test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_HTTP
+#endif /* FIO_HTTP */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_FIOBJ              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -35806,7 +35982,7 @@ memory consumption on 64 bit systems and uses 4 bytes on 32 bit systems.
 Note: this code is placed at the end of the STL file, since it leverages most of
 the SLT features and could be affected by their inclusion.
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
 #define H___FIOBJ___H
@@ -38216,8 +38392,7 @@ FIOBJ cleanup
 #endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MODULE_NAME module /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
@@ -38232,7 +38407,7 @@ FIOBJ cleanup
 
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_MODULE_NAME) /* && !defined(FIO_STL_KEEP__) */
 
@@ -38419,12 +38594,11 @@ Common cleanup
 
 #endif /* !FIO_STL_KEEP__ */
 /* ************************************************************************* */
-#if !defined(H___FIO_CSTL_COMBINED___H) &&                                     \
-    !defined(FIO___CSTL_NON_COMBINED_INCLUSION) /* Dev test - ignore line */
-#define FIO___DEV___   /* Development inclusion - ignore line */
-#define FIO_TEST_CSTL  /* Development inclusion - ignore line */
-#include "./include.h" /* Development inclusion - ignore line */
-#endif                 /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_TEST_CSTL          /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
 
 
@@ -38432,7 +38606,7 @@ Common cleanup
                                 Testing
 
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
 #if !defined(FIO_FIO_TEST_CSTL_ONLY_ONCE) && (defined(FIO_TEST_CSTL))
@@ -39306,9 +39480,6 @@ Cleanup
 #ifndef FIO_INCLUDE_FILE
 #define FIO_INCLUDE_FILE "fio-stl/include.h"
 #endif
-#ifndef FIO___CSTL_NON_COMBINED_INCLUSION
-#define FIO___CSTL_NON_COMBINED_INCLUSION
-#endif
 #include "001 header.h"
 
 #ifdef FIO_LOG
@@ -39420,11 +39591,16 @@ Cleanup
 #include "420 pubsub.h"
 #endif
 
+#ifdef FIO_HTTP1_PARSER
+#include "431 http1 parser.h"
+#endif
+
 #ifdef FIO_HTTP_HANDLE
 #include "431 http handle.h"
 #endif
-#ifdef FIO_HTTP1_PARSER
-#include "431 http1 parser.h"
+
+#ifdef FIO_HTTP
+#include "439 http.h"
 #endif
 
 #if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
@@ -39441,10 +39617,6 @@ Cleanup
 #endif
 
 #include "999 footer.h"
-
-#ifndef FIO_STL_KEEP__
-#undef FIO___CSTL_NON_COMBINED_INCLUSION
-#endif
 
 #endif /* !H___FIO_CSTL_COMBINED___H */
 /* ************************************************************************* */

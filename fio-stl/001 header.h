@@ -1596,7 +1596,7 @@ Sleep / Thread Scheduling Macros
 
 Patch for OSX version < 10.12 from https://stackoverflow.com/a/9781275/4025095
 
-Copyright and License: see header file (000 header.h) or top of file
+Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if (defined(__MACH__) && !defined(CLOCK_REALTIME))
 #warning fio_time functions defined using gettimeofday patch.
@@ -2213,8 +2213,21 @@ Pointer Tagging
 #endif
 #endif
 
+/* HTTP Modules */
+#if defined(FIO_HTTP)
+#ifndef FIO_HTTP1_PARSER
+#define FIO_HTTP1_PARSER
+#endif /* FIO_HTTP1_PARSER */
+#ifndef FIO_HTTP_HANDLE
+#define FIO_HTTP_HANDLE
+#endif /* FIO_HTTP_HANDLE */
+#ifndef FIO_PUBSUB
+#define FIO_PUBSUB
+#endif /* FIO_PUBSUB */
+#endif /* FIO_HTTP */
+
 /* Modules that require FIO_SERVER */
-#if defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB) || defined(FIO_HTTP)
 #ifndef FIO_SERVER
 #define FIO_SERVER
 #endif
