@@ -53,7 +53,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_LIMIT
 /** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT (1 << 10)
+#define FIO_HTTP_CACHE_LIMIT (1 << 6)
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -64,6 +64,11 @@ HTTP Handle Settings
 #ifndef FIO_HTTP_CACHE_USES_MUTEX
 /** The HTTP cache will use a mutex to allow headers to be set concurrently. */
 #define FIO_HTTP_CACHE_USES_MUTEX 1
+#endif
+
+#ifndef FIO_HTTP_CACHE_STATIC
+/** Adds a static cache for common HTTP header names. */
+#define FIO_HTTP_CACHE_STATIC 1
 #endif
 
 /* *****************************************************************************
@@ -576,8 +581,6 @@ String Cache
 #define FIO_MAP_NAME fio___http_str_cache
 #define FIO_MAP_LRU  FIO_HTTP_CACHE_LIMIT
 #define FIO_MAP_KEY_BSTR
-#define FIO_MAP_HASH_FN(k)                                                     \
-  fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio_http_new)
 #include FIO_INCLUDE_FILE
 
 static struct {
@@ -590,15 +593,172 @@ static struct {
 #define FIO___HTTP_STR_CACHE_COOKIE 1
 #define FIO___HTTP_STR_CACHE_VALUE  2
 
+#if FIO_HTTP_CACHE_STATIC
+static struct {
+  fio___bstr_meta_s meta;
+  char str[32];
+} FIO___HTTP_STATIC_CACHE[] = {
+#define FIO___HTTP_STATIC_CACHE_SET(s)                                         \
+  { .meta = {.ref = 3, .len = (uint32_t)(sizeof(s) - 1)}, .str = s }
+    FIO___HTTP_STATIC_CACHE_SET("a-im"),
+    FIO___HTTP_STATIC_CACHE_SET("accept"),
+    FIO___HTTP_STATIC_CACHE_SET("accept-charset"),
+    FIO___HTTP_STATIC_CACHE_SET("accept-datetime"),
+    FIO___HTTP_STATIC_CACHE_SET("accept-encoding"),
+    FIO___HTTP_STATIC_CACHE_SET("accept-language"),
+    FIO___HTTP_STATIC_CACHE_SET("accept-ranges"),
+    FIO___HTTP_STATIC_CACHE_SET("access-control-allow-origin"),
+    FIO___HTTP_STATIC_CACHE_SET("access-control-request-headers"),
+    FIO___HTTP_STATIC_CACHE_SET("access-control-request-method"),
+    FIO___HTTP_STATIC_CACHE_SET("age"),
+    FIO___HTTP_STATIC_CACHE_SET("allow"),
+    FIO___HTTP_STATIC_CACHE_SET("authorization"),
+    FIO___HTTP_STATIC_CACHE_SET("cache-control"),
+    FIO___HTTP_STATIC_CACHE_SET("connection"),
+    FIO___HTTP_STATIC_CACHE_SET("content-disposition"),
+    FIO___HTTP_STATIC_CACHE_SET("content-encoding"),
+    FIO___HTTP_STATIC_CACHE_SET("content-language"),
+    FIO___HTTP_STATIC_CACHE_SET("content-length"),
+    FIO___HTTP_STATIC_CACHE_SET("content-location"),
+    FIO___HTTP_STATIC_CACHE_SET("content-range"),
+    FIO___HTTP_STATIC_CACHE_SET("content-type"),
+    FIO___HTTP_STATIC_CACHE_SET("cookie"),
+    FIO___HTTP_STATIC_CACHE_SET("date"),
+    FIO___HTTP_STATIC_CACHE_SET("dnt"),
+    FIO___HTTP_STATIC_CACHE_SET("etag"),
+    FIO___HTTP_STATIC_CACHE_SET("expect"),
+    FIO___HTTP_STATIC_CACHE_SET("expires"),
+    FIO___HTTP_STATIC_CACHE_SET("forwarded"),
+    FIO___HTTP_STATIC_CACHE_SET("from"),
+    FIO___HTTP_STATIC_CACHE_SET("host"),
+    FIO___HTTP_STATIC_CACHE_SET("if-match"),
+    FIO___HTTP_STATIC_CACHE_SET("if-modified-since"),
+    FIO___HTTP_STATIC_CACHE_SET("if-none-match"),
+    FIO___HTTP_STATIC_CACHE_SET("if-range"),
+    FIO___HTTP_STATIC_CACHE_SET("if-unmodified-since"),
+    FIO___HTTP_STATIC_CACHE_SET("last-modified"),
+    FIO___HTTP_STATIC_CACHE_SET("link"),
+    FIO___HTTP_STATIC_CACHE_SET("location"),
+    FIO___HTTP_STATIC_CACHE_SET("max-forwards"),
+    FIO___HTTP_STATIC_CACHE_SET("origin"),
+    FIO___HTTP_STATIC_CACHE_SET("pragma"),
+    FIO___HTTP_STATIC_CACHE_SET("proxy-authenticate"),
+    FIO___HTTP_STATIC_CACHE_SET("proxy-authorization"),
+    FIO___HTTP_STATIC_CACHE_SET("range"),
+    FIO___HTTP_STATIC_CACHE_SET("referer"),
+    FIO___HTTP_STATIC_CACHE_SET("refresh"),
+    FIO___HTTP_STATIC_CACHE_SET("retry-after"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-ch-ua"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-ch-ua-mobile"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-ch-ua-platform"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-fetch-dest"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-fetch-mode"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-fetch-site"),
+    FIO___HTTP_STATIC_CACHE_SET("sec-fetch-user"),
+    FIO___HTTP_STATIC_CACHE_SET("server"),
+    FIO___HTTP_STATIC_CACHE_SET("set-cookie"),
+    FIO___HTTP_STATIC_CACHE_SET("strict-transport-security"),
+    FIO___HTTP_STATIC_CACHE_SET("te"),
+    FIO___HTTP_STATIC_CACHE_SET("transfer-encoding"),
+    FIO___HTTP_STATIC_CACHE_SET("upgrade"),
+    FIO___HTTP_STATIC_CACHE_SET("upgrade-insecure-requests"),
+    FIO___HTTP_STATIC_CACHE_SET("user-agent"),
+    FIO___HTTP_STATIC_CACHE_SET("vary"),
+    FIO___HTTP_STATIC_CACHE_SET("via"),
+    FIO___HTTP_STATIC_CACHE_SET("warning"),
+    FIO___HTTP_STATIC_CACHE_SET("www-authenticate"),
+    FIO___HTTP_STATIC_CACHE_SET("x-csrf-token"),
+    FIO___HTTP_STATIC_CACHE_SET("x-forwarded-for"),
+    FIO___HTTP_STATIC_CACHE_SET("x-forwarded-host"),
+    FIO___HTTP_STATIC_CACHE_SET("x-forwarded-proto"),
+    FIO___HTTP_STATIC_CACHE_SET("x-requested-with"),
+    {0}};
+
+#define FIO___HTTP_STATIC_CACHE_MASK       127
+#define FIO___HTTP_STATIC_CACHE_FOLD       13
+#define FIO___HTTP_STATIC_CACHE_STEP       27
+#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
+
+static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
+    {0};
+
+static void fio___http_str_cached_init(void) {
+  memset(FIO___HTTP_STATIC_CACHE_IMAP, 0, 64 * 2);
+  for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
+    uint64_t hash = fio_risky_hash(FIO___HTTP_STATIC_CACHE[i].str,
+                                   FIO___HTTP_STATIC_CACHE[i].meta.len,
+                                   0);
+    hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
+    size_t protection = 0;
+    while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
+      FIO_ASSERT(
+          (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
+           0xFF80) != (hash & 0xFF80),
+          "full collision for HTTP static hash (%zu == %zu!",
+          (size_t)(hash & FIO___HTTP_STATIC_CACHE_MASK),
+          i);
+      hash += hash >> FIO___HTTP_STATIC_CACHE_STEP;
+      FIO_ASSERT((protection++) < FIO___HTTP_STATIC_CACHE_STEP_LIMIT,
+                 "HTTP static cache collision overflow @ %zu (%s)",
+                 i,
+                 FIO___HTTP_STATIC_CACHE[i].str);
+    }
+    FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] =
+        (hash & 0xFF80) | i;
+  }
+}
+
+static char *fio___http_str_cached_static(uint64_t hash,
+                                          char *str,
+                                          size_t len) {
+  hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
+  for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
+       ++attempts) {
+    if ((FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
+         0xFF80) == (hash & 0xFF80))
+      break;
+    hash += hash >> FIO___HTTP_STATIC_CACHE_STEP;
+  }
+  size_t pos =
+      FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
+      0x007F;
+  if (FIO___HTTP_STATIC_CACHE[pos].meta.len == len &&
+      !FIO_MEMCMP(str, FIO___HTTP_STATIC_CACHE[pos].str, len)) {
+    return FIO___HTTP_STATIC_CACHE[pos].str;
+  }
+  return NULL;
+}
+
+#undef FIO___HTTP_STATIC_CACHE_MASK
+#undef FIO___HTTP_STATIC_CACHE_FOLD
+#undef FIO___HTTP_STATIC_CACHE_STEP
+#undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
+#else
+#define fio___http_str_cached_init() (void)0
+#endif /* FIO_HTTP_CACHE_STATIC */
+
 static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   fio_str_info_s cached;
+  uint64_t hash;
+  if (!s.len)
+    return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
+  hash = fio_risky_hash(s.buf, s.len, 0);
+#if FIO_HTTP_CACHE_STATIC
+  if (group == FIO___HTTP_STR_CACHE_NAME) {
+    char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+    if (tmp)
+      return fio_bstr_copy(tmp);
+  }
+#endif /* FIO_HTTP_CACHE_STATIC */
+  hash ^= (uint64_t)(uintptr_t)fio_http_new;
 #if FIO_HTTP_CACHE_USES_MUTEX
   FIO___LOCK_LOCK(FIO___HTTP_STRING_CACHE[group].lock);
 #endif
   cached =
       fio___http_str_cache_set_if_missing(&FIO___HTTP_STRING_CACHE[group].cache,
+                                          hash,
                                           s);
 #if FIO_HTTP_CACHE_USES_MUTEX
   FIO___LOCK_UNLOCK(FIO___HTTP_STRING_CACHE[group].lock);
@@ -606,6 +766,10 @@ static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   return fio_bstr_copy(cached.buf);
 avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
+}
+
+FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
+  fio___http_str_cached_init();
 }
 
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
@@ -616,6 +780,15 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
         getpid(),
         fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
         names[i]);
+#ifdef FIO_LOG_LEVEL_DEBUG
+    if (FIO_LOG_LEVEL_DEBUG == FIO_LOG_LEVEL) {
+      FIO_MAP_EACH(fio___http_str_cache,
+                   (&FIO___HTTP_STRING_CACHE[i].cache),
+                   pos) {
+        fprintf(stderr, "\t \"%s\" (%zu bytes)\n", pos.key.buf, pos.key.len);
+      }
+    }
+#endif
     fio___http_str_cache_destroy(&FIO___HTTP_STRING_CACHE[i].cache);
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
   }
