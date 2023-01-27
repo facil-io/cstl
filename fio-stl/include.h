@@ -93,7 +93,7 @@
 #include "220 linked lists.h"
 #endif
 
-#include "299 reference counter.h" /* pointer tagging cleanup is here */
+#include "299 reference counter.h" /* required: pointer tagging cleanup is here */
 
 #ifdef FIO_SORT_NAME
 #include "301 sort.h"
@@ -121,11 +121,11 @@
 #include "431 http1 parser.h"
 #endif
 
-#ifdef FIO_HTTP_HANDLE
+#if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__)
 #include "431 http handle.h"
 #endif
 
-#ifdef FIO_HTTP
+#if defined(FIO_HTTP) && !defined(FIO_STL_KEEP__)
 #include "439 http.h"
 #endif
 
