@@ -265,34 +265,13 @@ FIO_SFUNC void on_data(fio_s *io) {
 HTTP/1.1 Protocol Controller
 ***************************************************************************** */
 
-/** Informs the controller that a request is starting. */
-static int fio_http1_start_request(fio_http_s *h, int reserved, int streaming) {
-  (void)reserved;
-  (void)streaming;
-  client_s *c = fio_http_cdata(h);
-  if (!c->io)
-    return -1;
-  return -1;
-}
 /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-static void fio_http1_on_unlinked(fio_http_s *h, void *c_) {
+static void fio_http1_on_destroyed(fio_http_s *h, void *c_) {
   client_s *c = c_; // client_s *c = http_controller_data(h);
   if (c->h == h)
     c->h = NULL;
   client_free(c);
   (void)h;
-}
-
-/** Informs the controller that a response is starting. */
-static int fio_http1_start_response(fio_http_s *h, int status, int streaming) {
-  (void)status;
-  client_s *c = fio_http_cdata(h);
-  if (!c->io)
-    return -1;
-  if (streaming) {
-    /* TODO: add streaming headers */
-  }
-  return 0;
 }
 
 /** called by the HTTP handle for each header. */
@@ -405,9 +384,7 @@ finish:
 }
 
 static fio_http_controller_s HTTP1_CONTROLLER = {
-    .on_unlinked = fio_http1_on_unlinked,
-    .start_response = fio_http1_start_response,
-    .start_request = fio_http1_start_request,
+    .on_destroyed = fio_http1_on_destroyed,
     .send_headers = fio_http1_send_headers,
     .write_body = fio_http1_write_body,
     .on_finish = fio_http1_on_finish,

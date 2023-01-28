@@ -33530,7 +33530,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_LIMIT
 /** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT (1 << 6)
+#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) - 1)
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -33540,7 +33540,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_USES_MUTEX
 /** The HTTP cache will use a mutex to allow headers to be set concurrently. */
-#define FIO_HTTP_CACHE_USES_MUTEX 1
+#define FIO_HTTP_CACHE_USES_MUTEX 0
 #endif
 
 #ifndef FIO_HTTP_CACHE_STATIC
@@ -33582,6 +33582,9 @@ SFUNC void fio_http_free(fio_http_s *);
 
 /** Increases an fio_http_s handle's reference count. */
 SFUNC fio_http_s *fio_http_dup(fio_http_s *);
+
+/** Destroyed the HTTP handle object, freeing all allocated resources. */
+SFUNC void fio_http_destroy(fio_http_s *h);
 
 /* *****************************************************************************
 Opaque User and Controller Data
@@ -33956,13 +33959,9 @@ The HTTP Controller
 struct fio_http_controller_s {
   /* MUST be initialized to zero, used internally by the HTTP Handle. */
   uintptr_t private_flags;
-  /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-  void (*on_unlinked)(fio_http_s *h, void *cdata);
-  /** Informs the controller that a response is starting. */
-  int (*start_response)(fio_http_s *h, int status, int will_stream);
-  /** Informs the controller that a request is starting. */
-  int (*start_request)(fio_http_s *h, int reserved, int will_stream);
-  /** Informs the controller that all headers must be sent. */
+  /** Called when an HTTP handle is freed. */
+  void (*on_destroyed)(fio_http_s *h, void *cdata);
+  /** Informs the controller that request / response headers must be sent. */
   void (*send_headers)(fio_http_s *h);
   /** called by the HTTP handle for each body chunk (or to finish a response. */
   void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
@@ -34406,14 +34405,8 @@ Cookie Maps
 Controller Validation
 ***************************************************************************** */
 
-FIO_SFUNC void fio___mock_c_on_unlinked(fio_http_s *h, void *cdata) {
+FIO_SFUNC void fio___mock_c_on_destroyed(fio_http_s *h, void *cdata) {
   (void)h, (void)cdata;
-}
-FIO_SFUNC int fio___mock_c_start_response(fio_http_s *h,
-                                          int status,
-                                          int streaming) {
-  return -1;
-  (void)h, (void)status, (void)streaming;
 }
 FIO_SFUNC void fio___mock_c_send_headers(fio_http_s *h) { (void)h; }
 FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
@@ -34430,12 +34423,8 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
 FIO_SFUNC void fio___mock_c_on_finish(fio_http_s *h) { (void)h; }
 
 SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
-  if (!c->on_unlinked)
-    c->on_unlinked = fio___mock_c_on_unlinked;
-  if (!c->start_response)
-    c->start_response = fio___mock_c_start_response;
-  if (!c->start_request)
-    c->start_request = fio___mock_c_start_response;
+  if (!c->on_destroyed)
+    c->on_destroyed = fio___mock_c_on_destroyed;
   if (!c->send_headers)
     c->send_headers = fio___mock_c_send_headers;
   if (!c->write_body)
@@ -34448,18 +34437,22 @@ SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
 HTTP Handle Type
 ***************************************************************************** */
 
-#define FIO_HTTP_STATE_FINISHED       1
-#define FIO_HTTP_STATE_STREAMING      2
+#define FIO_HTTP_STATE_STREAMING      1
+#define FIO_HTTP_STATE_FINISHED       2
 #define FIO_HTTP_STATE_COOKIES_PARSED 4
+
+FIO_SFUNC int fio____http_write_start(fio_http_s *, fio_http_write_args_s *);
+FIO_SFUNC int fio____http_write_cont(fio_http_s *, fio_http_write_args_s *);
 
 struct fio_http_s {
   void *udata;
   void *cdata;
   fio_http_controller_s *controller;
+  int (*writer)(fio_http_s *, fio_http_write_args_s *);
   int64_t received_at;
-  size_t state;
   size_t sent;
-  size_t status;
+  uint32_t state;
+  uint32_t status;
   fio_keystr_s method;
   fio_keystr_s path;
   fio_keystr_s query;
@@ -34477,11 +34470,18 @@ struct fio_http_s {
 #define HTTP_HDR_REQUEST(h)  (h->headers + 0)
 #define HTTP_HDR_RESPONSE(h) (h->headers + 1)
 
-void fio_http_destroy(fio_http_s *h) {
+#define FIO_REF_NAME fio_http
+#define FIO_REF_INIT(h)                                                        \
+  h = (fio_http_s) {                                                           \
+    .writer = fio____http_write_start,                                         \
+    .received_at = fio_http_get_timestump(), .body.fd = -1                     \
+  }
+#define FIO_REF_DESTROY(h) fio_http_destroy(&(h))
+SFUNC void fio_http_destroy(fio_http_s *h) {
   if (!h)
     return;
   if (h->controller)
-    h->controller->on_unlinked(h, h->cdata);
+    h->controller->on_destroyed(h, h->cdata);
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
   fio_keystr_destroy(&h->query, fio___http_keystr_free);
@@ -34493,13 +34493,8 @@ void fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
-  *h = (fio_http_s){.received_at = fio_http_get_timestump(), .body.fd = -1};
+  FIO_REF_INIT(*h);
 }
-
-#define FIO_REF_NAME fio_http
-#define FIO_REF_INIT(h)                                                        \
-  h = (fio_http_s) { .received_at = fio_http_get_timestump(), .body.fd = -1 }
-#define FIO_REF_DESTROY(h) fio_http_destroy(&(h))
 #include FIO_INCLUDE_FILE
 
 /** Create a new http_s handle. */
@@ -34552,13 +34547,13 @@ Handler State
 /** Returns true if the HTTP handle's response was sent. */
 SFUNC int fio_http_is_finished(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (FIO_HTTP_STATE_STREAMING == (h->state & FIO_HTTP_STATE_FINISHED));
+  return (!!(h->state & FIO_HTTP_STATE_FINISHED));
 }
 
 /** Returns true if the HTTP handle's response is streaming. */
 SFUNC int fio_http_is_streaming(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (FIO_HTTP_STATE_STREAMING == (h->state & FIO_HTTP_STATE_STREAMING));
+  return (!!(h->state & FIO_HTTP_STATE_STREAMING));
 }
 
 /* *****************************************************************************
@@ -35089,8 +35084,6 @@ A Response Payload
 
 /** ETag Helper */
 FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  if (!h->status)
-    return 0;
   fio_str_info_s method = fio_keystr_info(&h->method);
   if ((method.len < 3) | (method.len > 4))
     return 0;
@@ -35108,7 +35101,78 @@ FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
       fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
                            FIO_STR_INFO2((char *)"if-none-match", 13),
                            0);
-  return FIO_STR_INFO_IS_EQ(etag, cond);
+  if (!cond.len)
+    return 0;
+  char *end = cond.buf + cond.len;
+  for (;;) {
+    cond.buf += (cond.buf[0] == ',');
+    while (cond.buf[0] == ' ')
+      ++cond.buf;
+    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
+      return 0;
+    if (memcmp(cond.buf, etag.buf, etag.len)) {
+      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
+      if (!cond.buf)
+        return 0;
+      continue;
+    }
+    h->status = 304;
+    fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
+                         FIO_STR_INFO2((char *)"content-length", 14),
+                         FIO_STR_INFO2((char *)"0", 1),
+                         -1);
+    h->controller->send_headers(h);
+    h->controller->on_finish(h);
+    return -1;
+  }
+}
+
+FIO_SFUNC int fio____http_write_done(fio_http_s *h,
+                                     fio_http_write_args_s *args) {
+  return -1;
+  (void)h, (void)args;
+}
+
+FIO_SFUNC int fio____http_write_start(fio_http_s *h,
+                                      fio_http_write_args_s *args) {
+  /* if response has an `etag` header matching `if-none-match`, skip */
+  fio___http_hmap_s *hdrs = h->headers + (!!h->status);
+  if (h->status && fio___http_response_etag_if_none_match(h))
+    return -1;
+  /* test if streaming / single body response */
+  if (args->finish) {
+    /* validate / set Content-Length (not streaming) */
+    char ibuf[32];
+    fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
+    fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+    v.len = fio_digits10u(args->len);
+    fio_ltoa10u(v.buf, args->len, v.len);
+    fio___http_hmap_set2(hdrs, k, v, -1);
+  } else {
+    h->state |= FIO_HTTP_STATE_STREAMING;
+  }
+  /* validate Date header */
+  fio___http_hmap_set2(hdrs,
+                       FIO_STR_INFO2((char *)"date", 4),
+                       fio_http_date(fio_http_get_timestump()),
+                       0);
+
+  /* start a response, unless status == 0 (which starts a request). */
+  h->controller->send_headers(h);
+  return (h->writer = fio____http_write_cont)(h, args);
+}
+FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
+                                     fio_http_write_args_s *args) {
+  if (args->data || args->fd) {
+    h->controller->write_body(h, *args);
+    h->sent += args->len;
+  }
+  if (args->finish) {
+    h->state |= FIO_HTTP_STATE_FINISHED;
+    h->controller->on_finish(h);
+    h->writer = fio____http_write_done;
+  }
+  return 0;
 }
 
 void fio_http_write___(void); /* IDE Marker */
@@ -35117,53 +35181,10 @@ void fio_http_write___(void); /* IDE Marker */
  * sending all headers (no further headers may be sent).
  */
 SFUNC void fio_http_write FIO_NOOP(fio_http_s *h, fio_http_write_args_s args) {
-  fio_http_controller_s *c;
-  fio___http_hmap_s *hdrs;
   if (!h || (fio_http_is_finished(h) | (!h->controller)))
     goto handle_error;
-  c = h->controller;
-  hdrs = h->headers + (!!h->status);
-  if (!(h->state & FIO_HTTP_STATE_STREAMING)) { /* first call to http_write */
-    /* if response has an `etag` header matching `if-none-match`, skip */
-    if (fio___http_response_etag_if_none_match(h)) {
-      h->status = 304;
-      if (args.fd)
-        close(args.fd);
-      if (args.dealloc && args.data)
-        args.dealloc((void *)args.data);
-      args.len = args.fd = 0;
-      args.data = NULL;
-      args.finish = 1;
-    }
-    /* test if streaming / single body response */
-    if (args.finish) {
-      /* validate / set Content-Length (not streaming) */
-      char ibuf[32];
-      fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
-      fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
-      fio_string_write_u(&v, NULL, args.len);
-      fio___http_hmap_set2(hdrs, k, v, -1);
-    } else {
-      h->state |= FIO_HTTP_STATE_STREAMING;
-    }
-    /* validate Date header */
-    fio___http_hmap_set2(hdrs,
-                         FIO_STR_INFO2((char *)"date", 4),
-                         fio_http_date(fio_http_get_timestump()),
-                         0);
-
-    /* start a response, unless status == 0 (which starts a request). */
-    (&c->start_response)[h->status == 0](h, h->status, !args.finish);
-    c->send_headers(h);
-  }
-  if (args.data || args.fd) {
-    c->write_body(h, args);
-    h->sent += args.len;
-  }
-  if (args.finish) {
-    h->state |= FIO_HTTP_STATE_FINISHED;
-    c->on_finish(h);
-  }
+  if (h->writer(h, &args))
+    goto handle_error;
   return;
 
 handle_error:
@@ -35210,6 +35231,32 @@ SFUNC void fio_http_sse_set_request(fio_http_s *h);
 
 
 ***************************************************************************** */
+
+/* *****************************************************************************
+Error Handling (TODO!)
+***************************************************************************** */
+
+/** Sends the requested error message and finishes the response. */
+SFUNC void fio_http_send_error(fio_http_s *h, size_t status) {
+  if (!h || h->writer != fio____http_write_start)
+    return;
+  if (!status || status > 1000)
+    status = 404;
+  h->status = status;
+  /* TODO: load body template, fill details and send it...? */
+  char buf[32];
+  fio_str_info_s filename = FIO_STR_INFO3(buf, 0, 32);
+  fio_string_write2(&filename,
+                    NULL,
+                    FIO_STRING_WRITE_UNUM(status),
+                    FIO_STRING_WRITE_STR2(".html", 5));
+  char *body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
+  fio_http_write_args_s args = {.data = body,
+                                .len = fio_bstr_len(body),
+                                .dealloc = (void (*)(void *))fio_bstr_free,
+                                .finish = 1};
+  fio_http_write FIO_NOOP(h, args);
+}
 
 /* *****************************************************************************
 HTTP Logging
@@ -35261,7 +35308,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
     }
   }
   memcpy(buf.buf + buf.len, " - - [", 6);
-  memcpy(buf.buf + 6, date.buf, date.len);
+  memcpy(buf.buf + buf.len + 6, date.buf, date.len);
   buf.len += date.len + 6;
   fio_string_write2(&buf,
                     NULL,
