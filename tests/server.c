@@ -116,9 +116,9 @@ FIO_SFUNC int http_write_headers_to_string(fio_http_s *h,
 }
 
 FIO_SFUNC void http_respond(fio_http_s *h) {
-  http_response_header_set(h,
-                           FIO_STR_INFO1("server"),
-                           FIO_STR_INFO1("fio-stl"));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO1("server"),
+                               FIO_STR_INFO1("fio-stl"));
 #if HTTP_RESPONSE_ECHO
   char *out = fio_bstr_write2(
       NULL,
@@ -150,7 +150,7 @@ FIO_SFUNC void http_respond(fio_http_s *h) {
     char hash_buf[18];
     fio_str_info_s etag = FIO_STR_INFO3(hash_buf, 0, 18);
     fio_string_write_hex(&etag, NULL, hash);
-    http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
+    fio_http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
   }
   // FIO_LOG_DEBUG2("echoing back:\n%s", str2ptr(&out));
   fio_http_write(h,
@@ -439,9 +439,9 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
   if (u.query.len)
     fio_http_query_set(c->h, FIO_BUF2STR_INFO(u.query));
   if (u.host.len)
-    http_request_header_set(c->h,
-                            FIO_STR_INFO1("host"),
-                            FIO_BUF2STR_INFO(u.host));
+    fio_http_request_header_set(c->h,
+                                FIO_STR_INFO1("host"),
+                                FIO_BUF2STR_INFO(u.host));
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
@@ -455,9 +455,9 @@ static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
   client_s *c = (client_s *)udata;
-  http_request_header_add(c->h,
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+  fio_http_request_header_add(c->h,
+                              FIO_BUF2STR_INFO(name),
+                              FIO_BUF2STR_INFO(value));
   return 0;
 }
 /** called when the special content-length header is parsed. */
@@ -470,9 +470,9 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
     return -1; /* TODO: send "payload too big" response */
   if (content_length)
     fio_http_body_expect(c->h, content_length);
-  http_request_header_add(c->h,
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+  fio_http_request_header_add(c->h,
+                              FIO_BUF2STR_INFO(name),
+                              FIO_BUF2STR_INFO(value));
   return 0;
   (void)name, (void)value;
 }

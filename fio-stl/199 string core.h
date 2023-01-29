@@ -268,6 +268,22 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
                                      size_t encoded_len);
 
 /* *****************************************************************************
+String URL Encoding support
+***************************************************************************** */
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *data,
+                                   size_t data_len);
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *encoded,
+                                   size_t encoded_len);
+
+/* *****************************************************************************
 String File Reading support
 ***************************************************************************** */
 
@@ -502,6 +518,15 @@ FIO_IFUNC char *fio_bstr_write_base64enc(char *bstr,
 FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
                                          const void *src,
                                          size_t len);
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+FIO_IFUNC char *fio_bstr_write_url_enc(char *bstr,
+                                       const void *data,
+                                       size_t len);
+/** Writes decoded URL data to String. */
+FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
+                                       const void *encoded,
+                                       size_t len);
 
 /** Writes to the String from a regular file `fd`. */
 FIO_IFUNC char *fio_bstr_readfd(char *bstr,
@@ -834,6 +859,26 @@ FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_base64dec(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+FIO_IFUNC char *fio_bstr_write_url_enc(char *bstr,
+                                       const void *src,
+                                       size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_url_enc(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes decoded URL data to String. */
+FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
+                                       const void *src,
+                                       size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_url_dec(&i, fio_bstr_reallocate, src, len);
   return fio_bstr___len_set(i.buf, i.len);
 }
 
@@ -2065,6 +2110,111 @@ p valid; p decoder; nil
 }
 
 /* *****************************************************************************
+String URL Encoding support
+***************************************************************************** */
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *data,
+                                   size_t data_len) {
+  static const uint8_t url_enc_map[256] = {
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 0,
+      2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+  int r = 0;
+  /* reserve memory space */
+  {
+    size_t required_len = data_len;
+    for (size_t i = 0; i < data_len; ++i) {
+      required_len += url_enc_map[((uint8_t *)data)[i]];
+    }
+    if (fio_string___write_validate_len(dest, reallocate, &required_len)) {
+      return (r = -1); /* no partial encoding. */
+    };
+  }
+  for (size_t i = 0; i < data_len; ++i) {
+    if (!url_enc_map[((uint8_t *)data)[i]]) {
+      dest->buf[dest->len++] = ((uint8_t *)data)[i];
+      continue;
+    }
+    dest->buf[dest->len++] = '%';
+    dest->buf[dest->len++] = fio_i2c(((uint8_t *)data)[i] >> 4);
+    dest->buf[dest->len++] = fio_i2c(((uint8_t *)data)[i] & 15);
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *encoded,
+                                   size_t encoded_len) {
+  int r = 0;
+  uint8_t *pr = (uint8_t *)encoded;
+  uint8_t *last = pr;
+  uint8_t *end = pr + encoded_len;
+  { /* reserve memory space */
+    size_t act_len = 0;
+    while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+      act_len += pr - last;
+      last = pr + 1;
+      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16)
+        last += 2;
+      else if (end - last > 4 && (last[0] | 32) == 'u' &&
+               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+        last += 5;
+        act_len += 1;
+      }
+      pr = last;
+    }
+    act_len += end - last;
+    if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
+      return (r = -1); /* no partial decoding. */
+    };
+  }
+  /* copy and unencode data */
+  pr = (uint8_t *)encoded;
+  last = pr;
+  end = pr + encoded_len;
+  while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+    const size_t slice_len = pr - last;
+    if (slice_len)
+      FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    dest->len += slice_len;
+    last = pr + 1;
+    if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
+      dest->buf[dest->len++] = (fio_c2i(last[0]) << 4) | fio_c2i(last[1]);
+      last += 2;
+    } else if (end - last > 4 && (last[0] | 32) == 'u' &&
+               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+      dest->buf[dest->len++] = (fio_c2i(last[1]) << 4) | fio_c2i(last[2]);
+      dest->buf[dest->len++] = (fio_c2i(last[3]) << 4) | fio_c2i(last[4]);
+      last += 5;
+    }
+    pr = last;
+  }
+  if (end > last) {
+    const size_t slice_len = end - last;
+    FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    dest->len += slice_len;
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/* *****************************************************************************
 String File Reading support
 ***************************************************************************** */
 
@@ -2525,6 +2675,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
                "Base64 round-trip failed:\n %s",
                decoded.buf);
+  }
+  { /* testing Base64 Support */
+    fprintf(stderr, "* Testing URL (percent) encoding / decoding.\n");
+    char mem[2048];
+    for (size_t i = 0; i < 256; ++i) {
+      mem[i] = i;
+    }
+    fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
+    fio_str_info_s encoded = FIO_STR_INFO3(mem + 256, 0, 1024);
+    fio_str_info_s decoded = FIO_STR_INFO3(mem + 1024 + 256, 0, 257);
+    FIO_ASSERT(
+        !fio_string_write_url_enc(&encoded, NULL, mem, 256),
+        "fio_string_write_url_enc reported an error where none was expected!");
+    FIO_ASSERT(encoded.len > 256, "fio_string_write_url_enc did nothing?");
+    FIO_ASSERT(
+        !fio_string_write_url_dec(&decoded, NULL, encoded.buf, encoded.len),
+        "fio_string_write_url_dec reported an error where none was expected!");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
+               "fio_string_write_url_enc/dec roundtrip failed!");
   }
   { /* Comparison testing */
     fprintf(stderr, "* Testing comparison\n");

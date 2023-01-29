@@ -199,9 +199,8 @@ static void http_settings_validate(fio_http_settings_s *s) {
 }
 
 /* *****************************************************************************
-HTTP Protocol Container (vtable + settings storage)
+HTTP Protocols used by the HTTP module
 ***************************************************************************** */
-#define FIO_STL_KEEP__ 1
 
 typedef enum fio___http_protocol_selector_e {
   FIO___HTTP_PROTOCOL_HTTP1 = 0,
@@ -213,13 +212,19 @@ typedef enum fio___http_protocol_selector_e {
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-    fio___protocol_callbacks(fio___http_protocol_selector_e);
+fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-    fio___controller_callbacks(fio___http_protocol_selector_e);
+fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+
+/* *****************************************************************************
+HTTP Protocol Container (vtable + settings storage)
+***************************************************************************** */
+#define FIO_STL_KEEP__ 1
 
 typedef struct {
   fio_http_settings_s settings;
+  void (*on_http_callback)(void *, void *);
   fio_protocol_s protocol[FIO___HTTP_PROTOCOL_NONE];
   fio_http_controller_s controller[FIO___HTTP_PROTOCOL_NONE];
 } fio_http_protocol_s;
@@ -240,14 +245,14 @@ HTTP Connection Container
 
 /** Connection objects for managing HTTP / WebSocket connection state. */
 typedef struct {
+  fio_s *io;
   size_t state;
   size_t limit;
-  union {
-    fio_http1_parser_s http;
-  } parser;
   fio_http_s *queue[FIO_HTTP_PIPELINE_QUEUE];
-  size_t qrpos;
-  size_t qwpos;
+  fio_http_settings_s *settings;
+  fio_http1_parser_s parser;
+  uint32_t qrpos;
+  uint32_t qwpos;
   size_t total;
   size_t len;
   char buf[];
@@ -274,11 +279,33 @@ HTTP On Open - Accepting new connections
 static void http___on_open(int fd, void *udata) {
   fio_http_protocol_s *p = fio_http_protocol_dup((fio_http_protocol_s *)udata);
   fio_http_connection_s *c = fio_http_connection_new(p->settings.max_line_len);
-  c->limit = p->settings.max_line_len;
-  fio_attach_fd(fd,
-                &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
-                (void *)c,
-                p->settings.tls);
+  *c = (fio_http_connection_s){
+      .settings = &(p->settings),
+      .limit = p->settings.max_line_len,
+  };
+  c->io = fio_attach_fd(fd,
+                        &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
+                        (void *)c,
+                        p->settings.tls);
+}
+
+/* *****************************************************************************
+HTTP Request handling / handling
+***************************************************************************** */
+
+FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
+  fio_http_s *h = (fio_http_s *)h_;
+  (void)ignr;
+}
+
+FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
+  fio_http_s *h = (fio_http_s *)h_;
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio_http_static_file_response(h,
+                                    c->settings->public_folder,
+                                    fio_http_path(h)))
+    fio___http_on_http_direct(h_, ignr);
+  return;
 }
 
 /* *****************************************************************************
@@ -290,11 +317,20 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
     p->protocol[i] =
-        fio___protocol_callbacks((fio___http_protocol_selector_e)i);
+        fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
     p->controller[i] =
-        fio___controller_callbacks((fio___http_protocol_selector_e)i);
+        fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
+  p->on_http_callback = (p->settings.public_folder.len)
+                            ? fio___http_on_http_with_public_folder
+                            : fio___http_on_http_direct;
+  p->settings.public_folder.len -=
+      (p->settings.public_folder.len &&
+       (p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
+            '/' ||
+        p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
+            '\\'));
   fio_listen(.url = url,
              .on_open = http___on_open,
              .on_finish = (void (*)(void *))fio_http_protocol_free,
@@ -302,6 +338,132 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
              /* , .queue_for_accept = http___queue_for_accept // TODO! */
   );
 }
+
+/* *****************************************************************************
+HTTP/1.1 Request / Response Completed
+***************************************************************************** */
+
+/** called when either a request or a response was received. */
+static void fio_http1_on_complete(void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (c->qrpos == c->qwpos) {
+    fio_defer((FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                   ->on_http_callback),
+              c->queue[c->qwpos],
+              NULL);
+  }
+  c->qwpos = (c->qwpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
+}
+
+/* *****************************************************************************
+HTTP/1.1 Parser callbacks
+***************************************************************************** */
+
+/** called when a request method is parsed. */
+static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (c->queue[c->qwpos])
+    return -1;
+  c->queue[c->qwpos] = fio_http_new();
+  FIO_ASSERT_ALLOC(c->queue[c->qwpos]);
+  fio_http_controller_set(
+      c->queue[c->qwpos],
+      &(fio_http_protocol_dup(
+            FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
+            ->controller[FIO___HTTP_PROTOCOL_HTTP1]));
+  fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
+  fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
+  fio_http_status_set(c->queue[c->qwpos], 200);
+  return 0;
+}
+/** called when a response status is parsed. the status_str is the string
+ * without the prefixed numerical status indicator.*/
+static int fio_http1_on_status(size_t istatus,
+                               fio_buf_info_s status,
+                               void *udata) {
+  FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
+  return -1; /* do not accept responses */
+  (void)istatus, (void)status, (void)udata;
+}
+/** called when a request URL is parsed. */
+static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_url_s u = fio_url_parse(url.buf, url.len);
+  if (!u.path.len || u.path.buf[0] != '/')
+    return -1;
+  fio_http_path_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.path));
+  if (u.query.len)
+    fio_http_query_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.query));
+  if (u.host.len)
+    http_request_header_set(c->queue[c->qwpos],
+                            FIO_STR_INFO1((char *)"host"),
+                            FIO_BUF2STR_INFO(u.host));
+  return 0;
+}
+/** called when a the HTTP/1.x version is parsed. */
+static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_http_version_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(version));
+  return 0;
+}
+/** called when a header is parsed. */
+static int fio_http1_on_header(fio_buf_info_s name,
+                               fio_buf_info_s value,
+                               void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  http_request_header_add(c->queue[c->qwpos],
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
+  return 0;
+}
+/** called when the special content-length header is parsed. */
+static int fio_http1_on_header_content_length(fio_buf_info_s name,
+                                              fio_buf_info_s value,
+                                              size_t content_length,
+                                              void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (content_length > c->settings->max_body_size)
+    goto too_big;
+  if (content_length)
+    fio_http_body_expect(c->queue[c->qwpos], content_length);
+  http_request_header_add(c->queue[c->qwpos],
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
+  return 0;
+too_big:
+  fio_http_send_error_response(c->queue[c->qwpos], 413);
+  return -1; /* TODO: send "payload too big" response */
+  (void)name, (void)value;
+}
+/** called when `Expect` arrives and may require a 100 continue response. */
+static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_write2(c->io, .buf = (char *)"100 Continue\r\n", .len = 14, .copy = 0);
+  return 0; /* TODO?: improve support for `expect` */
+  (void)expected;
+}
+
+/** called when a body chunk is parsed. */
+static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (chunk.len + fio_http_body_length(c->queue[c->qwpos]) >
+      c->settings->max_body_size)
+    return -1;
+  fio_http_body_write(c->queue[c->qwpos], chunk.buf, chunk.len);
+  return 0;
+}
+
+/* *****************************************************************************
+The Protocols at play
+***************************************************************************** */
+
+/** Returns a facil.io protocol object with the proper protocol callbacks. */
+FIO_IFUNC fio_protocol_s
+fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+
+/** Returns an http controller object with the proper protocol callbacks. */
+FIO_IFUNC fio_http_controller_s
+fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
 
 /* *****************************************************************************
 HTTP Testing

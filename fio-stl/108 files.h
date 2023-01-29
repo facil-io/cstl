@@ -34,8 +34,11 @@ File Helper API
  */
 SFUNC int fio_filename_open(const char *filename, int flags);
 
-/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+/** Returns 1 if `path` does folds backwards (OS separator dependent). */
 SFUNC int fio_filename_is_unsafe(const char *path);
+
+/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+SFUNC int fio_filename_is_unsafe_url(const char *path);
 
 /** Creates a temporary file, returning its file descriptor. */
 SFUNC int fio_filename_tmp(void);
@@ -340,6 +343,21 @@ SFUNC int fio_filename_is_unsafe(const char *path) {
 #else
   const char sep = '/';
 #endif
+  for (;;) {
+    if (!path)
+      return 0;
+    if (path[0] == sep && path[1] == sep)
+      return 1;
+    if (path[0] == sep && path[1] == '.' && path[2] == '.' && path[3] == sep)
+      return 1;
+    ++path;
+    path = strchr(path, sep);
+  }
+}
+
+/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+SFUNC int fio_filename_is_unsafe_url(const char *path) {
+  const char sep = '/';
   for (;;) {
     if (!path)
       return 0;

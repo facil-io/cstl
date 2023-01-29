@@ -71,6 +71,11 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_STATIC 1
 #endif
 
+#ifndef FIO_HTTP_DEFAULT_INDEX_FILENAME
+/** The default file name when a static file response points to a folder. */
+#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index.html"
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -432,12 +437,10 @@ typedef struct fio_http_write_args_s {
  */
 SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
 
-#ifndef __cplusplus
 /** Named arguments helper. See fio_http_write and fio_http_write_args_s. */
 #define fio_http_write(http_handle, ...)                                       \
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
-#endif
 
 /* *****************************************************************************
 WebSocket / SSE Helpers
@@ -464,6 +467,20 @@ SFUNC void fio_http_sse_set_request(fio_http_s *);
 /* *****************************************************************************
 General Helpers
 ***************************************************************************** */
+
+/** Sends the requested error message and finishes the response. */
+SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status);
+
+/** Returns true (1) if the ETag response matches an if-none-match request. */
+SFUNC int fio_http_etag_is_match(fio_http_s *h);
+
+/**
+ * Attempts to send a static file from the `root` folder. On success the
+ * response is complete and 0 is returned. Otherwise returns -1.
+ */
+SFUNC int fio_http_static_file_response(fio_http_s *h,
+                                        fio_str_info_s root_folder,
+                                        fio_str_info_s file_name);
 
 /** Returns a human readable string related to the HTTP status number. */
 SFUNC fio_str_info_s fio_http_status2str(size_t status);
@@ -1095,9 +1112,9 @@ Header Data Management
 
 #define FIO___HTTP_HEADER_SET_FN(category, name_, headers, add_val)            \
   /** Sets the header information associated with the HTTP handle. */          \
-  fio_str_info_s http_##category##_header_##name_(fio_http_s *h,               \
-                                                  fio_str_info_s name,         \
-                                                  fio_str_info_s value) {      \
+  fio_str_info_s fio_http_##category##_header_##name_(fio_http_s *h,           \
+                                                      fio_str_info_s name,     \
+                                                      fio_str_info_s value) {  \
     FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");                                  \
     return fio___http_hmap_set2(headers(h), name, value, add_val);             \
   }
@@ -1607,47 +1624,16 @@ A Response Payload
 
 /** ETag Helper */
 FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  fio_str_info_s method = fio_keystr_info(&h->method);
-  if ((method.len < 3) | (method.len > 4))
+  if (!fio_http_etag_is_match(h))
     return 0;
-  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 't')) &&
-      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
-    return 0;
-  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
-                                             FIO_STR_INFO2((char *)"etag", 4),
-                                             0);
-  if (!etag.len)
-    return 0;
-  fio_str_info_s cond =
-      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
-                           FIO_STR_INFO2((char *)"if-none-match", 13),
-                           0);
-  if (!cond.len)
-    return 0;
-  char *end = cond.buf + cond.len;
-  for (;;) {
-    cond.buf += (cond.buf[0] == ',');
-    while (cond.buf[0] == ' ')
-      ++cond.buf;
-    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
-      return 0;
-    if (memcmp(cond.buf, etag.buf, etag.len)) {
-      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
-      if (!cond.buf)
-        return 0;
-      continue;
-    }
-    h->status = 304;
-    fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
-                         FIO_STR_INFO2((char *)"content-length", 14),
-                         FIO_STR_INFO2((char *)"0", 1),
-                         -1);
-    h->controller->send_headers(h);
-    h->controller->on_finish(h);
-    return -1;
-  }
+  h->status = 304;
+  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       FIO_STR_INFO2((char *)"0", 1),
+                       -1);
+  h->controller->send_headers(h);
+  h->controller->on_finish(h);
+  return -1;
 }
 
 FIO_SFUNC int fio____http_write_done(fio_http_s *h,
@@ -1660,7 +1646,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
   /* if response has an `etag` header matching `if-none-match`, skip */
   fio___http_hmap_s *hdrs = h->headers + (!!h->status);
-  if (h->status && fio___http_response_etag_if_none_match(h))
+  if (h->status && args->len && fio___http_response_etag_if_none_match(h))
     return -1;
   /* test if streaming / single body response */
   if (args->finish) {
@@ -1760,7 +1746,7 @@ Error Handling (TODO!)
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
-SFUNC void fio_http_send_error(fio_http_s *h, size_t status) {
+SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!h || h->writer != fio____http_write_start)
     return;
   if (!status || status > 1000)
@@ -1855,6 +1841,150 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
     buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
 
   fwrite(buf.buf, 1, buf.len, stdout);
+}
+
+/* *****************************************************************************
+ETag helper
+***************************************************************************** */
+
+/** Returns true (1) if the ETag response matches an if-none-match request. */
+SFUNC int fio_http_etag_is_match(fio_http_s *h) {
+  fio_str_info_s method = fio_keystr_info(&h->method);
+  if ((method.len < 3) | (method.len > 4))
+    return 0;
+  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 't')) &&
+      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
+    return 0;
+  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
+                                             FIO_STR_INFO2((char *)"etag", 4),
+                                             0);
+  if (!etag.len)
+    return 0;
+  fio_str_info_s cond =
+      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                           FIO_STR_INFO2((char *)"if-none-match", 13),
+                           0);
+  if (!cond.len)
+    return 0;
+  char *end = cond.buf + cond.len;
+  for (;;) {
+    cond.buf += (cond.buf[0] == ',');
+    while (cond.buf[0] == ' ')
+      ++cond.buf;
+    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
+      return 0;
+    if (memcmp(cond.buf, etag.buf, etag.len)) {
+      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
+      if (!cond.buf)
+        return 0;
+      continue;
+    }
+    return 1;
+  }
+}
+
+/* *****************************************************************************
+Static file helper
+***************************************************************************** */
+
+/**
+ * Attempts to send a static file from the `root` folder. On success the
+ * response is complete and 0 is returned. Otherwise returns -1.
+ */
+SFUNC int fio_http_static_file_response(fio_http_s *h,
+                                        fio_str_info_s rt,
+                                        fio_str_info_s fnm) {
+  int fd = -1;
+  /* combine public folder with path to get file name */
+  FIO_STR_INFO_TMP_VAR(filename, 4096);
+  { /* test for HEAD and OPTIONS requests */
+    fio_str_info_s m = fio_keystr_info(&h->method);
+    if ((m.len == 7 &&
+         (fio_buf2u64_local(m.buf) | 0x3232323232323232ULL) ==
+             (fio_buf2u64_local("options") | 0x3232323232323232ULL)))
+      goto file_not_found;
+  }
+  rt.len -= (rt.len > 0) && fnm.buf[0] == '/' &&
+            (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\');
+  fio_string_write(&filename, NULL, rt.buf, rt.len);
+  fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
+  if (fio_filename_is_unsafe_url(filename.buf))
+    goto file_not_found;
+
+  { /* Test for incomplete file name */
+    size_t file_type = fio_filename_type(filename.buf);
+    switch (file_type) {
+    case 0: fio_string_write(&filename, NULL, ".html", 5); break;
+    case S_IFDIR:
+      filename.len -= filename.buf[filename.len - 1];
+      fio_string_write(&filename,
+                       NULL,
+                       "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
+                       sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
+      break;
+    case S_IFREG: break;
+    case S_IFLNK: break;
+    default: goto file_not_found;
+    }
+  }
+
+  { /* TODO: test / validate accept-encoding for gz alternatives */
+    // add header Vary: accept-encoding, accept-language
+    // https://httpwg.org/specs/rfc9110.html#field.vary
+    fio_str_info_s ac =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                0);
+    if (!ac.len)
+      goto no_accept_encoding_header;
+  }
+
+no_accept_encoding_header:
+  /* attempt to open file */
+  fd = fio_filename_open(filename.buf, O_RDONLY);
+  if (fd == -1)
+    goto file_not_found;
+
+  { /* test / validate etag */
+    struct stat stt;
+    if (fstat(fd, &stt))
+      goto file_not_found;
+    uint64_t etag_hash = fio_risky_hash(&stt, sizeof(stt), 0);
+    filename.len = 0;
+    fio_string_write_hex(&filename, NULL, etag_hash);
+    fio_http_response_header_set(h, FIO_STR_INFO1((char *)"etag"), filename);
+    if (fio___http_response_etag_if_none_match(h))
+      return 0;
+  }
+
+  /* TODO: created and test for etag, test for range, send file. */
+  FIO_LOG_WARNING("TODO: static file service not implemented!");
+  {
+      /* test / validate range requests */
+      // fio_str_info_s rng =
+      //     fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
+  }
+
+  { /* test for HEAD and OPTIONS requests */
+    fio_str_info_s m = fio_keystr_info(&h->method);
+    if ((m.len == 4 && (fio_buf2u32_local(m.buf) | 0x32323232) ==
+                           (fio_buf2u32_local("head") | 0x32323232)))
+      goto head_request;
+  }
+
+file_not_found:
+  if (fd != -1)
+    close(fd);
+  return -1;
+
+head_request:
+  /* TODO! HEAD responses. */
+  if (fd != -1)
+    close(fd);
+  fio_http_write(h, .finish = 1);
+  return 0;
 }
 
 /* *****************************************************************************

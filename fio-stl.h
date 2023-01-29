@@ -18447,8 +18447,11 @@ File Helper API
  */
 SFUNC int fio_filename_open(const char *filename, int flags);
 
-/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+/** Returns 1 if `path` does folds backwards (OS separator dependent). */
 SFUNC int fio_filename_is_unsafe(const char *path);
+
+/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+SFUNC int fio_filename_is_unsafe_url(const char *path);
 
 /** Creates a temporary file, returning its file descriptor. */
 SFUNC int fio_filename_tmp(void);
@@ -18753,6 +18756,21 @@ SFUNC int fio_filename_is_unsafe(const char *path) {
 #else
   const char sep = '/';
 #endif
+  for (;;) {
+    if (!path)
+      return 0;
+    if (path[0] == sep && path[1] == sep)
+      return 1;
+    if (path[0] == sep && path[1] == '.' && path[2] == '.' && path[3] == sep)
+      return 1;
+    ++path;
+    path = strchr(path, sep);
+  }
+}
+
+/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+SFUNC int fio_filename_is_unsafe_url(const char *path) {
+  const char sep = '/';
   for (;;) {
     if (!path)
       return 0;
@@ -19223,6 +19241,22 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
                                      size_t encoded_len);
 
 /* *****************************************************************************
+String URL Encoding support
+***************************************************************************** */
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *data,
+                                   size_t data_len);
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *encoded,
+                                   size_t encoded_len);
+
+/* *****************************************************************************
 String File Reading support
 ***************************************************************************** */
 
@@ -19457,6 +19491,15 @@ FIO_IFUNC char *fio_bstr_write_base64enc(char *bstr,
 FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
                                          const void *src,
                                          size_t len);
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+FIO_IFUNC char *fio_bstr_write_url_enc(char *bstr,
+                                       const void *data,
+                                       size_t len);
+/** Writes decoded URL data to String. */
+FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
+                                       const void *encoded,
+                                       size_t len);
 
 /** Writes to the String from a regular file `fd`. */
 FIO_IFUNC char *fio_bstr_readfd(char *bstr,
@@ -19789,6 +19832,26 @@ FIO_IFUNC char *fio_bstr_write_base64dec(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_base64dec(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+FIO_IFUNC char *fio_bstr_write_url_enc(char *bstr,
+                                       const void *src,
+                                       size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_url_enc(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes decoded URL data to String. */
+FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
+                                       const void *src,
+                                       size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_url_dec(&i, fio_bstr_reallocate, src, len);
   return fio_bstr___len_set(i.buf, i.len);
 }
 
@@ -21020,6 +21083,111 @@ p valid; p decoder; nil
 }
 
 /* *****************************************************************************
+String URL Encoding support
+***************************************************************************** */
+
+/** Writes data to String using URL encoding (a.k.a., percent encoding). */
+SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *data,
+                                   size_t data_len) {
+  static const uint8_t url_enc_map[256] = {
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 0,
+      2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+  int r = 0;
+  /* reserve memory space */
+  {
+    size_t required_len = data_len;
+    for (size_t i = 0; i < data_len; ++i) {
+      required_len += url_enc_map[((uint8_t *)data)[i]];
+    }
+    if (fio_string___write_validate_len(dest, reallocate, &required_len)) {
+      return (r = -1); /* no partial encoding. */
+    };
+  }
+  for (size_t i = 0; i < data_len; ++i) {
+    if (!url_enc_map[((uint8_t *)data)[i]]) {
+      dest->buf[dest->len++] = ((uint8_t *)data)[i];
+      continue;
+    }
+    dest->buf[dest->len++] = '%';
+    dest->buf[dest->len++] = fio_i2c(((uint8_t *)data)[i] >> 4);
+    dest->buf[dest->len++] = fio_i2c(((uint8_t *)data)[i] & 15);
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *encoded,
+                                   size_t encoded_len) {
+  int r = 0;
+  uint8_t *pr = (uint8_t *)encoded;
+  uint8_t *last = pr;
+  uint8_t *end = pr + encoded_len;
+  { /* reserve memory space */
+    size_t act_len = 0;
+    while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+      act_len += pr - last;
+      last = pr + 1;
+      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16)
+        last += 2;
+      else if (end - last > 4 && (last[0] | 32) == 'u' &&
+               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+        last += 5;
+        act_len += 1;
+      }
+      pr = last;
+    }
+    act_len += end - last;
+    if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
+      return (r = -1); /* no partial decoding. */
+    };
+  }
+  /* copy and unencode data */
+  pr = (uint8_t *)encoded;
+  last = pr;
+  end = pr + encoded_len;
+  while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+    const size_t slice_len = pr - last;
+    if (slice_len)
+      FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    dest->len += slice_len;
+    last = pr + 1;
+    if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
+      dest->buf[dest->len++] = (fio_c2i(last[0]) << 4) | fio_c2i(last[1]);
+      last += 2;
+    } else if (end - last > 4 && (last[0] | 32) == 'u' &&
+               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+      dest->buf[dest->len++] = (fio_c2i(last[1]) << 4) | fio_c2i(last[2]);
+      dest->buf[dest->len++] = (fio_c2i(last[3]) << 4) | fio_c2i(last[4]);
+      last += 5;
+    }
+    pr = last;
+  }
+  if (end > last) {
+    const size_t slice_len = end - last;
+    FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    dest->len += slice_len;
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/* *****************************************************************************
 String File Reading support
 ***************************************************************************** */
 
@@ -21480,6 +21648,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
                "Base64 round-trip failed:\n %s",
                decoded.buf);
+  }
+  { /* testing Base64 Support */
+    fprintf(stderr, "* Testing URL (percent) encoding / decoding.\n");
+    char mem[2048];
+    for (size_t i = 0; i < 256; ++i) {
+      mem[i] = i;
+    }
+    fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
+    fio_str_info_s encoded = FIO_STR_INFO3(mem + 256, 0, 1024);
+    fio_str_info_s decoded = FIO_STR_INFO3(mem + 1024 + 256, 0, 257);
+    FIO_ASSERT(
+        !fio_string_write_url_enc(&encoded, NULL, mem, 256),
+        "fio_string_write_url_enc reported an error where none was expected!");
+    FIO_ASSERT(encoded.len > 256, "fio_string_write_url_enc did nothing?");
+    FIO_ASSERT(
+        !fio_string_write_url_dec(&decoded, NULL, encoded.buf, encoded.len),
+        "fio_string_write_url_dec reported an error where none was expected!");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
+               "fio_string_write_url_enc/dec roundtrip failed!");
   }
   { /* Comparison testing */
     fprintf(stderr, "* Testing comparison\n");
@@ -33548,6 +33735,11 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_STATIC 1
 #endif
 
+#ifndef FIO_HTTP_DEFAULT_INDEX_FILENAME
+/** The default file name when a static file response points to a folder. */
+#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index.html"
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -33909,12 +34101,10 @@ typedef struct fio_http_write_args_s {
  */
 SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
 
-#ifndef __cplusplus
 /** Named arguments helper. See fio_http_write and fio_http_write_args_s. */
 #define fio_http_write(http_handle, ...)                                       \
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
-#endif
 
 /* *****************************************************************************
 WebSocket / SSE Helpers
@@ -33941,6 +34131,20 @@ SFUNC void fio_http_sse_set_request(fio_http_s *);
 /* *****************************************************************************
 General Helpers
 ***************************************************************************** */
+
+/** Sends the requested error message and finishes the response. */
+SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status);
+
+/** Returns true (1) if the ETag response matches an if-none-match request. */
+SFUNC int fio_http_etag_is_match(fio_http_s *h);
+
+/**
+ * Attempts to send a static file from the `root` folder. On success the
+ * response is complete and 0 is returned. Otherwise returns -1.
+ */
+SFUNC int fio_http_static_file_response(fio_http_s *h,
+                                        fio_str_info_s root_folder,
+                                        fio_str_info_s file_name);
 
 /** Returns a human readable string related to the HTTP status number. */
 SFUNC fio_str_info_s fio_http_status2str(size_t status);
@@ -34572,9 +34776,9 @@ Header Data Management
 
 #define FIO___HTTP_HEADER_SET_FN(category, name_, headers, add_val)            \
   /** Sets the header information associated with the HTTP handle. */          \
-  fio_str_info_s http_##category##_header_##name_(fio_http_s *h,               \
-                                                  fio_str_info_s name,         \
-                                                  fio_str_info_s value) {      \
+  fio_str_info_s fio_http_##category##_header_##name_(fio_http_s *h,           \
+                                                      fio_str_info_s name,     \
+                                                      fio_str_info_s value) {  \
     FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");                                  \
     return fio___http_hmap_set2(headers(h), name, value, add_val);             \
   }
@@ -35084,47 +35288,16 @@ A Response Payload
 
 /** ETag Helper */
 FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  fio_str_info_s method = fio_keystr_info(&h->method);
-  if ((method.len < 3) | (method.len > 4))
+  if (!fio_http_etag_is_match(h))
     return 0;
-  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 't')) &&
-      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
-    return 0;
-  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
-                                             FIO_STR_INFO2((char *)"etag", 4),
-                                             0);
-  if (!etag.len)
-    return 0;
-  fio_str_info_s cond =
-      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
-                           FIO_STR_INFO2((char *)"if-none-match", 13),
-                           0);
-  if (!cond.len)
-    return 0;
-  char *end = cond.buf + cond.len;
-  for (;;) {
-    cond.buf += (cond.buf[0] == ',');
-    while (cond.buf[0] == ' ')
-      ++cond.buf;
-    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
-      return 0;
-    if (memcmp(cond.buf, etag.buf, etag.len)) {
-      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
-      if (!cond.buf)
-        return 0;
-      continue;
-    }
-    h->status = 304;
-    fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
-                         FIO_STR_INFO2((char *)"content-length", 14),
-                         FIO_STR_INFO2((char *)"0", 1),
-                         -1);
-    h->controller->send_headers(h);
-    h->controller->on_finish(h);
-    return -1;
-  }
+  h->status = 304;
+  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       FIO_STR_INFO2((char *)"0", 1),
+                       -1);
+  h->controller->send_headers(h);
+  h->controller->on_finish(h);
+  return -1;
 }
 
 FIO_SFUNC int fio____http_write_done(fio_http_s *h,
@@ -35137,7 +35310,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
   /* if response has an `etag` header matching `if-none-match`, skip */
   fio___http_hmap_s *hdrs = h->headers + (!!h->status);
-  if (h->status && fio___http_response_etag_if_none_match(h))
+  if (h->status && args->len && fio___http_response_etag_if_none_match(h))
     return -1;
   /* test if streaming / single body response */
   if (args->finish) {
@@ -35237,7 +35410,7 @@ Error Handling (TODO!)
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
-SFUNC void fio_http_send_error(fio_http_s *h, size_t status) {
+SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!h || h->writer != fio____http_write_start)
     return;
   if (!status || status > 1000)
@@ -35332,6 +35505,149 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
     buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
 
   fwrite(buf.buf, 1, buf.len, stdout);
+}
+
+/* *****************************************************************************
+ETag helper
+***************************************************************************** */
+
+/** Returns true (1) if the ETag response matches an if-none-match request. */
+SFUNC int fio_http_etag_is_match(fio_http_s *h) {
+  fio_str_info_s method = fio_keystr_info(&h->method);
+  if ((method.len < 3) | (method.len > 4))
+    return 0;
+  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 't')) &&
+      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
+        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
+    return 0;
+  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
+                                             FIO_STR_INFO2((char *)"etag", 4),
+                                             0);
+  if (!etag.len)
+    return 0;
+  fio_str_info_s cond =
+      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                           FIO_STR_INFO2((char *)"if-none-match", 13),
+                           0);
+  if (!cond.len)
+    return 0;
+  char *end = cond.buf + cond.len;
+  for (;;) {
+    cond.buf += (cond.buf[0] == ',');
+    while (cond.buf[0] == ' ')
+      ++cond.buf;
+    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
+      return 0;
+    if (memcmp(cond.buf, etag.buf, etag.len)) {
+      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
+      if (!cond.buf)
+        return 0;
+      continue;
+    }
+    return 1;
+  }
+}
+
+/* *****************************************************************************
+Static file helper
+***************************************************************************** */
+
+/**
+ * Attempts to send a static file from the `root` folder. On success the
+ * response is complete and 0 is returned. Otherwise returns -1.
+ */
+SFUNC int fio_http_static_file_response(fio_http_s *h,
+                                        fio_str_info_s rt,
+                                        fio_str_info_s fnm) {
+  int fd = -1;
+  /* combine public folder with path to get file name */
+  FIO_STR_INFO_TMP_VAR(filename, 4096);
+  { /* test for HEAD and OPTIONS requests */
+    fio_str_info_s m = fio_keystr_info(&h->method);
+    if ((m.len == 7 &&
+         (fio_buf2u64_local(m.buf) | 0x3232323232323232ULL) ==
+             (fio_buf2u64_local("options") | 0x3232323232323232ULL)))
+      goto file_not_found;
+  }
+  rt.len -= (rt.len > 0) && fnm.buf[0] == '/' &&
+            (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\');
+  fio_string_write(&filename, NULL, rt.buf, rt.len);
+  fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
+  if (fio_filename_is_unsafe_url(filename.buf))
+    goto file_not_found;
+
+  { /* Test for incomplete file name */
+    size_t file_type = fio_filename_type(filename.buf);
+    switch (file_type) {
+    case 0: fio_string_write(&filename, NULL, ".html", 5); break;
+    case S_IFDIR:
+      filename.len -= filename.buf[filename.len - 1];
+      fio_string_write(&filename,
+                       NULL,
+                       "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
+                       sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
+      break;
+    case S_IFREG: break;
+    case S_IFLNK: break;
+    default: goto file_not_found;
+    }
+  }
+
+  { /* TODO: test / validate accept-encoding for gz alternatives */
+    // add header Vary: accept-encoding, accept-language
+    fio_str_info_s ac =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                0);
+    if (!ac.len)
+      goto no_accept_encoding_header;
+  }
+
+no_accept_encoding_header:
+  /* attempt to open file */
+  fd = fio_filename_open(filename.buf, O_RDONLY);
+  if (fd == -1)
+    goto file_not_found;
+
+  { /* test / validate etag */
+    struct stat stt;
+    if (fstat(fd, &stt))
+      goto file_not_found;
+    uint64_t etag_hash = fio_risky_hash(&stt, sizeof(stt), 0);
+    filename.len = 0;
+    fio_string_write_hex(&filename, NULL, etag_hash);
+    fio_http_response_header_set(h, FIO_STR_INFO1((char *)"etag"), filename);
+    if (fio___http_response_etag_if_none_match(h))
+      return 0;
+  }
+
+  /* TODO: created and test for etag, test for range, send file. */
+  FIO_LOG_WARNING("TODO: static file service not implemented!");
+  {
+      /* test / validate range requests */
+      // fio_str_info_s rng =
+      //     fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
+  }
+
+  { /* test for HEAD and OPTIONS requests */
+    fio_str_info_s m = fio_keystr_info(&h->method);
+    if ((m.len == 4 && (fio_buf2u32_local(m.buf) | 0x32323232) ==
+                           (fio_buf2u32_local("head") | 0x32323232)))
+      goto head_request;
+  }
+
+file_not_found:
+  if (fd != -1)
+    close(fd);
+  return -1;
+
+head_request:
+  /* TODO! HEAD responses. */
+  if (fd != -1)
+    close(fd);
+  fio_http_write(h, .finish = 1);
+  return 0;
 }
 
 /* *****************************************************************************
@@ -36165,9 +36481,8 @@ static void http_settings_validate(fio_http_settings_s *s) {
 }
 
 /* *****************************************************************************
-HTTP Protocol Container (vtable + settings storage)
+HTTP Protocols used by the HTTP module
 ***************************************************************************** */
-#define FIO_STL_KEEP__ 1
 
 typedef enum fio___http_protocol_selector_e {
   FIO___HTTP_PROTOCOL_HTTP1 = 0,
@@ -36179,13 +36494,19 @@ typedef enum fio___http_protocol_selector_e {
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-    fio___protocol_callbacks(fio___http_protocol_selector_e);
+fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-    fio___controller_callbacks(fio___http_protocol_selector_e);
+fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+
+/* *****************************************************************************
+HTTP Protocol Container (vtable + settings storage)
+***************************************************************************** */
+#define FIO_STL_KEEP__ 1
 
 typedef struct {
   fio_http_settings_s settings;
+  void (*on_http_callback)(void *, void *);
   fio_protocol_s protocol[FIO___HTTP_PROTOCOL_NONE];
   fio_http_controller_s controller[FIO___HTTP_PROTOCOL_NONE];
 } fio_http_protocol_s;
@@ -36206,14 +36527,14 @@ HTTP Connection Container
 
 /** Connection objects for managing HTTP / WebSocket connection state. */
 typedef struct {
+  fio_s *io;
   size_t state;
   size_t limit;
-  union {
-    fio_http1_parser_s http;
-  } parser;
   fio_http_s *queue[FIO_HTTP_PIPELINE_QUEUE];
-  size_t qrpos;
-  size_t qwpos;
+  fio_http_settings_s *settings;
+  fio_http1_parser_s parser;
+  uint32_t qrpos;
+  uint32_t qwpos;
   size_t total;
   size_t len;
   char buf[];
@@ -36240,11 +36561,33 @@ HTTP On Open - Accepting new connections
 static void http___on_open(int fd, void *udata) {
   fio_http_protocol_s *p = fio_http_protocol_dup((fio_http_protocol_s *)udata);
   fio_http_connection_s *c = fio_http_connection_new(p->settings.max_line_len);
-  c->limit = p->settings.max_line_len;
-  fio_attach_fd(fd,
-                &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
-                (void *)c,
-                p->settings.tls);
+  *c = (fio_http_connection_s){
+      .settings = &(p->settings),
+      .limit = p->settings.max_line_len,
+  };
+  c->io = fio_attach_fd(fd,
+                        &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
+                        (void *)c,
+                        p->settings.tls);
+}
+
+/* *****************************************************************************
+HTTP Request handling / handling
+***************************************************************************** */
+
+FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
+  fio_http_s *h = (fio_http_s *)h_;
+  (void)ignr;
+}
+
+FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
+  fio_http_s *h = (fio_http_s *)h_;
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio_http_static_file_response(h,
+                                    c->settings->public_folder,
+                                    fio_http_path(h)))
+    fio___http_on_http_direct(h_, ignr);
+  return;
 }
 
 /* *****************************************************************************
@@ -36256,11 +36599,20 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
     p->protocol[i] =
-        fio___protocol_callbacks((fio___http_protocol_selector_e)i);
+        fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
     p->controller[i] =
-        fio___controller_callbacks((fio___http_protocol_selector_e)i);
+        fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
+  p->on_http_callback = (p->settings.public_folder.len)
+                            ? fio___http_on_http_with_public_folder
+                            : fio___http_on_http_direct;
+  p->settings.public_folder.len -=
+      (p->settings.public_folder.len &&
+       (p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
+            '/' ||
+        p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
+            '\\'));
   fio_listen(.url = url,
              .on_open = http___on_open,
              .on_finish = (void (*)(void *))fio_http_protocol_free,
@@ -36268,6 +36620,132 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
              /* , .queue_for_accept = http___queue_for_accept // TODO! */
   );
 }
+
+/* *****************************************************************************
+HTTP/1.1 Request / Response Completed
+***************************************************************************** */
+
+/** called when either a request or a response was received. */
+static void fio_http1_on_complete(void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (c->qrpos == c->qwpos) {
+    fio_defer((FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                   ->on_http_callback),
+              c->queue[c->qwpos],
+              NULL);
+  }
+  c->qwpos = (c->qwpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
+}
+
+/* *****************************************************************************
+HTTP/1.1 Parser callbacks
+***************************************************************************** */
+
+/** called when a request method is parsed. */
+static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (c->queue[c->qwpos])
+    return -1;
+  c->queue[c->qwpos] = fio_http_new();
+  FIO_ASSERT_ALLOC(c->queue[c->qwpos]);
+  fio_http_controller_set(
+      c->queue[c->qwpos],
+      &(fio_http_protocol_dup(
+            FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
+            ->controller[FIO___HTTP_PROTOCOL_HTTP1]));
+  fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
+  fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
+  fio_http_status_set(c->queue[c->qwpos], 200);
+  return 0;
+}
+/** called when a response status is parsed. the status_str is the string
+ * without the prefixed numerical status indicator.*/
+static int fio_http1_on_status(size_t istatus,
+                               fio_buf_info_s status,
+                               void *udata) {
+  FIO_LOG_ERROR("response received instead of a request. Silently ignored.");
+  return -1; /* do not accept responses */
+  (void)istatus, (void)status, (void)udata;
+}
+/** called when a request URL is parsed. */
+static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_url_s u = fio_url_parse(url.buf, url.len);
+  if (!u.path.len || u.path.buf[0] != '/')
+    return -1;
+  fio_http_path_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.path));
+  if (u.query.len)
+    fio_http_query_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.query));
+  if (u.host.len)
+    http_request_header_set(c->queue[c->qwpos],
+                            FIO_STR_INFO1((char *)"host"),
+                            FIO_BUF2STR_INFO(u.host));
+  return 0;
+}
+/** called when a the HTTP/1.x version is parsed. */
+static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_http_version_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(version));
+  return 0;
+}
+/** called when a header is parsed. */
+static int fio_http1_on_header(fio_buf_info_s name,
+                               fio_buf_info_s value,
+                               void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  http_request_header_add(c->queue[c->qwpos],
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
+  return 0;
+}
+/** called when the special content-length header is parsed. */
+static int fio_http1_on_header_content_length(fio_buf_info_s name,
+                                              fio_buf_info_s value,
+                                              size_t content_length,
+                                              void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (content_length > c->settings->max_body_size)
+    goto too_big;
+  if (content_length)
+    fio_http_body_expect(c->queue[c->qwpos], content_length);
+  http_request_header_add(c->queue[c->qwpos],
+                          FIO_BUF2STR_INFO(name),
+                          FIO_BUF2STR_INFO(value));
+  return 0;
+too_big:
+  fio_http_send_error_response(c->queue[c->qwpos], 413);
+  return -1; /* TODO: send "payload too big" response */
+  (void)name, (void)value;
+}
+/** called when `Expect` arrives and may require a 100 continue response. */
+static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  fio_write2(c->io, .buf = (char *)"100 Continue\r\n", .len = 14, .copy = 0);
+  return 0; /* TODO?: improve support for `expect` */
+  (void)expected;
+}
+
+/** called when a body chunk is parsed. */
+static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
+  fio_http_connection_s *c = (fio_http_connection_s *)udata;
+  if (chunk.len + fio_http_body_length(c->queue[c->qwpos]) >
+      c->settings->max_body_size)
+    return -1;
+  fio_http_body_write(c->queue[c->qwpos], chunk.buf, chunk.len);
+  return 0;
+}
+
+/* *****************************************************************************
+The Protocols at play
+***************************************************************************** */
+
+/** Returns a facil.io protocol object with the proper protocol callbacks. */
+FIO_IFUNC fio_protocol_s
+fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+
+/** Returns an http controller object with the proper protocol callbacks. */
+FIO_IFUNC fio_http_controller_s
+fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
 
 /* *****************************************************************************
 HTTP Testing
