@@ -2351,7 +2351,7 @@ Pointer Tagging
 #endif /* FIO_BITMAP */
 
 /* Modules that require FIO_IMAP_CORE */
-#if defined(FIO_STATE)
+#if defined(FIO_STATE) || defined(FIO_HTTP_HANDLE)
 #ifndef FIO_IMAP_CORE
 #define FIO_IMAP_CORE
 #endif

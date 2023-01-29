@@ -76,6 +76,10 @@ HTTP Handle Settings
 #define FIO_HTTP_DEFAULT_INDEX_FILENAME "index.html"
 #endif
 
+#ifndef FIO_HTTP_STATIC_FILE_COMPLETION
+#define FIO_HTTP_STATIC_FILE_COMPLETION 1
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -417,6 +421,8 @@ typedef struct fio_http_write_args_s {
   const void *data;
   /** The length of the data to be written. */
   size_t len;
+  /** The offset at which writing should begin. */
+  size_t offset;
   /** If streaming a file, set this value. The file is always closed. */
   int fd;
   /** If the data is a buffer, this callback may be set to free it once sent. */
@@ -463,6 +469,18 @@ SFUNC void fio_http_sse_set_response(fio_http_s *);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *);
+
+/* *****************************************************************************
+Mime-Type Helpers - NOT thread safe!
+***************************************************************************** */
+
+/** Registers a Mime-Type to be associated with the file extension. */
+SFUNC int fio_http_mimetype_register(char *file_ext,
+                                     size_t file_ext_len,
+                                     fio_str_info_s mime_type);
+
+/** Finds the Mime-Type associated with the file extension (if registered). */
+SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
 General Helpers
@@ -610,6 +628,12 @@ static struct {
 #define FIO___HTTP_STR_CACHE_VALUE  2
 
 #if FIO_HTTP_CACHE_STATIC
+
+#define FIO___HTTP_STATIC_CACHE_MASK       127
+#define FIO___HTTP_STATIC_CACHE_FOLD       13
+#define FIO___HTTP_STATIC_CACHE_STEP       27
+#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
+
 static struct {
   fio___bstr_meta_s meta;
   char str[32];
@@ -689,11 +713,6 @@ static struct {
     FIO___HTTP_STATIC_CACHE_SET("x-forwarded-proto"),
     FIO___HTTP_STATIC_CACHE_SET("x-requested-with"),
     {0}};
-
-#define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       13
-#define FIO___HTTP_STATIC_CACHE_STEP       27
-#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
 
 static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
     {0};
@@ -782,32 +801,6 @@ static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   return fio_bstr_copy(cached.buf);
 avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
-}
-
-FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
-  fio___http_str_cached_init();
-}
-
-FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
-  for (size_t i = 0; i < 3; ++i) {
-    const char *names[] = {"header names", "cookie names", "header values"};
-    FIO_LOG_DEBUG2(
-        "(%d) freeing %zu strings from %s cache",
-        getpid(),
-        fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
-        names[i]);
-#ifdef FIO_LOG_LEVEL_DEBUG
-    if (FIO_LOG_LEVEL_DEBUG == FIO_LOG_LEVEL) {
-      FIO_MAP_EACH(fio___http_str_cache,
-                   (&FIO___HTTP_STRING_CACHE[i].cache),
-                   pos) {
-        fprintf(stderr, "\t \"%s\" (%zu bytes)\n", pos.key.buf, pos.key.len);
-      }
-    }
-#endif
-    fio___http_str_cache_destroy(&FIO___HTTP_STRING_CACHE[i].cache);
-    FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
-  }
 }
 
 /* *****************************************************************************
@@ -1898,6 +1891,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s fnm) {
   int fd = -1;
   /* combine public folder with path to get file name */
+  fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(filename, 4096);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
@@ -1906,42 +1900,99 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
              (fio_buf2u64_local("options") | 0x3232323232323232ULL)))
       goto file_not_found;
   }
-  rt.len -= (rt.len > 0) && fnm.buf[0] == '/' &&
-            (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\');
+  rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
+             (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\'));
   fio_string_write(&filename, NULL, rt.buf, rt.len);
   fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
   if (fio_filename_is_unsafe_url(filename.buf))
     goto file_not_found;
 
+  if (filename.buf[filename.len - 1] == '/')
+    fio_string_write(&filename,
+                     NULL,
+                     "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
+                     sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
+
   { /* Test for incomplete file name */
     size_t file_type = fio_filename_type(filename.buf);
+#if FIO_HTTP_STATIC_FILE_COMPLETION
+    if (!file_type) {
+      char *ext = filename.buf + filename.len;
+      do {
+        --ext;
+      } while (ext[0] != '.' && ext[0] != '/');
+      if (ext[0] == '.')
+        goto file_not_found;
+      fio_string_write(&filename, NULL, ".html", 5);
+      file_type = fio_filename_type(filename.buf);
+    }
     switch (file_type) {
-    case 0: fio_string_write(&filename, NULL, ".html", 5); break;
     case S_IFDIR:
-      filename.len -= filename.buf[filename.len - 1];
       fio_string_write(&filename,
                        NULL,
                        "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
                        sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
+      if (!fio_filename_type(filename.buf))
+        goto file_not_found;
       break;
     case S_IFREG: break;
     case S_IFLNK: break;
     default: goto file_not_found;
     }
+#else
+    if (!file_type)
+      goto file_not_found;
+#endif
   }
-
+  {
+    /* find mime type if registered */
+    char *end = filename.buf + filename.len;
+    char *ext = end;
+    do {
+      --ext;
+    } while (ext[0] != '.' && ext[0] != '/');
+    if ((ext++)[0] == '.')
+      mime_type = fio_http_mimetype(ext, end - ext);
+    if (!mime_type.len)
+      FIO_LOG_WARNING("missing mime-type for extension %s (not registered).",
+                      ext);
+  }
   { /* TODO: test / validate accept-encoding for gz alternatives */
-    // add header Vary: accept-encoding, accept-language
-    // https://httpwg.org/specs/rfc9110.html#field.vary
     fio_str_info_s ac =
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 0);
     if (!ac.len)
-      goto no_accept_encoding_header;
+      goto accept_encoding_header_test_done;
+    struct {
+      char *value;
+      fio_buf_info_s ext;
+    } options[] = {{(char *)"gzip", FIO_BUF_INFO2((char *)".gz", 3)},
+                   {(char *)"br", FIO_BUF_INFO2((char *)".br", 3)},
+                   {(char *)"deflate", FIO_BUF_INFO2((char *)".zip", 4)},
+                   {NULL}};
+    for (size_t i = 0; options[i].value; ++i) {
+      if (!strstr(ac.buf, options[i].value))
+        continue;
+      fio_string_write(&filename, NULL, options[i].ext.buf, options[i].ext.len);
+      if (!fio_filename_type(filename.buf)) {
+        filename.len -= options[i].ext.len;
+        filename.buf[filename.len] = 0;
+        continue;
+      }
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"vary", 4),
+          FIO_STR_INFO2((char *)"accept-encoding", 15));
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"content-encoding", 16),
+          FIO_STR_INFO1(options[i].value));
+      break;
+    }
   }
 
-no_accept_encoding_header:
+accept_encoding_header_test_done:
   /* attempt to open file */
   fd = fio_filename_open(filename.buf, O_RDONLY);
   if (fd == -1)
@@ -1955,16 +2006,26 @@ no_accept_encoding_header:
     filename.len = 0;
     fio_string_write_hex(&filename, NULL, etag_hash);
     fio_http_response_header_set(h, FIO_STR_INFO1((char *)"etag"), filename);
+    filename.len = 0;
+    filename.len = fio_time2rfc7231(filename.buf, stt.st_mtime);
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO1((char *)"last-modified"),
+                                 filename);
+    filename.len = stt.st_size;
+    filename.capa = 0;
     if (fio___http_response_etag_if_none_match(h))
       return 0;
   }
+  /* Note: at this point filename.len holds the length of the file */
 
-  /* TODO: created and test for etag, test for range, send file. */
-  FIO_LOG_WARNING("TODO: static file service not implemented!");
+  /* TODO: created and test range requests. */
   {
-      /* test / validate range requests */
-      // fio_str_info_s rng =
-      //     fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
+    /* test / validate range requests */
+    fio_str_info_s rng =
+        fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
+    if (rng.len) {
+      FIO_LOG_WARNING("TODO: ranged static file service not implemented!");
+    }
   }
 
   { /* test for HEAD and OPTIONS requests */
@@ -1973,6 +2034,18 @@ no_accept_encoding_header:
                            (fio_buf2u32_local("head") | 0x32323232)))
       goto head_request;
   }
+
+  /* finish up (set mime type and send file) */
+  if (mime_type.len)
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-type", 12),
+                                 mime_type);
+  fio_http_write(h,
+                 .fd = fd,
+                 .len = filename.len,
+                 .offset = filename.capa,
+                 .finish = 1);
+  return 0;
 
 file_not_found:
   if (fd != -1)
@@ -2091,6 +2164,228 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
   }
   HTTP_RETURN_STATUS("Unknown");
 #undef HTTP_RETURN_STATUS
+}
+
+/* *****************************************************************************
+MIME Helpers
+***************************************************************************** */
+
+typedef struct {
+  uint64_t ext;
+  uint16_t len;
+  char mime[118]; /* all together 128 bytes per node */
+} fio___http_mime_info_s;
+
+#define FIO___HTTP_MIME_IS_VALID(o) ((o)->ext != 0)
+#define FIO___HTTP_MIME_CMP(a, b)   ((a)->ext == (b)->ext)
+#define FIO___HTTP_MIME_HASH(o)     fio_risky_ptr(((void *)(uintptr_t)((o)->ext)))
+
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#define FIO_TYPEDEF_IMAP_REALLOC(ptr, old_size, new_size, copy_len)            \
+  realloc(ptr, new_size)
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE 0
+#undef FIO_TYPEDEF_IMAP_FREE
+#define FIO_TYPEDEF_IMAP_FREE(ptr, len) free(ptr)
+
+FIO_TYPEDEF_IMAP_ARRAY(fio___http_mime_map,
+                       fio___http_mime_info_s,
+                       uint32_t,
+                       FIO___HTTP_MIME_HASH,
+                       FIO___HTTP_MIME_CMP,
+                       FIO___HTTP_MIME_IS_VALID)
+
+static fio___http_mime_map_s FIO___HTTP_MIMETYPES;
+#undef FIO___HTTP_MIME_IS_VALID
+#undef FIO___HTTP_MIME_CMP
+#undef FIO___HTTP_MIME_HASH
+
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#define FIO_TYPEDEF_IMAP_REALLOC FIO_MEM_REALLOC
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
+#undef FIO_TYPEDEF_IMAP_FREE
+#define FIO_TYPEDEF_IMAP_FREE FIO_MEM_FREE
+
+/** Registers a Mime-Type to be associated with the file extension. */
+SFUNC int fio_http_mimetype_register(char *file_ext,
+                                     size_t file_ext_len,
+                                     fio_str_info_s mime_type) {
+  fio___http_mime_info_s tmp, *old;
+  if (file_ext_len > 7 || mime_type.len > 117)
+    return -1;
+  tmp.ext = 0;
+  FIO_MEMCPY(&tmp.ext, file_ext, file_ext_len);
+  if (!mime_type.len)
+    goto remove_mime;
+  FIO_MEMCPY(&tmp.mime, mime_type.buf, mime_type.len);
+  tmp.len = mime_type.len;
+  tmp.mime[mime_type.len] = 0;
+  old = fio___http_mime_map_get(&FIO___HTTP_MIMETYPES, tmp);
+  if (old && old->len == tmp.len && !FIO_MEMCMP(old->mime, tmp.mime, tmp.len)) {
+    FIO_LOG_WARNING("mime-type collision: %.*s was %s, now %s",
+                    (int)file_ext_len,
+                    file_ext,
+                    old->mime,
+                    tmp.mime);
+  }
+  fio___http_mime_map_set(&FIO___HTTP_MIMETYPES, tmp, 1);
+  return 0;
+
+remove_mime:
+  return fio___http_mime_map_remove(&FIO___HTTP_MIMETYPES, tmp);
+}
+
+/** Finds the Mime-Type associated with the file extension (if registered). */
+SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len) {
+  fio_str_info_s r = {0};
+  fio___http_mime_info_s tmp, *val;
+  tmp.ext = 0;
+  FIO_MEMCPY(&tmp.ext, file_ext, file_ext_len);
+  val = fio___http_mime_map_get(&FIO___HTTP_MIMETYPES, tmp);
+  if (!val)
+    return r;
+  r.len = val->len;
+  r.buf = val->mime;
+  return r;
+}
+
+#define REGISTER_MIME(ext, type)                                               \
+  fio_http_mimetype_register((char *)ext,                                      \
+                             sizeof(ext) - 1,                                  \
+                             FIO_STR_INFO2((char *)type, sizeof(type) - 1))
+
+/** Registers known mime-types that aren't often used by Web Servers. */
+FIO_SFUNC void fio_http_mime_register_essential(void) {
+  /* clang-format off */
+  REGISTER_MIME("3ds", "image/x-3ds");
+  REGISTER_MIME("3g2", "video/3gpp");
+  REGISTER_MIME("3gp", "video/3gpp");
+  REGISTER_MIME("7z", "application/x-7z-compressed");
+  REGISTER_MIME("aac", "audio/aac");
+  REGISTER_MIME("abw", "application/x-abiword");
+  REGISTER_MIME("aif", "audio/x-aiff");
+  REGISTER_MIME("aifc", "audio/x-aiff");
+  REGISTER_MIME("aiff", "audio/x-aiff");
+  REGISTER_MIME("arc", "application/x-freearc");
+  REGISTER_MIME("atom", "application/atom+xml");
+  REGISTER_MIME("avi", "video/x-msvideo");
+  REGISTER_MIME("avif", "image/avif");
+  REGISTER_MIME("azw", "application/vnd.amazon.ebook");
+  REGISTER_MIME("bin", "application/octet-stream");
+  REGISTER_MIME("bmp", "image/bmp");
+  REGISTER_MIME("bz", "application/x-bzip");
+  REGISTER_MIME("bz2", "application/x-bzip2");
+  REGISTER_MIME("cda", "application/x-cdf");
+  REGISTER_MIME("csh", "application/x-csh");
+  REGISTER_MIME("css", "text/css");
+  REGISTER_MIME("csv", "text/csv");
+  REGISTER_MIME("dmg", "application/x-apple-diskimage");
+  REGISTER_MIME("doc", "application/msword");
+  REGISTER_MIME("docx", "application/" "vnd.openxmlformats-officedocument.wordprocessingml.document");
+  REGISTER_MIME("eot", "application/vnd.ms-fontobject");
+  REGISTER_MIME("epub", "application/epub+zip");
+  REGISTER_MIME("gif", "image/gif");
+  REGISTER_MIME("gz", "application/gzip");
+  REGISTER_MIME("htm", "text/html");
+  REGISTER_MIME("html", "text/html");
+  REGISTER_MIME("ico", "image/vnd.microsoft.icon");
+  REGISTER_MIME("ics", "text/calendar");
+  REGISTER_MIME("iso", "application/x-iso9660-image");
+  REGISTER_MIME("jar", "application/java-archive");
+  REGISTER_MIME("jpe", "image/jpeg");
+  REGISTER_MIME("jpeg", "image/jpeg");
+  REGISTER_MIME("jpg", "image/jpeg");
+  REGISTER_MIME("jpgm", "video/jpm");
+  REGISTER_MIME("jpgv", "video/jpeg");
+  REGISTER_MIME("jpm", "video/jpm");
+  REGISTER_MIME("js", "application/javascript");
+  REGISTER_MIME("json", "application/json");
+  REGISTER_MIME("jsonld", "application/ld+json");
+  REGISTER_MIME("jsonml", "application/jsonml+json");
+  REGISTER_MIME("md", "text/markdown");  
+  REGISTER_MIME("mid", "audio/midi");
+  REGISTER_MIME("midi", "audio/midi");
+  REGISTER_MIME("mjs", "text/javascript");
+  REGISTER_MIME("mp3", "audio/mpeg");
+  REGISTER_MIME("mp4", "video/mp4");
+  REGISTER_MIME("mpeg", "video/mpeg");
+  REGISTER_MIME("mpkg", "application/vnd.apple.installer+xml");
+  REGISTER_MIME("odp", "application/vnd.oasis.opendocument.presentation");
+  REGISTER_MIME("ods", "application/vnd.oasis.opendocument.spreadsheet");
+  REGISTER_MIME("odt", "application/vnd.oasis.opendocument.text");
+  REGISTER_MIME("oga", "audio/ogg");
+  REGISTER_MIME("ogv", "video/ogg");
+  REGISTER_MIME("ogx", "application/ogg");
+  REGISTER_MIME("opus", "audio/opus");
+  REGISTER_MIME("otf", "font/otf");
+  REGISTER_MIME("pdf", "application/pdf");
+  REGISTER_MIME("php", "application/x-httpd-php");
+  REGISTER_MIME("png", "image/png");
+  REGISTER_MIME("ppt", "application/vnd.ms-powerpoint");
+  REGISTER_MIME("pptx","application/""vnd.openxmlformats-officedocument.presentationml.presentation");
+  REGISTER_MIME("rar", "application/vnd.rar");
+  REGISTER_MIME("rtf", "application/rtf");
+  REGISTER_MIME("sh", "application/x-sh");
+  REGISTER_MIME("svg", "image/svg+xml");
+  REGISTER_MIME("svgz", "image/svg+xml");
+  REGISTER_MIME("tar", "application/x-tar");
+  REGISTER_MIME("tif", "image/tiff");
+  REGISTER_MIME("tiff", "image/tiff");
+  REGISTER_MIME("ts", "video/mp2t");
+  REGISTER_MIME("ttf", "font/ttf");
+  REGISTER_MIME("txt", "text/plain");
+  REGISTER_MIME("vsd", "application/vnd.visio");
+  REGISTER_MIME("wav", "audio/wav");
+  REGISTER_MIME("weba", "audio/webm");
+  REGISTER_MIME("webm", "video/webm");
+  REGISTER_MIME("webp", "image/webp");
+  REGISTER_MIME("woff", "font/woff");
+  REGISTER_MIME("woff2", "font/woff2");
+  REGISTER_MIME("xhtml", "application/xhtml+xml");
+  REGISTER_MIME("xls", "application/vnd.ms-excel");
+  REGISTER_MIME("xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  REGISTER_MIME("xml", "application/xml");
+  REGISTER_MIME("xul", "application/vnd.mozilla.xul+xml");
+  REGISTER_MIME("zip", "application/zip");
+  /* clang-format on */
+}
+
+#undef REGISTER_MIME
+
+/* *****************************************************************************
+Constructor / Destructor
+***************************************************************************** */
+
+FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
+  fio___http_str_cached_init();
+  fio_http_mime_register_essential();
+}
+
+FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
+  for (size_t i = 0; i < 3; ++i) {
+    const char *names[] = {"header names", "cookie names", "header values"};
+    FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
+                   FIO___HTTP_MIMETYPES.count,
+                   fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
+    FIO_LOG_DEBUG2(
+        "(%d) freeing %zu strings from %s cache",
+        getpid(),
+        fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
+        names[i]);
+#ifdef FIO_LOG_LEVEL_DEBUG
+    if (FIO_LOG_LEVEL_DEBUG == FIO_LOG_LEVEL) {
+      FIO_MAP_EACH(fio___http_str_cache,
+                   (&FIO___HTTP_STRING_CACHE[i].cache),
+                   pos) {
+        fprintf(stderr, "\t \"%s\" (%zu bytes)\n", pos.key.buf, pos.key.len);
+      }
+    }
+#endif
+    fio___http_str_cache_destroy(&FIO___HTTP_STRING_CACHE[i].cache);
+    FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
+  }
+  fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
 }
 
 /* *****************************************************************************

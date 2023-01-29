@@ -22,6 +22,7 @@ Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 /* *****************************************************************************
 iMap Creation Macro
 ***************************************************************************** */
+
 /**
  * This MACRO defines the type and functions needed for an indexed array.
  *
@@ -84,8 +85,9 @@ iMap Creation Macro
   /** Deallocates dynamic memory. */                                           \
   FIO_IFUNC void FIO_NAME(array_name, destroy)(FIO_NAME(array_name, s) * a) {  \
     size_t capa = FIO_NAME(array_name, capa)(a);                               \
-    FIO_MEM_FREE(a->ary,                                                       \
-                 (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))));   \
+    FIO_TYPEDEF_IMAP_FREE(                                                     \
+        a->ary,                                                                \
+        (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))));            \
     *a = (FIO_NAME(array_name, s)){0};                                         \
     (void)capa; /* if unused */                                                \
   }                                                                            \
@@ -96,7 +98,7 @@ iMap Creation Macro
       return -1;                                                               \
     size_t capa = 1ULL << bits;                                                \
     size_t old_capa = FIO_NAME(array_name, capa)(a);                           \
-    array_type *tmp = (array_type *)FIO_MEM_REALLOC(                           \
+    array_type *tmp = (array_type *)FIO_TYPEDEF_IMAP_REALLOC(                  \
         a->ary,                                                                \
         (a->bits ? (old_capa * (sizeof(array_type)) +                          \
                     (old_capa * (sizeof(imap_type))))                          \
@@ -108,7 +110,7 @@ iMap Creation Macro
       return -1;                                                               \
     a->capa_bits = bits;                                                       \
     a->ary = tmp;                                                              \
-    if (!FIO_MEM_REALLOC_IS_SAFE)                                              \
+    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE)                                     \
       FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
     return 0;                                                                  \
   }                                                                            \
@@ -172,7 +174,7 @@ iMap Creation Macro
     if (a->count != a->w) {                                                    \
       a->count = 0;                                                            \
       for (size_t i = 0; i < a->w; ++i) {                                      \
-        if (!is_valid_fn(a->ary + i))                                          \
+        if (!is_valid_fn((a->ary + i)))                                        \
           continue;                                                            \
         if (a->count != i)                                                     \
           a->ary[a->count] = a->ary[i];                                        \
@@ -232,7 +234,7 @@ iMap Creation Macro
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
-    if (!a || !is_valid_fn(&obj))                                              \
+    if (!a || !is_valid_fn((&obj)))                                            \
       return NULL;                                                             \
     {                                                                          \
       size_t capa = FIO_NAME(array_name, capa)(a);                             \
@@ -268,7 +270,7 @@ iMap Creation Macro
   /** Finds an object in the Array using the index map. */                     \
   FIO_IFUNC array_type *FIO_NAME(array_name, get)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj) {            \
-    if (!a || !is_valid_fn(&obj))                                              \
+    if (!a || !is_valid_fn((&obj)))                                            \
       return NULL;                                                             \
     FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);    \
     if (s.pos >= a->w)                                                         \
@@ -278,7 +280,7 @@ iMap Creation Macro
   /** Removes an object in the Array's index map, zeroing out its memory. */   \
   FIO_IFUNC int FIO_NAME(array_name, remove)(FIO_NAME(array_name, s) * a,      \
                                              array_type obj) {                 \
-    if (!a || !is_valid_fn(&obj))                                              \
+    if (!a || !is_valid_fn((&obj)))                                            \
       return -1;                                                               \
     FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);    \
     if (s.pos >= a->w)                                                         \
@@ -286,7 +288,7 @@ iMap Creation Macro
     a->ary[s.pos] = (array_type){0};                                           \
     FIO_NAME(array_name, imap)(a)[s.ipos] = (~(imap_type)0);                   \
     --a->count;                                                                \
-    while (a->w && !is_valid_fn(a->ary + a->w - 1))                            \
+    while (a->w && !is_valid_fn((a->ary + a->w - 1)))                          \
       --a->w;                                                                  \
     return 0;                                                                  \
   }
@@ -301,6 +303,17 @@ iMap Creation Macro
 #define FIO_IMAP_ALWAYS_VALID(o) 1
 /** Helper macro for simple imap array types. */
 #define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
+
+#ifndef FIO_TYPEDEF_IMAP_REALLOC
+#define FIO_TYPEDEF_IMAP_REALLOC FIO_MEM_REALLOC
+#endif
+#ifndef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
+#endif
+
+#ifndef FIO_TYPEDEF_IMAP_FREE
+#define FIO_TYPEDEF_IMAP_FREE FIO_MEM_FREE
+#endif
 
 /* *****************************************************************************
 iMap Testing
