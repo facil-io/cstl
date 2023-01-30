@@ -865,6 +865,9 @@ struct fio_s {
   FIO_LIST_NODE node;
   fio_stream_s stream;
   fio___srv_env_safe_s env;
+#ifdef DEBUG
+  size_t total_sent;
+#endif
   int64_t active;
   uint32_t state;
   int fd;
@@ -897,7 +900,14 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_sock_close(io->fd);
   fio_stream_destroy(&io->stream);
   fio_poll_forget(&fio___srvdata.poll_data, io->fd);
+#ifdef DEBUG
+  FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d): %zu bytes total",
+                  (void *)io,
+                  io->fd,
+                  io->total_sent);
+#else
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d)", (void *)io, io->fd);
+#endif
   io->pr->on_close(io->udata);
   io->pr->io_functions.free(io->tls);
   fio___srv_env_safe_destroy(&io->env);
@@ -1075,50 +1085,67 @@ static void fio___srv_poll_on_data(void *io_, void *ignr_) {
 
 static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
+#if DEBUG
+  errno = 0;
+#endif
   fio_s *io = (fio_s *)io_;
-  if ((io->state & FIO_STATE_OPEN)) {
-    char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
-    size_t total = 0;
-    for (;;) {
-      size_t len = FIO_SRV_BUFFER_PER_WRITE;
-      char *buf = buf_mem;
-      fio_stream_read(&io->stream, &buf, &len);
-      if (!len)
-        break;
-      ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-      if (r > 0) {
-        total += r;
-        fio_stream_advance(&io->stream, len);
-        continue;
-      } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
-                              (errno == EINTR))) {
-        break;
-      } else {
-        fio_close_now(io);
-        goto finish;
-      }
+  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
+  size_t total = 0;
+  if (!(io->state & FIO_STATE_OPEN))
+    goto finish;
+  for (;;) {
+    size_t len = FIO_SRV_BUFFER_PER_WRITE;
+    char *buf = buf_mem;
+    fio_stream_read(&io->stream, &buf, &len);
+    if (!len)
+      break;
+    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    if (r > 0) {
+      total += r;
+      fio_stream_advance(&io->stream, r);
+      continue;
+    } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
+                            (errno == EINTR))) {
+      break;
+    } else {
+#if DEBUG
+      if (fio_stream_any(&io->stream))
+        FIO_LOG_DDEBUG2(
+            "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
+            errno,
+            (void *)io,
+            io->fd,
+            strerror(errno));
+#endif
+      fio_close_now(io);
+      goto finish;
     }
-    if (total)
-      fio_touch(io);
-    if (!fio_stream_any(&io->stream) &&
-        !io->pr->io_functions.flush(io->fd, io->tls)) {
-      if ((io->state & FIO_STATE_CLOSING)) {
-        fio_close_now(io);
-      } else {
-        if ((io->state & FIO_STATE_THROTTLED)) {
-          fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
-          fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
-        }
-        io->pr->on_ready(io);
+  }
+  if (total) {
+    fio_touch(io);
+#ifdef DEBUG
+    io->total_sent += total;
+#endif
+  }
+  if (!fio_stream_any(&io->stream) &&
+      !io->pr->io_functions.flush(io->fd, io->tls)) {
+    if ((io->state & FIO_STATE_CLOSING)) {
+      fio_close_now(io);
+    } else {
+      if ((io->state & FIO_STATE_THROTTLED)) {
+        fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
+        fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
       }
-    } else if ((io->state & FIO_STATE_OPEN)) {
-      if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
-        if (!(io->state & FIO_STATE_THROTTLED))
-          FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
-        fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
-      }
-      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+      FIO_LOG_DDEBUG2("calling on_ready for %p (fd %d)", (void *)io, io->fd);
+      io->pr->on_ready(io);
     }
+  } else {
+    if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
+      if (!(io->state & FIO_STATE_THROTTLED))
+        FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
+      fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
+    }
+    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
   }
 finish:
   fio_free2(io);

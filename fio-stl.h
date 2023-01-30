@@ -17093,7 +17093,7 @@ Stream API - types, constructor / destructor
 typedef struct fio_stream_packet_s fio_stream_packet_s;
 
 typedef struct {
-  /* do not directly acecss! */
+  /* do not directly access! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
   size_t consumed;
@@ -17237,7 +17237,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Returns true if there's any data in the stream */
-FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
+FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && s->next; }
 
 /* Returns the number of bytes waiting in the stream */
 FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
@@ -17274,13 +17274,14 @@ typedef enum {
 #define FIO_STREAM___TYPE_BITS 2
 
 typedef struct fio_stream_packet_embd_s {
-  uint32_t type;
+  fio_stream_packet_type_e type;
+  uint32_t length;
   char buf[];
 } fio_stream_packet_embd_s;
 
 typedef struct fio_stream_packet_extrn_s {
-  uint32_t type;
-  uint32_t length;
+  fio_stream_packet_type_e type;
+  size_t length;
   char *buf;
   uintptr_t offset;
   void (*dealloc)(void *buf);
@@ -17288,9 +17289,9 @@ typedef struct fio_stream_packet_extrn_s {
 
 /** User-space socket buffer data */
 typedef struct {
-  uint32_t type;
-  uint32_t length;
-  int32_t offset;
+  fio_stream_packet_type_e type;
+  size_t length;
+  size_t offset;
   int fd;
 } fio_stream_packet_fd_s;
 
@@ -17302,20 +17303,19 @@ FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
     fio_stream_packet_extrn_s *ext;
     fio_stream_packet_fd_s *f;
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
-  switch ((fio_stream_packet_type_e)(u.em->type &
-                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
+  switch (u.em->type) {
   case FIO_PACKET_TYPE_EMBEDDED:
-    FIO_MEM_FREE_(p,
-                  sizeof(*p) + sizeof(*u.em) +
-                      (sizeof(char) * (u.em->type >> FIO_STREAM___TYPE_BITS)));
+    FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.em) + u.em->length);
     break;
   case FIO_PACKET_TYPE_EXTERNAL:
     if (u.ext->dealloc)
       u.ext->dealloc(u.ext->buf);
     FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.ext));
     break;
-  case FIO_PACKET_TYPE_FILE:
-    close(u.f->fd);
+  case FIO_PACKET_TYPE_FILE: close(u.f->fd);
+#ifdef DEBUG
+    FIO_LOG_DEBUG2("fio_stream_packet_free closed file fd %d", u.f->fd);
+#endif
     /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.f));
@@ -17343,15 +17343,14 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
 
   switch ((fio_stream_packet_type_e)(u.em->type &
                                      ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
-  case FIO_PACKET_TYPE_EMBEDDED:
-    len = u.em->type >> FIO_STREAM___TYPE_BITS;
-    return len;
+  case FIO_PACKET_TYPE_EMBEDDED: return len = u.em->length; return len;
   case FIO_PACKET_TYPE_EXTERNAL: len = u.ext->length; return len;
   case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE: len = u.f->length; return len;
   }
   return len;
 }
+
 /** Packs data into a fio_stream_packet_s container. */
 SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 size_t len,
@@ -17376,8 +17375,8 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
         goto error;
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
-      em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
-                 (uint32_t)(slice << FIO_STREAM___TYPE_BITS);
+      em->type = FIO_PACKET_TYPE_EMBEDDED;
+      em->length = slice;
       FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;
@@ -17438,11 +17437,14 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
   f = (fio_stream_packet_fd_s *)(p + 1);
   *f = (fio_stream_packet_fd_s){
       .type =
-          (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
-      .length = (uint32_t)len,
-      .offset = (int32_t)offset,
+          (keep_open ? FIO_PACKET_TYPE_FILE_NO_CLOSE : FIO_PACKET_TYPE_FILE),
+      .length = len,
+      .offset = offset,
       .fd = fd,
   };
+#ifdef DEBUG
+  FIO_LOG_DEBUG2("fio_stream_pack_fd wrapping file fd %d", fd);
+#endif
   return p;
 error:
   if (!keep_open)
@@ -17500,17 +17502,15 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
   size_t written = 0;
 
-  switch ((fio_stream_packet_type_e)(u.em->type &
-                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
+  switch (u.em->type) {
   case FIO_PACKET_TYPE_EMBEDDED:
     if (!buf[0] || !len[0] ||
-        (!must_copy && (!p->next || (u.em->type >> FIO_STREAM___TYPE_BITS) >=
-                                        len[0] + offset))) {
+        (!must_copy && (!p->next || u.em->length >= len[0] + offset))) {
       buf[0] = u.em->buf + offset;
-      len[0] = (size_t)(u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
+      len[0] = (size_t)u.em->length - offset;
       return;
     }
-    written = (u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
+    written = u.em->length - offset;
     if (written > len[0])
       written = len[0];
     if (written) {
@@ -17547,13 +17547,12 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     if (!buf[0] || !len[0]) {
-      buf[0] = NULL;
       len[0] = 0;
       return;
     }
     {
-      uint8_t possible_eol_surprise = 0;
-      written = u.f->length - offset;
+      uint8_t possible_eof_surprise = 0;
+      written = u.f->length - offset; /* written here == to be read & written */
       if (written > len[0])
         written = len[0];
       if (written) {
@@ -17566,15 +17565,16 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
           FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));
           if (errno == EINTR)
             goto retry_on_signal;
-          u.f->length = offset;
+          // u.f->length = offset; /* mark EOF */
         } else if ((size_t)act != written) {
           /* a surprising EOF? */
           written = act;
-          possible_eol_surprise = 1;
+          possible_eof_surprise = 1;
+          // u.f->length = offset + act; /* mark EOF? */
         }
         len[0] -= written;
       }
-      if (!possible_eol_surprise && len[0]) {
+      if (!possible_eof_surprise && len[0]) {
         fio___stream_read_internal(p->next,
                                    buf,
                                    len,
@@ -30729,6 +30729,9 @@ struct fio_s {
   FIO_LIST_NODE node;
   fio_stream_s stream;
   fio___srv_env_safe_s env;
+#ifdef DEBUG
+  size_t total_sent;
+#endif
   int64_t active;
   uint32_t state;
   int fd;
@@ -30761,7 +30764,14 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_sock_close(io->fd);
   fio_stream_destroy(&io->stream);
   fio_poll_forget(&fio___srvdata.poll_data, io->fd);
+#ifdef DEBUG
+  FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d): %zu bytes total",
+                  (void *)io,
+                  io->fd,
+                  io->total_sent);
+#else
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d)", (void *)io, io->fd);
+#endif
   io->pr->on_close(io->udata);
   io->pr->io_functions.free(io->tls);
   fio___srv_env_safe_destroy(&io->env);
@@ -30939,50 +30949,67 @@ static void fio___srv_poll_on_data(void *io_, void *ignr_) {
 
 static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
+#if DEBUG
+  errno = 0;
+#endif
   fio_s *io = (fio_s *)io_;
-  if ((io->state & FIO_STATE_OPEN)) {
-    char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
-    size_t total = 0;
-    for (;;) {
-      size_t len = FIO_SRV_BUFFER_PER_WRITE;
-      char *buf = buf_mem;
-      fio_stream_read(&io->stream, &buf, &len);
-      if (!len)
-        break;
-      ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-      if (r > 0) {
-        total += r;
-        fio_stream_advance(&io->stream, len);
-        continue;
-      } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
-                              (errno == EINTR))) {
-        break;
-      } else {
-        fio_close_now(io);
-        goto finish;
-      }
+  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
+  size_t total = 0;
+  if (!(io->state & FIO_STATE_OPEN))
+    goto finish;
+  for (;;) {
+    size_t len = FIO_SRV_BUFFER_PER_WRITE;
+    char *buf = buf_mem;
+    fio_stream_read(&io->stream, &buf, &len);
+    if (!len)
+      break;
+    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    if (r > 0) {
+      total += r;
+      fio_stream_advance(&io->stream, r);
+      continue;
+    } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
+                            (errno == EINTR))) {
+      break;
+    } else {
+#if DEBUG
+      if (fio_stream_any(&io->stream))
+        FIO_LOG_DDEBUG2(
+            "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
+            errno,
+            (void *)io,
+            io->fd,
+            strerror(errno));
+#endif
+      fio_close_now(io);
+      goto finish;
     }
-    if (total)
-      fio_touch(io);
-    if (!fio_stream_any(&io->stream) &&
-        !io->pr->io_functions.flush(io->fd, io->tls)) {
-      if ((io->state & FIO_STATE_CLOSING)) {
-        fio_close_now(io);
-      } else {
-        if ((io->state & FIO_STATE_THROTTLED)) {
-          fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
-          fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
-        }
-        io->pr->on_ready(io);
+  }
+  if (total) {
+    fio_touch(io);
+#ifdef DEBUG
+    io->total_sent += total;
+#endif
+  }
+  if (!fio_stream_any(&io->stream) &&
+      !io->pr->io_functions.flush(io->fd, io->tls)) {
+    if ((io->state & FIO_STATE_CLOSING)) {
+      fio_close_now(io);
+    } else {
+      if ((io->state & FIO_STATE_THROTTLED)) {
+        fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
+        fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
       }
-    } else if ((io->state & FIO_STATE_OPEN)) {
-      if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
-        if (!(io->state & FIO_STATE_THROTTLED))
-          FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
-        fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
-      }
-      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+      FIO_LOG_DDEBUG2("calling on_ready for %p (fd %d)", (void *)io, io->fd);
+      io->pr->on_ready(io);
     }
+  } else {
+    if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
+      if (!(io->state & FIO_STATE_THROTTLED))
+        FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
+      fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
+    }
+    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
   }
 finish:
   fio_free2(io);
@@ -34172,7 +34199,8 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s root_folder,
-                                        fio_str_info_s file_name);
+                                        fio_str_info_s file_name,
+                                        size_t max_age);
 
 /** Returns a human readable string related to the HTTP status number. */
 SFUNC fio_str_info_s fio_http_status2str(size_t status);
@@ -34543,7 +34571,7 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
   return r;
 
 remove_key:
-  if (!add)
+  if (add < 1)
     fio___http_hmap_remove(map, key, NULL);
   return r;
 }
@@ -35562,10 +35590,12 @@ Static file helper
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s rt,
-                                        fio_str_info_s fnm) {
+                                        fio_str_info_s fnm,
+                                        size_t max_age) {
   int fd = -1;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
+  FIO_STR_INFO_TMP_VAR(etag, 32);
   FIO_STR_INFO_TMP_VAR(filename, 4096);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
@@ -35625,13 +35655,14 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
     do {
       --ext;
     } while (ext[0] != '.' && ext[0] != '/');
-    if ((ext++)[0] == '.')
+    if ((ext++)[0] == '.') {
       mime_type = fio_http_mimetype(ext, end - ext);
-    if (!mime_type.len)
-      FIO_LOG_WARNING("missing mime-type for extension %s (not registered).",
-                      ext);
+      if (!mime_type.len)
+        FIO_LOG_WARNING("missing mime-type for extension %s (not registered).",
+                        ext);
+    }
   }
-  { /* TODO: test / validate accept-encoding for gz alternatives */
+  {
     fio_str_info_s ac =
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
@@ -35677,14 +35708,23 @@ accept_encoding_header_test_done:
     if (fstat(fd, &stt))
       goto file_not_found;
     uint64_t etag_hash = fio_risky_hash(&stt, sizeof(stt), 0);
-    filename.len = 0;
-    fio_string_write_hex(&filename, NULL, etag_hash);
-    fio_http_response_header_set(h, FIO_STR_INFO1((char *)"etag"), filename);
+    fio_string_write_hex(&etag, NULL, etag_hash);
+    fio_http_response_header_set(h, FIO_STR_INFO2((char *)"etag", 4), etag);
     filename.len = 0;
     filename.len = fio_time2rfc7231(filename.buf, stt.st_mtime);
     fio_http_response_header_set(h,
                                  FIO_STR_INFO1((char *)"last-modified"),
                                  filename);
+    if (max_age) {
+      filename.len = 0;
+      fio_string_write2(&filename,
+                        NULL,
+                        FIO_STRING_WRITE_STR2("max-age=", 8),
+                        FIO_STRING_WRITE_UNUM(max_age));
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"cache-control"),
+                                   filename);
+    }
     filename.len = stt.st_size;
     filename.capa = 0;
     if (fio___http_response_etag_if_none_match(h))
@@ -35697,12 +35737,66 @@ accept_encoding_header_test_done:
     /* test / validate range requests */
     fio_str_info_s rng =
         fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
-    if (rng.len) {
-      FIO_LOG_WARNING("TODO: ranged static file service not implemented!");
+    if (!rng.len)
+      goto range_request_review_finished;
+    {
+      fio_str_info_s ifrng =
+          fio_http_request_header(h, FIO_STR_INFO2((char *)"if-range", 8), 0);
+      if (ifrng.len && !FIO_STR_INFO_IS_EQ(ifrng, etag))
+        goto range_request_review_finished;
     }
+    if (rng.len < 7 ||
+        fio_buf2u32_local(rng.buf) != fio_buf2u32_local("byte") ||
+        fio_buf2u16_local(rng.buf + 4) != fio_buf2u16_local("s="))
+      goto range_request_review_finished;
+    const size_t file_length = filename.len;
+    char *ipos = rng.buf + 6;
+    size_t start_range = fio_atol10u(&ipos);
+    if (ipos == rng.buf + 6)
+      start_range = (size_t)-1;
+    if (*ipos != '-')
+      goto range_request_review_finished;
+    ++ipos;
+    size_t end_range = fio_atol10u(&ipos);
+    if (end_range > file_length)
+      goto range_request_review_finished;
+    if (!end_range)
+      end_range = file_length - 1;
+    if (start_range > end_range) {
+      start_range = file_length - end_range;
+      end_range = file_length - 1;
+    }
+    if (!start_range && end_range + 1 == file_length)
+      goto range_request_review_finished;
+    /* update response headers and info */
+    h->status = 206;
+    filename.len = 0;
+    filename.capa = 1024;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("bytes ", 6),
+                      FIO_STRING_WRITE_UNUM(start_range),
+                      FIO_STRING_WRITE_STR2("-", 1),
+                      FIO_STRING_WRITE_UNUM((end_range)),
+                      FIO_STRING_WRITE_STR2("/", 1),
+                      FIO_STRING_WRITE_UNUM(file_length));
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-range", 13),
+                                 filename);
+    filename.len = (end_range - start_range) + 1;
+    filename.capa = start_range;
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"etag", 4),
+                                 FIO_STR_INFO2(NULL, 0));
   }
 
-  { /* test for HEAD and OPTIONS requests */
+range_request_review_finished:
+  /* allow interrupted downloads to resume */
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"accept-ranges", 13),
+                               FIO_STR_INFO2((char *)"bytes", 5));
+  /* test for HEAD requests */
+  {
     fio_str_info_s m = fio_keystr_info(&h->method);
     if ((m.len == 4 && (fio_buf2u32_local(m.buf) | 0x32323232) ==
                            (fio_buf2u32_local("head") | 0x32323232)))
@@ -35716,8 +35810,8 @@ accept_encoding_header_test_done:
                                  mime_type);
   fio_http_write(h,
                  .fd = fd,
-                 .len = filename.len,
-                 .offset = filename.capa,
+                 .len = filename.len,     /* now holds body length */
+                 .offset = filename.capa, /* now holds starting offset */
                  .finish = 1);
   return 0;
 
@@ -35983,6 +36077,7 @@ FIO_SFUNC void fio_http_mime_register_essential(void) {
   REGISTER_MIME("mjs", "text/javascript");
   REGISTER_MIME("mp3", "audio/mpeg");
   REGISTER_MIME("mp4", "video/mp4");
+  REGISTER_MIME("m4v", "video/mp4");
   REGISTER_MIME("mpeg", "video/mpeg");
   REGISTER_MIME("mpkg", "application/vnd.apple.installer+xml");
   REGISTER_MIME("odp", "application/vnd.oasis.opendocument.presentation");
@@ -36633,6 +36728,11 @@ HTTP Setting Defaults
 #define FIO_HTTP_PIPELINE_QUEUE 4
 #endif
 
+#ifndef FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
+/** Adds a "content-length" header to the HTTP handle (usually redundant). */
+#define FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER 0
+#endif
+
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
@@ -36659,6 +36759,13 @@ typedef struct fio_http_settings_s {
    * Supports automatic `gz` pre-compressed alternatives.
    */
   fio_str_info_s public_folder;
+  /**
+   * The max-age value (in seconds) for possibly caching static files from the
+   * public folder specified.
+   *
+   * Defaults to 0 (not sent).
+   */
+  size_t max_age;
   /**
    * The maximum total of bytes for the overall size of the request string and
    * headers, combined.
@@ -36983,9 +37090,11 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
   if (u.query.len)
     fio_http_query_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.query));
   if (u.host.len)
-    http_request_header_set(c->queue[c->qwpos],
-                            FIO_STR_INFO1((char *)"host"),
-                            FIO_BUF2STR_INFO(u.host));
+    (!(c->queue[c->qwpos])
+         ? fio_http_request_header_set
+         : fio_http_response_header_set)(c->queue[c->qwpos],
+                                         FIO_STR_INFO1((char *)"host"),
+                                         FIO_BUF2STR_INFO(u.host));
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
@@ -36999,9 +37108,11 @@ static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
   fio_http_connection_s *c = (fio_http_connection_s *)udata;
-  http_request_header_add(c->queue[c->qwpos],
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+  (!(c->queue[c->qwpos])
+       ? fio_http_request_header_add
+       : fio_http_response_header_add)(c->queue[c->qwpos],
+                                       FIO_BUF2STR_INFO(name),
+                                       FIO_BUF2STR_INFO(value));
   return 0;
 }
 /** called when the special content-length header is parsed. */
@@ -37014,9 +37125,13 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
     goto too_big;
   if (content_length)
     fio_http_body_expect(c->queue[c->qwpos], content_length);
-  http_request_header_add(c->queue[c->qwpos],
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+#if FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
+  (!(c->queue[c->qwpos])
+       ? fio_http_request_header_add
+       : fio_http_response_header_add)(c->queue[c->qwpos],
+                                       FIO_BUF2STR_INFO(name),
+                                       FIO_BUF2STR_INFO(value));
+#endif
   return 0;
 too_big:
   fio_http_send_error_response(c->queue[c->qwpos], 413);

@@ -498,7 +498,8 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s root_folder,
-                                        fio_str_info_s file_name);
+                                        fio_str_info_s file_name,
+                                        size_t max_age);
 
 /** Returns a human readable string related to the HTTP status number. */
 SFUNC fio_str_info_s fio_http_status2str(size_t status);
@@ -869,7 +870,7 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
   return r;
 
 remove_key:
-  if (!add)
+  if (add < 1)
     fio___http_hmap_remove(map, key, NULL);
   return r;
 }
@@ -1888,10 +1889,12 @@ Static file helper
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s rt,
-                                        fio_str_info_s fnm) {
+                                        fio_str_info_s fnm,
+                                        size_t max_age) {
   int fd = -1;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
+  FIO_STR_INFO_TMP_VAR(etag, 32);
   FIO_STR_INFO_TMP_VAR(filename, 4096);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
@@ -1951,13 +1954,14 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
     do {
       --ext;
     } while (ext[0] != '.' && ext[0] != '/');
-    if ((ext++)[0] == '.')
+    if ((ext++)[0] == '.') {
       mime_type = fio_http_mimetype(ext, end - ext);
-    if (!mime_type.len)
-      FIO_LOG_WARNING("missing mime-type for extension %s (not registered).",
-                      ext);
+      if (!mime_type.len)
+        FIO_LOG_WARNING("missing mime-type for extension %s (not registered).",
+                        ext);
+    }
   }
-  { /* TODO: test / validate accept-encoding for gz alternatives */
+  {
     fio_str_info_s ac =
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
@@ -2003,14 +2007,23 @@ accept_encoding_header_test_done:
     if (fstat(fd, &stt))
       goto file_not_found;
     uint64_t etag_hash = fio_risky_hash(&stt, sizeof(stt), 0);
-    filename.len = 0;
-    fio_string_write_hex(&filename, NULL, etag_hash);
-    fio_http_response_header_set(h, FIO_STR_INFO1((char *)"etag"), filename);
+    fio_string_write_hex(&etag, NULL, etag_hash);
+    fio_http_response_header_set(h, FIO_STR_INFO2((char *)"etag", 4), etag);
     filename.len = 0;
     filename.len = fio_time2rfc7231(filename.buf, stt.st_mtime);
     fio_http_response_header_set(h,
                                  FIO_STR_INFO1((char *)"last-modified"),
                                  filename);
+    if (max_age) {
+      filename.len = 0;
+      fio_string_write2(&filename,
+                        NULL,
+                        FIO_STRING_WRITE_STR2("max-age=", 8),
+                        FIO_STRING_WRITE_UNUM(max_age));
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"cache-control"),
+                                   filename);
+    }
     filename.len = stt.st_size;
     filename.capa = 0;
     if (fio___http_response_etag_if_none_match(h))
@@ -2023,12 +2036,66 @@ accept_encoding_header_test_done:
     /* test / validate range requests */
     fio_str_info_s rng =
         fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0);
-    if (rng.len) {
-      FIO_LOG_WARNING("TODO: ranged static file service not implemented!");
+    if (!rng.len)
+      goto range_request_review_finished;
+    {
+      fio_str_info_s ifrng =
+          fio_http_request_header(h, FIO_STR_INFO2((char *)"if-range", 8), 0);
+      if (ifrng.len && !FIO_STR_INFO_IS_EQ(ifrng, etag))
+        goto range_request_review_finished;
     }
+    if (rng.len < 7 ||
+        fio_buf2u32_local(rng.buf) != fio_buf2u32_local("byte") ||
+        fio_buf2u16_local(rng.buf + 4) != fio_buf2u16_local("s="))
+      goto range_request_review_finished;
+    const size_t file_length = filename.len;
+    char *ipos = rng.buf + 6;
+    size_t start_range = fio_atol10u(&ipos);
+    if (ipos == rng.buf + 6)
+      start_range = (size_t)-1;
+    if (*ipos != '-')
+      goto range_request_review_finished;
+    ++ipos;
+    size_t end_range = fio_atol10u(&ipos);
+    if (end_range > file_length)
+      goto range_request_review_finished;
+    if (!end_range)
+      end_range = file_length - 1;
+    if (start_range > end_range) {
+      start_range = file_length - end_range;
+      end_range = file_length - 1;
+    }
+    if (!start_range && end_range + 1 == file_length)
+      goto range_request_review_finished;
+    /* update response headers and info */
+    h->status = 206;
+    filename.len = 0;
+    filename.capa = 1024;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("bytes ", 6),
+                      FIO_STRING_WRITE_UNUM(start_range),
+                      FIO_STRING_WRITE_STR2("-", 1),
+                      FIO_STRING_WRITE_UNUM((end_range)),
+                      FIO_STRING_WRITE_STR2("/", 1),
+                      FIO_STRING_WRITE_UNUM(file_length));
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-range", 13),
+                                 filename);
+    filename.len = (end_range - start_range) + 1;
+    filename.capa = start_range;
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"etag", 4),
+                                 FIO_STR_INFO2(NULL, 0));
   }
 
-  { /* test for HEAD and OPTIONS requests */
+range_request_review_finished:
+  /* allow interrupted downloads to resume */
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"accept-ranges", 13),
+                               FIO_STR_INFO2((char *)"bytes", 5));
+  /* test for HEAD requests */
+  {
     fio_str_info_s m = fio_keystr_info(&h->method);
     if ((m.len == 4 && (fio_buf2u32_local(m.buf) | 0x32323232) ==
                            (fio_buf2u32_local("head") | 0x32323232)))
@@ -2042,8 +2109,8 @@ accept_encoding_header_test_done:
                                  mime_type);
   fio_http_write(h,
                  .fd = fd,
-                 .len = filename.len,
-                 .offset = filename.capa,
+                 .len = filename.len,     /* now holds body length */
+                 .offset = filename.capa, /* now holds starting offset */
                  .finish = 1);
   return 0;
 
@@ -2309,6 +2376,7 @@ FIO_SFUNC void fio_http_mime_register_essential(void) {
   REGISTER_MIME("mjs", "text/javascript");
   REGISTER_MIME("mp3", "audio/mpeg");
   REGISTER_MIME("mp4", "video/mp4");
+  REGISTER_MIME("m4v", "video/mp4");
   REGISTER_MIME("mpeg", "video/mpeg");
   REGISTER_MIME("mpkg", "application/vnd.apple.installer+xml");
   REGISTER_MIME("odp", "application/vnd.oasis.opendocument.presentation");

@@ -45,6 +45,11 @@ HTTP Setting Defaults
 #define FIO_HTTP_PIPELINE_QUEUE 4
 #endif
 
+#ifndef FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
+/** Adds a "content-length" header to the HTTP handle (usually redundant). */
+#define FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER 0
+#endif
+
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
@@ -71,6 +76,13 @@ typedef struct fio_http_settings_s {
    * Supports automatic `gz` pre-compressed alternatives.
    */
   fio_str_info_s public_folder;
+  /**
+   * The max-age value (in seconds) for possibly caching static files from the
+   * public folder specified.
+   *
+   * Defaults to 0 (not sent).
+   */
+  size_t max_age;
   /**
    * The maximum total of bytes for the overall size of the request string and
    * headers, combined.
@@ -395,9 +407,11 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
   if (u.query.len)
     fio_http_query_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(u.query));
   if (u.host.len)
-    http_request_header_set(c->queue[c->qwpos],
-                            FIO_STR_INFO1((char *)"host"),
-                            FIO_BUF2STR_INFO(u.host));
+    (!(c->queue[c->qwpos])
+         ? fio_http_request_header_set
+         : fio_http_response_header_set)(c->queue[c->qwpos],
+                                         FIO_STR_INFO1((char *)"host"),
+                                         FIO_BUF2STR_INFO(u.host));
   return 0;
 }
 /** called when a the HTTP/1.x version is parsed. */
@@ -411,9 +425,11 @@ static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
   fio_http_connection_s *c = (fio_http_connection_s *)udata;
-  http_request_header_add(c->queue[c->qwpos],
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+  (!(c->queue[c->qwpos])
+       ? fio_http_request_header_add
+       : fio_http_response_header_add)(c->queue[c->qwpos],
+                                       FIO_BUF2STR_INFO(name),
+                                       FIO_BUF2STR_INFO(value));
   return 0;
 }
 /** called when the special content-length header is parsed. */
@@ -426,9 +442,13 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
     goto too_big;
   if (content_length)
     fio_http_body_expect(c->queue[c->qwpos], content_length);
-  http_request_header_add(c->queue[c->qwpos],
-                          FIO_BUF2STR_INFO(name),
-                          FIO_BUF2STR_INFO(value));
+#if FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
+  (!(c->queue[c->qwpos])
+       ? fio_http_request_header_add
+       : fio_http_response_header_add)(c->queue[c->qwpos],
+                                       FIO_BUF2STR_INFO(name),
+                                       FIO_BUF2STR_INFO(value));
+#endif
   return 0;
 too_big:
   fio_http_send_error_response(c->queue[c->qwpos], 413);

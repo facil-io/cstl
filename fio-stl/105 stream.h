@@ -39,7 +39,7 @@ Stream API - types, constructor / destructor
 typedef struct fio_stream_packet_s fio_stream_packet_s;
 
 typedef struct {
-  /* do not directly acecss! */
+  /* do not directly access! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
   size_t consumed;
@@ -183,7 +183,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Returns true if there's any data in the stream */
-FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && !!s->next; }
+FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && s->next; }
 
 /* Returns the number of bytes waiting in the stream */
 FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
@@ -220,13 +220,14 @@ typedef enum {
 #define FIO_STREAM___TYPE_BITS 2
 
 typedef struct fio_stream_packet_embd_s {
-  uint32_t type;
+  fio_stream_packet_type_e type;
+  uint32_t length;
   char buf[];
 } fio_stream_packet_embd_s;
 
 typedef struct fio_stream_packet_extrn_s {
-  uint32_t type;
-  uint32_t length;
+  fio_stream_packet_type_e type;
+  size_t length;
   char *buf;
   uintptr_t offset;
   void (*dealloc)(void *buf);
@@ -234,9 +235,9 @@ typedef struct fio_stream_packet_extrn_s {
 
 /** User-space socket buffer data */
 typedef struct {
-  uint32_t type;
-  uint32_t length;
-  int32_t offset;
+  fio_stream_packet_type_e type;
+  size_t length;
+  size_t offset;
   int fd;
 } fio_stream_packet_fd_s;
 
@@ -248,20 +249,19 @@ FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
     fio_stream_packet_extrn_s *ext;
     fio_stream_packet_fd_s *f;
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
-  switch ((fio_stream_packet_type_e)(u.em->type &
-                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
+  switch (u.em->type) {
   case FIO_PACKET_TYPE_EMBEDDED:
-    FIO_MEM_FREE_(p,
-                  sizeof(*p) + sizeof(*u.em) +
-                      (sizeof(char) * (u.em->type >> FIO_STREAM___TYPE_BITS)));
+    FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.em) + u.em->length);
     break;
   case FIO_PACKET_TYPE_EXTERNAL:
     if (u.ext->dealloc)
       u.ext->dealloc(u.ext->buf);
     FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.ext));
     break;
-  case FIO_PACKET_TYPE_FILE:
-    close(u.f->fd);
+  case FIO_PACKET_TYPE_FILE: close(u.f->fd);
+#ifdef DEBUG
+    FIO_LOG_DEBUG2("fio_stream_packet_free closed file fd %d", u.f->fd);
+#endif
     /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     FIO_MEM_FREE_(p, sizeof(*p) + sizeof(*u.f));
@@ -289,15 +289,14 @@ FIO_IFUNC size_t fio___stream_p2len(fio_stream_packet_s *p) {
 
   switch ((fio_stream_packet_type_e)(u.em->type &
                                      ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
-  case FIO_PACKET_TYPE_EMBEDDED:
-    len = u.em->type >> FIO_STREAM___TYPE_BITS;
-    return len;
+  case FIO_PACKET_TYPE_EMBEDDED: return len = u.em->length; return len;
   case FIO_PACKET_TYPE_EXTERNAL: len = u.ext->length; return len;
   case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE: len = u.f->length; return len;
   }
   return len;
 }
+
 /** Packs data into a fio_stream_packet_s container. */
 SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 size_t len,
@@ -322,8 +321,8 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
         goto error;
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
-      em->type = (uint32_t)FIO_PACKET_TYPE_EMBEDDED |
-                 (uint32_t)(slice << FIO_STREAM___TYPE_BITS);
+      em->type = FIO_PACKET_TYPE_EMBEDDED;
+      em->length = slice;
       FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;
@@ -384,11 +383,14 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
   f = (fio_stream_packet_fd_s *)(p + 1);
   *f = (fio_stream_packet_fd_s){
       .type =
-          (keep_open ? FIO_PACKET_TYPE_FILE : FIO_PACKET_TYPE_FILE_NO_CLOSE),
-      .length = (uint32_t)len,
-      .offset = (int32_t)offset,
+          (keep_open ? FIO_PACKET_TYPE_FILE_NO_CLOSE : FIO_PACKET_TYPE_FILE),
+      .length = len,
+      .offset = offset,
       .fd = fd,
   };
+#ifdef DEBUG
+  FIO_LOG_DEBUG2("fio_stream_pack_fd wrapping file fd %d", fd);
+#endif
   return p;
 error:
   if (!keep_open)
@@ -446,17 +448,15 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
   size_t written = 0;
 
-  switch ((fio_stream_packet_type_e)(u.em->type &
-                                     ((1UL << FIO_STREAM___TYPE_BITS) - 1))) {
+  switch (u.em->type) {
   case FIO_PACKET_TYPE_EMBEDDED:
     if (!buf[0] || !len[0] ||
-        (!must_copy && (!p->next || (u.em->type >> FIO_STREAM___TYPE_BITS) >=
-                                        len[0] + offset))) {
+        (!must_copy && (!p->next || u.em->length >= len[0] + offset))) {
       buf[0] = u.em->buf + offset;
-      len[0] = (size_t)(u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
+      len[0] = (size_t)u.em->length - offset;
       return;
     }
-    written = (u.em->type >> FIO_STREAM___TYPE_BITS) - offset;
+    written = u.em->length - offset;
     if (written > len[0])
       written = len[0];
     if (written) {
@@ -493,13 +493,12 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
   case FIO_PACKET_TYPE_FILE: /* fall through */
   case FIO_PACKET_TYPE_FILE_NO_CLOSE:
     if (!buf[0] || !len[0]) {
-      buf[0] = NULL;
       len[0] = 0;
       return;
     }
     {
-      uint8_t possible_eol_surprise = 0;
-      written = u.f->length - offset;
+      uint8_t possible_eof_surprise = 0;
+      written = u.f->length - offset; /* written here == to be read & written */
       if (written > len[0])
         written = len[0];
       if (written) {
@@ -512,15 +511,16 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
           FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));
           if (errno == EINTR)
             goto retry_on_signal;
-          u.f->length = offset;
+          // u.f->length = offset; /* mark EOF */
         } else if ((size_t)act != written) {
           /* a surprising EOF? */
           written = act;
-          possible_eol_surprise = 1;
+          possible_eof_surprise = 1;
+          // u.f->length = offset + act; /* mark EOF? */
         }
         len[0] -= written;
       }
-      if (!possible_eol_surprise && len[0]) {
+      if (!possible_eof_surprise && len[0]) {
         fio___stream_read_internal(p->next,
                                    buf,
                                    len,

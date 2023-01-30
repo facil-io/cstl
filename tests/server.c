@@ -24,7 +24,7 @@ Benchmark with keep-alive:
 #define HTTP_CLIENT_BUFFER 32768
 #define HTTP_MAX_BODY_SIZE (1ULL << 27)
 #define HTTP_MAX_HEADERS   16
-#define HTTP_TIMEOUT       (60 * 100)
+#define HTTP_TIMEOUT       (40 * 1000) /* is in milliseconds */
 
 /* an echo response (vs. Hello World). */
 #define HTTP_RESPONSE_ECHO 1
@@ -119,6 +119,11 @@ FIO_SFUNC void http_respond(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO1("server"),
                                FIO_STR_INFO1("fio-stl"));
+  if (!fio_http_static_file_response(h,
+                                     FIO_STR_INFO2(".", 1),
+                                     fio_http_path(h),
+                                     3600))
+    return;
 #if HTTP_RESPONSE_ECHO
   char *out = fio_bstr_write2(
       NULL,
@@ -223,6 +228,7 @@ static int fio_http1_on_error(void *udata) {
                    .len = 34,
                    .finish = 1);
   }
+  FIO_LOG_DEBUG2("HTTP error occurred, closing fd %d", c->io->fd);
   fio_close(c->io);
   return -1;
 }
@@ -363,6 +369,7 @@ static void fio_http1_write_body(fio_http_s *h, fio_http_write_args_s args) {
              .buf = (void *)args.data,
              .len = args.len,
              .fd = args.fd,
+             .offset = args.offset,
              .dealloc = args.dealloc,
              .copy = args.copy);
   if (fio_http_is_streaming(h))
