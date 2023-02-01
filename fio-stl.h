@@ -2358,6 +2358,13 @@ Pointer Tagging
 #endif /* FIO_PUBSUB */
 #endif /* FIO_HTTP */
 
+/* Modules that require SHA-1*/
+#if defined(FIO_HTTP_HANDLE)
+#ifndef FIO_SHA1
+#define FIO_SHA1
+#endif
+#endif /* FIO_HTTP_HANDLE */
+
 /* Modules that require FIO_SERVER */
 #if defined(FIO_PUBSUB) || defined(FIO_HTTP)
 #ifndef FIO_SERVER
@@ -2462,7 +2469,7 @@ Pointer Tagging
 #endif /* FIO_MALLOC */
 
 /* Modules that require FIO_TIME */
-#if defined(FIO_QUEUE) || defined(FIO_RAND)
+#if defined(FIO_QUEUE) || defined(FIO_RAND) || defined(FIO_HTTP_HANDLE)
 #ifndef FIO_TIME
 #define FIO_TIME
 #endif
@@ -17086,6 +17093,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_STREAM_COPY_PER_PACKET 98304
 #endif
 
+#ifndef FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN
+/** If the data added is less than said bytes, copy is preferred (locality). */
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
+#ifdef DEBUG
+#undef FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 8
+#endif
+#endif
+
 /* *****************************************************************************
 Stream API - types, constructor / destructor
 ***************************************************************************** */
@@ -17360,7 +17376,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
   fio_stream_packet_s *p = NULL;
   if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___TYPE_BITS))))
     goto error;
-  if (copy_buffer || len <= 14) {
+  if (copy_buffer || len < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN) {
     while (len) {
       /* break apart large memory blocks into smaller pieces */
       const size_t slice =
@@ -17732,7 +17748,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
                            0,
                            FIO_NAME_TEST(stl, stream___noop_dealloc)));
   fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
-
+  expect_dealloc += (49 < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN);
   FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
   FIO_ASSERT(fio_stream_length(&s) == 80, "stream length error.");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
@@ -17809,7 +17825,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              buf);
 
   fio_stream_destroy(&s);
-  ++expect_dealloc;
+  expect_dealloc += (49 >= FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN);
 
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
@@ -33741,6 +33757,10 @@ HTTP Handle Settings
  * time-stamping is the default.
  */
 #define FIO_HTTP_EXACT_LOGGING 0
+#ifndef H___FIO_SERVER___H
+#undef FIO_HTTP_EXACT_LOGGING
+#define FIO_HTTP_EXACT_LOGGING 1
+#endif
 #endif
 
 #ifndef FIO_HTTP_BODY_RAM_LIMIT
@@ -34157,13 +34177,13 @@ WebSocket / SSE Helpers
 SFUNC int fio_http_websockets_requested(fio_http_s *);
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC int fio_http_websockets_set_response(fio_http_s *);
+SFUNC void fio_http_websockets_set_response(fio_http_s *);
 
 /** Sets request data to request a WebSockets Upgrade.*/
 SFUNC void fio_http_websockets_set_request(fio_http_s *);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_requested(fio_http_s *);
+SFUNC int fio_http_sse_requested(fio_http_s *);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_response(fio_http_s *);
@@ -34182,6 +34202,78 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 
 /** Finds the Mime-Type associated with the file extension (if registered). */
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
+
+/* *****************************************************************************
+Header Parsing Helpers
+***************************************************************************** */
+
+/**
+ * Copies all header data, from possibly an array of identical response headers,
+ * resulting in a parsed format outputted to `buf_parsed`.
+ *
+ * Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
+ * for the parsed output).
+ *
+ * Note that the parsed output isn't readable as a string, but is designed to
+ * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
+ * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ *
+ * See also `fio_http_response_header_parse`.
+ */
+SFUNC int fio_http_response_header_parse(fio_http_s *h,
+                                         fio_str_info_s *buf_parsed,
+                                         fio_str_info_s header_name);
+
+/**
+ * Copies all header data, from possibly an array of identical response headers,
+ * resulting in a parsed format outputted to `buf_parsed`.
+ *
+ * Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
+ * for the parsed output).
+ *
+ * Note that the parsed output isn't readable as a string, but is designed to
+ * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
+ * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ *
+ * i.e.:
+ *
+ * ```c
+ *  FIO_STR_INFO_TMP_VAR(buf, 1024); // tmp buffer for the parsed output
+ *  fio_http_s *h = fio_http_new();  // using a mock HTTP handle
+ *  fio_http_request_header_add(
+ *      h,
+ *      FIO_STR_INFO2("accept", 6),
+ *      FIO_STR_INFO1("text/html, application/json;q=0.9; d=500, image/png"));
+ *  fio_http_request_header_add(h,
+ *                              FIO_STR_INFO2("accept", 6),
+ *                              FIO_STR_INFO1("text/yaml"));
+ *  FIO_ASSERT(  // in production do NOT assert, but route to error instead!
+ *      !fio_http_request_header_parse(h, &buf, FIO_STR_INFO2("accept", 6)),
+ *      "parse returned error!");
+ *  FIO_HTTP_PARSED_HEADER_EACH(buf, value) {
+ *    printf("* processing value (%zu bytes): %s\n", value.len, value.buf);
+ *    FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, prop) {
+ *      printf("* for value %s: (%zu,%zu bytes) %s = %s\n",
+ *             value.buf,
+ *             prop.name.len,
+ *             prop.value.len,
+ *             prop.name.buf,
+ *             prop.value.buf);
+ *    }
+ *  }
+ * ```
+ */
+SFUNC int fio_http_request_header_parse(fio_http_s *h,
+                                        fio_str_info_s *buf_parsed,
+                                        fio_str_info_s header_name);
+
+/** Iterated through the header values in a parsed header buffer. */
+#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
+                                    /* chosen var named */ value)
+
+/** Iterated through the properties associated with a parsed header values. */
+#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(/* fio_str_info_s   */ value,     \
+                                             /* chosen var named */ property)
 
 /* *****************************************************************************
 General Helpers
@@ -34269,6 +34361,84 @@ All memory allocations should use:
 * FIO_MEM_FREE_(ptr, size)
 
 */
+
+/* *****************************************************************************
+Header Parsing Helpers - inlined helpers
+***************************************************************************** */
+
+#define FIO___HTTP_PARSED_HEADER_VALUE              0
+#define FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN 1
+#define FIO___HTTP_PARSED_HEADER_PROPERTY_DATA      2
+
+typedef struct {
+  fio_str_info_s name;
+  fio_str_info_s value;
+} fio___http_header_property_s;
+
+/**
+ * Assumes a Buffer of bytes containing length info and string data as such:
+ *   [ NUL byte - 1 byte at head of format ]
+ *   repeat
+ *   [ 2 byte info: (type | (len << 2)) ]
+ *   [ Optional 2 byte info: (len << 2) (if type was 1)]
+ *   [ String of `len` bytes][ NUL byte (not counted in `len`)]
+ */
+
+FIO_IFUNC fio_str_info_s fio___http_parsed_headers_next(fio_str_info_s value) {
+  for (;;) {
+    const size_t coded = (size_t)fio_buf2u16_local(value.buf + value.len + 1U);
+    if (!coded)
+      return (value = (fio_str_info_s){0});
+    const size_t block_len = coded >> 2;
+    value.buf += value.len + 3;
+    value.len = block_len;
+    if (!(coded & 3))
+      return value;
+    value.buf -= 3; /* reposition to read NUL + value rather than text start */
+  }
+}
+
+FIO_IFUNC fio___http_header_property_s
+fio___http_parsed_property_next(fio___http_header_property_s property) {
+  for (;;) {
+    size_t coded =
+        (size_t)fio_buf2u16_local(property.value.buf + property.value.len + 1);
+    if (!(coded & 3))
+      return (property = (fio___http_header_property_s){{0}, {0}});
+    if ((coded & 3) == FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN) {
+      property.value.buf += 2;
+      coded = (size_t)fio_buf2u16_local(property.value.buf +
+                                        property.value.len + 1);
+    }
+    if ((coded & 3) != 2)
+      return (property = (fio___http_header_property_s){{0}, {0}});
+    coded >>= 2;
+    property.name.buf = property.value.buf + property.value.len + 3;
+    property.name.len = coded;
+    coded =
+        (size_t)fio_buf2u16_local(property.name.buf + property.name.len + 1);
+    FIO_ASSERT_DEBUG((coded & 3) == 2,
+                     "header property value parsing format error");
+    property.value.buf = property.name.buf + property.name.len + 3;
+    property.value.len = coded >> 2;
+    return property;
+  }
+}
+
+#undef FIO_HTTP_PARSED_HEADER_EACH
+#define FIO_HTTP_PARSED_HEADER_EACH(buf_parsed, value)                         \
+  for (fio_str_info_s value =                                                  \
+           fio___http_parsed_headers_next(FIO_STR_INFO2(buf_parsed.buf, 0));   \
+       value.len;                                                              \
+       value = fio___http_parsed_headers_next(value))
+
+#undef FIO_HTTP_PARSED_HEADER_EACH_PROPERTY
+#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, property)                  \
+  for (fio___http_header_property_s property =                                 \
+           fio___http_parsed_property_next(                                    \
+               (fio___http_header_property_s){.value = value});                \
+       property.name.len;                                                      \
+       property = fio___http_parsed_property_next(property))
 
 /* *****************************************************************************
 HTTP Handle Implementation - possibly externed functions.
@@ -35411,22 +35581,210 @@ WebSocket / SSE Helpers
 ***************************************************************************** */
 
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
-SFUNC int fio_http_websockets_requested(fio_http_s *h);
+SFUNC int fio_http_websockets_requested(fio_http_s *h) {
+  fio_str_info_s val =
+      fio_http_request_header(h, FIO_STR_INFO2("connection", 10), 0);
+  /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
+  if (val.len < 7 || !(((fio_buf2u32_local(val.buf) | 0x32323232UL) ==
+                        fio_buf2u32_local("upgr")) |
+                       ((fio_buf2u32_local(val.buf + 3) | 0x32323232UL) ==
+                        fio_buf2u32_local("rade"))))
+    return 0;
+  /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
+  val = fio_http_request_header(h, FIO_STR_INFO2("upgrade", 7), 0);
+  if (val.len < 7 || !(((fio_buf2u64_local(val.buf) | 0x3232323232323232ULL) ==
+                        fio_buf2u64_local("websocke")) |
+                       ((fio_buf2u32_local(val.buf + 5) | 0x32323232UL) ==
+                        fio_buf2u32_local("cket"))))
+    return 0;
+  val = fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+  if (val.len != 24)
+    return 0;
+  return 1;
+}
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC int fio_http_websockets_set_response(fio_http_s *h);
+SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
+  h->status = 101;
+  /* we ignore client version and force the RFC final version instead */
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2("sec-websocket-version", 21),
+                               FIO_STR_INFO2("13", 2));
+  { /* Sec-WebSocket-Accept */
+    fio_str_info_s k =
+        fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+    FIO_STR_INFO_TMP_VAR(accept_val, 64);
+    if (k.len != 24)
+      goto handshake_error;
+    fio_string_write(&accept_val, NULL, k.buf, k.len);
+    fio_string_write(&accept_val,
+                     NULL,
+                     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                     36);
+    fio_sha1_s sha = fio_sha1(accept_val.buf, accept_val.len);
+    fio_sha1_digest(&sha);
+    accept_val.len = 0;
+    fio_string_write_base64enc(&accept_val,
+                               NULL,
+                               fio_sha1_digest(&sha),
+                               fio_sha1_len(),
+                               0);
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2("sec-websocket-accept", 20),
+                                 accept_val);
+  }
+  fio_http_write(h, .finish = 1);
+  return;
+handshake_error:
+  fio_http_send_error_response(h, 403);
+  return;
+}
 
 /** Sets request data to request a WebSockets Upgrade.*/
 SFUNC void fio_http_websockets_set_request(fio_http_s *h);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_requested(fio_http_s *h);
+SFUNC int fio_http_sse_requested(fio_http_s *h);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_response(fio_http_s *h);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *h);
+
+/* *****************************************************************************
+Header Parsing Helpers - Implementation
+***************************************************************************** */
+
+/**
+ * Assumes a Buffer of bytes containing length info and string data as such:
+ *
+ *   [ 2 byte info: (type | (len << 2)) ]
+ *   [ Optional 2 byte info: (len << 2) (if type was 1)]
+ *   [ String of `len` bytes][ NUL byte (not counted in `len`)]
+ */
+
+FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
+                                                 char *start,
+                                                 char *const end) {
+  for (;;) {
+    char *nxt = FIO_MEMCHR(start, ';', end - start);
+    if (!nxt)
+      nxt = end;
+    char *eq = FIO_MEMCHR(start, '=', nxt - start);
+    if (!eq)
+      eq = nxt;
+    /* write value to dst */
+    size_t len = eq - start;
+    if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
+      return -1; /* too long */
+    fio_u2buf16_local(dst->buf + dst->len,
+                      ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
+    dst->len += 2;
+    if (len)
+      FIO_MEMCPY(dst->buf + dst->len, start, len);
+    dst->len += len;
+    dst->buf[dst->len++] = 0;
+
+    eq += (eq[0] == '=');
+    eq += (eq[0] == ' ' || eq[0] == '\t');
+    len = nxt - eq;
+    if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
+      return -1; /* too long */
+    fio_u2buf16_local(dst->buf + dst->len,
+                      ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
+    dst->len += 2;
+    if (len)
+      FIO_MEMCPY(dst->buf + dst->len, eq, len);
+    dst->len += len;
+    dst->buf[dst->len++] = 0;
+
+    if (nxt == end)
+      return 0;
+    nxt += (*nxt == ';');
+    while (*nxt == ' ' || *nxt == '\t')
+      ++nxt;
+    start = nxt;
+  }
+  return 0;
+}
+
+FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
+                                      fio_str_info_s *dst,
+                                      fio_str_info_s header_name) {
+  fio___http_sary_s *a =
+      fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, header_name));
+  if (!a)
+    return -1;
+  dst->len = 0;
+  if (dst->capa < 3)
+    return -1;
+  dst->buf[dst->len++] = 0; /* first byte is a pretend NUL */
+  FIO_ARRAY_EACH(fio___http_sary, a, pos) {
+    fio_buf_info_s i = fio_bstr_buf(*pos);
+    if (!i.len)
+      continue;
+    char *const end = i.buf + i.len;
+    char *sep;
+    do {
+      sep = FIO_MEMCHR(i.buf, ',', end - i.buf);
+      if (!sep)
+        sep = end;
+      if (dst->len + (end - i.buf) + 2 > dst->capa)
+        return -1;
+      char *prop = FIO_MEMCHR(i.buf, ';', sep - i.buf);
+      if (!prop)
+        prop = sep;
+      size_t len = prop - i.buf;
+      if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
+        return -1; /* too long */
+      fio_u2buf16_local(dst->buf + dst->len, (len << 2));
+      dst->len += 2;
+      FIO_MEMCPY(dst->buf + dst->len, i.buf, len);
+      dst->len += len;
+      dst->buf[dst->len++] = 0;
+      if (prop != sep) { /* TODO! parse properties */
+        ++prop;
+        len = sep - prop;
+        if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
+          return -1;
+        const size_t old_len = dst->len;
+        dst->len += 2;
+        if (fio___http_header_parse_properties(dst, prop, sep))
+          return -1;
+        len = dst->len - old_len;
+        if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
+          return -1;
+        fio_u2buf16_local(
+            dst->buf + old_len,
+            ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN));
+        /* TODO: parse properties */
+      }
+      sep += (*sep == ',');
+      while (*sep == ' ' || *sep == '\t')
+        ++sep;
+      i.buf = sep;
+    } while (sep < end);
+  }
+  if (dst->len + 2 > dst->capa)
+    return -1;
+  /* last u16 must be zero (end marker) */
+  dst->buf[dst->len++] = 0;
+  dst->buf[dst->len++] = 0;
+  return 0;
+}
+
+SFUNC int fio_http_response_header_parse(fio_http_s *h,
+                                         fio_str_info_s *buf_parsed,
+                                         fio_str_info_s header_name) {
+  return fio___http_header_parse(HTTP_HDR_RESPONSE(h), buf_parsed, header_name);
+}
+
+SFUNC int fio_http_request_header_parse(fio_http_s *h,
+                                        fio_str_info_s *buf_parsed,
+                                        fio_str_info_s header_name) {
+  return fio___http_header_parse(HTTP_HDR_REQUEST(h), buf_parsed, header_name);
+}
 
 /* *****************************************************************************
 
@@ -36153,6 +36511,7 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
 #endif
     fio___http_str_cache_destroy(&FIO___HTTP_STRING_CACHE[i].cache);
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
+    (void)names; /* if unused */
   }
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
 }
@@ -36740,10 +37099,10 @@ HTTP Listen
 typedef struct fio_http_settings_s {
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
-  /** Callback for EventSource (SSE) requests. */
-  void (*on_upgrade2sse)(fio_http_s *h);
-  /** Callback for WebSockets Upgrade requests. */
-  void (*on_upgrade2websockets)(fio_http_s *h);
+  /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
+  int (*on_upgrade2sse)(fio_http_s *h);
+  /** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
+  int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
   void (*on_finish)(struct http_settings_s *settings);
   /** Opaque user data. */
@@ -36862,6 +37221,7 @@ HTTP Settings Validation
 ***************************************************************************** */
 
 static void fio___http___mock_noop(fio_http_s *h) { ((void)h); }
+static int fio___http___mock_noop_allow(fio_http_s *h) { ((void)h); }
 static void http___noop_on_finish(struct http_settings_s *settings) {
   ((void)settings);
 }
@@ -36870,9 +37230,9 @@ static void http_settings_validate(fio_http_settings_s *s) {
   if (!s->on_http)
     s->on_http = fio___http___mock_noop;
   if (!s->on_upgrade2websockets)
-    s->on_upgrade2websockets = fio___http___mock_noop;
+    s->on_upgrade2websockets = fio___http___mock_noop_allow;
   if (!s->on_upgrade2sse)
-    s->on_upgrade2sse = fio___http___mock_noop;
+    s->on_upgrade2sse = fio___http___mock_noop_allow;
   if (!s->on_finish)
     s->on_finish = http___noop_on_finish;
   if (!s->max_header_size)
@@ -36988,18 +37348,58 @@ static void http___on_open(int fd, void *udata) {
 HTTP Request handling / handling
 ***************************************************************************** */
 
+FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
+                                              fio_http_connection_s *c) {
+
+  if (fio_http_websockets_requested(h))
+    goto websocket_requested;
+  if (fio_http_sse_requested(h))
+    goto sse_requested;
+  return 0;
+websocket_requested:
+  if (c->settings->on_upgrade2websockets(h))
+    goto deny_upgrade;
+  /* TODO: set WebSocket response headers + send response */
+  /* TODO: feed remaining data in buffer to WebSocket client */
+  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  return -1;
+sse_requested:
+  if (c->settings->on_upgrade2sse(h))
+    goto deny_upgrade;
+  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  return -1;
+#if 0
+http2_requested:
+  // Connection: Upgrade, HTTP2-Settings
+  // Upgrade: h2c
+  // HTTP2-Settings: <base64url encoding of HTTP/2 SETTINGS payload>
+  return 0; /* allowed to ignore upgrade request */
+#endif
+deny_upgrade:
+  fio_http_send_error_response(h, 403);
+  return -1;
+}
+
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio___http_on_http_test4upgrade(h, c))
+    return;
+  c->settings->on_http(h);
   (void)ignr;
 }
 
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio___http_on_http_test4upgrade(h, c))
+    return;
   if (fio_http_static_file_response(h,
                                     c->settings->public_folder,
-                                    fio_http_path(h)))
+                                    fio_http_path(h),
+                                    c->settings->max_age))
     fio___http_on_http_direct(h_, ignr);
+  c->settings->on_http(h);
   return;
 }
 
@@ -37046,6 +37446,7 @@ static void fio_http1_on_complete(void *udata) {
                    ->on_http_callback),
               c->queue[c->qwpos],
               NULL);
+    c->qrpos = (c->qrpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
   }
   c->qwpos = (c->qwpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
 }
@@ -37155,6 +37556,10 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   fio_http_body_write(c->queue[c->qwpos], chunk.buf, chunk.len);
   return 0;
 }
+
+/* *****************************************************************************
+HTTP/1 Controller Callbacks (TODO!)
+***************************************************************************** */
 
 /* *****************************************************************************
 The Protocols at play

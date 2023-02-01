@@ -2226,6 +2226,13 @@ Pointer Tagging
 #endif /* FIO_PUBSUB */
 #endif /* FIO_HTTP */
 
+/* Modules that require SHA-1*/
+#if defined(FIO_HTTP_HANDLE)
+#ifndef FIO_SHA1
+#define FIO_SHA1
+#endif
+#endif /* FIO_HTTP_HANDLE */
+
 /* Modules that require FIO_SERVER */
 #if defined(FIO_PUBSUB) || defined(FIO_HTTP)
 #ifndef FIO_SERVER
@@ -2330,7 +2337,7 @@ Pointer Tagging
 #endif /* FIO_MALLOC */
 
 /* Modules that require FIO_TIME */
-#if defined(FIO_QUEUE) || defined(FIO_RAND)
+#if defined(FIO_QUEUE) || defined(FIO_RAND) || defined(FIO_HTTP_HANDLE)
 #ifndef FIO_TIME
 #define FIO_TIME
 #endif

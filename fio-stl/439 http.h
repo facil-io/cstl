@@ -57,10 +57,10 @@ HTTP Listen
 typedef struct fio_http_settings_s {
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
-  /** Callback for EventSource (SSE) requests. */
-  void (*on_upgrade2sse)(fio_http_s *h);
-  /** Callback for WebSockets Upgrade requests. */
-  void (*on_upgrade2websockets)(fio_http_s *h);
+  /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
+  int (*on_upgrade2sse)(fio_http_s *h);
+  /** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
+  int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
   void (*on_finish)(struct http_settings_s *settings);
   /** Opaque user data. */
@@ -179,6 +179,7 @@ HTTP Settings Validation
 ***************************************************************************** */
 
 static void fio___http___mock_noop(fio_http_s *h) { ((void)h); }
+static int fio___http___mock_noop_allow(fio_http_s *h) { ((void)h); }
 static void http___noop_on_finish(struct http_settings_s *settings) {
   ((void)settings);
 }
@@ -187,9 +188,9 @@ static void http_settings_validate(fio_http_settings_s *s) {
   if (!s->on_http)
     s->on_http = fio___http___mock_noop;
   if (!s->on_upgrade2websockets)
-    s->on_upgrade2websockets = fio___http___mock_noop;
+    s->on_upgrade2websockets = fio___http___mock_noop_allow;
   if (!s->on_upgrade2sse)
-    s->on_upgrade2sse = fio___http___mock_noop;
+    s->on_upgrade2sse = fio___http___mock_noop_allow;
   if (!s->on_finish)
     s->on_finish = http___noop_on_finish;
   if (!s->max_header_size)
@@ -305,18 +306,58 @@ static void http___on_open(int fd, void *udata) {
 HTTP Request handling / handling
 ***************************************************************************** */
 
+FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
+                                              fio_http_connection_s *c) {
+
+  if (fio_http_websockets_requested(h))
+    goto websocket_requested;
+  if (fio_http_sse_requested(h))
+    goto sse_requested;
+  return 0;
+websocket_requested:
+  if (c->settings->on_upgrade2websockets(h))
+    goto deny_upgrade;
+  /* TODO: set WebSocket response headers + send response */
+  /* TODO: feed remaining data in buffer to WebSocket client */
+  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  return -1;
+sse_requested:
+  if (c->settings->on_upgrade2sse(h))
+    goto deny_upgrade;
+  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  return -1;
+#if 0
+http2_requested:
+  // Connection: Upgrade, HTTP2-Settings
+  // Upgrade: h2c
+  // HTTP2-Settings: <base64url encoding of HTTP/2 SETTINGS payload>
+  return 0; /* allowed to ignore upgrade request */
+#endif
+deny_upgrade:
+  fio_http_send_error_response(h, 403);
+  return -1;
+}
+
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio___http_on_http_test4upgrade(h, c))
+    return;
+  c->settings->on_http(h);
   (void)ignr;
 }
 
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  if (fio___http_on_http_test4upgrade(h, c))
+    return;
   if (fio_http_static_file_response(h,
                                     c->settings->public_folder,
-                                    fio_http_path(h)))
+                                    fio_http_path(h),
+                                    c->settings->max_age))
     fio___http_on_http_direct(h_, ignr);
+  c->settings->on_http(h);
   return;
 }
 
@@ -363,6 +404,7 @@ static void fio_http1_on_complete(void *udata) {
                    ->on_http_callback),
               c->queue[c->qwpos],
               NULL);
+    c->qrpos = (c->qrpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
   }
   c->qwpos = (c->qwpos + 1) & (FIO_HTTP_PIPELINE_QUEUE - 1);
 }
@@ -472,6 +514,10 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   fio_http_body_write(c->queue[c->qwpos], chunk.buf, chunk.len);
   return 0;
 }
+
+/* *****************************************************************************
+HTTP/1 Controller Callbacks (TODO!)
+***************************************************************************** */
 
 /* *****************************************************************************
 The Protocols at play

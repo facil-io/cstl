@@ -32,6 +32,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_STREAM_COPY_PER_PACKET 98304
 #endif
 
+#ifndef FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN
+/** If the data added is less than said bytes, copy is preferred (locality). */
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
+#ifdef DEBUG
+#undef FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 8
+#endif
+#endif
+
 /* *****************************************************************************
 Stream API - types, constructor / destructor
 ***************************************************************************** */
@@ -306,7 +315,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
   fio_stream_packet_s *p = NULL;
   if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___TYPE_BITS))))
     goto error;
-  if (copy_buffer || len <= 14) {
+  if (copy_buffer || len < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN) {
     while (len) {
       /* break apart large memory blocks into smaller pieces */
       const size_t slice =
@@ -678,7 +687,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
                            0,
                            FIO_NAME_TEST(stl, stream___noop_dealloc)));
   fio_stream_add(&s, fio_stream_pack_data(str, 20, 60, 0, NULL));
-
+  expect_dealloc += (49 < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN);
   FIO_ASSERT(fio_stream_any(&s), "stream with data shouldn't be empty.");
   FIO_ASSERT(fio_stream_length(&s) == 80, "stream length error.");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
@@ -755,7 +764,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              buf);
 
   fio_stream_destroy(&s);
-  ++expect_dealloc;
+  expect_dealloc += (49 >= FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN);
 
   FIO_ASSERT(!fio_stream_any(&s), "destroyed stream should be empty.");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
