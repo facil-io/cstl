@@ -62,7 +62,7 @@ typedef struct fio_http_settings_s {
   /** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
   int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_finish)(struct http_settings_s *settings);
+  void (*on_finish)(struct fio_http_settings_s *settings);
   /** Opaque user data. */
   void *udata;
   /** Optional SSL/TLS support. */
@@ -179,8 +179,11 @@ HTTP Settings Validation
 ***************************************************************************** */
 
 static void fio___http___mock_noop(fio_http_s *h) { ((void)h); }
-static int fio___http___mock_noop_allow(fio_http_s *h) { ((void)h); }
-static void http___noop_on_finish(struct http_settings_s *settings) {
+static int fio___http___mock_noop_allow(fio_http_s *h) {
+  ((void)h);
+  return 0; /* TODO!: change to -1; */
+}
+static void http___noop_on_finish(struct fio_http_settings_s *settings) {
   ((void)settings);
 }
 
@@ -276,7 +279,7 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    const size_t mask = HTTP_PIPELINE_QUEUE - 1;                               \
+    const size_t mask = FIO_HTTP_PIPELINE_QUEUE - 1;                           \
     while (o.queue[o.qrpos & mask]) {                                          \
       fio_http_free(o.queue[o.qrpos & mask]);                                  \
       o.queue[(o.qrpos++) & mask] = NULL;                                      \

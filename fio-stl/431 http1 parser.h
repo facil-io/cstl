@@ -37,9 +37,9 @@ typedef struct fio_http1_parser_s fio_http1_parser_s;
  *
  * Returns bytes consumed or `FIO_HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
  */
-static size_t fio_http1_parse(fio_http1_parser_s *p,
-                              fio_buf_info_s buf,
-                              void *udata);
+FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
+                                 fio_buf_info_s buf,
+                                 void *udata);
 
 /** The error return value for fio_http1_parse. */
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
@@ -114,9 +114,9 @@ struct fio_http1_parser_s {
   size_t expected;
 };
 
-static size_t fio_http1_parse(fio_http1_parser_s *p,
-                              fio_buf_info_s buf,
-                              void *udata) {
+FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
+                                 fio_buf_info_s buf,
+                                 void *udata) {
   int i = 0;
   char *buf_start = buf.buf;
   if (!buf.len)

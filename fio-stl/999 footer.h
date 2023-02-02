@@ -32,7 +32,6 @@ Everything, and the Kitchen Sink
 #define FIO_BASIC___PRE
 #define FIO_BASIC___POST
 #define FIO_CORE
-#define FIO_SERVER_COMPLETE
 #endif
 
 /* *****************************************************************************
@@ -107,8 +106,7 @@ Server Elements
 #define FIO_MEMORY_NAME        fio___server_mem
 #define FIO_MEMORY_ARENA_COUNT 4
 
-#define FIO_HTTP1_PARSER
-#define FIO_HTTP_HANDLE
+#define FIO_HTTP
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER
