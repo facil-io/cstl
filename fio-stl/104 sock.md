@@ -187,6 +187,14 @@ Creates a new Unix socket and binds it to a local address.
 **Note**: not available on all systems. On Windows, when Unix Sockets are available (which isn't always), the permissions for the socket are system defined (facil.io doesn't change them).
 
 
+#### `fio_sock_maximize_limits`
+
+```c
+size_t fio_sock_maximize_limits(size_t max_limit)
+```
+
+Attempts to maximize the allowed open file limits (with values up to `max_limit`). Returns the new known limit.
+
 #### `FIO_SOCK_AVOID_UMASK`
 
 This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).

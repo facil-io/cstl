@@ -16348,6 +16348,10 @@ FIO_IFUNC int fio_sock_dup(int original) {
 Socket OS abstraction - API
 ***************************************************************************** */
 
+#ifndef FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT
+#define FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT (1ULL << 24)
+#endif
+
 /** Socket type flags */
 typedef enum {
   FIO_SOCK_SERVER = 0,
@@ -16404,7 +16408,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags);
 SFUNC int fio_sock_set_non_block(int fd);
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
-SFUNC size_t fio_sock_maximize_limits(void);
+SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
 
 /**
  * Returns 0 on timeout, -1 on error or the events that are valid.
@@ -16760,8 +16764,10 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
 }
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
-SFUNC size_t fio_sock_maximize_limits(void) {
+SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
   ssize_t capa = 0;
+  if (!max_limit)
+    max_limit = FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT;
 #if FIO_OS_POSIX
 
 #ifdef _SC_OPEN_MAX
@@ -16780,8 +16786,15 @@ SFUNC size_t fio_sock_maximize_limits(void) {
                  (ssize_t)rlim.rlim_cur,
                  (ssize_t)rlim.rlim_max);
 
+  if (rlim.rlim_cur >= max_limit) {
+    FIO_LOG_DEBUG2("open file limit can't be maximized any further (%zd / %zu)",
+                   (ssize_t)rlim.rlim_cur,
+                   max_limit);
+    return rlim.rlim_cur;
+  }
+
   rlim_t original = rlim.rlim_cur;
-  rlim.rlim_cur = rlim.rlim_max;
+  rlim.rlim_cur = rlim.rlim_max > max_limit ? max_limit : rlim.rlim_max;
   while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
     rlim.rlim_cur >>= 1;
 
@@ -31303,7 +31316,7 @@ SFUNC void fio_srv_start(int workers) {
   fio___srvdata.workers = fio_srv_workers(workers);
   workers = (int)fio___srvdata.workers;
   fio___srvdata.is_worker = !workers;
-  fio_sock_maximize_limits();
+  fio_sock_maximize_limits(0);
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(fio___srv_tasks);
   fio_signal_monitor(SIGINT,
@@ -34204,6 +34217,10 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
+HTTP Body Parsing Helpers (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
 Header Parsing Helpers
 ***************************************************************************** */
 
@@ -34216,7 +34233,7 @@ Header Parsing Helpers
  *
  * Note that the parsed output isn't readable as a string, but is designed to
  * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
  *
  * See also `fio_http_response_header_parse`.
  */
@@ -34233,7 +34250,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  *
  * Note that the parsed output isn't readable as a string, but is designed to
  * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
  *
  * i.e.:
  *
@@ -34252,7 +34269,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  *      "parse returned error!");
  *  FIO_HTTP_PARSED_HEADER_EACH(buf, value) {
  *    printf("* processing value (%zu bytes): %s\n", value.len, value.buf);
- *    FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, prop) {
+ *    FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, prop) {
  *      printf("* for value %s: (%zu,%zu bytes) %s = %s\n",
  *             value.buf,
  *             prop.name.len,
@@ -34267,13 +34284,42 @@ SFUNC int fio_http_request_header_parse(fio_http_s *h,
                                         fio_str_info_s *buf_parsed,
                                         fio_str_info_s header_name);
 
-/** Iterated through the header values in a parsed header buffer. */
-#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
-                                    /* chosen var named */ value)
+/**
+ * Parses header for multiple values and properties and iterates over all
+ * values.
+ *
+ * This MACRO will allocate 2048 bytes on the stack for parsing the header
+ * values and properties, if more space is necessary dig deeper.
+ *
+ * Use FIO_HTTP_HEADER_VALUE_EACH_PROPERTY to iterate over a value's properties.
+ */
+#define FIO_HTTP_HEADER_EACH_VALUE(/* fio_http_s */ http_handle,               \
+                                   /* int / bool */ is_request,                \
+                                   /* fio_str_info_s */ header_name,           \
+                                   /* chosen var named */ value)               \
+  for (char fio___buf__##value##__[2048], /* allocate buffer on stack */       \
+           *fio___buf__##value##_ptr = NULL;                                   \
+       !fio___buf__##value##_ptr;                                              \
+       fio___buf__##value##_ptr = fio___buf__##value##__)                      \
+    for (fio_str_info_s fio___buf__##value##__str = /* declare buffer var */   \
+         FIO_STR_INFO3(fio___buf__##value##__, 0, 2048);                       \
+         fio___buf__##value##__str.buf == fio___buf__##value##__;              \
+         fio___buf__##value##__str.buf = fio___buf__##value##__ + 1)           \
+      if (!((is_request ? fio_http_request_header_parse                        \
+                        : fio_http_response_header_parse)(                     \
+              http_handle, /* parse headers */                                 \
+              &fio___buf__##value##__str,                                      \
+              header_name)))                                                   \
+  FIO_HTTP_PARSED_HEADER_EACH(fio___buf__##value##__str, value) /* loop        \
+                                                                 */
 
 /** Iterated through the properties associated with a parsed header values. */
-#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(/* fio_str_info_s   */ value,     \
-                                             /* chosen var named */ property)
+#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(/* fio_str_info_s   */ value,      \
+                                            /* chosen var named */ property)
+
+/** Used internally to iterate over a parsed header buffer. */
+#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
+                                    /* chosen var named */ value)
 
 /* *****************************************************************************
 General Helpers
@@ -34432,8 +34478,8 @@ fio___http_parsed_property_next(fio___http_header_property_s property) {
        value.len;                                                              \
        value = fio___http_parsed_headers_next(value))
 
-#undef FIO_HTTP_PARSED_HEADER_EACH_PROPERTY
-#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, property)                  \
+#undef FIO_HTTP_HEADER_VALUE_EACH_PROPERTY
+#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, property)                   \
   for (fio___http_header_property_s property =                                 \
            fio___http_parsed_property_next(                                    \
                (fio___http_header_property_s){.value = value});                \
@@ -35644,7 +35690,11 @@ handshake_error:
 SFUNC void fio_http_websockets_set_request(fio_http_s *h);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
-SFUNC int fio_http_sse_requested(fio_http_s *h);
+SFUNC int fio_http_sse_requested(fio_http_s *h) {
+  /* TODO! */
+  return 0;
+  (void)h;
+}
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_response(fio_http_s *h);
@@ -35730,8 +35780,6 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
       sep = FIO_MEMCHR(i.buf, ',', end - i.buf);
       if (!sep)
         sep = end;
-      if (dst->len + (end - i.buf) + 2 > dst->capa)
-        return -1;
       char *prop = FIO_MEMCHR(i.buf, ';', sep - i.buf);
       if (!prop)
         prop = sep;
@@ -36573,9 +36621,9 @@ typedef struct fio_http1_parser_s fio_http1_parser_s;
  *
  * Returns bytes consumed or `FIO_HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
  */
-static size_t fio_http1_parse(fio_http1_parser_s *p,
-                              fio_buf_info_s buf,
-                              void *udata);
+FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
+                                 fio_buf_info_s buf,
+                                 void *udata);
 
 /** The error return value for fio_http1_parse. */
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
@@ -36650,9 +36698,9 @@ struct fio_http1_parser_s {
   size_t expected;
 };
 
-static size_t fio_http1_parse(fio_http1_parser_s *p,
-                              fio_buf_info_s buf,
-                              void *udata) {
+FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
+                                 fio_buf_info_s buf,
+                                 void *udata) {
   int i = 0;
   char *buf_start = buf.buf;
   if (!buf.len)
@@ -37104,7 +37152,7 @@ typedef struct fio_http_settings_s {
   /** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
   int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_finish)(struct http_settings_s *settings);
+  void (*on_finish)(struct fio_http_settings_s *settings);
   /** Opaque user data. */
   void *udata;
   /** Optional SSL/TLS support. */
@@ -37221,8 +37269,11 @@ HTTP Settings Validation
 ***************************************************************************** */
 
 static void fio___http___mock_noop(fio_http_s *h) { ((void)h); }
-static int fio___http___mock_noop_allow(fio_http_s *h) { ((void)h); }
-static void http___noop_on_finish(struct http_settings_s *settings) {
+static int fio___http___mock_noop_allow(fio_http_s *h) {
+  ((void)h);
+  return 0; /* TODO!: change to -1; */
+}
+static void http___noop_on_finish(struct fio_http_settings_s *settings) {
   ((void)settings);
 }
 
@@ -37318,7 +37369,7 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    const size_t mask = HTTP_PIPELINE_QUEUE - 1;                               \
+    const size_t mask = FIO_HTTP_PIPELINE_QUEUE - 1;                           \
     while (o.queue[o.qrpos & mask]) {                                          \
       fio_http_free(o.queue[o.qrpos & mask]);                                  \
       o.queue[(o.qrpos++) & mask] = NULL;                                      \
@@ -41009,7 +41060,6 @@ Everything, and the Kitchen Sink
 #define FIO_BASIC___PRE
 #define FIO_BASIC___POST
 #define FIO_CORE
-#define FIO_SERVER_COMPLETE
 #endif
 
 /* *****************************************************************************
@@ -41084,8 +41134,7 @@ Server Elements
 #define FIO_MEMORY_NAME        fio___server_mem
 #define FIO_MEMORY_ARENA_COUNT 4
 
-#define FIO_HTTP1_PARSER
-#define FIO_HTTP_HANDLE
+#define FIO_HTTP
 #define FIO_PUBSUB
 #define FIO_QUEUE
 #define FIO_SERVER

@@ -487,6 +487,10 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
+HTTP Body Parsing Helpers (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
 Header Parsing Helpers
 ***************************************************************************** */
 
@@ -499,7 +503,7 @@ Header Parsing Helpers
  *
  * Note that the parsed output isn't readable as a string, but is designed to
  * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
  *
  * See also `fio_http_response_header_parse`.
  */
@@ -516,7 +520,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  *
  * Note that the parsed output isn't readable as a string, but is designed to
  * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_PARSED_HEADER_EACH_PROPERTY` property.
+ * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
  *
  * i.e.:
  *
@@ -535,7 +539,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  *      "parse returned error!");
  *  FIO_HTTP_PARSED_HEADER_EACH(buf, value) {
  *    printf("* processing value (%zu bytes): %s\n", value.len, value.buf);
- *    FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, prop) {
+ *    FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, prop) {
  *      printf("* for value %s: (%zu,%zu bytes) %s = %s\n",
  *             value.buf,
  *             prop.name.len,
@@ -550,13 +554,42 @@ SFUNC int fio_http_request_header_parse(fio_http_s *h,
                                         fio_str_info_s *buf_parsed,
                                         fio_str_info_s header_name);
 
-/** Iterated through the header values in a parsed header buffer. */
-#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
-                                    /* chosen var named */ value)
+/**
+ * Parses header for multiple values and properties and iterates over all
+ * values.
+ *
+ * This MACRO will allocate 2048 bytes on the stack for parsing the header
+ * values and properties, if more space is necessary dig deeper.
+ *
+ * Use FIO_HTTP_HEADER_VALUE_EACH_PROPERTY to iterate over a value's properties.
+ */
+#define FIO_HTTP_HEADER_EACH_VALUE(/* fio_http_s */ http_handle,               \
+                                   /* int / bool */ is_request,                \
+                                   /* fio_str_info_s */ header_name,           \
+                                   /* chosen var named */ value)               \
+  for (char fio___buf__##value##__[2048], /* allocate buffer on stack */       \
+           *fio___buf__##value##_ptr = NULL;                                   \
+       !fio___buf__##value##_ptr;                                              \
+       fio___buf__##value##_ptr = fio___buf__##value##__)                      \
+    for (fio_str_info_s fio___buf__##value##__str = /* declare buffer var */   \
+         FIO_STR_INFO3(fio___buf__##value##__, 0, 2048);                       \
+         fio___buf__##value##__str.buf == fio___buf__##value##__;              \
+         fio___buf__##value##__str.buf = fio___buf__##value##__ + 1)           \
+      if (!((is_request ? fio_http_request_header_parse                        \
+                        : fio_http_response_header_parse)(                     \
+              http_handle, /* parse headers */                                 \
+              &fio___buf__##value##__str,                                      \
+              header_name)))                                                   \
+  FIO_HTTP_PARSED_HEADER_EACH(fio___buf__##value##__str, value) /* loop        \
+                                                                 */
 
 /** Iterated through the properties associated with a parsed header values. */
-#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(/* fio_str_info_s   */ value,     \
-                                             /* chosen var named */ property)
+#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(/* fio_str_info_s   */ value,      \
+                                            /* chosen var named */ property)
+
+/** Used internally to iterate over a parsed header buffer. */
+#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
+                                    /* chosen var named */ value)
 
 /* *****************************************************************************
 General Helpers
@@ -715,8 +748,8 @@ fio___http_parsed_property_next(fio___http_header_property_s property) {
        value.len;                                                              \
        value = fio___http_parsed_headers_next(value))
 
-#undef FIO_HTTP_PARSED_HEADER_EACH_PROPERTY
-#define FIO_HTTP_PARSED_HEADER_EACH_PROPERTY(value, property)                  \
+#undef FIO_HTTP_HEADER_VALUE_EACH_PROPERTY
+#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, property)                   \
   for (fio___http_header_property_s property =                                 \
            fio___http_parsed_property_next(                                    \
                (fio___http_header_property_s){.value = value});                \
@@ -1927,7 +1960,11 @@ handshake_error:
 SFUNC void fio_http_websockets_set_request(fio_http_s *h);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
-SFUNC int fio_http_sse_requested(fio_http_s *h);
+SFUNC int fio_http_sse_requested(fio_http_s *h) {
+  /* TODO! */
+  return 0;
+  (void)h;
+}
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_response(fio_http_s *h);
@@ -2013,8 +2050,6 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
       sep = FIO_MEMCHR(i.buf, ',', end - i.buf);
       if (!sep)
         sep = end;
-      if (dst->len + (end - i.buf) + 2 > dst->capa)
-        return -1;
       char *prop = FIO_MEMCHR(i.buf, ';', sep - i.buf);
       if (!prop)
         prop = sep;

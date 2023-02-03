@@ -37,8 +37,9 @@ Used facil.io Modules
 // #define FIO_USE_THREAD_MUTEX 1
 // #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 #define FIO_LEAK_COUNTER 1
-#define FIO_EVERYTHING
+#define FIO_BASIC
 #include "fio-stl/include.h"
+#define FIO_SERVER
 #define FIO_HTTP1_PARSER
 #define FIO_HTTP_HANDLE
 #include FIO_INCLUDE_FILE

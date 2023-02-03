@@ -1423,7 +1423,7 @@ SFUNC void fio_srv_start(int workers) {
   fio___srvdata.workers = fio_srv_workers(workers);
   workers = (int)fio___srvdata.workers;
   fio___srvdata.is_worker = !workers;
-  fio_sock_maximize_limits();
+  fio_sock_maximize_limits(0);
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(fio___srv_tasks);
   fio_signal_monitor(SIGINT,

@@ -104,6 +104,10 @@ FIO_IFUNC int fio_sock_dup(int original) {
 Socket OS abstraction - API
 ***************************************************************************** */
 
+#ifndef FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT
+#define FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT (1ULL << 24)
+#endif
+
 /** Socket type flags */
 typedef enum {
   FIO_SOCK_SERVER = 0,
@@ -160,7 +164,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags);
 SFUNC int fio_sock_set_non_block(int fd);
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
-SFUNC size_t fio_sock_maximize_limits(void);
+SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
 
 /**
  * Returns 0 on timeout, -1 on error or the events that are valid.
@@ -516,8 +520,10 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
 }
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
-SFUNC size_t fio_sock_maximize_limits(void) {
+SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
   ssize_t capa = 0;
+  if (!max_limit)
+    max_limit = FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT;
 #if FIO_OS_POSIX
 
 #ifdef _SC_OPEN_MAX
@@ -536,8 +542,15 @@ SFUNC size_t fio_sock_maximize_limits(void) {
                  (ssize_t)rlim.rlim_cur,
                  (ssize_t)rlim.rlim_max);
 
+  if (rlim.rlim_cur >= max_limit) {
+    FIO_LOG_DEBUG2("open file limit can't be maximized any further (%zd / %zu)",
+                   (ssize_t)rlim.rlim_cur,
+                   max_limit);
+    return rlim.rlim_cur;
+  }
+
   rlim_t original = rlim.rlim_cur;
-  rlim.rlim_cur = rlim.rlim_max;
+  rlim.rlim_cur = rlim.rlim_max > max_limit ? max_limit : rlim.rlim_max;
   while (setrlimit(RLIMIT_NOFILE, &rlim) == -1 && rlim.rlim_cur > original)
     rlim.rlim_cur >>= 1;
 
