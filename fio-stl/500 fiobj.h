@@ -51,14 +51,30 @@ Type Naming Macros for FIOBJ types. By default, results in:
 - fiobj_hash_new() ... (etc')
 ***************************************************************************** */
 
-#define FIOBJ___NAME_TRUE   true
-#define FIOBJ___NAME_FALSE  false
-#define FIOBJ___NAME_NULL   null
+#ifndef FIOBJ___NAME_TRUE
+#define FIOBJ___NAME_TRUE true
+#endif
+#ifndef FIOBJ___NAME_FALSE
+#define FIOBJ___NAME_FALSE false
+#endif
+#ifndef FIOBJ___NAME_NULL
+#define FIOBJ___NAME_NULL null
+#endif
+#ifndef FIOBJ___NAME_NUMBER
 #define FIOBJ___NAME_NUMBER num
-#define FIOBJ___NAME_FLOAT  float
+#endif
+#ifndef FIOBJ___NAME_FLOAT
+#define FIOBJ___NAME_FLOAT float
+#endif
+#ifndef FIOBJ___NAME_STRING
 #define FIOBJ___NAME_STRING str
-#define FIOBJ___NAME_ARRAY  array
-#define FIOBJ___NAME_HASH   hash
+#endif
+#ifndef FIOBJ___NAME_ARRAY
+#define FIOBJ___NAME_ARRAY array
+#endif
+#ifndef FIOBJ___NAME_HASH
+#define FIOBJ___NAME_HASH hash
+#endif
 
 #ifndef FIOBJ_MAX_NESTING
 /**

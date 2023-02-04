@@ -6442,6 +6442,44 @@ FIO_IFUNC_T fio_thread_t fio_thread_current(void);
 /** Yields thread execution. */
 FIO_IFUNC_T void fio_thread_yield(void);
 
+/** Possible thread priority values. */
+typedef enum {
+  FIO_THREAD_PRIORITY_ERROR = -1,
+  FIO_THREAD_PRIORITY_LOWEST = 0,
+  FIO_THREAD_PRIORITY_LOW,
+  FIO_THREAD_PRIORITY_NORMAL,
+  FIO_THREAD_PRIORITY_HIGH,
+  FIO_THREAD_PRIORITY_HIGHEST,
+} fio_thread_priority_e;
+
+/** Returns a thread's priority level. */
+FIO_SFUNC fio_thread_priority_e fio_thread_priority(void);
+
+/** Sets a thread's priority level. */
+FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e);
+
+// THREAD_PRIORITY_ABOVE_NORMAL
+// 1
+// Priority 1 point above the priority class.
+// THREAD_PRIORITY_BELOW_NORMAL
+// -1
+// Priority 1 point below the priority class.
+// THREAD_PRIORITY_HIGHEST
+// 2
+// Priority 2 points above the priority class.
+// THREAD_PRIORITY_IDLE
+// -15
+// Base priority of 1 for IDLE_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
+// NORMAL_PRIORITY_CLASS, ABOVE_NORMAL_PRIORITY_CLASS, or HIGH_PRIORITY_CLASS
+// processes, and a base priority of 16 for REALTIME_PRIORITY_CLASS processes.
+// THREAD_PRIORITY_LOWEST
+// -2
+// Priority 2 points below the priority class.
+// THREAD_PRIORITY_NORMAL
+// 0
+// Normal priority for the priority class.
+// THREAD_PRIORITY_TIME_CRITICAL
+
 /**
  * Initializes a simple Mutex.
  *
@@ -6525,8 +6563,89 @@ FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { sched_yield(); }
-
 #endif /* FIO_THREADS_BYO */
+
+
+#if defined(__APPLE__) &&  __has_include("sys/qos.h") /* MacOS with QoS */
+#include "sys/qos.h"
+
+/** Returns a thread's priority level. */
+FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
+  qos_class_t qos;
+  int rel;
+  if(pthread_get_qos_class_np(pthread_self(), &qos, &rel)) return FIO_THREAD_PRIORITY_ERROR;
+  switch(qos) {
+  case QOS_CLASS_BACKGROUND:       return FIO_THREAD_PRIORITY_LOWEST;
+  case QOS_CLASS_UTILITY:          return FIO_THREAD_PRIORITY_LOW;
+  case QOS_CLASS_DEFAULT:          return FIO_THREAD_PRIORITY_NORMAL;
+  case QOS_CLASS_UNSPECIFIED:      return FIO_THREAD_PRIORITY_NORMAL;
+  case QOS_CLASS_USER_INITIATED:   return FIO_THREAD_PRIORITY_HIGH;
+  case QOS_CLASS_USER_INTERACTIVE: return FIO_THREAD_PRIORITY_HIGHEST;
+  }
+  return FIO_THREAD_PRIORITY_ERROR;
+}
+
+/** Sets a thread's priority level. */
+FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
+  // pthread_get_qos_class_np(pthread_t  _Nonnull __pthread, qos_class_t * _Nullable __qos_class, int * _Nullable __relative_priority)
+  qos_class_t qos = QOS_CLASS_DEFAULT;
+  int rel = 0;
+  switch(pr) {
+  case FIO_THREAD_PRIORITY_LOWEST:  qos = QOS_CLASS_BACKGROUND;       rel = -4; break;
+  case FIO_THREAD_PRIORITY_LOW:     qos = QOS_CLASS_UTILITY;          rel = -2; break;
+  case FIO_THREAD_PRIORITY_NORMAL:  qos = QOS_CLASS_DEFAULT;          rel = 0; break;
+  case FIO_THREAD_PRIORITY_HIGH:    qos = QOS_CLASS_USER_INITIATED;   rel = 2; break;
+  case FIO_THREAD_PRIORITY_HIGHEST: qos = QOS_CLASS_USER_INTERACTIVE; rel = 4; break;
+  case FIO_THREAD_PRIORITY_ERROR:   qos = QOS_CLASS_DEFAULT;          rel = 0; break;
+  }
+  return pthread_set_qos_class_self_np(qos, rel);
+}
+
+#else /* portable POSIX */
+
+/** Returns a thread's priority level. */
+FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
+  int policy;
+  struct sched_param schd;
+  if(pthread_getschedparam(pthread_self(), &policy, &schd))
+    return FIO_THREAD_PRIORITY_ERROR;
+  int min = sched_get_priority_min(policy);
+  int max = sched_get_priority_max(policy);
+  size_t steps = (size_t)(max - min) / 5;
+  size_t priority_value = (schd.sched_priority - min);
+  if(steps) priority_value /= steps;
+  switch(priority_value) {
+  case 0: return FIO_THREAD_PRIORITY_LOWEST;
+  case 1: return FIO_THREAD_PRIORITY_LOW;  
+  case 2: return FIO_THREAD_PRIORITY_NORMAL;  
+  case 3: return FIO_THREAD_PRIORITY_HIGH;  
+  case 4: return FIO_THREAD_PRIORITY_HIGHEST;  
+  }
+  return FIO_THREAD_PRIORITY_ERROR;
+}
+
+/** Sets a thread's priority level. */
+FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e priority_value) {
+  int policy;
+  struct sched_param schd;
+  if(pthread_getschedparam(pthread_self(), &policy, &schd))
+    return -1;
+  int min = sched_get_priority_min(policy);
+  int max = sched_get_priority_max(policy);
+  size_t steps = (size_t)(max - min) / 5;
+  switch(priority_value) {
+  case FIO_THREAD_PRIORITY_LOWEST:  schd.sched_priority = min + steps; break;
+  case FIO_THREAD_PRIORITY_LOW:     schd.sched_priority = min + (steps << 1); break; 
+  case FIO_THREAD_PRIORITY_NORMAL:  schd.sched_priority = max - (steps << 1); break; 
+  case FIO_THREAD_PRIORITY_HIGH:    schd.sched_priority = max - steps; break; 
+  case FIO_THREAD_PRIORITY_HIGHEST: schd.sched_priority = max; break; 
+  case FIO_THREAD_PRIORITY_ERROR: return -1;
+  }
+  return pthread_setschedparam(pthread_self(), policy, &schd);
+}
+
+#endif /* MacOS vs. portable POSIX */
+
 #ifndef FIO_THREADS_MUTEX_BYO
 
 /** Initializes a simple Mutex. */
@@ -6626,6 +6745,33 @@ FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }
 FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
 
 #endif /* FIO_THREADS_BYO */
+
+/** Returns a thread's priority level. */
+FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
+  switch(GetThreadPriority(GetCurrentThread())) {
+  case THREAD_PRIORITY_LOWEST:       return FIO_THREAD_PRIORITY_LOWEST;
+  case THREAD_PRIORITY_BELOW_NORMAL: return FIO_THREAD_PRIORITY_LOW;
+  case THREAD_PRIORITY_NORMAL:       return FIO_THREAD_PRIORITY_NORMAL;
+  case THREAD_PRIORITY_ABOVE_NORMAL: return FIO_THREAD_PRIORITY_HIGH;
+  case THREAD_PRIORITY_HIGHEST:      return FIO_THREAD_PRIORITY_HIGHEST;
+  default:                           return FIO_THREAD_PRIORITY_ERROR;
+  }
+}
+
+/** Sets a thread's priority level. */
+FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
+  int    priority;
+  switch(pr){
+  case FIO_THREAD_PRIORITY_ERROR: return -1;
+  case FIO_THREAD_PRIORITY_LOWEST:  priority = THREAD_PRIORITY_LOWEST; break;
+  case FIO_THREAD_PRIORITY_LOW:     priority = THREAD_PRIORITY_BELOW_NORMAL; break;
+  case FIO_THREAD_PRIORITY_NORMAL:  priority = THREAD_PRIORITY_NORMAL; break;
+  case FIO_THREAD_PRIORITY_HIGH:    priority = THREAD_PRIORITY_ABOVE_NORMAL; break;
+  case FIO_THREAD_PRIORITY_HIGHEST: priority = THREAD_PRIORITY_HIGHEST; break;
+  }
+  return 0 - !SetThreadPriority(GetCurrentThread(), priority);
+}
+
 #ifndef FIO_THREADS_MUTEX_BYO
 
 SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
@@ -37695,14 +37841,30 @@ Type Naming Macros for FIOBJ types. By default, results in:
 - fiobj_hash_new() ... (etc')
 ***************************************************************************** */
 
-#define FIOBJ___NAME_TRUE   true
-#define FIOBJ___NAME_FALSE  false
-#define FIOBJ___NAME_NULL   null
+#ifndef FIOBJ___NAME_TRUE
+#define FIOBJ___NAME_TRUE true
+#endif
+#ifndef FIOBJ___NAME_FALSE
+#define FIOBJ___NAME_FALSE false
+#endif
+#ifndef FIOBJ___NAME_NULL
+#define FIOBJ___NAME_NULL null
+#endif
+#ifndef FIOBJ___NAME_NUMBER
 #define FIOBJ___NAME_NUMBER num
-#define FIOBJ___NAME_FLOAT  float
+#endif
+#ifndef FIOBJ___NAME_FLOAT
+#define FIOBJ___NAME_FLOAT float
+#endif
+#ifndef FIOBJ___NAME_STRING
 #define FIOBJ___NAME_STRING str
-#define FIOBJ___NAME_ARRAY  array
-#define FIOBJ___NAME_HASH   hash
+#endif
+#ifndef FIOBJ___NAME_ARRAY
+#define FIOBJ___NAME_ARRAY array
+#endif
+#ifndef FIOBJ___NAME_HASH
+#define FIOBJ___NAME_HASH hash
+#endif
 
 #ifndef FIOBJ_MAX_NESTING
 /**

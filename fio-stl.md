@@ -1914,6 +1914,34 @@ void fio_thread_yield(void);
 
 Yields thread execution.
 
+#### `fio_thread_priority`
+
+```c
+fio_thread_priority_e fio_thread_priority(void);
+```
+
+Returns the current thread's priority level as a `fio_thread_priority_e` enum.
+
+```c
+/** Possible thread priority values. */
+typedef enum {
+  FIO_THREAD_PRIORITY_ERROR = -1,
+  FIO_THREAD_PRIORITY_LOWEST = 0,
+  FIO_THREAD_PRIORITY_LOW,
+  FIO_THREAD_PRIORITY_NORMAL,
+  FIO_THREAD_PRIORITY_HIGH,
+  FIO_THREAD_PRIORITY_HIGHEST,
+} fio_thread_priority_e;
+```
+
+#### `fio_thread_priority_set`
+
+```c
+int fio_thread_priority_set(fio_thread_priority_e pr);
+```
+
+Sets the current thread's priority level as a `fio_thread_priority_e` enum (see [`fio_thread_priority`](#fio_thread_priority)).
+
 ### Mutex functions
 
 #### `FIO_THREADS_MUTEX_BYO`
