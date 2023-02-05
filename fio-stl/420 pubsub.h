@@ -1081,8 +1081,7 @@ error:
 }
 
 /* *****************************************************************************
-Remote Letter Processing - validate unique
-delivery.
+Remote Letter Processing - validate unique delivery.
 ***************************************************************************** */
 
 #define FIO_OMAP_NAME  fio___letter_map
@@ -1107,6 +1106,23 @@ FIO_SFUNC void fio___on_letter_remote(fio_letter_s *l) {
   fio___letter_map_set(&fio___letter_validation.map, hash, letter_id);
   fio___letter_on_recieved_root(l);
 }
+
+/* *****************************************************************************
+Letter Protocol - Handshake Callbacks (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
+Letter Protocol - Handshake Callbacks (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
 
 /* *****************************************************************************
 Letter Protocol Callbacks

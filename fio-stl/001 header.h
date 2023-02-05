@@ -55,7 +55,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 
 #ifndef __has_include
 #define __has_include(...) 0
-#define GNUC_BYPASS 1
+#define GNUC_BYPASS        1
 #endif
 
 #if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 5))
@@ -75,7 +75,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if _MSC_VER
-#define inline __inline
+#define inline   __inline
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_local
@@ -2313,7 +2313,8 @@ Pointer Tagging
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_VALUE) && !defined(FIO_MAP_KEY)) ||                       \
-    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER) || defined(FIO_FIOBJ)
+    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_HTTP_HANDLE) ||                 \
+    defined(FIO_SERVER) || defined(FIO_FIOBJ)
 #ifndef FIO_STR
 #define FIO_STR
 #endif

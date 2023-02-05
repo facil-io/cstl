@@ -715,13 +715,13 @@ static struct {
 Wakeup Protocol
 ***************************************************************************** */
 
-static void fio___srv_wakeup_cb(fio_s *io) {
+FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   fio_sock_read(fio_fd_get(io), buf, 512);
   (void)(io);
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
 }
-static void fio___srv_wakeup_on_close(void *ignr_) {
+FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
   fio_sock_close(fio___srvdata.wakeup_fd);
   fio___srvdata.wakeup = NULL;
@@ -737,7 +737,7 @@ FIO_SFUNC void fio___srv_wakeup(void) {
   (void)ignr;
 }
 
-FIO_SFUNC fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
+static fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
     .on_data = fio___srv_wakeup_cb,
     .on_close = fio___srv_wakeup_on_close,
     .on_timeout = fio___srv_on_timeout_never,

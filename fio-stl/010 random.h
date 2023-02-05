@@ -39,6 +39,15 @@ IFUNC void fio_rand_reseed(void);
 Risky / Stable Hash - API
 ***************************************************************************** */
 
+/** Computes a facil.io Risky Hash (Risky v.3). */
+SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
+
+/** Adds a bit of entropy to pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
+
+/** Adds a bit of entropy to numeral values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_num(uint64_t number, uint64_t seed);
+
 /** Computes a facil.io Stable Hash (will not be updated, even if broken). */
 SFUNC uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 
@@ -47,12 +56,6 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               const void *restrict data,
                               size_t len,
                               uint64_t seed);
-
-/** Computes a facil.io Risky Hash (Risky v.3). */
-SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
-
-/** Adds bit of entropy to pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
  * Masks data using using `fio_xmask2` with sensible defaults for the key and
@@ -106,6 +109,18 @@ Here's a few resources about hashes that might explain more:
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   uint64_t n = (uint64_t)(uintptr_t)ptr;
   n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n ^= fio_rrot64(n, 7);
+  n ^= fio_rrot64(n, 13);
+  n ^= fio_rrot64(n, 17);
+  n ^= fio_rrot64(n, 31);
+  return n;
+}
+
+/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
+  n += seed;
+  n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n += seed;
   n ^= fio_rrot64(n, 7);
   n ^= fio_rrot64(n, 13);
   n ^= fio_rrot64(n, 17);
@@ -399,22 +414,19 @@ IFUNC void fio_rand_reseed(void) {
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
-    uint64_t clk = (uint64_t)fio_time_nano();
-    fio___rand_state[0] ^=
-        fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
-    clk = fio_time_nano();
-    fio___rand_state[1] ^=
-        fio_risky_hash(&clk,
-                       sizeof(clk),
-                       fio___rand_state[1] + fio___rand_counter);
+    uint64_t clk = (uint64_t)fio_time_nano() + fio___rand_counter;
+    fio___rand_state[0] ^= fio_risky_num(clk, fio___rand_state[0] + i);
+    clk = fio_time_nano() ^ fio___rand_counter;
+    fio___rand_state[1] ^= fio_risky_num(clk, fio___rand_state[1] + i);
   }
-  fio___rand_state[2] ^=
-      fio_risky_hash((void *)fio___rand_buffer,
-                     sizeof(fio___rand_buffer),
-                     fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
-                                        sizeof(fio___rand_state),
-                                        fio___rand_state[1] + jitter_samples);
+  {
+    fio___rand_state[2] ^=
+        fio_risky_num(fio___rand_buffer[0], fio___rand_state[0]) +
+        fio_risky_num(fio___rand_buffer[1], fio___rand_state[1]);
+    fio___rand_state[3] ^=
+        fio_risky_num(fio___rand_buffer[2], fio___rand_state[0]) +
+        fio_risky_num(fio___rand_buffer[3], fio___rand_state[1]);
+  }
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
   fio___rand_buffer[2] ^= fio___rand_buffer[0];
@@ -426,7 +438,7 @@ IFUNC void fio_rand_reseed(void) {
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
   const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
-  if (((fio___rand_counter++) & (((size_t)1 << 19) - 1)) == 0) {
+  if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
@@ -659,6 +671,47 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
   return fio_risky2_hash(buf, len, 1);
 }
 
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  do {
+    h[0] += fio_risky_ptr((void *)fio_buf2u64_local(buf));
+    h[1] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 8));
+    h[2] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 16));
+    h[3] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 24));
+    len -= 32;
+  } while (len > 31);
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_ptr((void *)t[0]);
+    h[1] += fio_risky_ptr((void *)t[1]);
+    h[2] += fio_risky_ptr((void *)t[2]);
+    h[3] += fio_risky_ptr((void *)t[3]);
+  }
+  return h[0] + h[1] + h[2] + h[3];
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  do {
+    h[0] += fio_risky_num(fio_buf2u64_local(buf), 0);
+    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), 0);
+    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), 0);
+    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), 0);
+    len -= 32;
+  } while (len > 31);
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_num(t[0], 0);
+    h[1] += fio_risky_num(t[1], 0);
+    h[2] += fio_risky_num(t[2], 0);
+    h[3] += fio_risky_num(t[3], 0);
+  }
+  return h[0] + h[1] + h[2] + h[3];
+}
+
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
                                                            size_t len) {
   fio_risky_mask(buf, len);
@@ -758,6 +811,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          3,
                          2);
   fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_ptr_wrapper),
+                         (char *)"fio_risky_ptr (emulated)",
+                         7,
+                         0,
+                         2);
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         7,
+                         0,
+                         2);
+
+  fprintf(stderr, "\n");
+
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
@@ -875,7 +942,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   fprintf(stderr,
           "* Testing randomness "
           "- bit frequency / hemming distance / chi-square.\n");
-  const size_t test_len = (FIO_TEST_REPEAT << 7);
+  const size_t test_len = (1UL << 21);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
   clock_t start, end;

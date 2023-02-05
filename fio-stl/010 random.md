@@ -111,6 +111,17 @@ Adds a bit of entropy to pointer values.
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
 
+#### `fio_risky_num`
+
+```c
+uint64_t fio_risky_num(uint64_t number, uint64_t seed);
+```
+
+Adds a bit of entropy to numeral values.
+
+**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps, but that's about it.
+
+
 #### `fio_risky_mask`
 
 ```c

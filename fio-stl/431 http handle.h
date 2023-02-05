@@ -17,8 +17,8 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__) &&                    \
-    !defined(H___FIO_HTTP_HANDLE___H)
+#if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
+    !defined(FIO_STL_KEEP__)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -2850,5 +2850,5 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_HTTP_HANDLE */
 #undef FIO_HTTP_HANDLE
+#endif /* FIO_HTTP_HANDLE */

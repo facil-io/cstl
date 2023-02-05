@@ -502,5 +502,5 @@ Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_HTTP1_PARSER */
 #undef FIO_HTTP1_PARSER
+#endif /* FIO_HTTP1_PARSER */

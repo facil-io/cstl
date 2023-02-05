@@ -175,6 +175,7 @@ Starting the program - main()
 ***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
+  fio_thread_priority_set(FIO_THREAD_PRIORITY_HIGHEST);
   /* initialize the CLI options */
   fio_cli_start(
       argc,

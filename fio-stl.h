@@ -187,7 +187,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 
 #ifndef __has_include
 #define __has_include(...) 0
-#define GNUC_BYPASS 1
+#define GNUC_BYPASS        1
 #endif
 
 #if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 5))
@@ -207,7 +207,7 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #endif
 
 #if _MSC_VER
-#define inline __inline
+#define inline   __inline
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
 #define __thread _Thread_local
@@ -2445,7 +2445,8 @@ Pointer Tagging
 #if defined(FIO_STR_NAME) || defined(FIO_STR_SMALL) ||                         \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_VALUE) && !defined(FIO_MAP_KEY)) ||                       \
-    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_SERVER) || defined(FIO_FIOBJ)
+    defined(FIO_MAP_VALUE_BSTR) || defined(FIO_HTTP_HANDLE) ||                 \
+    defined(FIO_SERVER) || defined(FIO_FIOBJ)
 #ifndef FIO_STR
 #define FIO_STR
 #endif
@@ -7613,6 +7614,15 @@ IFUNC void fio_rand_reseed(void);
 Risky / Stable Hash - API
 ***************************************************************************** */
 
+/** Computes a facil.io Risky Hash (Risky v.3). */
+SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
+
+/** Adds a bit of entropy to pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
+
+/** Adds a bit of entropy to numeral values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_num(uint64_t number, uint64_t seed);
+
 /** Computes a facil.io Stable Hash (will not be updated, even if broken). */
 SFUNC uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 
@@ -7621,12 +7631,6 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               const void *restrict data,
                               size_t len,
                               uint64_t seed);
-
-/** Computes a facil.io Risky Hash (Risky v.3). */
-SFUNC uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
-
-/** Adds bit of entropy to pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr);
 
 /**
  * Masks data using using `fio_xmask2` with sensible defaults for the key and
@@ -7680,6 +7684,18 @@ Here's a few resources about hashes that might explain more:
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   uint64_t n = (uint64_t)(uintptr_t)ptr;
   n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n ^= fio_rrot64(n, 7);
+  n ^= fio_rrot64(n, 13);
+  n ^= fio_rrot64(n, 17);
+  n ^= fio_rrot64(n, 31);
+  return n;
+}
+
+/** Adds bit entropy to a pointer values. Designed to be unsafe. */
+FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
+  n += seed;
+  n ^= (n + FIO_RISKY3_PRIME0) * FIO_RISKY3_PRIME1;
+  n += seed;
   n ^= fio_rrot64(n, 7);
   n ^= fio_rrot64(n, 13);
   n ^= fio_rrot64(n, 17);
@@ -7973,22 +7989,19 @@ IFUNC void fio_rand_reseed(void) {
   }
 #endif
   for (size_t i = 0; i < jitter_samples; ++i) {
-    uint64_t clk = (uint64_t)fio_time_nano();
-    fio___rand_state[0] ^=
-        fio_risky_hash(&clk, sizeof(clk), fio___rand_state[0] + i);
-    clk = fio_time_nano();
-    fio___rand_state[1] ^=
-        fio_risky_hash(&clk,
-                       sizeof(clk),
-                       fio___rand_state[1] + fio___rand_counter);
+    uint64_t clk = (uint64_t)fio_time_nano() + fio___rand_counter;
+    fio___rand_state[0] ^= fio_risky_num(clk, fio___rand_state[0] + i);
+    clk = fio_time_nano() ^ fio___rand_counter;
+    fio___rand_state[1] ^= fio_risky_num(clk, fio___rand_state[1] + i);
   }
-  fio___rand_state[2] ^=
-      fio_risky_hash((void *)fio___rand_buffer,
-                     sizeof(fio___rand_buffer),
-                     fio___rand_counter + fio___rand_state[0]);
-  fio___rand_state[3] ^= fio_risky_hash((void *)fio___rand_state,
-                                        sizeof(fio___rand_state),
-                                        fio___rand_state[1] + jitter_samples);
+  {
+    fio___rand_state[2] ^=
+        fio_risky_num(fio___rand_buffer[0], fio___rand_state[0]) +
+        fio_risky_num(fio___rand_buffer[1], fio___rand_state[1]);
+    fio___rand_state[3] ^=
+        fio_risky_num(fio___rand_buffer[2], fio___rand_state[0]) +
+        fio_risky_num(fio___rand_buffer[3], fio___rand_state[1]);
+  }
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
   fio___rand_buffer[2] ^= fio___rand_buffer[0];
@@ -8000,7 +8013,7 @@ IFUNC void fio_rand_reseed(void) {
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
   const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
-  if (((fio___rand_counter++) & (((size_t)1 << 19) - 1)) == 0) {
+  if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
@@ -8233,6 +8246,47 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
   return fio_risky2_hash(buf, len, 1);
 }
 
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  do {
+    h[0] += fio_risky_ptr((void *)fio_buf2u64_local(buf));
+    h[1] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 8));
+    h[2] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 16));
+    h[3] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 24));
+    len -= 32;
+  } while (len > 31);
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_ptr((void *)t[0]);
+    h[1] += fio_risky_ptr((void *)t[1]);
+    h[2] += fio_risky_ptr((void *)t[2]);
+    h[3] += fio_risky_ptr((void *)t[3]);
+  }
+  return h[0] + h[1] + h[2] + h[3];
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  do {
+    h[0] += fio_risky_num(fio_buf2u64_local(buf), 0);
+    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), 0);
+    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), 0);
+    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), 0);
+    len -= 32;
+  } while (len > 31);
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_num(t[0], 0);
+    h[1] += fio_risky_num(t[1], 0);
+    h[2] += fio_risky_num(t[2], 0);
+    h[3] += fio_risky_num(t[3], 0);
+  }
+  return h[0] + h[1] + h[2] + h[3];
+}
+
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_mask_wrapper)(char *buf,
                                                            size_t len) {
   fio_risky_mask(buf, len);
@@ -8332,6 +8386,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          3,
                          2);
   fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_ptr_wrapper),
+                         (char *)"fio_risky_ptr (emulated)",
+                         7,
+                         0,
+                         2);
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         7,
+                         0,
+                         2);
+
+  fprintf(stderr, "\n");
+
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_mask_wrapper),
                          (char *)"fio_risky_mask (Risky XOR + counter)",
                          13,
@@ -8449,7 +8517,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   fprintf(stderr,
           "* Testing randomness "
           "- bit frequency / hemming distance / chi-square.\n");
-  const size_t test_len = (FIO_TEST_REPEAT << 7);
+  const size_t test_len = (1UL << 21);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
   clock_t start, end;
@@ -12035,7 +12103,7 @@ FIO_WEAK fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
 FIO_WEAK fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
-FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
+static const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
     [FIO_CALL_PRE_START] = "PRE_START",
     [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
@@ -30754,13 +30822,13 @@ static struct {
 Wakeup Protocol
 ***************************************************************************** */
 
-static void fio___srv_wakeup_cb(fio_s *io) {
+FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   fio_sock_read(fio_fd_get(io), buf, 512);
   (void)(io);
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
 }
-static void fio___srv_wakeup_on_close(void *ignr_) {
+FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
   fio_sock_close(fio___srvdata.wakeup_fd);
   fio___srvdata.wakeup = NULL;
@@ -30776,7 +30844,7 @@ FIO_SFUNC void fio___srv_wakeup(void) {
   (void)ignr;
 }
 
-FIO_SFUNC fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
+static fio_protocol_s FIO___SRV_WAKEUP_PROTOCOL = {
     .on_data = fio___srv_wakeup_cb,
     .on_close = fio___srv_wakeup_on_close,
     .on_timeout = fio___srv_on_timeout_never,
@@ -32984,8 +33052,7 @@ error:
 }
 
 /* *****************************************************************************
-Remote Letter Processing - validate unique
-delivery.
+Remote Letter Processing - validate unique delivery.
 ***************************************************************************** */
 
 #define FIO_OMAP_NAME  fio___letter_map
@@ -33010,6 +33077,23 @@ FIO_SFUNC void fio___on_letter_remote(fio_letter_s *l) {
   fio___letter_map_set(&fio___letter_validation.map, hash, letter_id);
   fio___letter_on_recieved_root(l);
 }
+
+/* *****************************************************************************
+Letter Protocol - Handshake Callbacks (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
+Letter Protocol - Handshake Callbacks (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
 
 /* *****************************************************************************
 Letter Protocol Callbacks
@@ -33893,8 +33977,8 @@ Pub/Sub Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__) &&                    \
-    !defined(H___FIO_HTTP_HANDLE___H)
+#if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
+    !defined(FIO_STL_KEEP__)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -36726,8 +36810,8 @@ Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_HTTP_HANDLE */
 #undef FIO_HTTP_HANDLE
+#endif /* FIO_HTTP_HANDLE */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -37232,8 +37316,8 @@ Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_HTTP1_PARSER */
 #undef FIO_HTTP1_PARSER
+#endif /* FIO_HTTP1_PARSER */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -37455,10 +37539,11 @@ HTTP Protocols used by the HTTP module
 ***************************************************************************** */
 
 typedef enum fio___http_protocol_selector_e {
-  FIO___HTTP_PROTOCOL_HTTP1 = 0,
+  FIO___HTTP_PROTOCOL_ACCEPT = 0,
+  FIO___HTTP_PROTOCOL_HTTP1,
+  FIO___HTTP_PROTOCOL_HTTP2,
   FIO___HTTP_PROTOCOL_WS,
   FIO___HTTP_PROTOCOL_SSE,
-  FIO___HTTP_PROTOCOL_HTTP2,
   FIO___HTTP_PROTOCOL_NONE
 } fio___http_protocol_selector_e;
 
@@ -37477,8 +37562,10 @@ HTTP Protocol Container (vtable + settings storage)
 typedef struct {
   fio_http_settings_s settings;
   void (*on_http_callback)(void *, void *);
-  fio_protocol_s protocol[FIO___HTTP_PROTOCOL_NONE];
-  fio_http_controller_s controller[FIO___HTTP_PROTOCOL_NONE];
+  struct {
+    fio_protocol_s protocol;
+    fio_http_controller_s controller;
+  } state[FIO___HTTP_PROTOCOL_NONE];
 } fio_http_protocol_s;
 #include FIO_INCLUDE_FILE
 
@@ -37536,7 +37623,7 @@ static void http___on_open(int fd, void *udata) {
       .limit = p->settings.max_line_len,
   };
   c->io = fio_attach_fd(fd,
-                        &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
+                        &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                         (void *)c,
                         p->settings.tls);
 }
@@ -37608,9 +37695,9 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s);
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
-    p->protocol[i] =
+    p->state[i].protocol =
         fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
-    p->controller[i] =
+    p->state[i].controller =
         fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
@@ -37663,7 +37750,8 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
       c->queue[c->qwpos],
       &(fio_http_protocol_dup(
             FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
-            ->controller[FIO___HTTP_PROTOCOL_HTTP1]));
+            ->state[FIO___HTTP_PROTOCOL_HTTP1]
+            .controller));
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
   fio_http_status_set(c->queue[c->qwpos], 200);
@@ -37755,8 +37843,112 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 }
 
 /* *****************************************************************************
-HTTP/1 Controller Callbacks (TODO!)
+HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knoledge)
 ***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/1.1 Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/1 Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
+
+/* *****************************************************************************
+HTTP/2 Protocol (disconnect, as HTTP/2 is unsupported)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/2 Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
+
+/* *****************************************************************************
+WebSocket Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+WebSocket Controller (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
+EventSource / SSE Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+EventSource / SSE Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
 
 /* *****************************************************************************
 The Protocols at play

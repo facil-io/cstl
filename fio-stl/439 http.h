@@ -219,10 +219,11 @@ HTTP Protocols used by the HTTP module
 ***************************************************************************** */
 
 typedef enum fio___http_protocol_selector_e {
-  FIO___HTTP_PROTOCOL_HTTP1 = 0,
+  FIO___HTTP_PROTOCOL_ACCEPT = 0,
+  FIO___HTTP_PROTOCOL_HTTP1,
+  FIO___HTTP_PROTOCOL_HTTP2,
   FIO___HTTP_PROTOCOL_WS,
   FIO___HTTP_PROTOCOL_SSE,
-  FIO___HTTP_PROTOCOL_HTTP2,
   FIO___HTTP_PROTOCOL_NONE
 } fio___http_protocol_selector_e;
 
@@ -241,8 +242,10 @@ HTTP Protocol Container (vtable + settings storage)
 typedef struct {
   fio_http_settings_s settings;
   void (*on_http_callback)(void *, void *);
-  fio_protocol_s protocol[FIO___HTTP_PROTOCOL_NONE];
-  fio_http_controller_s controller[FIO___HTTP_PROTOCOL_NONE];
+  struct {
+    fio_protocol_s protocol;
+    fio_http_controller_s controller;
+  } state[FIO___HTTP_PROTOCOL_NONE];
 } fio_http_protocol_s;
 #include FIO_INCLUDE_FILE
 
@@ -300,7 +303,7 @@ static void http___on_open(int fd, void *udata) {
       .limit = p->settings.max_line_len,
   };
   c->io = fio_attach_fd(fd,
-                        &p->protocol[FIO___HTTP_PROTOCOL_HTTP1],
+                        &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                         (void *)c,
                         p->settings.tls);
 }
@@ -372,9 +375,9 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s);
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
-    p->protocol[i] =
+    p->state[i].protocol =
         fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
-    p->controller[i] =
+    p->state[i].controller =
         fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
@@ -427,7 +430,8 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
       c->queue[c->qwpos],
       &(fio_http_protocol_dup(
             FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
-            ->controller[FIO___HTTP_PROTOCOL_HTTP1]));
+            ->state[FIO___HTTP_PROTOCOL_HTTP1]
+            .controller));
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
   fio_http_status_set(c->queue[c->qwpos], 200);
@@ -519,8 +523,112 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 }
 
 /* *****************************************************************************
-HTTP/1 Controller Callbacks (TODO!)
+HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knoledge)
 ***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/1.1 Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/1 Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
+
+/* *****************************************************************************
+HTTP/2 Protocol (disconnect, as HTTP/2 is unsupported)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+HTTP/2 Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
+
+/* *****************************************************************************
+WebSocket Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+WebSocket Controller (TODO!)
+***************************************************************************** */
+
+/* *****************************************************************************
+EventSource / SSE Protocol (TODO!)
+***************************************************************************** */
+
+// /** Called when an IO is attached to a protocol. */
+// void (*on_attach)(fio_s *io);
+// /** Called when a data is available. */
+// void (*on_data)(fio_s *io);
+// /** called once all pending `fio_write` calls are finished. */
+// void (*on_ready)(fio_s *io);
+// /** Called after the connection was closed, and pending tasks completed. */
+// void (*on_close)(void *udata);
+
+/* *****************************************************************************
+EventSource / SSE Controller (TODO!)
+***************************************************************************** */
+
+// /** Called when an HTTP handle is freed. */
+// void (*on_destroyed)(fio_http_s *h, void *cdata);
+// /** Informs the controller that request / response headers must be sent. */
+// void (*send_headers)(fio_http_s *h);
+// /** called by the HTTP handle for each body chunk (or to finish a response.
+// */ void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+// /** called once a request / response had finished */
+// void (*on_finish)(fio_http_s *h);
 
 /* *****************************************************************************
 The Protocols at play
