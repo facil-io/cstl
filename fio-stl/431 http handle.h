@@ -1357,7 +1357,7 @@ size_t fio_http_response_header_each(
 }
 
 /* *****************************************************************************
-Cookies (TODO!)
+Cookies
 ***************************************************************************** */
 
 /** (Helper) HTTP Cookie Parser */
@@ -1658,7 +1658,7 @@ fio_http_set_cookie_each(fio_http_s *h,
 }
 
 /* *****************************************************************************
-Body Management - file descriptor (TODO!)
+Body Management - file descriptor
 ***************************************************************************** */
 
 FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t len) {
@@ -2047,10 +2047,10 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
     char *const end = i.buf + i.len;
     char *sep;
     do {
-      sep = FIO_MEMCHR(i.buf, ',', end - i.buf);
+      sep = (char *)FIO_MEMCHR(i.buf, ',', end - i.buf);
       if (!sep)
         sep = end;
-      char *prop = FIO_MEMCHR(i.buf, ';', sep - i.buf);
+      char *prop = (char *)FIO_MEMCHR(i.buf, ';', sep - i.buf);
       if (!prop)
         prop = sep;
       size_t len = prop - i.buf;
@@ -2061,7 +2061,7 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
       FIO_MEMCPY(dst->buf + dst->len, i.buf, len);
       dst->len += len;
       dst->buf[dst->len++] = 0;
-      if (prop != sep) { /* TODO! parse properties */
+      if (prop != sep) { /* parse properties */
         ++prop;
         len = sep - prop;
         if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
@@ -2076,7 +2076,6 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
         fio_u2buf16_local(
             dst->buf + old_len,
             ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN));
-        /* TODO: parse properties */
       }
       sep += (*sep == ',');
       while (*sep == ' ' || *sep == '\t')
@@ -2113,7 +2112,7 @@ SFUNC int fio_http_request_header_parse(fio_http_s *h,
 ***************************************************************************** */
 
 /* *****************************************************************************
-Error Handling (TODO!)
+Error Handling
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
@@ -2153,8 +2152,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
   fio_str_info_s date = fio_http_date(milli_end);
 
   { /* try to gather address from request headers */
-    /* TODO Guess IP address from headers (forwarded) where possible */
-    /* if we failed */
+    /* Guess IP address from headers (forwarded) where possible */
     fio_str_info_s forwarded =
         fio_http_request_header(h, FIO_STR_INFO2((char *)"forwarded", 9), -1);
     if (forwarded.len) {
@@ -2177,7 +2175,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
         break;
       }
     }
-    if (!buf.len) {
+    if (!buf.len) { /* if we failed, use peer_addr */
       if (peer_addr.len) {
         memcpy(buf.buf, peer_addr.buf, peer_addr.len);
         buf.len = peer_addr.len;
@@ -2255,6 +2253,10 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
     return 1;
   }
 }
+
+/* *****************************************************************************
+Param Parsing (TODO! - parse query, parse mime/multipart parse text/json)
+***************************************************************************** */
 
 /* *****************************************************************************
 Static file helper

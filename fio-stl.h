@@ -8397,6 +8397,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          7,
                          0,
                          2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         5,
+                         3,
+                         2);
 
   fprintf(stderr, "\n");
 
@@ -8687,15 +8702,188 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#if !defined(DEBUG) && defined(__ARM_FEATURE_CRYPTO) &&                        \
+    __ARM_FEATURE_CRYPTO && defined(__ARM_NEON)
+#include <arm_acle.h>
+#include <arm_neon.h>
+#define FIO___SHA1_ARM_INTRIN 1
+#endif
+
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
+#if FIO___SHA1_ARM_INTRIN
+  /* Code adjusted from:
+   * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-arm.c
+   * Credit to Jeffrey Walton.
+   */
+  uint32x4_t w0, w1, w2, w3;
+  uint32x4_t t0, t1, v0, v_old;
+  uint32_t e0, e1, e_old;
+  e0 = e_old = old->v[4];
+  v_old = vld1q_u32(old->v);
+  v0 = v_old;
 
+  /* load to vectors */
+  w0 = vld1q_u32(w);
+  w1 = vld1q_u32(w + 4);
+  w2 = vld1q_u32(w + 8);
+  w3 = vld1q_u32(w + 12);
+  /* make little endian */
+  w0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w0)));
+  w1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w1)));
+  w2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w2)));
+  w3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w3)));
+
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x5A827999));
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x5A827999));
+
+  /* round: 0-3 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x5A827999));
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 4-7 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x5A827999));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 8-11 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x5A827999));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 12-15 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 16-19 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x6ED9EBA1));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 20-23 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x6ED9EBA1));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 24-27 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x6ED9EBA1));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 28-31 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 32-35 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 36-39 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x8F1BBCDC));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 40-43 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x8F1BBCDC));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 44-47 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x8F1BBCDC));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 48-51 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 52-55 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0xCA62C1D6));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 56-59 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0xCA62C1D6));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 60-63 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0xCA62C1D6));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 64-67 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0xCA62C1D6));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 68-71 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0xCA62C1D6));
+  w0 = vsha1su1q_u32(w0, w3);
+
+  /* round: 72-75 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+
+  /* round: 76-79 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+
+  /* combine and store */
+  e0 += e_old;
+  v0 = vaddq_u32(v_old, v0);
+  vst1q_u32(old->v, v0);
+  old->v[4] = e0;
+
+#else
   register uint32_t v0 = old->v[0];
   register uint32_t v1 = old->v[1];
   register uint32_t v2 = old->v[2];
   register uint32_t v3 = old->v[3];
   register uint32_t v4 = old->v[4];
   register uint32_t v5;
+
+  // vsha1h_u32(uint32_t __p0)
 
 #define FIO___SHA1_ROTATE(K, F, i)                                             \
   v5 = fio_lrot32(v0, 5) + v4 + F + (uint32_t)K + w[(i)&15];                   \
@@ -8752,8 +8940,9 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
 #undef FIO___SHA1_ROUND4
 #undef FIO___SHA1_ROUND16
 #undef FIO___SHA1_ROUND20
+#endif /* FIO___SHA1_ARM_INTRIN */
+#undef FIO___SHA1_ARM_INTRIN
 }
-
 /**
  * A simple, non streaming, implementation of the SHA1 hashing algorithm.
  *
@@ -30978,6 +31167,7 @@ struct fio_s {
   int64_t active;
   uint32_t state;
   int fd;
+  /* TODO? peer address buffer */
 };
 
 #define FIO_STATE_OPEN      ((uint32_t)1U)
@@ -35317,7 +35507,7 @@ size_t fio_http_response_header_each(
 }
 
 /* *****************************************************************************
-Cookies (TODO!)
+Cookies
 ***************************************************************************** */
 
 /** (Helper) HTTP Cookie Parser */
@@ -35618,7 +35808,7 @@ fio_http_set_cookie_each(fio_http_s *h,
 }
 
 /* *****************************************************************************
-Body Management - file descriptor (TODO!)
+Body Management - file descriptor
 ***************************************************************************** */
 
 FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t len) {
@@ -36007,10 +36197,10 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
     char *const end = i.buf + i.len;
     char *sep;
     do {
-      sep = FIO_MEMCHR(i.buf, ',', end - i.buf);
+      sep = (char *)FIO_MEMCHR(i.buf, ',', end - i.buf);
       if (!sep)
         sep = end;
-      char *prop = FIO_MEMCHR(i.buf, ';', sep - i.buf);
+      char *prop = (char *)FIO_MEMCHR(i.buf, ';', sep - i.buf);
       if (!prop)
         prop = sep;
       size_t len = prop - i.buf;
@@ -36021,7 +36211,7 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
       FIO_MEMCPY(dst->buf + dst->len, i.buf, len);
       dst->len += len;
       dst->buf[dst->len++] = 0;
-      if (prop != sep) { /* TODO! parse properties */
+      if (prop != sep) { /* parse properties */
         ++prop;
         len = sep - prop;
         if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
@@ -36036,7 +36226,6 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
         fio_u2buf16_local(
             dst->buf + old_len,
             ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN));
-        /* TODO: parse properties */
       }
       sep += (*sep == ',');
       while (*sep == ' ' || *sep == '\t')
@@ -36073,7 +36262,7 @@ SFUNC int fio_http_request_header_parse(fio_http_s *h,
 ***************************************************************************** */
 
 /* *****************************************************************************
-Error Handling (TODO!)
+Error Handling
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
@@ -36113,8 +36302,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
   fio_str_info_s date = fio_http_date(milli_end);
 
   { /* try to gather address from request headers */
-    /* TODO Guess IP address from headers (forwarded) where possible */
-    /* if we failed */
+    /* Guess IP address from headers (forwarded) where possible */
     fio_str_info_s forwarded =
         fio_http_request_header(h, FIO_STR_INFO2((char *)"forwarded", 9), -1);
     if (forwarded.len) {
@@ -36137,7 +36325,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
         break;
       }
     }
-    if (!buf.len) {
+    if (!buf.len) { /* if we failed, use peer_addr */
       if (peer_addr.len) {
         memcpy(buf.buf, peer_addr.buf, peer_addr.len);
         buf.len = peer_addr.len;
@@ -36215,6 +36403,10 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
     return 1;
   }
 }
+
+/* *****************************************************************************
+Param Parsing (TODO! - parse query, parse mime/multipart parse text/json)
+***************************************************************************** */
 
 /* *****************************************************************************
 Static file helper
@@ -37383,7 +37575,7 @@ typedef struct fio_http_settings_s {
   int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
   void (*on_finish)(struct fio_http_settings_s *settings);
-  /** Opaque user data. */
+  /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
   /** Optional SSL/TLS support. */
   struct fio_io_functions *tls_io_func;
@@ -37589,6 +37781,7 @@ typedef struct {
   size_t limit;
   fio_http_s *queue[FIO_HTTP_PIPELINE_QUEUE];
   fio_http_settings_s *settings;
+  void *udata;
   fio_http1_parser_s parser;
   uint32_t qrpos;
   uint32_t qwpos;
@@ -37620,6 +37813,7 @@ static void http___on_open(int fd, void *udata) {
   fio_http_connection_s *c = fio_http_connection_new(p->settings.max_line_len);
   *c = (fio_http_connection_s){
       .settings = &(p->settings),
+      .udata = p->settings.udata,
       .limit = p->settings.max_line_len,
   };
   c->io = fio_attach_fd(fd,
@@ -37752,6 +37946,7 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
             FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .controller));
+  fio_http_udata_set(c->queue[c->qwpos], c->udata);
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
   fio_http_status_set(c->queue[c->qwpos], 200);
@@ -37956,11 +38151,19 @@ The Protocols at play
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___protocol_callbacks(fio___http_protocol_selector_e s, int is_client) {
+  fio_protocol_s r = {0};
+  (void)is_client, (void)s;
+  return r;
+}
 
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___controller_callbacks(fio___http_protocol_selector_e s, int is_client) {
+  fio_http_controller_s r = {0};
+  (void)is_client, (void)s;
+  return r;
+}
 
 /* *****************************************************************************
 HTTP Testing

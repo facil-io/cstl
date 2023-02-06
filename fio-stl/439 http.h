@@ -63,7 +63,7 @@ typedef struct fio_http_settings_s {
   int (*on_upgrade2websockets)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
   void (*on_finish)(struct fio_http_settings_s *settings);
-  /** Opaque user data. */
+  /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
   /** Optional SSL/TLS support. */
   struct fio_io_functions *tls_io_func;
@@ -269,6 +269,7 @@ typedef struct {
   size_t limit;
   fio_http_s *queue[FIO_HTTP_PIPELINE_QUEUE];
   fio_http_settings_s *settings;
+  void *udata;
   fio_http1_parser_s parser;
   uint32_t qrpos;
   uint32_t qwpos;
@@ -300,6 +301,7 @@ static void http___on_open(int fd, void *udata) {
   fio_http_connection_s *c = fio_http_connection_new(p->settings.max_line_len);
   *c = (fio_http_connection_s){
       .settings = &(p->settings),
+      .udata = p->settings.udata,
       .limit = p->settings.max_line_len,
   };
   c->io = fio_attach_fd(fd,
@@ -432,6 +434,7 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
             FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .controller));
+  fio_http_udata_set(c->queue[c->qwpos], c->udata);
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
   fio_http_status_set(c->queue[c->qwpos], 200);
@@ -636,11 +639,19 @@ The Protocols at play
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___protocol_callbacks(fio___http_protocol_selector_e s, int is_client) {
+  fio_protocol_s r = {0};
+  (void)is_client, (void)s;
+  return r;
+}
 
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___controller_callbacks(fio___http_protocol_selector_e s, int is_client) {
+  fio_http_controller_s r = {0};
+  (void)is_client, (void)s;
+  return r;
+}
 
 /* *****************************************************************************
 HTTP Testing

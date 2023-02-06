@@ -871,6 +871,7 @@ struct fio_s {
   int64_t active;
   uint32_t state;
   int fd;
+  /* TODO? peer address buffer */
 };
 
 #define FIO_STATE_OPEN      ((uint32_t)1U)

@@ -822,6 +822,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          7,
                          0,
                          2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         5,
+                         3,
+                         2);
 
   fprintf(stderr, "\n");
 

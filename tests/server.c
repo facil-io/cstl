@@ -387,7 +387,7 @@ static void fio_http1_on_finish(fio_http_s *h) {
     fio_write2(c->io, .buf = "0\r\n\r\n", .len = 5, .copy = 1);
   }
   if (http_should_log_responses)
-    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0));
+    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
 finish:
   fio_http_free(h);
 }

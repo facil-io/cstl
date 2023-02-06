@@ -61,15 +61,188 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#if !defined(DEBUG) && defined(__ARM_FEATURE_CRYPTO) &&                        \
+    __ARM_FEATURE_CRYPTO && defined(__ARM_NEON)
+#include <arm_acle.h>
+#include <arm_neon.h>
+#define FIO___SHA1_ARM_INTRIN 1
+#endif
+
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
+#if FIO___SHA1_ARM_INTRIN
+  /* Code adjusted from:
+   * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-arm.c
+   * Credit to Jeffrey Walton.
+   */
+  uint32x4_t w0, w1, w2, w3;
+  uint32x4_t t0, t1, v0, v_old;
+  uint32_t e0, e1, e_old;
+  e0 = e_old = old->v[4];
+  v_old = vld1q_u32(old->v);
+  v0 = v_old;
 
+  /* load to vectors */
+  w0 = vld1q_u32(w);
+  w1 = vld1q_u32(w + 4);
+  w2 = vld1q_u32(w + 8);
+  w3 = vld1q_u32(w + 12);
+  /* make little endian */
+  w0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w0)));
+  w1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w1)));
+  w2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w2)));
+  w3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w3)));
+
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x5A827999));
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x5A827999));
+
+  /* round: 0-3 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x5A827999));
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 4-7 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x5A827999));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 8-11 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x5A827999));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 12-15 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 16-19 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1cq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x6ED9EBA1));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 20-23 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x6ED9EBA1));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 24-27 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x6ED9EBA1));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 28-31 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 32-35 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 36-39 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0x8F1BBCDC));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 40-43 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0x8F1BBCDC));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 44-47 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0x8F1BBCDC));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 48-51 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 52-55 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0xCA62C1D6));
+  w0 = vsha1su1q_u32(w0, w3);
+  w1 = vsha1su0q_u32(w1, w2, w3);
+
+  /* round: 56-59 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1mq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w0, vdupq_n_u32(0xCA62C1D6));
+  w1 = vsha1su1q_u32(w1, w0);
+  w2 = vsha1su0q_u32(w2, w3, w0);
+
+  /* round: 60-63 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w1, vdupq_n_u32(0xCA62C1D6));
+  w2 = vsha1su1q_u32(w2, w1);
+  w3 = vsha1su0q_u32(w3, w0, w1);
+
+  /* round: 64-67 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+  t0 = vaddq_u32(w2, vdupq_n_u32(0xCA62C1D6));
+  w3 = vsha1su1q_u32(w3, w2);
+  w0 = vsha1su0q_u32(w0, w1, w2);
+
+  /* round: 68-71 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+  t1 = vaddq_u32(w3, vdupq_n_u32(0xCA62C1D6));
+  w0 = vsha1su1q_u32(w0, w3);
+
+  /* round: 72-75 */
+  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e0, t0);
+
+  /* round: 76-79 */
+  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
+  v0 = vsha1pq_u32(v0, e1, t1);
+
+  /* combine and store */
+  e0 += e_old;
+  v0 = vaddq_u32(v_old, v0);
+  vst1q_u32(old->v, v0);
+  old->v[4] = e0;
+
+#else
   register uint32_t v0 = old->v[0];
   register uint32_t v1 = old->v[1];
   register uint32_t v2 = old->v[2];
   register uint32_t v3 = old->v[3];
   register uint32_t v4 = old->v[4];
   register uint32_t v5;
+
+  // vsha1h_u32(uint32_t __p0)
 
 #define FIO___SHA1_ROTATE(K, F, i)                                             \
   v5 = fio_lrot32(v0, 5) + v4 + F + (uint32_t)K + w[(i)&15];                   \
@@ -126,8 +299,9 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
 #undef FIO___SHA1_ROUND4
 #undef FIO___SHA1_ROUND16
 #undef FIO___SHA1_ROUND20
+#endif /* FIO___SHA1_ARM_INTRIN */
+#undef FIO___SHA1_ARM_INTRIN
 }
-
 /**
  * A simple, non streaming, implementation of the SHA1 hashing algorithm.
  *
