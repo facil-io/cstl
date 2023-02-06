@@ -2477,7 +2477,8 @@ Pointer Tagging
 #endif /* FIO_QUEUE */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_SHA2) ||           \
+    defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
 #endif
@@ -3710,40 +3711,40 @@ FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_local)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_bswap)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_bswap)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_little)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_little)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
@@ -4371,7 +4372,7 @@ typedef union {
 #if defined(__SIZEOF_INT128__)
   __uint128_t u128[1];
 #endif
-} fio_128u;
+} fio_u128;
 
 /** An unsigned 256bit union type. */
 typedef union {
@@ -4386,7 +4387,7 @@ typedef union {
   __uint256_t u256[1];
 #endif
 
-} fio_256u;
+} fio_u256;
 
 /** An unsigned 512bit union type. */
 typedef union {
@@ -4400,7 +4401,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t u256[2];
 #endif
-} fio_512u;
+} fio_u512;
 
 /** An unsigned 1024bit union type. */
 typedef union {
@@ -4414,7 +4415,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t u256[4];
 #endif
-} fio_1024u;
+} fio_u1024;
 
 /** An unsigned 2048bit union type. */
 typedef union {
@@ -4428,7 +4429,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t u256[4];
 #endif
-} fio_2048u;
+} fio_u2048;
 
 /** An unsigned 4096bit union type. */
 typedef union {
@@ -4442,7 +4443,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t u256[16];
 #endif
-} fio_4096u;
+} fio_u4096;
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -4520,6 +4521,412 @@ FIO_IFUNC size_t fio_math_msb_index(uint64_t *n, const size_t len);
 
 /** Multi-precision - returns the index for the least significant bit or -1. */
 FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
+
+/* *****************************************************************************
+Vector Type Wrappers
+***************************************************************************** */
+#if !defined(DEBUG) && !defined(FIO___HAS_ARM_INTRIN) &&                       \
+    defined(__ARM_FEATURE_CRYPTO) && __ARM_FEATURE_CRYPTO &&                   \
+    defined(__ARM_NEON)
+#include <arm_acle.h>
+#include <arm_neon.h>
+#define FIO___HAS_ARM_INTRIN 1
+#endif
+
+typedef union fio_v128 {
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t v64;
+  uint32x4_t v32;
+  uint16x8_t v16;
+  uint8x16_t v8;
+#elif __has_attribute(vector_size)
+  uint64_t __attribute__((vector_size(16))) v64;
+  uint32_t __attribute__((vector_size(16))) v32;
+  uint16_t __attribute__((vector_size(16))) v16;
+  uint8_t __attribute__((vector_size(16))) v8;
+#else
+  uint64_t v64[2];
+  uint32_t v32[4];
+  uint16_t v16[8];
+  uint8_t v8[16];
+#endif
+} fio_v128;
+
+typedef union fio_v256 {
+#if __has_attribute(vector_size)
+  uint64_t __attribute__((vector_size(32))) v64;
+  uint32_t __attribute__((vector_size(32))) v32;
+  uint16_t __attribute__((vector_size(32))) v16;
+  uint8_t __attribute__((vector_size(32))) v8;
+#else
+  uint64_t v64[4];
+  uint32_t v32[8];
+  uint16_t v16[16];
+  uint8_t v8[32];
+#endif
+} fio_v256;
+
+typedef union fio_v512 {
+#if __has_attribute(vector_size)
+  uint64_t __attribute__((vector_size(64))) v64;
+  uint32_t __attribute__((vector_size(64))) v32;
+  uint16_t __attribute__((vector_size(64))) v16;
+  uint8_t __attribute__((vector_size(64))) v8;
+#else
+  uint64_t v64[8];
+  uint32_t v32[16];
+  uint16_t v16[32];
+  uint8_t v8[64];
+#endif
+} fio_v512;
+
+/* *****************************************************************************
+Vector Helpers (load and simple math operations)
+***************************************************************************** */
+
+#if FIO___HAS_ARM_INTRIN
+/** Loads a 128 bit vector from memory. */
+FIO_IFUNC fio_v128 fio_v128_load(const void *buf) {
+  fio_v128 r;
+  r.v64 = vld1q_u64(buf);
+  return r;
+}
+/** Loads a 128 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v128 fio_v128_load_le32(const void *buf) {
+  fio_v128 r;
+  r.v32 = vld1q_u32(buf);
+  r.v32 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(r.v32)));
+  return r;
+}
+/** Loads a 128 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v128 fio_v128_load_le64(const void *buf) {
+  fio_v128 r;
+  r.v64 = vld1q_u64(buf);
+  r.v64 = vreinterpretq_u64_u8(vrev64q_u8(vreinterpretq_u8_u64(r.v64)));
+  return r;
+}
+#else
+/** Loads a 128 bit vector from memory. */
+FIO_IFUNC fio_v128 fio_v128_load(const void *buf) {
+  uint64_t loader[2];
+  fio_memcpy16(loader, buf);
+  return (fio_v128){.v64 = {loader[0], loader[1]}};
+}
+/** Loads a 128 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v128 fio_v128_load_le32(const void *buf) {
+  uint32_t loader[4];
+  fio_memcpy16(loader, buf);
+  return (fio_v128){.v32 = {fio_bswap32(loader[0]),
+                            fio_bswap32(loader[1]),
+                            fio_bswap32(loader[2]),
+                            fio_bswap32(loader[3])}};
+}
+/** Loads a 128 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v128 fio_v128_load_le64(const void *buf) {
+  uint64_t loader[2];
+  fio_memcpy16(loader, buf);
+  return (fio_v128){.v64 = {fio_bswap64(loader[0]), fio_bswap64(loader[1])}};
+}
+#endif
+/** Loads a 256 bit vector from memory. */
+FIO_IFUNC fio_v256 fio_v256_load(const void *buf) {
+  uint64_t loader[4];
+  fio_memcpy32(loader, buf);
+  return (fio_v256){.v64 = {loader[0], loader[1], loader[2], loader[3]}};
+}
+
+/** Loads a 256 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v256 fio_v256_load_le32(const void *buf) {
+  uint32_t loader[8];
+  fio_memcpy32(loader, buf);
+  return (fio_v256){.v32 = {
+                        fio_bswap32(loader[0]),
+                        fio_bswap32(loader[1]),
+                        fio_bswap32(loader[2]),
+                        fio_bswap32(loader[3]),
+                        fio_bswap32(loader[4]),
+                        fio_bswap32(loader[5]),
+                        fio_bswap32(loader[6]),
+                        fio_bswap32(loader[7]),
+                    }};
+}
+/** Loads a 256 bit vector from memory, reading in little endian. */
+FIO_IFUNC fio_v256 fio_v256_load_le64(const void *buf) {
+  uint64_t loader[4];
+  fio_memcpy32(loader, buf);
+  return (fio_v256){.v64 = {fio_bswap64(loader[0]),
+                            fio_bswap64(loader[1]),
+                            fio_bswap64(loader[2]),
+                            fio_bswap64(loader[3])}};
+}
+
+#if __has_attribute(vector_size) /* assumes that compiler handles Neon too */
+#define FIO_VECTOR_OPERATION(total_bits, bits, opt_name, opt)                  \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##opt_name##bits(            \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    a.v##bits = a.v##bits opt b.v##bits;                                       \
+    return a;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_CONST(total_bits, bits, opt_name, opt)            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##opt_name##bits(           \
+      fio_v##total_bits a,                                                     \
+      uint##bits##_t b) {                                                      \
+    a.v##bits = a.v##bits opt b;                                               \
+    return a;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_SINGLE(total_bits, bits, opt_name, opt)           \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##opt_name##bits(            \
+      fio_v##total_bits a) {                                                   \
+    a.v##bits = opt a.v##bits;                                                 \
+    return a;                                                                  \
+  }
+
+#define FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, dir, opt, opt_inv)     \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##dir##rot##bits(           \
+      fio_v##total_bits a,                                                     \
+      size_t bits_) {                                                          \
+    a.v##bits = (a.v##bits opt bits_) | (a.v##bits opt_inv bits_);             \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##dir##shift##bits(         \
+      fio_v##total_bits a,                                                     \
+      size_t bits_) {                                                          \
+    a.v##bits = (a.v##bits opt bits_);                                         \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##dir##rot##bits(            \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    a.v##bits = (a.v##bits opt b.v##bits) | (a.v##bits opt_inv b.v##bits);     \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##dir##shift##bits(          \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    a.v##bits = (a.v##bits opt b.v##bits);                                     \
+    return a;                                                                  \
+  }
+
+#else /* __has_attribute(vector_size) */
+#define FIO_VECTOR_OPERATION(total_bits, bits, opt_name, opt)                  \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##opt_name##bits(            \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = a.v##bits[i] opt b.v##bits[i];                            \
+    }                                                                          \
+    return a;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_CONST(total_bits, bits, opt_name, opt)            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##opt_name##bits(           \
+      fio_v##total_bits a,                                                     \
+      uint##bits##_t b) {                                                      \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = a.v##bits[i] opt b;                                       \
+    }                                                                          \
+    return a;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_SINGLE(total_bits, bits, opt_name, opt)           \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##opt_name##bits(            \
+      fio_v##total_bits a) {                                                   \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = opt a.v##bits[i];                                         \
+    }                                                                          \
+    return a;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, dir, opt, opt_inv)     \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##dir##rot##bits(           \
+      fio_v##total_bits a,                                                     \
+      size_t bits_) {                                                          \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = (a.v##bits[i] opt bits_) | (a.v##bits[i] opt_inv bits_);  \
+    }                                                                          \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_c##dir##shift##bits(         \
+      fio_v##total_bits a,                                                     \
+      size_t bits_) {                                                          \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = (a.v##bits[i] opt bits_);                                 \
+    }                                                                          \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##dir##rot##bits(            \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = (a.v##bits[i] opt b.v##bits[i]) |                         \
+                     (a.v##bits[i] opt_inv b.v##bits[i]);                      \
+    }                                                                          \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_##dir##shift##bits(          \
+      fio_v##total_bits a,                                                     \
+      fio_v##total_bits b) {                                                   \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      a.v##bits[i] = (a.v##bits[i] opt b.v##bits[i]);                          \
+    }                                                                          \
+    return a;                                                                  \
+  }
+#endif /* __has_attribute(vector_size) */
+
+#if __has_builtin(__builtin_reduce_max) &&                                     \
+    __has_builtin(__builtin_reduce_min) &&                                     \
+    __has_builtin(__builtin_reduce_add) &&                                     \
+    __has_builtin(__builtin_reduce_mul) &&                                     \
+    __has_builtin(__builtin_reduce_and) &&                                     \
+    __has_builtin(__builtin_reduce_or) && __has_builtin(__builtin_reduce_xor)
+#define FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, opt_name)                \
+  FIO_IFUNC uint##bits##_t fio_v##total_bits##_reduce_##opt_name##bits(        \
+      fio_v##total_bits a) {                                                   \
+    return __builtin_reduce_##opt_name(a.v##bits);                             \
+  }
+#define FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS(total_bits, bits)                \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, mul)                           \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, add)                           \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, and)                           \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, or)                            \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, xor)                           \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, max)                           \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, min)
+
+#else
+#define FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, opt_name, opt)           \
+  FIO_IFUNC uint##bits##_t fio_v##total_bits##_reduce_##opt_name##bits(        \
+      fio_v##total_bits a) {                                                   \
+    uint##bits##_t r = a.v##bits[0];                                           \
+    for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
+      r = r opt a.v##bits[i];                                                  \
+    }                                                                          \
+    return r;                                                                  \
+  }
+#define FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS(total_bits, bits)                \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, mul, *)                        \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, add, +)                        \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, and, &)                        \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, or, |)                         \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, xor, ^)                        \
+  FIO_IFUNC uint##bits##_t fio_v##total_bits##_reduce_max##bits(               \
+      fio_v##total_bits a) {                                                   \
+    uint##bits##_t r = a.v##bits[0];                                           \
+    for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
+      r = r < a.v##bits[i] ? a.v##bits[i] : r;                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC uint##bits##_t fio_v##total_bits##_reduce_min##bits(               \
+      fio_v##total_bits a) {                                                   \
+    uint##bits##_t r = a.v##bits[0];                                           \
+    for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
+      r = r > a.v##bits[i] ? a.v##bits[i] : r;                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }
+#endif /* reduce builtins */
+
+#define FIO_VECTOR_GROUP_FUNCTIONS(total_bits, bits)                           \
+  FIO_VECTOR_OPERATION(total_bits, bits, mul, *)                               \
+  FIO_VECTOR_OPERATION(total_bits, bits, add, +)                               \
+  FIO_VECTOR_OPERATION(total_bits, bits, sub, -)                               \
+  FIO_VECTOR_OPERATION(total_bits, bits, div, /)                               \
+  FIO_VECTOR_OPERATION(total_bits, bits, reminder, %)                          \
+  FIO_VECTOR_OPERATION(total_bits, bits, and, &)                               \
+  FIO_VECTOR_OPERATION(total_bits, bits, or, |)                                \
+  FIO_VECTOR_OPERATION(total_bits, bits, xor, ^)                               \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, mul, *)                         \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, add, +)                         \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, sub, -)                         \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, div, /)                         \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, reminder, %)                    \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, and, &)                         \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, or, |)                          \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, xor, ^)                         \
+  FIO_VECTOR_OPERATION_SINGLE(total_bits, bits, flip, ~)                       \
+  FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS(total_bits, bits)                      \
+  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, l, <<, >>)                   \
+  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, r, >>, <<)
+
+FIO_VECTOR_GROUP_FUNCTIONS(128, 8)
+FIO_VECTOR_GROUP_FUNCTIONS(128, 16)
+FIO_VECTOR_GROUP_FUNCTIONS(128, 32)
+FIO_VECTOR_GROUP_FUNCTIONS(128, 64)
+FIO_VECTOR_GROUP_FUNCTIONS(256, 8)
+FIO_VECTOR_GROUP_FUNCTIONS(256, 16)
+FIO_VECTOR_GROUP_FUNCTIONS(256, 32)
+FIO_VECTOR_GROUP_FUNCTIONS(256, 64)
+FIO_VECTOR_GROUP_FUNCTIONS(512, 8)
+FIO_VECTOR_GROUP_FUNCTIONS(512, 16)
+FIO_VECTOR_GROUP_FUNCTIONS(512, 32)
+FIO_VECTOR_GROUP_FUNCTIONS(512, 64)
+
+#undef FIO_VECTOR_OPERATION_REDUCE
+#undef FIO_VECTOR_OPERATION
+#undef FIO_VECTOR_OPERATION_CONST
+#undef FIO_VECTOR_OPERATION_SINGLE
+#undef FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS
+#undef FIO_VECTOR_OPERATION_ROT_SHFT_FUNC
+
+/** Performs a "shuffle" operation, returning a new, reordered vector. */
+FIO_IFUNC fio_v128
+fio_v128_shuffle32(fio_v128 v, int i0, int i1, int i2, int i3) {
+  fio_v128 r;
+  r.v64[0] = v.v64[i0 & 3];
+  r.v64[1] = v.v64[i1 & 3];
+  r.v64[2] = v.v64[i2 & 3];
+  r.v64[3] = v.v64[i3 & 3];
+  return r;
+}
+/** Performs a "shuffle" operation, returning a new, reordered vector. */
+FIO_IFUNC fio_v128 fio_v128_shuffle64(fio_v128 v, int i0, int i1) {
+  fio_v128 r;
+  r.v64[0] = v.v64[i0 & 1];
+  r.v64[1] = v.v64[i1 & 1];
+  return r;
+}
+/** Performs a "shuffle" operation, returning a new, reordered vector. */
+FIO_IFUNC fio_v256 fio_v256_shuffle32(fio_v256 v,
+                                      int i0,
+                                      int i1,
+                                      int i2,
+                                      int i3,
+                                      int i4,
+                                      int i5,
+                                      int i6,
+                                      int i7) {
+  fio_v256 r;
+  r.v32[0] = v.v32[i0 & 7];
+  r.v32[1] = v.v32[i1 & 7];
+  r.v32[2] = v.v32[i2 & 7];
+  r.v32[3] = v.v32[i3 & 7];
+  r.v32[4] = v.v32[i4 & 7];
+  r.v32[5] = v.v32[i5 & 7];
+  r.v32[6] = v.v32[i6 & 7];
+  r.v32[7] = v.v32[i7 & 7];
+  return r;
+}
+/** Performs a "shuffle" operation, returning a new, reordered vector. */
+FIO_IFUNC fio_v256
+fio_v256_shuffle64(fio_v256 v, int i0, int i1, int i2, int i3) {
+  fio_v256 r;
+  r.v64[0] = v.v64[i0 & 3];
+  r.v64[1] = v.v64[i1 & 3];
+  r.v64[2] = v.v64[i2 & 3];
+  r.v64[3] = v.v64[i3 & 3];
+  return r;
+}
+
+#if __has_builtin(__builtin_shufflevector)
+#define fio_v128_shuffle32(v, ...)                                             \
+  (fio_v128) { .v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__) }
+#define fio_v128_shuffle64(v, ...)                                             \
+  (fio_v128) { .v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__) }
+
+#define fio_v256_shuffle32(v, ...)                                             \
+  (fio_v256) { .v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__) }
+#define fio_v256_shuffle64(v, ...)                                             \
+  (fio_v256) { .v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__) }
+#endif
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -7824,29 +8231,12 @@ IFUNC void fio_risky_mask(char *buf, size_t len) {
 Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
-#define FIO_STABLE_HASH_MUL_PRIME(dest)                                        \
-  (dest)[0] = v[0] * prime[0]; /* FIO_STABLE_HASH_PRIME0 */                    \
-  (dest)[1] = v[1] * prime[1]; /* FIO_STABLE_HASH_PRIME1 */                    \
-  (dest)[2] = v[2] * prime[2]; /* FIO_STABLE_HASH_PRIME2 */                    \
-  (dest)[3] = v[3] * prime[3]  /* FIO_STABLE_HASH_PRIME3 */
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v[0] ^= w[0];                                                                \
-  v[1] ^= w[1];                                                                \
-  v[2] ^= w[2];                                                                \
-  v[3] ^= w[3];                                                                \
-  FIO_STABLE_HASH_MUL_PRIME(v);                                                \
-  w[0] = fio_lrot64(w[0], 31);                                                 \
-  w[1] = fio_lrot64(w[1], 31);                                                 \
-  w[2] = fio_lrot64(w[2], 31);                                                 \
-  w[3] = fio_lrot64(w[3], 31);                                                 \
-  w[0] ^= seed;                                                                \
-  w[1] ^= seed;                                                                \
-  w[2] ^= seed;                                                                \
-  w[3] ^= seed;                                                                \
-  v[0] += w[0];                                                                \
-  v[1] += w[1];                                                                \
-  v[2] += w[2];                                                                \
-  v[3] += w[3]
+  v = fio_v256_xor64(v, w);                                                    \
+  v = fio_v256_mul64(v, prime);                                                \
+  w = fio_v256_clrot64(w, 31);                                                 \
+  w = fio_v256_cxor64(w, seed);                                                \
+  v = fio_v256_add64(v, w);
 
 FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
                                        const void *restrict data_,
@@ -7857,45 +8247,34 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  typedef uint64_t fio___shash_vec_u[4] FIO_ALIGN(16);
-  fio___shash_vec_u w, v = {seed, seed, seed, seed};
-  fio___shash_vec_u const prime = {FIO_STABLE_HASH_PRIME0,
-                                   FIO_STABLE_HASH_PRIME1,
-                                   FIO_STABLE_HASH_PRIME2,
-                                   FIO_STABLE_HASH_PRIME3};
+  fio_v256 w, v = {.v64 = {seed, seed, seed, seed}};
+  fio_v256 const prime = {.v64 = {FIO_STABLE_HASH_PRIME0,
+                                  FIO_STABLE_HASH_PRIME1,
+                                  FIO_STABLE_HASH_PRIME2,
+                                  FIO_STABLE_HASH_PRIME3}};
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    fio_memcpy32(w, data);
-    w[0] = fio_ltole64(w[0]); /* make sure we're using little endien */
-    w[1] = fio_ltole64(w[1]);
-    w[2] = fio_ltole64(w[2]);
-    w[3] = fio_ltole64(w[3]);
-    seed ^= w[0] + w[1] + w[2] + w[3];
+    w = fio_v256_load_le64(data);
+    seed ^= fio_v256_reduce_add64(w);
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
-  /* copy bytes to the word block in little endian */
   if ((len & 31)) {
-    w[0] = w[1] = w[2] = w[3] = 0; /* sets padding to 0 */
-    fio_memcpy31x(w, data, len);   /* copies `len & 31` bytes */
-    w[0] = fio_ltole64(w[0]);      /* make sure we're using little endien */
-    w[1] = fio_ltole64(w[1]);
-    w[2] = fio_ltole64(w[2]);
-    w[3] = fio_ltole64(w[3]);
+    uint64_t tmp[4] = {0};
+    fio_memcpy31x(tmp, data, len); /* copies `len & 31` bytes */
+    w = fio_v256_load_le64(tmp);
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector mini-avalanche */
-  FIO_STABLE_HASH_MUL_PRIME(v);
-  v[0] ^= fio_lrot64(v[0], 7);
-  v[1] ^= fio_lrot64(v[1], 11);
-  v[2] ^= fio_lrot64(v[2], 13);
-  v[3] ^= fio_lrot64(v[3], 17);
+  v = fio_v256_mul64(v, prime);
+  w = (fio_v256){.v64 = {7, 11, 13, 17}};
+  v = fio_v256_lrot64(v, w);
 
-  dest[0] = v[0];
-  dest[1] = v[1];
-  dest[2] = v[2];
-  dest[3] = v[3];
+  dest[0] = v.v64[0];
+  dest[1] = v.v64[1];
+  dest[2] = v.v64[2];
+  dest[3] = v.v64[3];
   return;
 }
 
@@ -8249,13 +8628,13 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
                                                           size_t len) {
   uint64_t h[4] = {0};
-  do {
+  while (len > 31) {
     h[0] += fio_risky_ptr((void *)fio_buf2u64_local(buf));
     h[1] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 8));
     h[2] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 16));
     h[3] += fio_risky_ptr((void *)fio_buf2u64_local(buf + 24));
     len -= 32;
-  } while (len > 31);
+  }
   if ((len & 31)) {
     uint64_t t[4] = {0};
     fio_memcpy31x(t, buf, len);
@@ -8269,13 +8648,13 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
                                                           size_t len) {
   uint64_t h[4] = {0};
-  do {
+  while (len > 31) {
     h[0] += fio_risky_num(fio_buf2u64_local(buf), 0);
     h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), 0);
     h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), 0);
     h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), 0);
     len -= 32;
-  } while (len > 31);
+  }
   if ((len & 31)) {
     uint64_t t[4] = {0};
     fio_memcpy31x(t, buf, len);
@@ -8702,16 +9081,9 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if !defined(DEBUG) && defined(__ARM_FEATURE_CRYPTO) &&                        \
-    __ARM_FEATURE_CRYPTO && defined(__ARM_NEON)
-#include <arm_acle.h>
-#include <arm_neon.h>
-#define FIO___SHA1_ARM_INTRIN 1
-#endif
-
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
-#if FIO___SHA1_ARM_INTRIN
+#if FIO___HAS_ARM_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-arm.c
    * Credit to Jeffrey Walton.
@@ -8940,8 +9312,7 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
 #undef FIO___SHA1_ROUND4
 #undef FIO___SHA1_ROUND16
 #undef FIO___SHA1_ROUND20
-#endif /* FIO___SHA1_ARM_INTRIN */
-#undef FIO___SHA1_ARM_INTRIN
+#endif /* FIO___HAS_ARM_INTRIN */
 }
 /**
  * A simple, non streaming, implementation of the SHA1 hashing algorithm.
@@ -9009,7 +9380,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
                                                                 size_t len) {
-  fio_256u result;
+  fio_u256 result;
   SHA1((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
@@ -9106,43 +9477,43 @@ SHA 2 API
 
 /** Streaming SHA-256 type. */
 typedef struct {
-  fio_256u hash;
-  fio_512u cache;
+  fio_u256 hash;
+  fio_u512 cache;
   uint64_t total_len;
 } fio_sha256_s;
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len);
+FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len);
 
-/** initializes a fio_256u so the hash can consume streaming data. */
+/** initializes a fio_u256 so the hash can consume streaming data. */
 FIO_IFUNC fio_sha256_s fio_sha256_init();
 /** Feed data into the hash */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
-/** finalizes a fio_256u with the SHA 256 hash. */
-SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h);
+/** finalizes a fio_u256 with the SHA 256 hash. */
+SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h);
 
 /** Streaming SHA-512 type. */
 typedef struct {
-  fio_512u hash;
-  fio_1024u cache;
+  fio_u512 hash;
+  fio_u1024 cache;
   uint64_t total_len;
 } fio_sha512_s;
 
 /** A simple, non streaming, implementation of the SHA-512 hashing algorithm. */
-FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len);
+FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len);
 
-/** initializes a fio_512u so the hash can consume streaming data. */
+/** initializes a fio_u512 so the hash can consume streaming data. */
 FIO_IFUNC fio_sha512_s fio_sha512_init();
 /** Feed data into the hash */
 SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
-/** finalizes a fio_512u with the SHA 512 hash. */
-SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h);
+/** finalizes a fio_u512 with the SHA 512 hash. */
+SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h);
 
 /* *****************************************************************************
 Implementation - static / inline functions.
 ***************************************************************************** */
 
-/** initializes a fio_256u so the hash can be consumed. */
+/** initializes a fio_u256 so the hash can be consumed. */
 FIO_IFUNC fio_sha256_s fio_sha256_init() {
   fio_sha256_s h = {.hash.u32 = {0x6A09E667ULL,
                                  0xBB67AE85ULL,
@@ -9156,20 +9527,20 @@ FIO_IFUNC fio_sha256_s fio_sha256_init() {
 }
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len) {
+FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len) {
   fio_sha256_s h = fio_sha256_init();
   fio_sha256_consume(&h, data, len);
   return fio_sha256_finalize(&h);
 }
 
-/** initializes a fio_256u so the hash can be consumed. */
+/** initializes a fio_u256 so the hash can be consumed. */
 FIO_IFUNC fio_sha512_s fio_sha512_init() {
   fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
   return h;
 }
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len) {
+FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len) {
   fio_sha512_s h = fio_sha512_init();
   fio_sha512_consume(&h, data, len);
   return fio_sha512_finalize(&h);
@@ -9184,7 +9555,7 @@ Implementation - possibly externed functions.
 Implementation - SHA-256
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
+FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   const uint32_t sha256_consts[64] = {
       0x428A2F98ULL, 0x71374491ULL, 0xB5C0FBCFULL, 0xE9B5DBA5ULL, 0x3956C25BULL,
       0x59F111F1ULL, 0x923F82A4ULL, 0xAB1C5ED5ULL, 0xD807AA98ULL, 0x12835B01ULL,
@@ -9199,7 +9570,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
       0x2748774CULL, 0x34B0BCB5ULL, 0x391C0CB3ULL, 0x4ED8AA4AULL, 0x5B9CCA4FULL,
       0x682E6FF3ULL, 0x748F82EEULL, 0x78A5636FULL, 0x84C87814ULL, 0x8CC70208ULL,
       0x90BEFFFAULL, 0xA4506CEBULL, 0xBEF9A3F7ULL, 0xC67178F2ULL};
-  const fio_256u old = *h;
+  const fio_u256 old = *h;
   /* read data as an array of 16 big endian 32 bit integers. */
   uint32_t w[16];
   fio_memcpy64(w, block);
@@ -9275,7 +9646,7 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
   fio_memcpy63x(h->cache.u64, r, len);
 }
 
-SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
+SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h) {
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
   const size_t total = h->total_len;
@@ -9297,7 +9668,7 @@ SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
 Implementation - SHA-512
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha512_round(fio_512u *h, const uint8_t *block) {
+FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
   /* TODO! */
   (void)h;
   (void)block;
@@ -9337,8 +9708,8 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
   fio_memcpy63x(h->cache.u64, r, len);
 }
 
-/** finalizes a fio_512u with the SHA 512 hash. */
-SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h) {
+/** finalizes a fio_u512 with the SHA 512 hash. */
+SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
   /* TODO! */
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
@@ -9364,12 +9735,12 @@ SHA2 Testing
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_wrapper)(char *data,
                                                          size_t len) {
-  fio_256u h = fio_sha256((const void *)data, (uint64_t)len);
+  fio_u256 h = fio_sha256((const void *)data, (uint64_t)len);
   return (uintptr_t)(h.u64[0]);
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
                                                          size_t len) {
-  fio_512u h = fio_sha512((const void *)data, (uint64_t)len);
+  fio_u512 h = fio_sha512((const void *)data, (uint64_t)len);
   return (uintptr_t)(h.u64[0]);
 }
 
@@ -9379,13 +9750,13 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
 #include <openssl/ssl.h>
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
-  fio_256u result;
+  fio_u256 result;
   SHA256((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
-  fio_512u result;
+  fio_u512 result;
   SHA512((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
@@ -9452,7 +9823,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
     if (!data[i].str)
       continue;
     if (data[i].sha256) {
-      fio_256u sha256 = fio_sha256(data[i].str, strlen(data[i].str));
+      fio_u256 sha256 = fio_sha256(data[i].str, strlen(data[i].str));
       FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
                  "SHA256 mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
                  data[i].str,
@@ -9466,7 +9837,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[31]);
     }
     // if (data[i].sha512) {
-    //   fio_512u sha512 = fio_sha512(data[i].str, strlen(data[i].str));
+    //   fio_u512 sha512 = fio_sha512(data[i].str, strlen(data[i].str));
     //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
     //              "SHA512 mismatch for \"%s\"",
     //              data[i].str);
@@ -9857,10 +10228,10 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-FIO_IFUNC fio_512u fio___chacha_init(const void *key,
+FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
                                      const void *nounce,
                                      uint32_t counter) {
-  fio_512u o = {
+  fio_u512 o = {
       .u32 =
           {
               // clang-format off
@@ -9907,8 +10278,8 @@ FIO_IFUNC void fio___chacha_xor64(void *dest_,
   }
 }
 
-FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
-  fio_512u c2 = *c;
+FIO_IFUNC void fio___chacha_round20(fio_u512 *c) {
+  fio_u512 c2 = *c;
   for (size_t round = 0; round < 10; ++round) {
     for (size_t i = 0; i < 4; ++i) {
       FIO___CHACHA_QROUND(c2.u32[i],
@@ -9960,23 +10331,23 @@ SFUNC void fio_chacha20(void *restrict data,
                         const void *key,
                         const void *nounce,
                         uint32_t counter) {
-  fio_512u c = fio___chacha_init(key, nounce, counter);
+  fio_u512 c = fio___chacha_init(key, nounce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
-    fio_512u cypher[4] = {c, c, c, c};
+    fio_u512 cypher[4] = {c, c, c, c};
     fio___chacha_round20x2(cypher[0].u32, cypher[2].u32);
     fio___chacha_xor64(data, cypher[0].u64, 16);
     c.u32[12] += 2; /* block counter */
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2);
     fio___chacha_xor64(data, c2.u64, 8);
     data = (void *)((uint8_t *)data + 64);
     ++c.u32[12];
   }
   if ((len & 63)) {
-    fio_512u dest; /* no need to initialize, junk data disregarded. */
+    fio_u512 dest; /* no need to initialize, junk data disregarded. */
     fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
     fio___chacha_xor64(dest.u64, c.u64, 8);
@@ -9995,10 +10366,10 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      size_t adlen,
                                      const void *key,
                                      const void *nounce) {
-  fio_512u c = fio___chacha_init(key, nounce, 0);
+  fio_u512 c = fio___chacha_init(key, nounce, 0);
   fio___poly_s pl;
   {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2); /* computes poly1305 key */
     pl = fio___poly_init(&c2);
     ++c.u32[12]; /* block counter */
@@ -10018,7 +10389,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     fio___poly_consume128bit(&pl, (uint8_t *)tmp, 1);
   }
   for (size_t i = 127; i < len; i += 128) {
-    fio_512u c2[4] = {c, c, c, c};
+    fio_u512 c2[4] = {c, c, c, c};
     fio___chacha_round20x2(c2[0].u32, c2[2].u32);
     fio___chacha_xor64(data, c2[0].u64, 16);
     fio___poly_consume128bit(&pl, data, 1);
@@ -10033,7 +10404,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2);
     fio___chacha_xor64(data, c2.u64, 8);
     fio___poly_consume128bit(&pl, data, 1);
@@ -10044,7 +10415,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     data = (void *)((uint8_t *)data + 64);
   }
   if ((len & 63)) {
-    fio_512u dest;
+    fio_u512 dest;
     uint8_t *p = dest.u8;
     fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
@@ -10082,7 +10453,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       size_t adlen,
                                       const void *key,
                                       const void *nounce) {
-  fio_512u c = fio___chacha_init(key, nounce, 0);
+  fio_u512 c = fio___chacha_init(key, nounce, 0);
   fio___chacha_round20(&c); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c);
   for (size_t i = 31; i < adlen; i += 32) {
@@ -10101,7 +10472,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
   }
   fio___poly_consume_msg(&pl, (uint8_t *)data, (len & (~15ULL)));
   if ((len & 15)) {
-    fio_128u dest = {0}; /* 16 byte pad */
+    fio_u128 dest = {0}; /* 16 byte pad */
     fio_memcpy15x(dest.u64, (uint8_t *)data + (len & (~15ULL)), len);
     fio___poly_consume128bit(&pl, (uint8_t *)(dest.u64), 1);
   }
@@ -10570,7 +10941,7 @@ Implementation - possibly externed functions.
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* prevent ED25519 keys from having a small period (cyclic value). */
-FIO_IFUNC void fio___ed25519_clamp_on_key(fio_256u *k) {
+FIO_IFUNC void fio___ed25519_clamp_on_key(fio_u256 *k) {
   k->u8[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
   k->u8[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
   k->u8[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */

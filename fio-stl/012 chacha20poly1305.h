@@ -328,10 +328,10 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-FIO_IFUNC fio_512u fio___chacha_init(const void *key,
+FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
                                      const void *nounce,
                                      uint32_t counter) {
-  fio_512u o = {
+  fio_u512 o = {
       .u32 =
           {
               // clang-format off
@@ -378,8 +378,8 @@ FIO_IFUNC void fio___chacha_xor64(void *dest_,
   }
 }
 
-FIO_IFUNC void fio___chacha_round20(fio_512u *c) {
-  fio_512u c2 = *c;
+FIO_IFUNC void fio___chacha_round20(fio_u512 *c) {
+  fio_u512 c2 = *c;
   for (size_t round = 0; round < 10; ++round) {
     for (size_t i = 0; i < 4; ++i) {
       FIO___CHACHA_QROUND(c2.u32[i],
@@ -431,23 +431,23 @@ SFUNC void fio_chacha20(void *restrict data,
                         const void *key,
                         const void *nounce,
                         uint32_t counter) {
-  fio_512u c = fio___chacha_init(key, nounce, counter);
+  fio_u512 c = fio___chacha_init(key, nounce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
-    fio_512u cypher[4] = {c, c, c, c};
+    fio_u512 cypher[4] = {c, c, c, c};
     fio___chacha_round20x2(cypher[0].u32, cypher[2].u32);
     fio___chacha_xor64(data, cypher[0].u64, 16);
     c.u32[12] += 2; /* block counter */
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2);
     fio___chacha_xor64(data, c2.u64, 8);
     data = (void *)((uint8_t *)data + 64);
     ++c.u32[12];
   }
   if ((len & 63)) {
-    fio_512u dest; /* no need to initialize, junk data disregarded. */
+    fio_u512 dest; /* no need to initialize, junk data disregarded. */
     fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
     fio___chacha_xor64(dest.u64, c.u64, 8);
@@ -466,10 +466,10 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      size_t adlen,
                                      const void *key,
                                      const void *nounce) {
-  fio_512u c = fio___chacha_init(key, nounce, 0);
+  fio_u512 c = fio___chacha_init(key, nounce, 0);
   fio___poly_s pl;
   {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2); /* computes poly1305 key */
     pl = fio___poly_init(&c2);
     ++c.u32[12]; /* block counter */
@@ -489,7 +489,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     fio___poly_consume128bit(&pl, (uint8_t *)tmp, 1);
   }
   for (size_t i = 127; i < len; i += 128) {
-    fio_512u c2[4] = {c, c, c, c};
+    fio_u512 c2[4] = {c, c, c, c};
     fio___chacha_round20x2(c2[0].u32, c2[2].u32);
     fio___chacha_xor64(data, c2[0].u64, 16);
     fio___poly_consume128bit(&pl, data, 1);
@@ -504,7 +504,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_512u c2 = c;
+    fio_u512 c2 = c;
     fio___chacha_round20(&c2);
     fio___chacha_xor64(data, c2.u64, 8);
     fio___poly_consume128bit(&pl, data, 1);
@@ -515,7 +515,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     data = (void *)((uint8_t *)data + 64);
   }
   if ((len & 63)) {
-    fio_512u dest;
+    fio_u512 dest;
     uint8_t *p = dest.u8;
     fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
@@ -553,7 +553,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       size_t adlen,
                                       const void *key,
                                       const void *nounce) {
-  fio_512u c = fio___chacha_init(key, nounce, 0);
+  fio_u512 c = fio___chacha_init(key, nounce, 0);
   fio___chacha_round20(&c); /* computes poly1305 key */
   fio___poly_s pl = fio___poly_init(&c);
   for (size_t i = 31; i < adlen; i += 32) {
@@ -572,7 +572,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
   }
   fio___poly_consume_msg(&pl, (uint8_t *)data, (len & (~15ULL)));
   if ((len & 15)) {
-    fio_128u dest = {0}; /* 16 byte pad */
+    fio_u128 dest = {0}; /* 16 byte pad */
     fio_memcpy15x(dest.u64, (uint8_t *)data + (len & (~15ULL)), len);
     fio___poly_consume128bit(&pl, (uint8_t *)(dest.u64), 1);
   }

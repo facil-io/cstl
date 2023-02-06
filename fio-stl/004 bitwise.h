@@ -349,40 +349,40 @@ FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_local)(const void *c) {
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_local)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_bswap)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_bswap)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8_little)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8_little)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }
 
-/** Convinience function for reading 1 byte (8 bit) from a buffer. */
+/** Convenience function for reading 1 byte (8 bit) from a buffer. */
 FIO_IFUNC uint8_t FIO_NAME2(fio_buf, u8)(const void *c) {
   const uint8_t *tmp = (const uint8_t *)c; /* fio_buf2u16 */
   return *tmp;
 }
 
-/** Convinience function for writing 1 byte (8 bit) to a buffer. */
+/** Convenience function for writing 1 byte (8 bit) to a buffer. */
 FIO_IFUNC void FIO_NAME2(fio_u, buf8)(void *buf, uint8_t i) {
   *((uint8_t *)buf) = i; /* fio_u2buf16 */
 }

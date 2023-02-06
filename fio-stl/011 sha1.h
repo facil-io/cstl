@@ -61,16 +61,9 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if !defined(DEBUG) && defined(__ARM_FEATURE_CRYPTO) &&                        \
-    __ARM_FEATURE_CRYPTO && defined(__ARM_NEON)
-#include <arm_acle.h>
-#include <arm_neon.h>
-#define FIO___SHA1_ARM_INTRIN 1
-#endif
-
 FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
                                    uint32_t *w /* 16 words */) {
-#if FIO___SHA1_ARM_INTRIN
+#if FIO___HAS_ARM_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-arm.c
    * Credit to Jeffrey Walton.
@@ -299,8 +292,7 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
 #undef FIO___SHA1_ROUND4
 #undef FIO___SHA1_ROUND16
 #undef FIO___SHA1_ROUND20
-#endif /* FIO___SHA1_ARM_INTRIN */
-#undef FIO___SHA1_ARM_INTRIN
+#endif /* FIO___HAS_ARM_INTRIN */
 }
 /**
  * A simple, non streaming, implementation of the SHA1 hashing algorithm.
@@ -368,7 +360,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_wrapper)(char *data, size_t len) {
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
                                                                 size_t len) {
-  fio_256u result;
+  fio_u256 result;
   SHA1((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }

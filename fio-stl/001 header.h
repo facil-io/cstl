@@ -2345,7 +2345,8 @@ Pointer Tagging
 #endif /* FIO_QUEUE */
 
 /* Modules that require FIO_MATH */
-#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_TEST_CSTL)
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_SHA2) ||           \
+    defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
 #endif

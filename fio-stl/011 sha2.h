@@ -24,43 +24,43 @@ SHA 2 API
 
 /** Streaming SHA-256 type. */
 typedef struct {
-  fio_256u hash;
-  fio_512u cache;
+  fio_u256 hash;
+  fio_u512 cache;
   uint64_t total_len;
 } fio_sha256_s;
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len);
+FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len);
 
-/** initializes a fio_256u so the hash can consume streaming data. */
+/** initializes a fio_u256 so the hash can consume streaming data. */
 FIO_IFUNC fio_sha256_s fio_sha256_init();
 /** Feed data into the hash */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
-/** finalizes a fio_256u with the SHA 256 hash. */
-SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h);
+/** finalizes a fio_u256 with the SHA 256 hash. */
+SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h);
 
 /** Streaming SHA-512 type. */
 typedef struct {
-  fio_512u hash;
-  fio_1024u cache;
+  fio_u512 hash;
+  fio_u1024 cache;
   uint64_t total_len;
 } fio_sha512_s;
 
 /** A simple, non streaming, implementation of the SHA-512 hashing algorithm. */
-FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len);
+FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len);
 
-/** initializes a fio_512u so the hash can consume streaming data. */
+/** initializes a fio_u512 so the hash can consume streaming data. */
 FIO_IFUNC fio_sha512_s fio_sha512_init();
 /** Feed data into the hash */
 SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
-/** finalizes a fio_512u with the SHA 512 hash. */
-SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h);
+/** finalizes a fio_u512 with the SHA 512 hash. */
+SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h);
 
 /* *****************************************************************************
 Implementation - static / inline functions.
 ***************************************************************************** */
 
-/** initializes a fio_256u so the hash can be consumed. */
+/** initializes a fio_u256 so the hash can be consumed. */
 FIO_IFUNC fio_sha256_s fio_sha256_init() {
   fio_sha256_s h = {.hash.u32 = {0x6A09E667ULL,
                                  0xBB67AE85ULL,
@@ -74,20 +74,20 @@ FIO_IFUNC fio_sha256_s fio_sha256_init() {
 }
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_256u fio_sha256(const void *data, uint64_t len) {
+FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len) {
   fio_sha256_s h = fio_sha256_init();
   fio_sha256_consume(&h, data, len);
   return fio_sha256_finalize(&h);
 }
 
-/** initializes a fio_256u so the hash can be consumed. */
+/** initializes a fio_u256 so the hash can be consumed. */
 FIO_IFUNC fio_sha512_s fio_sha512_init() {
   fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
   return h;
 }
 
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
-FIO_IFUNC fio_512u fio_sha512(const void *data, uint64_t len) {
+FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len) {
   fio_sha512_s h = fio_sha512_init();
   fio_sha512_consume(&h, data, len);
   return fio_sha512_finalize(&h);
@@ -102,7 +102,7 @@ Implementation - possibly externed functions.
 Implementation - SHA-256
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
+FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   const uint32_t sha256_consts[64] = {
       0x428A2F98ULL, 0x71374491ULL, 0xB5C0FBCFULL, 0xE9B5DBA5ULL, 0x3956C25BULL,
       0x59F111F1ULL, 0x923F82A4ULL, 0xAB1C5ED5ULL, 0xD807AA98ULL, 0x12835B01ULL,
@@ -117,7 +117,7 @@ FIO_IFUNC void fio___sha256_round(fio_256u *h, const uint8_t *block) {
       0x2748774CULL, 0x34B0BCB5ULL, 0x391C0CB3ULL, 0x4ED8AA4AULL, 0x5B9CCA4FULL,
       0x682E6FF3ULL, 0x748F82EEULL, 0x78A5636FULL, 0x84C87814ULL, 0x8CC70208ULL,
       0x90BEFFFAULL, 0xA4506CEBULL, 0xBEF9A3F7ULL, 0xC67178F2ULL};
-  const fio_256u old = *h;
+  const fio_u256 old = *h;
   /* read data as an array of 16 big endian 32 bit integers. */
   uint32_t w[16];
   fio_memcpy64(w, block);
@@ -193,7 +193,7 @@ SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
   fio_memcpy63x(h->cache.u64, r, len);
 }
 
-SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
+SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h) {
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
   const size_t total = h->total_len;
@@ -215,7 +215,7 @@ SFUNC fio_256u fio_sha256_finalize(fio_sha256_s *h) {
 Implementation - SHA-512
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha512_round(fio_512u *h, const uint8_t *block) {
+FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
   /* TODO! */
   (void)h;
   (void)block;
@@ -255,8 +255,8 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
   fio_memcpy63x(h->cache.u64, r, len);
 }
 
-/** finalizes a fio_512u with the SHA 512 hash. */
-SFUNC fio_512u fio_sha512_finalize(fio_sha512_s *h) {
+/** finalizes a fio_u512 with the SHA 512 hash. */
+SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
   /* TODO! */
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
@@ -282,12 +282,12 @@ SHA2 Testing
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_wrapper)(char *data,
                                                          size_t len) {
-  fio_256u h = fio_sha256((const void *)data, (uint64_t)len);
+  fio_u256 h = fio_sha256((const void *)data, (uint64_t)len);
   return (uintptr_t)(h.u64[0]);
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
                                                          size_t len) {
-  fio_512u h = fio_sha512((const void *)data, (uint64_t)len);
+  fio_u512 h = fio_sha512((const void *)data, (uint64_t)len);
   return (uintptr_t)(h.u64[0]);
 }
 
@@ -297,13 +297,13 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_wrapper)(char *data,
 #include <openssl/ssl.h>
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
-  fio_256u result;
+  fio_u256 result;
   SHA256((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
                                                                   size_t len) {
-  fio_512u result;
+  fio_u512 result;
   SHA512((const unsigned char *)data, len, result.u8);
   return result.u64[0];
 }
@@ -370,7 +370,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
     if (!data[i].str)
       continue;
     if (data[i].sha256) {
-      fio_256u sha256 = fio_sha256(data[i].str, strlen(data[i].str));
+      fio_u256 sha256 = fio_sha256(data[i].str, strlen(data[i].str));
       FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
                  "SHA256 mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
                  data[i].str,
@@ -384,7 +384,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[31]);
     }
     // if (data[i].sha512) {
-    //   fio_512u sha512 = fio_sha512(data[i].str, strlen(data[i].str));
+    //   fio_u512 sha512 = fio_sha512(data[i].str, strlen(data[i].str));
     //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
     //              "SHA512 mismatch for \"%s\"",
     //              data[i].str);
