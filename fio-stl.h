@@ -4825,6 +4825,18 @@ FIO_IFUNC fio_v256 fio_v256_load_le64(const void *buf) {
   }
 #endif /* reduce builtins */
 
+#define FIO_VECTOR_SHUFFLE_FN(total_bits, bits)                                \
+  /** Performs a "shuffle" operation, returning a new, reordered vector. */    \
+  FIO_IFUNC fio_v##total_bits fio_v##total_bits##_shuffle##bits##fn(           \
+      fio_v##total_bits v,                                                     \
+      int vi[total_bits / bits]) {                                             \
+    fio_v##total_bits r;                                                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.v##bits[i] = v.v##bits[vi[i] & (bits - 1)];                            \
+    }                                                                          \
+    return r;                                                                  \
+  }
+
 #define FIO_VECTOR_GROUP_FUNCTIONS(total_bits, bits)                           \
   FIO_VECTOR_OPERATION(total_bits, bits, mul, *)                               \
   FIO_VECTOR_OPERATION(total_bits, bits, add, +)                               \
@@ -4845,7 +4857,8 @@ FIO_IFUNC fio_v256 fio_v256_load_le64(const void *buf) {
   FIO_VECTOR_OPERATION_SINGLE(total_bits, bits, flip, ~)                       \
   FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS(total_bits, bits)                      \
   FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, l, <<, >>)                   \
-  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, r, >>, <<)
+  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, r, >>, <<)                   \
+  FIO_VECTOR_SHUFFLE_FN(total_bits, bits)
 
 FIO_VECTOR_GROUP_FUNCTIONS(128, 8)
 FIO_VECTOR_GROUP_FUNCTIONS(128, 16)
@@ -4866,67 +4879,63 @@ FIO_VECTOR_GROUP_FUNCTIONS(512, 64)
 #undef FIO_VECTOR_OPERATION_SINGLE
 #undef FIO_VECTOR_OPERATION_REDUCE_FUNCTIONS
 #undef FIO_VECTOR_OPERATION_ROT_SHFT_FUNC
-
-/** Performs a "shuffle" operation, returning a new, reordered vector. */
-FIO_IFUNC fio_v128
-fio_v128_shuffle32(fio_v128 v, int i0, int i1, int i2, int i3) {
-  fio_v128 r;
-  r.v64[0] = v.v64[i0 & 3];
-  r.v64[1] = v.v64[i1 & 3];
-  r.v64[2] = v.v64[i2 & 3];
-  r.v64[3] = v.v64[i3 & 3];
-  return r;
-}
-/** Performs a "shuffle" operation, returning a new, reordered vector. */
-FIO_IFUNC fio_v128 fio_v128_shuffle64(fio_v128 v, int i0, int i1) {
-  fio_v128 r;
-  r.v64[0] = v.v64[i0 & 1];
-  r.v64[1] = v.v64[i1 & 1];
-  return r;
-}
-/** Performs a "shuffle" operation, returning a new, reordered vector. */
-FIO_IFUNC fio_v256 fio_v256_shuffle32(fio_v256 v,
-                                      int i0,
-                                      int i1,
-                                      int i2,
-                                      int i3,
-                                      int i4,
-                                      int i5,
-                                      int i6,
-                                      int i7) {
-  fio_v256 r;
-  r.v32[0] = v.v32[i0 & 7];
-  r.v32[1] = v.v32[i1 & 7];
-  r.v32[2] = v.v32[i2 & 7];
-  r.v32[3] = v.v32[i3 & 7];
-  r.v32[4] = v.v32[i4 & 7];
-  r.v32[5] = v.v32[i5 & 7];
-  r.v32[6] = v.v32[i6 & 7];
-  r.v32[7] = v.v32[i7 & 7];
-  return r;
-}
-/** Performs a "shuffle" operation, returning a new, reordered vector. */
-FIO_IFUNC fio_v256
-fio_v256_shuffle64(fio_v256 v, int i0, int i1, int i2, int i3) {
-  fio_v256 r;
-  r.v64[0] = v.v64[i0 & 3];
-  r.v64[1] = v.v64[i1 & 3];
-  r.v64[2] = v.v64[i2 & 3];
-  r.v64[3] = v.v64[i3 & 3];
-  return r;
-}
+#undef FIO_VECTOR_SHUFFLE_FN
 
 #if __has_builtin(__builtin_shufflevector)
+#define fio_v128_shuffle8(v, ...)                                              \
+  ((fio_v128){.v8 = __builtin_shufflevector(v.v8, v.v8, __VA_ARGS__)})
+#define fio_v128_shuffle16(v, ...)                                             \
+  ((fio_v128){.v16 = __builtin_shufflevector(v.v16, v.v16, __VA_ARGS__)})
 #define fio_v128_shuffle32(v, ...)                                             \
-  (fio_v128) { .v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__) }
+  ((fio_v128){.v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__)})
 #define fio_v128_shuffle64(v, ...)                                             \
-  (fio_v128) { .v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__) }
+  ((fio_v128){.v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__)})
 
+#define fio_v256_shuffle8(v, ...)                                              \
+  ((fio_v256){.v8 = __builtin_shufflevector(v.v8, v.v8, __VA_ARGS__)})
+#define fio_v256_shuffle16(v, ...)                                             \
+  ((fio_v256){.v16 = __builtin_shufflevector(v.v16, v.v16, __VA_ARGS__)})
 #define fio_v256_shuffle32(v, ...)                                             \
-  (fio_v256) { .v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__) }
+  ((fio_v256){.v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__)})
 #define fio_v256_shuffle64(v, ...)                                             \
-  (fio_v256) { .v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__) }
-#endif
+  ((fio_v256){.v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__)})
+
+#define fio_v512_shuffle8(v, ...)                                              \
+  ((fio_v512){.v8 = __builtin_shufflevector(v.v8, v.v8, __VA_ARGS__)})
+#define fio_v512_shuffle16(v, ...)                                             \
+  ((fio_v512){.v16 = __builtin_shufflevector(v.v16, v.v16, __VA_ARGS__)})
+#define fio_v512_shuffle32(v, ...)                                             \
+  ((fio_v512){.v32 = __builtin_shufflevector(v.v32, v.v32, __VA_ARGS__)})
+#define fio_v512_shuffle64(v, ...)                                             \
+  ((fio_v512){.v64 = __builtin_shufflevector(v.v64, v.v64, __VA_ARGS__)})
+
+#else
+
+#define fio_v128_shuffle8(v, ...) fio_v128_shuffle8fn(v, (int[16]){__VA_ARGS__})
+#define fio_v128_shuffle16(v, ...)                                             \
+  fio_v128_shuffle16fn(v, (int[8]){__VA_ARGS__})
+#define fio_v128_shuffle32(v, ...)                                             \
+  fio_v128_shuffle32fn(v, (int[4]){__VA_ARGS__})
+#define fio_v128_shuffle64(v, ...)                                             \
+  fio_v128_shuffle64fn(v, (int[2]){__VA_ARGS__})
+
+#define fio_v256_shuffle8(v, ...) fio_v256_shuffle8fn(v, (int[32]){__VA_ARGS__})
+#define fio_v256_shuffle16(v, ...)                                             \
+  fio_v256_shuffle16fn(v, (int[16]){__VA_ARGS__})
+#define fio_v256_shuffle32(v, ...)                                             \
+  fio_v256_shuffle32fn(v, (int[8]){__VA_ARGS__})
+#define fio_v256_shuffle64(v, ...)                                             \
+  fio_v256_shuffle64fn(v, (int[4]){__VA_ARGS__})
+
+#define fio_v512_shuffle8(v, ...) fio_v512_shuffle8fn(v, (int[64]){__VA_ARGS__})
+#define fio_v512_shuffle16(v, ...)                                             \
+  fio_v512_shuffle16fn(v, (int[32]){__VA_ARGS__})
+#define fio_v512_shuffle32(v, ...)                                             \
+  fio_v512_shuffle32fn(v, (int[16]){__VA_ARGS__})
+#define fio_v512_shuffle64(v, ...)                                             \
+  fio_v512_shuffle64fn(v, (int[8]){__VA_ARGS__})
+
+#endif /* __has_builtin(__builtin_shufflevector) */
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
