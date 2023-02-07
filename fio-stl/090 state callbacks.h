@@ -148,7 +148,7 @@ FIO_WEAK fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
 FIO_WEAK fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
-static const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
+FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
     [FIO_CALL_PRE_START] = "PRE_START",
     [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",

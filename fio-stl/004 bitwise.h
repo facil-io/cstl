@@ -174,20 +174,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_local)(void *buf, uint64_t i) {
   fio_memcpy8(buf, &i); /* fio_u2buf64 */
 }
 
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (local byte order). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_local)(const void *c) {
-  __uint128_t tmp; /* fio_buf2u1128 */
-  fio_memcpy16(&tmp, c);
-  return tmp;
-}
-
-/** Writes a local 128 bit number to an unaligned buffer. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_local)(void *buf, __uint128_t i) {
-  fio_memcpy16(buf, &i); /* fio_u2buf128 */
-}
-#endif /* __SIZEOF_INT128__ */
-
 /** Converts an unaligned byte stream to a 16 bit number (reversed order). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16_bswap)(const void *c) {
   return fio_bswap16(FIO_NAME2(fio_buf, u16_local)(c)); /* fio_buf2u16 */
@@ -213,13 +199,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf32_bswap)(void *buf, uint32_t i) {
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_bswap)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_local)(buf, fio_bswap64(i));
 }
-
-#ifdef __SIZEOF_INT128__
-/** Writes a local 64 bit number to an unaligned buffer in reversed order. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_bswap)(void *buf, __uint128_t i) {
-  FIO_NAME2(fio_u, buf128_local)(buf, fio_bswap128(i));
-}
-#endif /* __SIZEOF_INT128__ */
 
 /** Converts an unaligned byte stream to a 16 bit number (Big Endian). */
 FIO_IFUNC uint16_t FIO_NAME2(fio_buf, u16)(const void *c) { /* fio_buf2u16 */
@@ -250,19 +229,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_local)(buf, fio_ntol64(i));
 }
 
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (Big Endian). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf,
-                                u128)(const void *c) { /* fio_buf2u64 */
-  __uint128_t i = FIO_NAME2(fio_buf, u128_local)(c);
-  return fio_lton128(i);
-}
-/** Writes a local 128 bit number to an unaligned buffer in Big Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128)(void *buf, __uint128_t i) {
-  FIO_NAME2(fio_u, buf128_local)(buf, fio_ntol128(i));
-}
-#endif /* __SIZEOF_INT128__ */
-
 #if __LITTLE_ENDIAN__
 
 /** Converts an unaligned byte stream to a 16 bit number (Little Endian). */
@@ -291,17 +257,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_local)(buf, i);
 }
 
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (Little Endian). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_little)(const void *c) {
-  return FIO_NAME2(fio_buf, u128_local)(c); /* fio_buf2u64 */
-}
-/** Writes a local 128 bit number to an unaligned buffer in Little Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_little)(void *buf, __uint128_t i) {
-  FIO_NAME2(fio_u, buf128_local)(buf, i);
-}
-#endif /* __SIZEOF_INT128__ */
-
 #else /* !__LITTLE_ENDIAN__ */
 
 /** Converts an unaligned byte stream to a 16 bit number (Little Endian). */
@@ -329,17 +284,6 @@ FIO_IFUNC void FIO_NAME2(fio_u, buf32_little)(void *buf, uint32_t i) {
 FIO_IFUNC void FIO_NAME2(fio_u, buf64_little)(void *buf, uint64_t i) {
   FIO_NAME2(fio_u, buf64_bswap)(buf, i);
 }
-
-#ifdef __SIZEOF_INT128__
-/** Converts an unaligned byte stream to a 128 bit number (Little Endian). */
-FIO_IFUNC __uint128_t FIO_NAME2(fio_buf, u128_little)(const void *c) {
-  return FIO_NAME2(fio_buf, u128_bswap)(c); /* fio_buf2u64 */
-}
-/** Writes a local 128 bit number to an unaligned buffer in Little Endian. */
-FIO_IFUNC void FIO_NAME2(fio_u, buf128_little)(void *buf, __uint128_t i) {
-  FIO_NAME2(fio_u, buf128_bswap)(buf, i);
-}
-#endif /* __SIZEOF_INT128__ */
 
 #endif /* __LITTLE_ENDIAN__ */
 
@@ -483,47 +427,6 @@ FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_zero_byte64((row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
-
-#ifdef __SIZEOF_INT128__
-/**
- * Detects a byte where all the bits are set (255) within an 16 byte vector.
- *
- * The full byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC __uint128_t fio_has_full_byte128(__uint128_t row) {
-  const __uint128_t allF7 = ((__uint128_t)(0x7F7F7F7F7F7F7F7FULL) << 64) |
-                            (__uint128_t)(0x7F7F7F7F7F7F7F7FULL);
-  const __uint128_t all80 = ((__uint128_t)(0x8080808080808080) << 64) |
-                            (__uint128_t)(0x8080808080808080);
-  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
-                            (__uint128_t)(0x0101010101010101);
-  return ((row & allF7) + all01) & (row & all80);
-}
-
-/**
- * Detects a byte where no bits are set (0) within an 8 byte vector.
- *
- * The zero byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC __uint128_t fio_has_zero_byte128(__uint128_t row) {
-  const __uint128_t all80 = ((__uint128_t)(0x8080808080808080) << 64) |
-                            (__uint128_t)(0x8080808080808080);
-  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
-                            (__uint128_t)(0x0101010101010101);
-  return ((row - all01) & ((~row) & all80));
-}
-
-/**
- * Detects if `byte` exists within an 8 byte vector.
- *
- * The requested byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte) {
-  const __uint128_t all01 = ((__uint128_t)(0x0101010101010101) << 64) |
-                            (__uint128_t)(0x0101010101010101);
-  return fio_has_zero_byte128((row ^ (all01 * byte)));
-}
-#endif /* __SIZEOF_INT128__ */
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
 FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
@@ -809,9 +712,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, bitwise)(void) {
   FIO___BITMAP_TEST_BITS(int16_t, uint16_t, 16);
   FIO___BITMAP_TEST_BITS(int32_t, uint32_t, 32);
   FIO___BITMAP_TEST_BITS(int64_t, uint64_t, 64);
-#ifdef __SIZEOF_INT128__
-  FIO___BITMAP_TEST_BITS(__int128_t, __uint128_t, 128);
-#endif
 #undef FIO___BITMAP_TEST_BITS
 
   fprintf(stderr, "* Testing constant-time helpers.\n");

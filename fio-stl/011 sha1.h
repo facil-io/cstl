@@ -109,104 +109,29 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
   w1 = vsha1su1q_u32(w1, w0);
   w2 = vsha1su0q_u32(w2, w3, w0);
 
-  /* round: 12-15 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1cq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
-  w2 = vsha1su1q_u32(w2, w1);
-  w3 = vsha1su0q_u32(w3, w0, w1);
+#define FIO_SHA1_ROUND_(K, rn_fn, n, ni, n0, n1, n2, n3)                       \
+  e##n = vsha1h_u32(vgetq_lane_u32(v0, 0));                                    \
+  v0 = rn_fn(v0, e##ni, t##ni);                                                \
+  t##ni = vaddq_u32(w##n1, vdupq_n_u32(K));                                    \
+  w##n2 = vsha1su1q_u32(w##n2, w##n1);                                         \
+  w##n3 = vsha1su0q_u32(w##n3, w##n0, w##n1);
+  FIO_SHA1_ROUND_(0x6ED9EBA1, vsha1cq_u32, 0, 1, 0, 1, 2, 3)
+  FIO_SHA1_ROUND_(0x6ED9EBA1, vsha1cq_u32, 1, 0, 1, 2, 3, 0)
+  FIO_SHA1_ROUND_(0x6ED9EBA1, vsha1pq_u32, 0, 1, 2, 3, 0, 1)
+  FIO_SHA1_ROUND_(0x6ED9EBA1, vsha1pq_u32, 1, 0, 3, 0, 1, 2)
+  FIO_SHA1_ROUND_(0x6ED9EBA1, vsha1pq_u32, 0, 1, 0, 1, 2, 3)
 
-  /* round: 16-19 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1cq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w2, vdupq_n_u32(0x6ED9EBA1));
-  w3 = vsha1su1q_u32(w3, w2);
-  w0 = vsha1su0q_u32(w0, w1, w2);
+  FIO_SHA1_ROUND_(0x8F1BBCDC, vsha1pq_u32, 1, 0, 1, 2, 3, 0)
+  FIO_SHA1_ROUND_(0x8F1BBCDC, vsha1pq_u32, 0, 1, 2, 3, 0, 1)
+  FIO_SHA1_ROUND_(0x8F1BBCDC, vsha1mq_u32, 1, 0, 3, 0, 1, 2)
+  FIO_SHA1_ROUND_(0x8F1BBCDC, vsha1mq_u32, 0, 1, 0, 1, 2, 3)
+  FIO_SHA1_ROUND_(0x8F1BBCDC, vsha1mq_u32, 1, 0, 1, 2, 3, 0)
 
-  /* round: 20-23 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w3, vdupq_n_u32(0x6ED9EBA1));
-  w0 = vsha1su1q_u32(w0, w3);
-  w1 = vsha1su0q_u32(w1, w2, w3);
-
-  /* round: 24-27 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w0, vdupq_n_u32(0x6ED9EBA1));
-  w1 = vsha1su1q_u32(w1, w0);
-  w2 = vsha1su0q_u32(w2, w3, w0);
-
-  /* round: 28-31 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w1, vdupq_n_u32(0x6ED9EBA1));
-  w2 = vsha1su1q_u32(w2, w1);
-  w3 = vsha1su0q_u32(w3, w0, w1);
-
-  /* round: 32-35 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
-  w3 = vsha1su1q_u32(w3, w2);
-  w0 = vsha1su0q_u32(w0, w1, w2);
-
-  /* round: 36-39 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w3, vdupq_n_u32(0x8F1BBCDC));
-  w0 = vsha1su1q_u32(w0, w3);
-  w1 = vsha1su0q_u32(w1, w2, w3);
-
-  /* round: 40-43 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1mq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w0, vdupq_n_u32(0x8F1BBCDC));
-  w1 = vsha1su1q_u32(w1, w0);
-  w2 = vsha1su0q_u32(w2, w3, w0);
-
-  /* round: 44-47 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1mq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w1, vdupq_n_u32(0x8F1BBCDC));
-  w2 = vsha1su1q_u32(w2, w1);
-  w3 = vsha1su0q_u32(w3, w0, w1);
-
-  /* round: 48-51 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1mq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w2, vdupq_n_u32(0x8F1BBCDC));
-  w3 = vsha1su1q_u32(w3, w2);
-  w0 = vsha1su0q_u32(w0, w1, w2);
-
-  /* round: 52-55 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1mq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w3, vdupq_n_u32(0xCA62C1D6));
-  w0 = vsha1su1q_u32(w0, w3);
-  w1 = vsha1su0q_u32(w1, w2, w3);
-
-  /* round: 56-59 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1mq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w0, vdupq_n_u32(0xCA62C1D6));
-  w1 = vsha1su1q_u32(w1, w0);
-  w2 = vsha1su0q_u32(w2, w3, w0);
-
-  /* round: 60-63 */
-  e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e1, t1);
-  t1 = vaddq_u32(w1, vdupq_n_u32(0xCA62C1D6));
-  w2 = vsha1su1q_u32(w2, w1);
-  w3 = vsha1su0q_u32(w3, w0, w1);
-
-  /* round: 64-67 */
-  e1 = vsha1h_u32(vgetq_lane_u32(v0, 0));
-  v0 = vsha1pq_u32(v0, e0, t0);
-  t0 = vaddq_u32(w2, vdupq_n_u32(0xCA62C1D6));
-  w3 = vsha1su1q_u32(w3, w2);
-  w0 = vsha1su0q_u32(w0, w1, w2);
-
+  FIO_SHA1_ROUND_(0xCA62C1D6, vsha1mq_u32, 0, 1, 2, 3, 0, 1)
+  FIO_SHA1_ROUND_(0xCA62C1D6, vsha1mq_u32, 1, 0, 3, 0, 1, 2)
+  FIO_SHA1_ROUND_(0xCA62C1D6, vsha1pq_u32, 0, 1, 0, 1, 2, 3)
+  FIO_SHA1_ROUND_(0xCA62C1D6, vsha1pq_u32, 1, 0, 1, 2, 3, 0)
+#undef FIO_SHA1_ROUND_
   /* round: 68-71 */
   e0 = vsha1h_u32(vgetq_lane_u32(v0, 0));
   v0 = vsha1pq_u32(v0, e1, t1);
@@ -227,27 +152,11 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
   vst1q_u32(old->v, v0);
   old->v[4] = e0;
 
-#else
-  register uint32_t v0 = old->v[0];
-  register uint32_t v1 = old->v[1];
-  register uint32_t v2 = old->v[2];
-  register uint32_t v3 = old->v[3];
-  register uint32_t v4 = old->v[4];
-  register uint32_t v5;
+#else /* portable implementation */
 
-  // vsha1h_u32(uint32_t __p0)
-
-#define FIO___SHA1_ROTATE(K, F, i)                                             \
-  v5 = fio_lrot32(v0, 5) + v4 + F + (uint32_t)K + w[(i)&15];                   \
-  v4 = v3;                                                                     \
-  v3 = v2;                                                                     \
-  v2 = fio_lrot32(v1, 30);                                                     \
-  v1 = v0;                                                                     \
-  v0 = v5;
-#define FIO___SHA1_CALC_WORD(i)                                                \
-  fio_lrot32(                                                                  \
-      (w[(i + 13) & 15] ^ w[(i + 8) & 15] ^ w[(i + 2) & 15] ^ w[(i)&15]),      \
-      1);
+  fio_u128 v = fio_u128_load(old->v);
+  uint32_t v4, v5;
+  v4 = old->v[4];
 
 #define FIO___SHA1_ROUND4(K, F, i)                                             \
   FIO___SHA1_ROUND((K), (F), i);                                               \
@@ -263,27 +172,49 @@ FIO_IFUNC void fio___sha1_round512(fio_sha1_s *old, /* state */
   FIO___SHA1_ROUND16(K, F, i);                                                 \
   FIO___SHA1_ROUND4((K), (F), i + 16);
 
+#define FIO___SHA1_ROTATE(K, F, i)                                             \
+  v5 = fio_lrot32(v.u32[0], 5) + v4 + F + (uint32_t)K + w[(i)&15];             \
+  v4 = v.u32[3];                                                               \
+  v.u32[3] = v.u32[2];                                                         \
+  v.u32[2] = fio_lrot32(v.u32[1], 30);                                         \
+  v.u32[1] = v.u32[0];                                                         \
+  v.u32[0] = v5;
+#define FIO___SHA1_CALC_WORD(i)                                                \
+  fio_lrot32(                                                                  \
+      (w[(i + 13) & 15] ^ w[(i + 8) & 15] ^ w[(i + 2) & 15] ^ w[(i)&15]),      \
+      1);
+
 #define FIO___SHA1_ROUND(K, F, i)                                              \
   w[i] = fio_ntol32(w[i]);                                                     \
   FIO___SHA1_ROTATE(K, F, i);
+  /* perform first 16 rounds with simple words as copied from data */
+  FIO___SHA1_ROUND16(0x5A827999,
+                     ((v.u32[1] & v.u32[2]) | ((~v.u32[1]) & (v.u32[3]))),
+                     0);
 
-  FIO___SHA1_ROUND16(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 0);
-
+/* change round definition so now we compute the word's value per round */
 #undef FIO___SHA1_ROUND
 #define FIO___SHA1_ROUND(K, F, i)                                              \
   w[(i)&15] = FIO___SHA1_CALC_WORD(i);                                         \
   FIO___SHA1_ROTATE(K, F, i);
 
-  FIO___SHA1_ROUND4(0x5A827999, ((v1 & v2) | ((~v1) & (v3))), 16);
+  /* complete last 4 round from the first 20 round group */
+  FIO___SHA1_ROUND4(0x5A827999,
+                    ((v.u32[1] & v.u32[2]) | ((~v.u32[1]) & (v.u32[3]))),
+                    16);
 
-  FIO___SHA1_ROUND20(0x6ED9EBA1, (v1 ^ v2 ^ v3), 20);
-  FIO___SHA1_ROUND20(0x8F1BBCDC, ((v1 & (v2 | v3)) | (v2 & v3)), 40);
-  FIO___SHA1_ROUND20(0xCA62C1D6, (v1 ^ v2 ^ v3), 60);
-
-  old->v[0] += v0;
-  old->v[1] += v1;
-  old->v[2] += v2;
-  old->v[3] += v3;
+  /* remaining 20 round groups */
+  FIO___SHA1_ROUND20(0x6ED9EBA1, (v.u32[1] ^ v.u32[2] ^ v.u32[3]), 20);
+  FIO___SHA1_ROUND20(
+      0x8F1BBCDC,
+      ((v.u32[1] & (v.u32[2] | v.u32[3])) | (v.u32[2] & v.u32[3])),
+      40);
+  FIO___SHA1_ROUND20(0xCA62C1D6, (v.u32[1] ^ v.u32[2] ^ v.u32[3]), 60);
+  /* sum and store */
+  v = fio_u128_add32(
+      v,
+      (fio_u128){.u32 = {old->v[0], old->v[1], old->v[2], old->v[3]}});
+  fio_memcpy16(old->v, v.u32);
   old->v[4] += v4;
 
 #undef FIO___SHA1_ROTATE
@@ -314,26 +245,26 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
 
   const uint8_t *buf = (const uint8_t *)data;
 
-  uint32_t vec[16];
+  fio_u512 vec;
 
   for (size_t i = 63; i < len; i += 64) {
-    fio_memcpy64(vec, buf);
-    fio___sha1_round512(&s, vec);
+    fio_memcpy64(vec.u32, buf);
+    fio___sha1_round512(&s, vec.u32);
     buf += 64;
   }
-  FIO_MEMSET(vec, 0, sizeof(vec));
+  FIO_MEMSET(vec.u32, 0, sizeof(vec));
   if ((len & 63)) {
-    fio_memcpy63x(vec, buf, len);
+    fio_memcpy63x(vec.u32, buf, len);
   }
-  ((uint8_t *)vec)[(len & 63)] = 0x80;
+  vec.u8[(len & 63)] = 0x80;
 
   if ((len & 63) > 55) {
-    fio___sha1_round512(&s, vec);
-    FIO_MEMSET(vec, 0, sizeof(vec));
+    fio___sha1_round512(&s, vec.u32);
+    FIO_MEMSET(vec.u32, 0, sizeof(vec));
   }
 
-  fio_u2buf64((void *)(vec + 14), (len << 3));
-  fio___sha1_round512(&s, vec);
+  fio_u2buf64((void *)(vec.u32 + 14), (len << 3));
+  fio___sha1_round512(&s, vec.u32);
 
   s.v[0] = fio_ntol32(s.v[0]);
   s.v[1] = fio_ntol32(s.v[1]);

@@ -367,8 +367,8 @@ FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
     FIO___CHACHA_QROUND_S4(a, b, c, d);                                        \
   } while (0)
 
-FIO_IFUNC void fio___chacha_xor64(void *dest_,
-                                  uint64_t *src,
+FIO_IFUNC void fio___chacha_xor64(void *restrict dest_,
+                                  const uint64_t *restrict src,
                                   const size_t groups) {
   uint8_t *d = (uint8_t *)dest_;
   for (size_t i = 0; i < groups; (++i), d += 8) {
@@ -380,6 +380,7 @@ FIO_IFUNC void fio___chacha_xor64(void *dest_,
 
 FIO_IFUNC void fio___chacha_round20(fio_u512 *c) {
   fio_u512 c2 = *c;
+  fio_u512 c_old = *c;
   for (size_t round = 0; round < 10; ++round) {
     for (size_t i = 0; i < 4; ++i) {
       FIO___CHACHA_QROUND(c2.u32[i],
@@ -394,10 +395,10 @@ FIO_IFUNC void fio___chacha_round20(fio_u512 *c) {
                           c2.u32[((i + 3) & 3) | 12]);
     }
   }
-  for (size_t i = 0; i < 16; ++i) {
-    c->u32[i] += c2.u32[i];
-    c->u32[i] = fio_ltole32(c->u32[i]);
-  }
+  c2 = fio_u512_add32(c2, c_old);
+  for (size_t i = 0; i < 16; ++i)
+    c2.u32[i] = fio_ltole32(c2.u32[i]);
+  fio_memcpy64(c, c2.u32);
 }
 FIO_IFUNC void fio___chacha_round20x2(uint32_t *restrict cypher,
                                       uint32_t *restrict v) {

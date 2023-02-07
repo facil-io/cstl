@@ -33,7 +33,7 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
 
 /** Reseeds the random engin using system state (rusage / jitter). */
-IFUNC void fio_rand_reseed(void);
+SFUNC void fio_rand_reseed(void);
 
 /* *****************************************************************************
 Risky / Stable Hash - API
@@ -256,17 +256,16 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
   w = fio_v256_cxor64(w, seed);                                                \
   v = fio_v256_add64(v, w);
 
-FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
-                                       const void *restrict data_,
-                                       size_t len,
-                                       uint64_t seed) {
+FIO_IFUNC fio_v256 fio_stable_hash___inner(const void *restrict data_,
+                                           const size_t len,
+                                           uint64_t seed) {
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_v256 w, v = {.v64 = {seed, seed, seed, seed}};
-  fio_v256 const prime = {.v64 = {FIO_STABLE_HASH_PRIME0,
+  fio_v256 w, v = {.u64 = {seed, seed, seed, seed}};
+  fio_v256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
                                   FIO_STABLE_HASH_PRIME1,
                                   FIO_STABLE_HASH_PRIME2,
                                   FIO_STABLE_HASH_PRIME3}};
@@ -286,23 +285,17 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t *dest,
   }
   /* inner vector mini-avalanche */
   v = fio_v256_mul64(v, prime);
-  w = (fio_v256){.v64 = {7, 11, 13, 17}};
+  w = (fio_v256){.u64 = {7, 11, 13, 17}};
   v = fio_v256_lrot64(v, w);
-
-  dest[0] = v.v64[0];
-  dest[1] = v.v64[1];
-  dest[2] = v.v64[2];
-  dest[3] = v.v64[3];
-  return;
+  return v;
 }
 
 /*  Computes a facil.io Stable Hash. */
 SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   uint64_t r;
-  uint64_t v[4] FIO_ALIGN(16);
-  fio_stable_hash___inner(v, data_, len, seed);
+  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
   /* summing avalanche */
-  r = v[0] + v[1] + v[2] + v[3];
+  r = fio_v256_reduce_add64(v);
   r ^= r >> 31;
   r *= FIO_STABLE_HASH_PRIME4;
   r ^= r >> 31;
@@ -313,11 +306,11 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               const void *restrict data_,
                               size_t len,
                               uint64_t seed) {
-  uint64_t FIO_ALIGN(16) v[4];
-  fio_stable_hash___inner(v, data_, len, seed);
+
+  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
   uint64_t r[2];
-  r[0] = v[0] + v[1] + v[2] + v[3];
-  r[1] = v[0] ^ v[1] ^ v[2] ^ v[3];
+  r[0] = fio_v256_reduce_add64(v);
+  r[1] = fio_v256_reduce_xor64(v);
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
   r[0] *= FIO_STABLE_HASH_PRIME4;
@@ -375,7 +368,7 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
 /* used here, defined later */
 FIO_IFUNC int64_t fio_time_nano();
 
-IFUNC void fio_rand_reseed(void) {
+SFUNC void fio_rand_reseed(void) {
   const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
 #if defined(RUSAGE_SELF)
   {
