@@ -1580,55 +1580,59 @@ Vector helper functions start with the type of the vector. i.e. `fio_u128`. Next
 
 When a vector operation is applied to a constant, the operation is prefixed with a `c`, i.e., `fio_u128_clrot32`.
 
-`fio_vxxx_load`, `fio_vxxx_load_le32` and `fio_vxxx_load_le64` functions are also provided.
+`fio_uxxx_load`, `fio_uxxx_load_le32` and `fio_uxxx_load_le64` functions are also provided.
 
 The following functions are available:
 
-* `fio_vxxx_mul##(vec_a, vec_b)` - performs the `mul` operation (`*`).
-* `fio_vxxx_add##(vec_a, vec_b)` - performs the `add` operation (`+`).
-* `fio_vxxx_sub##(vec_a, vec_b)` - performs the `sub` operation (`-`).
-* `fio_vxxx_div##(vec_a, vec_b)` - performs the `div` operation (`/`).
-* `fio_vxxx_reminder##(vec_a, vec_b)` - performs the `reminder` operation (`%`).
+* `fio_uxxx_mul##(vec_a, vec_b)` - performs the `mul` operation (`*`).
+* `fio_uxxx_add##(vec_a, vec_b)` - performs the `add` operation (`+`).
+* `fio_uxxx_sub##(vec_a, vec_b)` - performs the `sub` operation (`-`).
+* `fio_uxxx_div##(vec_a, vec_b)` - performs the `div` operation (`/`).
+* `fio_uxxx_reminder##(vec_a, vec_b)` - performs the `reminder` operation (`%`).
 
 
-* `fio_vxxx_cmul##(vec, single_element)` - performs the `mul` operation (`*`).
-* `fio_vxxx_cadd##(vec, single_element)` - performs the `add` operation (`+`).
-* `fio_vxxx_csub##(vec, single_element)` - performs the `sub` operation (`-`).
-* `fio_vxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
-* `fio_vxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
+* `fio_uxxx_cmul##(vec, single_element)` - performs the `mul` operation (`*`).
+* `fio_uxxx_cadd##(vec, single_element)` - performs the `add` operation (`+`).
+* `fio_uxxx_csub##(vec, single_element)` - performs the `sub` operation (`-`).
+* `fio_uxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
+* `fio_uxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
 
-* `fio_vxxx_and##(vec_a, vec_b)` - performs the `and` operation (`&`).
-* `fio_vxxx_or##(vec_a, vec_b)` - performs the `or` operation (`|`).
-* `fio_vxxx_xor##(vec_a, vec_b)` - performs the `xor` operation (`^`).
+* `fio_uxxx_and##(vec_a, vec_b)` - performs the `and` operation (`&`).
+* `fio_uxxx_or##(vec_a, vec_b)` - performs the `or` operation (`|`).
+* `fio_uxxx_xor##(vec_a, vec_b)` - performs the `xor` operation (`^`).
 
-* `fio_vxxx_cand##(vec, single_element)` - performs the `and` operation (`&`).
-* `fio_vxxx_cor##(vec, single_element)` - performs the `or` operation (`|`).
-* `fio_vxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`).
+* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`).
+* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`).
+* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`).
 
-* `fio_vxxx_flip##(vec)` - performs the `flip` bit operation (`~`).
+* `fio_uxxx_flip##(vec)` - performs the `flip` bit operation (`~`).
 
-* `fio_vxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
+* `fio_uxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
 
-* `fio_vxxx_load(const void * buffer)` loads data from the buffer, returning a properly aligned vector.
+* `fio_uxxx_load(const void * buffer)` loads data from the buffer, returning a properly aligned vector.
 
-* `fio_vxxx_load_le##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using little endian rather than local endian.
+* `fio_uxxx_load_le##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using little endian rather than local endian.
 
-* `fio_vxxx_load_be##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using big endian rather than local endian.
+* `fio_uxxx_load_be##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using big endian rather than local endian.
+
+Additionally, the same functions are available for `fio_vxxx` types (note the `v` that indicates it is a vector rather than a number). The naming is mostly a matter of convenience but also allow for future architecture dependent code to be applied to the `fio_vxxx` types / functions.
 
 Example use:
 
 ```c
-fio_u256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
+fio_v256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
                                 FIO_STABLE_HASH_PRIME1,
                                 FIO_STABLE_HASH_PRIME2,
                                 FIO_STABLE_HASH_PRIME3}};
-fio_u256 v = fio_u256_load(buf);
-v = fio_u256_mul64(v, prime);
-v = fio_u256_xor64(v, fio_u256_clrot64(v, 31));
+fio_v256 v = fio_v256_load(buf), tmp;
+v = fio_v256_mul64(v, prime);
+tmp = fio_v256_clrot64(v, 31);
+v = fio_v256_xor64(v, tmp);
 // ...
 ```
 
 **Note**: the implementation is portable and doesn't currently use any compiler vector builtins or types. We pray to the optimization gods instead (which don't always listen) and depend on compilation flags.
+
 
 -------------------------------------------------------------------------------
 ## String / Number conversion

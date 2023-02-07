@@ -29,8 +29,9 @@
 static uint64_t (*next)(void) = fio_rand64;
 
 static uint64_t sys_next(void) {
-  uint64_t r = ((uint64_t)rand() >> 8) | ((uint64_t)rand() << 40);
+  uint64_t r = (uint64_t)rand() >> 8;
   r ^= (uint64_t)rand() << 20;
+  r ^= (uint64_t)rand() << 40;
   return r;
 }
 

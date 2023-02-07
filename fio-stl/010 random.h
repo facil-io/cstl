@@ -381,16 +381,16 @@ SFUNC void fio_rand_reseed(void) {
   for (size_t i = 0; i < jitter_samples; ++i) {
     uint64_t clk = (uint64_t)fio_time_nano() + fio___rand_counter;
     fio___rand_state[0] ^= fio_risky_num(clk, fio___rand_state[0] + i);
-    clk = fio_time_nano() ^ fio___rand_counter;
     fio___rand_state[1] ^= fio_risky_num(clk, fio___rand_state[1] + i);
   }
   {
-    fio___rand_state[2] ^=
-        fio_risky_num(fio___rand_buffer[0], fio___rand_state[0]) +
-        fio_risky_num(fio___rand_buffer[1], fio___rand_state[1]);
-    fio___rand_state[3] ^=
-        fio_risky_num(fio___rand_buffer[2], fio___rand_state[0]) +
-        fio_risky_num(fio___rand_buffer[3], fio___rand_state[1]);
+    uint64_t tmp[2];
+    tmp[0] = fio_risky_num(fio___rand_buffer[0], fio___rand_state[0]) +
+             fio_risky_num(fio___rand_buffer[1], fio___rand_state[1]);
+    tmp[1] = fio_risky_num(fio___rand_buffer[2], fio___rand_state[0]) +
+             fio_risky_num(fio___rand_buffer[3], fio___rand_state[1]);
+    fio___rand_state[2] ^= tmp[0];
+    fio___rand_state[3] ^= tmp[1];
   }
   fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
   fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
