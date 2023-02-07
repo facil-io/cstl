@@ -249,19 +249,19 @@ Vector Helpers - memory load operations (implementation starts here)
 ***************************************************************************** */
 
 #define FIO_MATH_TYPE_LOADER(prefix, not_prefix, bits, bytes)                  \
-  /** Loads type from memory using local-endian. */                            \
+  /** Loads from memory using local-endian. */                                 \
   FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result))             \
   fio_##prefix##bits##_load(const void *buf) {                                 \
     fio_##prefix##bits r;                                                      \
     fio_memcpy##bytes(&r, buf);                                                \
     return r;                                                                  \
   }                                                                            \
-  /** Stores type to memory using local-endian. */                             \
+  /** Stores to memory using local-endian. */                                  \
   FIO_IFUNC void fio_##prefix##bits##_store(void *buf,                         \
                                             const fio_##prefix##bits a) {      \
     fio_memcpy##bytes(buf, &a);                                                \
   }                                                                            \
-  /** Loads type from memory using local-endian. */                            \
+  /** Loads from memory using local-endian. */                                 \
   FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result))             \
   fio_##prefix##2##not_prefix##bits(fio_##not_prefix##bits o) {                \
     fio_##prefix##bits r;                                                      \
@@ -426,11 +426,10 @@ Vector Helpers - Simple Math functions - vector versions (if available)
 Vector Helpers - Shuffle
 ***************************************************************************** */
 
+// clang-format off
 #define FIO_VECTOR_SHUFFLE_FN(prefix, total_bits, bits)                        \
   /** Performs a "shuffle" operation, returning a new, reordered vector. */    \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result))       \
-  fio_##prefix##total_bits##_shuffle##bits                                     \
-  FIO_NOOP(fio_##prefix##total_bits v, char vi[total_bits / bits]) {           \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_shuffle##bits FIO_NOOP(fio_##prefix##total_bits v, char vi[total_bits / bits]) { \
     fio_##prefix##total_bits r;                                                \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       r.u##bits[i] = v.u##bits[vi[i] & ((total_bits / bits) - 1)];             \
@@ -438,7 +437,6 @@ Vector Helpers - Shuffle
     return r;                                                                  \
   }
 
-// clang-format off
 #define fio_u128_shuffle8(v, ...)  fio_u128_shuffle8(v, (char[16]){__VA_ARGS__})
 #define fio_u128_shuffle16(v, ...) fio_u128_shuffle16(v, (char[8]){__VA_ARGS__})
 #define fio_u128_shuffle32(v, ...) fio_u128_shuffle32(v, (char[4]){__VA_ARGS__})
@@ -486,13 +484,11 @@ Vector Helpers - Shuffle
 
 /* *****************************************************************************
 Vector Helpers - Reduce
-*****************************************************************************
-*/
+***************************************************************************** */
 
+// clang-format off
 #define FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, opt_name, opt)   \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result))                 \
-  fio_##prefix##total_bits##_reduce_##opt_name##bits(                          \
-      fio_##prefix##total_bits a) {                                            \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_##opt_name##bits(fio_##prefix##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r opt a.u##bits[i];                                                  \
@@ -506,16 +502,14 @@ Vector Helpers - Reduce
   FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, and, &)                \
   FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, or, |)                 \
   FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, xor, ^)                \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result))                 \
-  fio_##prefix##total_bits##_reduce_max##bits(fio_##prefix##total_bits a) {    \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_max##bits(fio_##prefix##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r < a.u##bits[i] ? a.u##bits[i] : r;                                 \
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result))                 \
-  fio_##prefix##total_bits##_reduce_min##bits(fio_##prefix##total_bits a) {    \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_min##bits(fio_##prefix##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r > a.u##bits[i] ? a.u##bits[i] : r;                                 \
@@ -529,13 +523,8 @@ Vector Helpers - Reduce
     __has_builtin(__builtin_reduce_mul) &&                                     \
     __has_builtin(__builtin_reduce_and) &&                                     \
     __has_builtin(__builtin_reduce_or) && __has_builtin(__builtin_reduce_xor)
-#define FIO_VECTOR_OPERATION_REDUCE_VEC(prefix,                                \
-                                        total_bits,                            \
-                                        bits,                                  \
-                                        opt_name,                              \
-                                        opt)                                   \
-  FIO_IFUNC uint##bits##_t fio_##prefix##total_bits##_reduce_##opt_name##bits( \
-      fio_##prefix##total_bits a) {                                            \
+#define FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, opt_name, opt) \
+  FIO_IFUNC uint##bits##_t fio_##prefix##total_bits##_reduce_##opt_name##bits( fio_##prefix##total_bits a) { \
     return __builtin_reduce_##opt_name(a);                                     \
   }
 
@@ -548,6 +537,7 @@ Vector Helpers - Reduce
   FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, min, +)            \
   FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, max, +)
 
+// clang-format on
 #endif /* FIO_MATH_USE_COMPILER_VECTORS */
 /* *****************************************************************************
 Vector Helpers - Actual Functions
