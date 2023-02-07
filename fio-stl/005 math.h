@@ -27,7 +27,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 #ifndef FIO_MATH_USE_COMPILER_VECTORS
-#define FIO_MATH_USE_COMPILER_VECTORS 1
+#define FIO_MATH_USE_COMPILER_VECTORS 0
 #endif
 
 #if !(__has_attribute(vector_size))
