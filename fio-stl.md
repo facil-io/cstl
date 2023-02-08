@@ -1597,15 +1597,15 @@ The following functions are available:
 * `fio_uxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
 * `fio_uxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
 
-* `fio_uxxx_and##(vec_a, vec_b)` - performs the `and` operation (`&`).
-* `fio_uxxx_or##(vec_a, vec_b)` - performs the `or` operation (`|`).
-* `fio_uxxx_xor##(vec_a, vec_b)` - performs the `xor` operation (`^`).
+* `fio_uxxx_and(vec_a, vec_b)` - performs the `and` operation (`&`) on the whole vector.
+* `fio_uxxx_or(vec_a, vec_b)` - performs the `or` operation (`|`) on the whole vector.
+* `fio_uxxx_xor(vec_a, vec_b)` - performs the `xor` operation (`^`) on the whole vector.
 
-* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`).
-* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`).
-* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`).
+* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`) with an X bit constant.
+* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`) with an X bit constant.
+* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`) with an X bit constant.
 
-* `fio_uxxx_flip##(vec)` - performs the `flip` bit operation (`~`).
+* `fio_uxxx_flip(vec)` - performs the `flip` bit operation (`~`).
 
 * `fio_uxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
 

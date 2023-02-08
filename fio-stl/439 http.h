@@ -228,11 +228,11 @@ typedef enum fio___http_protocol_selector_e {
 } fio___http_protocol_selector_e;
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
-FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+FIO_IFUNC fio_protocol_s fio___http_protocol_get(fio___http_protocol_selector_e,
+                                                 int is_client);
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
@@ -348,6 +348,7 @@ deny_upgrade:
 
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
+  fio_http_status_set(h, 200);
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
@@ -358,6 +359,7 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  fio_http_status_set(h, 200);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
   if (fio_http_static_file_response(h,
@@ -378,9 +380,9 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
     p->state[i].protocol =
-        fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, 0);
     p->state[i].controller =
-        fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
+        fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
@@ -437,7 +439,6 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
   fio_http_udata_set(c->queue[c->qwpos], c->udata);
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
-  fio_http_status_set(c->queue[c->qwpos], 200);
   return 0;
 }
 /** called when a response status is parsed. the status_str is the string
@@ -530,26 +531,93 @@ HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knoledge)
 ***************************************************************************** */
 
 // /** Called when an IO is attached to a protocol. */
-// void (*on_attach)(fio_s *io);
+FIO_SFUNC void fio___http1_accept_on_attach_client(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  fio_protocol_set(
+      io,
+      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+            ->state[FIO___HTTP_PROTOCOL_HTTP1]
+            .protocol));
+}
+
 // /** Called when a data is available. */
-// void (*on_data)(fio_s *io);
-// /** called once all pending `fio_write` calls are finished. */
-// void (*on_ready)(fio_s *io);
-// /** Called after the connection was closed, and pending tasks completed. */
-// void (*on_close)(void *udata);
+FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
+  const fio_buf_info_s prior_knowledge = FIO_BUF_INFO2(
+      (char *)"\x50\x52\x49\x20\x2a\x20\x48\x54\x54\x50\x2f\x32\x2e\x30"
+              "\x0d\x0a\x0d\x0a\x53\x4d\x0d\x0a\x0d\x0a",
+      24);
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  fio_protocol_s *phttp_new;
+  size_t r = fio_read(io, c->buf + c->len, c->limit - c->len);
+  if (!r)
+    return;
+  fio_buf_info_s tmp = FIO_BUF_INFO2(
+      c->buf,
+      (c->len > prior_knowledge.len) ? prior_knowledge.len : c->len);
+  if (FIO_MEMCMP(prior_knowledge.buf, tmp.buf, tmp.len)) {
+    /* no prior knowledge, switch to HTTP 1 */
+    phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                      ->state[FIO___HTTP_PROTOCOL_HTTP1]
+                      .protocol);
+    fio_protocol_set(io, phttp_new);
+    return;
+  }
+  if (tmp.len != prior_knowledge.len)
+    return;
+  if (c->len != prior_knowledge.len)
+    FIO_MEMMOVE(c->buf,
+                c->buf + prior_knowledge.len,
+                c->len - prior_knowledge.len);
+  c->len -= prior_knowledge.len;
+  phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                    ->state[FIO___HTTP_PROTOCOL_HTTP2]
+                    .protocol);
+  fio_protocol_set(io, phttp_new);
+}
+
+FIO_SFUNC void fio___http_on_close(void *udata) {
+  fio_http_connection_free((fio_http_connection_s *)udata);
+}
 
 /* *****************************************************************************
 HTTP/1.1 Protocol (TODO!)
 ***************************************************************************** */
 
-// /** Called when an IO is attached to a protocol. */
-// void (*on_attach)(fio_s *io);
+FIO_SFUNC int fio___http1_process_data(fio_s *io, fio_http_connection_s *c) {
+  (void)io, (void)c;
+  size_t consumed =
+      fio_http1_parse(&c->parser, FIO_BUF_INFO2(c->buf, c->len), (void *)c);
+  if (!consumed)
+    return -1;
+  if (consumed == FIO_HTTP1_PARSER_ERROR)
+    goto http1_error;
+  c->len -= consumed;
+  if (c->len)
+    FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
+  return 0;
+http1_error:
+  if (c->queue[c->qwpos])
+    ;
+  return -1;
+}
+
 // /** Called when a data is available. */
-// void (*on_data)(fio_s *io);
-// /** called once all pending `fio_write` calls are finished. */
-// void (*on_ready)(fio_s *io);
-// /** Called after the connection was closed, and pending tasks completed. */
-// void (*on_close)(void *udata);
+FIO_SFUNC void fio___http1_on_data(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  size_t r;
+  while (c->limit > c->len &&
+         (r = fio_read(io, c->buf + c->len, c->limit - c->len)) &&
+         !fio___http1_process_data(io, c))
+    ;
+}
+
+// /** Called when an IO is attached to a protocol. */
+FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  if (c->len && fio___http1_process_data(io, c))
+    fio_suspend(io);
+  return;
+}
 
 /* *****************************************************************************
 HTTP/1 Controller (TODO!)
@@ -639,18 +707,48 @@ The Protocols at play
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e s, int is_client) {
+fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   fio_protocol_s r = {0};
   (void)is_client, (void)s;
-  return r;
+  switch (s) {
+  case FIO___HTTP_PROTOCOL_ACCEPT:
+    r = (fio_protocol_s){.on_attach = fio___http1_accept_on_attach_client,
+                         .on_data = fio___http1_accept_on_data,
+                         .on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_HTTP1:
+    r = (fio_protocol_s){.on_attach = fio___http1_on_attach,
+                         .on_data = fio___http1_on_data,
+                         .on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_HTTP2:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_WS:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_SSE:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_NONE: /* fall through*/
+  default: return r;
+  }
 }
 
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e s, int is_client) {
+fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   fio_http_controller_s r = {0};
   (void)is_client, (void)s;
-  return r;
+  switch (s) {
+  case FIO___HTTP_PROTOCOL_ACCEPT: r = (fio_http_controller_s){0}; return r;
+  case FIO___HTTP_PROTOCOL_HTTP1: /* fall through */
+  case FIO___HTTP_PROTOCOL_HTTP2: /* fall through */
+  case FIO___HTTP_PROTOCOL_WS:    /* fall through */
+  case FIO___HTTP_PROTOCOL_SSE:   /* fall through */
+  case FIO___HTTP_PROTOCOL_NONE:  /* fall through */
+  default: return r;
+  }
 }
 
 /* *****************************************************************************

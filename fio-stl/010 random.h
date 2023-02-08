@@ -250,7 +250,7 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v = fio_v256_xor64(v, w);                                                    \
+  v = fio_v256_xor(v, w);                                                      \
   v = fio_v256_mul64(v, prime);                                                \
   w = fio_v256_clrot64(w, 31);                                                 \
   w = fio_v256_cxor64(w, seed);                                                \

@@ -4283,10 +4283,10 @@ Useful math unions.
 ***************************************************************************** */
 /** An unsigned 128bit union type. */
 typedef union {
-  uint8_t u8[16];
-  uint16_t u16[8];
-  uint32_t u32[4];
   uint64_t u64[2];
+  uint32_t u32[4];
+  uint16_t u16[8];
+  uint8_t u8[16];
 #if defined(__SIZEOF_INT128__)
   __uint128_t u128[1];
 #endif
@@ -4294,111 +4294,119 @@ typedef union {
 
 /** An unsigned 256bit union type. */
 typedef union {
-  uint8_t u8[32];
-  uint16_t u16[16];
-  uint32_t u32[8];
   uint64_t u64[4];
+  uint32_t u32[8];
+  uint16_t u16[16];
+  uint8_t u8[32];
+  fio_u128 u128[2];
 #if defined(__SIZEOF_INT128__)
-  __uint128_t u128[2];
+  __uint128_t u128_[2];
 #endif
 #if defined(__SIZEOF_INT256__)
-  __uint256_t u256[1];
+  __uint256_t u256_[1];
 #endif
-
 } fio_u256;
 
 /** An unsigned 512bit union type. */
 typedef union {
-  uint8_t u8[64];
-  uint16_t u16[32];
-  uint32_t u32[16];
   uint64_t u64[8];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t u128[4];
-#endif
+  uint32_t u32[16];
+  uint16_t u16[32];
+  uint8_t u8[64];
+  fio_u128 u128[4];
+  fio_u256 u256[2];
 #if defined(__SIZEOF_INT256__)
-  __uint256_t u256[2];
+  __uint256_t u256_[2];
 #endif
 } fio_u512;
 
 /** An unsigned 1024bit union type. */
 typedef union {
-  uint8_t u8[128];
-  uint16_t u16[64];
-  uint32_t u32[32];
   uint64_t u64[16];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t u128[8];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t u256[4];
-#endif
+  uint32_t u32[32];
+  uint16_t u16[64];
+  uint8_t u8[128];
+  fio_u128 u128[8];
+  fio_u256 u256[4];
+  fio_u512 u512[2];
 } fio_u1024;
 
 /** An unsigned 2048bit union type. */
 typedef union {
-  uint8_t u8[256];
-  uint16_t u16[128];
-  uint32_t u32[64];
   uint64_t u64[32];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t u128[8];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t u256[4];
-#endif
+  uint32_t u32[64];
+  uint16_t u16[128];
+  uint8_t u8[256];
+  fio_u128 u128[16];
+  fio_u256 u256[8];
+  fio_u512 u512[4];
+  fio_u1024 u1024[2];
 } fio_u2048;
 
 /** An unsigned 4096bit union type. */
 typedef union {
-  uint8_t u8[512];
-  uint16_t u16[256];
-  uint32_t u32[128];
   uint64_t u64[64];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t u128[32];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t u256[16];
-#endif
+  uint32_t u32[128];
+  uint16_t u16[256];
+  uint8_t u8[512];
+  fio_u128 u128[32];
+  fio_u256 u256[16];
+  fio_u512 u512[8];
+  fio_u1024 u1024[4];
+  fio_u2048 u2048[2];
 } fio_u4096;
 
 #if FIO_MATH_USE_COMPILER_VECTORS
 typedef union {
-  uint8_t __attribute__((vector_size(16))) u8;
-  uint16_t __attribute__((vector_size(16))) u16;
-  uint32_t __attribute__((vector_size(16))) u32;
   uint64_t __attribute__((vector_size(16))) u64;
+  uint32_t __attribute__((vector_size(16))) u32;
+  uint16_t __attribute__((vector_size(16))) u16;
+  uint8_t __attribute__((vector_size(16))) u8;
 } fio_v128;
 typedef union {
-  uint8_t __attribute__((vector_size(32))) u8;
-  uint16_t __attribute__((vector_size(32))) u16;
-  uint32_t __attribute__((vector_size(32))) u32;
   uint64_t __attribute__((vector_size(32))) u64;
+  uint32_t __attribute__((vector_size(32))) u32;
+  uint16_t __attribute__((vector_size(32))) u16;
+  uint8_t __attribute__((vector_size(32))) u8;
+  fio_v128 u128[2];
 } fio_v256;
 typedef union {
-  uint8_t __attribute__((vector_size(64))) u8;
-  uint16_t __attribute__((vector_size(64))) u16;
-  uint32_t __attribute__((vector_size(64))) u32;
   uint64_t __attribute__((vector_size(64))) u64;
+  uint32_t __attribute__((vector_size(64))) u32;
+  uint16_t __attribute__((vector_size(64))) u16;
+  uint8_t __attribute__((vector_size(64))) u8;
+  fio_v128 u128[4];
+  fio_v256 u256[2];
 } fio_v512;
 typedef union {
-  uint8_t __attribute__((vector_size(128))) u8;
-  uint16_t __attribute__((vector_size(128))) u16;
-  uint32_t __attribute__((vector_size(128))) u32;
   uint64_t __attribute__((vector_size(128))) u64;
+  uint32_t __attribute__((vector_size(128))) u32;
+  uint16_t __attribute__((vector_size(128))) u16;
+  uint8_t __attribute__((vector_size(128))) u8;
+  fio_v128 u128[8];
+  fio_v256 u256[4];
+  fio_v512 u512[2];
 } fio_v1024;
 typedef union {
-  uint8_t __attribute__((vector_size(256))) u8;
-  uint16_t __attribute__((vector_size(256))) u16;
-  uint32_t __attribute__((vector_size(256))) u32;
   uint64_t __attribute__((vector_size(256))) u64;
+  uint32_t __attribute__((vector_size(256))) u32;
+  uint16_t __attribute__((vector_size(256))) u16;
+  uint8_t __attribute__((vector_size(256))) u8;
+  fio_v128 u128[16];
+  fio_v256 u256[8];
+  fio_v512 u512[4];
+  fio_v1024 u1024[2];
 } fio_v2048;
 typedef union {
-  uint8_t __attribute__((vector_size(512))) u8;
-  uint16_t __attribute__((vector_size(512))) u16;
-  uint32_t __attribute__((vector_size(512))) u32;
   uint64_t __attribute__((vector_size(512))) u64;
+  uint32_t __attribute__((vector_size(512))) u32;
+  uint16_t __attribute__((vector_size(512))) u16;
+  uint8_t __attribute__((vector_size(512))) u8;
+  fio_v128 u128[32];
+  fio_v256 u256[16];
+  fio_v512 u512[8];
+  fio_v1024 u1024[4];
+  fio_v2048 u2048[2];
 } fio_v4096;
 #else
 typedef fio_u128 fio_v128;
@@ -4408,6 +4416,9 @@ typedef fio_u1024 fio_v1024;
 typedef fio_u2048 fio_v2048;
 typedef fio_u4096 fio_v4096;
 #endif /* FIO_MATH_USE_COMPILER_VECTORS */
+
+FIO_ASSERT_STATIC(sizeof(fio_v4096) == 512 && sizeof(fio_u4096) == 512,
+                  "Math type size error!");
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -4491,26 +4502,45 @@ FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 Vector Helpers - memory load operations (implementation starts here)
 ***************************************************************************** */
 
+// clang-format off
 #define FIO_MATH_TYPE_LOADER(prefix, not_prefix, bits, bytes)                  \
   /** Loads from memory using local-endian. */                                 \
-  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result))             \
-  fio_##prefix##bits##_load(const void *buf) {                                 \
+  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result)) fio_##prefix##bits##_load(const void *buf) { \
     fio_##prefix##bits r;                                                      \
     fio_memcpy##bytes(&r, buf);                                                \
     return r;                                                                  \
   }                                                                            \
   /** Stores to memory using local-endian. */                                  \
-  FIO_IFUNC void fio_##prefix##bits##_store(void *buf,                         \
-                                            const fio_##prefix##bits a) {      \
+  FIO_IFUNC void fio_##prefix##bits##_store(void *buf, const fio_##prefix##bits a) { \
     fio_memcpy##bytes(buf, &a);                                                \
   }                                                                            \
   /** Loads from memory using local-endian. */                                 \
-  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result))             \
-  fio_##prefix##2##not_prefix##bits(fio_##not_prefix##bits o) {                \
+  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result)) fio_##not_prefix##2##prefix##bits(fio_##not_prefix##bits o) { \
     fio_##prefix##bits r;                                                      \
-    fio_memcpy##bytes(&r, &o);                                                 \
+    for (size_t i = 0; i < (bits >> 6); ++i) {                                 \
+      r.u64[i] = o.u64[i];                                                     \
+    }                                                                          \
     return r;                                                                  \
   }
+
+#define FIO_VECTOR_LOADER_ENDIAN_FUNC(prefix, total_bits, bits)                \
+  /** Loads vector from memory, reading from little-endian.  */                \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_load_le##bits(const void *buf) { \
+    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** Loads vector from memory, reading from big-endian.  */                   \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_load_be##bits(const void *buf) { \
+    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
+    }                                                                          \
+    return r;                                                                  \
+  }
+// clang-format on
 
 FIO_MATH_TYPE_LOADER(u, v, 128, 16)
 FIO_MATH_TYPE_LOADER(u, v, 256, 32)
@@ -4525,28 +4555,6 @@ FIO_MATH_TYPE_LOADER(v, u, 512, 64)
 FIO_MATH_TYPE_LOADER(v, u, 1024, 128)
 FIO_MATH_TYPE_LOADER(v, u, 2048, 256)
 FIO_MATH_TYPE_LOADER(v, u, 4096, 512)
-
-#undef FIO_MATH_TYPE_LOADER
-
-#define FIO_VECTOR_LOADER_ENDIAN_FUNC(prefix, total_bits, bits)                \
-  /** Loads vector from memory, reading from little-endian.  */                \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result))       \
-  fio_##prefix##total_bits##_load_le##bits(const void *buf) {                  \
-    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  /** Loads vector from memory, reading from big-endian.  */                   \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result))       \
-  fio_##prefix##total_bits##_load_be##bits(const void *buf) {                  \
-    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
-    }                                                                          \
-    return r;                                                                  \
-  }
 
 #define FIO_VECTOR_LOADER_ENDIAN(total_bits)                                   \
   FIO_VECTOR_LOADER_ENDIAN_FUNC(u, total_bits, 16)                             \
@@ -4563,6 +4571,7 @@ FIO_VECTOR_LOADER_ENDIAN(1024)
 FIO_VECTOR_LOADER_ENDIAN(2048)
 FIO_VECTOR_LOADER_ENDIAN(4096)
 
+#undef FIO_MATH_TYPE_LOADER
 #undef FIO_VECTOR_LOADER_ENDIAN_FUNC
 #undef FIO_VECTOR_LOADER_ENDIAN
 /* *****************************************************************************
@@ -4586,10 +4595,18 @@ Vector Helpers - Simple Math functions
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, bits, opt_name, opt)   \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name##bits (fio_##prefix##total_bits a) { \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      a.u##bits[i] = opt a.u##bits[i];                                         \
+#define FIO_VECTOR_OPERATION_BIG(prefix, total_bits, bits, opt_name, opt)      \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
+    for (size_t i = 0; i < (total_bits / 64); ++i) {                           \
+      a.u64[i] = a.u64[i] opt b.u64[i];                                        \
+    }                                                                          \
+    return a;                                                                  \
+  }
+
+#define FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, opt_name, opt)         \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a) { \
+    for (size_t i = 0; i < (total_bits / 64); ++i) {                           \
+      a.u64[i] = opt a.u64[i];                                                 \
     }                                                                          \
     return a;                                                                  \
   }
@@ -4631,15 +4648,21 @@ Vector Helpers - Simple Math functions - vector versions (if available)
     return a;                                                                  \
   }
 
+#define FIO_VECTOR_OPERATION_BIG_VEC(prefix, total_bits, bits, opt_name, opt)  \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
+    a.u##bits = (a.u##bits opt b.u##bits);                                     \
+    return a;                                                                  \
+  }
+
 #define FIO_VECTOR_OPERATION_CONST_VEC(prefix, total_bits, bits, opt_name, opt) \
   FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##opt_name##bits (fio_##prefix##total_bits a, const uint##bits##_t b) { \
     a.u##bits = (a.u##bits opt b);                                             \
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_SINGLE_VEC(prefix, total_bits, bits, opt_name, opt) \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name##bits (fio_##prefix##total_bits a) { \
-    a.u##bits = (opt a.u##bits);                                               \
+#define FIO_VECTOR_OPERATION_SINGLE_VEC(prefix, total_bits, opt_name, opt)     \
+  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a) { \
+    a.u64 = opt a.u64;                                                         \
     return a;                                                                  \
   }
 
@@ -4745,9 +4768,6 @@ Vector Helpers - Actual Functions (Macros used to write function code)
   FIO_VECTOR_OPERATION(prefix, total_bits, bits, sub, -)                       \
   FIO_VECTOR_OPERATION(prefix, total_bits, bits, div, /)                       \
   FIO_VECTOR_OPERATION(prefix, total_bits, bits, reminder, %)                  \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, and, &)                       \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, or, |)                        \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, xor, ^)                       \
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, mul, *)                 \
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, add, +)                 \
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, sub, -)                 \
@@ -4756,13 +4776,16 @@ Vector Helpers - Actual Functions (Macros used to write function code)
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, and, &)                 \
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, or, |)                  \
   FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, xor, ^)                 \
-  FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, bits, flip, ~)               \
   FIO_VECTOR_OPERATION_ROT_SHFT(prefix, total_bits, bits, l, <<, >>)           \
   FIO_VECTOR_OPERATION_ROT_SHFT(prefix, total_bits, bits, r, >>, <<)           \
   FIO_VECTOR_OPERATION_REDUCE_FN(prefix, total_bits, bits)                     \
   FIO_VECTOR_SHUFFLE_FN(prefix, total_bits, bits)
 
 #define FIO_VECTOR_GROUP_FUNCTIONS(prefix, total_bits)                         \
+  FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, flip, ~)                     \
+  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, and, &)                     \
+  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, or, |)                      \
+  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, xor, ^)                     \
   FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 8)                       \
   FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 16)                      \
   FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 32)                      \
@@ -4781,7 +4804,9 @@ FIO_VECTOR_GROUP_FUNCTIONS(u, 4096)
 #undef FIO_VECTOR_OPERATION_CONST
 #undef FIO_VECTOR_OPERATION_SINGLE
 #undef FIO_VECTOR_OPERATION_ROT_SHFT
+#undef FIO_VECTOR_OPERATION_BIG
 #define FIO_VECTOR_OPERATION          FIO_VECTOR_OPERATION_VEC
+#define FIO_VECTOR_OPERATION_BIG      FIO_VECTOR_OPERATION_BIG_VEC
 #define FIO_VECTOR_OPERATION_CONST    FIO_VECTOR_OPERATION_CONST_VEC
 #define FIO_VECTOR_OPERATION_SINGLE   FIO_VECTOR_OPERATION_SINGLE_VEC
 #define FIO_VECTOR_OPERATION_ROT_SHFT FIO_VECTOR_OPERATION_ROT_SHFT_VEC
@@ -4802,6 +4827,8 @@ FIO_VECTOR_GROUP_FUNCTIONS(v, 4096)
 #undef FIO_VECTOR_GROUP_FUNCTIONS
 #undef FIO_VECTOR_GROUP_FUNCTIONS_BITS
 #undef FIO_VECTOR_OPERATION
+#undef FIO_VECTOR_OPERATION_BIG
+#undef FIO_VECTOR_OPERATION_BIG_VEC
 #undef FIO_VECTOR_OPERATION_CONST
 #undef FIO_VECTOR_OPERATION_CONST_VEC
 #undef FIO_VECTOR_OPERATION_REDUCE_FN_VEC
@@ -5449,6 +5476,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
   v512 = fio_u512_##opt##64(                                                   \
       v512,                                                                    \
       ((fio_u512){.u64 = {val, val, val, val, val, val, val, val}}));
+#define FIO_VTEST_ACT_BIG(opt, val)                                            \
+  v128 = fio_u128_##opt(v128, ((fio_u128){.u64 = {val, val}}));                \
+  v256 = fio_u256_##opt(v256, ((fio_u256){.u64 = {val, val, val, val}}));      \
+  v512 = fio_u512_##opt(                                                       \
+      v512,                                                                    \
+      ((fio_u512){.u64 = {val, val, val, val, val, val, val, val}}));
+
 #define FIO_VTEST_IS_EQ(val)                                                   \
   (v128.u64[0] == val && v128.u64[1] == val && v256.u64[0] == val &&           \
    v256.u64[1] == val && v256.u64[2] == val && v256.u64[3] == val &&           \
@@ -5465,7 +5499,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
     FIO_VTEST_ACT(sub, 15);
     FIO_VTEST_ACT(add, 1);
     FIO_VTEST_ACT(mul, 31);
-    FIO_VTEST_ACT(and, 15);
+    FIO_VTEST_ACT_BIG(and, 15);
     FIO_ASSERT(FIO_VTEST_IS_EQ(15),
                "fio_u128 / fio_u256 / fio_u512 failed "
                "with vector operations");
@@ -8237,7 +8271,7 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v = fio_v256_xor64(v, w);                                                    \
+  v = fio_v256_xor(v, w);                                                      \
   v = fio_v256_mul64(v, prime);                                                \
   w = fio_v256_clrot64(w, 31);                                                 \
   w = fio_v256_cxor64(w, seed);                                                \
@@ -38041,11 +38075,11 @@ typedef enum fio___http_protocol_selector_e {
 } fio___http_protocol_selector_e;
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
-FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e, int is_client);
+FIO_IFUNC fio_protocol_s fio___http_protocol_get(fio___http_protocol_selector_e,
+                                                 int is_client);
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e, int is_client);
+fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
@@ -38161,6 +38195,7 @@ deny_upgrade:
 
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
+  fio_http_status_set(h, 200);
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
@@ -38171,6 +38206,7 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_connection_s *c = (fio_http_connection_s *)fio_http_cdata(h);
+  fio_http_status_set(h, 200);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
   if (fio_http_static_file_response(h,
@@ -38191,9 +38227,9 @@ SFUNC void fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   fio_http_protocol_s *p = fio_http_protocol_new();
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i) {
     p->state[i].protocol =
-        fio___protocol_callbacks((fio___http_protocol_selector_e)i, 0);
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, 0);
     p->state[i].controller =
-        fio___controller_callbacks((fio___http_protocol_selector_e)i, 0);
+        fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
   }
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
@@ -38250,7 +38286,6 @@ static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
   fio_http_udata_set(c->queue[c->qwpos], c->udata);
   fio_http_cdata_set(c->queue[c->qwpos], fio_http_connection_dup(c));
   fio_http_method_set(c->queue[c->qwpos], FIO_BUF2STR_INFO(method));
-  fio_http_status_set(c->queue[c->qwpos], 200);
   return 0;
 }
 /** called when a response status is parsed. the status_str is the string
@@ -38343,26 +38378,93 @@ HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knoledge)
 ***************************************************************************** */
 
 // /** Called when an IO is attached to a protocol. */
-// void (*on_attach)(fio_s *io);
+FIO_SFUNC void fio___http1_accept_on_attach_client(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  fio_protocol_set(
+      io,
+      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+            ->state[FIO___HTTP_PROTOCOL_HTTP1]
+            .protocol));
+}
+
 // /** Called when a data is available. */
-// void (*on_data)(fio_s *io);
-// /** called once all pending `fio_write` calls are finished. */
-// void (*on_ready)(fio_s *io);
-// /** Called after the connection was closed, and pending tasks completed. */
-// void (*on_close)(void *udata);
+FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
+  const fio_buf_info_s prior_knowledge = FIO_BUF_INFO2(
+      (char *)"\x50\x52\x49\x20\x2a\x20\x48\x54\x54\x50\x2f\x32\x2e\x30"
+              "\x0d\x0a\x0d\x0a\x53\x4d\x0d\x0a\x0d\x0a",
+      24);
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  fio_protocol_s *phttp_new;
+  size_t r = fio_read(io, c->buf + c->len, c->limit - c->len);
+  if (!r)
+    return;
+  fio_buf_info_s tmp = FIO_BUF_INFO2(
+      c->buf,
+      (c->len > prior_knowledge.len) ? prior_knowledge.len : c->len);
+  if (FIO_MEMCMP(prior_knowledge.buf, tmp.buf, tmp.len)) {
+    /* no prior knowledge, switch to HTTP 1 */
+    phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                      ->state[FIO___HTTP_PROTOCOL_HTTP1]
+                      .protocol);
+    fio_protocol_set(io, phttp_new);
+    return;
+  }
+  if (tmp.len != prior_knowledge.len)
+    return;
+  if (c->len != prior_knowledge.len)
+    FIO_MEMMOVE(c->buf,
+                c->buf + prior_knowledge.len,
+                c->len - prior_knowledge.len);
+  c->len -= prior_knowledge.len;
+  phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+                    ->state[FIO___HTTP_PROTOCOL_HTTP2]
+                    .protocol);
+  fio_protocol_set(io, phttp_new);
+}
+
+FIO_SFUNC void fio___http_on_close(void *udata) {
+  fio_http_connection_free((fio_http_connection_s *)udata);
+}
 
 /* *****************************************************************************
 HTTP/1.1 Protocol (TODO!)
 ***************************************************************************** */
 
-// /** Called when an IO is attached to a protocol. */
-// void (*on_attach)(fio_s *io);
+FIO_SFUNC int fio___http1_process_data(fio_s *io, fio_http_connection_s *c) {
+  (void)io, (void)c;
+  size_t consumed =
+      fio_http1_parse(&c->parser, FIO_BUF_INFO2(c->buf, c->len), (void *)c);
+  if (!consumed)
+    return -1;
+  if (consumed == FIO_HTTP1_PARSER_ERROR)
+    goto http1_error;
+  c->len -= consumed;
+  if (c->len)
+    FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
+  return 0;
+http1_error:
+  if (c->queue[c->qwpos])
+    ;
+  return -1;
+}
+
 // /** Called when a data is available. */
-// void (*on_data)(fio_s *io);
-// /** called once all pending `fio_write` calls are finished. */
-// void (*on_ready)(fio_s *io);
-// /** Called after the connection was closed, and pending tasks completed. */
-// void (*on_close)(void *udata);
+FIO_SFUNC void fio___http1_on_data(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  size_t r;
+  while (c->limit > c->len &&
+         (r = fio_read(io, c->buf + c->len, c->limit - c->len)) &&
+         !fio___http1_process_data(io, c))
+    ;
+}
+
+// /** Called when an IO is attached to a protocol. */
+FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
+  fio_http_connection_s *c = (fio_http_connection_s *)fio_udata_get(io);
+  if (c->len && fio___http1_process_data(io, c))
+    fio_suspend(io);
+  return;
+}
 
 /* *****************************************************************************
 HTTP/1 Controller (TODO!)
@@ -38452,18 +38554,48 @@ The Protocols at play
 
 /** Returns a facil.io protocol object with the proper protocol callbacks. */
 FIO_IFUNC fio_protocol_s
-fio___protocol_callbacks(fio___http_protocol_selector_e s, int is_client) {
+fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   fio_protocol_s r = {0};
   (void)is_client, (void)s;
-  return r;
+  switch (s) {
+  case FIO___HTTP_PROTOCOL_ACCEPT:
+    r = (fio_protocol_s){.on_attach = fio___http1_accept_on_attach_client,
+                         .on_data = fio___http1_accept_on_data,
+                         .on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_HTTP1:
+    r = (fio_protocol_s){.on_attach = fio___http1_on_attach,
+                         .on_data = fio___http1_on_data,
+                         .on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_HTTP2:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_WS:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_SSE:
+    r = (fio_protocol_s){.on_close = fio___http_on_close};
+    return r;
+  case FIO___HTTP_PROTOCOL_NONE: /* fall through*/
+  default: return r;
+  }
 }
 
 /** Returns an http controller object with the proper protocol callbacks. */
 FIO_IFUNC fio_http_controller_s
-fio___controller_callbacks(fio___http_protocol_selector_e s, int is_client) {
+fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   fio_http_controller_s r = {0};
   (void)is_client, (void)s;
-  return r;
+  switch (s) {
+  case FIO___HTTP_PROTOCOL_ACCEPT: r = (fio_http_controller_s){0}; return r;
+  case FIO___HTTP_PROTOCOL_HTTP1: /* fall through */
+  case FIO___HTTP_PROTOCOL_HTTP2: /* fall through */
+  case FIO___HTTP_PROTOCOL_WS:    /* fall through */
+  case FIO___HTTP_PROTOCOL_SSE:   /* fall through */
+  case FIO___HTTP_PROTOCOL_NONE:  /* fall through */
+  default: return r;
+  }
 }
 
 /* *****************************************************************************
