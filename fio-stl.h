@@ -8391,11 +8391,11 @@ FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_u64x4 v = {seed, seed, seed, seed};
-  fio_u64x4 const prime = {FIO_STABLE_HASH_PRIME0,
-                           FIO_STABLE_HASH_PRIME1,
-                           FIO_STABLE_HASH_PRIME2,
-                           FIO_STABLE_HASH_PRIME3};
+  fio_u64x4 v = FIO_U64x4(seed, seed, seed, seed);
+  fio_u64x4 const prime = FIO_U64x4(FIO_STABLE_HASH_PRIME0,
+                                    FIO_STABLE_HASH_PRIME1,
+                                    FIO_STABLE_HASH_PRIME2,
+                                    FIO_STABLE_HASH_PRIME3);
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
@@ -14037,6 +14037,7 @@ typedef struct {
   void *block;
   int32_t last_pos;
   FIO_MEMORY_LOCK_TYPE lock;
+  uint8_t pad_for_cache___[115]; /* cache line padding */
 } FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s);
 
 /* *****************************************************************************
@@ -14062,12 +14063,14 @@ static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
   int32_t big_last_pos;
   /** big allocation lock */
   FIO_MEMORY_LOCK_TYPE big_lock;
+  uint8_t pad_for_cache___[115]; /* cache line padding */
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
   /** main memory state lock */
   FIO_MEMORY_LOCK_TYPE lock;
   /** free list for available blocks */
   FIO_LIST_HEAD blocks;
   /** the arena count for the allocator */
+  uint8_t pad_for_cache2___[111]; /* cache line padding */
   size_t arena_count;
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) arena[];
 } * FIO_NAME(FIO_MEMORY_NAME, __mem_state);
