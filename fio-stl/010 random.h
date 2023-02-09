@@ -407,10 +407,10 @@ SFUNC uint64_t fio_rand64(void) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
-  const fio_u64x4 s0 = {fio___rand_state[0],
-                        fio___rand_state[1],
-                        fio___rand_state[2],
-                        fio___rand_state[3]}; /* load to registers */
+  const fio_u64x4 s0 = FIO_U64x4(fio___rand_state[0],
+                                 fio___rand_state[1],
+                                 fio___rand_state[2],
+                                 fio___rand_state[3]); /* load to registers */
   fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
   s1 = fio_u64x4_add(s1,
                      FIO_U64x4(fio___rand_counter, 0, fio___rand_counter, 0));
