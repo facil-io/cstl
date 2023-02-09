@@ -424,7 +424,6 @@ SFUNC uint64_t fio_rand64(void) {
     fio___rand_state[i] = fio_u64x4_i(s1, i);
   }
   s1 = fio_u64x4_lrot(s1, (fio_u64x4){31, 29, 27, 30});
-  // return s1.v[0] + s1.v[1] + s1.v[2] + s1.v[3];
   return fio_u64x4_reduce_add(s1);
 }
 

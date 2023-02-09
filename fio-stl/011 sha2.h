@@ -117,33 +117,37 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
       0x2748774CULL, 0x34B0BCB5ULL, 0x391C0CB3ULL, 0x4ED8AA4AULL, 0x5B9CCA4FULL,
       0x682E6FF3ULL, 0x748F82EEULL, 0x78A5636FULL, 0x84C87814ULL, 0x8CC70208ULL,
       0x90BEFFFAULL, 0xA4506CEBULL, 0xBEF9A3F7ULL, 0xC67178F2ULL};
-  const fio_u256 old = *h;
+
+  fio_u256 v = *h;
   /* read data as an array of 16 big endian 32 bit integers. */
-  uint32_t w[16];
+  uint32_t w[16] FIO_ALIGN(16);
   fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
   }
 
 #define FIO___SHA256_ROUND_INNER_COMMON()                                      \
-  const uint32_t t2 = ((h->u32[0] & h->u32[1]) ^ (h->u32[0] & h->u32[2]) ^     \
-                       (h->u32[1] & h->u32[2])) +                              \
-                      (fio_rrot32(h->u32[0], 2) ^ fio_rrot32(h->u32[0], 13) ^  \
-                       fio_rrot32(h->u32[0], 22));                             \
-  h->u32[7] = h->u32[6];                                                       \
-  h->u32[6] = h->u32[5];                                                       \
-  h->u32[5] = h->u32[4];                                                       \
-  h->u32[4] = h->u32[3];                                                       \
-  h->u32[3] = h->u32[2];                                                       \
-  h->u32[2] = h->u32[1];                                                       \
-  h->u32[1] = h->u32[0];                                                       \
-  h->u32[4] += t1;                                                             \
-  h->u32[0] = t1 + t2
+  const uint32_t t2 =                                                          \
+      fio_u32x4_reduce_xor(                                                    \
+          fio_u32x4_and((fio_u32x4){v.u32[0], v.u32[0], v.u32[1], 0},          \
+                        (fio_u32x4){v.u32[1], v.u32[2], v.u32[2], 0})) +       \
+      fio_u32x4_reduce_xor(                                                    \
+          fio_u32x4_rrot((fio_u32x4){v.u32[0], v.u32[0], v.u32[0]},            \
+                         (fio_u32x4){2, 13, 22}));                             \
+  v.u32[7] = v.u32[6];                                                         \
+  v.u32[6] = v.u32[5];                                                         \
+  v.u32[5] = v.u32[4];                                                         \
+  v.u32[4] = v.u32[3];                                                         \
+  v.u32[3] = v.u32[2];                                                         \
+  v.u32[2] = v.u32[1];                                                         \
+  v.u32[1] = v.u32[0];                                                         \
+  v.u32[4] += t1;                                                              \
+  v.u32[0] = t1 + t2
   for (size_t i = 0; i < 16; ++i) {
-    const uint32_t t1 = h->u32[7] + sha256_consts[i] + w[i] +
-                        ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
-                        (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
-                         fio_rrot32(h->u32[4], 25));
+    const uint32_t t1 = v.u32[7] + sha256_consts[i] + w[i] +
+                        ((v.u32[4] & v.u32[5]) ^ ((~v.u32[4]) & v.u32[6])) +
+                        (fio_rrot32(v.u32[4], 6) ^ fio_rrot32(v.u32[4], 11) ^
+                         fio_rrot32(v.u32[4], 25));
     FIO___SHA256_ROUND_INNER_COMMON();
   }
   for (size_t i = 0; i < 48; ++i) { /* expand block */
@@ -153,14 +157,15 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
         w[((i + 9) & 15)] + w[(i & 15)] +
         (fio_rrot32(w[((i + 1) & 15)], 7) ^ fio_rrot32(w[((i + 1) & 15)], 18) ^
          (w[((i + 1) & 15)] >> 3));
-    const uint32_t t1 = h->u32[7] + sha256_consts[i + 16] + w[(i & 15)] +
-                        ((h->u32[4] & h->u32[5]) ^ ((~h->u32[4]) & h->u32[6])) +
-                        (fio_rrot32(h->u32[4], 6) ^ fio_rrot32(h->u32[4], 11) ^
-                         fio_rrot32(h->u32[4], 25));
+    const uint32_t t1 = v.u32[7] + sha256_consts[i + 16] + w[(i & 15)] +
+                        ((v.u32[4] & v.u32[5]) ^ ((~v.u32[4]) & v.u32[6])) +
+                        (fio_rrot32(v.u32[4], 6) ^ fio_rrot32(v.u32[4], 11) ^
+                         fio_rrot32(v.u32[4], 25));
     FIO___SHA256_ROUND_INNER_COMMON();
   }
   for (size_t i = 0; i < 8; ++i)
-    h->u32[i] += old.u32[i]; /* compress block with previous state */
+    h->u32[i] += v.u32[i]; /* compress block with previous state */
+
 #undef FIO___SHA256_ROUND_INNER_COMMON
 }
 

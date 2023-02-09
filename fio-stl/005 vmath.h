@@ -155,6 +155,22 @@ Compiler supported Vector Types
                                                      uint##bt##_t val) {       \
     a.v[i] = val;                                                              \
     return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_shuffle_up(                    \
+      fio_u##bt##x##gr a) {                                                    \
+    uint##bt##_t tmp = a.v[gr - 1];                                            \
+    for (size_t i = gr - 1; i--;)                                              \
+      a.v[i + 1] = a.v[i];                                                     \
+    a.v[0] = tmp;                                                              \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_shuffle_down(                  \
+      fio_u##bt##x##gr a) {                                                    \
+    uint##bt##_t tmp = a.v[0];                                                 \
+    for (size_t i = 0; i < (gr - 1); ++i)                                      \
+      a.v[i] = a.v[i + 1];                                                     \
+    a.v[gr - 1] = tmp;                                                         \
+    return a;                                                                  \
   }
 
 #define FIO___DEF_OPT(bt, gr, nm, op)                                          \
