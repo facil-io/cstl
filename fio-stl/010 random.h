@@ -32,7 +32,7 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 /** Feeds up to 1023 bytes of entropy to the random state. */
 IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
 
-/** Reseeds the random engin using system state (rusage / jitter). */
+/** Reseeds the random engine using system state (rusage / jitter). */
 SFUNC void fio_rand_reseed(void);
 
 /* *****************************************************************************
@@ -250,52 +250,53 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v = fio_v256_xor(v, w);                                                      \
-  v = fio_v256_mul64(v, prime);                                                \
-  w = fio_v256_clrot64(w, 31);                                                 \
-  w = fio_v256_cxor64(w, seed);                                                \
-  v = fio_v256_add64(v, w);
+  v = fio_u64x4_xor(v, w);                                                     \
+  v = fio_u64x4_mul(v, prime);                                                 \
+  w = fio_u64x4_clrot(w, 31);                                                  \
+  w = fio_u64x4_cxor(w, seed);                                                 \
+  v = fio_u64x4_add(v, w);
 
-FIO_IFUNC fio_v256 fio_stable_hash___inner(const void *restrict data_,
+FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
                                            const size_t len,
                                            uint64_t seed) {
+  fio_u256 r;
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_v256 w, v = {.u64 = {seed, seed, seed, seed}};
-  fio_v256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
-                                  FIO_STABLE_HASH_PRIME1,
-                                  FIO_STABLE_HASH_PRIME2,
-                                  FIO_STABLE_HASH_PRIME3}};
+  fio_u64x4 v = {seed, seed, seed, seed};
+  fio_u64x4 const prime = {FIO_STABLE_HASH_PRIME0,
+                           FIO_STABLE_HASH_PRIME1,
+                           FIO_STABLE_HASH_PRIME2,
+                           FIO_STABLE_HASH_PRIME3};
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    w = fio_v256_load_le64(data);
-    seed ^= fio_v256_reduce_add64(w);
+    fio_u64x4 w = fio_u64x4_load_le((void *)data);
+    seed ^= fio_u64x4_reduce_add(w);
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
   if ((len & 31)) {
     uint64_t tmp[4] = {0};
     fio_memcpy31x(tmp, data, len); /* copies `len & 31` bytes */
-    w = fio_v256_load_le64(tmp);
+    fio_u64x4 w = fio_u64x4_load_le(tmp);
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector mini-avalanche */
-  v = fio_v256_mul64(v, prime);
-  w = (fio_v256){.u64 = {7, 11, 13, 17}};
-  v = fio_v256_lrot64(v, w);
-  return v;
+  v = fio_u64x4_mul(v, prime);
+  v = fio_u64x4_lrot(v, (fio_u64x4){7, 11, 13, 17});
+  fio_u64x4_store(r.u64, v);
+  return r;
 }
 
 /*  Computes a facil.io Stable Hash. */
 SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   uint64_t r;
-  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
+  fio_u256 v = fio_stable_hash___inner(data_, len, seed);
   /* summing avalanche */
-  r = fio_v256_reduce_add64(v);
+  r = fio_u256_reduce_add64(v);
   r ^= r >> 31;
   r *= FIO_STABLE_HASH_PRIME4;
   r ^= r >> 31;
@@ -307,10 +308,10 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               size_t len,
                               uint64_t seed) {
 
-  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
+  fio_u256 v = fio_stable_hash___inner(data_, len, seed);
   uint64_t r[2];
-  r[0] = fio_v256_reduce_add64(v);
-  r[1] = fio_v256_reduce_xor64(v);
+  r[0] = fio_u256_reduce_add64(v);
+  r[1] = fio_u256_reduce_xor64(v);
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
   r[0] *= FIO_STABLE_HASH_PRIME4;
@@ -402,21 +403,29 @@ SFUNC void fio_rand_reseed(void) {
 /* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
-  const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
   if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
-  fio___rand_state[0] +=
-      (fio_lrot64(fio___rand_state[0], 33) + fio___rand_counter) * P[0];
-  fio___rand_state[1] += fio_lrot64(fio___rand_state[1], 33) * P[1];
-  fio___rand_state[2] +=
-      (fio_lrot64(fio___rand_state[2], 33) + fio___rand_counter) * (~P[0]);
-  fio___rand_state[3] += fio_lrot64(fio___rand_state[3], 33) * (~P[1]);
-  return fio_lrot64(fio___rand_state[0], 31) +
-         fio_lrot64(fio___rand_state[1], 29) +
-         fio_lrot64(fio___rand_state[2], 27) +
-         fio_lrot64(fio___rand_state[3], 30);
+  const fio_u64x4 s0 = {fio___rand_state[0],
+                        fio___rand_state[1],
+                        fio___rand_state[2],
+                        fio___rand_state[3]}; /* load to registers */
+  fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
+  s1 = fio_u64x4_add(s1,
+                     (fio_u64x4){fio___rand_counter, 0, fio___rand_counter, 0});
+  s1 = fio_u64x4_mul(s1,
+                     (fio_u64x4){0x37701261ED6C16C7ULL,
+                                 0x764DBBB75F3B3E0DULL,
+                                 ~(0x37701261ED6C16C7ULL),
+                                 ~(0x764DBBB75F3B3E0DULL)});
+  s1 = fio_u64x4_add(s1, s0);
+  for (size_t i = 0; i < 4; ++i) { /* store to memory */
+    fio___rand_state[i] = fio_u64x4_i(s1, i);
+  }
+  s1 = fio_u64x4_lrot(s1, (fio_u64x4){31, 29, 27, 30});
+  // return s1.v[0] + s1.v[1] + s1.v[2] + s1.v[3];
+  return fio_u64x4_reduce_add(s1);
 }
 
 /* copies 64 bits of randomness (8 bytes) repeatedly. */

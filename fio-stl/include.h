@@ -20,6 +20,9 @@
 #ifdef FIO_MATH
 #include "005 math.h"
 #endif
+#ifdef FIO_VMATH
+#include "005 vmath.h"
+#endif
 #ifdef FIO_ATOL
 #include "006 atol.h"
 #endif

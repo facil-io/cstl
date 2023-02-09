@@ -488,6 +488,10 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 Switching Endian Ordering
 ***************************************************************************** */
 
+#define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
+#define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
+#define fio_ntol8(i)  (i) /* avoid special cases by defining for all sizes */
+
 #if __BIG_ENDIAN__
 
 /** Local byte order to Network byte order, 16 bit integer */
@@ -2352,6 +2356,14 @@ Pointer Tagging
     defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
 #ifndef FIO_MATH
 #define FIO_MATH
+#endif
+#endif
+
+/* Modules that require FIO_VMATH */
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_SHA2) ||           \
+    defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
+#ifndef FIO_VMATH
+#define FIO_VMATH
 #endif
 #endif
 

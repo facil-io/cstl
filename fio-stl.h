@@ -620,6 +620,10 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 Switching Endian Ordering
 ***************************************************************************** */
 
+#define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
+#define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
+#define fio_ntol8(i)  (i) /* avoid special cases by defining for all sizes */
+
 #if __BIG_ENDIAN__
 
 /** Local byte order to Network byte order, 16 bit integer */
@@ -2487,6 +2491,14 @@ Pointer Tagging
 #endif
 #endif
 
+/* Modules that require FIO_VMATH */
+#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_SHA2) ||           \
+    defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
+#ifndef FIO_VMATH
+#define FIO_VMATH
+#endif
+#endif
+
 /* Modules that require FIO_BITMAP */
 #if defined(FIO_JSON) || defined(FIO_TEST_CSTL)
 #ifndef FIO_BITMAP
@@ -4262,22 +4274,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
 #define H___FIO_MATH___H 1
 
-#if defined(__ARM_FEATURE_CRYPTO) &&                                           \
-    (defined(__ARM_NEON) || defined(__ARM_NEON__))
-#include <arm_acle.h>
-#include <arm_neon.h>
-#define FIO___HAS_ARM_INTRIN 1
-#endif
-
-#ifndef FIO_MATH_USE_COMPILER_VECTORS
-#define FIO_MATH_USE_COMPILER_VECTORS 0
-#endif
-
-#if !(__has_attribute(vector_size))
-#undef FIO_MATH_USE_COMPILER_VECTORS
-#define FIO_MATH_USE_COMPILER_VECTORS 0
-#endif
-
 /* *****************************************************************************
 Useful math unions.
 ***************************************************************************** */
@@ -4356,69 +4352,7 @@ typedef union {
   fio_u2048 u2048[2];
 } fio_u4096;
 
-#if FIO_MATH_USE_COMPILER_VECTORS
-typedef union {
-  uint64_t __attribute__((vector_size(16))) u64;
-  uint32_t __attribute__((vector_size(16))) u32;
-  uint16_t __attribute__((vector_size(16))) u16;
-  uint8_t __attribute__((vector_size(16))) u8;
-} fio_v128;
-typedef union {
-  uint64_t __attribute__((vector_size(32))) u64;
-  uint32_t __attribute__((vector_size(32))) u32;
-  uint16_t __attribute__((vector_size(32))) u16;
-  uint8_t __attribute__((vector_size(32))) u8;
-  fio_v128 u128[2];
-} fio_v256;
-typedef union {
-  uint64_t __attribute__((vector_size(64))) u64;
-  uint32_t __attribute__((vector_size(64))) u32;
-  uint16_t __attribute__((vector_size(64))) u16;
-  uint8_t __attribute__((vector_size(64))) u8;
-  fio_v128 u128[4];
-  fio_v256 u256[2];
-} fio_v512;
-typedef union {
-  uint64_t __attribute__((vector_size(128))) u64;
-  uint32_t __attribute__((vector_size(128))) u32;
-  uint16_t __attribute__((vector_size(128))) u16;
-  uint8_t __attribute__((vector_size(128))) u8;
-  fio_v128 u128[8];
-  fio_v256 u256[4];
-  fio_v512 u512[2];
-} fio_v1024;
-typedef union {
-  uint64_t __attribute__((vector_size(256))) u64;
-  uint32_t __attribute__((vector_size(256))) u32;
-  uint16_t __attribute__((vector_size(256))) u16;
-  uint8_t __attribute__((vector_size(256))) u8;
-  fio_v128 u128[16];
-  fio_v256 u256[8];
-  fio_v512 u512[4];
-  fio_v1024 u1024[2];
-} fio_v2048;
-typedef union {
-  uint64_t __attribute__((vector_size(512))) u64;
-  uint32_t __attribute__((vector_size(512))) u32;
-  uint16_t __attribute__((vector_size(512))) u16;
-  uint8_t __attribute__((vector_size(512))) u8;
-  fio_v128 u128[32];
-  fio_v256 u256[16];
-  fio_v512 u512[8];
-  fio_v1024 u1024[4];
-  fio_v2048 u2048[2];
-} fio_v4096;
-#else
-typedef fio_u128 fio_v128;
-typedef fio_u256 fio_v256;
-typedef fio_u512 fio_v512;
-typedef fio_u1024 fio_v1024;
-typedef fio_u2048 fio_v2048;
-typedef fio_u4096 fio_v4096;
-#endif /* FIO_MATH_USE_COMPILER_VECTORS */
-
-FIO_ASSERT_STATIC(sizeof(fio_v4096) == 512 && sizeof(fio_u4096) == 512,
-                  "Math type size error!");
+FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -4503,38 +4437,31 @@ Vector Helpers - memory load operations (implementation starts here)
 ***************************************************************************** */
 
 // clang-format off
-#define FIO_MATH_TYPE_LOADER(prefix, not_prefix, bits, bytes)                  \
+#define FIO_MATH_TYPE_LOADER(bits, bytes)                  \
   /** Loads from memory using local-endian. */                                 \
-  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result)) fio_##prefix##bits##_load(const void *buf) { \
-    fio_##prefix##bits r;                                                      \
+  FIO_IFUNC fio_u##bits __attribute__((warn_unused_result)) fio_u##bits##_load(const void *buf) { \
+    fio_u##bits r;                                                      \
     fio_memcpy##bytes(&r, buf);                                                \
     return r;                                                                  \
   }                                                                            \
   /** Stores to memory using local-endian. */                                  \
-  FIO_IFUNC void fio_##prefix##bits##_store(void *buf, const fio_##prefix##bits a) { \
+  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) { \
     fio_memcpy##bytes(buf, &a);                                                \
   }                                                                            \
-  /** Loads from memory using local-endian. */                                 \
-  FIO_IFUNC fio_##prefix##bits __attribute__((warn_unused_result)) fio_##not_prefix##2##prefix##bits(fio_##not_prefix##bits o) { \
-    fio_##prefix##bits r;                                                      \
-    for (size_t i = 0; i < (bits >> 6); ++i) {                                 \
-      r.u64[i] = o.u64[i];                                                     \
-    }                                                                          \
-    return r;                                                                  \
-  }
 
-#define FIO_VECTOR_LOADER_ENDIAN_FUNC(prefix, total_bits, bits)                \
+
+#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                \
   /** Loads vector from memory, reading from little-endian.  */                \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_load_le##bits(const void *buf) { \
-    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_load_le##bits(const void *buf) { \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);         \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
   /** Loads vector from memory, reading from big-endian.  */                   \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_load_be##bits(const void *buf) { \
-    fio_##prefix##total_bits r = fio_##prefix##total_bits##_load(buf);         \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_load_be##bits(const void *buf) { \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);         \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
     }                                                                          \
@@ -4542,27 +4469,17 @@ Vector Helpers - memory load operations (implementation starts here)
   }
 // clang-format on
 
-FIO_MATH_TYPE_LOADER(u, v, 128, 16)
-FIO_MATH_TYPE_LOADER(u, v, 256, 32)
-FIO_MATH_TYPE_LOADER(u, v, 512, 64)
-FIO_MATH_TYPE_LOADER(u, v, 1024, 128)
-FIO_MATH_TYPE_LOADER(u, v, 2048, 256)
-FIO_MATH_TYPE_LOADER(u, v, 4096, 512)
-
-FIO_MATH_TYPE_LOADER(v, u, 128, 16)
-FIO_MATH_TYPE_LOADER(v, u, 256, 32)
-FIO_MATH_TYPE_LOADER(v, u, 512, 64)
-FIO_MATH_TYPE_LOADER(v, u, 1024, 128)
-FIO_MATH_TYPE_LOADER(v, u, 2048, 256)
-FIO_MATH_TYPE_LOADER(v, u, 4096, 512)
+FIO_MATH_TYPE_LOADER(128, 16)
+FIO_MATH_TYPE_LOADER(256, 32)
+FIO_MATH_TYPE_LOADER(512, 64)
+FIO_MATH_TYPE_LOADER(1024, 128)
+FIO_MATH_TYPE_LOADER(2048, 256)
+FIO_MATH_TYPE_LOADER(4096, 512)
 
 #define FIO_VECTOR_LOADER_ENDIAN(total_bits)                                   \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(u, total_bits, 16)                             \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(u, total_bits, 32)                             \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(u, total_bits, 64)                             \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(v, total_bits, 16)                             \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(v, total_bits, 32)                             \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(v, total_bits, 64)
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 16)                                \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 32)                                \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 64)
 
 FIO_VECTOR_LOADER_ENDIAN(128)
 FIO_VECTOR_LOADER_ENDIAN(256)
@@ -4579,121 +4496,72 @@ Vector Helpers - Simple Math functions
 ***************************************************************************** */
 
 // clang-format off
-#define FIO_VECTOR_OPERATION(prefix, total_bits, bits, opt_name, opt)          \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name##bits (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
+#define FIO_VECTOR_OPERATION(total_bits, bits, opt_name, opt)          \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_##opt_name##bits (fio_u##total_bits a, const fio_u##total_bits b) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = a.u##bits[i] opt b.u##bits[i];                            \
     }                                                                          \
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, opt_name, opt)    \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##opt_name##bits (fio_##prefix##total_bits a, const uint##bits##_t b) { \
+#define FIO_VECTOR_OPERATION_CONST(total_bits, bits, opt_name, opt)    \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_c##opt_name##bits (fio_u##total_bits a, const uint##bits##_t b) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = a.u##bits[i] opt b;                                       \
     }                                                                          \
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_BIG(prefix, total_bits, bits, opt_name, opt)      \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
+#define FIO_VECTOR_OPERATION_BIG(total_bits, bits, opt_name, opt)      \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_##opt_name (fio_u##total_bits a, const fio_u##total_bits b) { \
     for (size_t i = 0; i < (total_bits / 64); ++i) {                           \
       a.u64[i] = a.u64[i] opt b.u64[i];                                        \
     }                                                                          \
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, opt_name, opt)         \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a) { \
+#define FIO_VECTOR_OPERATION_SINGLE(total_bits, opt_name, opt)         \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_##opt_name (fio_u##total_bits a) { \
     for (size_t i = 0; i < (total_bits / 64); ++i) {                           \
       a.u64[i] = opt a.u64[i];                                                 \
     }                                                                          \
     return a;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_ROT_SHFT(prefix, total_bits, bits, dir, opt, opt_inv) \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##dir##rot##bits (fio_##prefix##total_bits a, size_t bits_) { \
+#define FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, dir, opt, opt_inv) \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_c##dir##rot##bits (fio_u##total_bits a, size_t bits_) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = (a.u##bits[i] opt bits_) | (a.u##bits[i] opt_inv bits_);  \
     }                                                                          \
     return a;                                                                  \
   }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##dir##shift##bits (fio_##prefix##total_bits a, size_t bits_) { \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_c##dir##shift##bits (fio_u##total_bits a, size_t bits_) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = (a.u##bits[i] opt bits_);                                 \
     }                                                                          \
     return a;                                                                  \
   }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##dir##rot##bits (fio_##prefix##total_bits a, fio_##prefix##total_bits b) { \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_##dir##rot##bits (fio_u##total_bits a, fio_u##total_bits b) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = (a.u##bits[i] opt b.u##bits[i]) |                         \
                      (a.u##bits[i] opt_inv b.u##bits[i]);                      \
     }                                                                          \
     return a;                                                                  \
   }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##dir##shift##bits (fio_##prefix##total_bits a, fio_##prefix##total_bits b) { \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_##dir##shift##bits (fio_u##total_bits a, fio_u##total_bits b) { \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       a.u##bits[i] = (a.u##bits[i] opt b.u##bits[i]);                          \
     }                                                                          \
     return a;                                                                  \
   }
-/* *****************************************************************************
-Vector Helpers - Simple Math functions - vector versions (if available)
-***************************************************************************** */
-#if FIO_MATH_USE_COMPILER_VECTORS
 
-#define FIO_VECTOR_OPERATION_VEC(prefix, total_bits, bits, opt_name, opt)      \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name##bits (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
-    a.u##bits = (a.u##bits opt b.u##bits);                                     \
-    return a;                                                                  \
-  }
-
-#define FIO_VECTOR_OPERATION_BIG_VEC(prefix, total_bits, bits, opt_name, opt)  \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a, const fio_##prefix##total_bits b) { \
-    a.u##bits = (a.u##bits opt b.u##bits);                                     \
-    return a;                                                                  \
-  }
-
-#define FIO_VECTOR_OPERATION_CONST_VEC(prefix, total_bits, bits, opt_name, opt) \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##opt_name##bits (fio_##prefix##total_bits a, const uint##bits##_t b) { \
-    a.u##bits = (a.u##bits opt b);                                             \
-    return a;                                                                  \
-  }
-
-#define FIO_VECTOR_OPERATION_SINGLE_VEC(prefix, total_bits, opt_name, opt)     \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##opt_name (fio_##prefix##total_bits a) { \
-    a.u64 = opt a.u64;                                                         \
-    return a;                                                                  \
-  }
-
-#define FIO_VECTOR_OPERATION_ROT_SHFT_VEC(prefix, total_bits, bits, dir, opt, opt_inv) \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##dir##rot##bits (fio_##prefix##total_bits a, size_t bits_) { \
-    a.u##bits = (a.u##bits opt bits_) | (a.u##bits opt_inv bits_);             \
-    return a;                                                                  \
-  }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_c##dir##shift##bits (fio_##prefix##total_bits a, size_t bits_) { \
-    a.u##bits = (a.u##bits opt bits_);                                         \
-    return a;                                                                  \
-  }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##dir##rot##bits (fio_##prefix##total_bits a, fio_##prefix##total_bits b) { \
-    a.u##bits = (a.u##bits opt b.u##bits) | (a.u##bits opt_inv b.u##bits);     \
-    return a;                                                                  \
-  }                                                                            \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_##dir##shift##bits (fio_##prefix##total_bits a, fio_##prefix##total_bits b) { \
-    a.u##bits = (a.u##bits opt b.u##bits);                                     \
-    return a;                                                                  \
-  }
-
-#endif /* FIO_MATH_USE_COMPILER_VECTORS */
-// clang-format on
 /* *****************************************************************************
 Vector Helpers - Shuffle
 ***************************************************************************** */
-// clang-format off
-#define FIO_VECTOR_SHUFFLE_FN(prefix, total_bits, bits)                        \
+#define FIO_VECTOR_SHUFFLE_FN(total_bits, bits)                        \
   /** Performs a "shuffle" operation, returning a new, reordered vector. */    \
-  FIO_IFUNC fio_##prefix##total_bits __attribute__((warn_unused_result)) fio_##prefix##total_bits##_shuffle##bits  (fio_##prefix##total_bits v, char vi[total_bits / bits]) { \
-    fio_##prefix##total_bits r;                                                \
+  FIO_IFUNC fio_u##total_bits __attribute__((warn_unused_result)) fio_u##total_bits##_shuffle##bits  (fio_u##total_bits v, char vi[total_bits / bits]) { \
+    fio_u##total_bits r;                                                \
     for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
       r.u##bits[i] = v.u##bits[vi[i] & ((total_bits / bits) - 1)];             \
     }                                                                          \
@@ -4706,8 +4574,8 @@ Vector Helpers - Reduce
 ***************************************************************************** */
 
 // clang-format off
-#define FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, opt_name, opt)   \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_##opt_name##bits (fio_##prefix##total_bits a) { \
+#define FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, opt_name, opt)   \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_u##total_bits##_reduce_##opt_name##bits (fio_u##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r opt a.u##bits[i];                                                  \
@@ -4715,20 +4583,20 @@ Vector Helpers - Reduce
     return r;                                                                  \
   }
 
-#define FIO_VECTOR_OPERATION_REDUCE_FN(prefix, total_bits, bits)               \
-  FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, mul, *)                \
-  FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, add, +)                \
-  FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, and, &)                \
-  FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, or, |)                 \
-  FIO_VECTOR_OPERATION_REDUCE(prefix, total_bits, bits, xor, ^)                \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_max##bits (fio_##prefix##total_bits a) { \
+#define FIO_VECTOR_OPERATION_REDUCE_FN(total_bits, bits)               \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, mul, *)                \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, add, +)                \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, and, &)                \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, or, |)                 \
+  FIO_VECTOR_OPERATION_REDUCE(total_bits, bits, xor, ^)                \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_u##total_bits##_reduce_max##bits (fio_u##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r < a.u##bits[i] ? a.u##bits[i] : r;                                 \
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
-  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_##prefix##total_bits##_reduce_min##bits (fio_##prefix##total_bits a) { \
+  FIO_IFUNC uint##bits##_t __attribute__((warn_unused_result)) fio_u##total_bits##_reduce_min##bits (fio_u##total_bits a) { \
     uint##bits##_t r = a.u##bits[0];                                           \
     for (size_t i = 1; i < (total_bits / bits); ++i) {                         \
       r = r > a.u##bits[i] ? a.u##bits[i] : r;                                 \
@@ -4736,107 +4604,53 @@ Vector Helpers - Reduce
     return r;                                                                  \
   }
 
-#if FIO_MATH_USE_COMPILER_VECTORS && __has_builtin(__builtin_reduce_max) &&    \
-    __has_builtin(__builtin_reduce_min) &&                                     \
-    __has_builtin(__builtin_reduce_add) &&                                     \
-    __has_builtin(__builtin_reduce_mul) &&                                     \
-    __has_builtin(__builtin_reduce_and) &&                                     \
-    __has_builtin(__builtin_reduce_or) && __has_builtin(__builtin_reduce_xor)
-#define FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, opt_name, opt) \
-  FIO_IFUNC uint##bits##_t fio_##prefix##total_bits##_reduce_##opt_name##bits ( fio_##prefix##total_bits a) { \
-    return __builtin_reduce_##opt_name(a);                                     \
-  }
-
-#define FIO_VECTOR_OPERATION_REDUCE_FN_VEC(prefix, total_bits, bits)           \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, mul, *)            \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, add, +)            \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, and, &)            \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, or, |)             \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, xor, ^)            \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, min, +)            \
-  FIO_VECTOR_OPERATION_REDUCE_VEC(prefix, total_bits, bits, max, +)
-
-// clang-format on
-#endif /* FIO_MATH_USE_COMPILER_VECTORS */
 /* *****************************************************************************
 Vector Helpers - Actual Functions (Macros used to write function code)
 ***************************************************************************** */
 
-#define FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, bits)              \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, mul, *)                       \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, add, +)                       \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, sub, -)                       \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, div, /)                       \
-  FIO_VECTOR_OPERATION(prefix, total_bits, bits, reminder, %)                  \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, mul, *)                 \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, add, +)                 \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, sub, -)                 \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, div, /)                 \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, reminder, %)            \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, and, &)                 \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, or, |)                  \
-  FIO_VECTOR_OPERATION_CONST(prefix, total_bits, bits, xor, ^)                 \
-  FIO_VECTOR_OPERATION_ROT_SHFT(prefix, total_bits, bits, l, <<, >>)           \
-  FIO_VECTOR_OPERATION_ROT_SHFT(prefix, total_bits, bits, r, >>, <<)           \
-  FIO_VECTOR_OPERATION_REDUCE_FN(prefix, total_bits, bits)                     \
-  FIO_VECTOR_SHUFFLE_FN(prefix, total_bits, bits)
+#define FIO_VECTOR_GROUP_FUNCTIONS_BITS(total_bits, bits)              \
+  FIO_VECTOR_OPERATION(total_bits, bits, mul, *)                       \
+  FIO_VECTOR_OPERATION(total_bits, bits, add, +)                       \
+  FIO_VECTOR_OPERATION(total_bits, bits, sub, -)                       \
+  FIO_VECTOR_OPERATION(total_bits, bits, div, /)                       \
+  FIO_VECTOR_OPERATION(total_bits, bits, reminder, %)                  \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, mul, *)                 \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, add, +)                 \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, sub, -)                 \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, div, /)                 \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, reminder, %)            \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, and, &)                 \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, or, |)                  \
+  FIO_VECTOR_OPERATION_CONST(total_bits, bits, xor, ^)                 \
+  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, l, <<, >>)           \
+  FIO_VECTOR_OPERATION_ROT_SHFT(total_bits, bits, r, >>, <<)           \
+  FIO_VECTOR_OPERATION_REDUCE_FN(total_bits, bits)                     \
+  FIO_VECTOR_SHUFFLE_FN(total_bits, bits)
 
-#define FIO_VECTOR_GROUP_FUNCTIONS(prefix, total_bits)                         \
-  FIO_VECTOR_OPERATION_SINGLE(prefix, total_bits, flip, ~)                     \
-  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, and, &)                     \
-  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, or, |)                      \
-  FIO_VECTOR_OPERATION_BIG(prefix, total_bits, 64, xor, ^)                     \
-  FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 8)                       \
-  FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 16)                      \
-  FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 32)                      \
-  FIO_VECTOR_GROUP_FUNCTIONS_BITS(prefix, total_bits, 64)
+#define FIO_VECTOR_GROUP_FUNCTIONS(total_bits)                         \
+  FIO_VECTOR_OPERATION_SINGLE(total_bits, flip, ~)                     \
+  FIO_VECTOR_OPERATION_BIG(total_bits, 64, and, &)                     \
+  FIO_VECTOR_OPERATION_BIG(total_bits, 64, or, |)                      \
+  FIO_VECTOR_OPERATION_BIG(total_bits, 64, xor, ^)                     \
+  FIO_VECTOR_GROUP_FUNCTIONS_BITS(total_bits, 8)                       \
+  FIO_VECTOR_GROUP_FUNCTIONS_BITS(total_bits, 16)                      \
+  FIO_VECTOR_GROUP_FUNCTIONS_BITS(total_bits, 32)                      \
+  FIO_VECTOR_GROUP_FUNCTIONS_BITS(total_bits, 64)
 
-FIO_VECTOR_GROUP_FUNCTIONS(u, 128)
-FIO_VECTOR_GROUP_FUNCTIONS(u, 256)
-FIO_VECTOR_GROUP_FUNCTIONS(u, 512)
-FIO_VECTOR_GROUP_FUNCTIONS(u, 1024)
-FIO_VECTOR_GROUP_FUNCTIONS(u, 2048)
-FIO_VECTOR_GROUP_FUNCTIONS(u, 4096)
-
-/* use vector version for `v` types, if available... */
-#if defined(FIO_VECTOR_OPERATION_VEC)
-#undef FIO_VECTOR_OPERATION
-#undef FIO_VECTOR_OPERATION_CONST
-#undef FIO_VECTOR_OPERATION_SINGLE
-#undef FIO_VECTOR_OPERATION_ROT_SHFT
-#undef FIO_VECTOR_OPERATION_BIG
-#define FIO_VECTOR_OPERATION          FIO_VECTOR_OPERATION_VEC
-#define FIO_VECTOR_OPERATION_BIG      FIO_VECTOR_OPERATION_BIG_VEC
-#define FIO_VECTOR_OPERATION_CONST    FIO_VECTOR_OPERATION_CONST_VEC
-#define FIO_VECTOR_OPERATION_SINGLE   FIO_VECTOR_OPERATION_SINGLE_VEC
-#define FIO_VECTOR_OPERATION_ROT_SHFT FIO_VECTOR_OPERATION_ROT_SHFT_VEC
-#endif /* FIO_VECTOR_OPERATION_VEC */
-
-#ifdef FIO_VECTOR_OPERATION_REDUCE_FN_VEC
-#undef FIO_VECTOR_OPERATION_REDUCE_FN
-#define FIO_VECTOR_OPERATION_REDUCE_FN FIO_VECTOR_OPERATION_REDUCE_FN_VEC
-#endif /* FIO_VECTOR_OPERATION_REDUCE_FN_VEC */
-
-FIO_VECTOR_GROUP_FUNCTIONS(v, 128)
-FIO_VECTOR_GROUP_FUNCTIONS(v, 256)
-FIO_VECTOR_GROUP_FUNCTIONS(v, 512)
-FIO_VECTOR_GROUP_FUNCTIONS(v, 1024)
-FIO_VECTOR_GROUP_FUNCTIONS(v, 2048)
-FIO_VECTOR_GROUP_FUNCTIONS(v, 4096)
+FIO_VECTOR_GROUP_FUNCTIONS(128)
+FIO_VECTOR_GROUP_FUNCTIONS(256)
+FIO_VECTOR_GROUP_FUNCTIONS(512)
+FIO_VECTOR_GROUP_FUNCTIONS(1024)
+FIO_VECTOR_GROUP_FUNCTIONS(2048)
+FIO_VECTOR_GROUP_FUNCTIONS(4096)
 
 #undef FIO_VECTOR_GROUP_FUNCTIONS
 #undef FIO_VECTOR_GROUP_FUNCTIONS_BITS
 #undef FIO_VECTOR_OPERATION
 #undef FIO_VECTOR_OPERATION_BIG
-#undef FIO_VECTOR_OPERATION_BIG_VEC
 #undef FIO_VECTOR_OPERATION_CONST
-#undef FIO_VECTOR_OPERATION_CONST_VEC
-#undef FIO_VECTOR_OPERATION_REDUCE_FN_VEC
 #undef FIO_VECTOR_OPERATION_ROT_SHFT
-#undef FIO_VECTOR_OPERATION_ROT_SHFT_VEC
 #undef FIO_VECTOR_OPERATION_SINGLE
-#undef FIO_VECTOR_OPERATION_SINGLE_VEC
-#undef FIO_VECTOR_OPERATION_VEC
 #undef FIO_VECTOR_SHUFFLE_FN
 
 /* *****************************************************************************
@@ -4858,35 +4672,6 @@ Vector Helpers - Shuffle Macros
 #define fio_u512_shuffle16(v, ...) fio_u512_shuffle16(v, (char[32]){__VA_ARGS__})
 #define fio_u512_shuffle32(v, ...) fio_u512_shuffle32(v, (char[16]){__VA_ARGS__})
 #define fio_u512_shuffle64(v, ...) fio_u512_shuffle64(v, (char[8]){__VA_ARGS__})
-
-#if FIO_MATH_USE_COMPILER_VECTORS && __has_builtin(__builtin_shufflevector)
-#define fio_v128_shuffle8(v, ...)  __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v128_shuffle16(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v128_shuffle32(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v128_shuffle64(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v256_shuffle8(v, ...)  __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v256_shuffle16(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v256_shuffle32(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v256_shuffle64(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v512_shuffle8(v, ...)  __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v512_shuffle16(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v512_shuffle32(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-#define fio_v512_shuffle64(v, ...) __builtin_shufflevector(v, v, __VA_ARGS__)
-
-#else /* using facil.io functions (no __builtin_shufflevector) */
-#define fio_v128_shuffle8(v, ...)  fio_v128_shuffle8(v, (char[16]){__VA_ARGS__})
-#define fio_v128_shuffle16(v, ...) fio_v128_shuffle16(v, (char[8]){__VA_ARGS__})
-#define fio_v128_shuffle32(v, ...) fio_v128_shuffle32(v, (char[4]){__VA_ARGS__})
-#define fio_v128_shuffle64(v, ...) fio_v128_shuffle64(v, (char[2]){__VA_ARGS__})
-#define fio_v256_shuffle8(v, ...)  fio_v256_shuffle8(v, (char[32]){__VA_ARGS__})
-#define fio_v256_shuffle16(v, ...) fio_v256_shuffle16(v, (char[16]){__VA_ARGS__})
-#define fio_v256_shuffle32(v, ...) fio_v256_shuffle32(v, (char[8]){__VA_ARGS__})
-#define fio_v256_shuffle64(v, ...) fio_v256_shuffle64(v, (char[4]){__VA_ARGS__})
-#define fio_v512_shuffle8(v, ...)  fio_v512_shuffle8(v, (char[64]){__VA_ARGS__})
-#define fio_v512_shuffle16(v, ...) fio_v512_shuffle16(v, (char[32]){__VA_ARGS__})
-#define fio_v512_shuffle32(v, ...) fio_v512_shuffle32(v, (char[16]){__VA_ARGS__})
-#define fio_v512_shuffle64(v, ...) fio_v512_shuffle64(v, (char[8]){__VA_ARGS__})
-#endif /* FIO_MATH_USE_COMPILER_VECTORS && __builtin_shufflevector */
 
 // clang-format on
 /* *****************************************************************************
@@ -5519,6 +5304,284 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
                    v256.u64[3] == 18,
                "fio_u256_shuffle64 failed");
   }
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Math - cleanup
+***************************************************************************** */
+#endif /* FIO_MATH */
+#undef FIO_MATH
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_VMATH              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                    Basic Vector Mathematical Operations
+                              (TODO, maybe)
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_VMATH) && !defined(H___FIO_VMATH___H)
+#define H___FIO_VMATH___H 1
+
+#if defined(__ARM_FEATURE_CRYPTO) &&                                           \
+    (defined(__ARM_NEON) || defined(__ARM_NEON__))
+#include <arm_acle.h>
+#include <arm_neon.h>
+#define FIO___HAS_ARM_INTRIN 1
+#endif
+
+#ifndef FIO_MATH_USE_COMPILER_VECTORS
+/* Note: currently vector types appear slower than the optimizer */
+#define FIO_MATH_USE_COMPILER_VECTORS 0
+#endif
+
+#if !(__has_attribute(vector_size))
+#undef FIO_MATH_USE_COMPILER_VECTORS
+#define FIO_MATH_USE_COMPILER_VECTORS 0
+#endif
+
+/* *****************************************************************************
+Compiler supported Vector Types
+***************************************************************************** */
+#if FIO_MATH_USE_COMPILER_VECTORS
+#define FIO___DEF_VTYPE(bt, gr)                                                \
+  typedef uint##bt##_t __attribute__((vector_size(((bt / 8) * gr))))           \
+  fio_u##bt##x##gr;                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load(const void *buf) {        \
+    fio_u##bt##x##gr r;                                                        \
+    FIO_MEMCPY(&r, buf, (bt / 8 * gr));                                        \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load_le(const void *buf) {     \
+    fio_u##bt##x##gr r = fio_u##bt##x##gr##_load(buf);                         \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r[i] = fio_ltole##bt(r[i]);                                              \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load_be(const void *buf) {     \
+    fio_u##bt##x##gr r = fio_u##bt##x##gr##_load(buf);                         \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r[i] = fio_lton##bt(r[i]);                                               \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC void fio_u##bt##x##gr##_store(void *buf, fio_u##bt##x##gr a) {     \
+    FIO_MEMCPY(buf, &a, (bt / 8 * gr));                                        \
+  }                                                                            \
+  FIO_IFUNC uint##bt##_t fio_u##bt##x##gr##_i(fio_u##bt##x##gr a, size_t i) {  \
+    return a[i];                                                               \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_iset(fio_u##bt##x##gr a,       \
+                                                     size_t i,                 \
+                                                     uint##bt##_t val) {       \
+    a[i] = val;                                                                \
+    return a;                                                                  \
+  }
+
+#define FIO___DEF_OPT(bt, gr, nm, op)                                          \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    return a op b;                                                             \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_c##nm(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    return a op b;                                                             \
+  }
+#define FIO___DEF_OPT_RLL(bt, gr)                                              \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_lrot(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    return (a << b) | (a >> b);                                                \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_rrot(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    return (a >> b) | (a << b);                                                \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_clrot(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a[i] = (a[i] << b) | (a[i] >> (bt - b));                                 \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_crrot(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a[i] = (a[i] >> b) | (a[i] << (bt - b));                                 \
+    return a;                                                                  \
+  }                                                                            \
+  FIO___DEF_OPT(bt, gr, lshift, <<)                                            \
+  FIO___DEF_OPT(bt, gr, rshift, >>)
+
+#define FIO___DEF_OPT_SIG(bt, gr, nm, op)                                      \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a) {     \
+    return (op a);                                                             \
+  }
+
+#if __has_builtin(__builtin_reduce_add) &&                                     \
+    __has_builtin(__builtin_reduce_mul) &&                                     \
+    __has_builtin(__builtin_reduce_and) &&                                     \
+    __has_builtin(__builtin_reduce_or) && __has_builtin(__builtin_reduce_xor)
+#define FIO___DEF_OPT_REDUCE(bt, gr, nm, op)                                   \
+  FIO_IFUNC uint##bt##_t fio_u##bt##x##gr##_reduce_##nm(fio_u##bt##x##gr a) {  \
+    return __builtin_reduce_##nm(a);                                           \
+  }
+#endif /* __builtin_reduce */
+
+#else /* FIO_MATH_USE_COMPILER_VECTORS */
+
+#define FIO___DEF_VTYPE(bt, gr)                                                \
+  typedef union {                                                              \
+    uint##bt##_t v[gr];                                                        \
+  } fio_u##bt##x##gr;                                                          \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load(const void *buf) {        \
+    fio_u##bt##x##gr r;                                                        \
+    FIO_MEMCPY(&r, buf, (bt / 8 * gr));                                        \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load_le(const void *buf) {     \
+    fio_u##bt##x##gr r = fio_u##bt##x##gr##_load(buf);                         \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r.v[i] = fio_ltole##bt(r.v[i]);                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_load_be(const void *buf) {     \
+    fio_u##bt##x##gr r = fio_u##bt##x##gr##_load(buf);                         \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r.v[i] = fio_lton##bt(r.v[i]);                                           \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC void fio_u##bt##x##gr##_store(void *buf, fio_u##bt##x##gr a) {     \
+    FIO_MEMCPY(buf, &a, (bt / 8 * gr));                                        \
+  }                                                                            \
+  FIO_IFUNC uint##bt##_t fio_u##bt##x##gr##_i(fio_u##bt##x##gr a, size_t i) {  \
+    return a.v[i];                                                             \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_iset(fio_u##bt##x##gr a,       \
+                                                     size_t i,                 \
+                                                     uint##bt##_t val) {       \
+    a.v[i] = val;                                                              \
+    return a;                                                                  \
+  }
+
+#define FIO___DEF_OPT(bt, gr, nm, op)                                          \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    fio_u##bt##x##gr r;                                                        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r.v[i] = a.v[i] op b.v[i];                                               \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_c##nm(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    fio_u##bt##x##gr r;                                                        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r.v[i] = a.v[i] op b;                                                    \
+    return r;                                                                  \
+  }
+
+#define FIO___DEF_OPT_RLL(bt, gr)                                              \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_lrot(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a.v[i] = (a.v[i] << (b.v[i] & (bt - 1))) |                               \
+               (a.v[i] >> ((bt - b.v[i]) & (bt - 1)));                         \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_rrot(fio_u##bt##x##gr a,       \
+                                                     fio_u##bt##x##gr b) {     \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a.v[i] = (a.v[i] >> (b.v[i] & (bt - 1))) |                               \
+               (a.v[i] << ((bt - b.v[i]) & (bt - 1)));                         \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_clrot(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a.v[i] = (a.v[i] << (b & (bt - 1))) | (a.v[i] >> ((bt - b) & (bt - 1))); \
+    return a;                                                                  \
+  }                                                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_crrot(fio_u##bt##x##gr a,      \
+                                                      uint##bt##_t b) {        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      a.v[i] = (a.v[i] >> (b & (bt - 1))) | (a.v[i] << ((bt - b) & (bt - 1))); \
+    return a;                                                                  \
+  }                                                                            \
+  FIO___DEF_OPT(bt, gr, lshift, <<)                                            \
+  FIO___DEF_OPT(bt, gr, rshift, >>)
+
+#define FIO___DEF_OPT_SIG(bt, gr, nm, op)                                      \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a) {     \
+    fio_u##bt##x##gr r;                                                        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      r.v[i] = op a.v[i];                                                      \
+    return r;                                                                  \
+  }
+
+#endif /* FIO_MATH_USE_COMPILER_VECTORS */
+
+#ifndef FIO___DEF_OPT_REDUCE
+#define FIO___DEF_OPT_REDUCE(bt, gr, nm, op)                                   \
+  FIO_IFUNC uint##bt##_t fio_u##bt##x##gr##_reduce_##nm(fio_u##bt##x##gr a) {  \
+    uint##bt##_t r = fio_u##bt##x##gr##_i(a, 0);                               \
+    for (size_t i = 1; i < gr; ++i)                                            \
+      r = r op fio_u##bt##x##gr##_i(a, i);                                     \
+    return r;                                                                  \
+  }
+#endif
+
+#define FIO__DEF_VGROUP(bits, groups)                                          \
+  FIO___DEF_VTYPE(bits, groups)                                                \
+  FIO___DEF_OPT(bits, groups, mul, *)                                          \
+  FIO___DEF_OPT(bits, groups, add, +)                                          \
+  FIO___DEF_OPT(bits, groups, sub, -)                                          \
+  FIO___DEF_OPT(bits, groups, div, /)                                          \
+  FIO___DEF_OPT(bits, groups, reminder, %)                                     \
+  FIO___DEF_OPT(bits, groups, and, &)                                          \
+  FIO___DEF_OPT(bits, groups, or, |)                                           \
+  FIO___DEF_OPT(bits, groups, xor, ^)                                          \
+  FIO___DEF_OPT_RLL(bits, groups)                                              \
+  FIO___DEF_OPT_SIG(bits, groups, flip, ~)                                     \
+  FIO___DEF_OPT_REDUCE(bits, groups, mul, *)                                   \
+  FIO___DEF_OPT_REDUCE(bits, groups, add, +)                                   \
+  FIO___DEF_OPT_REDUCE(bits, groups, and, &)                                   \
+  FIO___DEF_OPT_REDUCE(bits, groups, or, |)                                    \
+  FIO___DEF_OPT_REDUCE(bits, groups, xor, ^)
+
+FIO__DEF_VGROUP(8, 16)
+FIO__DEF_VGROUP(8, 32)
+FIO__DEF_VGROUP(8, 64)
+
+FIO__DEF_VGROUP(16, 8)
+FIO__DEF_VGROUP(16, 16)
+FIO__DEF_VGROUP(16, 32)
+
+FIO__DEF_VGROUP(32, 4)
+FIO__DEF_VGROUP(32, 8)
+FIO__DEF_VGROUP(32, 16)
+
+FIO__DEF_VGROUP(64, 2)
+FIO__DEF_VGROUP(64, 4)
+FIO__DEF_VGROUP(64, 8)
+
+#undef FIO__DEF_VGROUP
+/* *****************************************************************************
+Common Math operations - test
+***************************************************************************** */
+#if defined(FIO_TEST_CSTL)
+
+FIO_SFUNC void FIO_NAME_TEST(stl, vmath)(void) {
+  fprintf(stderr, "* Testing vector math operations (missing).\n");
+  fio_u32x4 a = {1, 1, 1, 1}, b = {2, 2, 2, 2};
+  a = fio_u32x4_mul(a, b);
+  FIO_ASSERT(fio_u32x4_i(a, 2) == 2, "FIO_VOP routing failed.");
 }
 
 #endif /* FIO_TEST_CSTL */
@@ -8053,7 +8116,7 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 /** Feeds up to 1023 bytes of entropy to the random state. */
 IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
 
-/** Reseeds the random engin using system state (rusage / jitter). */
+/** Reseeds the random engine using system state (rusage / jitter). */
 SFUNC void fio_rand_reseed(void);
 
 /* *****************************************************************************
@@ -8271,52 +8334,53 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v = fio_v256_xor(v, w);                                                      \
-  v = fio_v256_mul64(v, prime);                                                \
-  w = fio_v256_clrot64(w, 31);                                                 \
-  w = fio_v256_cxor64(w, seed);                                                \
-  v = fio_v256_add64(v, w);
+  v = fio_u64x4_xor(v, w);                                                     \
+  v = fio_u64x4_mul(v, prime);                                                 \
+  w = fio_u64x4_clrot(w, 31);                                                  \
+  w = fio_u64x4_cxor(w, seed);                                                 \
+  v = fio_u64x4_add(v, w);
 
-FIO_IFUNC fio_v256 fio_stable_hash___inner(const void *restrict data_,
+FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
                                            const size_t len,
                                            uint64_t seed) {
+  fio_u256 r;
   const uint8_t *data = (const uint8_t *)data_;
   /* seed selection is constant time to avoid leaking seed data */
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_v256 w, v = {.u64 = {seed, seed, seed, seed}};
-  fio_v256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
-                                  FIO_STABLE_HASH_PRIME1,
-                                  FIO_STABLE_HASH_PRIME2,
-                                  FIO_STABLE_HASH_PRIME3}};
+  fio_u64x4 v = {seed, seed, seed, seed};
+  fio_u64x4 const prime = {FIO_STABLE_HASH_PRIME0,
+                           FIO_STABLE_HASH_PRIME1,
+                           FIO_STABLE_HASH_PRIME2,
+                           FIO_STABLE_HASH_PRIME3};
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    w = fio_v256_load_le64(data);
-    seed ^= fio_v256_reduce_add64(w);
+    fio_u64x4 w = fio_u64x4_load_le((void *)data);
+    seed ^= fio_u64x4_reduce_add(w);
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
   if ((len & 31)) {
     uint64_t tmp[4] = {0};
     fio_memcpy31x(tmp, data, len); /* copies `len & 31` bytes */
-    w = fio_v256_load_le64(tmp);
+    fio_u64x4 w = fio_u64x4_load_le(tmp);
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector mini-avalanche */
-  v = fio_v256_mul64(v, prime);
-  w = (fio_v256){.u64 = {7, 11, 13, 17}};
-  v = fio_v256_lrot64(v, w);
-  return v;
+  v = fio_u64x4_mul(v, prime);
+  v = fio_u64x4_lrot(v, (fio_u64x4){7, 11, 13, 17});
+  fio_u64x4_store(r.u64, v);
+  return r;
 }
 
 /*  Computes a facil.io Stable Hash. */
 SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   uint64_t r;
-  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
+  fio_u256 v = fio_stable_hash___inner(data_, len, seed);
   /* summing avalanche */
-  r = fio_v256_reduce_add64(v);
+  r = fio_u256_reduce_add64(v);
   r ^= r >> 31;
   r *= FIO_STABLE_HASH_PRIME4;
   r ^= r >> 31;
@@ -8328,10 +8392,10 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               size_t len,
                               uint64_t seed) {
 
-  fio_v256 v = fio_stable_hash___inner(data_, len, seed);
+  fio_u256 v = fio_stable_hash___inner(data_, len, seed);
   uint64_t r[2];
-  r[0] = fio_v256_reduce_add64(v);
-  r[1] = fio_v256_reduce_xor64(v);
+  r[0] = fio_u256_reduce_add64(v);
+  r[1] = fio_u256_reduce_xor64(v);
   r[0] ^= r[0] >> 31;
   r[1] ^= r[1] >> 31;
   r[0] *= FIO_STABLE_HASH_PRIME4;
@@ -8423,21 +8487,29 @@ SFUNC void fio_rand_reseed(void) {
 /* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
-  const uint64_t P[] = {0x37701261ED6C16C7ULL, 0x764DBBB75F3B3E0DULL};
   if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
-  fio___rand_state[0] +=
-      (fio_lrot64(fio___rand_state[0], 33) + fio___rand_counter) * P[0];
-  fio___rand_state[1] += fio_lrot64(fio___rand_state[1], 33) * P[1];
-  fio___rand_state[2] +=
-      (fio_lrot64(fio___rand_state[2], 33) + fio___rand_counter) * (~P[0]);
-  fio___rand_state[3] += fio_lrot64(fio___rand_state[3], 33) * (~P[1]);
-  return fio_lrot64(fio___rand_state[0], 31) +
-         fio_lrot64(fio___rand_state[1], 29) +
-         fio_lrot64(fio___rand_state[2], 27) +
-         fio_lrot64(fio___rand_state[3], 30);
+  const fio_u64x4 s0 = {fio___rand_state[0],
+                        fio___rand_state[1],
+                        fio___rand_state[2],
+                        fio___rand_state[3]}; /* load to registers */
+  fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
+  s1 = fio_u64x4_add(s1,
+                     (fio_u64x4){fio___rand_counter, 0, fio___rand_counter, 0});
+  s1 = fio_u64x4_mul(s1,
+                     (fio_u64x4){0x37701261ED6C16C7ULL,
+                                 0x764DBBB75F3B3E0DULL,
+                                 ~(0x37701261ED6C16C7ULL),
+                                 ~(0x764DBBB75F3B3E0DULL)});
+  s1 = fio_u64x4_add(s1, s0);
+  for (size_t i = 0; i < 4; ++i) { /* store to memory */
+    fio___rand_state[i] = fio_u64x4_i(s1, i);
+  }
+  s1 = fio_u64x4_lrot(s1, (fio_u64x4){31, 29, 27, 30});
+  // return s1.v[0] + s1.v[1] + s1.v[2] + s1.v[3];
+  return fio_u64x4_reduce_add(s1);
 }
 
 /* copies 64 bits of randomness (8 bytes) repeatedly. */
@@ -42175,6 +42247,9 @@ Cleanup
 #endif
 #ifdef FIO_MATH
 #include "005 math.h"
+#endif
+#ifdef FIO_VMATH
+#include "005 vmath.h"
 #endif
 #ifdef FIO_ATOL
 #include "006 atol.h"
