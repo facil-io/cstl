@@ -5435,6 +5435,19 @@ Compiler supported Vector Types
   }
 #endif /* __builtin_reduce */
 
+#define FIO_U8x16(...)  ((fio_u8x16){__VA_ARGS__})
+#define FIO_U8x32(...)  ((fio_u8x32){__VA_ARGS__})
+#define FIO_U8x64(...)  ((fio_u8x64){__VA_ARGS__})
+#define FIO_U16x8(...)  ((fio_u16x8){__VA_ARGS__})
+#define FIO_U16x16(...) ((fio_u16x16){__VA_ARGS__})
+#define FIO_U16x32(...) ((fio_u16x32){__VA_ARGS__})
+#define FIO_U32x4(...)  ((fio_u32x4){__VA_ARGS__})
+#define FIO_U32x8(...)  ((fio_u32x8){__VA_ARGS__})
+#define FIO_U32x16(...) ((fio_u32x16){__VA_ARGS__})
+#define FIO_U64x2(...)  ((fio_u64x2){__VA_ARGS__})
+#define FIO_U64x4(...)  ((fio_u64x4){__VA_ARGS__})
+#define FIO_U64x8(...)  ((fio_u64x8){__VA_ARGS__})
+
 #else /* FIO_MATH_USE_COMPILER_VECTORS */
 
 #define FIO___DEF_VTYPE(bt, gr)                                                \
@@ -5541,7 +5554,20 @@ Compiler supported Vector Types
     return r;                                                                  \
   }
 
-#endif /* FIO_MATH_USE_COMPILER_VECTORS */
+#define FIO_U8x16(...)  ((fio_u8x16){{__VA_ARGS__}})
+#define FIO_U8x32(...)  ((fio_u8x32){{__VA_ARGS__}})
+#define FIO_U8x64(...)  ((fio_u8x64){{__VA_ARGS__}})
+#define FIO_U16x8(...)  ((fio_u16x8){{__VA_ARGS__}})
+#define FIO_U16x16(...) ((fio_u16x16){{__VA_ARGS__}})
+#define FIO_U16x32(...) ((fio_u16x32){{__VA_ARGS__}})
+#define FIO_U32x4(...)  ((fio_u32x4){{__VA_ARGS__}})
+#define FIO_U32x8(...)  ((fio_u32x8){{__VA_ARGS__}})
+#define FIO_U32x16(...) ((fio_u32x16){{__VA_ARGS__}})
+#define FIO_U64x2(...)  ((fio_u64x2){{__VA_ARGS__}})
+#define FIO_U64x4(...)  ((fio_u64x4){{__VA_ARGS__}})
+#define FIO_U64x8(...)  ((fio_u64x8){{__VA_ARGS__}})
+
+#endif /* !FIO_MATH_USE_COMPILER_VECTORS */
 
 #ifndef FIO___DEF_OPT_REDUCE
 #define FIO___DEF_OPT_REDUCE(bt, gr, nm, op)                                   \
@@ -5595,7 +5621,7 @@ Common Math operations - test
 
 FIO_SFUNC void FIO_NAME_TEST(stl, vmath)(void) {
   fprintf(stderr, "* Testing vector math operations (missing).\n");
-  fio_u32x4 a = {1, 1, 1, 1}, b = {2, 2, 2, 2};
+  fio_u32x4 a = FIO_U32x4(1, 1, 1, 1), b = FIO_U32x4(2, 2, 2, 2);
   a = fio_u32x4_mul(a, b);
   FIO_ASSERT(fio_u32x4_i(a, 2) == 2, "FIO_VOP routing failed.");
 }
@@ -8386,7 +8412,7 @@ FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
   }
   /* inner vector mini-avalanche */
   v = fio_u64x4_mul(v, prime);
-  v = fio_u64x4_lrot(v, (fio_u64x4){7, 11, 13, 17});
+  v = fio_u64x4_lrot(v, FIO_U64x4(7, 11, 13, 17));
   fio_u64x4_store(r.u64, v);
   return r;
 }
@@ -8513,17 +8539,17 @@ SFUNC uint64_t fio_rand64(void) {
                         fio___rand_state[3]}; /* load to registers */
   fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
   s1 = fio_u64x4_add(s1,
-                     (fio_u64x4){fio___rand_counter, 0, fio___rand_counter, 0});
+                     FIO_U64x4(fio___rand_counter, 0, fio___rand_counter, 0));
   s1 = fio_u64x4_mul(s1,
-                     (fio_u64x4){0x37701261ED6C16C7ULL,
-                                 0x764DBBB75F3B3E0DULL,
-                                 ~(0x37701261ED6C16C7ULL),
-                                 ~(0x764DBBB75F3B3E0DULL)});
+                     FIO_U64x4(0x37701261ED6C16C7ULL,
+                               0x764DBBB75F3B3E0DULL,
+                               ~(0x37701261ED6C16C7ULL),
+                               ~(0x764DBBB75F3B3E0DULL)));
   s1 = fio_u64x4_add(s1, s0);
   for (size_t i = 0; i < 4; ++i) { /* store to memory */
     fio___rand_state[i] = fio_u64x4_i(s1, i);
   }
-  s1 = fio_u64x4_lrot(s1, (fio_u64x4){31, 29, 27, 30});
+  s1 = fio_u64x4_lrot(s1, FIO_U64x4(31, 29, 27, 30));
   return fio_u64x4_reduce_add(s1);
 }
 
@@ -9632,11 +9658,11 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
 #define FIO___SHA256_ROUND_INNER_COMMON()                                      \
   const uint32_t t2 =                                                          \
       fio_u32x4_reduce_xor(                                                    \
-          fio_u32x4_and((fio_u32x4){v.u32[0], v.u32[0], v.u32[1], 0},          \
-                        (fio_u32x4){v.u32[1], v.u32[2], v.u32[2], 0})) +       \
+          fio_u32x4_and(FIO_U32x4(v.u32[0], v.u32[0], v.u32[1], 0),            \
+                        FIO_U32x4(v.u32[1], v.u32[2], v.u32[2], 0))) +         \
       fio_u32x4_reduce_xor(                                                    \
-          fio_u32x4_rrot((fio_u32x4){v.u32[0], v.u32[0], v.u32[0]},            \
-                         (fio_u32x4){2, 13, 22}));                             \
+          fio_u32x4_rrot(FIO_U32x4(v.u32[0], v.u32[0], v.u32[0]),              \
+                         FIO_U32x4(2, 13, 22)));                               \
   v.u32[7] = v.u32[6];                                                         \
   v.u32[6] = v.u32[5];                                                         \
   v.u32[5] = v.u32[4];                                                         \

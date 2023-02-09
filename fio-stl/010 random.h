@@ -286,7 +286,7 @@ FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
   }
   /* inner vector mini-avalanche */
   v = fio_u64x4_mul(v, prime);
-  v = fio_u64x4_lrot(v, (fio_u64x4){7, 11, 13, 17});
+  v = fio_u64x4_lrot(v, FIO_U64x4(7, 11, 13, 17));
   fio_u64x4_store(r.u64, v);
   return r;
 }
@@ -413,17 +413,17 @@ SFUNC uint64_t fio_rand64(void) {
                         fio___rand_state[3]}; /* load to registers */
   fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
   s1 = fio_u64x4_add(s1,
-                     (fio_u64x4){fio___rand_counter, 0, fio___rand_counter, 0});
+                     FIO_U64x4(fio___rand_counter, 0, fio___rand_counter, 0));
   s1 = fio_u64x4_mul(s1,
-                     (fio_u64x4){0x37701261ED6C16C7ULL,
-                                 0x764DBBB75F3B3E0DULL,
-                                 ~(0x37701261ED6C16C7ULL),
-                                 ~(0x764DBBB75F3B3E0DULL)});
+                     FIO_U64x4(0x37701261ED6C16C7ULL,
+                               0x764DBBB75F3B3E0DULL,
+                               ~(0x37701261ED6C16C7ULL),
+                               ~(0x764DBBB75F3B3E0DULL)));
   s1 = fio_u64x4_add(s1, s0);
   for (size_t i = 0; i < 4; ++i) { /* store to memory */
     fio___rand_state[i] = fio_u64x4_i(s1, i);
   }
-  s1 = fio_u64x4_lrot(s1, (fio_u64x4){31, 29, 27, 30});
+  s1 = fio_u64x4_lrot(s1, FIO_U64x4(31, 29, 27, 30));
   return fio_u64x4_reduce_add(s1);
 }
 

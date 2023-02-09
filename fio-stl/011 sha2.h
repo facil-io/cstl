@@ -129,11 +129,11 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
 #define FIO___SHA256_ROUND_INNER_COMMON()                                      \
   const uint32_t t2 =                                                          \
       fio_u32x4_reduce_xor(                                                    \
-          fio_u32x4_and((fio_u32x4){v.u32[0], v.u32[0], v.u32[1], 0},          \
-                        (fio_u32x4){v.u32[1], v.u32[2], v.u32[2], 0})) +       \
+          fio_u32x4_and(FIO_U32x4(v.u32[0], v.u32[0], v.u32[1], 0),            \
+                        FIO_U32x4(v.u32[1], v.u32[2], v.u32[2], 0))) +         \
       fio_u32x4_reduce_xor(                                                    \
-          fio_u32x4_rrot((fio_u32x4){v.u32[0], v.u32[0], v.u32[0]},            \
-                         (fio_u32x4){2, 13, 22}));                             \
+          fio_u32x4_rrot(FIO_U32x4(v.u32[0], v.u32[0], v.u32[0]),              \
+                         FIO_U32x4(2, 13, 22)));                               \
   v.u32[7] = v.u32[6];                                                         \
   v.u32[6] = v.u32[5];                                                         \
   v.u32[5] = v.u32[4];                                                         \

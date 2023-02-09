@@ -121,6 +121,19 @@ Compiler supported Vector Types
   }
 #endif /* __builtin_reduce */
 
+#define FIO_U8x16(...)  ((fio_u8x16){__VA_ARGS__})
+#define FIO_U8x32(...)  ((fio_u8x32){__VA_ARGS__})
+#define FIO_U8x64(...)  ((fio_u8x64){__VA_ARGS__})
+#define FIO_U16x8(...)  ((fio_u16x8){__VA_ARGS__})
+#define FIO_U16x16(...) ((fio_u16x16){__VA_ARGS__})
+#define FIO_U16x32(...) ((fio_u16x32){__VA_ARGS__})
+#define FIO_U32x4(...)  ((fio_u32x4){__VA_ARGS__})
+#define FIO_U32x8(...)  ((fio_u32x8){__VA_ARGS__})
+#define FIO_U32x16(...) ((fio_u32x16){__VA_ARGS__})
+#define FIO_U64x2(...)  ((fio_u64x2){__VA_ARGS__})
+#define FIO_U64x4(...)  ((fio_u64x4){__VA_ARGS__})
+#define FIO_U64x8(...)  ((fio_u64x8){__VA_ARGS__})
+
 #else /* FIO_MATH_USE_COMPILER_VECTORS */
 
 #define FIO___DEF_VTYPE(bt, gr)                                                \
@@ -227,7 +240,20 @@ Compiler supported Vector Types
     return r;                                                                  \
   }
 
-#endif /* FIO_MATH_USE_COMPILER_VECTORS */
+#define FIO_U8x16(...)  ((fio_u8x16){{__VA_ARGS__}})
+#define FIO_U8x32(...)  ((fio_u8x32){{__VA_ARGS__}})
+#define FIO_U8x64(...)  ((fio_u8x64){{__VA_ARGS__}})
+#define FIO_U16x8(...)  ((fio_u16x8){{__VA_ARGS__}})
+#define FIO_U16x16(...) ((fio_u16x16){{__VA_ARGS__}})
+#define FIO_U16x32(...) ((fio_u16x32){{__VA_ARGS__}})
+#define FIO_U32x4(...)  ((fio_u32x4){{__VA_ARGS__}})
+#define FIO_U32x8(...)  ((fio_u32x8){{__VA_ARGS__}})
+#define FIO_U32x16(...) ((fio_u32x16){{__VA_ARGS__}})
+#define FIO_U64x2(...)  ((fio_u64x2){{__VA_ARGS__}})
+#define FIO_U64x4(...)  ((fio_u64x4){{__VA_ARGS__}})
+#define FIO_U64x8(...)  ((fio_u64x8){{__VA_ARGS__}})
+
+#endif /* !FIO_MATH_USE_COMPILER_VECTORS */
 
 #ifndef FIO___DEF_OPT_REDUCE
 #define FIO___DEF_OPT_REDUCE(bt, gr, nm, op)                                   \
@@ -281,7 +307,7 @@ Common Math operations - test
 
 FIO_SFUNC void FIO_NAME_TEST(stl, vmath)(void) {
   fprintf(stderr, "* Testing vector math operations (missing).\n");
-  fio_u32x4 a = {1, 1, 1, 1}, b = {2, 2, 2, 2};
+  fio_u32x4 a = FIO_U32x4(1, 1, 1, 1), b = FIO_U32x4(2, 2, 2, 2);
   a = fio_u32x4_mul(a, b);
   FIO_ASSERT(fio_u32x4_i(a, 2) == 2, "FIO_VOP routing failed.");
 }
