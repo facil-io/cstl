@@ -265,11 +265,11 @@ FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_u64x4 v = {seed, seed, seed, seed};
-  fio_u64x4 const prime = {FIO_STABLE_HASH_PRIME0,
-                           FIO_STABLE_HASH_PRIME1,
-                           FIO_STABLE_HASH_PRIME2,
-                           FIO_STABLE_HASH_PRIME3};
+  fio_u64x4 v = FIO_U64x4(seed, seed, seed, seed);
+  fio_u64x4 const prime = FIO_U64x4(FIO_STABLE_HASH_PRIME0,
+                                    FIO_STABLE_HASH_PRIME1,
+                                    FIO_STABLE_HASH_PRIME2,
+                                    FIO_STABLE_HASH_PRIME3);
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
