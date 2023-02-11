@@ -1374,6 +1374,8 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
 
   if (fio___srvdata.root_pid != fio___srvdata.pid)
     return;
+  if (fio_atomic_or_fetch(&fio___srvdata.stop, 2) != 2)
+    return;
 
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
@@ -1392,6 +1394,8 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
         "sentinel thread creation failed, no worker will be spawned.");
     fio_srv_stop();
   }
+  if (!fio_atomic_xor_fetch(&fio___srvdata.stop, 2))
+    fio_queue_push(fio___srv_tasks, fio___srv_work_task);
   return;
 
 is_worker_process:
@@ -1400,7 +1404,8 @@ is_worker_process:
   FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
-  fio___srv_work(1);
+  if (!fio_atomic_xor_fetch(&fio___srvdata.stop, 2))
+    fio___srv_work(1);
   FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
   exit(0);
 }
@@ -1410,7 +1415,7 @@ Starting the Server
 ***************************************************************************** */
 
 /* Stopping the server. */
-SFUNC void fio_srv_stop(void) { fio___srvdata.stop = 1; }
+SFUNC void fio_srv_stop(void) { fio_atomic_or(&fio___srvdata.stop, 1); }
 
 /* Returns true if server running and 0 if server stopped or shutting down. */
 SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }

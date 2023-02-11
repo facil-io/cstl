@@ -274,8 +274,8 @@ HTTP/1.1 Protocol Controller
 ***************************************************************************** */
 
 /** Called before an HTTP handler link to an HTTP Controller is revoked. */
-static void fio_http1_on_destroyed(fio_http_s *h, void *c_) {
-  client_s *c = c_; // client_s *c = http_controller_data(h);
+static void fio_http1_on_destroyed(fio_http_s *h) {
+  client_s *c = fio_http_cdata(h);
   if (c->h == h)
     c->h = NULL;
   client_free(c);
