@@ -120,7 +120,7 @@ SFUNC void fio_http_free(fio_http_s *);
 SFUNC fio_http_s *fio_http_dup(fio_http_s *);
 
 /** Destroyed the HTTP handle object, freeing all allocated resources. */
-SFUNC void fio_http_destroy(fio_http_s *h);
+SFUNC fio_http_s *fio_http_destroy(fio_http_s *h);
 
 /* *****************************************************************************
 Opaque User and Controller Data
@@ -628,7 +628,7 @@ struct fio_http_controller_s {
   /* MUST be initialized to zero, used internally by the HTTP Handle. */
   uintptr_t private_flags;
   /** Called when an HTTP handle is freed. */
-  void (*on_destroyed)(fio_http_s *h, void *cdata);
+  void (*on_destroyed)(fio_http_s *h);
   /** Informs the controller that request / response headers must be sent. */
   void (*send_headers)(fio_http_s *h);
   /** called by the HTTP handle for each body chunk (or to finish a response. */
@@ -1126,10 +1126,7 @@ Cookie Maps
 Controller Validation
 ***************************************************************************** */
 
-FIO_SFUNC void fio___mock_c_on_destroyed(fio_http_s *h, void *cdata) {
-  (void)h, (void)cdata;
-}
-FIO_SFUNC void fio___mock_c_send_headers(fio_http_s *h) { (void)h; }
+FIO_SFUNC void fio___mock_controller_cb(fio_http_s *h) { (void)h; }
 FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
                                        fio_http_write_args_s args) {
   if (args.data) {
@@ -1141,17 +1138,15 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   (void)h;
 }
 
-FIO_SFUNC void fio___mock_c_on_finish(fio_http_s *h) { (void)h; }
-
 SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
   if (!c->on_destroyed)
-    c->on_destroyed = fio___mock_c_on_destroyed;
+    c->on_destroyed = fio___mock_controller_cb;
   if (!c->send_headers)
-    c->send_headers = fio___mock_c_send_headers;
+    c->send_headers = fio___mock_controller_cb;
   if (!c->write_body)
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
-    c->on_finish = fio___mock_c_on_finish;
+    c->on_finish = fio___mock_controller_cb;
 }
 
 /* *****************************************************************************
@@ -1198,11 +1193,9 @@ struct fio_http_s {
     .received_at = fio_http_get_timestump(), .body.fd = -1                     \
   }
 #define FIO_REF_DESTROY(h) fio_http_destroy(&(h))
-SFUNC void fio_http_destroy(fio_http_s *h) {
+SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
-    return;
-  if (h->controller)
-    h->controller->on_destroyed(h, h->cdata);
+    return h;
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
   fio_keystr_destroy(&h->query, fio___http_keystr_free);
@@ -1214,7 +1207,10 @@ SFUNC void fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
+  if (h->controller)
+    h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
+  return h;
 }
 #include FIO_INCLUDE_FILE
 
@@ -1859,8 +1855,8 @@ FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
   }
   if (args->finish) {
     h->state |= FIO_HTTP_STATE_FINISHED;
-    h->controller->on_finish(h);
     h->writer = fio____http_write_done;
+    h->controller->on_finish(h);
   }
   return 0;
 }

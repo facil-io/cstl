@@ -467,6 +467,10 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
   fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
+TODO!: Helpers fio_srv_queue_get && fio_srv_pid
+***************************************************************************** */
+
+/* *****************************************************************************
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -534,7 +538,6 @@ static int io_func_default_flush(int fd, void *tls) {
   (void)fd;
   (void)tls;
 }
-static void io_func_default_free(void *tls) { (void)tls; }
 
 FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
@@ -560,7 +563,7 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   if (!pr->io_functions.flush)
     pr->io_functions.flush = io_func_default_flush;
   if (!pr->io_functions.free)
-    pr->io_functions.free = io_func_default_free;
+    pr->io_functions.free = srv_on_close_mock;
 }
 
 /* the MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -909,11 +912,13 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #else
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d)", (void *)io, io->fd);
 #endif
-  io->pr->on_close(io->udata);
-  io->pr->io_functions.free(io->tls);
-  fio___srv_env_safe_destroy(&io->env);
+  /* store info, as it might be freed if the protocol is freed. */
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
+  /* call on_finish / free callbacks . */
+  io->pr->io_functions.free(io->tls);
+  io->pr->on_close(io->udata); /* may destroy protocol object! */
+  fio___srv_env_safe_destroy(&io->env);
 }
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
@@ -1571,8 +1576,10 @@ SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
 
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_unsuspend(fio_s *io) {
-  if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) & FIO_STATE_SUSPENDED))
+  if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) &
+       FIO_STATE_SUSPENDED)) {
     fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
+  }
 }
 
 /** Returns 1 if the IO handle was suspended. */
@@ -1613,8 +1620,6 @@ static void fio___srv_listen_on_data(fio_s *io) {
 }
 static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *s = (struct fio_listen_args *)settings_;
-  if (s->on_finish)
-    s->on_finish(s->udata);
   if ((!s->on_root && fio_srv_is_worker()) ||
       (s->on_root && fio_srv_is_master()))
     FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
@@ -1623,6 +1628,8 @@ static void fio___srv_listen_on_close(void *settings_) {
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   struct fio_listen_args *l = (struct fio_listen_args *)udata;
   int *pfd = (int *)(l + 1);
+  if (l->on_finish)
+    l->on_finish(l->udata);
   fio_sock_close(*pfd);
 #ifdef AF_UNIX
   /* delete the unix socket file, if any. */

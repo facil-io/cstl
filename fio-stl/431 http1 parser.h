@@ -41,6 +41,9 @@ FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
                                  fio_buf_info_s buf,
                                  void *udata);
 
+/** Returns true if the parser is waiting to parse a new request/response .*/
+FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p);
+
 /** The error return value for fio_http1_parse. */
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
 
@@ -105,7 +108,7 @@ static int fio_http1___finish(fio_http1_parser_s *p,
                               void *udata);
 
 /* *****************************************************************************
-Main Parsing Loop
+HTTP Parser Type
 ***************************************************************************** */
 
 /** The HTTP/1.1 parser type implementation */
@@ -113,6 +116,15 @@ struct fio_http1_parser_s {
   int (*fn)(fio_http1_parser_s *, fio_buf_info_s *, void *);
   size_t expected;
 };
+
+/** Returns true if the parser is waiting to parse a new request/response .*/
+FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p) {
+  return !p->fn || p->fn == fio_http1___start;
+}
+
+/* *****************************************************************************
+Main Parsing Loop
+***************************************************************************** */
 
 FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
                                  fio_buf_info_s buf,
