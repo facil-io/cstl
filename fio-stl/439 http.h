@@ -751,8 +751,9 @@ stream_chunk:
   return;
 }
 
-/** called once a request / response had finished */
-FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
+FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
+                                                          void *ignr_) {
+  fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->h = NULL;
   if (fio_http_is_streaming(h)) {
@@ -760,9 +761,16 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
   }
   if (c->settings->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+  // if(fio___http1_process_data(fio_s *io))
   fio_unsuspend(c->io);
   fio_http_free(h);
   fio_undup(c->io);
+  (void)ignr_;
+}
+
+/** called once a request / response had finished */
+FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
+  fio_defer(fio___http_controller_http1_on_finish_task, (void *)h, NULL);
 }
 
 /* *****************************************************************************

@@ -272,6 +272,9 @@ SFUNC void fio_unsuspend(fio_s *io);
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_is_suspended(fio_s *io);
 
+/** Returns 1 if the IO handle is marked as open. */
+SFUNC int fio_is_open(fio_s *io);
+
 /* *****************************************************************************
 Task Scheduling
 ***************************************************************************** */
@@ -1256,7 +1259,16 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   fio_signal_review();
 }
 
-FIO_SFUNC void fio_srv_shutdown(void) {
+FIO_SFUNC void fio___srv_shutdown_task(void *shutdown_start_, void *a2) {
+  intptr_t shutdown_start = (intptr_t)shutdown_start_;
+  if (shutdown_start + FIO_SRV_SHUTDOWN_TIMEOUT < fio___srvdata.tick ||
+      FIO_LIST_IS_EMPTY(&fio___srvdata.protocols))
+    return;
+  fio___srv_tick(fio_queue_count(fio___srv_tasks) ? 0 : 100);
+  fio_queue_push(fio___srv_tasks, fio___srv_shutdown_task, shutdown_start_, a2);
+}
+
+FIO_SFUNC void fio___srv_shutdown(void) {
   /* collect tick for shutdown start, to monitor for possible timeout */
   int64_t shutdown_start = fio___srvdata.tick = fio_time_milli();
   size_t connected = 0;
@@ -1275,10 +1287,11 @@ FIO_SFUNC void fio_srv_shutdown(void) {
   }
   FIO_LOG_DEBUG("Server shutting down with %zu connected clients", connected);
   /* cycle while connections exist. */
-  while (shutdown_start + FIO_SRV_SHUTDOWN_TIMEOUT >= fio___srvdata.tick &&
-         !FIO_LIST_IS_EMPTY(&fio___srvdata.protocols)) {
-    fio___srv_tick(100);
-  }
+  fio_queue_push(fio___srv_tasks,
+                 fio___srv_shutdown_task,
+                 (void *)(intptr_t)shutdown_start,
+                 NULL);
+  fio_queue_perform_all(fio___srv_tasks);
   /* in case of timeout, force close remaining connections. */
   connected = 0;
   FIO_LIST_EACH(fio_protocol_s,
@@ -1295,6 +1308,13 @@ FIO_SFUNC void fio_srv_shutdown(void) {
   fio_queue_perform_all(fio___srv_tasks);
 }
 
+FIO_SFUNC void fio___srv_work_task(void *ignr_1, void *ignr_2) {
+  if (fio___srvdata.stop)
+    return;
+  fio___srv_tick(fio_queue_count(fio___srv_tasks) ? 0 : 500);
+  fio_queue_push(fio___srv_tasks, fio___srv_work_task, ignr_1, ignr_2);
+}
+
 FIO_SFUNC void fio___srv_work(int is_worker) {
   fio___srvdata.is_worker = is_worker;
   fio_queue_perform_all(fio___srv_tasks);
@@ -1302,10 +1322,9 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
   }
   fio___srv_wakeup_init();
-  while (!fio___srvdata.stop) {
-    fio___srv_tick(500);
-  }
-  fio_srv_shutdown();
+  fio_queue_push(fio___srv_tasks, fio___srv_work_task);
+  fio_queue_perform_all(fio___srv_tasks);
+  fio___srv_shutdown();
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srvdata.workers = 0;
@@ -1585,6 +1604,11 @@ SFUNC void fio_unsuspend(fio_s *io) {
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_is_suspended(fio_s *io) {
   return (io->state & FIO_STATE_SUSPENDED);
+}
+
+/** Returns 1 if the IO handle is marked as open. */
+SFUNC int fio_is_open(fio_s *io) {
+  return (io->state & FIO_STATE_OPEN) && !(io->state & FIO_STATE_CLOSING);
 }
 
 /* *****************************************************************************

@@ -2273,7 +2273,7 @@ Pointer Tagging
 
 /* Modules that require FIO_STATE */
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) ||                         \
-    defined(FIOBJ_MALLOC) || defined(FIO_POLL)
+    defined(FIOBJ_MALLOC) || defined(FIO_POLL) || defined(FIO_LEAK_COUNTER)
 #ifndef FIO_STATE
 #define FIO_STATE
 #endif

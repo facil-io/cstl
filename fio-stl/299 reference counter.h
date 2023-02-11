@@ -149,7 +149,7 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO___REF_ON_FREE()                                                    \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 
-FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
+void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
     FIO_LOG_ERROR(
         "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "
@@ -157,6 +157,13 @@ FIO_DESTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test)) {
                                         "type: " FIO_MACRO2STR(FIO_REF_TYPE),
         FIO_NAME(FIO_REF_NAME, ___leak_tester));
   }
+  (void)ignr_;
+}
+
+FIO_CONSTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test_schd)) {
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         FIO_NAME(FIO_REF_NAME, ___leak_test),
+                         NULL);
 }
 #else
 #undef FIO___REF_ON_ALLOC
