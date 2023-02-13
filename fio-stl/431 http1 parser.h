@@ -198,7 +198,9 @@ static int fio_http1___start(fio_http1_parser_s *p,
   start = tmp + 1;
   if (start >= eol)
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (eol - start)), udata))
+  if (fio_http1_on_version(
+          FIO_BUF_INFO2(start, ((eol - start) > 14) ? 14 : (eol - start)),
+          udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 

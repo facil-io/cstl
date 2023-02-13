@@ -761,9 +761,10 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
   }
   if (c->settings->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
-  // if(fio___http1_process_data(fio_s *io))
-  fio_unsuspend(c->io);
   fio_http_free(h);
+  fio_unsuspend(c->io);
+  // fio_defer(fio___http1_process_data, void *udata1, void *udata2)
+  fio___http1_process_data(c->io, c);
   fio_undup(c->io);
   (void)ignr_;
 }

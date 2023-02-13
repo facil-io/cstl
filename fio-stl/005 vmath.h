@@ -73,6 +73,8 @@ Compiler supported Vector Types
     return a;                                                                  \
   }
 
+#define FIO_VTYPE_I(var, i) (var)[(i)]
+
 #define FIO___DEF_OPT(bt, gr, nm, op)                                          \
   FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
                                                      fio_u##bt##x##gr b) {     \
@@ -186,6 +188,9 @@ Compiler supported Vector Types
     return a;                                                                  \
   }
 
+/** Accesses index i in the vector variable `var`. */
+#define FIO_VTYPE_I(var, i) (var).v[(i)]
+
 #define FIO___DEF_OPT(bt, gr, nm, op)                                          \
   FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
                                                      fio_u##bt##x##gr b) {     \
@@ -265,6 +270,26 @@ Compiler supported Vector Types
   }
 #endif
 
+#ifndef FIO___DEF_OPT_SHFL
+#define FIO___DEF_OPT_SHFL(bt, gr)                                             \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_shuffle(fio_u##bt##x##gr a,    \
+                                                        uint8_t indexes[gr]) { \
+    fio_u##bt##x##gr r;                                                        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      FIO_VTYPE_I(r, i) = FIO_VTYPE_I(a, (indexes[i] & (gr - 1)));             \
+    return r;                                                                  \
+  }
+#endif
+
+#ifndef FIO___DEF_OPT_BSWAP
+#define FIO___DEF_OPT_BSWAP(bt, gr)                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_bswap(fio_u##bt##x##gr a) {  \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      FIO_VTYPE_I(a, i) = fio_bswap##bt(FIO_VTYPE_I(a, i));                    \
+    return a;                                                                  \
+  }
+#endif
+
 #define FIO__DEF_VGROUP(bits, groups)                                          \
   FIO___DEF_VTYPE(bits, groups)                                                \
   FIO___DEF_OPT(bits, groups, mul, *)                                          \
@@ -281,7 +306,9 @@ Compiler supported Vector Types
   FIO___DEF_OPT_REDUCE(bits, groups, add, +)                                   \
   FIO___DEF_OPT_REDUCE(bits, groups, and, &)                                   \
   FIO___DEF_OPT_REDUCE(bits, groups, or, |)                                    \
-  FIO___DEF_OPT_REDUCE(bits, groups, xor, ^)
+  FIO___DEF_OPT_REDUCE(bits, groups, xor, ^)                                   \
+  FIO___DEF_OPT_SHFL(bits, groups)                                             \
+  FIO___DEF_OPT_BSWAP(bits, groups)
 
 FIO__DEF_VGROUP(8, 16)
 FIO__DEF_VGROUP(8, 32)
@@ -299,6 +326,27 @@ FIO__DEF_VGROUP(64, 2)
 FIO__DEF_VGROUP(64, 4)
 FIO__DEF_VGROUP(64, 8)
 
+// clang-format off
+#define fio_u8x16_shuffle(v, ...)  fio_u8x16_shuffle((v),  ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u8x32_shuffle(v, ...)  fio_u8x32_shuffle((v),  ((uint8_t[32]){__VA_ARGS__}))
+#define fio_u8x64_shuffle(v, ...)  fio_u8x64_shuffle((v),  ((uint8_t[64]){__VA_ARGS__}))
+#define fio_u16x8_shuffle(v, ...)  fio_u16x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+#define fio_u16x16_shuffle(v, ...) fio_u16x16_shuffle((v), ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u16x32_shuffle(v, ...) fio_u16x32_shuffle((v), ((uint8_t[32]){__VA_ARGS__}))
+#define fio_u32x4_shuffle(v, ...)  fio_u32x4_shuffle((v),  ((uint8_t[4]){__VA_ARGS__}))
+#define fio_u32x8_shuffle(v, ...)  fio_u32x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+#define fio_u32x16_shuffle(v, ...) fio_u32x16_shuffle((v), ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u64x2_shuffle(v, ...)  fio_u64x2_shuffle((v),  ((uint8_t[2]){__VA_ARGS__}))
+#define fio_u64x4_shuffle(v, ...)  fio_u64x4_shuffle((v),  ((uint8_t[4]){__VA_ARGS__}))
+#define fio_u64x8_shuffle(v, ...)  fio_u64x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+// clang-format on
+
+#undef FIO___DEF_OPT
+#undef FIO___DEF_OPT_BSWAP
+#undef FIO___DEF_OPT_REDUCE
+#undef FIO___DEF_OPT_SHFL
+#undef FIO___DEF_OPT_SIG
+#undef FIO___DEF_VTYPE
 #undef FIO__DEF_VGROUP
 /* *****************************************************************************
 Common Math operations - test

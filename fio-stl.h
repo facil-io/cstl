@@ -574,6 +574,9 @@ FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 Swapping byte's order (`bswap` variations)
 ***************************************************************************** */
 
+/* avoid special cases by defining for all sizes */
+#define fio_bswap8(i) (i)
+
 /** Byte swap a 16 bit integer, inlined. */
 #if __has_builtin(__builtin_bswap16)
 #define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
@@ -5387,6 +5390,8 @@ Compiler supported Vector Types
     return a;                                                                  \
   }
 
+#define FIO_VTYPE_I(var, i) (var)[(i)]
+
 #define FIO___DEF_OPT(bt, gr, nm, op)                                          \
   FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
                                                      fio_u##bt##x##gr b) {     \
@@ -5500,6 +5505,9 @@ Compiler supported Vector Types
     return a;                                                                  \
   }
 
+/** Accesses index i in the vector variable `var`. */
+#define FIO_VTYPE_I(var, i) (var).v[(i)]
+
 #define FIO___DEF_OPT(bt, gr, nm, op)                                          \
   FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_##nm(fio_u##bt##x##gr a,       \
                                                      fio_u##bt##x##gr b) {     \
@@ -5579,6 +5587,26 @@ Compiler supported Vector Types
   }
 #endif
 
+#ifndef FIO___DEF_OPT_SHFL
+#define FIO___DEF_OPT_SHFL(bt, gr)                                             \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_shuffle(fio_u##bt##x##gr a,    \
+                                                        uint8_t indexes[gr]) { \
+    fio_u##bt##x##gr r;                                                        \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      FIO_VTYPE_I(r, i) = FIO_VTYPE_I(a, (indexes[i] & (gr - 1)));             \
+    return r;                                                                  \
+  }
+#endif
+
+#ifndef FIO___DEF_OPT_BSWAP
+#define FIO___DEF_OPT_BSWAP(bt, gr)                                            \
+  FIO_IFUNC fio_u##bt##x##gr fio_u##bt##x##gr##_bswap(fio_u##bt##x##gr a) {  \
+    for (size_t i = 0; i < gr; ++i)                                            \
+      FIO_VTYPE_I(a, i) = fio_bswap##bt(FIO_VTYPE_I(a, i));                    \
+    return a;                                                                  \
+  }
+#endif
+
 #define FIO__DEF_VGROUP(bits, groups)                                          \
   FIO___DEF_VTYPE(bits, groups)                                                \
   FIO___DEF_OPT(bits, groups, mul, *)                                          \
@@ -5595,7 +5623,9 @@ Compiler supported Vector Types
   FIO___DEF_OPT_REDUCE(bits, groups, add, +)                                   \
   FIO___DEF_OPT_REDUCE(bits, groups, and, &)                                   \
   FIO___DEF_OPT_REDUCE(bits, groups, or, |)                                    \
-  FIO___DEF_OPT_REDUCE(bits, groups, xor, ^)
+  FIO___DEF_OPT_REDUCE(bits, groups, xor, ^)                                   \
+  FIO___DEF_OPT_SHFL(bits, groups)                                             \
+  FIO___DEF_OPT_BSWAP(bits, groups)
 
 FIO__DEF_VGROUP(8, 16)
 FIO__DEF_VGROUP(8, 32)
@@ -5613,6 +5643,27 @@ FIO__DEF_VGROUP(64, 2)
 FIO__DEF_VGROUP(64, 4)
 FIO__DEF_VGROUP(64, 8)
 
+// clang-format off
+#define fio_u8x16_shuffle(v, ...)  fio_u8x16_shuffle((v),  ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u8x32_shuffle(v, ...)  fio_u8x32_shuffle((v),  ((uint8_t[32]){__VA_ARGS__}))
+#define fio_u8x64_shuffle(v, ...)  fio_u8x64_shuffle((v),  ((uint8_t[64]){__VA_ARGS__}))
+#define fio_u16x8_shuffle(v, ...)  fio_u16x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+#define fio_u16x16_shuffle(v, ...) fio_u16x16_shuffle((v), ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u16x32_shuffle(v, ...) fio_u16x32_shuffle((v), ((uint8_t[32]){__VA_ARGS__}))
+#define fio_u32x4_shuffle(v, ...)  fio_u32x4_shuffle((v),  ((uint8_t[4]){__VA_ARGS__}))
+#define fio_u32x8_shuffle(v, ...)  fio_u32x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+#define fio_u32x16_shuffle(v, ...) fio_u32x16_shuffle((v), ((uint8_t[16]){__VA_ARGS__}))
+#define fio_u64x2_shuffle(v, ...)  fio_u64x2_shuffle((v),  ((uint8_t[2]){__VA_ARGS__}))
+#define fio_u64x4_shuffle(v, ...)  fio_u64x4_shuffle((v),  ((uint8_t[4]){__VA_ARGS__}))
+#define fio_u64x8_shuffle(v, ...)  fio_u64x8_shuffle((v),  ((uint8_t[8]){__VA_ARGS__}))
+// clang-format on
+
+#undef FIO___DEF_OPT
+#undef FIO___DEF_OPT_BSWAP
+#undef FIO___DEF_OPT_REDUCE
+#undef FIO___DEF_OPT_SHFL
+#undef FIO___DEF_OPT_SIG
+#undef FIO___DEF_VTYPE
 #undef FIO__DEF_VGROUP
 /* *****************************************************************************
 Common Math operations - test
@@ -10335,77 +10386,109 @@ FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
 }
 
 // clang-format off
-#define FIO___CHACHA_QROUND_S1(a, b, c, d) do {a += b; d ^= a; d = fio_lrot32(d, 16);} while(0)
-#define FIO___CHACHA_QROUND_S2(a, b, c, d) do {c += d; b ^= c; b = fio_lrot32(b, 12);} while(0)
-#define FIO___CHACHA_QROUND_S3(a, b, c, d) do {a += b; d ^= a; d = fio_lrot32(d, 8);} while(0)
-#define FIO___CHACHA_QROUND_S4(a, b, c, d) do {c += d; b ^= c; b = fio_lrot32(b, 7);} while(0)
+#define FIO___CHACHA_VROUND(typ, a, b, c, d)                                   \
+  a = typ##_add(a, b); d = typ##_xor(d, a); d = typ##_clrot(d, 16);                                                      \
+  c = typ##_add(c, d); b = typ##_xor(b, c); b = typ##_clrot(b, 12);                                                      \
+  a = typ##_add(a, b); d = typ##_xor(d, a); d = typ##_clrot(d, 8);                                                       \
+  c = typ##_add(c, d); b = typ##_xor(b, c); b = typ##_clrot(b, 7)
 // clang-format on
-#define FIO___CHACHA_QROUND(a, b, c, d)                                        \
-  do {                                                                         \
-    FIO___CHACHA_QROUND_S1(a, b, c, d);                                        \
-    FIO___CHACHA_QROUND_S2(a, b, c, d);                                        \
-    FIO___CHACHA_QROUND_S3(a, b, c, d);                                        \
-    FIO___CHACHA_QROUND_S4(a, b, c, d);                                        \
-  } while (0)
 
-FIO_IFUNC void fio___chacha_xor64(void *restrict dest_,
-                                  const uint64_t *restrict src,
-                                  const size_t groups) {
-  uint8_t *d = (uint8_t *)dest_;
-  for (size_t i = 0; i < groups; (++i), d += 8) {
-    uint64_t t = fio_buf2u64_local(d);
-    t ^= src[i];
-    fio_u2buf64_local(d, t);
+FIO_IFUNC void fio___chacha_vround20(fio_u512 c, uint8_t *restrict data) {
+  fio_u32x4 v0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
+  fio_u32x4 v1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
+  fio_u32x4 v2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
+  fio_u32x4 v3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15]};
+  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
+    FIO___CHACHA_VROUND(fio_u32x4, v0, v1, v2, v3);
+    v1 = fio_u32x4_shuffle(v1, 1, 2, 3, 0);
+    v2 = fio_u32x4_shuffle(v2, 2, 3, 0, 1);
+    v3 = fio_u32x4_shuffle(v3, 3, 0, 1, 2);
+    FIO___CHACHA_VROUND(fio_u32x4, v0, v1, v2, v3);
+    v1 = fio_u32x4_shuffle(v1, 3, 0, 1, 2);
+    v2 = fio_u32x4_shuffle(v2, 2, 3, 0, 1);
+    v3 = fio_u32x4_shuffle(v3, 1, 2, 3, 0);
+  }
+  {
+    fio_u32x4 o0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
+    fio_u32x4 o1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
+    fio_u32x4 o2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
+    fio_u32x4 o3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15]};
+    v0 = fio_u32x4_add(v0, o0);
+    v1 = fio_u32x4_add(v1, o1);
+    v2 = fio_u32x4_add(v2, o2);
+    v3 = fio_u32x4_add(v3, o3);
+  }
+
+#if __BIG_ENDIAN__
+  {
+    v0 = fio_u32x4_bswap(v0);
+    v1 = fio_u32x4_bswap(v1);
+    v2 = fio_u32x4_bswap(v2);
+    v3 = fio_u32x4_bswap(v3);
+  }
+#endif
+  {
+    fio_u32x4_store(data, fio_u32x4_xor(fio_u32x4_load(data), v0));
+    fio_u32x4_store(data + 16, fio_u32x4_xor(fio_u32x4_load(data + 16), v1));
+    fio_u32x4_store(data + 32, fio_u32x4_xor(fio_u32x4_load(data + 32), v2));
+    fio_u32x4_store(data + 48, fio_u32x4_xor(fio_u32x4_load(data + 48), v3));
   }
 }
 
-FIO_IFUNC void fio___chacha_round20(fio_u512 *c) {
-  fio_u512 c2 = *c;
-  fio_u512 c_old = *c;
-  for (size_t round = 0; round < 10; ++round) {
-    for (size_t i = 0; i < 4; ++i) {
-      FIO___CHACHA_QROUND(c2.u32[i],
-                          c2.u32[i | 4],
-                          c2.u32[i | 8],
-                          c2.u32[i | 12]);
-    }
-    for (size_t i = 0; i < 4; ++i) {
-      FIO___CHACHA_QROUND(c2.u32[i],
-                          c2.u32[((i + 1) & 3) | 4],
-                          c2.u32[((i + 2) & 3) | 8],
-                          c2.u32[((i + 3) & 3) | 12]);
-    }
+FIO_IFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
+  // clang-format off
+  fio_u32x8 v0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3], c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
+  fio_u32x8 v1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7], c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
+  fio_u32x8 v2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11], c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
+  fio_u32x8 v3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15], c.u32[12] + 1, c.u32[13], c.u32[14], c.u32[15]};
+  // clang-format on
+  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
+    FIO___CHACHA_VROUND(fio_u32x8, v0, v1, v2, v3);
+    v1 = fio_u32x8_shuffle(v1, 1, 2, 3, 0, 5, 6, 7, 4);
+    v2 = fio_u32x8_shuffle(v2, 2, 3, 0, 1, 6, 7, 4, 5);
+    v3 = fio_u32x8_shuffle(v3, 3, 0, 1, 2, 7, 4, 5, 6);
+    FIO___CHACHA_VROUND(fio_u32x8, v0, v1, v2, v3);
+    v1 = fio_u32x8_shuffle(v1, 3, 0, 1, 2, 7, 4, 5, 6);
+    v2 = fio_u32x8_shuffle(v2, 2, 3, 0, 1, 6, 7, 4, 5);
+    v3 = fio_u32x8_shuffle(v3, 1, 2, 3, 0, 5, 6, 7, 4);
   }
-  c2 = fio_u512_add32(c2, c_old);
-  for (size_t i = 0; i < 16; ++i)
-    c2.u32[i] = fio_ltole32(c2.u32[i]);
-  fio_memcpy64(c, c2.u32);
-}
-FIO_IFUNC void fio___chacha_round20x2(uint32_t *restrict cypher,
-                                      uint32_t *restrict v) {
-  for (size_t b = 1; b < 2; ++b) { /* block counters increase */
-    cypher[(b << 4) + 12] += b;
-    v[(b << 4) + 12] += b;
+  {
+    // clang-format off
+    fio_u32x8 o0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3], c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
+    fio_u32x8 o1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7], c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
+    fio_u32x8 o2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11], c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
+    fio_u32x8 o3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15], c.u32[12] + 1, c.u32[13], c.u32[14], c.u32[15]};
+    // clang-format on
+    v0 = fio_u32x8_add(v0, o0);
+    v1 = fio_u32x8_add(v1, o1);
+    v2 = fio_u32x8_add(v2, o2);
+    v3 = fio_u32x8_add(v3, o3);
   }
-  for (size_t round = 0; round < 10; ++round) {
-    for (size_t i = 0; i < 4; ++i)
-      for (size_t b = 0; b < 2; ++b)
-        FIO___CHACHA_QROUND(v[(b << 4) | (i)],
-                            v[(b << 4) | ((i | 4))],
-                            v[(b << 4) | ((i | 8))],
-                            v[(b << 4) | ((i | 12))]);
-    for (size_t i = 0; i < 4; ++i)
-      for (size_t b = 0; b < 2; ++b)
-        FIO___CHACHA_QROUND(v[(b << 4) | (i)],
-                            v[(b << 4) | ((((i + 1) & 3) | 4))],
-                            v[(b << 4) | ((((i + 2) & 3) | 8))],
-                            v[(b << 4) | ((((i + 3) & 3) | 12))]);
+#if __BIG_ENDIAN__
+  {
+    v0 = fio_u32x8_bswap(v0);
+    v1 = fio_u32x8_bswap(v1);
+    v2 = fio_u32x8_bswap(v2);
+    v3 = fio_u32x8_bswap(v3);
   }
-  for (size_t i = 0; i < 16; ++i)
-    for (size_t b = 0; b < 2; ++b) {
-      cypher[(b << 4) | i] += v[(b << 4) | i];
-      cypher[(b << 4) | i] = fio_ltole32(cypher[(b << 4) | i]);
-    }
+#endif
+  {
+    // clang-format off
+    fio_u32x4 t0 = {FIO_VTYPE_I(v0, 4), FIO_VTYPE_I(v0, 5), FIO_VTYPE_I(v0, 6), FIO_VTYPE_I(v0, 7)};
+    fio_u32x4 t1 = {FIO_VTYPE_I(v1, 4), FIO_VTYPE_I(v1, 5), FIO_VTYPE_I(v1, 6), FIO_VTYPE_I(v1, 7)};
+    fio_u32x4 t2 = {FIO_VTYPE_I(v2, 4), FIO_VTYPE_I(v2, 5), FIO_VTYPE_I(v2, 6), FIO_VTYPE_I(v2, 7)};
+    fio_u32x4 t3 = {FIO_VTYPE_I(v3, 4), FIO_VTYPE_I(v3, 5), FIO_VTYPE_I(v3, 6), FIO_VTYPE_I(v3, 7)};
+    v0 = (fio_u32x8){FIO_VTYPE_I(v0, 0), FIO_VTYPE_I(v0, 1), FIO_VTYPE_I(v0, 2), FIO_VTYPE_I(v0, 3), FIO_VTYPE_I(v1, 0), FIO_VTYPE_I(v1, 1), FIO_VTYPE_I(v1, 2), FIO_VTYPE_I(v1, 3)};
+    v1 = (fio_u32x8){FIO_VTYPE_I(v2, 0), FIO_VTYPE_I(v2, 1), FIO_VTYPE_I(v2, 2), FIO_VTYPE_I(v2, 3), FIO_VTYPE_I(v3, 0), FIO_VTYPE_I(v3, 1), FIO_VTYPE_I(v3, 2), FIO_VTYPE_I(v3, 3)};
+    v2 = (fio_u32x8){FIO_VTYPE_I(t0, 0), FIO_VTYPE_I(t0, 1), FIO_VTYPE_I(t0, 2), FIO_VTYPE_I(t0, 3), FIO_VTYPE_I(t1, 0), FIO_VTYPE_I(t1, 1), FIO_VTYPE_I(t1, 2), FIO_VTYPE_I(t1, 3)};
+    v3 = (fio_u32x8){FIO_VTYPE_I(t2, 0), FIO_VTYPE_I(t2, 1), FIO_VTYPE_I(t2, 2), FIO_VTYPE_I(t2, 3), FIO_VTYPE_I(t3, 0), FIO_VTYPE_I(t3, 1), FIO_VTYPE_I(t3, 2), FIO_VTYPE_I(t3, 3)};
+  }
+  {
+    fio_u32x8_store(data,fio_u32x8_xor(fio_u32x8_load(data), v0));
+    fio_u32x8_store(data+32,fio_u32x8_xor(fio_u32x8_load(data+32), v1));
+    fio_u32x8_store(data+64,fio_u32x8_xor(fio_u32x8_load(data+64), v2));
+    fio_u32x8_store(data+96,fio_u32x8_xor(fio_u32x8_load(data+96), v3));
+  }
 }
 
 SFUNC void fio_chacha20(void *restrict data,
@@ -10415,24 +10498,19 @@ SFUNC void fio_chacha20(void *restrict data,
                         uint32_t counter) {
   fio_u512 c = fio___chacha_init(key, nounce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
-    fio_u512 cypher[4] = {c, c, c, c};
-    fio___chacha_round20x2(cypher[0].u32, cypher[2].u32);
-    fio___chacha_xor64(data, cypher[0].u64, 16);
+    fio___chacha_vround20x2(c, (uint8_t *)data);
     c.u32[12] += 2; /* block counter */
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_u512 c2 = c;
-    fio___chacha_round20(&c2);
-    fio___chacha_xor64(data, c2.u64, 8);
+    fio___chacha_vround20(c, (uint8_t *)data);
     data = (void *)((uint8_t *)data + 64);
     ++c.u32[12];
   }
   if ((len & 63)) {
     fio_u512 dest; /* no need to initialize, junk data disregarded. */
-    fio___chacha_round20(&c);
     fio_memcpy63x(dest.u64, data, len);
-    fio___chacha_xor64(dest.u64, c.u64, 8);
+    fio___chacha_vround20(c, dest.u8);
     fio_memcpy63x(data, dest.u64, len);
   }
 }
@@ -10441,6 +10519,11 @@ SFUNC void fio_chacha20(void *restrict data,
 ChaCha20Poly1305 Encryption with Authentication
 ***************************************************************************** */
 
+FIO_IFUNC fio_u512 fio___chacha20_mixround(fio_u512 c) {
+  fio_u512 k = {.u64 = {0}};
+  fio___chacha_vround20(c, k.u8);
+  return k;
+}
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
@@ -10451,11 +10534,10 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   fio_u512 c = fio___chacha_init(key, nounce, 0);
   fio___poly_s pl;
   {
-    fio_u512 c2 = c;
-    fio___chacha_round20(&c2); /* computes poly1305 key */
+    fio_u512 c2 = fio___chacha20_mixround(c);
     pl = fio___poly_init(&c2);
-    ++c.u32[12]; /* block counter */
   }
+  ++c.u32[12]; /* block counter */
   for (size_t i = 31; i < adlen; i += 32) {
     fio___poly_consume128bit(&pl, (uint8_t *)ad, 1);
     fio___poly_consume128bit(&pl, (uint8_t *)ad + 16, 1);
@@ -10471,9 +10553,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     fio___poly_consume128bit(&pl, (uint8_t *)tmp, 1);
   }
   for (size_t i = 127; i < len; i += 128) {
-    fio_u512 c2[4] = {c, c, c, c};
-    fio___chacha_round20x2(c2[0].u32, c2[2].u32);
-    fio___chacha_xor64(data, c2[0].u64, 16);
+    fio___chacha_vround20x2(c, (uint8_t *)data);
     fio___poly_consume128bit(&pl, data, 1);
     fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 16), 1);
     fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 32), 1);
@@ -10486,9 +10566,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     data = (void *)((uint8_t *)data + 128);
   }
   if ((len & 64)) {
-    fio_u512 c2 = c;
-    fio___chacha_round20(&c2);
-    fio___chacha_xor64(data, c2.u64, 8);
+    fio___chacha_vround20(c, (uint8_t *)data);
     fio___poly_consume128bit(&pl, data, 1);
     fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 16), 1);
     fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 32), 1);
@@ -10498,11 +10576,10 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   }
   if ((len & 63)) {
     fio_u512 dest;
+    fio_memcpy63x(dest.u8, data, len);
+    fio___chacha_vround20(c, dest.u8);
+    fio_memcpy63x(data, dest.u8, len);
     uint8_t *p = dest.u8;
-    fio___chacha_round20(&c);
-    fio_memcpy63x(dest.u64, data, len);
-    fio___chacha_xor64(dest.u64, c.u64, 8);
-    fio_memcpy63x(data, dest.u64, len);
     if ((len & 32)) {
       fio___poly_consume128bit(&pl, p, 1);
       fio___poly_consume128bit(&pl, (p + 16), 1);
@@ -10535,9 +10612,12 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       size_t adlen,
                                       const void *key,
                                       const void *nounce) {
-  fio_u512 c = fio___chacha_init(key, nounce, 0);
-  fio___chacha_round20(&c); /* computes poly1305 key */
-  fio___poly_s pl = fio___poly_init(&c);
+  fio___poly_s pl;
+  {
+    fio_u512 c = fio___chacha_init(key, nounce, 0);
+    c = fio___chacha20_mixround(c); /* computes poly1305 key */
+    pl = fio___poly_init(&c);
+  }
   for (size_t i = 31; i < adlen; i += 32) {
     fio___poly_consume128bit(&pl, (uint8_t *)ad, 1);
     fio___poly_consume128bit(&pl, (uint8_t *)ad + 16, 1);
@@ -10646,18 +10726,6 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
 
 FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   fprintf(stderr, "* Testing ChaCha20 Poly1305\n");
-  {
-    uint32_t tv1[4] = {
-        0x11111111,
-        0x01020304,
-        0x9b8d6f43,
-        0x01234567,
-    };
-    FIO___CHACHA_QROUND(tv1[0], tv1[1], tv1[2], tv1[3]);
-    FIO_ASSERT((tv1[0] == 0xea2a92f4 && tv1[1] == 0xcb1cf8ce &&
-                tv1[2] == 0x4581472e && tv1[3] == 0x5881c4bb),
-               "ChaCha quarter round example error");
-  }
   { /* test ChaCha20 independently */
     struct {
       char key[33];
@@ -10929,6 +10997,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                          0);
 #endif /* HAVE_OPENSSL */
   fprintf(stderr, "\n");
+  fio_test_hash_function(fio__chacha20_speed_wrapper,
+                         (char *)"ChaCha20",
+                         6,
+                         0,
+                         0);
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",
                          7,
@@ -37699,7 +37772,9 @@ static int fio_http1___start(fio_http1_parser_s *p,
   start = tmp + 1;
   if (start >= eol)
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (eol - start)), udata))
+  if (fio_http1_on_version(
+          FIO_BUF_INFO2(start, ((eol - start) > 14) ? 14 : (eol - start)),
+          udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 
@@ -38503,6 +38578,11 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
 /** called when a the HTTP/1.x version is parsed. */
 static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  if (version.len > 15)
+    FIO_LOG_ERROR("HTTP version error, %zu bytes long: %.*s",
+                  version.len,
+                  (int)version.len,
+                  version.buf);
   fio_http_version_set(c->h, FIO_BUF2STR_INFO(version));
   return 0;
 }
@@ -38700,7 +38780,8 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
     fio_str_info_s ver = fio_http_version(h);
     fio_str_info_s status = fio_http_status2str(fio_http_status(h));
     if (ver.len > 15) {
-      FIO_LOG_ERROR("HTTP/1.1 client version string too long!");
+      FIO_LOG_ERROR("HTTP/1.1 client version string too long! (\"%.14s\"...)",
+                    ver.buf);
       ver = FIO_STR_INFO1((char *)"HTTP/1.1");
     }
     fio_string_write2(&buf,
@@ -38780,9 +38861,10 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
   }
   if (c->settings->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
-  // if(fio___http1_process_data(fio_s *io))
-  fio_unsuspend(c->io);
   fio_http_free(h);
+  fio_unsuspend(c->io);
+  // fio_defer(fio___http1_process_data, void *udata1, void *udata2)
+  fio___http1_process_data(c->io, c);
   fio_undup(c->io);
   (void)ignr_;
 }

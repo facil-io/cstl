@@ -442,6 +442,9 @@ FIO_IFUNC size_t fio_is_big_endian(void) { return !fio_is_little_endian(); }
 Swapping byte's order (`bswap` variations)
 ***************************************************************************** */
 
+/* avoid special cases by defining for all sizes */
+#define fio_bswap8(i) (i)
+
 /** Byte swap a 16 bit integer, inlined. */
 #if __has_builtin(__builtin_bswap16)
 #define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
