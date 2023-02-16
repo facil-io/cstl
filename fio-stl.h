@@ -10231,21 +10231,6 @@ ChaCha20 (encryption)
     b[i] = (b[i] << 7) | (b[i] >> (32 - 7));                                   \
   }
 
-#define FIO____CHACHA_SHFL(bits, len)                                          \
-  FIO_IFUNC void fio___chacha_shuffle##bits##x##len(uint##bits##_t *v,         \
-                                                    uint8_t indx[len]) {       \
-    uint##bits##_t tmp[len];                                                   \
-    for (size_t i = 0; i < len; ++i) {                                         \
-      tmp[i] = v[indx[i] & (len - 1)];                                         \
-    }                                                                          \
-    for (size_t i = 0; i < len; ++i) {                                         \
-      v[i] = tmp[i];                                                           \
-    }                                                                          \
-  }
-FIO____CHACHA_SHFL(32, 4)
-FIO____CHACHA_SHFL(32, 8)
-#undef FIO____CHACHA_SHFL
-
 FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
                                      const void *nounce,
                                      uint32_t counter) {
@@ -10278,13 +10263,13 @@ FIO_SFUNC void fio___chacha_vround20(const fio_u512 c, uint8_t *restrict data) {
   }
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio___chacha_shuffle32x4((v + 4), (uint8_t[]){1, 2, 3, 0});
-    fio___chacha_shuffle32x4((v + 8), (uint8_t[]){2, 3, 0, 1});
-    fio___chacha_shuffle32x4((v + 12), (uint8_t[]){3, 0, 1, 2});
+    fio_u32x4_shuffle((v + 4), 1, 2, 3, 0);
+    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_shuffle((v + 12), 3, 0, 1, 2);
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio___chacha_shuffle32x4((v + 4), (uint8_t[]){3, 0, 1, 2});
-    fio___chacha_shuffle32x4((v + 8), (uint8_t[]){2, 3, 0, 1});
-    fio___chacha_shuffle32x4((v + 12), (uint8_t[]){1, 2, 3, 0});
+    fio_u32x4_shuffle((v + 4), 3, 0, 1, 2);
+    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_shuffle((v + 12), 1, 2, 3, 0);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i] += c.u32[i];
@@ -10314,13 +10299,13 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   ++v[28];
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio___chacha_shuffle32x8((v + 8), (uint8_t[]){1, 2, 3, 0, 5, 6, 7, 4});
-    fio___chacha_shuffle32x8((v + 16), (uint8_t[]){2, 3, 0, 1, 6, 7, 4, 5});
-    fio___chacha_shuffle32x8((v + 24), (uint8_t[]){3, 0, 1, 2, 7, 4, 5, 6});
+    fio_u32x8_shuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
+    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_shuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio___chacha_shuffle32x8((v + 8), (uint8_t[]){3, 0, 1, 2, 7, 4, 5, 6});
-    fio___chacha_shuffle32x8((v + 16), (uint8_t[]){2, 3, 0, 1, 6, 7, 4, 5});
-    fio___chacha_shuffle32x8((v + 24), (uint8_t[]){1, 2, 3, 0, 5, 6, 7, 4});
+    fio_u32x8_shuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
+    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_shuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i + (i & (4 | 8))] += c.u32[i];
@@ -10334,8 +10319,8 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   }
 #endif
   {
-    fio___chacha_shuffle32x8((v + 4), (uint8_t[]){4, 5, 6, 7, 0, 1, 2, 3});
-    fio___chacha_shuffle32x8((v + 20), (uint8_t[]){4, 5, 6, 7, 0, 1, 2, 3});
+    fio_u32x8_shuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
+    fio_u32x8_shuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
     uint32_t d[8];
     fio_memcpy32(d, data);
     for (size_t i = 0; i < 8; ++i) {
@@ -10836,40 +10821,38 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   }
 
 #if !DEBUG
-  if (0) {
-    fio_test_hash_function(fio__poly1305_speed_wrapper,
-                           (char *)"Poly1305",
-                           7,
-                           0,
-                           0);
-    fio_test_hash_function(fio__poly1305_speed_wrapper,
-                           (char *)"Poly1305",
-                           13,
-                           0,
-                           0);
-    fio_test_hash_function(fio__poly1305_speed_wrapper,
-                           (char *)"Poly1305 (unaligned)",
-                           13,
-                           3,
-                           0);
+  fio_test_hash_function(fio__poly1305_speed_wrapper,
+                         (char *)"Poly1305",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(fio__poly1305_speed_wrapper,
+                         (char *)"Poly1305",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(fio__poly1305_speed_wrapper,
+                         (char *)"Poly1305 (unaligned)",
+                         13,
+                         3,
+                         0);
 #if HAVE_OPENSSL && 0
-    fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                           (char *)"Poly1305",
-                           7,
-                           0,
-                           0);
-    fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                           (char *)"Poly1305",
-                           13,
-                           0,
-                           0);
-    fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                           (char *)"Poly1305 (unaligned)",
-                           13,
-                           3,
-                           0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(__poly1305_open_ssl_wrapper,
+                         (char *)"Poly1305 (unaligned)",
+                         13,
+                         3,
+                         0);
 #endif /* HAVE_OPENSSL */
-  }
   fprintf(stderr, "\n");
   fio_test_hash_function(fio__chacha20_speed_wrapper,
                          (char *)"ChaCha20",
