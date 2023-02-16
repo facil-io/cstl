@@ -190,7 +190,7 @@ ifeq ($(OS),Darwin) # Run MacOS commands
   # debugger
   DB=lldb
   # disassemble tool. Use stub to disable.
-  # DISAMS=otool -dtVGX
+  DISAMS=otool -dtVGX
   # documentation commands
   # DOCUMENTATION=cldoc generate $(INCLUDE_STR) -- --output ./html $(foreach dir, $(LIB_PUBLIC_SUBFOLDERS), $(wildcard $(addsuffix /, $(basename $(dir)))*.h*))
   # rule modifier (can't be indented)
@@ -697,16 +697,8 @@ clean:
 endif
 
 #############################################################################
-# Tasks - (TODO!) disassembler & documentation builder
+# Tasks - (TODO!) documentation builder
 #############################################################################
-
-ifneq ($(DISAMS),)
-.PHONY : disassemble.%
-disassemble.%: ;
-else
-.PHONY : disassemble.%
-disassemble.%: ;
-endif
 
 .PHONY : documentation.%
 documentation.%: ;
@@ -726,9 +718,17 @@ set_debug_flags:
 
 $(TMP_ROOT)/%.d: ;
 
+ifeq ($(DISAMS),)
+DISAMS=echo
+AFTER_DISAMS___= >> /dev/null 
+else
+AFTER_DISAMS___= >> $(TMP_ROOT)/$*.s
+endif
+
 $(TMP_ROOT)/%.o: create_tree %.c $(TMP_ROOT)/%.d
 	@echo "* Compiling $*.c"
 	@$(CC) -c $*.c -o $@ $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION)
+	@$(DISAMS) $(TMP_ROOT)/$*.o $(AFTER_DISAMS___)
 
 $(TMP_ROOT)/%.o: create_tree %.cpp $(TMP_ROOT)/%.d
 	@echo "* Compiling $*.cpp"
@@ -759,7 +759,7 @@ link.%:
 
 build_start.%: create_tree ;
 
-build_finish.%: link.% disassemble.% documentation.%
+build_finish.%: link.% documentation.%
 	@echo "* Finished build ($(DEST)/$*)"
 
 run.%: link.%
@@ -781,7 +781,7 @@ link_lib:
 	@$(DOCUMENTATION)
 
 
-lib: create_tree build_lib_objects link_lib disassemble.all documentation.all;
+lib: create_tree build_lib_objects link_lib documentation.all;
 
 
 # $(DEST)/pkgconfig/$(LIB_NAME).pc: makefile | libdump

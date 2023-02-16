@@ -2362,14 +2362,6 @@ Pointer Tagging
 #endif
 #endif
 
-/* Modules that require FIO_VMATH */
-#if defined(FIO_RAND) || defined(FIO_CHACHA) || defined(FIO_SHA2) ||           \
-    defined(FIO_SHA1) || defined(FIO_TEST_CSTL)
-#ifndef FIO_VMATH
-#define FIO_VMATH
-#endif
-#endif
-
 /* Modules that require FIO_BITMAP */
 #if defined(FIO_JSON) || defined(FIO_TEST_CSTL)
 #ifndef FIO_BITMAP

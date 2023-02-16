@@ -328,6 +328,37 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
+#define FIO___CHACHA_VROUND(count, a, b, c, d)                                 \
+  for (size_t i = 0; i < count; ++i) {                                         \
+    a[i] += b[i];                                                              \
+    d[i] ^= a[i];                                                              \
+    d[i] = (d[i] << 16) | (d[i] >> (32 - 16));                                 \
+    c[i] += d[i];                                                              \
+    b[i] ^= c[i];                                                              \
+    b[i] = (b[i] << 12) | (b[i] >> (32 - 12));                                 \
+    a[i] += b[i];                                                              \
+    d[i] ^= a[i];                                                              \
+    d[i] = (d[i] << 8) | (d[i] >> (32 - 8));                                   \
+    c[i] += d[i];                                                              \
+    b[i] ^= c[i];                                                              \
+    b[i] = (b[i] << 7) | (b[i] >> (32 - 7));                                   \
+  }
+
+#define FIO____CHACHA_SHFL(bits, len)                                          \
+  FIO_IFUNC void fio___chacha_shuffle##bits##x##len(uint##bits##_t *v,         \
+                                                    uint8_t indx[len]) {       \
+    uint##bits##_t tmp[len];                                                   \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      tmp[i] = v[indx[i] & (len - 1)];                                         \
+    }                                                                          \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      v[i] = tmp[i];                                                           \
+    }                                                                          \
+  }
+FIO____CHACHA_SHFL(32, 4)
+FIO____CHACHA_SHFL(32, 8)
+#undef FIO____CHACHA_SHFL
+
 FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
                                      const void *nounce,
                                      uint32_t counter) {
@@ -353,109 +384,95 @@ FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
   return o;
 }
 
-// clang-format off
-#define FIO___CHACHA_VROUND(typ, a, b, c, d)                                   \
-  a = typ##_add(a, b); d = typ##_xor(d, a); d = typ##_clrot(d, 16);                                                      \
-  c = typ##_add(c, d); b = typ##_xor(b, c); b = typ##_clrot(b, 12);                                                      \
-  a = typ##_add(a, b); d = typ##_xor(d, a); d = typ##_clrot(d, 8);                                                       \
-  c = typ##_add(c, d); b = typ##_xor(b, c); b = typ##_clrot(b, 7)
-// clang-format on
-
-FIO_IFUNC void fio___chacha_vround20(fio_u512 c, uint8_t *restrict data) {
-  fio_u32x4 v0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
-  fio_u32x4 v1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
-  fio_u32x4 v2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
-  fio_u32x4 v3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15]};
-  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
-    FIO___CHACHA_VROUND(fio_u32x4, v0, v1, v2, v3);
-    v1 = fio_u32x4_shuffle(v1, 1, 2, 3, 0);
-    v2 = fio_u32x4_shuffle(v2, 2, 3, 0, 1);
-    v3 = fio_u32x4_shuffle(v3, 3, 0, 1, 2);
-    FIO___CHACHA_VROUND(fio_u32x4, v0, v1, v2, v3);
-    v1 = fio_u32x4_shuffle(v1, 3, 0, 1, 2);
-    v2 = fio_u32x4_shuffle(v2, 2, 3, 0, 1);
-    v3 = fio_u32x4_shuffle(v3, 1, 2, 3, 0);
+FIO_SFUNC void fio___chacha_vround20(const fio_u512 c, uint8_t *restrict data) {
+  uint32_t v[16];
+  for (size_t i = 0; i < 16; ++i) {
+    v[i] = c.u32[i];
   }
-  {
-    fio_u32x4 o0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
-    fio_u32x4 o1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
-    fio_u32x4 o2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
-    fio_u32x4 o3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15]};
-    v0 = fio_u32x4_add(v0, o0);
-    v1 = fio_u32x4_add(v1, o1);
-    v2 = fio_u32x4_add(v2, o2);
-    v3 = fio_u32x4_add(v3, o3);
+  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
+    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
+    fio___chacha_shuffle32x4((v + 4), (uint8_t[]){1, 2, 3, 0});
+    fio___chacha_shuffle32x4((v + 8), (uint8_t[]){2, 3, 0, 1});
+    fio___chacha_shuffle32x4((v + 12), (uint8_t[]){3, 0, 1, 2});
+    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
+    fio___chacha_shuffle32x4((v + 4), (uint8_t[]){3, 0, 1, 2});
+    fio___chacha_shuffle32x4((v + 8), (uint8_t[]){2, 3, 0, 1});
+    fio___chacha_shuffle32x4((v + 12), (uint8_t[]){1, 2, 3, 0});
+  }
+  for (size_t i = 0; i < 16; ++i) {
+    v[i] += c.u32[i];
   }
 
 #if __BIG_ENDIAN__
-  {
-    v0 = fio_u32x4_bswap(v0);
-    v1 = fio_u32x4_bswap(v1);
-    v2 = fio_u32x4_bswap(v2);
-    v3 = fio_u32x4_bswap(v3);
+  for (size_t i = 0; i < 16; ++i) {
+    v[i] = fio_bswap32(v[i]);
   }
 #endif
   {
-    fio_u32x4_store(data, fio_u32x4_xor(fio_u32x4_load(data), v0));
-    fio_u32x4_store(data + 16, fio_u32x4_xor(fio_u32x4_load(data + 16), v1));
-    fio_u32x4_store(data + 32, fio_u32x4_xor(fio_u32x4_load(data + 32), v2));
-    fio_u32x4_store(data + 48, fio_u32x4_xor(fio_u32x4_load(data + 48), v3));
+    uint32_t d[16];
+    fio_memcpy64(d, data);
+    for (size_t i = 0; i < 16; ++i) {
+      d[i] ^= v[i];
+    }
+    fio_memcpy64(data, d);
   }
 }
 
-FIO_IFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
-  // clang-format off
-  fio_u32x8 v0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3], c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
-  fio_u32x8 v1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7], c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
-  fio_u32x8 v2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11], c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
-  fio_u32x8 v3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15], c.u32[12] + 1, c.u32[13], c.u32[14], c.u32[15]};
-  // clang-format on
+FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
+  uint32_t v[32];
+  for (size_t i = 0; i < 16; ++i) {
+    v[i + (i & (4 | 8))] = c.u32[i];
+    v[i + 4 + (i & (4 | 8))] = c.u32[i];
+  }
+  ++v[28];
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
-    FIO___CHACHA_VROUND(fio_u32x8, v0, v1, v2, v3);
-    v1 = fio_u32x8_shuffle(v1, 1, 2, 3, 0, 5, 6, 7, 4);
-    v2 = fio_u32x8_shuffle(v2, 2, 3, 0, 1, 6, 7, 4, 5);
-    v3 = fio_u32x8_shuffle(v3, 3, 0, 1, 2, 7, 4, 5, 6);
-    FIO___CHACHA_VROUND(fio_u32x8, v0, v1, v2, v3);
-    v1 = fio_u32x8_shuffle(v1, 3, 0, 1, 2, 7, 4, 5, 6);
-    v2 = fio_u32x8_shuffle(v2, 2, 3, 0, 1, 6, 7, 4, 5);
-    v3 = fio_u32x8_shuffle(v3, 1, 2, 3, 0, 5, 6, 7, 4);
+    FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
+    fio___chacha_shuffle32x8((v + 8), (uint8_t[]){1, 2, 3, 0, 5, 6, 7, 4});
+    fio___chacha_shuffle32x8((v + 16), (uint8_t[]){2, 3, 0, 1, 6, 7, 4, 5});
+    fio___chacha_shuffle32x8((v + 24), (uint8_t[]){3, 0, 1, 2, 7, 4, 5, 6});
+    FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
+    fio___chacha_shuffle32x8((v + 8), (uint8_t[]){3, 0, 1, 2, 7, 4, 5, 6});
+    fio___chacha_shuffle32x8((v + 16), (uint8_t[]){2, 3, 0, 1, 6, 7, 4, 5});
+    fio___chacha_shuffle32x8((v + 24), (uint8_t[]){1, 2, 3, 0, 5, 6, 7, 4});
   }
-  {
-    // clang-format off
-    fio_u32x8 o0 = {c.u32[0], c.u32[1], c.u32[2], c.u32[3], c.u32[0], c.u32[1], c.u32[2], c.u32[3]};
-    fio_u32x8 o1 = {c.u32[4], c.u32[5], c.u32[6], c.u32[7], c.u32[4], c.u32[5], c.u32[6], c.u32[7]};
-    fio_u32x8 o2 = {c.u32[8], c.u32[9], c.u32[10], c.u32[11], c.u32[8], c.u32[9], c.u32[10], c.u32[11]};
-    fio_u32x8 o3 = {c.u32[12], c.u32[13], c.u32[14], c.u32[15], c.u32[12] + 1, c.u32[13], c.u32[14], c.u32[15]};
-    // clang-format on
-    v0 = fio_u32x8_add(v0, o0);
-    v1 = fio_u32x8_add(v1, o1);
-    v2 = fio_u32x8_add(v2, o2);
-    v3 = fio_u32x8_add(v3, o3);
+  for (size_t i = 0; i < 16; ++i) {
+    v[i + (i & (4 | 8))] += c.u32[i];
+    v[i + 4 + (i & (4 | 8))] += c.u32[i];
   }
+  ++v[28];
+
 #if __BIG_ENDIAN__
-  {
-    v0 = fio_u32x8_bswap(v0);
-    v1 = fio_u32x8_bswap(v1);
-    v2 = fio_u32x8_bswap(v2);
-    v3 = fio_u32x8_bswap(v3);
+  for (size_t i = 0; i < 32; ++i) {
+    v[i] = fio_bswap32(v[i]);
   }
 #endif
-  { // clang-format off
-    fio_u32x4 t0 = {FIO_VTYPE_I(v0, 4), FIO_VTYPE_I(v0, 5), FIO_VTYPE_I(v0, 6), FIO_VTYPE_I(v0, 7)};
-    fio_u32x4 t1 = {FIO_VTYPE_I(v1, 4), FIO_VTYPE_I(v1, 5), FIO_VTYPE_I(v1, 6), FIO_VTYPE_I(v1, 7)};
-    fio_u32x4 t2 = {FIO_VTYPE_I(v2, 4), FIO_VTYPE_I(v2, 5), FIO_VTYPE_I(v2, 6), FIO_VTYPE_I(v2, 7)};
-    fio_u32x4 t3 = {FIO_VTYPE_I(v3, 4), FIO_VTYPE_I(v3, 5), FIO_VTYPE_I(v3, 6), FIO_VTYPE_I(v3, 7)};
-    v0 = (fio_u32x8){FIO_VTYPE_I(v0, 0), FIO_VTYPE_I(v0, 1), FIO_VTYPE_I(v0, 2), FIO_VTYPE_I(v0, 3), FIO_VTYPE_I(v1, 0), FIO_VTYPE_I(v1, 1), FIO_VTYPE_I(v1, 2), FIO_VTYPE_I(v1, 3)};
-    v1 = (fio_u32x8){FIO_VTYPE_I(v2, 0), FIO_VTYPE_I(v2, 1), FIO_VTYPE_I(v2, 2), FIO_VTYPE_I(v2, 3), FIO_VTYPE_I(v3, 0), FIO_VTYPE_I(v3, 1), FIO_VTYPE_I(v3, 2), FIO_VTYPE_I(v3, 3)};
-    v2 = (fio_u32x8){FIO_VTYPE_I(t0, 0), FIO_VTYPE_I(t0, 1), FIO_VTYPE_I(t0, 2), FIO_VTYPE_I(t0, 3), FIO_VTYPE_I(t1, 0), FIO_VTYPE_I(t1, 1), FIO_VTYPE_I(t1, 2), FIO_VTYPE_I(t1, 3)};
-    v3 = (fio_u32x8){FIO_VTYPE_I(t2, 0), FIO_VTYPE_I(t2, 1), FIO_VTYPE_I(t2, 2), FIO_VTYPE_I(t2, 3), FIO_VTYPE_I(t3, 0), FIO_VTYPE_I(t3, 1), FIO_VTYPE_I(t3, 2), FIO_VTYPE_I(t3, 3)};
-    
-  } // clang-format on
   {
-    fio_u32x8_store(data, fio_u32x8_xor(fio_u32x8_load(data), v0));
-    fio_u32x8_store(data + 32, fio_u32x8_xor(fio_u32x8_load(data + 32), v1));
-    fio_u32x8_store(data + 64, fio_u32x8_xor(fio_u32x8_load(data + 64), v2));
-    fio_u32x8_store(data + 96, fio_u32x8_xor(fio_u32x8_load(data + 96), v3));
+    fio___chacha_shuffle32x8((v + 4), (uint8_t[]){4, 5, 6, 7, 0, 1, 2, 3});
+    fio___chacha_shuffle32x8((v + 20), (uint8_t[]){4, 5, 6, 7, 0, 1, 2, 3});
+    uint32_t d[8];
+    fio_memcpy32(d, data);
+    for (size_t i = 0; i < 8; ++i) {
+      d[i] ^= v[i];
+    }
+    fio_memcpy32(data, d);
+
+    fio_memcpy32(d, data + 32);
+    for (size_t i = 0; i < 8; ++i) {
+      d[i] ^= v[16 + i];
+    }
+    fio_memcpy32(data + 32, d);
+
+    fio_memcpy32(d, data + 64);
+    for (size_t i = 0; i < 8; ++i) {
+      d[i] ^= v[8 + i];
+    }
+    fio_memcpy32(data + 64, d);
+
+    fio_memcpy32(d, data + 96);
+    for (size_t i = 0; i < 8; ++i) {
+      d[i] ^= v[24 + i];
+    }
+    fio_memcpy32(data + 96, d);
   }
 }
 

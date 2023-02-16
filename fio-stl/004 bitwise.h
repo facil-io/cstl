@@ -471,6 +471,140 @@ zero:
 }
 
 /* *****************************************************************************
+Byte Shuffling (on native types, up to 2048 bits == 256 bytes)
+***************************************************************************** */
+#define FIO____SHFL_FN(T, prefx, len)                                          \
+  FIO_IFUNC void fio_##prefx##x##len##_shuffle(T *v, uint8_t indx[len]) {      \
+    T tmp[len];                                                                \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      tmp[i] = v[indx[i] & (len - 1)];                                         \
+    }                                                                          \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      v[i] = tmp[i];                                                           \
+    }                                                                          \
+  }
+
+#define FIO____REDUCE_FN(T, prefx, len, opnm, op)                              \
+  FIO_IFUNC T fio_##prefx##x##len##_reduce_##opnm(T *v) {                      \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r op v[i];                                                           \
+    }                                                                          \
+    return r;                                                                  \
+  }
+#define FIO____REDUCE_MINMAX(T, prefx, len)                                    \
+  FIO_IFUNC T fio_##prefx##x##len##_reduce_max(T *v) {                         \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r < v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC T fio_##prefx##x##len##_reduce_min(T *v) {                         \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r > v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }
+
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_FN(T, prefx, len, and, &)                                      \
+  FIO____REDUCE_FN(T, prefx, len, or, |)                                       \
+  FIO____REDUCE_FN(T, prefx, len, xor, ^)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(uint8_t, u8, 4)
+FIO____SHFL_REDUCE(uint8_t, u8, 8)
+FIO____SHFL_REDUCE(uint8_t, u8, 16)
+FIO____SHFL_REDUCE(uint8_t, u8, 32)
+FIO____SHFL_REDUCE(uint8_t, u8, 64)
+FIO____SHFL_REDUCE(uint8_t, u8, 128)
+FIO____SHFL_REDUCE(uint8_t, u8, 256)
+FIO____SHFL_REDUCE(uint16_t, u16, 2)
+FIO____SHFL_REDUCE(uint16_t, u16, 4)
+FIO____SHFL_REDUCE(uint16_t, u16, 8)
+FIO____SHFL_REDUCE(uint16_t, u16, 16)
+FIO____SHFL_REDUCE(uint16_t, u16, 32)
+FIO____SHFL_REDUCE(uint16_t, u16, 64)
+FIO____SHFL_REDUCE(uint16_t, u16, 128)
+FIO____SHFL_REDUCE(uint32_t, u32, 2)
+FIO____SHFL_REDUCE(uint32_t, u32, 4)
+FIO____SHFL_REDUCE(uint32_t, u32, 8)
+FIO____SHFL_REDUCE(uint32_t, u32, 16)
+FIO____SHFL_REDUCE(uint32_t, u32, 32)
+FIO____SHFL_REDUCE(uint32_t, u32, 64)
+FIO____SHFL_REDUCE(uint64_t, u64, 2)
+FIO____SHFL_REDUCE(uint64_t, u64, 4)
+FIO____SHFL_REDUCE(uint64_t, u64, 8)
+FIO____SHFL_REDUCE(uint64_t, u64, 16)
+FIO____SHFL_REDUCE(uint64_t, u64, 32)
+
+#undef FIO____SHFL_REDUCE
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(float, float, 2)
+FIO____SHFL_REDUCE(float, float, 4)
+FIO____SHFL_REDUCE(float, float, 8)
+FIO____SHFL_REDUCE(float, float, 16)
+FIO____SHFL_REDUCE(float, float, 32)
+FIO____SHFL_REDUCE(float, float, 64)
+FIO____SHFL_REDUCE(double, dbl, 2)
+FIO____SHFL_REDUCE(double, dbl, 4)
+FIO____SHFL_REDUCE(double, dbl, 8)
+FIO____SHFL_REDUCE(double, dbl, 16)
+FIO____SHFL_REDUCE(double, dbl, 32)
+#undef FIO____SHFL_REDUCE
+#undef FIO____REDUCE_FN
+#undef FIO____SHFL_FN
+
+/* clang-format off */
+#define fio_u8x4_shuffle(v, ...)     fio_u8x4_shuffle(v,     (uint8_t[4]){__VA_ARGS__})
+#define fio_u8x8_shuffle(v, ...)     fio_u8x8_shuffle(v,     (uint8_t[8]){__VA_ARGS__})
+#define fio_u8x16_shuffle(v, ...)    fio_u8x16_shuffle(v,    (uint8_t[16]){__VA_ARGS__})
+#define fio_u8x32_shuffle(v, ...)    fio_u8x32_shuffle(v,    (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x64_shuffle(v, ...)    fio_u8x64_shuffle(v,    (uint8_t[64]){__VA_ARGS__})
+#define fio_u8x128_shuffle(v, ...)   fio_u8x128_shuffle(v,   (uint8_t[128]){__VA_ARGS__})
+#define fio_u8x256_shuffle(v, ...)   fio_u8x256_shuffle(v,   (uint8_t[256]){__VA_ARGS__})
+#define fio_u16x2_shuffle(v, ...)    fio_u16x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u16x4_shuffle(v, ...)    fio_u16x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u16x8_shuffle(v, ...)    fio_u16x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u16x16_shuffle(v, ...)   fio_u16x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u16x32_shuffle(v, ...)   fio_u16x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u16x64_shuffle(v, ...)   fio_u16x64_shuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u16x128_shuffle(v,...)   fio_u16x128_shuffle(v,  (uint8_t[128]){__VA_ARGS__})
+#define fio_u32x2_shuffle(v, ...)    fio_u32x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u32x4_shuffle(v, ...)    fio_u32x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u32x8_shuffle(v, ...)    fio_u32x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u32x16_shuffle(v, ...)   fio_u32x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u32x32_shuffle(v, ...)   fio_u32x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u32x64_shuffle(v, ...)   fio_u32x64_shuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u64x2_shuffle(v, ...)    fio_u64x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u64x4_shuffle(v, ...)    fio_u64x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_shuffle(v, ...)    fio_u64x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_shuffle(v, ...)   fio_u64x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u64x32_shuffle(v, ...)   fio_u64x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx2_shuffle(v, ...)  fio_floatx2_shuffle(v,  (uint8_t[2]){__VA_ARGS__})
+#define fio_floatx4_shuffle(v, ...)  fio_floatx4_shuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_floatx8_shuffle(v, ...)  fio_floatx8_shuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_floatx16_shuffle(v, ...) fio_floatx16_shuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define fio_floatx32_shuffle(v, ...) fio_floatx32_shuffle(v, (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx64_shuffle(v, ...) fio_floatx64_shuffle(v, (uint8_t[64]){__VA_ARGS__})
+#define fio_dblx2_shuffle(v, ...)    fio_dblx2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_dblx4_shuffle(v, ...)    fio_dblx4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_dblx8_shuffle(v, ...)    fio_dblx8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_dblx16_shuffle(v, ...)   fio_dblx16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_dblx32_shuffle(v, ...)   fio_dblx32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
+/* clang-format on */
+
+/* *****************************************************************************
 Byte masking (XOR) with nonce (counter mode)
 ***************************************************************************** */
 

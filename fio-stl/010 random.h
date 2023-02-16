@@ -250,11 +250,13 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 
 #define FIO_STABLE_HASH_ROUND_FULL()                                           \
-  v = fio_u64x4_xor(v, w);                                                     \
-  v = fio_u64x4_mul(v, prime);                                                 \
-  w = fio_u64x4_clrot(w, 31);                                                  \
-  w = fio_u64x4_cxor(w, seed);                                                 \
-  v = fio_u64x4_add(v, w);
+  for (size_t vi = 0; vi < 4; ++vi) {                                          \
+    v[vi] ^= w[vi];                                                            \
+    v[vi] *= prime[vi];                                                        \
+    w[vi] = ((w[vi] << 31) | (w[vi] << (64 - 31)));                            \
+    w[vi] ^= seed;                                                             \
+    v[vi] += w[vi];                                                            \
+  }
 
 FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
                                            const size_t len,
@@ -265,29 +267,39 @@ FIO_IFUNC fio_u256 fio_stable_hash___inner(const void *restrict data_,
   seed += len;
   seed ^= fio_lrot64(seed, 47);
   seed ^= FIO_STABLE_HASH_PRIME4;
-  fio_u64x4 v = FIO_U64x4(seed, seed, seed, seed);
-  fio_u64x4 const prime = FIO_U64x4(FIO_STABLE_HASH_PRIME0,
-                                    FIO_STABLE_HASH_PRIME1,
-                                    FIO_STABLE_HASH_PRIME2,
-                                    FIO_STABLE_HASH_PRIME3);
+  uint64_t v[4] = {seed, seed, seed, seed};
+  uint64_t const prime[4] = {FIO_STABLE_HASH_PRIME0,
+                             FIO_STABLE_HASH_PRIME1,
+                             FIO_STABLE_HASH_PRIME2,
+                             FIO_STABLE_HASH_PRIME3};
 
   for (size_t i = 31; i < len; i += 32) {
     /* consumes 32 bytes (256 bits) each loop */
-    fio_u64x4 w = fio_u64x4_load_le((void *)data);
+    uint64_t w[4];
+    fio_memcpy32(w, data);
+    for (size_t le = 0; le < 4; ++le) {
+      w[le] = fio_ltole64(w[le]);
+    }
     seed ^= fio_u64x4_reduce_add(w);
     FIO_STABLE_HASH_ROUND_FULL();
     data += 32;
   }
   if ((len & 31)) {
-    uint64_t tmp[4] = {0};
-    fio_memcpy31x(tmp, data, len); /* copies `len & 31` bytes */
-    fio_u64x4 w = fio_u64x4_load_le(tmp);
+    uint64_t w[4] = {0};
+    fio_memcpy31x(w, data, len); /* copies `len & 31` bytes */
+    for (size_t le = 0; le < 4; ++le) {
+      w[le] = fio_ltole64(w[le]);
+    }
     FIO_STABLE_HASH_ROUND_FULL();
   }
   /* inner vector mini-avalanche */
-  v = fio_u64x4_mul(v, prime);
-  v = fio_u64x4_lrot(v, FIO_U64x4(7, 11, 13, 17));
-  fio_u64x4_store(r.u64, v);
+  {
+    const uint8_t rol_val[] = {7, 11, 13, 17};
+    for (size_t i = 0; i < 4; ++i) {
+      v[i] *= prime[i];
+      r.u64[i] = ((v[i] << rol_val[i]) | (v[i] << (64 - rol_val[i])));
+    }
+  }
   return r;
 }
 
@@ -403,28 +415,40 @@ SFUNC void fio_rand_reseed(void) {
 /* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
 SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
+  uint64_t r = 0;
   if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
     /* re-seed state every 524,288 requests / 2^19-1 attempts  */
     fio_rand_reseed();
   }
-  const fio_u64x4 s0 = FIO_U64x4(fio___rand_state[0],
-                                 fio___rand_state[1],
-                                 fio___rand_state[2],
-                                 fio___rand_state[3]); /* load to registers */
-  fio_u64x4 s1 = fio_u64x4_clrot(s0, 33);
-  s1 = fio_u64x4_add(s1,
-                     FIO_U64x4(fio___rand_counter, 0, fio___rand_counter, 0));
-  s1 = fio_u64x4_mul(s1,
-                     FIO_U64x4(0x37701261ED6C16C7ULL,
-                               0x764DBBB75F3B3E0DULL,
-                               ~(0x37701261ED6C16C7ULL),
-                               ~(0x764DBBB75F3B3E0DULL)));
-  s1 = fio_u64x4_add(s1, s0);
-  for (size_t i = 0; i < 4; ++i) { /* store to memory */
-    fio___rand_state[i] = fio_u64x4_i(s1, i);
+  const uint64_t s0[] = {fio___rand_state[0],
+                         fio___rand_state[1],
+                         fio___rand_state[2],
+                         fio___rand_state[3]}; /* load to registers */
+  uint64_t s1[4];
+  {
+    const uint64_t mulp[] = {0x37701261ED6C16C7ULL,
+                             0x764DBBB75F3B3E0DULL,
+                             ~(0x37701261ED6C16C7ULL),
+                             ~(0x764DBBB75F3B3E0DULL)}; /* load to registers */
+    const uint64_t addc[] = {fio___rand_counter, 0, fio___rand_counter, 0};
+    for (size_t i = 0; i < 4; ++i) {
+      s1[i] = fio_lrot64(s0[i], 33);
+      s1[i] += addc[i];
+      s1[i] *= mulp[i];
+      s1[i] += s0[i];
+    }
   }
-  s1 = fio_u64x4_lrot(s1, FIO_U64x4(31, 29, 27, 30));
-  return fio_u64x4_reduce_add(s1);
+  for (size_t i = 0; i < 4; ++i) { /* store to memory */
+    fio___rand_state[i] = s1[i];
+  }
+  {
+    uint8_t rotc[] = {31, 29, 27, 30};
+    for (size_t i = 0; i < 4; ++i) {
+      s1[i] = fio_lrot64(s1[i], rotc[i]);
+      r += s1[i];
+    }
+  }
+  return r;
 }
 
 /* copies 64 bits of randomness (8 bytes) repeatedly. */
