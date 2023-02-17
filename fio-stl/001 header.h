@@ -156,6 +156,16 @@ typedef SSIZE_T ssize_t;
 #endif
 
 /* *****************************************************************************
+Intrinsic Availability Flags
+***************************************************************************** */
+#if defined(__ARM_FEATURE_CRYPTO) &&                                           \
+    (defined(__ARM_NEON) || defined(__ARM_NEON__))
+#include <arm_acle.h>
+#include <arm_neon.h>
+#define FIO___HAS_ARM_INTRIN 1
+#endif
+
+/* *****************************************************************************
 Aligned Memory Access Selectors
 ***************************************************************************** */
 
