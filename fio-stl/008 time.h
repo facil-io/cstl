@@ -40,6 +40,9 @@ FIO_IFUNC int64_t fio_time_milli();
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec);
 
+/** Converts a `struct timespec` to microseconds. */
+FIO_IFUNC int64_t fio_time2micro(struct timespec);
+
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
  *
@@ -127,6 +130,11 @@ FIO_IFUNC int64_t fio_time_milli() { return fio_time2milli(fio_time_real()); }
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
   return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/** Converts a `struct timespec` to microseconds. */
+FIO_IFUNC int64_t fio_time2micro(struct timespec t) {
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /* Normalizes a timespec struct after an `add` or `sub` operation. */

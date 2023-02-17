@@ -7416,6 +7416,9 @@ FIO_IFUNC int64_t fio_time_milli();
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec);
 
+/** Converts a `struct timespec` to microseconds. */
+FIO_IFUNC int64_t fio_time2micro(struct timespec);
+
 /**
  * A faster (yet less localized) alternative to `gmtime_r`.
  *
@@ -7503,6 +7506,11 @@ FIO_IFUNC int64_t fio_time_milli() { return fio_time2milli(fio_time_real()); }
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
   return ((int64_t)t.tv_sec * 1000) + (int64_t)t.tv_nsec / 1000000;
+}
+
+/** Converts a `struct timespec` to microseconds. */
+FIO_IFUNC int64_t fio_time2micro(struct timespec t) {
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /* Normalizes a timespec struct after an `add` or `sub` operation. */
@@ -35358,24 +35366,29 @@ FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
 }
 
 #if FIO_HTTP_EXACT_LOGGING
-FIO_IFUNC int64_t fio_http_get_timestump(void) { return fio_time_milli(); }
+#define FIO___HTTP_TIME_DIV  1000000
+#define FIO___HTTP_TIME_UNIT "us"
+FIO_IFUNC int64_t fio_http_get_timestump(void) {
+  return fio_time2micro(fio_time_real());
+}
 #else
+#define FIO___HTTP_TIME_DIV  1000
+#define FIO___HTTP_TIME_UNIT "ms"
 int64_t fio_last_tick(void);
 FIO_IFUNC int64_t fio_http_get_timestump(void) {
   return (int64_t)fio_last_tick();
 }
 #endif
 
-FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_milli) {
+FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   static char date_buf[128];
   static size_t date_len;
   static uint64_t date_buf_val;
-  const uint64_t now_time = now_milli / 1000;
-  if (date_buf_val == now_time)
+  if (date_buf_val == now_in_seconds)
     return FIO_STR_INFO2(date_buf, date_len);
-  date_len = fio_time2rfc7231(date_buf, now_time);
+  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
   date_buf[date_len] = 0;
-  date_buf_val = now_time;
+  date_buf_val = now_in_seconds;
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
@@ -36422,10 +36435,11 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
     h->state |= FIO_HTTP_STATE_STREAMING;
   }
   /* validate Date header */
-  fio___http_hmap_set2(hdrs,
-                       FIO_STR_INFO2((char *)"date", 4),
-                       fio_http_date(fio_http_get_timestump()),
-                       0);
+  fio___http_hmap_set2(
+      hdrs,
+      FIO_STR_INFO2((char *)"date", 4),
+      fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
+      0);
 
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
@@ -36726,10 +36740,10 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
   char buf_mem[1024];
   fio_str_info_s buf = FIO_STR_INFO3(buf_mem, 0, 1023);
   intptr_t bytes_sent = h->sent;
-  uint64_t milli_start, milli_end;
-  milli_start = h->received_at;
-  milli_end = fio_http_get_timestump();
-  fio_str_info_s date = fio_http_date(milli_end);
+  uint64_t time_start, time_end;
+  time_start = h->received_at;
+  time_end = fio_http_get_timestump();
+  fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
 
   { /* try to gather address from request headers */
     /* Guess IP address from headers (forwarded) where possible */
@@ -36768,28 +36782,29 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
   memcpy(buf.buf + buf.len, " - - [", 6);
   memcpy(buf.buf + buf.len + 6, date.buf, date.len);
   buf.len += date.len + 6;
-  fio_string_write2(&buf,
-                    NULL,
-                    FIO_STRING_WRITE_STR2((const char *)"] \"", 3),
-                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
-                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
-                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
-                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
-                    FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->version)),
-                    FIO_STRING_WRITE_STR2((const char *)"\" ", 2),
-                    FIO_STRING_WRITE_NUM(h->status),
-                    FIO_STRING_WRITE_STR2(" ", 1),
-                    ((bytes_sent > 0)
-                         ? (FIO_STRING_WRITE_UNUM(bytes_sent))
-                         : (FIO_STRING_WRITE_STR2((const char *)"---", 3))),
-                    FIO_STRING_WRITE_STR2((const char *)" ", 1),
-                    FIO_STRING_WRITE_NUM((milli_end - milli_start)),
-                    FIO_STRING_WRITE_STR2((const char *)"ms\r\n", 4));
+  fio_string_write2(
+      &buf,
+      NULL,
+      FIO_STRING_WRITE_STR2((const char *)"] \"", 3),
+      FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
+      FIO_STRING_WRITE_STR2((const char *)" ", 1),
+      FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
+      FIO_STRING_WRITE_STR2((const char *)" ", 1),
+      FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->version)),
+      FIO_STRING_WRITE_STR2((const char *)"\" ", 2),
+      FIO_STRING_WRITE_NUM(h->status),
+      FIO_STRING_WRITE_STR2(" ", 1),
+      ((bytes_sent > 0) ? (FIO_STRING_WRITE_UNUM(bytes_sent))
+                        : (FIO_STRING_WRITE_STR2((const char *)"---", 3))),
+      FIO_STRING_WRITE_STR2((const char *)" ", 1),
+      FIO_STRING_WRITE_NUM(time_end - time_start),
+      FIO_STRING_WRITE_STR2((const char *)(FIO___HTTP_TIME_UNIT "\r\n"), 4));
 
   if (buf.buf[buf.len - 1] != '\n')
     buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
 
   fwrite(buf.buf, 1, buf.len, stdout);
+  h->received_at = time_end;
 }
 
 /* *****************************************************************************
@@ -37430,8 +37445,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http)(void) {
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
+#undef FIO___HTTP_TIME_DIV
+#undef FIO___HTTP_TIME_UNIT
 
 #endif /* FIO_EXTERN_COMPLETE */
+
 #undef FIO_HTTP_HANDLE
 #endif /* FIO_HTTP_HANDLE */
 /* ************************************************************************* */
