@@ -1198,8 +1198,8 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
   if (fio_srv_is_worker()) {
-    FIO_LOG_DEBUG("(pub/sub) IPC socket skipped "
-                  "- no workers are spawned.");
+    FIO_LOG_DEBUG2("(pub/sub) IPC socket skipped "
+                   "- no workers are spawned.");
     return;
   }
   FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,

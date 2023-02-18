@@ -67,7 +67,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_USES_MUTEX
 /** The HTTP cache will use a mutex to allow headers to be set concurrently. */
-#define FIO_HTTP_CACHE_USES_MUTEX 0
+#define FIO_HTTP_CACHE_USES_MUTEX 1
 #endif
 
 #ifndef FIO_HTTP_CACHE_STATIC
@@ -121,6 +121,9 @@ SFUNC fio_http_s *fio_http_dup(fio_http_s *);
 
 /** Destroyed the HTTP handle object, freeing all allocated resources. */
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h);
+
+/** Collects an updated timestamp for logging purposes. */
+SFUNC void fio_http_start_time_set(fio_http_s *);
 
 /* *****************************************************************************
 Opaque User and Controller Data
@@ -1227,6 +1230,11 @@ SFUNC void fio_http_free(fio_http_s *h) { fio_http_free2(h); }
 
 /** Increases an http_s handle's reference count. */
 SFUNC fio_http_s *fio_http_dup(fio_http_s *h) { return fio_http_dup2(h); }
+
+/** Collects an updated timestamp for logging purposes. */
+SFUNC void fio_http_start_time_set(fio_http_s *h) {
+  h->received_at = fio_http_get_timestump();
+}
 
 #undef FIO_STL_KEEP__
 /* *****************************************************************************
@@ -2413,7 +2421,7 @@ accept_encoding_header_test_done:
   }
   /* Note: at this point filename.len holds the length of the file */
 
-  /* TODO: created and test range requests. */
+  /* test for range requests. */
   {
     /* test / validate range requests */
     fio_str_info_s rng =
@@ -2502,7 +2510,7 @@ file_not_found:
   return -1;
 
 head_request:
-  /* TODO! HEAD responses. */
+  /* TODO! HEAD responses should close?. */
   if (fd != -1)
     close(fd);
   fio_http_write(h, .finish = 1);

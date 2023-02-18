@@ -512,8 +512,6 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
     if (!grp->stop)
       fio_thread_cond_wait(&grp->cond, &grp->mutex);
     fio_thread_mutex_unlock(&grp->mutex);
-    fio_queue_perform(grp->queue);
-    fio_thread_cond_signal(&grp->cond);
     fio_queue_perform_all(grp->queue);
   }
   return NULL;
@@ -566,7 +564,8 @@ SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     pos->stop = 1;
-    fio_thread_cond_signal(&pos->cond);
+    for (size_t i = 0; i < pos->workers * 2; ++i)
+      fio_thread_cond_signal(&pos->cond);
   }
   FIO___LOCK_UNLOCK(q->lock);
 }

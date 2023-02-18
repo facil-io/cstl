@@ -65,6 +65,10 @@ typedef struct fio_http_settings_s {
   struct fio_io_functions *tls_io_func;
   /** Optional SSL/TLS support. */
   void *tls;
+  /** Optional HTTP task queue (for multi-threading HTTP responses) */
+  fio_queue_s *queue;
+  /** Optional callback called when a task was queued (only if queue was set) */
+  void (*on_queue)(fio_queue_s *);
   /**
    * A public folder for file transfers - allows to circumvent any application
    * layer logic and simply serve static files.
@@ -143,6 +147,13 @@ SFUNC int fio_http_listen(const char *url, fio_http_settings_s settings);
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
 
 /* *****************************************************************************
+HTTP Helpers
+***************************************************************************** */
+
+/** Returns the IO object associated with the HTTP object (request only). */
+SFUNC fio_s *fio_http_io(fio_http_s *);
+
+/* *****************************************************************************
 Module Implementation - inlined static functions
 ***************************************************************************** */
 /*
@@ -175,10 +186,12 @@ HTTP Settings Validation
 ***************************************************************************** */
 
 static void fio___http___mock_noop(fio_http_s *h) { ((void)h); }
-static int fio___http___mock_noop_allow(fio_http_s *h) {
+static int fio___http___mock_noop_upgrade(fio_http_s *h) {
   ((void)h);
   return 0; /* TODO!: change to -1; */
 }
+
+// on_queue
 static void http___noop_on_finish(struct fio_http_settings_s *settings) {
   ((void)settings);
 }
@@ -187,11 +200,17 @@ static void http_settings_validate(fio_http_settings_s *s) {
   if (!s->on_http)
     s->on_http = fio___http___mock_noop;
   if (!s->on_upgrade2websockets)
-    s->on_upgrade2websockets = fio___http___mock_noop_allow;
+    s->on_upgrade2websockets = fio___http___mock_noop_upgrade;
   if (!s->on_upgrade2sse)
-    s->on_upgrade2sse = fio___http___mock_noop_allow;
+    s->on_upgrade2sse = fio___http___mock_noop_upgrade;
   if (!s->on_finish)
     s->on_finish = http___noop_on_finish;
+  if (!s->queue) {
+    s->queue = fio_srv_queue();
+    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
+  }
+  if (!s->on_queue)
+    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
   if (!s->max_header_size)
     s->max_header_size = FIO_HTTP_DEFAULT_MAX_HEADER_SIZE;
   if (!s->max_line_len)
@@ -263,13 +282,19 @@ typedef struct {
   fio_s *io;
   fio_http_s *h;
   fio_http_settings_s *settings;
+  fio_queue_s *queue;
+  void (*on_queue)(fio_queue_s *);
+  void (*on_http_callback)(void *, void *);
+  void (*on_http)(fio_http_s *h);
   void *udata;
   union {
     fio_http1_parser_s http;
   } parser;
   uint32_t len;
   uint32_t capa;
+  uint32_t max_header;
   uint8_t log;
+  uint8_t suspend;
   char buf[];
 } fio___http_connection_s;
 
@@ -296,8 +321,13 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
   FIO_ASSERT_ALLOC(c);
   *c = (fio___http_connection_s){
       .settings = &(p->settings),
+      .queue = p->settings.queue,
+      .on_queue = p->settings.on_queue,
+      .on_http_callback = p->on_http_callback,
+      .on_http = p->settings.on_http,
       .udata = p->settings.udata,
       .capa = capa,
+      .max_header = p->settings.max_header_size,
       .log = p->settings.log,
   };
   c->io = fio_attach_fd(fd,
@@ -357,7 +387,7 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     goto finish;
-  c->settings->on_http(h);
+  c->on_http(h);
 finish:
   fio_http_free(h);
   (void)ignr;
@@ -365,16 +395,16 @@ finish:
 
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   fio_http_status_set(h, 200);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     goto finish;
-  if (fio_http_static_file_response(h,
-                                    c->settings->public_folder,
-                                    fio_http_path(h),
-                                    c->settings->max_age))
+  if (!fio_http_static_file_response(h,
+                                     c->settings->public_folder,
+                                     fio_http_path(h),
+                                     c->settings->max_age))
     goto finish;
-  c->settings->on_http(h);
+  c->on_http(h);
 finish:
   fio_http_free(h);
   (void)ignr;
@@ -407,9 +437,8 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   return fio_listen(.url = url,
                     .on_open = fio___http_on_open,
                     .on_finish = (void (*)(void *))fio_http_protocol_free,
-                    .udata = (void *)p
-                    /* , .queue_for_accept = http___queue_for_accept // TODO! */
-  );
+                    .udata = (void *)p,
+                    .queue_for_accept = s.queue);
 }
 
 /* *****************************************************************************
@@ -421,10 +450,9 @@ static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_dup(c->io);
   fio_suspend(c->io);
-  fio_defer((FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
-                 ->on_http_callback),
-            fio_http_dup(c->h),
-            NULL);
+  c->suspend = 1;
+  fio_queue_push(c->queue, c->on_http_callback, fio_http_dup(c->h));
+  c->on_queue(c->queue);
 }
 
 /* *****************************************************************************
@@ -615,10 +643,8 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
   c->len -= consumed;
   if (c->len)
     FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
-  if (fio_http1_parser_is_empty(&c->parser.http) && c->h) {
-    fio_suspend(io);
+  if (c->suspend)
     return -1;
-  }
   return 0;
 
 http1_error:
@@ -674,7 +700,7 @@ FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
 /** Informs the controller that request / response headers must be sent. */
 FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io)
+  if (!c->io || !fio_is_open(c->io))
     return;
   fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
   { /* write status string */
@@ -716,8 +742,8 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     fio_http_s *h,
     fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io)
-    return;
+  if (!c->io || !fio_is_open(c->io))
+    goto no_write_err;
   if (fio_http_is_streaming(h))
     goto stream_chunk;
   fio_write2(c->io,
@@ -749,6 +775,13 @@ stream_chunk:
   /* print chunk trailer */
   fio_write2(c->io, .buf = (char *)"\r\n", .len = 2, .copy = 1);
   return;
+no_write_err:
+  if (args.data) {
+    if (args.dealloc)
+      args.dealloc((void *)args.data);
+  } else if (args.fd != -1) {
+    close(args.fd);
+  }
 }
 
 FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
@@ -756,15 +789,16 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->h = NULL;
+  c->suspend = 0;
   if (fio_http_is_streaming(h)) {
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   }
-  if (c->settings->log)
+  if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
   fio_http_free(h);
-  fio_unsuspend(c->io);
-  // fio_defer(fio___http1_process_data, void *udata1, void *udata2)
   fio___http1_process_data(c->io, c);
+  if (!c->suspend)
+    fio_unsuspend(c->io);
   fio_undup(c->io);
   (void)ignr_;
 }
@@ -859,7 +893,9 @@ FIO_SFUNC void fio___http_controller_on_destroyed_task(void *c_, void *ignr_) {
 
 // /** Called when an HTTP handle is freed. */
 void fio__http_controller_on_destroyed(fio_http_s *h) {
-  fio_defer(fio___http_controller_on_destroyed_task, fio_http_cdata(h), NULL);
+  fio_queue_push(fio_srv_queue(),
+                 fio___http_controller_on_destroyed_task,
+                 fio_http_cdata(h));
 }
 
 /* *****************************************************************************
@@ -948,6 +984,16 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
                   "illegal arguments!");
     return r;
   }
+}
+
+/* *****************************************************************************
+HTTP Helpers
+***************************************************************************** */
+
+/** Returns the IO object associated with the HTTP object (request only). */
+SFUNC fio_s *fio_http_io(fio_http_s *h) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  return c->io;
 }
 
 /* *****************************************************************************

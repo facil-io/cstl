@@ -308,6 +308,9 @@ SFUNC void fio_run_every(fio_timer_schedule_args_s args);
 /** Returns the last millisecond when the server reviewed pending IO events. */
 SFUNC int64_t fio_last_tick(void);
 
+/** Returns a pointer for the server's queue. */
+SFUNC fio_queue_s *fio_srv_queue(void);
+
 /**************************************************************************/ /**
 The Protocol
 ============
@@ -736,7 +739,8 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
-  if (!fio___srvdata.wakeup)
+  /* TODO, skip wakeup for same thread caller? */
+  if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3)
     return;
   char buf[1] = {~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
@@ -758,6 +762,8 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
                   fio___srvdata.pid);
     return;
   }
+  fio_sock_set_non_block(fds[0]);
+  fio_sock_set_non_block(fds[1]);
   fio___srvdata.wakeup_fd = fds[1];
   fio___srvdata.wakeup = fio_attach_fd(fds[0],
                                        &FIO___SRV_WAKEUP_PROTOCOL,
@@ -787,6 +793,9 @@ SFUNC void fio_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
   args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;
   fio_timer_schedule FIO_NOOP(fio___srv_timer, args);
 }
+
+/** Returns a pointer for the server's queue. */
+SFUNC fio_queue_s *fio_srv_queue(void) { return fio___srv_tasks; }
 
 /* *****************************************************************************
 IO Validity Map - Implementation
@@ -1009,7 +1018,6 @@ static void fio_undup_task(void *io, void *ignr_) {
  */
 SFUNC void fio_undup(fio_s *io) {
   fio_queue_push(fio___srv_tasks, fio_undup_task, io);
-  fio___srv_wakeup();
 }
 
 /** Performs a task for each IO in the stated protocol. */
@@ -1467,9 +1475,9 @@ SFUNC void fio_srv_start(int workers) {
 #endif
   fio___srvdata.tick = fio_time_milli();
   if (workers)
-    FIO_LOG_DEBUG("starting facil.io server using %d workers.", workers);
+    FIO_LOG_DEBUG2("starting facil.io server using %d workers.", workers);
   else
-    FIO_LOG_DEBUG("starting facil.io server in single process mode.");
+    FIO_LOG_DEBUG2("starting facil.io server in single process mode.");
   for (int i = 0; i < workers; ++i) {
     fio___srv_spawn_worker(NULL, NULL);
   }
@@ -1558,7 +1566,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
     goto error;
   if (io && (io->state & FIO_STATE_CLOSING))
     goto write_called_after_close;
-  fio_queue_push(fio___srv_tasks, fio_write2___task, fio_dup2(io), packet);
+  fio_defer(fio_write2___task, fio_dup2(io), packet);
   return;
 error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
   FIO_LOG_ERROR("couldn't create %zu bytes long user-packet for IO %p (%d)",
