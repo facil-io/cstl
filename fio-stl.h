@@ -7439,14 +7439,14 @@ SFUNC time_t fio_gm2time(struct tm tm);
 SFUNC size_t fio_time2rfc7231(char *target, time_t time);
 
 /**
- * Writes an RFC 2109 date representation to target.
+ * Writes an RFC 2109 date representation to target (HTTP Cookie Format).
  *
  * Usually requires 31 characters, although this may vary.
  */
 SFUNC size_t fio_time2rfc2109(char *target, time_t time);
 
 /**
- * Writes an RFC 2822 date representation to target.
+ * Writes an RFC 2822 date representation to target (Internet Message Format).
  *
  * Usually requires 28 to 29 characters, although this may vary.
  */
@@ -7457,9 +7457,18 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  *
  *         [DD/MMM/yyyy:hh:mm:ss +0000]
  *
- * Usually requires 29 characters (includiing square brackes and NUL).
+ * Usually requires 29 characters (including square brackets and NUL).
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
+
+/**
+ * Writes a date representation to target in ISO 8601 format. i.e.,
+ *
+ *         YYYY-MM-DD HH:MM:SS
+ *
+ * Usually requires 20 characters (including NUL).
+ */
+SFUNC size_t fio_time2iso(char *target, time_t time);
 
 /** Adds two `struct timespec` objects. */
 FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
@@ -7828,7 +7837,7 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
  *
  *         [DD/MMM/yyyy:hh:mm:ss +0000]
  *
- * Usually requires 29 characters (includiing square brackes and NUL).
+ * Usually requires 29 characters (including square brackets and NUL).
  */
 SFUNC size_t fio_time2log(char *target, time_t time) {
   {
@@ -7863,6 +7872,43 @@ SFUNC size_t fio_time2log(char *target, time_t time) {
     *pos++ = '0';
     *pos++ = '0';
     *pos++ = ']';
+    *(pos) = 0;
+    return pos - target;
+  }
+}
+
+/**
+ * Writes a date representation to target in ISO 8601 format. i.e.,
+ *
+ *         YYYY-MM-DD HH:MM:SS
+ *
+ * Usually requires 20 characters (including NUL).
+ */
+SFUNC size_t fio_time2iso(char *target, time_t time) {
+  {
+    const struct tm tm = fio_time2gm(time);
+    /* note: day of month is either 1 or 2 digits */
+    char *pos = target;
+    uint16_t tmp;
+    pos = fio_time_write_year(pos, &tm);
+    *pos++ = '-';
+    pos = fio_time_write_month(pos, &tm);
+    *pos++ = '-';
+    tmp = tm.tm_mday / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+    *pos++ = ' ';
+    tmp = tm.tm_hour / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+    *pos++ = ':';
+    tmp = tm.tm_min / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_min - (tmp * 10));
+    *pos++ = ':';
+    tmp = tm.tm_sec / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_sec - (tmp * 10));
     *(pos) = 0;
     return pos - target;
   }
@@ -30792,6 +30838,8 @@ struct fio_listen_args {
    * Should either call `fio_attach` or close the connection.
    */
   void (*on_open)(int fd, void *udata);
+  /** Called when the a listening socket starts to listen (update state). */
+  void (*on_start)(void *udata);
   /**
    * Called when the server is done, usable for cleanup.
    *
@@ -31174,6 +31222,34 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
   fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
+Server Async - Worker Threads for non-IO tasks
+***************************************************************************** */
+
+/** The Server Async Queue type. */
+typedef struct {
+  fio_queue_s *q;
+  uint32_t count;
+  fio_queue_s queue;
+} fio_srv_async_s;
+
+/**
+ * Initializes a server - async (multi-threaded) task queue.
+ *
+ * It is recommended that the `fio_srv_async_s` be allocated as a static
+ * variable, as its memory must remain valid throughout the lifetime of the
+ * server's app.
+ *
+ * The queue automatically spawns threads and shuts down as the server starts or
+ * stops.
+ */
+FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
+
+/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
+
+#define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
+
+/* *****************************************************************************
 TODO!: Helpers fio_srv_queue_get && fio_srv_pid
 ***************************************************************************** */
 
@@ -31406,6 +31482,7 @@ static struct {
   pid_t pid;
   fio_s *wakeup;
   int wakeup_fd;
+  int wakeup_wait;
   uint16_t workers;
   uint8_t is_worker;
   volatile uint8_t stop;
@@ -31428,8 +31505,10 @@ Wakeup Protocol
 FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   fio_sock_read(fio_fd_get(io), buf, 512);
-  (void)(io);
+  fio___srvdata.wakeup_wait = 0;
+#if DEBUG
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
+#endif
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
@@ -31441,8 +31520,10 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   /* TODO, skip wakeup for same thread caller? */
-  if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3)
+  if (!fio___srvdata.wakeup || fio___srvdata.wakeup_wait ||
+      fio_queue_count(fio_srv_queue()) > 3)
     return;
+  fio___srvdata.wakeup_wait = 1;
   char buf[1] = {~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
   (void)ignr;
@@ -32398,6 +32479,8 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
                  *pfd,
                  fd);
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  if (l->on_start)
+    l->on_start(l->udata);
   FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
@@ -32508,6 +32591,41 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srvdata.root_pid = fio___srvdata.pid = getpid();
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
+}
+
+/* *****************************************************************************
+Server Async - Worker Threads for non-IO tasks
+***************************************************************************** */
+
+FIO_SFUNC void fio___srv_async_start(void *q_) {
+  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  q->q = &q->queue;
+  if (fio_queue_workers_add(&q->queue, (size_t)q->count))
+    goto failed;
+  return;
+
+failed:
+  FIO_LOG_ERROR("Server Async Queue couldn't spawn threads!");
+  q->q = fio_srv_queue();
+}
+FIO_SFUNC void fio___srv_async_finish(void *q_) {
+  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  fio_queue_workers_stop(&q->queue);
+  fio_queue_destroy(&q->queue);
+}
+
+/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
+  *q = (fio_srv_async_s){
+      .queue = FIO_QUEUE_STATIC_INIT(q->queue),
+      .count = threads,
+      .q = fio_srv_queue(),
+  };
+  if (!threads)
+    return;
+  q->q = &q->queue;
+  fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
+  fio_state_callback_add(FIO_CALL_ON_FINISH, fio___srv_async_finish, q);
 }
 
 /* *****************************************************************************
@@ -33271,8 +33389,7 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 Subscription Management Tasks
 ***************************************************************************** */
 
-/* The task to subscribe to a channel (called by
- * `fio_defer`). */
+/* The task to subscribe to a channel (called by `fio_defer`). */
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_);
 
 /** Unsubscribes a node and destroys the channel
@@ -33594,8 +33711,7 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
              .dealloc = (void (*)(void *))fio_letter_free);
 }
 
-/* a default callback for IO subscriptions -
- * sends message data. */
+/* a default callback for IO subscriptions - sends message data. */
 FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
   if (!msg->message.len)
     return;
@@ -33739,7 +33855,7 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
-  fio_defer(fio___publish_letter_task, fio_letter_dup(l), NULL);
+  fio_queue_push(fio_srv_queue(), fio___publish_letter_task, fio_letter_dup(l));
   (void)l;
 }
 
@@ -33899,16 +34015,18 @@ FIO_IFUNC void fio___channel_deliver(fio_letter_s *l) {
   //                            &cpy);
   // }
   if (ch)
-    fio_defer(fio___channel_deliver_task,
-              fio_channel_dup(ch),
-              fio_letter_dup(l));
+    fio_queue_push(fio_srv_queue(),
+                   fio___channel_deliver_task,
+                   fio_channel_dup(ch),
+                   fio_letter_dup(l));
   FIO_MAP_EACH(fio_channel_map, &FIO_POSTOFFICE.patterns, i) {
     if (i.key && i.key->filter == filter &&
         FIO_PUBSUB_PATTERN_MATCH(FIO_STR_INFO2(i.key->name, i.key->name_len),
                                  ch_name))
-      fio_defer(fio___channel_deliver_task,
-                fio_channel_dup(i.key),
-                fio_letter_dup(l));
+      fio_queue_push(fio_srv_queue(),
+                     fio___channel_deliver_task,
+                     fio_channel_dup(i.key),
+                     fio_letter_dup(l));
   }
 #if FIO_POSTOFFICE_THREAD_LOCK
   FIO___LOCK_UNLOCK(FIO_POSTOFFICE.lock);
@@ -33940,7 +34058,10 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *s) {
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = s->on_unsubscribe};
-    fio_defer(fio___subscription_on_destroy__task, u.p, s->udata);
+    fio_queue_push(fio_srv_queue(),
+                   fio___subscription_on_destroy__task,
+                   u.p,
+                   s->udata);
   }
 }
 
@@ -34029,7 +34150,10 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s) {
   if (!s)
     return;
   s->on_message = fio_subscription___mock_cb;
-  fio_defer(fio___unsubscribe_task, (void *)(s->channel), (void *)s);
+  fio_queue_push(fio_srv_queue(),
+                 fio___unsubscribe_task,
+                 (void *)(s->channel),
+                 (void *)s);
 }
 
 FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *l_) {
@@ -34059,7 +34183,7 @@ FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *l_) {
   fio_letter_free(l);
   return;
 reschedule:
-  fio_defer(fio___subscription_on_message_task, s_, l_);
+  fio_queue_push(fio_srv_queue(), fio___subscription_on_message_task, s_, l_);
 }
 
 /* returns the letter object associated with the
@@ -34082,15 +34206,19 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
   if (l->from) {
     FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
       if (l->from != s->io)
-        fio_defer((void (*)(void *, void *))fio___subscription_on_message_task,
-                  fio_subscription_dup(s),
-                  fio_letter_dup(l));
+        fio_queue_push(
+            fio_srv_queue(),
+            (void (*)(void *, void *))fio___subscription_on_message_task,
+            fio_subscription_dup(s),
+            fio_letter_dup(l));
     }
   } else {
     FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
-      fio_defer((void (*)(void *, void *))fio___subscription_on_message_task,
-                fio_subscription_dup(s),
-                fio_letter_dup(l));
+      fio_queue_push(
+          fio_srv_queue(),
+          (void (*)(void *, void *))fio___subscription_on_message_task,
+          fio_subscription_dup(s),
+          fio_letter_dup(l));
     }
   }
   fio_letter_free(l);
@@ -34126,7 +34254,10 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
       fio_channel_new_named(args.channel, args.filter, args.is_pattern);
   if (!s->channel)
     goto channel_error;
-  fio_defer(fio___subscribe_task, (void *)s->channel, (void *)s);
+  fio_queue_push(fio_srv_queue(),
+                 fio___subscribe_task,
+                 (void *)s->channel,
+                 (void *)s);
 
   if (args.master_only && !args.io)
     goto is_master_only;
@@ -34178,7 +34309,10 @@ sub_error:
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = args.on_unsubscribe};
-    fio_defer(fio___subscription_on_destroy__task, u.p, args.udata);
+    fio_queue_push(fio_srv_queue(),
+                   fio___subscription_on_destroy__task,
+                   u.p,
+                   args.udata);
   }
   return;
 }
@@ -34252,7 +34386,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
       (uint8_t)((uintptr_t)args.engine |
                 ((0x100U - args.is_json) & FIO___PUBSUB_JSON)));
   l->from = args.from;
-  fio_queue_push(fio___srv_tasks, fio___publish_letter_task, l);
+  fio_defer(fio___publish_letter_task, l, NULL);
   return;
 external_engine:
   args.engine->publish(args.engine,
@@ -34413,8 +34547,7 @@ static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
   }
 }
 
-/** Attaches an engine, so it's callback can be
- * called by facil.io. */
+/** Attaches an engine, so it's callback can be called by facil.io. */
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
@@ -34431,10 +34564,9 @@ FIO_SFUNC void fio_pubsub_detach___task(void *engine, void *ignr_) {
   e->detached(e);
 }
 
-/** Schedules an engine for Detachment, so it
- * could be safely destroyed. */
+/** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine) {
-  fio_defer(fio_pubsub_detach___task, engine, NULL);
+  fio_queue_push(fio_srv_queue(), fio_pubsub_detach___task, engine, NULL);
 }
 
 /* *****************************************************************************
@@ -34656,7 +34788,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_LIMIT
 /** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) - 1)
+#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) + (1UL << 5))
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -34878,21 +35010,13 @@ typedef enum fio_http_cookie_same_site_e {
  */
 typedef struct fio_http_cookie_args_s {
   /** The cookie's name. */
-  const char *name;
+  fio_str_info_s name;
   /** The cookie's value (leave blank to delete cookie). */
-  const char *value;
+  fio_str_info_s value;
   /** The cookie's domain (optional). */
-  const char *domain;
+  fio_str_info_s domain;
   /** The cookie's path (optional). */
-  const char *path;
-  /** The cookie name's size in bytes or a terminating NUL will be assumed.*/
-  size_t name_len;
-  /** The cookie value's size in bytes or a terminating NUL will be assumed.*/
-  size_t value_len;
-  /** The cookie domain's size in bytes or a terminating NUL will be assumed.*/
-  size_t domain_len;
-  /** The cookie path's size in bytes or a terminating NULL will be assumed.*/
-  size_t path_len;
+  fio_str_info_s path;
   /** Max Age (how long should the cookie persist), in seconds (0 == session).*/
   int max_age;
   /** SameSite value. */
@@ -35567,21 +35691,10 @@ static char *fio___http_str_cached_static(uint64_t hash,
 #define fio___http_str_cached_init() (void)0
 #endif /* FIO_HTTP_CACHE_STATIC */
 
-static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
+                                            uint64_t hash,
+                                            fio_str_info_s s) {
   fio_str_info_s cached;
-  uint64_t hash;
-  if (!s.len)
-    return NULL;
-  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
-    goto avoid_caching;
-  hash = fio_risky_hash(s.buf, s.len, 0);
-#if FIO_HTTP_CACHE_STATIC
-  if (group == FIO___HTTP_STR_CACHE_NAME) {
-    char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
-    if (tmp)
-      return fio_bstr_copy(tmp);
-  }
-#endif /* FIO_HTTP_CACHE_STATIC */
   hash ^= (uint64_t)(uintptr_t)fio_http_new;
 #if FIO_HTTP_CACHE_USES_MUTEX
   FIO___LOCK_LOCK(FIO___HTTP_STRING_CACHE[group].lock);
@@ -35594,6 +35707,30 @@ static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   FIO___LOCK_UNLOCK(FIO___HTTP_STRING_CACHE[group].lock);
 #endif
   return fio_bstr_copy(cached.buf);
+}
+static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+  if (!s.len)
+    return NULL;
+  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
+    goto avoid_caching;
+  return fio___http_str_cached_inner(group, fio_risky_hash(s.buf, s.len, 0), s);
+avoid_caching:
+  return fio_bstr_write(NULL, s.buf, s.len);
+}
+
+static char *fio___http_str_cached_with_static(fio_str_info_s s) {
+  uint64_t hash;
+  if (!s.len)
+    return NULL;
+  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
+    goto avoid_caching;
+  hash = fio_risky_hash(s.buf, s.len, 0);
+#if FIO_HTTP_CACHE_STATIC
+  char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+  if (tmp)
+    return fio_bstr_copy(tmp);
+#endif /* FIO_HTTP_CACHE_STATIC */
+  return fio___http_str_cached_inner(FIO___HTTP_STR_CACHE_NAME, hash, s);
 avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
@@ -35613,7 +35750,7 @@ Headers Maps
 #define FIO_MAP_KEY_CMP(a, b)        fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)     fio_bstr_free((key))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio___http_str_cached(FIO___HTTP_STR_CACHE_NAME, (src))
+  (dest) = fio___http_str_cached_with_static((src))
 #define FIO_MAP_KEY_DISCARD(key)
 #define FIO_MAP_VALUE fio___http_sary_s
 #define FIO_MAP_VALUE_COPY(a, b)                                               \
@@ -35814,6 +35951,7 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
+  /* TODO! auto-finish if freed without finishing? */
   if (h->controller)
     h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
@@ -36063,21 +36201,21 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   /* write name and value while auto-correcting encoding issues */
-  if ((cookie.name_len + cookie.value_len + cookie.domain_len +
-       cookie.path_len + 128) > 5119) {
+  if ((cookie.name.len + cookie.value.len + cookie.domain.len +
+       cookie.path.len + 128) > 5119) {
     FIO_LOG_ERROR("cookie data too long!");
   }
   char tmp_buf[5120];
   fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
 #define copy_cookie_ch(ch_var)                                                 \
-  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var[tmp]]) {          \
-    t.buf[t.len++] = cookie.ch_var[tmp];                                       \
+  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
+    t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
   } else {                                                                     \
     need2warn |= 1;                                                            \
     t.buf[t.len++] = '%';                                                      \
-    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var[tmp] >> 4) & 0x0F);       \
-    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var[tmp] & 0x0F);              \
+    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var.buf[tmp] >> 4) & 0x0F);   \
+    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var.buf[tmp] & 0x0F);          \
   }                                                                            \
   tmp += 1;                                                                    \
   if (t.capa <= t.len + 3) {                                                   \
@@ -36086,14 +36224,14 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
          : FIO_STRING_REALLOC)(&t, fio_string_capa4len(t.len + 3));            \
   }
 
-  if (cookie.name) {
+  if (cookie.name.buf) {
     size_t tmp = 0;
-    if (cookie.name_len) {
-      while (tmp < cookie.name_len) {
+    if (cookie.name.len) {
+      while (tmp < cookie.name.len) {
         copy_cookie_ch(name);
       }
     } else {
-      while (cookie.name[tmp]) {
+      while (cookie.name.buf[tmp]) {
         copy_cookie_ch(name);
       }
     }
@@ -36101,19 +36239,19 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie name (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.name[tmp],
-                      cookie.name);
+                      cookie.name.buf[tmp],
+                      cookie.name.buf);
     }
   }
   t.buf[t.len++] = '=';
-  if (cookie.value) {
+  if (cookie.value.buf) {
     size_t tmp = 0;
-    if (cookie.value_len) {
-      while (tmp < cookie.value_len) {
+    if (cookie.value.len) {
+      while (tmp < cookie.value.len) {
         copy_cookie_ch(value);
       }
     } else {
-      while (cookie.value[tmp]) {
+      while (cookie.value.buf[tmp]) {
         copy_cookie_ch(value);
       }
     }
@@ -36121,8 +36259,8 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie value (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.value[tmp],
-                      cookie.value);
+                      cookie.value.buf[tmp],
+                      cookie.value.buf);
     }
   } else
     cookie.max_age = -1;
@@ -36141,20 +36279,20 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
 
-  if (cookie.domain && cookie.domain_len) {
+  if (cookie.domain.buf && cookie.domain.len) {
     fio_string_write2(
         &t,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         FIO_STRING_WRITE_STR2((char *)"domain=", 7),
-        FIO_STRING_WRITE_STR2((char *)cookie.domain, cookie.domain_len),
+        FIO_STRING_WRITE_STR2((char *)cookie.domain.buf, cookie.domain.len),
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
-  if (cookie.path && cookie.path_len) {
+  if (cookie.path.buf && cookie.path.len) {
     fio_string_write2(
         &t,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         FIO_STRING_WRITE_STR2((char *)"path=", 5),
-        FIO_STRING_WRITE_STR2((char *)cookie.path, cookie.path_len),
+        FIO_STRING_WRITE_STR2((char *)cookie.path.buf, cookie.path.len),
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
   if (cookie.http_only) {
@@ -36200,15 +36338,9 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     --t.len;
 
   /* set the "write" cookie store data */
-  fio___http_cmap_set(h->cookies + 1,
-                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                      t,
-                      NULL);
+  fio___http_cmap_set(h->cookies + 1, cookie.name, t, NULL);
   /* set the "read" cookie store data */
-  fio___http_cmap_set(h->cookies,
-                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                      FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
-                      NULL);
+  fio___http_cmap_set(h->cookies, cookie.name, cookie.value, NULL);
   if (t.buf != tmp_buf)
     FIO_STRING_FREE2(t);
   return 0;
@@ -37422,14 +37554,12 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
   for (size_t i = 0; i < 3; ++i) {
     const char *names[] = {"header names", "cookie names", "header values"};
-    FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
-                   FIO___HTTP_MIMETYPES.count,
-                   fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
     FIO_LOG_DEBUG2(
-        "(%d) freeing %zu strings from %s cache",
+        "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
         getpid(),
         fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
-        names[i]);
+        names[i],
+        fio___http_str_cache_capa(&FIO___HTTP_STRING_CACHE[i].cache));
 #ifdef FIO_LOG_LEVEL_DEBUG
     if (FIO_LOG_LEVEL_DEBUG == FIO_LOG_LEVEL) {
       FIO_MAP_EACH(fio___http_str_cache,
@@ -37443,6 +37573,9 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
     (void)names; /* if unused */
   }
+  FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
+                 FIO___HTTP_MIMETYPES.count,
+                 fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
 }
 
@@ -38055,9 +38188,7 @@ typedef struct fio_http_settings_s {
   /** Optional SSL/TLS support. */
   void *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
-  fio_queue_s *queue;
-  /** Optional callback called when a task was queued (only if queue was set) */
-  void (*on_queue)(fio_queue_s *);
+  fio_srv_async_s *queue;
   /**
    * A public folder for file transfers - allows to circumvent any application
    * layer logic and simply serve static files.
@@ -38194,12 +38325,6 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->on_upgrade2sse = fio___http___mock_noop_upgrade;
   if (!s->on_finish)
     s->on_finish = http___noop_on_finish;
-  if (!s->queue) {
-    s->queue = fio_srv_queue();
-    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
-  }
-  if (!s->on_queue)
-    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
   if (!s->max_header_size)
     s->max_header_size = FIO_HTTP_DEFAULT_MAX_HEADER_SIZE;
   if (!s->max_line_len)
@@ -38246,6 +38371,7 @@ HTTP Protocol Container (vtable + settings storage)
 typedef struct {
   fio_http_settings_s settings;
   void (*on_http_callback)(void *, void *);
+  fio_queue_s *queue;
   struct {
     fio_protocol_s protocol;
     fio_http_controller_s controller;
@@ -38272,7 +38398,6 @@ typedef struct {
   fio_http_s *h;
   fio_http_settings_s *settings;
   fio_queue_s *queue;
-  void (*on_queue)(fio_queue_s *);
   void (*on_http_callback)(void *, void *);
   void (*on_http)(fio_http_s *h);
   void *udata;
@@ -38310,8 +38435,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
   FIO_ASSERT_ALLOC(c);
   *c = (fio___http_connection_s){
       .settings = &(p->settings),
-      .queue = p->settings.queue,
-      .on_queue = p->settings.on_queue,
+      .queue = p->queue,
       .on_http_callback = p->on_http_callback,
       .on_http = p->settings.on_http,
       .udata = p->settings.udata,
@@ -38324,6 +38448,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                         (void *)c,
                         p->settings.tls);
   FIO_ASSERT_ALLOC(c->io);
+#if DEBUG
   FIO_LOG_DEBUG2("(%d) HTTP accepted a new connection at fd %d,"
                  "\n\tattached to client %p (io %p)."
                  "\n\tattached protocol %p",
@@ -38332,31 +38457,62 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                  c,
                  c->io,
                  fio_protocol_get(c->io));
+#endif
 }
 
 /* *****************************************************************************
 HTTP Request handling / handling
 ***************************************************************************** */
 
+FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (FIO_LIKELY(fio_is_open(c->io)))
+    cb.fn(h);
+  fio_http_free(h);
+}
+
+FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (FIO_LIKELY(fio_is_open(c->io)))
+    if (cb.fn(h))
+      fio_http_send_error_response(h, 403);
+  fio_http_free(h);
+}
+
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
                                               fio___http_connection_s *c) {
-
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb;
   if (fio_http_websockets_requested(h))
     goto websocket_requested;
   if (fio_http_sse_requested(h))
     goto sse_requested;
   return 0;
 websocket_requested:
-  if (c->settings->on_upgrade2websockets(h))
-    goto deny_upgrade;
-  /* TODO: set WebSocket response headers + send response */
-  /* TODO: feed remaining data in buffer to WebSocket client */
-  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  cb.fn = c->settings->on_upgrade2websockets;
+  fio_queue_push(c->queue,
+                 fio___http_perform_user_upgrade_callback,
+                 cb.ptr,
+                 (void *)h);
   return -1;
 sse_requested:
-  if (c->settings->on_upgrade2sse(h))
-    goto deny_upgrade;
-  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  cb.fn = c->settings->on_upgrade2sse;
+  fio_queue_push(c->queue,
+                 fio___http_perform_user_upgrade_callback,
+                 cb.ptr,
+                 (void *)h);
   return -1;
 #if 0
 http2_requested:
@@ -38365,9 +38521,6 @@ http2_requested:
   // HTTP2-Settings: <base64url encoding of HTTP/2 SETTINGS payload>
   return 0; /* allowed to ignore upgrade request */
 #endif
-deny_upgrade:
-  fio_http_send_error_response(h, 403);
-  return -1;
 }
 
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
@@ -38375,10 +38528,12 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
-    goto finish;
-  c->on_http(h);
-finish:
-  fio_http_free(h);
+    return;
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.fn = c->on_http};
+  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
   (void)ignr;
 }
 
@@ -38387,21 +38542,31 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
-    goto finish;
+    return;
   if (!fio_http_static_file_response(h,
                                      c->settings->public_folder,
                                      fio_http_path(h),
-                                     c->settings->max_age))
-    goto finish;
-  c->on_http(h);
-finish:
-  fio_http_free(h);
+                                     c->settings->max_age)) {
+    fio_http_free(h);
+    return;
+  }
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.fn = c->on_http};
+  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
   (void)ignr;
 }
 
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
+
+FIO_SFUNC void fio___http_listen_on_start(void *p_) {
+  fio_http_protocol_s *p = (fio_http_protocol_s *)p_;
+  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+}
+
 void fio_http_listen___(void); /* IDE marker */
 SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s);
@@ -38425,9 +38590,10 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
             '\\'));
   return fio_listen(.url = url,
                     .on_open = fio___http_on_open,
+                    .on_start = fio___http_listen_on_start,
                     .on_finish = (void (*)(void *))fio_http_protocol_free,
                     .udata = (void *)p,
-                    .queue_for_accept = s.queue);
+                    .queue_for_accept = s.queue ? s.queue->q : NULL);
 }
 
 /* *****************************************************************************
@@ -38440,8 +38606,7 @@ static void fio_http1_on_complete(void *udata) {
   fio_dup(c->io);
   fio_suspend(c->io);
   c->suspend = 1;
-  fio_queue_push(c->queue, c->on_http_callback, fio_http_dup(c->h));
-  c->on_queue(c->queue);
+  fio_queue_push(fio_srv_queue(), c->on_http_callback, fio_http_dup(c->h));
 }
 
 /* *****************************************************************************
@@ -38779,13 +38944,15 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->h = NULL;
   c->suspend = 0;
-  if (fio_http_is_streaming(h)) {
-    fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
-  }
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+  if (fio_is_open(c->io)) {
+    if (fio_http_is_streaming(h)) {
+      fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
+    }
+    fio___http1_process_data(c->io, c);
+  }
   fio_http_free(h);
-  fio___http1_process_data(c->io, c);
   if (!c->suspend)
     fio_unsuspend(c->io);
   fio_undup(c->io);

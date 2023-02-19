@@ -100,7 +100,7 @@ i.e.: Sun, 06 Nov 1994 08:49:37 GMT
 size_t fio_time2rfc2109(char *target, time_t time);
 ```
 
-Writes an RFC 2109 date representation to target.
+Writes an RFC 2109 date representation to target (HTTP Cookie Format).
 
 Requires 31 characters (for positive, 4 digit years).
 
@@ -113,5 +113,25 @@ size_t fio_time2rfc2822(char *target, time_t time);
 Writes an RFC 2822 date representation to target.
 
 Requires 28 or 29 characters (for positive, 4 digit years).
+
+#### `fio_time2log`
+
+```c
+size_t fio_time2log(char *target, time_t time);
+```
+
+Writes a date representation to target in common log format. i.e.: `[DD/MMM/yyyy:hh:mm:ss +0000]`
+
+Usually requires 29 characters (including square brackets and NUL).
+
+#### `fio_time2iso`
+
+```c
+size_t fio_time2iso(char *target, time_t time);
+```
+
+Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
+
+Usually requires 20 characters (including NUL).
 
 -------------------------------------------------------------------------------

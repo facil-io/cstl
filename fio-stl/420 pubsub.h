@@ -661,8 +661,7 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 Subscription Management Tasks
 ***************************************************************************** */
 
-/* The task to subscribe to a channel (called by
- * `fio_defer`). */
+/* The task to subscribe to a channel (called by `fio_defer`). */
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_);
 
 /** Unsubscribes a node and destroys the channel
@@ -984,8 +983,7 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
              .dealloc = (void (*)(void *))fio_letter_free);
 }
 
-/* a default callback for IO subscriptions -
- * sends message data. */
+/* a default callback for IO subscriptions - sends message data. */
 FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
   if (!msg->message.len)
     return;
@@ -1129,7 +1127,7 @@ Letter Protocol Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *l) {
-  fio_defer(fio___publish_letter_task, fio_letter_dup(l), NULL);
+  fio_queue_push(fio_srv_queue(), fio___publish_letter_task, fio_letter_dup(l));
   (void)l;
 }
 
@@ -1289,16 +1287,18 @@ FIO_IFUNC void fio___channel_deliver(fio_letter_s *l) {
   //                            &cpy);
   // }
   if (ch)
-    fio_defer(fio___channel_deliver_task,
-              fio_channel_dup(ch),
-              fio_letter_dup(l));
+    fio_queue_push(fio_srv_queue(),
+                   fio___channel_deliver_task,
+                   fio_channel_dup(ch),
+                   fio_letter_dup(l));
   FIO_MAP_EACH(fio_channel_map, &FIO_POSTOFFICE.patterns, i) {
     if (i.key && i.key->filter == filter &&
         FIO_PUBSUB_PATTERN_MATCH(FIO_STR_INFO2(i.key->name, i.key->name_len),
                                  ch_name))
-      fio_defer(fio___channel_deliver_task,
-                fio_channel_dup(i.key),
-                fio_letter_dup(l));
+      fio_queue_push(fio_srv_queue(),
+                     fio___channel_deliver_task,
+                     fio_channel_dup(i.key),
+                     fio_letter_dup(l));
   }
 #if FIO_POSTOFFICE_THREAD_LOCK
   FIO___LOCK_UNLOCK(FIO_POSTOFFICE.lock);
@@ -1330,7 +1330,10 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *s) {
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = s->on_unsubscribe};
-    fio_defer(fio___subscription_on_destroy__task, u.p, s->udata);
+    fio_queue_push(fio_srv_queue(),
+                   fio___subscription_on_destroy__task,
+                   u.p,
+                   s->udata);
   }
 }
 
@@ -1419,7 +1422,10 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s) {
   if (!s)
     return;
   s->on_message = fio_subscription___mock_cb;
-  fio_defer(fio___unsubscribe_task, (void *)(s->channel), (void *)s);
+  fio_queue_push(fio_srv_queue(),
+                 fio___unsubscribe_task,
+                 (void *)(s->channel),
+                 (void *)s);
 }
 
 FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *l_) {
@@ -1449,7 +1455,7 @@ FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *l_) {
   fio_letter_free(l);
   return;
 reschedule:
-  fio_defer(fio___subscription_on_message_task, s_, l_);
+  fio_queue_push(fio_srv_queue(), fio___subscription_on_message_task, s_, l_);
 }
 
 /* returns the letter object associated with the
@@ -1472,15 +1478,19 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
   if (l->from) {
     FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
       if (l->from != s->io)
-        fio_defer((void (*)(void *, void *))fio___subscription_on_message_task,
-                  fio_subscription_dup(s),
-                  fio_letter_dup(l));
+        fio_queue_push(
+            fio_srv_queue(),
+            (void (*)(void *, void *))fio___subscription_on_message_task,
+            fio_subscription_dup(s),
+            fio_letter_dup(l));
     }
   } else {
     FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
-      fio_defer((void (*)(void *, void *))fio___subscription_on_message_task,
-                fio_subscription_dup(s),
-                fio_letter_dup(l));
+      fio_queue_push(
+          fio_srv_queue(),
+          (void (*)(void *, void *))fio___subscription_on_message_task,
+          fio_subscription_dup(s),
+          fio_letter_dup(l));
     }
   }
   fio_letter_free(l);
@@ -1516,7 +1526,10 @@ SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
       fio_channel_new_named(args.channel, args.filter, args.is_pattern);
   if (!s->channel)
     goto channel_error;
-  fio_defer(fio___subscribe_task, (void *)s->channel, (void *)s);
+  fio_queue_push(fio_srv_queue(),
+                 fio___subscribe_task,
+                 (void *)s->channel,
+                 (void *)s);
 
   if (args.master_only && !args.io)
     goto is_master_only;
@@ -1568,7 +1581,10 @@ sub_error:
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = args.on_unsubscribe};
-    fio_defer(fio___subscription_on_destroy__task, u.p, args.udata);
+    fio_queue_push(fio_srv_queue(),
+                   fio___subscription_on_destroy__task,
+                   u.p,
+                   args.udata);
   }
   return;
 }
@@ -1642,7 +1658,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
       (uint8_t)((uintptr_t)args.engine |
                 ((0x100U - args.is_json) & FIO___PUBSUB_JSON)));
   l->from = args.from;
-  fio_queue_push(fio___srv_tasks, fio___publish_letter_task, l);
+  fio_defer(fio___publish_letter_task, l, NULL);
   return;
 external_engine:
   args.engine->publish(args.engine,
@@ -1803,8 +1819,7 @@ static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
   }
 }
 
-/** Attaches an engine, so it's callback can be
- * called by facil.io. */
+/** Attaches an engine, so it's callback can be called by facil.io. */
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
@@ -1821,10 +1836,9 @@ FIO_SFUNC void fio_pubsub_detach___task(void *engine, void *ignr_) {
   e->detached(e);
 }
 
-/** Schedules an engine for Detachment, so it
- * could be safely destroyed. */
+/** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine) {
-  fio_defer(fio_pubsub_detach___task, engine, NULL);
+  fio_queue_push(fio_srv_queue(), fio_pubsub_detach___task, engine, NULL);
 }
 
 /* *****************************************************************************

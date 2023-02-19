@@ -63,14 +63,14 @@ SFUNC time_t fio_gm2time(struct tm tm);
 SFUNC size_t fio_time2rfc7231(char *target, time_t time);
 
 /**
- * Writes an RFC 2109 date representation to target.
+ * Writes an RFC 2109 date representation to target (HTTP Cookie Format).
  *
  * Usually requires 31 characters, although this may vary.
  */
 SFUNC size_t fio_time2rfc2109(char *target, time_t time);
 
 /**
- * Writes an RFC 2822 date representation to target.
+ * Writes an RFC 2822 date representation to target (Internet Message Format).
  *
  * Usually requires 28 to 29 characters, although this may vary.
  */
@@ -81,9 +81,18 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time);
  *
  *         [DD/MMM/yyyy:hh:mm:ss +0000]
  *
- * Usually requires 29 characters (includiing square brackes and NUL).
+ * Usually requires 29 characters (including square brackets and NUL).
  */
 SFUNC size_t fio_time2log(char *target, time_t time);
+
+/**
+ * Writes a date representation to target in ISO 8601 format. i.e.,
+ *
+ *         YYYY-MM-DD HH:MM:SS
+ *
+ * Usually requires 20 characters (including NUL).
+ */
+SFUNC size_t fio_time2iso(char *target, time_t time);
 
 /** Adds two `struct timespec` objects. */
 FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
@@ -452,7 +461,7 @@ SFUNC size_t fio_time2rfc2822(char *target, time_t time) {
  *
  *         [DD/MMM/yyyy:hh:mm:ss +0000]
  *
- * Usually requires 29 characters (includiing square brackes and NUL).
+ * Usually requires 29 characters (including square brackets and NUL).
  */
 SFUNC size_t fio_time2log(char *target, time_t time) {
   {
@@ -487,6 +496,43 @@ SFUNC size_t fio_time2log(char *target, time_t time) {
     *pos++ = '0';
     *pos++ = '0';
     *pos++ = ']';
+    *(pos) = 0;
+    return pos - target;
+  }
+}
+
+/**
+ * Writes a date representation to target in ISO 8601 format. i.e.,
+ *
+ *         YYYY-MM-DD HH:MM:SS
+ *
+ * Usually requires 20 characters (including NUL).
+ */
+SFUNC size_t fio_time2iso(char *target, time_t time) {
+  {
+    const struct tm tm = fio_time2gm(time);
+    /* note: day of month is either 1 or 2 digits */
+    char *pos = target;
+    uint16_t tmp;
+    pos = fio_time_write_year(pos, &tm);
+    *pos++ = '-';
+    pos = fio_time_write_month(pos, &tm);
+    *pos++ = '-';
+    tmp = tm.tm_mday / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_mday - (tmp * 10));
+    *pos++ = ' ';
+    tmp = tm.tm_hour / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_hour - (tmp * 10));
+    *pos++ = ':';
+    tmp = tm.tm_min / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_min - (tmp * 10));
+    *pos++ = ':';
+    tmp = tm.tm_sec / 10;
+    *pos++ = '0' + tmp;
+    *pos++ = '0' + (tm.tm_sec - (tmp * 10));
     *(pos) = 0;
     return pos - target;
   }

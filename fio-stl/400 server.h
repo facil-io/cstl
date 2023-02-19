@@ -91,6 +91,8 @@ struct fio_listen_args {
    * Should either call `fio_attach` or close the connection.
    */
   void (*on_open)(int fd, void *udata);
+  /** Called when the a listening socket starts to listen (update state). */
+  void (*on_start)(void *udata);
   /**
    * Called when the server is done, usable for cleanup.
    *
@@ -473,6 +475,34 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
   fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
+Server Async - Worker Threads for non-IO tasks
+***************************************************************************** */
+
+/** The Server Async Queue type. */
+typedef struct {
+  fio_queue_s *q;
+  uint32_t count;
+  fio_queue_s queue;
+} fio_srv_async_s;
+
+/**
+ * Initializes a server - async (multi-threaded) task queue.
+ *
+ * It is recommended that the `fio_srv_async_s` be allocated as a static
+ * variable, as its memory must remain valid throughout the lifetime of the
+ * server's app.
+ *
+ * The queue automatically spawns threads and shuts down as the server starts or
+ * stops.
+ */
+FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
+
+/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
+
+#define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
+
+/* *****************************************************************************
 TODO!: Helpers fio_srv_queue_get && fio_srv_pid
 ***************************************************************************** */
 
@@ -705,6 +735,7 @@ static struct {
   pid_t pid;
   fio_s *wakeup;
   int wakeup_fd;
+  int wakeup_wait;
   uint16_t workers;
   uint8_t is_worker;
   volatile uint8_t stop;
@@ -727,8 +758,10 @@ Wakeup Protocol
 FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   fio_sock_read(fio_fd_get(io), buf, 512);
-  (void)(io);
+  fio___srvdata.wakeup_wait = 0;
+#if DEBUG
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
+#endif
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
@@ -740,8 +773,10 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   /* TODO, skip wakeup for same thread caller? */
-  if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3)
+  if (!fio___srvdata.wakeup || fio___srvdata.wakeup_wait ||
+      fio_queue_count(fio_srv_queue()) > 3)
     return;
+  fio___srvdata.wakeup_wait = 1;
   char buf[1] = {~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
   (void)ignr;
@@ -1697,6 +1732,8 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
                  *pfd,
                  fd);
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  if (l->on_start)
+    l->on_start(l->udata);
   FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
@@ -1807,6 +1844,41 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srvdata.root_pid = fio___srvdata.pid = getpid();
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
+}
+
+/* *****************************************************************************
+Server Async - Worker Threads for non-IO tasks
+***************************************************************************** */
+
+FIO_SFUNC void fio___srv_async_start(void *q_) {
+  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  q->q = &q->queue;
+  if (fio_queue_workers_add(&q->queue, (size_t)q->count))
+    goto failed;
+  return;
+
+failed:
+  FIO_LOG_ERROR("Server Async Queue couldn't spawn threads!");
+  q->q = fio_srv_queue();
+}
+FIO_SFUNC void fio___srv_async_finish(void *q_) {
+  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  fio_queue_workers_stop(&q->queue);
+  fio_queue_destroy(&q->queue);
+}
+
+/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
+  *q = (fio_srv_async_s){
+      .queue = FIO_QUEUE_STATIC_INIT(q->queue),
+      .count = threads,
+      .q = fio_srv_queue(),
+  };
+  if (!threads)
+    return;
+  q->q = &q->queue;
+  fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
+  fio_state_callback_add(FIO_CALL_ON_FINISH, fio___srv_async_finish, q);
 }
 
 /* *****************************************************************************

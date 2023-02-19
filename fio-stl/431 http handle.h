@@ -57,7 +57,7 @@ HTTP Handle Settings
 
 #ifndef FIO_HTTP_CACHE_LIMIT
 /** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) - 1)
+#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) + (1UL << 5))
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -279,21 +279,13 @@ typedef enum fio_http_cookie_same_site_e {
  */
 typedef struct fio_http_cookie_args_s {
   /** The cookie's name. */
-  const char *name;
+  fio_str_info_s name;
   /** The cookie's value (leave blank to delete cookie). */
-  const char *value;
+  fio_str_info_s value;
   /** The cookie's domain (optional). */
-  const char *domain;
+  fio_str_info_s domain;
   /** The cookie's path (optional). */
-  const char *path;
-  /** The cookie name's size in bytes or a terminating NUL will be assumed.*/
-  size_t name_len;
-  /** The cookie value's size in bytes or a terminating NUL will be assumed.*/
-  size_t value_len;
-  /** The cookie domain's size in bytes or a terminating NUL will be assumed.*/
-  size_t domain_len;
-  /** The cookie path's size in bytes or a terminating NULL will be assumed.*/
-  size_t path_len;
+  fio_str_info_s path;
   /** Max Age (how long should the cookie persist), in seconds (0 == session).*/
   int max_age;
   /** SameSite value. */
@@ -968,21 +960,10 @@ static char *fio___http_str_cached_static(uint64_t hash,
 #define fio___http_str_cached_init() (void)0
 #endif /* FIO_HTTP_CACHE_STATIC */
 
-static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
+                                            uint64_t hash,
+                                            fio_str_info_s s) {
   fio_str_info_s cached;
-  uint64_t hash;
-  if (!s.len)
-    return NULL;
-  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
-    goto avoid_caching;
-  hash = fio_risky_hash(s.buf, s.len, 0);
-#if FIO_HTTP_CACHE_STATIC
-  if (group == FIO___HTTP_STR_CACHE_NAME) {
-    char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
-    if (tmp)
-      return fio_bstr_copy(tmp);
-  }
-#endif /* FIO_HTTP_CACHE_STATIC */
   hash ^= (uint64_t)(uintptr_t)fio_http_new;
 #if FIO_HTTP_CACHE_USES_MUTEX
   FIO___LOCK_LOCK(FIO___HTTP_STRING_CACHE[group].lock);
@@ -995,6 +976,30 @@ static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
   FIO___LOCK_UNLOCK(FIO___HTTP_STRING_CACHE[group].lock);
 #endif
   return fio_bstr_copy(cached.buf);
+}
+static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+  if (!s.len)
+    return NULL;
+  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
+    goto avoid_caching;
+  return fio___http_str_cached_inner(group, fio_risky_hash(s.buf, s.len, 0), s);
+avoid_caching:
+  return fio_bstr_write(NULL, s.buf, s.len);
+}
+
+static char *fio___http_str_cached_with_static(fio_str_info_s s) {
+  uint64_t hash;
+  if (!s.len)
+    return NULL;
+  if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
+    goto avoid_caching;
+  hash = fio_risky_hash(s.buf, s.len, 0);
+#if FIO_HTTP_CACHE_STATIC
+  char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+  if (tmp)
+    return fio_bstr_copy(tmp);
+#endif /* FIO_HTTP_CACHE_STATIC */
+  return fio___http_str_cached_inner(FIO___HTTP_STR_CACHE_NAME, hash, s);
 avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
@@ -1014,7 +1019,7 @@ Headers Maps
 #define FIO_MAP_KEY_CMP(a, b)        fio_bstr_is_eq2info((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)     fio_bstr_free((key))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio___http_str_cached(FIO___HTTP_STR_CACHE_NAME, (src))
+  (dest) = fio___http_str_cached_with_static((src))
 #define FIO_MAP_KEY_DISCARD(key)
 #define FIO_MAP_VALUE fio___http_sary_s
 #define FIO_MAP_VALUE_COPY(a, b)                                               \
@@ -1215,6 +1220,7 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
+  /* TODO! auto-finish if freed without finishing? */
   if (h->controller)
     h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
@@ -1464,21 +1470,21 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   /* write name and value while auto-correcting encoding issues */
-  if ((cookie.name_len + cookie.value_len + cookie.domain_len +
-       cookie.path_len + 128) > 5119) {
+  if ((cookie.name.len + cookie.value.len + cookie.domain.len +
+       cookie.path.len + 128) > 5119) {
     FIO_LOG_ERROR("cookie data too long!");
   }
   char tmp_buf[5120];
   fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
 #define copy_cookie_ch(ch_var)                                                 \
-  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var[tmp]]) {          \
-    t.buf[t.len++] = cookie.ch_var[tmp];                                       \
+  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
+    t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
   } else {                                                                     \
     need2warn |= 1;                                                            \
     t.buf[t.len++] = '%';                                                      \
-    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var[tmp] >> 4) & 0x0F);       \
-    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var[tmp] & 0x0F);              \
+    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var.buf[tmp] >> 4) & 0x0F);   \
+    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var.buf[tmp] & 0x0F);          \
   }                                                                            \
   tmp += 1;                                                                    \
   if (t.capa <= t.len + 3) {                                                   \
@@ -1487,14 +1493,14 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
          : FIO_STRING_REALLOC)(&t, fio_string_capa4len(t.len + 3));            \
   }
 
-  if (cookie.name) {
+  if (cookie.name.buf) {
     size_t tmp = 0;
-    if (cookie.name_len) {
-      while (tmp < cookie.name_len) {
+    if (cookie.name.len) {
+      while (tmp < cookie.name.len) {
         copy_cookie_ch(name);
       }
     } else {
-      while (cookie.name[tmp]) {
+      while (cookie.name.buf[tmp]) {
         copy_cookie_ch(name);
       }
     }
@@ -1502,19 +1508,19 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie name (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.name[tmp],
-                      cookie.name);
+                      cookie.name.buf[tmp],
+                      cookie.name.buf);
     }
   }
   t.buf[t.len++] = '=';
-  if (cookie.value) {
+  if (cookie.value.buf) {
     size_t tmp = 0;
-    if (cookie.value_len) {
-      while (tmp < cookie.value_len) {
+    if (cookie.value.len) {
+      while (tmp < cookie.value.len) {
         copy_cookie_ch(value);
       }
     } else {
-      while (cookie.value[tmp]) {
+      while (cookie.value.buf[tmp]) {
         copy_cookie_ch(value);
       }
     }
@@ -1522,8 +1528,8 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie value (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.value[tmp],
-                      cookie.value);
+                      cookie.value.buf[tmp],
+                      cookie.value.buf);
     }
   } else
     cookie.max_age = -1;
@@ -1542,20 +1548,20 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
 
-  if (cookie.domain && cookie.domain_len) {
+  if (cookie.domain.buf && cookie.domain.len) {
     fio_string_write2(
         &t,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         FIO_STRING_WRITE_STR2((char *)"domain=", 7),
-        FIO_STRING_WRITE_STR2((char *)cookie.domain, cookie.domain_len),
+        FIO_STRING_WRITE_STR2((char *)cookie.domain.buf, cookie.domain.len),
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
-  if (cookie.path && cookie.path_len) {
+  if (cookie.path.buf && cookie.path.len) {
     fio_string_write2(
         &t,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         FIO_STRING_WRITE_STR2((char *)"path=", 5),
-        FIO_STRING_WRITE_STR2((char *)cookie.path, cookie.path_len),
+        FIO_STRING_WRITE_STR2((char *)cookie.path.buf, cookie.path.len),
         FIO_STRING_WRITE_STR2((char *)"; ", 2));
   }
   if (cookie.http_only) {
@@ -1601,15 +1607,9 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     --t.len;
 
   /* set the "write" cookie store data */
-  fio___http_cmap_set(h->cookies + 1,
-                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                      t,
-                      NULL);
+  fio___http_cmap_set(h->cookies + 1, cookie.name, t, NULL);
   /* set the "read" cookie store data */
-  fio___http_cmap_set(h->cookies,
-                      FIO_STR_INFO2((char *)cookie.name, cookie.name_len),
-                      FIO_STR_INFO2((char *)cookie.value, cookie.value_len),
-                      NULL);
+  fio___http_cmap_set(h->cookies, cookie.name, cookie.value, NULL);
   if (t.buf != tmp_buf)
     FIO_STRING_FREE2(t);
   return 0;
@@ -2823,14 +2823,12 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
   for (size_t i = 0; i < 3; ++i) {
     const char *names[] = {"header names", "cookie names", "header values"};
-    FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
-                   FIO___HTTP_MIMETYPES.count,
-                   fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
     FIO_LOG_DEBUG2(
-        "(%d) freeing %zu strings from %s cache",
+        "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
         getpid(),
         fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
-        names[i]);
+        names[i],
+        fio___http_str_cache_capa(&FIO___HTTP_STRING_CACHE[i].cache));
 #ifdef FIO_LOG_LEVEL_DEBUG
     if (FIO_LOG_LEVEL_DEBUG == FIO_LOG_LEVEL) {
       FIO_MAP_EACH(fio___http_str_cache,
@@ -2844,6 +2842,9 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
     (void)names; /* if unused */
   }
+  FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
+                 FIO___HTTP_MIMETYPES.count,
+                 fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
 }
 

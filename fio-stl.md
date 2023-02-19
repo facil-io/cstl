@@ -2241,7 +2241,7 @@ i.e.: Sun, 06 Nov 1994 08:49:37 GMT
 size_t fio_time2rfc2109(char *target, time_t time);
 ```
 
-Writes an RFC 2109 date representation to target.
+Writes an RFC 2109 date representation to target (HTTP Cookie Format).
 
 Requires 31 characters (for positive, 4 digit years).
 
@@ -2254,6 +2254,26 @@ size_t fio_time2rfc2822(char *target, time_t time);
 Writes an RFC 2822 date representation to target.
 
 Requires 28 or 29 characters (for positive, 4 digit years).
+
+#### `fio_time2log`
+
+```c
+size_t fio_time2log(char *target, time_t time);
+```
+
+Writes a date representation to target in common log format. i.e.: `[DD/MMM/yyyy:hh:mm:ss +0000]`
+
+Usually requires 29 characters (including square brackets and NUL).
+
+#### `fio_time2iso`
+
+```c
+size_t fio_time2iso(char *target, time_t time);
+```
+
+Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
+
+Usually requires 20 characters (including NUL).
 
 -------------------------------------------------------------------------------
 ## Pseudo Random Generation
@@ -8063,6 +8083,62 @@ To handle IO events using other threads, first `fio_dup` the IO handle, then for
 
 **Note**: this will automatically include a large amount of the facil.io STL modules, such as once provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
+### Time Server Example
+
+The following example uses the `FIO_PUBSUB` module together with the `FIO_SERVER` module to author a very simplistic time server (with no micro-second accuracy).
+
+the `FIO_PUBSUB` module could have been replaced with a `fio_protocol_each` approach, but using `fio_protocol_each` isn't recommended.
+
+```c
+#define FIO_LOG
+#define FIO_SERVER
+#define FIO_PUBSUB
+#define FIO_TIME
+#include "fio-stl/include.h"
+
+/* timer callback for publishing time */
+static int publish_time(void *ignore1_, void *ignore2_);
+/* fio_listen callback for accepting new clients */
+static void accept_time_client(int fd, void *udata);
+
+int main(void) {
+  fio_run_every(.fn = publish_time, .every = 1000, .repetitions = -1);
+  FIO_ASSERT(!fio_listen(.on_open = accept_time_client), "");
+  printf("* Time service starting up.\n");
+  printf("  Press ^C to stop server and exit.\n");
+  fio_srv_start(0);
+}
+
+/***** timer protocol and publishing implementation *****/
+
+/* timer callback for publishing time */
+static int publish_time(void *ignore1_, void *ignore2_) {
+  char buf[32];
+  size_t len = fio_time2iso(buf, fio_time_real().tv_sec);
+  buf[len++] = '\r';
+  buf[len++] = '\n';
+  fio_publish(.channel = FIO_BUF_INFO1("time"),
+              .message = FIO_BUF_INFO2(buf, len));
+  return 0;
+  (void)ignore1_, (void)ignore2_;
+}
+
+/** Called when an IO is attached to a protocol. */
+FIO_SFUNC void time_protocol_on_attach(fio_s *io) {
+  /* .on_message is unnecessary, by default the message is sent to the IO. */
+  fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("time"));
+}
+
+fio_protocol_s TIME_PROTOCOL = {
+    .on_attach = time_protocol_on_attach,
+    /* .on_data = NULL, .on_ready = NULL, .on_close = NULL, */
+    .on_timeout = fio_touch, /* never times out */
+};
+static void accept_time_client(int fd, void *udata) {
+  fio_attach_fd(fd, &TIME_PROTOCOL, udata, NULL); /* udata isn't used here */
+}
+```
+
 ### `FIO_SERVER` API
 
 The API depends on the opaque `fio_s` type as well as the `fio_protocol_s` type.
@@ -8098,6 +8174,8 @@ struct fio_listen_args {
    * Should either call `fio_attach` or close the connection.
    */
   void (*on_open)(int fd, void *udata);
+  /** Called when the a listening socket starts to listen (update state). */
+  void (*on_start)(void *udata);
   /**
    * Called when the server is done, usable for cleanup.
    *
@@ -8370,6 +8448,8 @@ Protocols are usually global objects and the same protocol can be assigned to mu
 
 All the callbacks (except `on_close`) receive an IO handle, which is used instead of the system's file descriptor and protects callbacks and IO operations from sending data to incorrect clients (possible `fd` "recycling").
 
+#### `fio_protocol_s`
+
 ```c
 struct fio_protocol_s {
   /**
@@ -8623,6 +8703,50 @@ Possible "named arguments" (`fio_timer_schedule_args_s` members) include:
 int64_t fio_last_tick(void);
 ```
 Returns the last millisecond when the server reviewed pending IO events.
+
+#### `fio_srv_async_s`
+
+```
+typedef struct {
+  fio_queue_s *q;
+  uint32_t count;
+  fio_queue_s queue;
+} fio_srv_async_s;
+
+#define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
+```
+
+The `fio_srv_async` provides a server bound queue for non-IO tasks.
+
+The queue automatically spawns threads and shuts down as the server starts or stops.
+
+It is useful for thread-safe code or for scheduling non-IO bound tasks that can run in parallel to the server.
+
+**Note**: It is recommended that the `fio_srv_async_s` be used as a static variable, as its memory must remain valid throughout the lifetime of the server's app.
+
+#### `fio_srv_async_init`
+
+```
+void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
+```
+
+Initializes a server - async (multi-threaded) task queue.
+
+It is recommended that the `fio_srv_async_s` be allocated as a static variable, as its memory must remain valid throughout the lifetime of the server's app.
+
+The queue automatically spawns threads and shuts down as the server starts or stops.
+
+**Note**: if the spawning threads failed or the object was initialized with zero threads, than the server's IO queue will be used for the async tasks as well.
+
+#### `fio_srv_async_queue`
+
+```c
+fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
+```
+
+Returns the async queue's actual queues.
+
+**Note**: if the spawning threads failed or the object was initialized with zero threads, than the server's IO queue will be used for the async tasks as well.
 
 ### `FIO_SERVER` Compile Time Macros
 

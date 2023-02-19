@@ -94,17 +94,6 @@ TEST_ROOT=tests
 TEST_DEFAULT=stl
 
 #############################################################################
-# CMake Support
-#############################################################################
-
-# The library details for CMake incorporation. Can be safely removed.
-CMAKE_FILENAME?=
-# Project name to be stated in the CMakeFile
-CMAKE_PROJECT=facil.io
-# Space delimited list of required packages
-CMAKE_REQUIRE_PACKAGE=Threads
-
-#############################################################################
 # Compiler / Linker Settings
 #############################################################################
 
@@ -121,7 +110,7 @@ OPTIMIZATION=-O3
 # optimization level in debug mode. i.e.: -fsanitize=thread
 OPTIMIZATION_DEBUG=-O0 -g -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
-WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
+WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
 INCLUDE=.
 # any preprocessor defined flags we want, space separated list (i.e. DEBUG )
@@ -136,6 +125,17 @@ CSTD?=gnu11
 CXXSTD?=gnu++11
 # pkg-config
 PKG_CONFIG?=pkg-config
+
+#############################################################################
+# CMake Support
+#############################################################################
+
+# The library details for CMake incorporation. Can be safely removed.
+CMAKE_FILENAME?=
+# Project name to be stated in the CMakeFile
+CMAKE_PROJECT=facil.io
+# Space delimited list of required packages
+CMAKE_REQUIRE_PACKAGE=Threads
 
 #############################################################################
 # Debug Settings

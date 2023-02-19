@@ -66,9 +66,7 @@ typedef struct fio_http_settings_s {
   /** Optional SSL/TLS support. */
   void *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
-  fio_queue_s *queue;
-  /** Optional callback called when a task was queued (only if queue was set) */
-  void (*on_queue)(fio_queue_s *);
+  fio_srv_async_s *queue;
   /**
    * A public folder for file transfers - allows to circumvent any application
    * layer logic and simply serve static files.
@@ -205,12 +203,6 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->on_upgrade2sse = fio___http___mock_noop_upgrade;
   if (!s->on_finish)
     s->on_finish = http___noop_on_finish;
-  if (!s->queue) {
-    s->queue = fio_srv_queue();
-    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
-  }
-  if (!s->on_queue)
-    s->on_queue = (void (*)(fio_queue_s *))fio___http___mock_noop;
   if (!s->max_header_size)
     s->max_header_size = FIO_HTTP_DEFAULT_MAX_HEADER_SIZE;
   if (!s->max_line_len)
@@ -257,6 +249,7 @@ HTTP Protocol Container (vtable + settings storage)
 typedef struct {
   fio_http_settings_s settings;
   void (*on_http_callback)(void *, void *);
+  fio_queue_s *queue;
   struct {
     fio_protocol_s protocol;
     fio_http_controller_s controller;
@@ -283,7 +276,6 @@ typedef struct {
   fio_http_s *h;
   fio_http_settings_s *settings;
   fio_queue_s *queue;
-  void (*on_queue)(fio_queue_s *);
   void (*on_http_callback)(void *, void *);
   void (*on_http)(fio_http_s *h);
   void *udata;
@@ -321,8 +313,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
   FIO_ASSERT_ALLOC(c);
   *c = (fio___http_connection_s){
       .settings = &(p->settings),
-      .queue = p->settings.queue,
-      .on_queue = p->settings.on_queue,
+      .queue = p->queue,
       .on_http_callback = p->on_http_callback,
       .on_http = p->settings.on_http,
       .udata = p->settings.udata,
@@ -335,6 +326,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                         (void *)c,
                         p->settings.tls);
   FIO_ASSERT_ALLOC(c->io);
+#if DEBUG
   FIO_LOG_DEBUG2("(%d) HTTP accepted a new connection at fd %d,"
                  "\n\tattached to client %p (io %p)."
                  "\n\tattached protocol %p",
@@ -343,31 +335,62 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                  c,
                  c->io,
                  fio_protocol_get(c->io));
+#endif
 }
 
 /* *****************************************************************************
 HTTP Request handling / handling
 ***************************************************************************** */
 
+FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (FIO_LIKELY(fio_is_open(c->io)))
+    cb.fn(h);
+  fio_http_free(h);
+}
+
+FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (FIO_LIKELY(fio_is_open(c->io)))
+    if (cb.fn(h))
+      fio_http_send_error_response(h, 403);
+  fio_http_free(h);
+}
+
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
                                               fio___http_connection_s *c) {
-
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb;
   if (fio_http_websockets_requested(h))
     goto websocket_requested;
   if (fio_http_sse_requested(h))
     goto sse_requested;
   return 0;
 websocket_requested:
-  if (c->settings->on_upgrade2websockets(h))
-    goto deny_upgrade;
-  /* TODO: set WebSocket response headers + send response */
-  /* TODO: feed remaining data in buffer to WebSocket client */
-  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  cb.fn = c->settings->on_upgrade2websockets;
+  fio_queue_push(c->queue,
+                 fio___http_perform_user_upgrade_callback,
+                 cb.ptr,
+                 (void *)h);
   return -1;
 sse_requested:
-  if (c->settings->on_upgrade2sse(h))
-    goto deny_upgrade;
-  goto deny_upgrade; /* TODO: delete me once support is implemented */
+  cb.fn = c->settings->on_upgrade2sse;
+  fio_queue_push(c->queue,
+                 fio___http_perform_user_upgrade_callback,
+                 cb.ptr,
+                 (void *)h);
   return -1;
 #if 0
 http2_requested:
@@ -376,9 +399,6 @@ http2_requested:
   // HTTP2-Settings: <base64url encoding of HTTP/2 SETTINGS payload>
   return 0; /* allowed to ignore upgrade request */
 #endif
-deny_upgrade:
-  fio_http_send_error_response(h, 403);
-  return -1;
 }
 
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
@@ -386,10 +406,12 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
-    goto finish;
-  c->on_http(h);
-finish:
-  fio_http_free(h);
+    return;
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.fn = c->on_http};
+  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
   (void)ignr;
 }
 
@@ -398,21 +420,31 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
-    goto finish;
+    return;
   if (!fio_http_static_file_response(h,
                                      c->settings->public_folder,
                                      fio_http_path(h),
-                                     c->settings->max_age))
-    goto finish;
-  c->on_http(h);
-finish:
-  fio_http_free(h);
+                                     c->settings->max_age)) {
+    fio_http_free(h);
+    return;
+  }
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.fn = c->on_http};
+  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
   (void)ignr;
 }
 
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
+
+FIO_SFUNC void fio___http_listen_on_start(void *p_) {
+  fio_http_protocol_s *p = (fio_http_protocol_s *)p_;
+  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+}
+
 void fio_http_listen___(void); /* IDE marker */
 SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s);
@@ -436,9 +468,10 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
             '\\'));
   return fio_listen(.url = url,
                     .on_open = fio___http_on_open,
+                    .on_start = fio___http_listen_on_start,
                     .on_finish = (void (*)(void *))fio_http_protocol_free,
                     .udata = (void *)p,
-                    .queue_for_accept = s.queue);
+                    .queue_for_accept = s.queue ? s.queue->q : NULL);
 }
 
 /* *****************************************************************************
@@ -451,8 +484,7 @@ static void fio_http1_on_complete(void *udata) {
   fio_dup(c->io);
   fio_suspend(c->io);
   c->suspend = 1;
-  fio_queue_push(c->queue, c->on_http_callback, fio_http_dup(c->h));
-  c->on_queue(c->queue);
+  fio_queue_push(fio_srv_queue(), c->on_http_callback, fio_http_dup(c->h));
 }
 
 /* *****************************************************************************
@@ -790,13 +822,15 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->h = NULL;
   c->suspend = 0;
-  if (fio_http_is_streaming(h)) {
-    fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
-  }
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+  if (fio_is_open(c->io)) {
+    if (fio_http_is_streaming(h)) {
+      fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
+    }
+    fio___http1_process_data(c->io, c);
+  }
   fio_http_free(h);
-  fio___http1_process_data(c->io, c);
   if (!c->suspend)
     fio_unsuspend(c->io);
   fio_undup(c->io);
