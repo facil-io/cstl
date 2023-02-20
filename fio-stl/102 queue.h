@@ -315,7 +315,8 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       pos->stop = 1;
-      fio_thread_cond_signal(&pos->cond);
+      for (size_t i = 0; i < pos->workers; ++i)
+        fio_thread_cond_signal(&pos->cond);
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       FIO___LOCK_UNLOCK(q->lock);
@@ -541,6 +542,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
   FIO___LOCK_UNLOCK(grp.queue->lock);
+  fio_queue_perform_all(grp.queue);
   return NULL;
 }
 

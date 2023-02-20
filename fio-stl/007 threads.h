@@ -117,28 +117,6 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void);
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e);
 
-// THREAD_PRIORITY_ABOVE_NORMAL
-// 1
-// Priority 1 point above the priority class.
-// THREAD_PRIORITY_BELOW_NORMAL
-// -1
-// Priority 1 point below the priority class.
-// THREAD_PRIORITY_HIGHEST
-// 2
-// Priority 2 points above the priority class.
-// THREAD_PRIORITY_IDLE
-// -15
-// Base priority of 1 for IDLE_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
-// NORMAL_PRIORITY_CLASS, ABOVE_NORMAL_PRIORITY_CLASS, or HIGH_PRIORITY_CLASS
-// processes, and a base priority of 16 for REALTIME_PRIORITY_CLASS processes.
-// THREAD_PRIORITY_LOWEST
-// -2
-// Priority 2 points below the priority class.
-// THREAD_PRIORITY_NORMAL
-// 0
-// Normal priority for the priority class.
-// THREAD_PRIORITY_TIME_CRITICAL
-
 /**
  * Initializes a simple Mutex.
  *
@@ -183,6 +161,11 @@ FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
 /** Waits on a conditional variable (MUST be previously locked). */
 FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
                                      fio_thread_mutex_t *m);
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds);
 
 /** Signals a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
@@ -337,6 +320,18 @@ FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
   return pthread_cond_wait(c, m);
 }
 
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds) {
+  struct timespec t;
+  clock_gettime(CLOCK_REALTIME, &t);
+  milliseconds += t.tv_nsec / 1000000;
+  t.tv_sec += (long)(milliseconds / 1000);
+  t.tv_nsec = (long)((milliseconds % 1000) * 1000000);
+  return pthread_cond_timedwait(c, m, &t);
+}
+
 /** Signals a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return pthread_cond_signal(c);
@@ -477,6 +472,13 @@ FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
 FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
                                      fio_thread_mutex_t *m) {
   return 0 - !SleepConditionVariableCS(c, m, INFINITE);
+}
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds) {
+  return 0 - !SleepConditionVariableCS(c, m, milliseconds);
 }
 
 /** Signals a simple conditional variable. */

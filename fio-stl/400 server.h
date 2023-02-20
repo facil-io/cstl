@@ -483,6 +483,7 @@ typedef struct {
   fio_queue_s *q;
   uint32_t count;
   fio_queue_s queue;
+  FIO_LIST_NODE node;
 } fio_srv_async_s;
 
 /**
@@ -497,7 +498,12 @@ typedef struct {
  */
 FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
 
-/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+/**
+ * Initializes an async server queue for multi-threaded (non IO) tasks.
+ *
+ * This can function can only be called from the server's thread (or the thread
+ * that will eventually run the server).
+ */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 
 #define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
@@ -739,6 +745,7 @@ static struct {
   uint16_t workers;
   uint8_t is_worker;
   volatile uint8_t stop;
+  FIO_LIST_HEAD async;
 } fio___srvdata = {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
@@ -1302,12 +1309,23 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   fio_signal_review();
 }
 
+FIO_SFUNC void fio___srv_run_async_as_sync(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  unsigned repeat = 0;
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, pos) {
+    repeat += !fio_queue_perform(&pos->queue);
+  }
+  if (repeat)
+    fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
+}
+
 FIO_SFUNC void fio___srv_shutdown_task(void *shutdown_start_, void *a2) {
   intptr_t shutdown_start = (intptr_t)shutdown_start_;
   if (shutdown_start + FIO_SRV_SHUTDOWN_TIMEOUT < fio___srvdata.tick ||
       FIO_LIST_IS_EMPTY(&fio___srvdata.protocols))
     return;
   fio___srv_tick(fio_queue_count(fio___srv_tasks) ? 0 : 100);
+  fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
   fio_queue_push(fio___srv_tasks, fio___srv_shutdown_task, shutdown_start_, a2);
 }
 
@@ -1328,7 +1346,7 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG("Server shutting down with %zu connected clients", connected);
+  FIO_LOG_DEBUG2("Server shutting down with %zu connected clients", connected);
   /* cycle while connections exist. */
   fio_queue_push(fio___srv_tasks,
                  fio___srv_shutdown_task,
@@ -1833,15 +1851,16 @@ Initializing Server State
 ***************************************************************************** */
 FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
+  fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
+  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
+  fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.protocols);
   fio_poll_init(&fio___srvdata.poll_data,
                 .on_data = fio___srv_poll_on_data_schd,
                 .on_ready = fio___srv_poll_on_ready_schd,
                 .on_close = fio___srv_poll_on_close_schd);
   fio___srv_init_protocol_test(&MOCK_PROTOCOL);
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
-  fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
-  fio___srvdata.tick = fio_time_milli();
-  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
 }
@@ -1864,6 +1883,7 @@ failed:
 FIO_SFUNC void fio___srv_async_finish(void *q_) {
   fio_srv_async_s *q = (fio_srv_async_s *)q_;
   fio_queue_workers_stop(&q->queue);
+  fio_queue_perform_all(&q->queue);
   fio_queue_destroy(&q->queue);
 }
 
@@ -1877,8 +1897,9 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
   if (!threads)
     return;
   q->q = &q->queue;
+  FIO_LIST_PUSH(&fio___srvdata.async, &q->node);
   fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
-  fio_state_callback_add(FIO_CALL_ON_FINISH, fio___srv_async_finish, q);
+  fio_state_callback_add(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
 }
 
 /* *****************************************************************************

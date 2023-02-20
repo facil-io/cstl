@@ -12,6 +12,8 @@
 
                       An HTTP connection Handle helper
 
+See also:
+https://www.rfc-editor.org/rfc/rfc9110.html
 
 
 
@@ -470,7 +472,7 @@ SFUNC void fio_http_sse_set_response(fio_http_s *);
 SFUNC void fio_http_sse_set_request(fio_http_s *);
 
 /* *****************************************************************************
-Mime-Type Helpers - NOT thread safe!
+MIME File Type Helpers - NOT thread safe!
 ***************************************************************************** */
 
 /** Registers a Mime-Type to be associated with the file extension. */
@@ -2624,7 +2626,7 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
 }
 
 /* *****************************************************************************
-MIME Helpers
+MIME File Type Helpers
 ***************************************************************************** */
 
 typedef struct {

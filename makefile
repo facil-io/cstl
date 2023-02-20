@@ -114,7 +114,7 @@ WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wfor
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
 INCLUDE=.
 # any preprocessor defined flags we want, space separated list (i.e. DEBUG )
-FLAGS:=
+FLAGS:=FIO_LEAK_COUNTER
 # C specific compiler options
 C_EXTRA_OPT:=
 # C++ specific compiler options

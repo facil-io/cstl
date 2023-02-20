@@ -6909,28 +6909,6 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void);
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e);
 
-// THREAD_PRIORITY_ABOVE_NORMAL
-// 1
-// Priority 1 point above the priority class.
-// THREAD_PRIORITY_BELOW_NORMAL
-// -1
-// Priority 1 point below the priority class.
-// THREAD_PRIORITY_HIGHEST
-// 2
-// Priority 2 points above the priority class.
-// THREAD_PRIORITY_IDLE
-// -15
-// Base priority of 1 for IDLE_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
-// NORMAL_PRIORITY_CLASS, ABOVE_NORMAL_PRIORITY_CLASS, or HIGH_PRIORITY_CLASS
-// processes, and a base priority of 16 for REALTIME_PRIORITY_CLASS processes.
-// THREAD_PRIORITY_LOWEST
-// -2
-// Priority 2 points below the priority class.
-// THREAD_PRIORITY_NORMAL
-// 0
-// Normal priority for the priority class.
-// THREAD_PRIORITY_TIME_CRITICAL
-
 /**
  * Initializes a simple Mutex.
  *
@@ -6975,6 +6953,11 @@ FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
 /** Waits on a conditional variable (MUST be previously locked). */
 FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
                                      fio_thread_mutex_t *m);
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds);
 
 /** Signals a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
@@ -7129,6 +7112,18 @@ FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
   return pthread_cond_wait(c, m);
 }
 
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds) {
+  struct timespec t;
+  clock_gettime(CLOCK_REALTIME, &t);
+  milliseconds += t.tv_nsec / 1000000;
+  t.tv_sec += (long)(milliseconds / 1000);
+  t.tv_nsec = (long)((milliseconds % 1000) * 1000000);
+  return pthread_cond_timedwait(c, m, &t);
+}
+
 /** Signals a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return pthread_cond_signal(c);
@@ -7269,6 +7264,13 @@ FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
 FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
                                      fio_thread_mutex_t *m) {
   return 0 - !SleepConditionVariableCS(c, m, INFINITE);
+}
+
+/** Waits on a conditional variable (MUST be previously locked). */
+FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                          fio_thread_mutex_t *m,
+                                          size_t milliseconds) {
+  return 0 - !SleepConditionVariableCS(c, m, milliseconds);
 }
 
 /** Signals a simple conditional variable. */
@@ -16335,7 +16337,8 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       pos->stop = 1;
-      fio_thread_cond_signal(&pos->cond);
+      for (size_t i = 0; i < pos->workers; ++i)
+        fio_thread_cond_signal(&pos->cond);
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
       FIO___LOCK_UNLOCK(q->lock);
@@ -16561,6 +16564,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
   FIO___LOCK_UNLOCK(grp.queue->lock);
+  fio_queue_perform_all(grp.queue);
   return NULL;
 }
 
@@ -31230,6 +31234,7 @@ typedef struct {
   fio_queue_s *q;
   uint32_t count;
   fio_queue_s queue;
+  FIO_LIST_NODE node;
 } fio_srv_async_s;
 
 /**
@@ -31244,7 +31249,12 @@ typedef struct {
  */
 FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
 
-/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+/**
+ * Initializes an async server queue for multi-threaded (non IO) tasks.
+ *
+ * This can function can only be called from the server's thread (or the thread
+ * that will eventually run the server).
+ */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 
 #define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
@@ -31486,6 +31496,7 @@ static struct {
   uint16_t workers;
   uint8_t is_worker;
   volatile uint8_t stop;
+  FIO_LIST_HEAD async;
 } fio___srvdata = {
 #if FIO_VALIDATE_IO_MUTEX && FIO_VALIDITY_MAP_USE
     .valid_lock = FIO_THREAD_MUTEX_INIT,
@@ -32049,12 +32060,23 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   fio_signal_review();
 }
 
+FIO_SFUNC void fio___srv_run_async_as_sync(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  unsigned repeat = 0;
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, pos) {
+    repeat += !fio_queue_perform(&pos->queue);
+  }
+  if (repeat)
+    fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
+}
+
 FIO_SFUNC void fio___srv_shutdown_task(void *shutdown_start_, void *a2) {
   intptr_t shutdown_start = (intptr_t)shutdown_start_;
   if (shutdown_start + FIO_SRV_SHUTDOWN_TIMEOUT < fio___srvdata.tick ||
       FIO_LIST_IS_EMPTY(&fio___srvdata.protocols))
     return;
   fio___srv_tick(fio_queue_count(fio___srv_tasks) ? 0 : 100);
+  fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
   fio_queue_push(fio___srv_tasks, fio___srv_shutdown_task, shutdown_start_, a2);
 }
 
@@ -32075,7 +32097,7 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG("Server shutting down with %zu connected clients", connected);
+  FIO_LOG_DEBUG2("Server shutting down with %zu connected clients", connected);
   /* cycle while connections exist. */
   fio_queue_push(fio___srv_tasks,
                  fio___srv_shutdown_task,
@@ -32580,15 +32602,16 @@ Initializing Server State
 ***************************************************************************** */
 FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
+  fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
+  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
+  fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.protocols);
   fio_poll_init(&fio___srvdata.poll_data,
                 .on_data = fio___srv_poll_on_data_schd,
                 .on_ready = fio___srv_poll_on_ready_schd,
                 .on_close = fio___srv_poll_on_close_schd);
   fio___srv_init_protocol_test(&MOCK_PROTOCOL);
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
-  fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
-  fio___srvdata.tick = fio_time_milli();
-  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
 }
@@ -32611,6 +32634,7 @@ failed:
 FIO_SFUNC void fio___srv_async_finish(void *q_) {
   fio_srv_async_s *q = (fio_srv_async_s *)q_;
   fio_queue_workers_stop(&q->queue);
+  fio_queue_perform_all(&q->queue);
   fio_queue_destroy(&q->queue);
 }
 
@@ -32624,8 +32648,9 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
   if (!threads)
     return;
   q->q = &q->queue;
+  FIO_LIST_PUSH(&fio___srvdata.async, &q->node);
   fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
-  fio_state_callback_add(FIO_CALL_ON_FINISH, fio___srv_async_finish, q);
+  fio_state_callback_add(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
 }
 
 /* *****************************************************************************
@@ -34743,6 +34768,8 @@ Pub/Sub Cleanup
 
                       An HTTP connection Handle helper
 
+See also:
+https://www.rfc-editor.org/rfc/rfc9110.html
 
 
 
@@ -35201,7 +35228,7 @@ SFUNC void fio_http_sse_set_response(fio_http_s *);
 SFUNC void fio_http_sse_set_request(fio_http_s *);
 
 /* *****************************************************************************
-Mime-Type Helpers - NOT thread safe!
+MIME File Type Helpers - NOT thread safe!
 ***************************************************************************** */
 
 /** Registers a Mime-Type to be associated with the file extension. */
@@ -37355,7 +37382,7 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
 }
 
 /* *****************************************************************************
-MIME Helpers
+MIME File Type Helpers
 ***************************************************************************** */
 
 typedef struct {
