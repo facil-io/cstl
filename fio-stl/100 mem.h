@@ -87,7 +87,7 @@ Memory Allocation - fast setup for a specific global allocators
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
-#if defined(FIO_MEMORY_NAME) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_MEMORY_NAME) && !defined(FIO___STL_KEEP)
 
 #undef FIO_MEM_ALIGN
 #undef FIO_MEM_ALIGN_NEW

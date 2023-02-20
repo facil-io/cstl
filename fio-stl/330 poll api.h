@@ -15,7 +15,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO___STL_KEEP)
 
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */

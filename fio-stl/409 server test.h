@@ -2,7 +2,7 @@
 Simple Server Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SERVER) &&                           \
-    !defined(FIO_STL_KEEP__) && !defined(FIO_FIO_TEST_SERVER_ONLY_ONCE) &&     \
+    !defined(FIO___STL_KEEP) && !defined(FIO_FIO_TEST_SERVER_ONLY_ONCE) &&     \
     (!defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE))
 #define FIO_FIO_TEST_SERVER_ONLY_ONCE 1
 /* *****************************************************************************

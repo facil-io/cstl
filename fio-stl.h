@@ -2237,7 +2237,7 @@ Special `extern` support for FIO_EVERYTHING - Everything, and the Kitchen Sink
 ***************************************************************************** */
 #if (defined(FIO_EVERYTHING) || defined(FIO_CORE) || defined(FIO_BASIC) ||     \
      defined(FIO_CRYPT) || defined(FIO_SERVER_COMPLETE)) &&                    \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
 #define FIO_EXTERN                     2
@@ -2270,13 +2270,13 @@ Recursive inclusion management
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#elif !defined(FIO_STL_KEEP__) || (FIO_STL_KEEP__ + 1 != 100)
+#elif !defined(FIO___STL_KEEP) || (FIO___STL_KEEP + 1 != 100)
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
 #define SFUNC FIO_SFUNC
 #define IFUNC FIO_IFUNC
-#endif /* SFUNC_ vs FIO_STL_KEEP__*/
+#endif /* SFUNC_ vs FIO___STL_KEEP*/
 
 /* *****************************************************************************
 Pointer Tagging
@@ -12603,7 +12603,7 @@ failed:
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO___STL_KEEP)
 #define H__FIO_STATE__H
 /* *****************************************************************************
 State Callback API
@@ -13036,7 +13036,7 @@ Memory Allocation - fast setup for a specific global allocators
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
-#if defined(FIO_MEMORY_NAME) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_MEMORY_NAME) && !defined(FIO___STL_KEEP)
 
 #undef FIO_MEM_ALIGN
 #undef FIO_MEM_ALIGN_NEW
@@ -29036,7 +29036,7 @@ Module Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO___STL_KEEP)
 #define H___FIO_CLI___H 1
 
 /* *****************************************************************************
@@ -29230,9 +29230,9 @@ typedef struct {
   ((s).buf                                                                     \
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
        : ((s).len ^ ((s).len << 19)))
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
 static fio___cli_hash_s fio___cli_values = FIO_MAP_INIT;
@@ -29913,7 +29913,7 @@ CLI - cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO___STL_KEEP)
 
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
@@ -30066,7 +30066,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL &&                                \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -30265,7 +30265,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE &&                               \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -30454,7 +30454,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL &&                                 \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -30744,7 +30744,7 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */
 
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO___STL_KEEP)
 #define H___FIO_POLL___H
 #undef FIO_POLL
 #endif /* FIO_POLL */
@@ -30765,7 +30765,7 @@ Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__) &&                         \
+#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP) &&                         \
     !defined(H___FIO_SERVER___H)
 #define H___FIO_SERVER___H
 /* *****************************************************************************
@@ -31387,9 +31387,9 @@ typedef struct {
   } while (0)
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 typedef struct {
   fio_thread_mutex_t lock;
@@ -31461,9 +31461,9 @@ IO Validity Map - Type
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #else
 typedef void *fio_validity_map_s;
 #endif
@@ -31727,9 +31727,9 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#define FIO_STL_KEEP__     1
+#define FIO___STL_KEEP     1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
@@ -32667,7 +32667,7 @@ Done with Server code
 Simple Server Testing
 ***************************************************************************** */
 #if defined(FIO_TEST_CSTL) && defined(FIO_SERVER) &&                           \
-    !defined(FIO_STL_KEEP__) && !defined(FIO_FIO_TEST_SERVER_ONLY_ONCE) &&     \
+    !defined(FIO___STL_KEEP) && !defined(FIO_FIO_TEST_SERVER_ONLY_ONCE) &&     \
     (!defined(FIO_EXTERN) || defined(FIO_EXTERN_COMPLETE))
 #define FIO_FIO_TEST_SERVER_ONLY_ONCE 1
 /* *****************************************************************************
@@ -32775,7 +32775,7 @@ Simple Server Cleanup
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_PUBSUB___H
 
 /* *****************************************************************************
@@ -33212,9 +33212,9 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Distribution Channel: manages subscriptions to named channels. */
 typedef struct fio_channel_s {
@@ -33231,9 +33231,9 @@ typedef struct fio_channel_s {
 #define FIO_REF_NAME             fio_channel
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Subscription: contains subscriber data. */
 typedef struct fio_subscription_s {
@@ -33252,9 +33252,9 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_NAME             fio_subscription
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Channel Map: maps named channels. */
 FIO_SFUNC void fio_channel_on_create(fio_channel_s *ch);
@@ -33285,9 +33285,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
     fio_channel_free((key));                                                   \
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /* *****************************************************************************
 
@@ -33463,9 +33463,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #endif
 
 static struct FIO_POSTOFFICE {
@@ -33843,9 +33843,9 @@ Remote Letter Processing - validate unique delivery.
 #define FIO_OMAP_NAME  fio___letter_map
 #define FIO_MAP_KEY    uint64_t
 #define FIO_MAP_LRU    (1ULL << 16)
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 FIO_SFUNC struct {
   fio___letter_map_s map;
@@ -34781,7 +34781,7 @@ https://www.rfc-editor.org/rfc/rfc9110.html
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -35558,7 +35558,7 @@ FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 /* *****************************************************************************
 String Cache
 ***************************************************************************** */
@@ -35741,7 +35741,7 @@ FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
 #endif
   return fio_bstr_copy(cached.buf);
 }
-FIO_SFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
 #if !FIO_HTTP_CACHE_LIMIT
   return fio_bstr_write(NULL, s.buf, s.len);
 #endif
@@ -35754,15 +35754,16 @@ avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
-FIO_SFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
 #if FIO_HTTP_CACHE_STATIC
   uint64_t hash;
+  char *tmp;
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
   hash = fio_risky_hash(s.buf, s.len, 0);
-  char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+  tmp = fio___http_str_cached_static(hash, s.buf, s.len);
   if (tmp)
     return fio_bstr_copy(tmp);
 avoid_caching:
@@ -36008,7 +36009,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 /* *****************************************************************************
 Simple Property Set / Get
 ***************************************************************************** */
@@ -38175,7 +38176,7 @@ Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO___STL_KEEP)
 #define H___FIO_HTTP___H
 /* *****************************************************************************
 HTTP Setting Defaults
@@ -38403,7 +38404,7 @@ fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 
 typedef struct {
   fio_http_settings_s settings;
@@ -38459,7 +38460,7 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 /* *****************************************************************************
 HTTP On Open - Accepting new connections
 ***************************************************************************** */
@@ -39243,9 +39244,9 @@ the SLT features and could be affected by their inclusion.
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO___STL_KEEP)
 #define H___FIOBJ___H
-#define FIO_STL_KEEP__ 99 /* a magic value to keep FIO_EXTERN rules */
+#define FIO___STL_KEEP 99 /* a magic value to keep FIO_EXTERN rules */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -40517,7 +40518,7 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
   return args.json;
 }
 
-#undef FIO_STL_KEEP__ /* from now on, type helpers are internal */
+#undef FIO___STL_KEEP /* from now on, type helpers are internal */
 /* *****************************************************************************
 
 
@@ -40552,15 +40553,15 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 typedef struct {
   int (*task)(fiobj_each_s *info);
@@ -40990,9 +40991,9 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /* FIOBJ JSON parser */
 typedef struct {
@@ -41684,7 +41685,7 @@ FIOBJ cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_MODULE_NAME) /* && !defined(FIO_STL_KEEP__) */
+#if defined(FIO_MODULE_NAME) /* && !defined(FIO___STL_KEEP) */
 
 /* *****************************************************************************
 Module Settings
@@ -41832,7 +41833,7 @@ Module Cleanup
 /* *****************************************************************************
 Common cleanup
 ***************************************************************************** */
-#ifndef FIO_STL_KEEP__
+#ifndef FIO___STL_KEEP
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
 #if (FIO_EXTERN + 1) < 3
@@ -41867,7 +41868,7 @@ Common cleanup
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#endif /* !FIO_STL_KEEP__ */
+#endif /* !FIO___STL_KEEP */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -42622,7 +42623,7 @@ C++ extern end
 }
 #endif
 
-#if !defined(FIO_STL_KEEP__) && !defined(FIO___STL_SHORTCUTS)
+#if !defined(FIO___STL_KEEP) && !defined(FIO___STL_SHORTCUTS)
 #define FIO___STL_SHORTCUTS
 /* *****************************************************************************
 Everything, and the Kitchen Sink
@@ -42745,7 +42746,7 @@ Cleanup
 #undef FIO_CRYPT
 #undef FIO_SERVER_COMPLETE
 #undef FIO___STL_SHORTCUTS
-#endif /* FIO_STL_KEEP__ */
+#endif /* FIO___STL_KEEP */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H)
 /* *****************************************************************************
@@ -42846,22 +42847,22 @@ Cleanup
 #ifdef FIO_SORT_NAME
 #include "301 sort.h"
 #endif
-#if defined(FIO_CLI) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_CLI) && !defined(FIO___STL_KEEP)
 #include "302 cli.h"
 #endif
-#if defined(FIO_POLL) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_POLL) && !defined(FIO___STL_KEEP)
 #include "330 poll api.h"
 #include "331 poll epoll.h"
 #include "331 poll kqueue.h"
 #include "331 poll poll.h"
 #endif
-#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP)
 #include "400 server.h"
 #if defined(FIO_TEST_CSTL)
 #include "409 server test.h"
 #endif
 #endif
-#if defined(FIO_PUBSUB) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_PUBSUB) && !defined(FIO___STL_KEEP)
 #include "420 pubsub.h"
 #endif
 
@@ -42869,15 +42870,15 @@ Cleanup
 #include "431 http1 parser.h"
 #endif
 
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP_HANDLE) && !defined(FIO___STL_KEEP)
 #include "431 http handle.h"
 #endif
 
-#if defined(FIO_HTTP) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP) && !defined(FIO___STL_KEEP)
 #include "439 http.h"
 #endif
 
-#if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_FIOBJ) && !defined(FIO___STL_KEEP)
 #include "500 fiobj.h"
 #endif
 
@@ -42886,7 +42887,7 @@ Cleanup
 #endif
 
 #if defined(FIO_TEST_CSTL) && !defined(FIO_FIO_TEST_CSTL_ONLY_ONCE) &&         \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #include "998 tests.h"
 #endif
 

@@ -15,7 +15,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__) &&                         \
+#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP) &&                         \
     !defined(H___FIO_SERVER___H)
 #define H___FIO_SERVER___H
 /* *****************************************************************************
@@ -637,9 +637,9 @@ typedef struct {
   } while (0)
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 typedef struct {
   fio_thread_mutex_t lock;
@@ -711,9 +711,9 @@ IO Validity Map - Type
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #else
 typedef void *fio_validity_map_s;
 #endif
@@ -977,9 +977,9 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #define FIO_REF_NAME       fio
 #define FIO_REF_INIT(o)    fio_s_init(&(o))
 #define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#define FIO_STL_KEEP__     1
+#define FIO___STL_KEEP     1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;

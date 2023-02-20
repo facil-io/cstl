@@ -20,7 +20,7 @@ https://www.rfc-editor.org/rfc/rfc9110.html
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -797,7 +797,7 @@ FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 /* *****************************************************************************
 String Cache
 ***************************************************************************** */
@@ -980,7 +980,7 @@ FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
 #endif
   return fio_bstr_copy(cached.buf);
 }
-FIO_SFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
 #if !FIO_HTTP_CACHE_LIMIT
   return fio_bstr_write(NULL, s.buf, s.len);
 #endif
@@ -993,15 +993,16 @@ avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
-FIO_SFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
+FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
 #if FIO_HTTP_CACHE_STATIC
   uint64_t hash;
+  char *tmp;
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
   hash = fio_risky_hash(s.buf, s.len, 0);
-  char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+  tmp = fio___http_str_cached_static(hash, s.buf, s.len);
   if (tmp)
     return fio_bstr_copy(tmp);
 avoid_caching:
@@ -1247,7 +1248,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 /* *****************************************************************************
 Simple Property Set / Get
 ***************************************************************************** */

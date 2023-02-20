@@ -15,7 +15,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_STATE) && !defined(H__FIO_STATE__H) && !defined(FIO___STL_KEEP)
 #define H__FIO_STATE__H
 /* *****************************************************************************
 State Callback API

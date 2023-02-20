@@ -14,7 +14,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO___STL_KEEP)
 #define H___FIO_CLI___H 1
 
 /* *****************************************************************************
@@ -208,9 +208,9 @@ typedef struct {
   ((s).buf                                                                     \
        ? fio_risky_hash((s).buf, (s).len, (uint64_t)(uintptr_t)fio_cli_start)  \
        : ((s).len ^ ((s).len << 19)))
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 static fio___cli_hash_s fio___cli_aliases = FIO_MAP_INIT;
 static fio___cli_hash_s fio___cli_values = FIO_MAP_INIT;

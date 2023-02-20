@@ -98,22 +98,22 @@
 #ifdef FIO_SORT_NAME
 #include "301 sort.h"
 #endif
-#if defined(FIO_CLI) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_CLI) && !defined(FIO___STL_KEEP)
 #include "302 cli.h"
 #endif
-#if defined(FIO_POLL) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_POLL) && !defined(FIO___STL_KEEP)
 #include "330 poll api.h"
 #include "331 poll epoll.h"
 #include "331 poll kqueue.h"
 #include "331 poll poll.h"
 #endif
-#if defined(FIO_SERVER) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP)
 #include "400 server.h"
 #if defined(FIO_TEST_CSTL)
 #include "409 server test.h"
 #endif
 #endif
-#if defined(FIO_PUBSUB) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_PUBSUB) && !defined(FIO___STL_KEEP)
 #include "420 pubsub.h"
 #endif
 
@@ -121,15 +121,15 @@
 #include "431 http1 parser.h"
 #endif
 
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP_HANDLE) && !defined(FIO___STL_KEEP)
 #include "431 http handle.h"
 #endif
 
-#if defined(FIO_HTTP) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP) && !defined(FIO___STL_KEEP)
 #include "439 http.h"
 #endif
 
-#if defined(FIO_FIOBJ) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_FIOBJ) && !defined(FIO___STL_KEEP)
 #include "500 fiobj.h"
 #endif
 
@@ -138,7 +138,7 @@
 #endif
 
 #if defined(FIO_TEST_CSTL) && !defined(FIO_FIO_TEST_CSTL_ONLY_ONCE) &&         \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #include "998 tests.h"
 #endif
 

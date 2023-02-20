@@ -17,7 +17,7 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #define H___FIO_PUBSUB___H
 
 /* *****************************************************************************
@@ -454,9 +454,9 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Distribution Channel: manages subscriptions to named channels. */
 typedef struct fio_channel_s {
@@ -473,9 +473,9 @@ typedef struct fio_channel_s {
 #define FIO_REF_NAME             fio_channel
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Subscription: contains subscriber data. */
 typedef struct fio_subscription_s {
@@ -494,9 +494,9 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_NAME             fio_subscription
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /** The Channel Map: maps named channels. */
 FIO_SFUNC void fio_channel_on_create(fio_channel_s *ch);
@@ -527,9 +527,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
     fio_channel_free((key));                                                   \
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /* *****************************************************************************
 
@@ -705,9 +705,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #endif
 
 static struct FIO_POSTOFFICE {
@@ -1085,9 +1085,9 @@ Remote Letter Processing - validate unique delivery.
 #define FIO_OMAP_NAME  fio___letter_map
 #define FIO_MAP_KEY    uint64_t
 #define FIO_MAP_LRU    (1ULL << 16)
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 FIO_SFUNC struct {
   fio___letter_map_s map;

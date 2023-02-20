@@ -2105,7 +2105,7 @@ Special `extern` support for FIO_EVERYTHING - Everything, and the Kitchen Sink
 ***************************************************************************** */
 #if (defined(FIO_EVERYTHING) || defined(FIO_CORE) || defined(FIO_BASIC) ||     \
      defined(FIO_CRYPT) || defined(FIO_SERVER_COMPLETE)) &&                    \
-    !defined(FIO_STL_KEEP__)
+    !defined(FIO___STL_KEEP)
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
 #define FIO_EXTERN                     2
@@ -2138,13 +2138,13 @@ Recursive inclusion management
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#elif !defined(FIO_STL_KEEP__) || (FIO_STL_KEEP__ + 1 != 100)
+#elif !defined(FIO___STL_KEEP) || (FIO___STL_KEEP + 1 != 100)
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
 #define SFUNC FIO_SFUNC
 #define IFUNC FIO_IFUNC
-#endif /* SFUNC_ vs FIO_STL_KEEP__*/
+#endif /* SFUNC_ vs FIO___STL_KEEP*/
 
 /* *****************************************************************************
 Pointer Tagging

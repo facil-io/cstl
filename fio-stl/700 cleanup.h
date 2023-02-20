@@ -13,7 +13,7 @@
 /* *****************************************************************************
 Common cleanup
 ***************************************************************************** */
-#ifndef FIO_STL_KEEP__
+#ifndef FIO___STL_KEEP
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
 #if (FIO_EXTERN + 1) < 3
@@ -48,4 +48,4 @@ Common cleanup
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#endif /* !FIO_STL_KEEP__ */
+#endif /* !FIO___STL_KEEP */

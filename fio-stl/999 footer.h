@@ -13,7 +13,7 @@ C++ extern end
 }
 #endif
 
-#if !defined(FIO_STL_KEEP__) && !defined(FIO___STL_SHORTCUTS)
+#if !defined(FIO___STL_KEEP) && !defined(FIO___STL_SHORTCUTS)
 #define FIO___STL_SHORTCUTS
 /* *****************************************************************************
 Everything, and the Kitchen Sink
@@ -136,4 +136,4 @@ Cleanup
 #undef FIO_CRYPT
 #undef FIO_SERVER_COMPLETE
 #undef FIO___STL_SHORTCUTS
-#endif /* FIO_STL_KEEP__ */
+#endif /* FIO___STL_KEEP */

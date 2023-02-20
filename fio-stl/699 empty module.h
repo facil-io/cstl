@@ -16,7 +16,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_MODULE_NAME) /* && !defined(FIO_STL_KEEP__) */
+#if defined(FIO_MODULE_NAME) /* && !defined(FIO___STL_KEEP) */
 
 /* *****************************************************************************
 Module Settings

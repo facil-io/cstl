@@ -16,7 +16,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO___STL_KEEP)
 #define H___FIO_HTTP___H
 /* *****************************************************************************
 HTTP Setting Defaults
@@ -244,7 +244,7 @@ fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
-#define FIO_STL_KEEP__ 1
+#define FIO___STL_KEEP 1
 
 typedef struct {
   fio_http_settings_s settings;
@@ -300,7 +300,7 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 /* *****************************************************************************
 HTTP On Open - Accepting new connections
 ***************************************************************************** */

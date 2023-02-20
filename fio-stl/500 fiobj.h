@@ -34,9 +34,9 @@ the SLT features and could be affected by their inclusion.
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO_STL_KEEP__)
+#if defined(FIO_FIOBJ) && !defined(H___FIOBJ___H) && !defined(FIO___STL_KEEP)
 #define H___FIOBJ___H
-#define FIO_STL_KEEP__ 99 /* a magic value to keep FIO_EXTERN rules */
+#define FIO___STL_KEEP 99 /* a magic value to keep FIO_EXTERN rules */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -1308,7 +1308,7 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
   return args.json;
 }
 
-#undef FIO_STL_KEEP__ /* from now on, type helpers are internal */
+#undef FIO___STL_KEEP /* from now on, type helpers are internal */
 /* *****************************************************************************
 
 
@@ -1343,15 +1343,15 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO_STL_KEEP__           1
+#define FIO___STL_KEEP           1
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 typedef struct {
   int (*task)(fiobj_each_s *info);
@@ -1781,9 +1781,9 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
-#define FIO_STL_KEEP__
+#define FIO___STL_KEEP
 #include FIO_INCLUDE_FILE
-#undef FIO_STL_KEEP__
+#undef FIO___STL_KEEP
 
 /* FIOBJ JSON parser */
 typedef struct {
