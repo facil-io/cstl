@@ -295,7 +295,6 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    fio_http_free(o.h);                                                        \
     fio_http_protocol_free(                                                    \
         FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, o.settings));        \
   } while (0)
@@ -351,7 +350,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (FIO_LIKELY(fio_is_open(c->io)))
     cb.fn(h);
-  fio_http_free(h);
+  else
+    fio_http_write(h, .finish = 1);
 }
 
 FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
@@ -360,11 +360,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
     void *ptr;
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (FIO_LIKELY(fio_is_open(c->io)))
-    if (cb.fn(h))
-      fio_http_send_error_response(h, 403);
-  fio_http_free(h);
+  if (cb.fn(h))
+    fio_http_send_error_response(h, 403);
 }
 
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
@@ -483,8 +480,10 @@ static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_dup(c->io);
   fio_suspend(c->io);
+  fio_http_s *h = c->h;
+  c->h = NULL;
   c->suspend = 1;
-  fio_queue_push(fio_srv_queue(), c->on_http_callback, fio_http_dup(c->h));
+  fio_queue_push(fio_srv_queue(), c->on_http_callback, h);
 }
 
 /* *****************************************************************************
@@ -651,11 +650,12 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
 }
 
 FIO_SFUNC void fio___http_on_close(void *udata) {
+#if DEBUG
+  FIO_LOG_DEBUG2("(%d) HTTP connection closed for %p", getpid(), udata);
+#endif
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
-  fio_http_s *h = c->h;
-  c->h = NULL;
-  fio_http_free(h);
+  fio_http_free(c->h);
   fio___http_connection_free(c);
 }
 
@@ -820,7 +820,6 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
                                                           void *ignr_) {
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  c->h = NULL;
   c->suspend = 0;
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
@@ -926,7 +925,7 @@ FIO_SFUNC void fio___http_controller_on_destroyed_task(void *c_, void *ignr_) {
 }
 
 // /** Called when an HTTP handle is freed. */
-void fio__http_controller_on_destroyed(fio_http_s *h) {
+FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
   fio_queue_push(fio_srv_queue(),
                  fio___http_controller_on_destroyed_task,
                  fio_http_cdata(h));

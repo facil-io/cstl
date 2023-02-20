@@ -13,7 +13,8 @@ C++ extern end
 }
 #endif
 
-#if !defined(FIO_STL_KEEP__)
+#if !defined(FIO_STL_KEEP__) && !defined(FIO___STL_SHORTCUTS)
+#define FIO___STL_SHORTCUTS
 /* *****************************************************************************
 Everything, and the Kitchen Sink
 ***************************************************************************** */
@@ -41,7 +42,9 @@ Basic Elements - Pre Allocator
 #undef FIO_BASIC___PRE
 
 #define FIO_CLI
+#define FIO_FILES
 #define FIO_LOG
+#define FIO_STATE
 #define FIO_THREADS
 #include FIO_INCLUDE_FILE
 
@@ -58,12 +61,10 @@ Core Elements
 #define FIO_ATOMIC
 #define FIO_BITMAP
 #define FIO_BITWISE
-#define FIO_FILES
 #define FIO_GLOB_MATCH
 #define FIO_LOG
 #define FIO_MATH
 #define FIO_RAND
-#define FIO_STATE
 #define FIO_STR
 #define FIO_TIME
 #define FIO_URL
@@ -134,5 +135,5 @@ Cleanup
 #undef FIO_CORE
 #undef FIO_CRYPT
 #undef FIO_SERVER_COMPLETE
-
+#undef FIO___STL_SHORTCUTS
 #endif /* FIO_STL_KEEP__ */

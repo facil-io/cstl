@@ -1296,7 +1296,7 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   static size_t performed_idle = 0;
   if (fio_poll_review(&fio___srvdata.poll_data, timeout) > 0) {
     performed_idle = 0;
-  } else {
+  } else if (timeout) {
     if (!performed_idle)
       fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
@@ -1313,7 +1313,11 @@ FIO_SFUNC void fio___srv_run_async_as_sync(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   unsigned repeat = 0;
   FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, pos) {
-    repeat += !fio_queue_perform(&pos->queue);
+    fio_queue_task_s t = fio_queue_pop(&pos->queue);
+    if (!t.fn)
+      continue;
+    t.fn(t.udata1, t.udata2);
+    repeat = 1;
   }
   if (repeat)
     fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
@@ -1882,6 +1886,7 @@ failed:
 }
 FIO_SFUNC void fio___srv_async_finish(void *q_) {
   fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  q->q = fio___srv_tasks;
   fio_queue_workers_stop(&q->queue);
   fio_queue_perform_all(&q->queue);
   fio_queue_destroy(&q->queue);
@@ -1893,6 +1898,7 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
       .queue = FIO_QUEUE_STATIC_INIT(q->queue),
       .count = threads,
       .q = fio_srv_queue(),
+      .node = FIO_LIST_INIT(q->node),
   };
   if (!threads)
     return;

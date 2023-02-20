@@ -149,7 +149,7 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO___REF_ON_FREE()                                                    \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 
-void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
+static void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
     FIO_LOG_ERROR(
         "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "

@@ -487,11 +487,10 @@ finish:
 /** Performs a task from the queue. Returns -1 on error (queue empty). */
 SFUNC int fio_queue_perform(fio_queue_s *q) {
   fio_queue_task_s t = fio_queue_pop(q);
-  if (t.fn) {
-    t.fn(t.udata1, t.udata2);
-    return 0;
-  }
-  return -1;
+  if (!t.fn)
+    return -1;
+  t.fn(t.udata1, t.udata2);
+  return 0;
 }
 
 /** Performs all tasks in the queue. */

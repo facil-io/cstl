@@ -58,8 +58,8 @@ HTTP Handle Settings
 #endif
 
 #ifndef FIO_HTTP_CACHE_LIMIT
-/** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) + (1UL << 5))
+/** Each of the HTTP String Caches will be limited to this String count. */
+#define FIO_HTTP_CACHE_LIMIT 0 /* ((1UL << 6) + (1UL << 5)) */
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -810,12 +810,10 @@ String Cache
 static struct {
   fio___http_str_cache_s cache;
   FIO___LOCK_TYPE lock;
-} FIO___HTTP_STRING_CACHE[3] = {{.lock = FIO___LOCK_INIT},
-                                {.lock = FIO___LOCK_INIT},
+} FIO___HTTP_STRING_CACHE[2] = {{.lock = FIO___LOCK_INIT},
                                 {.lock = FIO___LOCK_INIT}};
-#define FIO___HTTP_STR_CACHE_NAME   0
-#define FIO___HTTP_STR_CACHE_COOKIE 1
-#define FIO___HTTP_STR_CACHE_VALUE  2
+#define FIO___HTTP_STR_CACHE_COOKIE 0
+#define FIO___HTTP_STR_CACHE_VALUE  1
 
 #if FIO_HTTP_CACHE_STATIC
 
@@ -965,6 +963,9 @@ static char *fio___http_str_cached_static(uint64_t hash,
 FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
                                             uint64_t hash,
                                             fio_str_info_s s) {
+#if !FIO_HTTP_CACHE_LIMIT
+  return fio_bstr_write(NULL, s.buf, s.len);
+#endif
   fio_str_info_s cached;
   hash ^= (uint64_t)(uintptr_t)fio_http_new;
 #if FIO_HTTP_CACHE_USES_MUTEX
@@ -979,7 +980,10 @@ FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
 #endif
   return fio_bstr_copy(cached.buf);
 }
-static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_SFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+#if !FIO_HTTP_CACHE_LIMIT
+  return fio_bstr_write(NULL, s.buf, s.len);
+#endif
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
@@ -989,20 +993,19 @@ avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
-static char *fio___http_str_cached_with_static(fio_str_info_s s) {
+FIO_SFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
+#if FIO_HTTP_CACHE_STATIC
   uint64_t hash;
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
   hash = fio_risky_hash(s.buf, s.len, 0);
-#if FIO_HTTP_CACHE_STATIC
   char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
   if (tmp)
     return fio_bstr_copy(tmp);
-#endif /* FIO_HTTP_CACHE_STATIC */
-  return fio___http_str_cached_inner(FIO___HTTP_STR_CACHE_NAME, hash, s);
 avoid_caching:
+#endif /* FIO_HTTP_CACHE_STATIC */
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
@@ -2823,8 +2826,9 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 }
 
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
-  for (size_t i = 0; i < 3; ++i) {
-    const char *names[] = {"header names", "cookie names", "header values"};
+#if FIO_HTTP_CACHE_LIMIT
+  for (size_t i = 0; i < 2; ++i) {
+    const char *names[] = {"cookie names", "header values"};
     FIO_LOG_DEBUG2(
         "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
         getpid(),
@@ -2844,6 +2848,7 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
     (void)names; /* if unused */
   }
+#endif /* FIO_HTTP_CACHE_LIMIT */
   FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
                  FIO___HTTP_MIMETYPES.count,
                  fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));

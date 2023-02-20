@@ -12731,9 +12731,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
 /* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
-/* use `weak` instead of `static` to make sure state in global. */
-FIO_WEAK fio___state_map_s fio___state_tasks_array[FIO_CALL_NEVER + 1];
-FIO_WEAK fio_lock_i fio___state_tasks_array_lock[FIO_CALL_NEVER + 1];
+/* use `weak` instead of `static` to make sure state callbacks are global. */
+FIO_WEAK fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
+FIO_WEAK fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
 
 /** a type-to-string map for callback types */
 FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
@@ -12763,7 +12763,7 @@ FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
 
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
-    fio___state_map_destroy(fio___state_tasks_array + i);
+    fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
   }
 }
 
@@ -12774,11 +12774,11 @@ SFUNC void fio_state_callback_add(fio_state_event_type_e e,
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
   fio___state_task_s t = {.func = func, .arg = arg};
-  fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  fio___state_map_set(fio___state_tasks_array + (uintptr_t)e, t, 0);
-  fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
+  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  fio___state_map_set(FIO___STATE_TASKS_ARRAY + (uintptr_t)e, t, 0);
+  fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
   if (e == FIO_CALL_ON_INITIALIZE &&
-      fio___state_tasks_array_lock[FIO_CALL_NEVER]) {
+      FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER]) {
     /* initialization tasks already performed, perform this without delay */
     func(arg);
   }
@@ -12792,9 +12792,9 @@ SFUNC int fio_state_callback_remove(fio_state_event_type_e e,
     return -1;
   int ret;
   fio___state_task_s t = {.func = func, .arg = arg};
-  fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  ret = fio___state_map_remove(fio___state_tasks_array + (uintptr_t)e, t);
-  fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
+  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  ret = fio___state_map_remove(FIO___STATE_TASKS_ARRAY + (uintptr_t)e, t);
+  fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
   return ret;
 }
 
@@ -12802,9 +12802,9 @@ SFUNC int fio_state_callback_remove(fio_state_event_type_e e,
 SFUNC void fio_state_callback_clear(fio_state_event_type_e e) {
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
-  fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  fio___state_map_destroy(fio___state_tasks_array + (uintptr_t)e);
-  fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
+  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + (uintptr_t)e);
+  fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
 }
 
 FIO_SFUNC void fio_state_callback_force___task(void *fn_p, void *arg) {
@@ -12828,16 +12828,16 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   if (e == FIO_CALL_AFTER_FORK) {
     /* make sure the `after_fork` events re-initializes all locks. */
     for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
-      fio___state_tasks_array_lock[i] = FIO_LOCK_INIT;
+      FIO___STATE_TASKS_ARRAY_LOCK[i] = FIO_LOCK_INIT;
     }
   }
   if (e == FIO_CALL_IN_CHILD)
     fio_rand_reseed(); /* re-seed random state in child processes */
   fio___state_task_s *ary = NULL;
-  size_t ary_capa = (sizeof(*ary) * fio___state_tasks_array[e].count);
+  size_t ary_capa = (sizeof(*ary) * FIO___STATE_TASKS_ARRAY[e].count);
   size_t len = 0;
   if (e == FIO_CALL_ON_INITIALIZE) {
-    fio_trylock(fio___state_tasks_array_lock + FIO_CALL_NEVER);
+    fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER);
   }
 
   FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
@@ -12845,17 +12845,17 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
                   fio___state_tasks_names[e]);
 
   /* copy task queue */
-  fio_lock(fio___state_tasks_array_lock + (uintptr_t)e);
-  if (fio___state_tasks_array[e].w) {
+  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  if (FIO___STATE_TASKS_ARRAY[e].w) {
     ary = (fio___state_task_s *)FIO_MEM_REALLOC(NULL, 0, ary_capa, 0);
     FIO_ASSERT_ALLOC(ary);
-    for (size_t i = 0; i < fio___state_tasks_array[e].w; ++i) {
-      if (!fio___state_tasks_array[e].ary[i].func)
+    for (size_t i = 0; i < FIO___STATE_TASKS_ARRAY[e].w; ++i) {
+      if (!FIO___STATE_TASKS_ARRAY[e].ary[i].func)
         continue;
-      ary[len++] = fio___state_tasks_array[e].ary[i];
+      ary[len++] = FIO___STATE_TASKS_ARRAY[e].ary[i];
     }
   }
-  fio_unlock(fio___state_tasks_array_lock + (uintptr_t)e);
+  fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
 
   if (e <= FIO_CALL_PRE_START) {
     /* perform copied tasks immediately within system thread */
@@ -16509,11 +16509,10 @@ finish:
 /** Performs a task from the queue. Returns -1 on error (queue empty). */
 SFUNC int fio_queue_perform(fio_queue_s *q) {
   fio_queue_task_s t = fio_queue_pop(q);
-  if (t.fn) {
-    t.fn(t.udata1, t.udata2);
-    return 0;
-  }
-  return -1;
+  if (!t.fn)
+    return -1;
+  t.fn(t.udata1, t.udata2);
+  return 0;
 }
 
 /** Performs all tasks in the queue. */
@@ -28600,7 +28599,7 @@ static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
 #define FIO___REF_ON_FREE()                                                    \
   fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
 
-void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
+static void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
   if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
     FIO_LOG_ERROR(
         "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "
@@ -32047,7 +32046,7 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   static size_t performed_idle = 0;
   if (fio_poll_review(&fio___srvdata.poll_data, timeout) > 0) {
     performed_idle = 0;
-  } else {
+  } else if (timeout) {
     if (!performed_idle)
       fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
@@ -32064,7 +32063,11 @@ FIO_SFUNC void fio___srv_run_async_as_sync(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   unsigned repeat = 0;
   FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, pos) {
-    repeat += !fio_queue_perform(&pos->queue);
+    fio_queue_task_s t = fio_queue_pop(&pos->queue);
+    if (!t.fn)
+      continue;
+    t.fn(t.udata1, t.udata2);
+    repeat = 1;
   }
   if (repeat)
     fio_queue_push(fio___srv_tasks, fio___srv_run_async_as_sync);
@@ -32633,6 +32636,7 @@ failed:
 }
 FIO_SFUNC void fio___srv_async_finish(void *q_) {
   fio_srv_async_s *q = (fio_srv_async_s *)q_;
+  q->q = fio___srv_tasks;
   fio_queue_workers_stop(&q->queue);
   fio_queue_perform_all(&q->queue);
   fio_queue_destroy(&q->queue);
@@ -32644,6 +32648,7 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
       .queue = FIO_QUEUE_STATIC_INIT(q->queue),
       .count = threads,
       .q = fio_srv_queue(),
+      .node = FIO_LIST_INIT(q->node),
   };
   if (!threads)
     return;
@@ -34814,8 +34819,8 @@ HTTP Handle Settings
 #endif
 
 #ifndef FIO_HTTP_CACHE_LIMIT
-/** Each of the 3 HTTP String Caches will be limited to this String count. */
-#define FIO_HTTP_CACHE_LIMIT ((1UL << 6) + (1UL << 5))
+/** Each of the HTTP String Caches will be limited to this String count. */
+#define FIO_HTTP_CACHE_LIMIT 0 /* ((1UL << 6) + (1UL << 5)) */
 #endif
 
 #ifndef FIO_HTTP_CACHE_STR_MAX_LEN
@@ -35566,12 +35571,10 @@ String Cache
 static struct {
   fio___http_str_cache_s cache;
   FIO___LOCK_TYPE lock;
-} FIO___HTTP_STRING_CACHE[3] = {{.lock = FIO___LOCK_INIT},
-                                {.lock = FIO___LOCK_INIT},
+} FIO___HTTP_STRING_CACHE[2] = {{.lock = FIO___LOCK_INIT},
                                 {.lock = FIO___LOCK_INIT}};
-#define FIO___HTTP_STR_CACHE_NAME   0
-#define FIO___HTTP_STR_CACHE_COOKIE 1
-#define FIO___HTTP_STR_CACHE_VALUE  2
+#define FIO___HTTP_STR_CACHE_COOKIE 0
+#define FIO___HTTP_STR_CACHE_VALUE  1
 
 #if FIO_HTTP_CACHE_STATIC
 
@@ -35721,6 +35724,9 @@ static char *fio___http_str_cached_static(uint64_t hash,
 FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
                                             uint64_t hash,
                                             fio_str_info_s s) {
+#if !FIO_HTTP_CACHE_LIMIT
+  return fio_bstr_write(NULL, s.buf, s.len);
+#endif
   fio_str_info_s cached;
   hash ^= (uint64_t)(uintptr_t)fio_http_new;
 #if FIO_HTTP_CACHE_USES_MUTEX
@@ -35735,7 +35741,10 @@ FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
 #endif
   return fio_bstr_copy(cached.buf);
 }
-static char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+FIO_SFUNC char *fio___http_str_cached(size_t group, fio_str_info_s s) {
+#if !FIO_HTTP_CACHE_LIMIT
+  return fio_bstr_write(NULL, s.buf, s.len);
+#endif
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
@@ -35745,20 +35754,19 @@ avoid_caching:
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
-static char *fio___http_str_cached_with_static(fio_str_info_s s) {
+FIO_SFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
+#if FIO_HTTP_CACHE_STATIC
   uint64_t hash;
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto avoid_caching;
   hash = fio_risky_hash(s.buf, s.len, 0);
-#if FIO_HTTP_CACHE_STATIC
   char *tmp = fio___http_str_cached_static(hash, s.buf, s.len);
   if (tmp)
     return fio_bstr_copy(tmp);
-#endif /* FIO_HTTP_CACHE_STATIC */
-  return fio___http_str_cached_inner(FIO___HTTP_STR_CACHE_NAME, hash, s);
 avoid_caching:
+#endif /* FIO_HTTP_CACHE_STATIC */
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
@@ -37579,8 +37587,9 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 }
 
 FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
-  for (size_t i = 0; i < 3; ++i) {
-    const char *names[] = {"header names", "cookie names", "header values"};
+#if FIO_HTTP_CACHE_LIMIT
+  for (size_t i = 0; i < 2; ++i) {
+    const char *names[] = {"cookie names", "header values"};
     FIO_LOG_DEBUG2(
         "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
         getpid(),
@@ -37600,6 +37609,7 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
     FIO___LOCK_DESTROY(FIO___HTTP_STRING_CACHE[i].lock);
     (void)names; /* if unused */
   }
+#endif /* FIO_HTTP_CACHE_LIMIT */
   FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
                  FIO___HTTP_MIMETYPES.count,
                  fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
@@ -38444,7 +38454,6 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    fio_http_free(o.h);                                                        \
     fio_http_protocol_free(                                                    \
         FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, o.settings));        \
   } while (0)
@@ -38500,7 +38509,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (FIO_LIKELY(fio_is_open(c->io)))
     cb.fn(h);
-  fio_http_free(h);
+  else
+    fio_http_write(h, .finish = 1);
 }
 
 FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
@@ -38509,11 +38519,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
     void *ptr;
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (FIO_LIKELY(fio_is_open(c->io)))
-    if (cb.fn(h))
-      fio_http_send_error_response(h, 403);
-  fio_http_free(h);
+  if (cb.fn(h))
+    fio_http_send_error_response(h, 403);
 }
 
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
@@ -38632,8 +38639,10 @@ static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_dup(c->io);
   fio_suspend(c->io);
+  fio_http_s *h = c->h;
+  c->h = NULL;
   c->suspend = 1;
-  fio_queue_push(fio_srv_queue(), c->on_http_callback, fio_http_dup(c->h));
+  fio_queue_push(fio_srv_queue(), c->on_http_callback, h);
 }
 
 /* *****************************************************************************
@@ -38800,11 +38809,12 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
 }
 
 FIO_SFUNC void fio___http_on_close(void *udata) {
+#if DEBUG
+  FIO_LOG_DEBUG2("(%d) HTTP connection closed for %p", getpid(), udata);
+#endif
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
-  fio_http_s *h = c->h;
-  c->h = NULL;
-  fio_http_free(h);
+  fio_http_free(c->h);
   fio___http_connection_free(c);
 }
 
@@ -38969,7 +38979,6 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
                                                           void *ignr_) {
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  c->h = NULL;
   c->suspend = 0;
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
@@ -39075,7 +39084,7 @@ FIO_SFUNC void fio___http_controller_on_destroyed_task(void *c_, void *ignr_) {
 }
 
 // /** Called when an HTTP handle is freed. */
-void fio__http_controller_on_destroyed(fio_http_s *h) {
+FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
   fio_queue_push(fio_srv_queue(),
                  fio___http_controller_on_destroyed_task,
                  fio_http_cdata(h));
@@ -42613,7 +42622,8 @@ C++ extern end
 }
 #endif
 
-#if !defined(FIO_STL_KEEP__)
+#if !defined(FIO_STL_KEEP__) && !defined(FIO___STL_SHORTCUTS)
+#define FIO___STL_SHORTCUTS
 /* *****************************************************************************
 Everything, and the Kitchen Sink
 ***************************************************************************** */
@@ -42641,7 +42651,9 @@ Basic Elements - Pre Allocator
 #undef FIO_BASIC___PRE
 
 #define FIO_CLI
+#define FIO_FILES
 #define FIO_LOG
+#define FIO_STATE
 #define FIO_THREADS
 #include FIO_INCLUDE_FILE
 
@@ -42658,12 +42670,10 @@ Core Elements
 #define FIO_ATOMIC
 #define FIO_BITMAP
 #define FIO_BITWISE
-#define FIO_FILES
 #define FIO_GLOB_MATCH
 #define FIO_LOG
 #define FIO_MATH
 #define FIO_RAND
-#define FIO_STATE
 #define FIO_STR
 #define FIO_TIME
 #define FIO_URL
@@ -42734,7 +42744,7 @@ Cleanup
 #undef FIO_CORE
 #undef FIO_CRYPT
 #undef FIO_SERVER_COMPLETE
-
+#undef FIO___STL_SHORTCUTS
 #endif /* FIO_STL_KEEP__ */
 /* ************************************************************************* */
 #if !defined(H___FIO_CSTL_COMBINED___H)
