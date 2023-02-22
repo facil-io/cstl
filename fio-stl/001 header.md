@@ -644,6 +644,19 @@ If `token` is found, returns the address of the token's first appearance. Otherw
 
 On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
+#### `FIO_MEMCMP`
+
+```c
+#ifndef
+#define FIO_MEMCMP memcmp // or __builtin_memcmp if available
+#endif
+```
+
+This macro makes it easy to override the `memcmp` implementation used by the library.
+
+By default this will be set to either `memcmp` or `__builtin_memcmp` (if available). It can also be set to `fio_memcmp` if need be.
+
+
 #### `fio_memcmp`
 
 ```c
@@ -653,6 +666,32 @@ static int fio_memcmp(const void *a, const void *b, size_t len);
 A fallback for `memcmp`, comparing two memory regions by byte values.
 
 Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
+
+#### `FIO_MEMALT`
+
+If defined, defines all previously undefined memory macros to use facil.io's fallback options.
+
+Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `fio_memcpy##` functions.
+
+```c
+#ifdef FIO_MEMALT
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY fio_memcpy
+#endif
+#ifndef FIO_MEMMOVE
+#define FIO_MEMMOVE fio_memcpy
+#endif
+#ifndef FIO_MEMCMP
+#define FIO_MEMCMP fio_memcmp
+#endif
+#ifndef FIO_MEMCHR
+#define FIO_MEMCHR fio_memchr
+#endif
+#ifndef FIO_MEMSET
+#define FIO_MEMSET fio_memset
+#endif
+#endif /* FIO_MEMALT */
+```
 
 -------------------------------------------------------------------------------
 

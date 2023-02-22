@@ -596,9 +596,26 @@ Switching Endian Ordering
 /* *****************************************************************************
 Memory Copying Primitives
 ***************************************************************************** */
+#ifdef FIO_MEMALT
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY fio_memcpy
+#endif
+#ifndef FIO_MEMMOVE
+#define FIO_MEMMOVE fio_memcpy
+#endif
+#ifndef FIO_MEMCMP
+#define FIO_MEMCMP fio_memcmp
+#endif
+#ifndef FIO_MEMCHR
+#define FIO_MEMCHR fio_memchr
+#endif
+#ifndef FIO_MEMSET
+#define FIO_MEMSET fio_memset
+#endif
+#endif /* FIO_MEMALT */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
+#if !defined(FIO_MEMALT) && __has_builtin(__builtin_memcpy)
 #ifndef FIO_MEMCPY
 /** `memcpy` selector macro */
 #define FIO_MEMCPY __builtin_memcpy
