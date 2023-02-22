@@ -568,6 +568,8 @@ static void * fio_memcpy64(void *restrict dest, const void *restrict src);
 
 Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including).
 
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
 #### `fio_memcpy##x`
 
 ```c
@@ -582,6 +584,8 @@ Copies up to `n-1` bytes from `src` to `dest` where `n` is a power of 2 between 
 
 This is provided to allow for easy "tail" processing.
 
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
 #### `fio_memcpy`
 
 ```c
@@ -593,6 +597,8 @@ A fallback for `memcpy` and `memmove`, copies `length` bytes from `src` to `dest
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
 On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
+
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_MEMSET`
 
@@ -620,6 +626,8 @@ On most of `clib` implementations the library call will be faster. On embedded s
 
 Returns `dest` (the pointer originally received).
 
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
 #### `FIO_MEMCHR`
 
 ```c
@@ -644,6 +652,8 @@ If `token` is found, returns the address of the token's first appearance. Otherw
 
 On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
 
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
 #### `FIO_MEMCMP`
 
 ```c
@@ -656,7 +666,6 @@ This macro makes it easy to override the `memcmp` implementation used by the lib
 
 By default this will be set to either `memcmp` or `__builtin_memcmp` (if available). It can also be set to `fio_memcmp` if need be.
 
-
 #### `fio_memcmp`
 
 ```c
@@ -666,6 +675,8 @@ static int fio_memcmp(const void *a, const void *b, size_t len);
 A fallback for `memcmp`, comparing two memory regions by byte values.
 
 Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
+
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_MEMALT`
 

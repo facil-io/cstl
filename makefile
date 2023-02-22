@@ -731,19 +731,19 @@ $(TMP_ROOT)/%.o: create_tree %.c $(TMP_ROOT)/%.d
 	@$(DISAMS) $(TMP_ROOT)/$*.o $(AFTER_DISAMS___)
 
 $(TMP_ROOT)/%.o: create_tree %.cpp $(TMP_ROOT)/%.d
-	@echo "* Compiling $*.cpp"
+	@echo "* Compiling $*.cpp (C++ source file)"
 	@$(CC) -c $*.cpp -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
 	$(eval LINKER_FLAGS+= -lc++)
 
 $(TMP_ROOT)/%.o: create_tree %.cxx $(TMP_ROOT)/%.d
-	@echo "* Compiling $*.cxx"
+	@echo "* Compiling $*.cxx (C++ source file)"
 	@$(CC) -c $*.cxx -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
 	$(eval LINKER_FLAGS+= -lc++)
 
 $(TMP_ROOT)/%.o: create_tree %.c++ $(TMP_ROOT)/%.d
-	@echo "* Compiling $*.c++"
+	@echo "* Compiling $*.c++ (C++ source file)"
 	@$(CC) -c $*.c++ -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
 
