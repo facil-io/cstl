@@ -1215,6 +1215,7 @@ fio_memcmp
 #endif /* FIO_MEMCMP */
 
 #define FIO___MEMCMP_BYTES(bytes)                                              \
+  /** Compares at least bytes and no more than `len` byte long buffers. */     \
   FIO_IFUNC int fio___memcmp##bytes(char *restrict a,                          \
                                     char *restrict b,                          \
                                     size_t len) {                              \
@@ -1230,6 +1231,7 @@ fio_memcmp
       goto review_diff;                                                        \
     a += len & (bytes - 1);                                                    \
     b += len & (bytes - 1);                                                    \
+    len -= len & (bytes - 1);                                                  \
     do {                                                                       \
       for (size_t i = 0; i < (bytes / 8); ++i) {                               \
         fio_memcpy8(ua + i, a + (i << 3));                                     \
@@ -1241,7 +1243,7 @@ fio_memcmp
       b += bytes;                                                              \
       if (flag)                                                                \
         goto review_diff;                                                      \
-    } while (len > (bytes - 1));                                               \
+    } while (len);                                                             \
     return 0;                                                                  \
   review_diff:                                                                 \
     for (size_t i = ((bytes / 8) - 1); i--;) {                                 \

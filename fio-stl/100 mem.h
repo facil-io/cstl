@@ -2714,21 +2714,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       fio_memset(mem + mem_len, sig, mem_len);
 
       FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
-                 "fio_memcmp sanity test FAILED (%zu)",
+                 "fio_memcmp sanity test FAILED (%zu eq)",
                  mem_len);
-      mem[mem_len - 2]--;
-      FIO_ASSERT(fio_memcmp(mem + mem_len, mem, mem_len),
-                 "fio_memcmp sanity test FAILED (%zu)",
-                 mem_len);
-      mem[mem_len - 2]++;
+      {
+        mem[mem_len - 2]--;
+        unsigned r1 = (unsigned)fio_memcmp(mem + mem_len, mem, mem_len);
+        unsigned r2 = (unsigned)memcmp(mem + mem_len, mem, mem_len);
+        FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                   "fio_memcmp sanity test FAILED (%zu !eq)",
+                   mem_len);
+        mem[mem_len - 2]++;
+      }
 
       start = fio_time_micro();
       for (size_t i = 0; i < repetitions; ++i) {
         int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
-        if (cmp)
-          ++(mem[mem_len - (1 + cmp)]);
-        (void)cmp;
+        mem[mem_len - 1] = (cmp) ? mem[mem_len - 1] + 1 : mem[mem_len - 1] - 1;
       }
       end = fio_time_micro();
       fprintf(stderr,
@@ -2741,9 +2743,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       for (size_t i = 0; i < repetitions; ++i) {
         int cmp = memcmp(mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
-        if (cmp)
-          ++(mem[mem_len - (1 + cmp)]);
-        (void)cmp;
+        mem[mem_len - 1] = (cmp) ? mem[mem_len - 1] + 1 : mem[mem_len - 1] - 1;
       }
       end = fio_time_micro();
       fprintf(stderr,
