@@ -1261,6 +1261,7 @@ FIO___MEMCMP_BYTES(8)
 FIO___MEMCMP_BYTES(16)
 FIO___MEMCMP_BYTES(32)
 FIO___MEMCMP_BYTES(64)
+FIO___MEMCMP_BYTES(128)
 
 FIO_IFUNC int fio___memcmp_mini(char *restrict a,
                                 char *restrict b,
@@ -1288,7 +1289,9 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return fio___memcmp16(a, b, len);
   if (len < 64)
     return fio___memcmp32(a, b, len);
-  return fio___memcmp64(a, b, len);
+  if (len < 4096)
+    return fio___memcmp64(a, b, len);
+  return fio___memcmp128(a, b, len);
 }
 
 /* *****************************************************************************

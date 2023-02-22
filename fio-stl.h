@@ -1393,6 +1393,7 @@ FIO___MEMCMP_BYTES(8)
 FIO___MEMCMP_BYTES(16)
 FIO___MEMCMP_BYTES(32)
 FIO___MEMCMP_BYTES(64)
+FIO___MEMCMP_BYTES(128)
 
 FIO_IFUNC int fio___memcmp_mini(char *restrict a,
                                 char *restrict b,
@@ -1420,7 +1421,9 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return fio___memcmp16(a, b, len);
   if (len < 64)
     return fio___memcmp32(a, b, len);
-  return fio___memcmp64(a, b, len);
+  if (len < 4096)
+    return fio___memcmp64(a, b, len);
+  return fio___memcmp128(a, b, len);
 }
 
 /* *****************************************************************************
@@ -15684,8 +15687,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  mem_len);
       {
         mem[mem_len - 2]--;
-        unsigned r1 = (unsigned)fio_memcmp(mem + mem_len, mem, mem_len);
-        unsigned r2 = (unsigned)memcmp(mem + mem_len, mem, mem_len);
+        int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
+        int r2 = memcmp(mem + mem_len, mem, mem_len);
         FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
                    "fio_memcmp sanity test FAILED (%zu !eq)",
                    mem_len);

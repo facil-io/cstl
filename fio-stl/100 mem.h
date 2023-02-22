@@ -2718,8 +2718,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  mem_len);
       {
         mem[mem_len - 2]--;
-        unsigned r1 = (unsigned)fio_memcmp(mem + mem_len, mem, mem_len);
-        unsigned r2 = (unsigned)memcmp(mem + mem_len, mem, mem_len);
+        int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
+        int r2 = memcmp(mem + mem_len, mem, mem_len);
         FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
                    "fio_memcmp sanity test FAILED (%zu !eq)",
                    mem_len);
