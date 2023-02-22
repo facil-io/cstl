@@ -1222,8 +1222,8 @@ fio_memcmp
     uint64_t ub[bytes / 8] FIO_ALIGN(16) = {0};                                \
     uint64_t flag = 0;                                                         \
     for (size_t i = 0; i < (bytes / 8); ++i) {                                 \
-      fio_memcpy##bytes(ua + i, a + (i << 3));                                 \
-      fio_memcpy##bytes(ub + i, b + (i << 3));                                 \
+      fio_memcpy8(ua + i, a + (i << 3));                                       \
+      fio_memcpy8(ub + i, b + (i << 3));                                       \
       flag |= (ua[i] ^ ub[i]);                                                 \
     }                                                                          \
     if (flag)                                                                  \
@@ -1232,8 +1232,8 @@ fio_memcmp
     b += len & (bytes - 1);                                                    \
     do {                                                                       \
       for (size_t i = 0; i < (bytes / 8); ++i) {                               \
-        fio_memcpy##bytes(ua + i, a + (i << 3));                               \
-        fio_memcpy##bytes(ub + i, b + (i << 3));                               \
+        fio_memcpy8(ua + i, a + (i << 3));                                     \
+        fio_memcpy8(ub + i, b + (i << 3));                                     \
         flag |= (ua[i] ^ ub[i]);                                               \
       }                                                                        \
       len -= bytes;                                                            \
