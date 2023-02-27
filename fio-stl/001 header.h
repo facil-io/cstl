@@ -1583,7 +1583,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
+  ((fio_str_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
 #define FIO_STR_INFO2(str, length)                                             \
@@ -1595,7 +1595,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = strlen((str)), .buf = (str)})
+  ((fio_buf_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \

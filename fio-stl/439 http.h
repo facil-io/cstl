@@ -62,9 +62,9 @@ typedef struct fio_http_settings_s {
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
   /** Optional SSL/TLS support. */
-  struct fio_io_functions *tls_io_func;
+  fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
-  void *tls;
+  fio_tls_s *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
   fio_srv_async_s *queue;
   /**
@@ -217,8 +217,6 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
   // if (!s->public_folder) s->public_folder = 0;
   // if (!s->public_folder_length) s->public_folder_length = 0;
-  // if(!s->tls_io_func) s->tls_io_func = 0;
-  // if(!s->tls) s->tls = 0;
 }
 
 /* *****************************************************************************
@@ -248,6 +246,7 @@ HTTP Protocol Container (vtable + settings storage)
 
 typedef struct {
   fio_http_settings_s settings;
+  void *tls_ctx;
   void (*on_http_callback)(void *, void *);
   fio_queue_s *queue;
   struct {
@@ -261,6 +260,8 @@ typedef struct {
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
+    if (o.settings.tls)                                                        \
+      fio_tls_free(o.settings.tls);                                            \
     if (o.settings.on_finish)                                                  \
       o.settings.on_finish(&o.settings);                                       \
   } while (0)
@@ -323,7 +324,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
   c->io = fio_attach_fd(fd,
                         &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                         (void *)c,
-                        p->settings.tls);
+                        p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
 #if DEBUG
   FIO_LOG_DEBUG2("(%d) HTTP accepted a new connection at fd %d,"
@@ -453,6 +454,18 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
     p->state[i].controller =
         fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
   }
+  if (s.tls) {
+    s.tls = fio_tls_dup(s.tls);
+    fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+    if (!s.tls_io_func)
+      s.tls_io_func = &tmp_fn;
+    for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+      p->state[i].protocol.io_functions = *s.tls_io_func;
+    p->tls_ctx = (s.tls_io_func->build_context
+                      ? s.tls_io_func->build_context
+                      : fio___io_func_default_build_context)(s.tls, 0);
+  }
+
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder

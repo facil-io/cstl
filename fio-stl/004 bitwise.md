@@ -163,17 +163,19 @@ Numeral vector / array shuffling is available the numeral types `uint8_t`, `uint
 
 Vector / array shuffling is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
 
-The naming convention is `fio_PRxL_shuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
+The naming convention is `fio_PRxL_reshuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
+
+**Note**: The use of **re**shuffle denotes that the shuffling occurs in-place, replacing current data (unlike the `fio_uxxx_shuffle##` math functions).
 
 i.e.: 
 
 ```c
-void fio_u64x4_shuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x8_shuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x16_shuffle(uint64_t * v, uint8_t[4]);
-#define fio_u64x4_shuffle(v, ...) fio_u64x4_shuffle(v, (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_shuffle(v, ...) fio_u64x8_shuffle(v, (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_shuffle(v, ...) fio_u64x16_shuffle(v, (uint8_t[16]){__VA_ARGS__})
+void fio_u64x4_reshuffle(uint64_t * v, uint8_t[4]);
+void fio_u64x8_reshuffle(uint64_t * v, uint8_t[8]);
+void fio_u64x16_reshuffle(uint64_t *v, uint8_t[16]);
+#define fio_u64x4_reshuffle(v, ...)  fio_u64x4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)  fio_u64x8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...) fio_u64x16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
 ```
 
 #### Numeral Array Reduction

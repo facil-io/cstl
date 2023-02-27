@@ -133,7 +133,7 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   uint32_t t2 =                                                                \
       ((v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2])) +                        \
       (fio_rrot32(v[0], 2) ^ fio_rrot32(v[0], 13) ^ fio_rrot32(v[0], 22));     \
-  fio_u32x8_shuffle(v, 7, 0, 1, 2, 3, 4, 5, 6);                                \
+  fio_u32x8_reshuffle(v, 7, 0, 1, 2, 3, 4, 5, 6);                              \
   v[4] += t1;                                                                  \
   v[0] = t1 + t2;
 

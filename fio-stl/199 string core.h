@@ -582,6 +582,8 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
+/** Returns a good-enough `fio_keystr_s` risky hash. */
+FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a);
 
 #define FIO_KEYSTR_CONST ((size_t)-1LL)
 
@@ -1010,7 +1012,9 @@ FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
 FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
-  if (str.len + 1 < sizeof(r)) {
+  if (!str.buf || !str.len)
+    return r;
+  if (str.len + 2 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
@@ -1053,6 +1057,12 @@ FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b) {
   fio_str_info_s a = fio_keystr_info(&a_);
   return FIO_STR_INFO_IS_EQ(a, b);
+}
+
+/** Returns a good-enough `fio_keystr_s` risky hash. */
+FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a_) {
+  fio_buf_info_s a = fio_keystr_buf(&a_);
+  return fio_risky_hash(a.buf, a.len, (uint64_t)(uintptr_t)fio_string_write2);
 }
 
 /* *****************************************************************************

@@ -52,8 +52,14 @@ IO Types
 /** The main protocol object type. See `struct fio_protocol_s`. */
 typedef struct fio_protocol_s fio_protocol_s;
 
+/** The IO functions used by the protocol object. */
+typedef struct fio_io_functions_s fio_io_functions_s;
+
 /** The main IO object type. Should be treated as an opaque pointer. */
 typedef struct fio_s fio_s;
+
+/** An opaque type used for the SSL/TLS helper functions. */
+typedef struct fio_tls_s fio_tls_s;
 
 /* *****************************************************************************
 Starting / Stopping the Server
@@ -314,6 +320,32 @@ SFUNC int64_t fio_last_tick(void);
 SFUNC fio_queue_s *fio_srv_queue(void);
 
 /**************************************************************************/ /**
+Protocol IO Functions
+============
+
+The Protocol struct uses IO callbacks to allow an easy way to override the
+system's IO functions.
+
+This defines Transport Layer callbacks that facil.io will treat as non-blocking
+system calls and allows any protocol to easily add a secure (SSL/TLS) flavor if
+desired.
+*/
+struct fio_io_functions_s {
+  /** Helper that converts a `fio_tls_s` into the implementation's context. */
+  void *(*build_context)(fio_tls_s *tls, uint8_t is_client);
+  /** called once the IO was attached and the TLS object was set. */
+  void (*start)(fio_s *io);
+  /** Called to perform a non-blocking `read`, same as the system call. */
+  ssize_t (*read)(int fd, void *buf, size_t len, void *tls_ctx);
+  /** Called to perform a non-blocking `write`, same as the system call. */
+  ssize_t (*write)(int fd, const void *buf, size_t len, void *tls_ctx);
+  /** Sends any unsent internal data. Returns 0 only if all data was sent. */
+  int (*flush)(int fd, void *tls_ctx);
+  /** Decreases a fio_tls_s object's reference count, or frees the object. */
+  void (*free)(void *tls_ctx);
+};
+
+/**************************************************************************/ /**
 The Protocol
 ============
 
@@ -365,18 +397,7 @@ struct fio_protocol_s {
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls.
    */
-  struct fio_io_functions {
-    /** called once the IO was attached and the TLS object was set. */
-    void (*start)(fio_s *io);
-    /** Called to perform a non-blocking `read`, same as the system call. */
-    ssize_t (*read)(int fd, void *buf, size_t len, void *tls);
-    /** Called to perform a non-blocking `write`, same as the system call. */
-    ssize_t (*write)(int fd, const void *buf, size_t len, void *tls);
-    /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-    int (*flush)(int fd, void *tls);
-    /** Decreases a fio_tls_s object's reference count, or frees the object. */
-    void (*free)(void *tls);
-  } io_functions;
+  fio_io_functions_s io_functions;
   /**
    * The timeout value in seconds for all connections using this protocol.
    *
@@ -475,6 +496,122 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
   fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
+TLS Context Helper Types
+***************************************************************************** */
+
+/** Performs a `new` operation, returning a new `fio_tls_s` context. */
+SFUNC fio_tls_s *fio_tls_new();
+
+/** Performs a `dup` operation, increasing the object's reference count. */
+SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *);
+
+/** Performs a `free` operation, reducing the reference count and freeing. */
+SFUNC void fio_tls_free(fio_tls_s *);
+
+/**
+ * Adds a certificate a new SSL/TLS context / settings object (SNI support).
+ *
+ *      fio_tls_cert_add(tls, "www.example.com",
+ *                            "public_key.pem",
+ *                            "private_key.pem", NULL );
+ *
+ * NOTE: Except for the `tls` and `server_name` arguments, all arguments might
+ * be `NULL`, which a context builder (`fio_io_functions_s`) should treat as a
+ * request for a self-signed certificate. It may be silently ignored.
+ */
+SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password);
+
+/**
+ * Adds an ALPN protocol callback to the SSL/TLS context.
+ *
+ * The first protocol added will act as the default protocol to be selected.
+ *
+ * A `NULL` protocol name will be silently ignored.
+ *
+ * A `NULL` callback (`on_selected`) will be silently replaced with a no-op.
+ */
+SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *tls,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_s *));
+
+/** Calls the `on_selected` callback for the `fio_tls_s` object. */
+SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+                                     const char *protocol_name,
+                                     fio_s *);
+
+/**
+ * Adds a certificate to the "trust" list, which automatically adds a peer
+ * verification requirement.
+ *
+ * If `public_cert_file` is `NULL`, implementation is expected to add the
+ * system's default trust registry.
+ *
+ * Note: when the `fio_tls_s` object is used for server connections, this should
+ * limit connections to clients that connect using a trusted certificate.
+ *
+ *      fio_tls_trust_add(tls, "google-ca.pem" );
+ */
+SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *, const char *public_cert_file);
+
+/**
+ * Returns the number of `fio_tls_cert_add` instructions.
+ *
+ * This could be used when deciding if to add a NULL instruction (self-signed).
+ *
+ * If `fio_tls_cert_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_cert_count(fio_tls_s *tls);
+
+/**
+ * Returns the number of registered ALPN protocol names.
+ *
+ * This could be used when deciding if protocol selection should be delegated to
+ * the ALPN mechanism, or whether a protocol should be immediately assigned.
+ *
+ * If no ALPN protocols are registered, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_alpn_count(fio_tls_s *tls);
+
+/**
+ * Returns the number of `fio_tls_trust_add` instructions.
+ *
+ * This could be used when deciding if to disable peer verification or not.
+ *
+ * If `fio_tls_trust_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_trust_count(fio_tls_s *tls);
+
+/** Arguments (and info) for `fio_tls_each`. */
+typedef struct fio_tls_each_s {
+  fio_tls_s *tls;
+  void *udata;
+  void *udata2;
+  int (*each_cert)(struct fio_tls_each_s *,
+                   const char *server_name,
+                   const char *public_cert_file,
+                   const char *private_key_file,
+                   const char *pk_password);
+  int (*each_alpn)(struct fio_tls_each_s *,
+                   const char *protocol_name,
+                   void (*on_selected)(fio_s *));
+  int (*each_trust)(struct fio_tls_each_s *, const char *public_cert_file);
+} fio_tls_each_s;
+
+/** Calls callbacks for certificate, trust certificate and ALPN added. */
+SFUNC int fio_tls_each(fio_tls_each_s);
+
+/** `fio_tls_each` helper macro, see `fio_tls_each_s` for named arguments. */
+#define fio_tls_each(tls_, ...)                                                \
+  fio_tls_each(((fio_tls_each_s){.tls = tls_, __VA_ARGS__}))
+
+/** If `NULL` returns current default, otherwise sets it. */
+SFUNC fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *);
+
+/* *****************************************************************************
 Server Async - Worker Threads for non-IO tasks
 ***************************************************************************** */
 
@@ -555,57 +692,70 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 Protocol validation
 ***************************************************************************** */
 
-static void srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
-static void srv_on_ev_mock(fio_s *io) { (void)(io); }
-static void srv_on_close_mock(void *ptr) { (void)ptr; }
-static void srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
+static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
+static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
+static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
+static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
 static void fio___srv_on_timeout_never(fio_s *io) { fio_touch(io); }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
-static ssize_t io_func_default_read(int fd, void *buf, size_t len, void *tls) {
-  (void)tls;
+static ssize_t fio___io_func_default_read(int fd,
+                                          void *buf,
+                                          size_t len,
+                                          void *tls) {
   return fio_sock_read(fd, buf, len);
+  (void)tls;
 }
 /** Called to perform a non-blocking `write`, same as the system call. */
-static ssize_t io_func_default_write(int fd,
-                                     const void *buf,
-                                     size_t len,
-                                     void *tls) {
-  (void)tls;
+static ssize_t fio___io_func_default_write(int fd,
+                                           const void *buf,
+                                           size_t len,
+                                           void *tls) {
   return fio_sock_write(fd, buf, len);
+  (void)tls;
 }
 /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-static int io_func_default_flush(int fd, void *tls) {
+static int fio___io_func_default_flush(int fd, void *tls) {
   return 0;
-  (void)fd;
-  (void)tls;
+  (void)fd, (void)tls;
+}
+/** Builds a local TLS context out of the fio_tls_s object. */
+static void *fio___io_func_default_build_context(fio_tls_s *tls,
+                                                 uint8_t is_client) {
+  FIO_ASSERT(0,
+             "SSL/TLS `build_context` was called, but no SSL/TLS "
+             "implementation found.");
+  return NULL;
+  (void)tls, (void)is_client;
 }
 
 FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
   pr->reserved.ios = FIO_LIST_INIT(pr->reserved.ios);
   if (!pr->on_attach)
-    pr->on_attach = srv_on_ev_mock;
+    pr->on_attach = fio___srv_on_ev_mock;
   if (!pr->on_data)
-    pr->on_data = srv_on_ev_mock_sus;
+    pr->on_data = fio___srv_on_ev_mock_sus;
   if (!pr->on_ready)
-    pr->on_ready = srv_on_ev_mock;
+    pr->on_ready = fio___srv_on_ev_mock;
   if (!pr->on_close)
-    pr->on_close = srv_on_close_mock;
+    pr->on_close = fio___srv_on_close_mock;
   if (!pr->on_shutdown)
-    pr->on_shutdown = srv_on_ev_mock;
+    pr->on_shutdown = fio___srv_on_ev_mock;
   if (!pr->on_timeout)
-    pr->on_timeout = srv_on_ev_on_timeout;
+    pr->on_timeout = fio___srv_on_ev_on_timeout;
+  if (!pr->io_functions.build_context)
+    pr->io_functions.build_context = fio___io_func_default_build_context;
   if (!pr->io_functions.start)
-    pr->io_functions.start = srv_on_ev_mock;
+    pr->io_functions.start = fio___srv_on_ev_mock;
   if (!pr->io_functions.read)
-    pr->io_functions.read = io_func_default_read;
+    pr->io_functions.read = fio___io_func_default_read;
   if (!pr->io_functions.write)
-    pr->io_functions.write = io_func_default_write;
+    pr->io_functions.write = fio___io_func_default_write;
   if (!pr->io_functions.flush)
-    pr->io_functions.flush = io_func_default_flush;
+    pr->io_functions.flush = fio___io_func_default_flush;
   if (!pr->io_functions.free)
-    pr->io_functions.free = srv_on_close_mock;
+    pr->io_functions.free = fio___srv_on_close_mock;
 }
 
 /* the MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -1867,6 +2017,310 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
+}
+
+/* *****************************************************************************
+TLS Context Type and Helpers
+***************************************************************************** */
+
+typedef struct {
+  fio_keystr_s nm;
+  void (*fn)(fio_s *);
+} fio___tls_alpn_s;
+
+typedef struct {
+  fio_keystr_s nm;
+  fio_keystr_s public_cert_file;
+  fio_keystr_s private_key_file;
+  fio_keystr_s pk_password;
+} fio___tls_cert_s;
+
+typedef struct {
+  fio_keystr_s nm;
+} fio___tls_trust_s;
+
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#undef FIO_TYPEDEF_IMAP_FREE
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC(p, size_old, size, copy) realloc(p, size)
+#define FIO_TYPEDEF_IMAP_FREE(ptr, len)                   free(ptr)
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE                  0
+
+#define FIO___ALPN_HASH(o)   ((uint16_t)fio_keystr_hash(o->nm))
+#define FIO___ALPN_CMP(a, b) fio_keystr_is_eq(a->nm, b->nm)
+#define FIO___ALPN_VALID(o)  fio_keystr_buf(&o->nm).len
+
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_alpn_map,
+                       fio___tls_alpn_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO___ALPN_VALID)
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_trust_map,
+                       fio___tls_trust_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO___ALPN_VALID)
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_cert_map,
+                       fio___tls_cert_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO_IMAP_ALWAYS_VALID)
+
+#undef FIO___ALPN_HASH
+#undef FIO___ALPN_CMP
+#undef FIO___ALPN_VALID
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#undef FIO_TYPEDEF_IMAP_FREE
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC         FIO_MEM_REALLOC
+#define FIO_TYPEDEF_IMAP_FREE            FIO_MEM_FREE
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
+
+struct fio_tls_s {
+  fio___tls_cert_map_s cert;
+  fio___tls_alpn_map_s alpn;
+  fio___tls_trust_map_s trust;
+  uint8_t trust_sys; /** Set to 1 if system certificate registry is trusted */
+};
+
+#define FIO___STL_KEEP 1
+#define FIO_REF_NAME   fio_tls
+#include FIO_INCLUDE_FILE
+#undef FIO___STL_KEEP
+
+/** Performs a `new` operation, returning a new `fio_tls_s` context. */
+SFUNC fio_tls_s *fio_tls_new() {
+  fio_tls_s *r = fio_tls_new2();
+  FIO_ASSERT_ALLOC(r);
+  *r = (fio_tls_s){.trust_sys = 0};
+  return r;
+}
+
+/** Performs a `dup` operation, increasing the object's reference count. */
+SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *tls) { return fio_tls_dup2(tls); }
+
+/** Performs a `free` operation, reducing the reference count and freeing. */
+SFUNC void fio_tls_free(fio_tls_s *tls) {
+  if (!tls)
+    return;
+  FIO_IMAP_EACH(fio___tls_alpn_map, &tls->alpn, i) {
+    fio_keystr_destroy(&tls->alpn.ary[i].nm, FIO_STRING_FREE_KEY);
+  }
+  FIO_IMAP_EACH(fio___tls_trust_map, &tls->trust, i) {
+    fio_keystr_destroy(&tls->trust.ary[i].nm, FIO_STRING_FREE_KEY);
+  }
+  FIO_IMAP_EACH(fio___tls_cert_map, &tls->cert, i) {
+    fio_keystr_destroy(&tls->cert.ary[i].nm, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].public_cert_file, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].private_key_file, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].pk_password, FIO_STRING_FREE_KEY);
+  }
+  fio___tls_alpn_map_destroy(&tls->alpn);
+  fio___tls_trust_map_destroy(&tls->trust);
+  fio___tls_cert_map_destroy(&tls->cert);
+  fio_tls_free2(tls);
+}
+
+/** Adds a certificate a new SSL/TLS context / settings object (SNI support). */
+SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *t,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password) {
+  if (!t)
+    return t;
+  fio___tls_cert_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)server_name),
+                            FIO_STRING_ALLOC_KEY),
+      .public_cert_file =
+          fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+                          FIO_STRING_ALLOC_KEY),
+      .private_key_file =
+          fio_keystr_copy(FIO_STR_INFO1((char *)private_key_file),
+                          FIO_STRING_ALLOC_KEY),
+      .pk_password = fio_keystr_copy(FIO_STR_INFO1((char *)pk_password),
+                                     FIO_STRING_ALLOC_KEY),
+  };
+  fio___tls_cert_s *old = fio___tls_cert_map_get(&t->cert, o);
+  if (old)
+    goto replace_old;
+  fio___tls_cert_map_set(&t->cert, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->public_cert_file, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->private_key_file, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->pk_password, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/**
+ * Adds an ALPN protocol callback to the SSL/TLS context.
+ *
+ * The first protocol added will act as the default protocol to be selected.
+ *
+ * Except for the `tls` and `protocol_name` arguments, all arguments can be
+ * NULL.
+ */
+SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *t,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_s *)) {
+  if (!t || !protocol_name)
+    return t;
+  if (!on_selected)
+    on_selected = fio___srv_on_ev_mock;
+  fio___tls_alpn_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)protocol_name),
+                            FIO_STRING_ALLOC_KEY),
+      .fn = on_selected,
+  };
+  fio___tls_alpn_s *old = fio___tls_alpn_map_get(&t->alpn, o);
+  if (old)
+    goto replace_old;
+  fio___tls_alpn_map_set(&t->alpn, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/** Calls the `on_selected` callback for the `fio_tls_s` object. */
+SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+                                     const char *protocol_name,
+                                     fio_s *);
+
+/**
+ * Adds a certificate to the "trust" list, which automatically adds a peer
+ * verification requirement.
+ *
+ * If `public_cert_file` is `NULL`, adds the system's default trust registry.
+ *
+ * Note: when the `fio_tls_s` object is used for server connections, this will
+ * limit connections to clients that connect using a trusted certificate.
+ *
+ *      fio_tls_trust_add(tls, "google-ca.pem" );
+ */
+SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *t, const char *public_cert_file) {
+  if (!t)
+    return t;
+  if (!public_cert_file) {
+    t->trust_sys = 1;
+    return t;
+  }
+  fio___tls_trust_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+                            FIO_STRING_ALLOC_KEY),
+  };
+  fio___tls_trust_s *old = fio___tls_trust_map_get(&t->trust, o);
+  if (old)
+    goto replace_old;
+  fio___tls_trust_map_set(&t->trust, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/**
+ * Returns the number of `fio_tls_cert_add` instructions.
+ *
+ * This could be used when deciding if to add a NULL instruction (self-signed).
+ *
+ * If `fio_tls_cert_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_cert_count(fio_tls_s *tls) {
+  return tls ? tls->cert.count : 0;
+}
+
+/**
+ * Returns the number of registered ALPN protocol names.
+ *
+ * This could be used when deciding if protocol selection should be delegated to
+ * the ALPN mechanism, or whether a protocol should be immediately assigned.
+ *
+ * If no ALPN protocols are registered, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_alpn_count(fio_tls_s *tls) {
+  return tls ? tls->alpn.count : 0;
+}
+
+/**
+ * Returns the number of `fio_tls_trust_add` instructions.
+ *
+ * This could be used when deciding if to disable peer verification or not.
+ *
+ * If `fio_tls_trust_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_trust_count(fio_tls_s *tls) {
+  return tls ? tls->trust.count : 0;
+}
+
+/** Calls callbacks for certificate, trust certificate and ALPN added. */
+void fio_tls_each___(void); /* IDE Marker*/
+SFUNC int fio_tls_each FIO_NOOP(fio_tls_each_s a) {
+  if (!a.tls)
+    return -1;
+  if (a.each_cert) {
+    FIO_IMAP_EACH(fio___tls_cert_map, &a.tls->cert, i) {
+      if (a.each_cert(&a,
+                      fio_keystr_buf(&a.tls->cert.ary[i].nm).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].public_cert_file).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].private_key_file).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].pk_password).buf))
+        return -1;
+    }
+  }
+  if (a.each_alpn) {
+    FIO_IMAP_EACH(fio___tls_alpn_map, &a.tls->alpn, i) {
+      if (a.each_alpn(&a,
+                      fio_keystr_buf(&a.tls->alpn.ary[i].nm).buf,
+                      a.tls->alpn.ary[i].fn))
+        return -1;
+    }
+  }
+  if (a.each_trust) {
+    if (a.tls->trust_sys && a.each_trust(&a, NULL))
+      return -1;
+    FIO_IMAP_EACH(fio___tls_trust_map, &a.tls->trust, i) {
+      if (a.each_trust(&a, fio_keystr_buf(&a.tls->trust.ary[i].nm).buf))
+        return -1;
+    }
+  }
+  return 0;
+}
+
+/** If `NULL` returns current default, otherwise sets it. */
+SFUNC fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *f) {
+  static fio_io_functions_s default_io_functions = {
+      .build_context = fio___io_func_default_build_context,
+      .start = fio___srv_on_ev_mock,
+      .read = fio___io_func_default_read,
+      .write = fio___io_func_default_write,
+      .flush = fio___io_func_default_flush,
+      .free = fio___srv_on_close_mock,
+  };
+  if (!f)
+    return default_io_functions;
+  if (!f->build_context)
+    f->build_context = fio___io_func_default_build_context;
+  if (!f->start)
+    f->start = fio___srv_on_ev_mock;
+  if (!f->read)
+    f->read = fio___io_func_default_read;
+  if (!f->write)
+    f->write = fio___io_func_default_write;
+  if (!f->flush)
+    f->flush = fio___io_func_default_flush;
+  if (!f->free)
+    f->free = fio___srv_on_close_mock;
+  default_io_functions = *f;
+  return default_io_functions;
 }
 
 /* *****************************************************************************

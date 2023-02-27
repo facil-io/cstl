@@ -1366,17 +1366,19 @@ Numeral vector / array shuffling is available the numeral types `uint8_t`, `uint
 
 Vector / array shuffling is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
 
-The naming convention is `fio_PRxL_shuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
+The naming convention is `fio_PRxL_reshuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
+
+**Note**: The use of **re**shuffle denotes that the shuffling occurs in-place, replacing current data (unlike the `fio_uxxx_shuffle##` math functions).
 
 i.e.: 
 
 ```c
-void fio_u64x4_shuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x8_shuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x16_shuffle(uint64_t * v, uint8_t[4]);
-#define fio_u64x4_shuffle(v, ...) fio_u64x4_shuffle(v, (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_shuffle(v, ...) fio_u64x8_shuffle(v, (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_shuffle(v, ...) fio_u64x16_shuffle(v, (uint8_t[16]){__VA_ARGS__})
+void fio_u64x4_reshuffle(uint64_t * v, uint8_t[4]);
+void fio_u64x8_reshuffle(uint64_t * v, uint8_t[8]);
+void fio_u64x16_reshuffle(uint64_t *v, uint8_t[16]);
+#define fio_u64x4_reshuffle(v, ...)  fio_u64x4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)  fio_u64x8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...) fio_u64x16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
 ```
 
 #### Numeral Array Reduction
@@ -8194,11 +8196,17 @@ static void accept_time_client(int fd, void *udata) {
 The API depends on the opaque `fio_s` type as well as the `fio_protocol_s` type.
 
 ```c
-/** The main protocol object type. See `struct fio_protocol_s`. */
-typedef struct fio_protocol_s fio_protocol_s;
 /** The main IO object type. Should be treated as an opaque pointer. */
 typedef struct fio_s fio_s;
+/** The main protocol object type. See `struct fio_protocol_s`. */
+typedef struct fio_protocol_s fio_protocol_s;
+/** The IO functions used by the protocol object. */
+typedef struct fio_io_functions fio_io_functions;
+/** An opaque type used for the SSL/TLS helper functions. */
+typedef struct fio_tls_s fio_tls_s;
 ```
+
+Other (optional) helper types include the `fio_io_functions` and `fio_tls_s` types.
 
 #### `fio_listen`
 
@@ -8539,7 +8547,9 @@ struct fio_protocol_s {
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls
    * */
-  struct {
+  struct fio_io_functions {
+    /** Helper that converts a `fio_tls_s` into the implementation's context. */
+    void *(*build_context)(fio_tls_s *tls, uint8_t is_client);
     /** Called to perform a non-blocking `read`, same as the system call. */
     ssize_t (*read)(int fd, void *buf, size_t len, void *tls);
     /** Called to perform a non-blocking `write`, same as the system call. */
@@ -8754,9 +8764,180 @@ int64_t fio_last_tick(void);
 ```
 Returns the last millisecond when the server reviewed pending IO events.
 
+### TLS/SSL Context Builder Helpers
+
+The facil.io doesn't include an SSL/TLS library of its own, but it does offer an gateway API to allow implementations to be more library agnostic.
+
+I.e., using this API, an implementation should be able to switch library implementations during runtime.
+
+#### `fio_tls_new`
+
+```c
+fio_tls_s *fio_tls_new();
+```
+
+Performs a `new` operation, returning a new `fio_tls_s` context.
+
+#### `fio_tls_dup`
+
+```c
+fio_tls_s *fio_tls_dup(fio_tls_s *);
+```
+
+Performs a `dup` operation, increasing the object's reference count.
+
+#### `fio_tls_free`
+
+```c
+void fio_tls_free(fio_tls_s *);
+```
+
+Performs a `free` operation, reducing the reference count and freeing.
+
+#### `fio_tls_cert_add`
+
+```c
+fio_tls_s *fio_tls_cert_add(fio_tls_s *,
+                            const char *server_name,
+                            const char *public_cert_file,
+                            const char *private_key_file,
+                            const char *pk_password);
+```
+
+Adds a certificate a new SSL/TLS context / settings object (SNI support). i.e.:
+
+```c
+fio_tls_cert_add(tls, "www.example.com",
+                     "public_key.pem",
+                     "private_key.pem", NULL);
+```
+
+**Note**: Except for the `tls` and `server_name` arguments, all arguments might be `NULL`, which a context builder (`fio_io_functions_s`) should treat as a request for a self-signed certificate. It may be silently ignored.
+
+#### `fio_tls_alpn_add`
+
+```c
+fio_tls_s *fio_tls_alpn_add(fio_tls_s *tls,
+                            const char *protocol_name,
+                            void (*on_selected)(fio_s *));
+```
+
+Adds an ALPN protocol callback to the SSL/TLS context.
+
+The first protocol added will act as the default protocol to be selected.
+
+A `NULL` protocol name will be silently ignored.
+
+A `NULL` callback (`on_selected`) will be silently replaced with a no-op.
+
+#### `fio_tls_alpn_select`
+
+```c
+fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+                               const char *protocol_name,
+                               fio_s *);
+```
+
+Calls the `on_selected` callback for the `fio_tls_s` object.
+
+#### `fio_tls_trust_add`
+
+```c
+fio_tls_s *fio_tls_trust_add(fio_tls_s *, const char *public_cert_file);
+```
+Adds a certificate to the "trust" list, which automatically adds a peer verification requirement.
+
+If `public_cert_file` is `NULL`, implementation is expected to add the system's default trust registry.
+
+Note: when the `fio_tls_s` object is used for server connections, this should limit connections to clients that connect using a trusted certificate.
+
+```c
+fio_tls_trust_add(tls, "google-ca.pem" );
+```
+
+#### `fio_tls_cert_count`
+
+```c
+uintptr_t fio_tls_cert_count(fio_tls_s *tls);
+```
+Returns the number of `fio_tls_cert_add` instructions.
+
+This could be used when deciding if to add a NULL instruction (self-signed).
+
+If `fio_tls_cert_add` was never called, zero (0) is returned.
+#### `fio_tls_alpn_count`
+
+```c
+uintptr_t fio_tls_alpn_count(fio_tls_s *tls);
+```
+Returns the number of registered ALPN protocol names.
+
+This could be used when deciding if protocol selection should be delegated to the ALPN mechanism, or whether a protocol should be immediately assigned.
+
+If no ALPN protocols are registered, zero (0) is returned.
+
+#### `fio_tls_trust_count`
+
+```c
+uintptr_t fio_tls_trust_count(fio_tls_s *tls);
+```
+Returns the number of `fio_tls_trust_add` instructions.
+
+This could be used when deciding if to disable peer verification or not.
+
+If `fio_tls_trust_add` was never called, zero (0) is returned.
+
+
+#### `fio_tls_each`
+
+```c
+/** Arguments (and info) for `fio_tls_each`. */
+typedef struct fio_tls_each_s {
+  fio_tls_s *tls;
+  void *udata;
+  void *udata2;
+  int (*each_cert)(struct fio_tls_each_s *,
+                   const char *server_name,
+                   const char *public_cert_file,
+                   const char *private_key_file,
+                   const char *pk_password);
+  int (*each_alpn)(struct fio_tls_each_s *,
+                   const char *protocol_name,
+                   void (*on_selected)(fio_s *));
+  int (*each_trust)(struct fio_tls_each_s *, const char *public_cert_file);
+} fio_tls_each_s;
+
+/** Calls callbacks for certificate, trust certificate and ALPN added. */
+int fio_tls_each(fio_tls_each_s);
+
+/** `fio_tls_each` helper macro, see `fio_tls_each_s` for named arguments. */
+#define fio_tls_each(tls_, ...)                                                \
+  fio_tls_each(((fio_tls_each_s){.tls = tls_, __VA_ARGS__}))
+```
+
+Calls callbacks for ID certificates, trust certificates and ALPN added. Note that these values may be zero (`0`), in which case the callbacks might never be called.
+
+Callbacks may be `NULL`.
+
+**Note**: should be used to implement the `fio_io_functions_s` function `build_context`. If a copy of the `fio_tls_s` should be kept, use `fio_tls_dup`.
+
+#### `fio_tls_default_io_functions`
+
+```c
+fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *);
+```
+
+If `NULL` returns current default, otherwise sets it.
+
+This allows SSL/TLS libraries to register as a default option, which will allow (future) protocol objects to be initialized with an SSL/TLS layer.
+
+### Server-Bound Async Queue for non-IO tasks
+
+The `fio_srv_async_s` will automatically spawn as many worker threads as requested when the server starts and guaranty a best attempt at a proper shutdown for when the server stops. See `fio_srv_async_init` for details.
+
 #### `fio_srv_async_s`
 
-```
+```c
 typedef struct {
   fio_queue_s *q;
   uint32_t count;
@@ -8776,7 +8957,7 @@ It is useful for thread-safe code or for scheduling non-IO bound tasks that can 
 
 #### `fio_srv_async_init`
 
-```
+```c
 void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 ```
 

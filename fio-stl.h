@@ -1715,7 +1715,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
+  ((fio_str_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
 #define FIO_STR_INFO2(str, length)                                             \
@@ -1727,7 +1727,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = strlen((str)), .buf = (str)})
+  ((fio_buf_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \
@@ -3890,10 +3890,10 @@ zero:
 }
 
 /* *****************************************************************************
-Byte Shuffling (on native types, up to 2048 bits == 256 bytes)
+Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
 ***************************************************************************** */
 #define FIO____SHFL_FN(T, prefx, len)                                          \
-  FIO_IFUNC void fio_##prefx##x##len##_shuffle(T *v, uint8_t indx[len]) {      \
+  FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
     T tmp[len];                                                                \
     for (size_t i = 0; i < len; ++i) {                                         \
       tmp[i] = v[indx[i] & (len - 1)];                                         \
@@ -3985,42 +3985,42 @@ FIO____SHFL_REDUCE(double, dbl, 32)
 #undef FIO____SHFL_FN
 
 /* clang-format off */
-#define fio_u8x4_shuffle(v, ...)     fio_u8x4_shuffle(v,     (uint8_t[4]){__VA_ARGS__})
-#define fio_u8x8_shuffle(v, ...)     fio_u8x8_shuffle(v,     (uint8_t[8]){__VA_ARGS__})
-#define fio_u8x16_shuffle(v, ...)    fio_u8x16_shuffle(v,    (uint8_t[16]){__VA_ARGS__})
-#define fio_u8x32_shuffle(v, ...)    fio_u8x32_shuffle(v,    (uint8_t[32]){__VA_ARGS__})
-#define fio_u8x64_shuffle(v, ...)    fio_u8x64_shuffle(v,    (uint8_t[64]){__VA_ARGS__})
-#define fio_u8x128_shuffle(v, ...)   fio_u8x128_shuffle(v,   (uint8_t[128]){__VA_ARGS__})
-#define fio_u8x256_shuffle(v, ...)   fio_u8x256_shuffle(v,   (uint8_t[256]){__VA_ARGS__})
-#define fio_u16x2_shuffle(v, ...)    fio_u16x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u16x4_shuffle(v, ...)    fio_u16x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u16x8_shuffle(v, ...)    fio_u16x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u16x16_shuffle(v, ...)   fio_u16x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u16x32_shuffle(v, ...)   fio_u16x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u16x64_shuffle(v, ...)   fio_u16x64_shuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u16x128_shuffle(v,...)   fio_u16x128_shuffle(v,  (uint8_t[128]){__VA_ARGS__})
-#define fio_u32x2_shuffle(v, ...)    fio_u32x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u32x4_shuffle(v, ...)    fio_u32x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u32x8_shuffle(v, ...)    fio_u32x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u32x16_shuffle(v, ...)   fio_u32x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u32x32_shuffle(v, ...)   fio_u32x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u32x64_shuffle(v, ...)   fio_u32x64_shuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u64x2_shuffle(v, ...)    fio_u64x2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u64x4_shuffle(v, ...)    fio_u64x4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_shuffle(v, ...)    fio_u64x8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_shuffle(v, ...)   fio_u64x16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u64x32_shuffle(v, ...)   fio_u64x32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx2_shuffle(v, ...)  fio_floatx2_shuffle(v,  (uint8_t[2]){__VA_ARGS__})
-#define fio_floatx4_shuffle(v, ...)  fio_floatx4_shuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_floatx8_shuffle(v, ...)  fio_floatx8_shuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_floatx16_shuffle(v, ...) fio_floatx16_shuffle(v, (uint8_t[16]){__VA_ARGS__})
-#define fio_floatx32_shuffle(v, ...) fio_floatx32_shuffle(v, (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx64_shuffle(v, ...) fio_floatx64_shuffle(v, (uint8_t[64]){__VA_ARGS__})
-#define fio_dblx2_shuffle(v, ...)    fio_dblx2_shuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_dblx4_shuffle(v, ...)    fio_dblx4_shuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_dblx8_shuffle(v, ...)    fio_dblx8_shuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_dblx16_shuffle(v, ...)   fio_dblx16_shuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_dblx32_shuffle(v, ...)   fio_dblx32_shuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
+#define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
+#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
+#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
+#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
+#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
+#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
+#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
+#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
+#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
 /* clang-format on */
 
 /* *****************************************************************************
@@ -4063,25 +4063,64 @@ Byte masking (XOR) - no nonce
  * When the buffer's memory is aligned, the function may perform significantly
  * better.
  */
+// FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
+//   register char *buf = (char *)buf_;
+//   uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
+//   uint64_t tmp[4] FIO_ALIGN(16);
+//   for (size_t i = 31; i < len; i += 32) {
+//     fio_memcpy32(tmp, buf);
+//     tmp[0] ^= m[0];
+//     tmp[1] ^= m[1];
+//     tmp[2] ^= m[2];
+//     tmp[3] ^= m[3];
+//     fio_memcpy32(buf, tmp);
+//     buf += 32;
+//   }
+//   fio_memcpy31x(tmp, buf, len);
+//   tmp[0] ^= m[0];
+//   tmp[1] ^= m[1];
+//   tmp[2] ^= m[2];
+//   tmp[3] ^= m[3];
+//   fio_memcpy31x(buf, tmp, len);
+// }
 FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   register char *buf = (char *)buf_;
-  uint64_t m[4] FIO_ALIGN(16) = {mask, mask, mask, mask};
-  uint64_t tmp[4] FIO_ALIGN(16);
   for (size_t i = 31; i < len; i += 32) {
-    fio_memcpy32(tmp, buf);
-    tmp[0] ^= m[0];
-    tmp[1] ^= m[1];
-    tmp[2] ^= m[2];
-    tmp[3] ^= m[3];
-    fio_memcpy32(buf, tmp);
-    buf += 32;
+    for (size_t g = 0; g < 4; ++g) {
+      uint64_t tmp = fio_buf2u64_local(buf);
+      tmp ^= mask;
+      fio_u2buf64_local(buf, tmp);
+      buf += 8;
+    }
   }
-  fio_memcpy31x(tmp, buf, len);
-  tmp[0] ^= m[0];
-  tmp[1] ^= m[1];
-  tmp[2] ^= m[2];
-  tmp[3] ^= m[3];
-  fio_memcpy31x(buf, tmp, len);
+  if (len & 16)
+    for (size_t g = 0; g < 2; ++g) {
+      uint64_t tmp = fio_buf2u64_local(buf);
+      tmp ^= mask;
+      fio_u2buf64_local(buf, tmp);
+      buf += 8;
+    }
+  if (len & 8) {
+    uint64_t tmp = fio_buf2u64_local(buf);
+    tmp ^= mask;
+    fio_u2buf64_local(buf, tmp);
+    buf += 8;
+  }
+  {
+    union {
+      uint64_t u64;
+      uint8_t u8[8];
+    } u = {.u64 = mask};
+    switch (len & 7) {
+    case 7: buf[6] = buf[6] ^ u.u8[6]; /* fall through */
+    case 6: buf[5] = buf[5] ^ u.u8[5]; /* fall through */
+    case 5: buf[4] = buf[4] ^ u.u8[4]; /* fall through */
+    case 4: buf[3] = buf[3] ^ u.u8[3]; /* fall through */
+    case 3: buf[2] = buf[2] ^ u.u8[2]; /* fall through */
+    case 2: buf[1] = buf[1] ^ u.u8[1]; /* fall through */
+    case 1: buf[0] = buf[0] ^ u.u8[0]; /* fall through */
+    }
+  }
 }
 
 /* *****************************************************************************
@@ -8809,20 +8848,21 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
                                                           size_t len) {
   uint64_t h[4] = {0};
+  const size_t seeder = FIO_RISKY3_PRIME4;
   while (len > 31) {
-    h[0] += fio_risky_num(fio_buf2u64_local(buf), 0);
-    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), 0);
-    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), 0);
-    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), 0);
+    h[0] += fio_risky_num(fio_buf2u64_local(buf), seeder);
+    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), seeder + 8);
+    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), seeder + 16);
+    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), seeder + 24);
     len -= 32;
   }
   if ((len & 31)) {
     uint64_t t[4] = {0};
     fio_memcpy31x(t, buf, len);
-    h[0] += fio_risky_num(t[0], 0);
-    h[1] += fio_risky_num(t[1], 0);
-    h[2] += fio_risky_num(t[2], 0);
-    h[3] += fio_risky_num(t[3], 0);
+    h[0] += fio_risky_num(t[0], seeder);
+    h[1] += fio_risky_num(t[1], seeder + 8);
+    h[2] += fio_risky_num(t[2], seeder + 16);
+    h[3] += fio_risky_num(t[3], seeder + 24);
   }
   return h[0] + h[1] + h[2] + h[3];
 }
@@ -8965,7 +9005,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          13,
                          1,
                          2);
-  if (0) {
+  if (1) {
     fprintf(stderr, "\n");
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",
@@ -9673,7 +9713,7 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   uint32_t t2 =                                                                \
       ((v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2])) +                        \
       (fio_rrot32(v[0], 2) ^ fio_rrot32(v[0], 13) ^ fio_rrot32(v[0], 22));     \
-  fio_u32x8_shuffle(v, 7, 0, 1, 2, 3, 4, 5, 6);                                \
+  fio_u32x8_reshuffle(v, 7, 0, 1, 2, 3, 4, 5, 6);                              \
   v[4] += t1;                                                                  \
   v[0] = t1 + t2;
 
@@ -10361,13 +10401,13 @@ FIO_SFUNC void fio___chacha_vround20(const fio_u512 c, uint8_t *restrict data) {
   }
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_shuffle((v + 4), 1, 2, 3, 0);
-    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_shuffle((v + 12), 3, 0, 1, 2);
+    fio_u32x4_reshuffle((v + 4), 1, 2, 3, 0);
+    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_reshuffle((v + 12), 3, 0, 1, 2);
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_shuffle((v + 4), 3, 0, 1, 2);
-    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_shuffle((v + 12), 1, 2, 3, 0);
+    fio_u32x4_reshuffle((v + 4), 3, 0, 1, 2);
+    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_reshuffle((v + 12), 1, 2, 3, 0);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i] += c.u32[i];
@@ -10397,13 +10437,13 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   ++v[28];
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_shuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
-    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_shuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
+    fio_u32x8_reshuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
+    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_reshuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_shuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
-    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_shuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
+    fio_u32x8_reshuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
+    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_reshuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i + (i & (4 | 8))] += c.u32[i];
@@ -10417,8 +10457,8 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   }
 #endif
   {
-    fio_u32x8_shuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
-    fio_u32x8_shuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
+    fio_u32x8_reshuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
+    fio_u32x8_reshuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
     uint32_t d[8];
     fio_memcpy32(d, data);
     for (size_t i = 0; i < 8; ++i) {
@@ -11051,10 +11091,10 @@ Implementation - possibly externed functions.
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* prevent ED25519 keys from having a small period (cyclic value). */
-FIO_IFUNC void fio___ed25519_clamp_on_key(fio_u256 *k) {
-  k->u8[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
-  k->u8[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
-  k->u8[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
+FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
+  k[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
+  k[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
+  k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
 /* *****************************************************************************
@@ -11097,6 +11137,25 @@ Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 #define H___FIO_IMAP_CORE___H
 
 /* *****************************************************************************
+iMap Helper Macros
+***************************************************************************** */
+
+/** Helper macro for simple iMap array types. */
+#define FIO_IMAP_ALWAYS_VALID(o) (1)
+/** Helper macro for simple iMap array types. */
+#define FIO_IMAP_ALWAYS_CMP_TRUE(a, b) (1)
+/** Helper macro for simple iMap array types. */
+#define FIO_IMAP_ALWAYS_CMP_FALSE(a, b) (0)
+/** Helper macro for simple iMap array types. */
+#define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
+/** Helper macro for simple iMap array types. */
+#define FIO_IMAP_EACH(array_name, map_ptr, i)                                  \
+  for (size_t i = 0; i < (map_ptr)->w; ++i)                                    \
+    if (!FIO_NAME(array_name, is_valid)((map_ptr)->ary + i))                   \
+      continue;                                                                \
+    else
+
+/* *****************************************************************************
 iMap Creation Macro
 ***************************************************************************** */
 
@@ -11136,7 +11195,7 @@ iMap Creation Macro
     array_type *ary;                                                           \
     imap_type count;                                                           \
     imap_type w;                                                               \
-    imap_type capa_bits;                                                       \
+    uint32_t capa_bits;                                                        \
   } FIO_NAME(array_name, s);                                                   \
   typedef struct {                                                             \
     imap_type pos;                                                             \
@@ -11148,11 +11207,10 @@ iMap Creation Macro
     return pobj && (!!is_valid_fn(pobj));                                      \
   }                                                                            \
   /** Returns the theoretical capacity for the indexed array. */               \
-  FIO_IFUNC imap_type FIO_NAME(array_name,                                     \
-                               capa)(FIO_NAME(array_name, s) * a) {            \
+  FIO_IFUNC size_t FIO_NAME(array_name, capa)(FIO_NAME(array_name, s) * a) {   \
     if (!a || !a->capa_bits)                                                   \
       return 0;                                                                \
-    return ((imap_type)1ULL << a->capa_bits);                                  \
+    return ((size_t)1ULL << a->capa_bits);                                     \
   }                                                                            \
   /** Returns a pointer to the index map. */                                   \
   FIO_IFUNC imap_type *FIO_NAME(array_name,                                    \
@@ -11185,7 +11243,7 @@ iMap Creation Macro
     (void)old_capa; /* if unused */                                            \
     if (!tmp)                                                                  \
       return -1;                                                               \
-    a->capa_bits = bits;                                                       \
+    a->capa_bits = (uint32_t)bits;                                             \
     a->ary = tmp;                                                              \
     if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE)                                     \
       FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
@@ -11195,14 +11253,15 @@ iMap Creation Macro
   FIO_SFUNC FIO_NAME(array_name, seeker_s)                                     \
       FIO_NAME(array_name, seek)(FIO_NAME(array_name, s) * a,                  \
                                  array_type * pobj) {                          \
-    FIO_NAME(array_name, seeker_s) r = {0, (~(imap_type)0), (~(imap_type)0)};  \
+    FIO_NAME(array_name, seeker_s)                                             \
+    r = {0, ((imap_type) ~(imap_type)0), ((imap_type) ~(imap_type)0)};         \
     if (!a || ((!a->capa_bits) | (!a->ary)))                                   \
       return r;                                                                \
     r.pos = a->w;                                                              \
     imap_type capa = (imap_type)1UL << a->capa_bits;                           \
     imap_type *imap = (imap_type *)(a->ary + capa);                            \
-    const imap_type pos_mask = capa - 1;                                       \
-    const imap_type hash_mask = ~pos_mask;                                     \
+    const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
+    const imap_type hash_mask = (imap_type)~pos_mask;                          \
     const imap_type hash = hash_fn(pobj);                                      \
     imap_type tester = hash & hash_mask;                                       \
     tester += (!tester) << a->capa_bits;                                       \
@@ -11237,7 +11296,7 @@ iMap Creation Macro
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
         ++mini_steps;                                                          \
       }                                                                        \
-      pos += 0x43F82D0BUL; /* big step */                                      \
+      pos += (imap_type)0x43F82D0BUL; /* big step */                           \
     }                                                                          \
   }                                                                            \
   /** fills an empty imap with the info about existing elements. */            \
@@ -11261,7 +11320,7 @@ iMap Creation Macro
     for (a->w = 0; a->w < a->count; ++(a->w)) {                                \
       FIO_NAME(array_name, seeker_s)                                           \
       s = FIO_NAME(array_name, seek)(a, a->ary + a->w);                        \
-      if (s.pos != a->w || s.ipos == (~(imap_type)0)) {                        \
+      if (s.pos != a->w || s.ipos == (imap_type)(~(imap_type)0)) {             \
         a->w = a->count;                                                       \
         return -1; /* destination not big enough to contain collisions! */     \
       }                                                                        \
@@ -11363,23 +11422,12 @@ iMap Creation Macro
     if (s.pos >= a->w)                                                         \
       return -1;                                                               \
     a->ary[s.pos] = (array_type){0};                                           \
-    FIO_NAME(array_name, imap)(a)[s.ipos] = (~(imap_type)0);                   \
+    FIO_NAME(array_name, imap)(a)[s.ipos] = (imap_type)(~(imap_type)0);        \
     --a->count;                                                                \
     while (a->w && !is_valid_fn((a->ary + a->w - 1)))                          \
       --a->w;                                                                  \
     return 0;                                                                  \
   }
-
-#define FIO_IMAP_EACH(array_name, map_ptr, i)                                  \
-  for (size_t i = 0; i < map_ptr->w; ++i)                                      \
-    if (!FIO_NAME(array_name, is_valid)(map_ptr->ary + i))                     \
-      continue;                                                                \
-    else
-
-/** Helper macro for simple imap array types. */
-#define FIO_IMAP_ALWAYS_VALID(o) 1
-/** Helper macro for simple imap array types. */
-#define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
 
 #ifndef FIO_TYPEDEF_IMAP_REALLOC
 #define FIO_TYPEDEF_IMAP_REALLOC FIO_MEM_REALLOC
@@ -20481,6 +20529,8 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
+/** Returns a good-enough `fio_keystr_s` risky hash. */
+FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a);
 
 #define FIO_KEYSTR_CONST ((size_t)-1LL)
 
@@ -20909,7 +20959,9 @@ FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
 FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
-  if (str.len + 1 < sizeof(r)) {
+  if (!str.buf || !str.len)
+    return r;
+  if (str.len + 2 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
@@ -20952,6 +21004,12 @@ FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b) {
   fio_str_info_s a = fio_keystr_info(&a_);
   return FIO_STR_INFO_IS_EQ(a, b);
+}
+
+/** Returns a good-enough `fio_keystr_s` risky hash. */
+FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a_) {
+  fio_buf_info_s a = fio_keystr_buf(&a_);
+  return fio_risky_hash(a.buf, a.len, (uint64_t)(uintptr_t)fio_string_write2);
 }
 
 /* *****************************************************************************
@@ -30839,8 +30897,14 @@ IO Types
 /** The main protocol object type. See `struct fio_protocol_s`. */
 typedef struct fio_protocol_s fio_protocol_s;
 
+/** The IO functions used by the protocol object. */
+typedef struct fio_io_functions_s fio_io_functions_s;
+
 /** The main IO object type. Should be treated as an opaque pointer. */
 typedef struct fio_s fio_s;
+
+/** An opaque type used for the SSL/TLS helper functions. */
+typedef struct fio_tls_s fio_tls_s;
 
 /* *****************************************************************************
 Starting / Stopping the Server
@@ -31101,6 +31165,32 @@ SFUNC int64_t fio_last_tick(void);
 SFUNC fio_queue_s *fio_srv_queue(void);
 
 /**************************************************************************/ /**
+Protocol IO Functions
+============
+
+The Protocol struct uses IO callbacks to allow an easy way to override the
+system's IO functions.
+
+This defines Transport Layer callbacks that facil.io will treat as non-blocking
+system calls and allows any protocol to easily add a secure (SSL/TLS) flavor if
+desired.
+*/
+struct fio_io_functions_s {
+  /** Helper that converts a `fio_tls_s` into the implementation's context. */
+  void *(*build_context)(fio_tls_s *tls, uint8_t is_client);
+  /** called once the IO was attached and the TLS object was set. */
+  void (*start)(fio_s *io);
+  /** Called to perform a non-blocking `read`, same as the system call. */
+  ssize_t (*read)(int fd, void *buf, size_t len, void *tls_ctx);
+  /** Called to perform a non-blocking `write`, same as the system call. */
+  ssize_t (*write)(int fd, const void *buf, size_t len, void *tls_ctx);
+  /** Sends any unsent internal data. Returns 0 only if all data was sent. */
+  int (*flush)(int fd, void *tls_ctx);
+  /** Decreases a fio_tls_s object's reference count, or frees the object. */
+  void (*free)(void *tls_ctx);
+};
+
+/**************************************************************************/ /**
 The Protocol
 ============
 
@@ -31152,18 +31242,7 @@ struct fio_protocol_s {
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls.
    */
-  struct fio_io_functions {
-    /** called once the IO was attached and the TLS object was set. */
-    void (*start)(fio_s *io);
-    /** Called to perform a non-blocking `read`, same as the system call. */
-    ssize_t (*read)(int fd, void *buf, size_t len, void *tls);
-    /** Called to perform a non-blocking `write`, same as the system call. */
-    ssize_t (*write)(int fd, const void *buf, size_t len, void *tls);
-    /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-    int (*flush)(int fd, void *tls);
-    /** Decreases a fio_tls_s object's reference count, or frees the object. */
-    void (*free)(void *tls);
-  } io_functions;
+  fio_io_functions_s io_functions;
   /**
    * The timeout value in seconds for all connections using this protocol.
    *
@@ -31262,6 +31341,122 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
   fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
+TLS Context Helper Types
+***************************************************************************** */
+
+/** Performs a `new` operation, returning a new `fio_tls_s` context. */
+SFUNC fio_tls_s *fio_tls_new();
+
+/** Performs a `dup` operation, increasing the object's reference count. */
+SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *);
+
+/** Performs a `free` operation, reducing the reference count and freeing. */
+SFUNC void fio_tls_free(fio_tls_s *);
+
+/**
+ * Adds a certificate a new SSL/TLS context / settings object (SNI support).
+ *
+ *      fio_tls_cert_add(tls, "www.example.com",
+ *                            "public_key.pem",
+ *                            "private_key.pem", NULL );
+ *
+ * NOTE: Except for the `tls` and `server_name` arguments, all arguments might
+ * be `NULL`, which a context builder (`fio_io_functions_s`) should treat as a
+ * request for a self-signed certificate. It may be silently ignored.
+ */
+SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password);
+
+/**
+ * Adds an ALPN protocol callback to the SSL/TLS context.
+ *
+ * The first protocol added will act as the default protocol to be selected.
+ *
+ * A `NULL` protocol name will be silently ignored.
+ *
+ * A `NULL` callback (`on_selected`) will be silently replaced with a no-op.
+ */
+SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *tls,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_s *));
+
+/** Calls the `on_selected` callback for the `fio_tls_s` object. */
+SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+                                     const char *protocol_name,
+                                     fio_s *);
+
+/**
+ * Adds a certificate to the "trust" list, which automatically adds a peer
+ * verification requirement.
+ *
+ * If `public_cert_file` is `NULL`, implementation is expected to add the
+ * system's default trust registry.
+ *
+ * Note: when the `fio_tls_s` object is used for server connections, this should
+ * limit connections to clients that connect using a trusted certificate.
+ *
+ *      fio_tls_trust_add(tls, "google-ca.pem" );
+ */
+SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *, const char *public_cert_file);
+
+/**
+ * Returns the number of `fio_tls_cert_add` instructions.
+ *
+ * This could be used when deciding if to add a NULL instruction (self-signed).
+ *
+ * If `fio_tls_cert_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_cert_count(fio_tls_s *tls);
+
+/**
+ * Returns the number of registered ALPN protocol names.
+ *
+ * This could be used when deciding if protocol selection should be delegated to
+ * the ALPN mechanism, or whether a protocol should be immediately assigned.
+ *
+ * If no ALPN protocols are registered, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_alpn_count(fio_tls_s *tls);
+
+/**
+ * Returns the number of `fio_tls_trust_add` instructions.
+ *
+ * This could be used when deciding if to disable peer verification or not.
+ *
+ * If `fio_tls_trust_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_trust_count(fio_tls_s *tls);
+
+/** Arguments (and info) for `fio_tls_each`. */
+typedef struct fio_tls_each_s {
+  fio_tls_s *tls;
+  void *udata;
+  void *udata2;
+  int (*each_cert)(struct fio_tls_each_s *,
+                   const char *server_name,
+                   const char *public_cert_file,
+                   const char *private_key_file,
+                   const char *pk_password);
+  int (*each_alpn)(struct fio_tls_each_s *,
+                   const char *protocol_name,
+                   void (*on_selected)(fio_s *));
+  int (*each_trust)(struct fio_tls_each_s *, const char *public_cert_file);
+} fio_tls_each_s;
+
+/** Calls callbacks for certificate, trust certificate and ALPN added. */
+SFUNC int fio_tls_each(fio_tls_each_s);
+
+/** `fio_tls_each` helper macro, see `fio_tls_each_s` for named arguments. */
+#define fio_tls_each(tls_, ...)                                                \
+  fio_tls_each(((fio_tls_each_s){.tls = tls_, __VA_ARGS__}))
+
+/** If `NULL` returns current default, otherwise sets it. */
+SFUNC fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *);
+
+/* *****************************************************************************
 Server Async - Worker Threads for non-IO tasks
 ***************************************************************************** */
 
@@ -31342,57 +31537,70 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 Protocol validation
 ***************************************************************************** */
 
-static void srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
-static void srv_on_ev_mock(fio_s *io) { (void)(io); }
-static void srv_on_close_mock(void *ptr) { (void)ptr; }
-static void srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
+static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
+static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
+static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
+static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
 static void fio___srv_on_timeout_never(fio_s *io) { fio_touch(io); }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
-static ssize_t io_func_default_read(int fd, void *buf, size_t len, void *tls) {
-  (void)tls;
+static ssize_t fio___io_func_default_read(int fd,
+                                          void *buf,
+                                          size_t len,
+                                          void *tls) {
   return fio_sock_read(fd, buf, len);
+  (void)tls;
 }
 /** Called to perform a non-blocking `write`, same as the system call. */
-static ssize_t io_func_default_write(int fd,
-                                     const void *buf,
-                                     size_t len,
-                                     void *tls) {
-  (void)tls;
+static ssize_t fio___io_func_default_write(int fd,
+                                           const void *buf,
+                                           size_t len,
+                                           void *tls) {
   return fio_sock_write(fd, buf, len);
+  (void)tls;
 }
 /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-static int io_func_default_flush(int fd, void *tls) {
+static int fio___io_func_default_flush(int fd, void *tls) {
   return 0;
-  (void)fd;
-  (void)tls;
+  (void)fd, (void)tls;
+}
+/** Builds a local TLS context out of the fio_tls_s object. */
+static void *fio___io_func_default_build_context(fio_tls_s *tls,
+                                                 uint8_t is_client) {
+  FIO_ASSERT(0,
+             "SSL/TLS `build_context` was called, but no SSL/TLS "
+             "implementation found.");
+  return NULL;
+  (void)tls, (void)is_client;
 }
 
 FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
   pr->reserved.ios = FIO_LIST_INIT(pr->reserved.ios);
   if (!pr->on_attach)
-    pr->on_attach = srv_on_ev_mock;
+    pr->on_attach = fio___srv_on_ev_mock;
   if (!pr->on_data)
-    pr->on_data = srv_on_ev_mock_sus;
+    pr->on_data = fio___srv_on_ev_mock_sus;
   if (!pr->on_ready)
-    pr->on_ready = srv_on_ev_mock;
+    pr->on_ready = fio___srv_on_ev_mock;
   if (!pr->on_close)
-    pr->on_close = srv_on_close_mock;
+    pr->on_close = fio___srv_on_close_mock;
   if (!pr->on_shutdown)
-    pr->on_shutdown = srv_on_ev_mock;
+    pr->on_shutdown = fio___srv_on_ev_mock;
   if (!pr->on_timeout)
-    pr->on_timeout = srv_on_ev_on_timeout;
+    pr->on_timeout = fio___srv_on_ev_on_timeout;
+  if (!pr->io_functions.build_context)
+    pr->io_functions.build_context = fio___io_func_default_build_context;
   if (!pr->io_functions.start)
-    pr->io_functions.start = srv_on_ev_mock;
+    pr->io_functions.start = fio___srv_on_ev_mock;
   if (!pr->io_functions.read)
-    pr->io_functions.read = io_func_default_read;
+    pr->io_functions.read = fio___io_func_default_read;
   if (!pr->io_functions.write)
-    pr->io_functions.write = io_func_default_write;
+    pr->io_functions.write = fio___io_func_default_write;
   if (!pr->io_functions.flush)
-    pr->io_functions.flush = io_func_default_flush;
+    pr->io_functions.flush = fio___io_func_default_flush;
   if (!pr->io_functions.free)
-    pr->io_functions.free = srv_on_close_mock;
+    pr->io_functions.free = fio___srv_on_close_mock;
 }
 
 /* the MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -32657,6 +32865,310 @@ FIO_CONSTRUCTOR(fio___srv) {
 }
 
 /* *****************************************************************************
+TLS Context Type and Helpers
+***************************************************************************** */
+
+typedef struct {
+  fio_keystr_s nm;
+  void (*fn)(fio_s *);
+} fio___tls_alpn_s;
+
+typedef struct {
+  fio_keystr_s nm;
+  fio_keystr_s public_cert_file;
+  fio_keystr_s private_key_file;
+  fio_keystr_s pk_password;
+} fio___tls_cert_s;
+
+typedef struct {
+  fio_keystr_s nm;
+} fio___tls_trust_s;
+
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#undef FIO_TYPEDEF_IMAP_FREE
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC(p, size_old, size, copy) realloc(p, size)
+#define FIO_TYPEDEF_IMAP_FREE(ptr, len)                   free(ptr)
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE                  0
+
+#define FIO___ALPN_HASH(o)   ((uint16_t)fio_keystr_hash(o->nm))
+#define FIO___ALPN_CMP(a, b) fio_keystr_is_eq(a->nm, b->nm)
+#define FIO___ALPN_VALID(o)  fio_keystr_buf(&o->nm).len
+
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_alpn_map,
+                       fio___tls_alpn_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO___ALPN_VALID)
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_trust_map,
+                       fio___tls_trust_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO___ALPN_VALID)
+FIO_TYPEDEF_IMAP_ARRAY(fio___tls_cert_map,
+                       fio___tls_cert_s,
+                       uint16_t,
+                       FIO___ALPN_HASH,
+                       FIO___ALPN_CMP,
+                       FIO_IMAP_ALWAYS_VALID)
+
+#undef FIO___ALPN_HASH
+#undef FIO___ALPN_CMP
+#undef FIO___ALPN_VALID
+#undef FIO_TYPEDEF_IMAP_REALLOC
+#undef FIO_TYPEDEF_IMAP_FREE
+#undef FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE
+#define FIO_TYPEDEF_IMAP_REALLOC         FIO_MEM_REALLOC
+#define FIO_TYPEDEF_IMAP_FREE            FIO_MEM_FREE
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
+
+struct fio_tls_s {
+  fio___tls_cert_map_s cert;
+  fio___tls_alpn_map_s alpn;
+  fio___tls_trust_map_s trust;
+  uint8_t trust_sys; /** Set to 1 if system certificate registry is trusted */
+};
+
+#define FIO___STL_KEEP 1
+#define FIO_REF_NAME   fio_tls
+#include FIO_INCLUDE_FILE
+#undef FIO___STL_KEEP
+
+/** Performs a `new` operation, returning a new `fio_tls_s` context. */
+SFUNC fio_tls_s *fio_tls_new() {
+  fio_tls_s *r = fio_tls_new2();
+  FIO_ASSERT_ALLOC(r);
+  *r = (fio_tls_s){.trust_sys = 0};
+  return r;
+}
+
+/** Performs a `dup` operation, increasing the object's reference count. */
+SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *tls) { return fio_tls_dup2(tls); }
+
+/** Performs a `free` operation, reducing the reference count and freeing. */
+SFUNC void fio_tls_free(fio_tls_s *tls) {
+  if (!tls)
+    return;
+  FIO_IMAP_EACH(fio___tls_alpn_map, &tls->alpn, i) {
+    fio_keystr_destroy(&tls->alpn.ary[i].nm, FIO_STRING_FREE_KEY);
+  }
+  FIO_IMAP_EACH(fio___tls_trust_map, &tls->trust, i) {
+    fio_keystr_destroy(&tls->trust.ary[i].nm, FIO_STRING_FREE_KEY);
+  }
+  FIO_IMAP_EACH(fio___tls_cert_map, &tls->cert, i) {
+    fio_keystr_destroy(&tls->cert.ary[i].nm, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].public_cert_file, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].private_key_file, FIO_STRING_FREE_KEY);
+    fio_keystr_destroy(&tls->cert.ary[i].pk_password, FIO_STRING_FREE_KEY);
+  }
+  fio___tls_alpn_map_destroy(&tls->alpn);
+  fio___tls_trust_map_destroy(&tls->trust);
+  fio___tls_cert_map_destroy(&tls->cert);
+  fio_tls_free2(tls);
+}
+
+/** Adds a certificate a new SSL/TLS context / settings object (SNI support). */
+SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *t,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password) {
+  if (!t)
+    return t;
+  fio___tls_cert_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)server_name),
+                            FIO_STRING_ALLOC_KEY),
+      .public_cert_file =
+          fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+                          FIO_STRING_ALLOC_KEY),
+      .private_key_file =
+          fio_keystr_copy(FIO_STR_INFO1((char *)private_key_file),
+                          FIO_STRING_ALLOC_KEY),
+      .pk_password = fio_keystr_copy(FIO_STR_INFO1((char *)pk_password),
+                                     FIO_STRING_ALLOC_KEY),
+  };
+  fio___tls_cert_s *old = fio___tls_cert_map_get(&t->cert, o);
+  if (old)
+    goto replace_old;
+  fio___tls_cert_map_set(&t->cert, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->public_cert_file, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->private_key_file, FIO_STRING_FREE_KEY);
+  fio_keystr_destroy(&old->pk_password, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/**
+ * Adds an ALPN protocol callback to the SSL/TLS context.
+ *
+ * The first protocol added will act as the default protocol to be selected.
+ *
+ * Except for the `tls` and `protocol_name` arguments, all arguments can be
+ * NULL.
+ */
+SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *t,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_s *)) {
+  if (!t || !protocol_name)
+    return t;
+  if (!on_selected)
+    on_selected = fio___srv_on_ev_mock;
+  fio___tls_alpn_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)protocol_name),
+                            FIO_STRING_ALLOC_KEY),
+      .fn = on_selected,
+  };
+  fio___tls_alpn_s *old = fio___tls_alpn_map_get(&t->alpn, o);
+  if (old)
+    goto replace_old;
+  fio___tls_alpn_map_set(&t->alpn, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/** Calls the `on_selected` callback for the `fio_tls_s` object. */
+SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+                                     const char *protocol_name,
+                                     fio_s *);
+
+/**
+ * Adds a certificate to the "trust" list, which automatically adds a peer
+ * verification requirement.
+ *
+ * If `public_cert_file` is `NULL`, adds the system's default trust registry.
+ *
+ * Note: when the `fio_tls_s` object is used for server connections, this will
+ * limit connections to clients that connect using a trusted certificate.
+ *
+ *      fio_tls_trust_add(tls, "google-ca.pem" );
+ */
+SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *t, const char *public_cert_file) {
+  if (!t)
+    return t;
+  if (!public_cert_file) {
+    t->trust_sys = 1;
+    return t;
+  }
+  fio___tls_trust_s o = {
+      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+                            FIO_STRING_ALLOC_KEY),
+  };
+  fio___tls_trust_s *old = fio___tls_trust_map_get(&t->trust, o);
+  if (old)
+    goto replace_old;
+  fio___tls_trust_map_set(&t->trust, o, 1);
+  return t;
+replace_old:
+  fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
+  *old = o;
+  return t;
+}
+
+/**
+ * Returns the number of `fio_tls_cert_add` instructions.
+ *
+ * This could be used when deciding if to add a NULL instruction (self-signed).
+ *
+ * If `fio_tls_cert_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_cert_count(fio_tls_s *tls) {
+  return tls ? tls->cert.count : 0;
+}
+
+/**
+ * Returns the number of registered ALPN protocol names.
+ *
+ * This could be used when deciding if protocol selection should be delegated to
+ * the ALPN mechanism, or whether a protocol should be immediately assigned.
+ *
+ * If no ALPN protocols are registered, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_alpn_count(fio_tls_s *tls) {
+  return tls ? tls->alpn.count : 0;
+}
+
+/**
+ * Returns the number of `fio_tls_trust_add` instructions.
+ *
+ * This could be used when deciding if to disable peer verification or not.
+ *
+ * If `fio_tls_trust_add` was never called, zero (0) is returned.
+ */
+SFUNC uintptr_t fio_tls_trust_count(fio_tls_s *tls) {
+  return tls ? tls->trust.count : 0;
+}
+
+/** Calls callbacks for certificate, trust certificate and ALPN added. */
+void fio_tls_each___(void); /* IDE Marker*/
+SFUNC int fio_tls_each FIO_NOOP(fio_tls_each_s a) {
+  if (!a.tls)
+    return -1;
+  if (a.each_cert) {
+    FIO_IMAP_EACH(fio___tls_cert_map, &a.tls->cert, i) {
+      if (a.each_cert(&a,
+                      fio_keystr_buf(&a.tls->cert.ary[i].nm).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].public_cert_file).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].private_key_file).buf,
+                      fio_keystr_buf(&a.tls->cert.ary[i].pk_password).buf))
+        return -1;
+    }
+  }
+  if (a.each_alpn) {
+    FIO_IMAP_EACH(fio___tls_alpn_map, &a.tls->alpn, i) {
+      if (a.each_alpn(&a,
+                      fio_keystr_buf(&a.tls->alpn.ary[i].nm).buf,
+                      a.tls->alpn.ary[i].fn))
+        return -1;
+    }
+  }
+  if (a.each_trust) {
+    if (a.tls->trust_sys && a.each_trust(&a, NULL))
+      return -1;
+    FIO_IMAP_EACH(fio___tls_trust_map, &a.tls->trust, i) {
+      if (a.each_trust(&a, fio_keystr_buf(&a.tls->trust.ary[i].nm).buf))
+        return -1;
+    }
+  }
+  return 0;
+}
+
+/** If `NULL` returns current default, otherwise sets it. */
+SFUNC fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *f) {
+  static fio_io_functions_s default_io_functions = {
+      .build_context = fio___io_func_default_build_context,
+      .start = fio___srv_on_ev_mock,
+      .read = fio___io_func_default_read,
+      .write = fio___io_func_default_write,
+      .flush = fio___io_func_default_flush,
+      .free = fio___srv_on_close_mock,
+  };
+  if (!f)
+    return default_io_functions;
+  if (!f->build_context)
+    f->build_context = fio___io_func_default_build_context;
+  if (!f->start)
+    f->start = fio___srv_on_ev_mock;
+  if (!f->read)
+    f->read = fio___io_func_default_read;
+  if (!f->write)
+    f->write = fio___io_func_default_write;
+  if (!f->flush)
+    f->flush = fio___io_func_default_flush;
+  if (!f->free)
+    f->free = fio___srv_on_close_mock;
+  default_io_functions = *f;
+  return default_io_functions;
+}
+
+/* *****************************************************************************
 Server Async - Worker Threads for non-IO tasks
 ***************************************************************************** */
 
@@ -32700,6 +33212,133 @@ Done with Server code
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SERVER */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SERVER             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                  OpenSSL Implementation for IO Functions
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_SERVER) && HAVE_OPENSSL && !defined(FIO___STL_KEEP)
+
+/* *****************************************************************************
+OpenSSL Helper Settings
+***************************************************************************** */
+
+typedef struct {
+  /* module's type(s) if any */
+  SSL_CTX *ctx;
+} fio_tls_openssl_s;
+
+/* *****************************************************************************
+OpenSSL Helpers Implementation - inlined static functions
+***************************************************************************** */
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+/* *****************************************************************************
+OpenSSL Helpers Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+SSL_CTX *create_context(bool isServer) {
+  const SSL_METHOD *method;
+  SSL_CTX *ctx;
+
+  if (isServer)
+    method = TLS_server_method();
+  else
+    method = TLS_client_method();
+
+  ctx = SSL_CTX_new(method);
+  if (ctx == NULL) {
+    perror("Unable to create SSL context");
+    ERR_print_errors_fp(stderr);
+    exit(EXIT_FAILURE);
+  }
+
+  return ctx;
+}
+
+void configure_server_context(SSL_CTX *ctx) {
+  /* Set the key and cert */
+  if (SSL_CTX_use_certificate_chain_file(ctx, "cert.pem") <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(EXIT_FAILURE);
+  }
+
+  if (SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(EXIT_FAILURE);
+  }
+}
+
+void configure_client_context(SSL_CTX *ctx) {
+  /*
+   * Configure the client to abort the handshake if certificate verification
+   * fails
+   */
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+  /*
+   * In a real application you would probably just use the default system
+   * certificate trust store and call: SSL_CTX_set_default_verify_paths(ctx); In
+   * this demo though we are using a self-signed certificate, so the client must
+   * trust it directly.
+   */
+  if (!SSL_CTX_load_verify_locations(ctx, "cert.pem", NULL)) {
+    ERR_print_errors_fp(stderr);
+    exit(EXIT_FAILURE);
+  }
+}
+
+/* *****************************************************************************
+OpenSSL Helpers Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, openssl)(void) {
+  /*
+   * TODO: test module here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+OpenSSL Helpers Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* HAVE_OPENSSL */
 /* *****************************************************************************
 Simple Server Testing
 ***************************************************************************** */
@@ -32710,6 +33349,152 @@ Simple Server Testing
 /* *****************************************************************************
 Test IO ENV support
 ***************************************************************************** */
+
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                            tls_each_cert)(fio_tls_each_s *e,
+                                           const char *nm,
+                                           const char *public_cert_file,
+                                           const char *private_key_file,
+                                           const char *pk_password) {
+  size_t *result = (size_t *)e->udata2;
+  *result += 0x01U;
+  const size_t step = result[0] & 0xFF;
+  struct {
+    const char *s[4];
+  } d =
+      {
+          {nm, public_cert_file, private_key_file, pk_password},
+      },
+    ex = {{NULL, "cert.pem", "key.pem", "1234"}};
+  FIO_ASSERT(nm && nm[0] == (char)('0' + step), "nm error for tls_each_cert");
+  for (size_t i = 1; i < 4; ++i) {
+    FIO_ASSERT(d.s[i] && ex.s[i] && strlen(ex.s[i]) == strlen(d.s[i]) &&
+                   !memcmp(ex.s[i], d.s[i], strlen(d.s[i])),
+               "tls_each_cert string error for argument %zu",
+               i);
+  }
+  return 0;
+}
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                            tls_each_alpn)(fio_tls_each_s *e,
+                                           const char *nm,
+                                           void (*fn)(fio_s *)) {
+  size_t *result = (size_t *)e->udata2;
+  *result += 0x0100U;
+  const size_t step = (result[0] >> 8) & 0xFF;
+  FIO_ASSERT(nm && nm[0] == (char)('0' + step), "nm error for tls_each_alpn");
+  FIO_ASSERT((uintptr_t)fn == step, "fn value error for tls_each_alpn");
+  return 0;
+}
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                            tls_each_trust)(fio_tls_each_s *e, const char *nm) {
+
+  size_t *result = (size_t *)e->udata2;
+  *result += 0x010000U;
+  const size_t step = (result[0] >> 16) & 0xFF;
+  FIO_ASSERT(nm && nm[0] == (char)('0' + step), "nm error for tls_each_trust");
+  return 0;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
+  struct {
+    const char *nm;
+    const char *public_cert_file;
+    const char *private_key_file;
+    const char *pk_password;
+  } tls_test_cert_data[] = {
+      {
+          .nm = "1",
+          .public_cert_file = "c.pem",
+          .private_key_file = "k.pem",
+          .pk_password = NULL,
+      },
+      {
+          .nm = "2",
+          .public_cert_file = "cert.pem",
+          .private_key_file = "key.pem",
+          .pk_password = "1234",
+      },
+      {
+          .nm = "1",
+          .public_cert_file = "cert.pem",
+          .private_key_file = "key.pem",
+          .pk_password = "1234",
+      },
+      {
+          .nm = "3",
+          .public_cert_file = "cert.pem",
+          .private_key_file = "key.pem",
+          .pk_password = "1234",
+      },
+      {NULL},
+  };
+  struct {
+    const char *nm;
+    void (*fn)(fio_s *);
+  } tls_test_alpn_data[] = {
+      {
+          .nm = "1",
+          .fn = (void (*)(fio_s *))(uintptr_t)3,
+      },
+      {
+          .nm = "2",
+          .fn = (void (*)(fio_s *))(uintptr_t)2,
+      },
+      {
+          .nm = "1",
+          .fn = (void (*)(fio_s *))(uintptr_t)1,
+      },
+      {NULL},
+  };
+  struct {
+    const char *nm;
+  } tls_test_trust_data[] = {
+      {
+          .nm = "1",
+      },
+      {
+          .nm = "2",
+      },
+      {NULL},
+  };
+  size_t counter = 0;
+  void *data_containers[] = {
+      (void *)&tls_test_cert_data,
+      (void *)&tls_test_alpn_data,
+      (void *)&tls_test_trust_data,
+      NULL,
+  };
+  fio_tls_s *t = fio_tls_new();
+  FIO_ASSERT(t, "fio_tls_new should return a valid fio_tls_s object");
+  for (size_t i = 0; tls_test_cert_data[i].nm; ++i) {
+    fio_tls_s *r = fio_tls_cert_add(t,
+                                    tls_test_cert_data[i].nm,
+                                    tls_test_cert_data[i].public_cert_file,
+                                    tls_test_cert_data[i].private_key_file,
+                                    tls_test_cert_data[i].pk_password);
+    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+  }
+  for (size_t i = 0; tls_test_alpn_data[i].nm; ++i) {
+    fio_tls_s *r =
+        fio_tls_alpn_add(t, tls_test_alpn_data[i].nm, tls_test_alpn_data[i].fn);
+    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+  }
+  for (size_t i = 0; tls_test_trust_data[i].nm; ++i) {
+    fio_tls_s *r = fio_tls_trust_add(t, tls_test_trust_data[i].nm);
+    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+  }
+
+  fio_tls_each(
+      t,
+      .udata = data_containers,
+      .udata2 = &counter,
+      .each_cert = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_cert),
+      .each_alpn = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn),
+      .each_trust = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_trust));
+  FIO_ASSERT(counter == 0x020203, "fio_tls_each iteration count error.");
+  fio_tls_free(t);
+}
 
 /* State callback test task */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
@@ -32777,6 +33562,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
   FIO_ASSERT(a == 1, "remove should call callbacks.");
   fio___srv_env_safe_destroy(&env);
   FIO_ASSERT(a == 2 && b == 1 && c == 1, "destroy should call callbacks.");
+  FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)();
 }
 
 /* *****************************************************************************
@@ -38259,9 +39045,9 @@ typedef struct fio_http_settings_s {
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
   /** Optional SSL/TLS support. */
-  struct fio_io_functions *tls_io_func;
+  fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
-  void *tls;
+  fio_tls_s *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
   fio_srv_async_s *queue;
   /**
@@ -38414,8 +39200,6 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
   // if (!s->public_folder) s->public_folder = 0;
   // if (!s->public_folder_length) s->public_folder_length = 0;
-  // if(!s->tls_io_func) s->tls_io_func = 0;
-  // if(!s->tls) s->tls = 0;
 }
 
 /* *****************************************************************************
@@ -38445,6 +39229,7 @@ HTTP Protocol Container (vtable + settings storage)
 
 typedef struct {
   fio_http_settings_s settings;
+  void *tls_ctx;
   void (*on_http_callback)(void *, void *);
   fio_queue_s *queue;
   struct {
@@ -38458,6 +39243,8 @@ typedef struct {
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
+    if (o.settings.tls)                                                        \
+      fio_tls_free(o.settings.tls);                                            \
     if (o.settings.on_finish)                                                  \
       o.settings.on_finish(&o.settings);                                       \
   } while (0)
@@ -38520,7 +39307,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
   c->io = fio_attach_fd(fd,
                         &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                         (void *)c,
-                        p->settings.tls);
+                        p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
 #if DEBUG
   FIO_LOG_DEBUG2("(%d) HTTP accepted a new connection at fd %d,"
@@ -38650,6 +39437,18 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
     p->state[i].controller =
         fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
   }
+  if (s.tls) {
+    s.tls = fio_tls_dup(s.tls);
+    fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+    if (!s.tls_io_func)
+      s.tls_io_func = &tmp_fn;
+    for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+      p->state[i].protocol.io_functions = *s.tls_io_func;
+    p->tls_ctx = (s.tls_io_func->build_context
+                      ? s.tls_io_func->build_context
+                      : fio___io_func_default_build_context)(s.tls, 0);
+  }
+
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder

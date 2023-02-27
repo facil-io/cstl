@@ -376,13 +376,13 @@ FIO_SFUNC void fio___chacha_vround20(const fio_u512 c, uint8_t *restrict data) {
   }
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_shuffle((v + 4), 1, 2, 3, 0);
-    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_shuffle((v + 12), 3, 0, 1, 2);
+    fio_u32x4_reshuffle((v + 4), 1, 2, 3, 0);
+    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_reshuffle((v + 12), 3, 0, 1, 2);
     FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_shuffle((v + 4), 3, 0, 1, 2);
-    fio_u32x4_shuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_shuffle((v + 12), 1, 2, 3, 0);
+    fio_u32x4_reshuffle((v + 4), 3, 0, 1, 2);
+    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
+    fio_u32x4_reshuffle((v + 12), 1, 2, 3, 0);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i] += c.u32[i];
@@ -412,13 +412,13 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   ++v[28];
   for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_shuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
-    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_shuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
+    fio_u32x8_reshuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
+    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_reshuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
     FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_shuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
-    fio_u32x8_shuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_shuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
+    fio_u32x8_reshuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
+    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
+    fio_u32x8_reshuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
   }
   for (size_t i = 0; i < 16; ++i) {
     v[i + (i & (4 | 8))] += c.u32[i];
@@ -432,8 +432,8 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
   }
 #endif
   {
-    fio_u32x8_shuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
-    fio_u32x8_shuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
+    fio_u32x8_reshuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
+    fio_u32x8_reshuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
     uint32_t d[8];
     fio_memcpy32(d, data);
     for (size_t i = 0; i < 8; ++i) {

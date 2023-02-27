@@ -847,7 +847,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          13,
                          1,
                          2);
-  if (0) {
+  if (1) {
     fprintf(stderr, "\n");
     fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
                            (char *)"fio_xmask (XOR, NO counter)",

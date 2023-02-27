@@ -43,10 +43,10 @@ Implementation - possibly externed functions.
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* prevent ED25519 keys from having a small period (cyclic value). */
-FIO_IFUNC void fio___ed25519_clamp_on_key(fio_u256 *k) {
-  k->u8[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
-  k->u8[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
-  k->u8[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
+FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
+  k[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
+  k[31] &= 0x7FU; /* unset most significant bit (constant time fix) */
+  k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
 /* *****************************************************************************
