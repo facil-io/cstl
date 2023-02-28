@@ -12,6 +12,11 @@ extern "C" {
 #ifndef restrict
 #define restrict
 #endif
+/* C keyword - unavailable in C++ */
+#ifndef _Bool
+#define _Bool bool
+#endif
+
 #endif
 
 /* *****************************************************************************
@@ -650,10 +655,12 @@ Memory Copying Primitives
 #endif
 #endif /* FIO_MEMMOVE */
 
+/** No-op. */
 FIO_SFUNC void *fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)s);
   return d;
 }
+/** Copies 1 byte from `src` (`s`) to `dest` (`d`). */
 FIO_SFUNC void *fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
   return (void *)((uintptr_t)d + 1);

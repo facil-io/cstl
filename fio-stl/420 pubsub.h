@@ -1154,6 +1154,14 @@ FIO_SFUNC void fio___letter_on_data_ipc_child(fio_s *io) {
 FIO_SFUNC void fio___letter_on_close(void *p) {
   fio_letter_parser_free((fio_letter_parser_s *)p);
 }
+FIO_SFUNC void fio___letter_on_close_in_child(void *p) {
+  fio___letter_on_close(p);
+  if (!fio_srv_is_running())
+    return;
+  fio_srv_stop();
+  FIO_LOG_FATAL("(%d) lost connection with manager process, shutting down!",
+                getpid());
+}
 FIO_SFUNC void fio___letter_on_timeout(fio_s *io) {
   static const char ping_buf[FIO___LETTER_MINIMAL_LEN] = {0};
   fio_write2(io, .buf = (char *)ping_buf, .len = FIO___LETTER_MINIMAL_LEN);
@@ -1180,7 +1188,7 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_MASTER = {
 static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_attach = fio___letter_on_attach,
     .on_data = fio___letter_on_data_ipc_child,
-    .on_close = fio___letter_on_close,
+    .on_close = fio___letter_on_close_in_child,
     .on_timeout = fio___letter_on_timeout,
 };
 
@@ -1192,6 +1200,11 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
+#if defined(DEBUG)
+#define FIO___PUBSUB_HIDE_FROM_LOG 0
+#else
+#define FIO___PUBSUB_HIDE_FROM_LOG 1
+#endif
 /** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
@@ -1203,11 +1216,12 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
                          .on_open = fio_letter_local_ipc_on_open,
                          .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
-                         .on_root = 1),
+                         .on_root = 1,
+                         .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
              "(pub/sub) couldn't open a socket for "
              "IPC.");
 }
-
+#undef FIO___PUBSUB_HIDE_FROM_LOG
 /* *****************************************************************************
 Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */

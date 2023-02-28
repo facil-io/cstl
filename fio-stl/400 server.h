@@ -114,6 +114,8 @@ struct fio_listen_args {
   fio_queue_s *queue_for_accept;
   /** If the server is forked - listen on the root process or the workers? */
   uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
 };
 
 /**
@@ -1681,12 +1683,14 @@ SFUNC void fio_srv_start(int workers) {
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
   fio___srvdata.tick = fio_time_milli();
-  if (workers)
-    FIO_LOG_DEBUG2("starting facil.io server using %d workers.", workers);
-  else
-    FIO_LOG_DEBUG2("starting facil.io server in single process mode.");
-  for (int i = 0; i < workers; ++i) {
-    fio___srv_spawn_worker(NULL, NULL);
+  if (workers) {
+    FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
+    for (int i = 0; i < workers; ++i) {
+      fio___srv_spawn_worker(NULL, NULL);
+    }
+  } else {
+    FIO_LOG_DEBUG2("(%d) starting facil.io server in single process mode.",
+                   fio___srvdata.root_pid);
   }
   fio___srv_work(!workers);
   fio_signal_forget(SIGINT);
@@ -1863,10 +1867,10 @@ static void fio___srv_listen_on_data(fio_s *io) {
   }
 }
 static void fio___srv_listen_on_close(void *settings_) {
-  struct fio_listen_args *s = (struct fio_listen_args *)settings_;
-  if ((!s->on_root && fio_srv_is_worker()) ||
-      (s->on_root && fio_srv_is_master()))
-    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
+  struct fio_listen_args *l = (struct fio_listen_args *)settings_;
+  if (!l->hide_from_log && ((!l->on_root && fio_srv_is_worker()) ||
+                            (l->on_root && fio_srv_is_master())))
+    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -1906,7 +1910,8 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
-  FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  if (!l->hide_from_log)
+    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {

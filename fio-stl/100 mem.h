@@ -2534,7 +2534,47 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       fprintf(stderr, "%zuus\n", (size_t)(end - start));
     }
   }
-
+  {
+    fprintf(stderr, "\n");
+    struct {
+      void *(*fn)(void *, const void *, size_t);
+      size_t bytes;
+    } tests[] = {
+        {fio_memcpy7x, 7},
+        {fio_memcpy15x, 15},
+        {fio_memcpy31x, 31},
+        {fio_memcpy63x, 63},
+        {fio_memcpy127x, 127},
+        {fio_memcpy255x, 255},
+        {fio_memcpy511x, 511},
+        {fio_memcpy1023x, 1023},
+        {fio_memcpy2047x, 2047},
+        {fio_memcpy4095x, 4095},
+        {NULL},
+    };
+    char buf[4096 * 2];
+    memset(buf, 0x80, 4096 * 2);
+    for (size_t i = 0; tests[i].bytes; ++i) {
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        tests[i].fn(buf, buf + 4096, ((tests[i].bytes + r) & tests[i].bytes));
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tfio_memcpy%zux\tmemcpy(a,b,%zu)   \t%zuus\t",
+              tests[i].bytes,
+              tests[i].bytes,
+              (size_t)(end - start));
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        memcpy(buf, buf + 4096, ((tests[i].bytes + r) & tests[i].bytes));
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr, "%zuus\n", (size_t)(end - start));
+    }
+  }
   fprintf(stderr, "* Speed testing memset:\n");
 
   for (size_t len_i = 5; len_i < 20; ++len_i) {

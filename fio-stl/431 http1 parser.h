@@ -1,7 +1,7 @@
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_MODULE_NAME module /* Development inclusion - ignore line */
+#define FIO_HTTP1_PARSER       /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -16,12 +16,12 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H)
-#define H___FIO_HTTP1_PARSER___H
+#if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H) &&         \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 /* *****************************************************************************
 The HTTP/1.1 provides static functions only, always as part or implementation.
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+#define H___FIO_HTTP1_PARSER___H
 
 /* *****************************************************************************
 HTTP/1.x Parser API
@@ -171,7 +171,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
     buf->buf = start;
     return fio_http1___finish(p, buf, udata);
   }
-  char *eol = FIO_MEMCHR(start, '\n', buf->len);
+  char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
     return 1;
   if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */
@@ -186,35 +186,36 @@ static int fio_http1___start(fio_http1_parser_s *p,
   if (start[0] > ('0' - 1) && start[0] < ('9' + 1))
     goto parse_response_line;
   /* request: method path version */
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
-  if (fio_http1_on_method(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_method(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_url(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_url(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
   if (start >= eol)
     return -1;
   if (fio_http1_on_version(
-          FIO_BUF_INFO2(start, ((eol - start) > 14) ? 14 : (eol - start)),
+          FIO_BUF_INFO2(start,
+                        (size_t)(((eol - start) > 14) ? 14 : (eol - start))),
           udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 
 parse_response_line:
   /* response: version code text */
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (tmp - start)), udata))
+  if (fio_http1_on_version(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
   if (fio_http1_on_status(fio_atol10(&start),
-                          FIO_BUF_INFO2((tmp + 1), eol - tmp),
+                          FIO_BUF_INFO2((tmp + 1), (size_t)(eol - tmp)),
                           udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
@@ -290,19 +291,19 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
                                          void *udata) {
   (void)p;
   fio_buf_info_s forbidden[] = {
-      FIO_BUF_INFO1("authorization"),
-      FIO_BUF_INFO1("cache-control"),
-      FIO_BUF_INFO1("content-encoding"),
-      FIO_BUF_INFO1("content-length"),
-      FIO_BUF_INFO1("content-range"),
-      FIO_BUF_INFO1("content-type"),
-      FIO_BUF_INFO1("expect"),
-      FIO_BUF_INFO1("host"),
-      FIO_BUF_INFO1("max-forwards"),
-      FIO_BUF_INFO1("set-cookie"),
-      FIO_BUF_INFO1("te"),
-      FIO_BUF_INFO1("trailer"),
-      FIO_BUF_INFO1("transfer-encoding"),
+      FIO_BUF_INFO1((char *)"authorization"),
+      FIO_BUF_INFO1((char *)"cache-control"),
+      FIO_BUF_INFO1((char *)"content-encoding"),
+      FIO_BUF_INFO1((char *)"content-length"),
+      FIO_BUF_INFO1((char *)"content-range"),
+      FIO_BUF_INFO1((char *)"content-type"),
+      FIO_BUF_INFO1((char *)"expect"),
+      FIO_BUF_INFO1((char *)"host"),
+      FIO_BUF_INFO1((char *)"max-forwards"),
+      FIO_BUF_INFO1((char *)"set-cookie"),
+      FIO_BUF_INFO1((char *)"te"),
+      FIO_BUF_INFO1((char *)"trailer"),
+      FIO_BUF_INFO1((char *)"transfer-encoding"),
       FIO_BUF_INFO2(NULL, 0),
   }; /* known forbidden headers in trailer */
   for (size_t i = 0; forbidden[i].buf; ++i) {
@@ -354,7 +355,7 @@ static inline int fio_http1___read_header_line(
   int r;
   for (;;) {
     char *start = buf->buf;
-    char *eol = FIO_MEMCHR(start, '\n', buf->len);
+    char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
     char *div;
     fio_buf_info_s name, value;
     if (!eol)
@@ -369,7 +370,7 @@ static inline int fio_http1___read_header_line(
     div = fio_http1___seek_header_div(start);
     if (div[0] != ':')
       return -1;
-    name = FIO_BUF_INFO2(start, (div - start));
+    name = FIO_BUF_INFO2(start, (size_t)(div - start));
     do {
       ++div;
     } while (*div == ' ' || *div == '\t');
@@ -377,7 +378,7 @@ static inline int fio_http1___read_header_line(
     if (div != eol)
       while (eol[-1] == ' ' || eol[-1] == '\t')
         --eol;
-    value = FIO_BUF_INFO2((div == eol) ? NULL : div, (eol - div));
+    value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
     r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
       return r;
@@ -514,7 +515,5 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-
-#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_HTTP1_PARSER
-#endif /* FIO_HTTP1_PARSER */
+#endif /* FIO_HTTP1_PARSER && FIO_EXTERN_COMPLETE*/

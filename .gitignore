@@ -1,3 +1,4 @@
 # Specify filepatterns you want git to ignore.
 tmp/*
 .DS_Store
+*.pem

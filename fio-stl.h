@@ -144,6 +144,11 @@ extern "C" {
 #ifndef restrict
 #define restrict
 #endif
+/* C keyword - unavailable in C++ */
+#ifndef _Bool
+#define _Bool bool
+#endif
+
 #endif
 
 /* *****************************************************************************
@@ -782,10 +787,12 @@ Memory Copying Primitives
 #endif
 #endif /* FIO_MEMMOVE */
 
+/** No-op. */
 FIO_SFUNC void *fio_memcpy0(void *restrict d, const void *restrict s) {
   ((void)s);
   return d;
 }
+/** Copies 1 byte from `src` (`s`) to `dest` (`d`). */
 FIO_SFUNC void *fio_memcpy1(void *restrict d, const void *restrict s) {
   *(char *)d = *(const char *)s;
   return (void *)((uintptr_t)d + 1);
@@ -8848,21 +8855,20 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
                                                           size_t len) {
   uint64_t h[4] = {0};
-  const size_t seeder = FIO_RISKY3_PRIME4;
   while (len > 31) {
-    h[0] += fio_risky_num(fio_buf2u64_local(buf), seeder);
-    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), seeder + 8);
-    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), seeder + 16);
-    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), seeder + 24);
+    h[0] += fio_risky_num(fio_buf2u64_local(buf), 0);
+    h[1] += fio_risky_num(fio_buf2u64_local(buf + 8), 0);
+    h[2] += fio_risky_num(fio_buf2u64_local(buf + 16), 0);
+    h[3] += fio_risky_num(fio_buf2u64_local(buf + 24), 0);
     len -= 32;
   }
   if ((len & 31)) {
     uint64_t t[4] = {0};
     fio_memcpy31x(t, buf, len);
-    h[0] += fio_risky_num(t[0], seeder);
-    h[1] += fio_risky_num(t[1], seeder + 8);
-    h[2] += fio_risky_num(t[2], seeder + 16);
-    h[3] += fio_risky_num(t[3], seeder + 24);
+    h[0] += fio_risky_num(t[0], 0);
+    h[1] += fio_risky_num(t[1], 0);
+    h[2] += fio_risky_num(t[2], 0);
+    h[3] += fio_risky_num(t[3], 0);
   }
   return h[0] + h[1] + h[2] + h[3];
 }
@@ -15568,7 +15574,47 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       fprintf(stderr, "%zuus\n", (size_t)(end - start));
     }
   }
-
+  {
+    fprintf(stderr, "\n");
+    struct {
+      void *(*fn)(void *, const void *, size_t);
+      size_t bytes;
+    } tests[] = {
+        {fio_memcpy7x, 7},
+        {fio_memcpy15x, 15},
+        {fio_memcpy31x, 31},
+        {fio_memcpy63x, 63},
+        {fio_memcpy127x, 127},
+        {fio_memcpy255x, 255},
+        {fio_memcpy511x, 511},
+        {fio_memcpy1023x, 1023},
+        {fio_memcpy2047x, 2047},
+        {fio_memcpy4095x, 4095},
+        {NULL},
+    };
+    char buf[4096 * 2];
+    memset(buf, 0x80, 4096 * 2);
+    for (size_t i = 0; tests[i].bytes; ++i) {
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        tests[i].fn(buf, buf + 4096, ((tests[i].bytes + r) & tests[i].bytes));
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr,
+              "\tfio_memcpy%zux\tmemcpy(a,b,%zu)   \t%zuus\t",
+              tests[i].bytes,
+              tests[i].bytes,
+              (size_t)(end - start));
+      start = fio_time_micro();
+      for (size_t r = 0; r < (base_repetitions << 4); ++r) {
+        memcpy(buf, buf + 4096, ((tests[i].bytes + r) & tests[i].bytes));
+        FIO_COMPILER_GUARD;
+      }
+      end = fio_time_micro();
+      fprintf(stderr, "%zuus\n", (size_t)(end - start));
+    }
+  }
   fprintf(stderr, "* Speed testing memset:\n");
 
   for (size_t len_i = 5; len_i < 20; ++len_i) {
@@ -30959,6 +31005,8 @@ struct fio_listen_args {
   fio_queue_s *queue_for_accept;
   /** If the server is forked - listen on the root process or the workers? */
   uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
 };
 
 /**
@@ -32526,12 +32574,14 @@ SFUNC void fio_srv_start(int workers) {
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
   fio___srvdata.tick = fio_time_milli();
-  if (workers)
-    FIO_LOG_DEBUG2("starting facil.io server using %d workers.", workers);
-  else
-    FIO_LOG_DEBUG2("starting facil.io server in single process mode.");
-  for (int i = 0; i < workers; ++i) {
-    fio___srv_spawn_worker(NULL, NULL);
+  if (workers) {
+    FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
+    for (int i = 0; i < workers; ++i) {
+      fio___srv_spawn_worker(NULL, NULL);
+    }
+  } else {
+    FIO_LOG_DEBUG2("(%d) starting facil.io server in single process mode.",
+                   fio___srvdata.root_pid);
   }
   fio___srv_work(!workers);
   fio_signal_forget(SIGINT);
@@ -32708,10 +32758,10 @@ static void fio___srv_listen_on_data(fio_s *io) {
   }
 }
 static void fio___srv_listen_on_close(void *settings_) {
-  struct fio_listen_args *s = (struct fio_listen_args *)settings_;
-  if ((!s->on_root && fio_srv_is_worker()) ||
-      (s->on_root && fio_srv_is_master()))
-    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, s->url);
+  struct fio_listen_args *l = (struct fio_listen_args *)settings_;
+  if (!l->hide_from_log && ((!l->on_root && fio_srv_is_worker()) ||
+                            (l->on_root && fio_srv_is_master())))
+    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -32751,7 +32801,8 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
-  FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  if (!l->hide_from_log)
+    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
@@ -34735,6 +34786,14 @@ FIO_SFUNC void fio___letter_on_data_ipc_child(fio_s *io) {
 FIO_SFUNC void fio___letter_on_close(void *p) {
   fio_letter_parser_free((fio_letter_parser_s *)p);
 }
+FIO_SFUNC void fio___letter_on_close_in_child(void *p) {
+  fio___letter_on_close(p);
+  if (!fio_srv_is_running())
+    return;
+  fio_srv_stop();
+  FIO_LOG_FATAL("(%d) lost connection with manager process, shutting down!",
+                getpid());
+}
 FIO_SFUNC void fio___letter_on_timeout(fio_s *io) {
   static const char ping_buf[FIO___LETTER_MINIMAL_LEN] = {0};
   fio_write2(io, .buf = (char *)ping_buf, .len = FIO___LETTER_MINIMAL_LEN);
@@ -34761,7 +34820,7 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_MASTER = {
 static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
     .on_attach = fio___letter_on_attach,
     .on_data = fio___letter_on_data_ipc_child,
-    .on_close = fio___letter_on_close,
+    .on_close = fio___letter_on_close_in_child,
     .on_timeout = fio___letter_on_timeout,
 };
 
@@ -34773,6 +34832,11 @@ FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
   fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
+#if defined(DEBUG)
+#define FIO___PUBSUB_HIDE_FROM_LOG 0
+#else
+#define FIO___PUBSUB_HIDE_FROM_LOG 1
+#endif
 /** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
@@ -34784,11 +34848,12 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
                          .on_open = fio_letter_local_ipc_on_open,
                          .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
-                         .on_root = 1),
+                         .on_root = 1,
+                         .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
              "(pub/sub) couldn't open a socket for "
              "IPC.");
 }
-
+#undef FIO___PUBSUB_HIDE_FROM_LOG
 /* *****************************************************************************
 Letter Listening to Remote Connections - TODO!
 ***************************************************************************** */
@@ -38464,7 +38529,7 @@ Module Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_MODULE_NAME module /* Development inclusion - ignore line */
+#define FIO_HTTP1_PARSER       /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -38479,12 +38544,12 @@ Module Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H)
-#define H___FIO_HTTP1_PARSER___H
+#if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H) &&         \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 /* *****************************************************************************
 The HTTP/1.1 provides static functions only, always as part or implementation.
 ***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+#define H___FIO_HTTP1_PARSER___H
 
 /* *****************************************************************************
 HTTP/1.x Parser API
@@ -38634,7 +38699,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
     buf->buf = start;
     return fio_http1___finish(p, buf, udata);
   }
-  char *eol = FIO_MEMCHR(start, '\n', buf->len);
+  char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
     return 1;
   if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */
@@ -38649,35 +38714,36 @@ static int fio_http1___start(fio_http1_parser_s *p,
   if (start[0] > ('0' - 1) && start[0] < ('9' + 1))
     goto parse_response_line;
   /* request: method path version */
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
-  if (fio_http1_on_method(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_method(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_url(FIO_BUF_INFO2(start, tmp - start), udata))
+  if (fio_http1_on_url(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
   if (start >= eol)
     return -1;
   if (fio_http1_on_version(
-          FIO_BUF_INFO2(start, ((eol - start) > 14) ? 14 : (eol - start)),
+          FIO_BUF_INFO2(start,
+                        (size_t)(((eol - start) > 14) ? 14 : (eol - start))),
           udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 
 parse_response_line:
   /* response: version code text */
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (tmp - start)), udata))
+  if (fio_http1_on_version(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
     return -1;
   start = tmp + 1;
-  if (!(tmp = FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
   if (fio_http1_on_status(fio_atol10(&start),
-                          FIO_BUF_INFO2((tmp + 1), eol - tmp),
+                          FIO_BUF_INFO2((tmp + 1), (size_t)(eol - tmp)),
                           udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
@@ -38753,19 +38819,19 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
                                          void *udata) {
   (void)p;
   fio_buf_info_s forbidden[] = {
-      FIO_BUF_INFO1("authorization"),
-      FIO_BUF_INFO1("cache-control"),
-      FIO_BUF_INFO1("content-encoding"),
-      FIO_BUF_INFO1("content-length"),
-      FIO_BUF_INFO1("content-range"),
-      FIO_BUF_INFO1("content-type"),
-      FIO_BUF_INFO1("expect"),
-      FIO_BUF_INFO1("host"),
-      FIO_BUF_INFO1("max-forwards"),
-      FIO_BUF_INFO1("set-cookie"),
-      FIO_BUF_INFO1("te"),
-      FIO_BUF_INFO1("trailer"),
-      FIO_BUF_INFO1("transfer-encoding"),
+      FIO_BUF_INFO1((char *)"authorization"),
+      FIO_BUF_INFO1((char *)"cache-control"),
+      FIO_BUF_INFO1((char *)"content-encoding"),
+      FIO_BUF_INFO1((char *)"content-length"),
+      FIO_BUF_INFO1((char *)"content-range"),
+      FIO_BUF_INFO1((char *)"content-type"),
+      FIO_BUF_INFO1((char *)"expect"),
+      FIO_BUF_INFO1((char *)"host"),
+      FIO_BUF_INFO1((char *)"max-forwards"),
+      FIO_BUF_INFO1((char *)"set-cookie"),
+      FIO_BUF_INFO1((char *)"te"),
+      FIO_BUF_INFO1((char *)"trailer"),
+      FIO_BUF_INFO1((char *)"transfer-encoding"),
       FIO_BUF_INFO2(NULL, 0),
   }; /* known forbidden headers in trailer */
   for (size_t i = 0; forbidden[i].buf; ++i) {
@@ -38817,7 +38883,7 @@ static inline int fio_http1___read_header_line(
   int r;
   for (;;) {
     char *start = buf->buf;
-    char *eol = FIO_MEMCHR(start, '\n', buf->len);
+    char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
     char *div;
     fio_buf_info_s name, value;
     if (!eol)
@@ -38832,7 +38898,7 @@ static inline int fio_http1___read_header_line(
     div = fio_http1___seek_header_div(start);
     if (div[0] != ':')
       return -1;
-    name = FIO_BUF_INFO2(start, (div - start));
+    name = FIO_BUF_INFO2(start, (size_t)(div - start));
     do {
       ++div;
     } while (*div == ' ' || *div == '\t');
@@ -38840,7 +38906,7 @@ static inline int fio_http1___read_header_line(
     if (div != eol)
       while (eol[-1] == ' ' || eol[-1] == '\t')
         --eol;
-    value = FIO_BUF_INFO2((div == eol) ? NULL : div, (eol - div));
+    value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
     r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
       return r;
@@ -38977,10 +39043,387 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
-
-#endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_HTTP1_PARSER
-#endif /* FIO_HTTP1_PARSER */
+#endif /* FIO_HTTP1_PARSER && FIO_EXTERN_COMPLETE*/
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_BITWISE            /* Development inclusion - ignore line */
+#define FIO_RAND               /* Development inclusion - ignore line */
+#define FIO_WEBSOCKET_PARSER   /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                              WebSocket Parser
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_WEBSOCKET_PARSER) && !defined(H___FIO_WEBSOCKET_PARSER___H) && \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
+/* *****************************************************************************
+The parser provides static functions only, always as part or implementation.
+***************************************************************************** */
+#define H___FIO_WEBSOCKET_PARSER___H
+
+/* *****************************************************************************
+WebSocket Parser Settings
+***************************************************************************** */
+#ifndef WEBSOCKET_CLIENT_MUST_MASK
+/** According to the RFC, a client WebSocket MUST mask messages. */
+#define WEBSOCKET_CLIENT_MUST_MASK 1
+#endif
+
+/* *****************************************************************************
+WebSocket Parsing API
+***************************************************************************** */
+
+typedef struct fio_websocket_parser_s fio_websocket_parser_s;
+/**
+ * Parses WebSocket data, calling any callbacks.
+ *
+ * Returns bytes consumed or `FIO_WEBSOCKET_PARSER_ERROR` (`(size_t)-1`) on
+ * error.
+ */
+FIO_SFUNC size_t fio_websocket_parse(fio_websocket_parser_s *p,
+                                     fio_buf_info_s buf,
+                                     void *udata);
+
+/** The parsers return value on error. */
+#define FIO_WEBSOCKET_PARSER_ERROR ((size_t)-1)
+
+/* *****************************************************************************
+WebSocket Parsing Callbacks
+***************************************************************************** */
+
+typedef struct fio_websocket_frame_s {
+  /** message buffer (in received buffer, the parser is non-copy) */
+  fio_buf_info_s msg;
+  /** opaque user data passed to the `fio_websocket_parse` function */
+  void *udata;
+  /** This is the beginning of a new message. */
+  unsigned char is_start;
+  /** This is the finishes the a message. */
+  unsigned char is_finish;
+  /** The message is in text format. */
+  unsigned char is_text;
+  /** The extra RSV data attached to the message (extensions). */
+  unsigned char rsv;
+} fio_websocket_frame_s;
+
+/** Called when a message frame was received. */
+FIO_SFUNC void fio_websocket_on_frame(fio_websocket_frame_s frame);
+
+/**
+ * Called when the parser needs to copy the message to an external buffer.
+ *
+ * MUST return the external buffer, as it may need to be unmasked.
+ */
+FIO_SFUNC fio_buf_info_s fio_websocket_write_partial(fio_buf_info_s partial,
+                                                     size_t total_expected);
+
+/** Called when a `ping` message was received. */
+FIO_SFUNC void fio_websocket_on_protocol_ping(void *udata,
+                                              void *msg,
+                                              uint64_t len);
+
+/** Called when a `pong` message was received. */
+FIO_SFUNC void fio_websocket_on_protocol_pong(void *udata,
+                                              void *msg,
+                                              uint64_t len);
+
+/** Called when a `close` message was received. */
+FIO_SFUNC void fio_websocket_on_protocol_close_frame(void *udata);
+FIO_SFUNC void fio_websocket_on_protocol_error(void *udata);
+
+/* *****************************************************************************
+WebSocket Formatting API
+***************************************************************************** */
+/** returns the length of the buffer required to wrap a message `len` long */
+FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len);
+
+/**
+ * Wraps a WebSocket server message and writes it to the target buffer.
+ *
+ * The `first` and `last` flags can be used to support message fragmentation.
+ *
+ * * target: the target buffer to write to.
+ * * msg:    the message to be wrapped.
+ * * len:    the message length.
+ * * opcode: set to 1 for UTF-8 message, 2 for binary, etc'.
+ * * first:  set to 1 if `msg` points the beginning of the message.
+ * * last:   set to 1 if `msg + len` ends the message.
+ * * client: set to 1 to use client mode (data  masking).
+ *
+ * Further opcode values:
+ * * %x0 denotes a continuation frame
+ * *  %x1 denotes a text frame
+ * *  %x2 denotes a binary frame
+ * *  %x3-7 are reserved for further non-control frames
+ * *  %x8 denotes a connection close
+ * *  %x9 denotes a ping
+ * *  %xA denotes a pong
+ * *  %xB-F are reserved for further control frames
+ *
+ * Returns the number of bytes written. Always `websocket_wrapped_len(len)`
+ */
+FIO_SFUNC uint64_t fio_websocket_server_wrap(void *target,
+                                             void *msg,
+                                             uint64_t len,
+                                             unsigned char opcode,
+                                             unsigned char first,
+                                             unsigned char last,
+                                             unsigned char rsv);
+
+/**
+ * Wraps a WebSocket client message and writes it to the target buffer.
+ *
+ * The `first` and `last` flags can be used to support message fragmentation.
+ *
+ * * target: the target buffer to write to.
+ * * msg:    the message to be wrapped.
+ * * len:    the message length.
+ * * opcode: set to 1 for UTF-8 message, 2 for binary, etc'.
+ * * first:  set to 1 if `msg` points the beginning of the message.
+ * * last:   set to 1 if `msg + len` ends the message.
+ * * client: set to 1 to use client mode (data  masking).
+ *
+ * Returns the number of bytes written. Always `websocket_wrapped_len(len) + 4`
+ */
+FIO_SFUNC uint64_t fio_websocket_client_wrap(void *target,
+                                             void *msg,
+                                             uint64_t len,
+                                             unsigned char opcode,
+                                             unsigned char first,
+                                             unsigned char last,
+                                             unsigned char rsv);
+
+/* *****************************************************************************
+API - Parsing (unwrapping)
+***************************************************************************** */
+
+/** the returned value for `websocket_buffer_required` */
+struct fio_websocket_packet_info_s {
+  /** the expected packet length */
+  uint64_t packet_length;
+  /** a 64 bit extended packet mask value (extended from 32 bits) */
+  uint64_t mask;
+  /** the packet's "head" size (before the data) */
+  uint8_t head_length;
+};
+
+/**
+ * Returns all known information regarding the upcoming message.
+ *
+ * @returns a struct fio_websocket_packet_info_s.
+ *
+ * On protocol error, the `head_length` value is 0 (no valid head detected).
+ */
+FIO_IFUNC struct fio_websocket_packet_info_s fio_websocket_buffer_peek(
+    void *buffer,
+    uint64_t len);
+
+/**
+ * Consumes the data in the buffer, calling any callbacks required.
+ *
+ * Returns the remaining data in the existing buffer (can be 0).
+ *
+ * Notice: if there's any data in the buffer that can't be parsed
+ * just yet, `memmove` is used to place the data at the beginning of the buffer.
+ */
+FIO_IFUNC uint64_t fio_websocket_consume(void *buffer,
+                                         uint64_t len,
+                                         void *udata,
+                                         uint8_t require_masking);
+
+/* *****************************************************************************
+
+                                Implementation
+
+***************************************************************************** */
+
+/** returns the length of the buffer required to wrap a message `len` long */
+FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len) {
+  if (len < 126)
+    return len + 2;
+  if (len < (1UL << 16))
+    return len + 4;
+  return len + 10;
+}
+
+/* *****************************************************************************
+Message Wrapping
+***************************************************************************** */
+
+/**
+ * Wraps a WebSocket server message and writes it to the target buffer.
+ *
+ * The `first` and `last` flags can be used to support message fragmentation.
+ *
+ * * target: the target buffer to write to.
+ * * msg:    the message to be wrapped.
+ * * len:    the message length.
+ * * opcode: set to 1 for UTF-8 message, 2 for binary, etc'.
+ * * first:  set to 1 if `msg` points the beginning of the message.
+ * * last:   set to 1 if `msg + len` ends the message.
+ * * client: set to 1 to use client mode (data  masking).
+ *
+ * Further opcode values:
+ * * %x0 denotes a continuation frame
+ * *  %x1 denotes a text frame
+ * *  %x2 denotes a binary frame
+ * *  %x3-7 are reserved for further non-control frames
+ * *  %x8 denotes a connection close
+ * *  %x9 denotes a ping
+ * *  %xA denotes a pong
+ * *  %xB-F are reserved for further control frames
+ *
+ * Returns the number of bytes written. Always `websocket_wrapped_len(len)`
+ */
+FIO_SFUNC uint64_t fio_websocket_server_wrap(void *target,
+                                             void *msg,
+                                             uint64_t len,
+                                             unsigned char opcode,
+                                             unsigned char first,
+                                             unsigned char last,
+                                             unsigned char rsv) {
+  ((uint8_t *)target)[0] = 0 |
+                           /* opcode */ (((first ? opcode : 0) & 15)) |
+                           /* rsv */ ((rsv & 7) << 4) |
+                           /*fin*/ ((last & 1) << 7);
+  if (len < 126) {
+    ((uint8_t *)target)[1] = len;
+    FIO_MEMCPY(((uint8_t *)target) + 2, msg, len);
+    return len + 2;
+  } else if (len < (1UL << 16)) {
+    /* head is 4 bytes */
+    ((uint8_t *)target)[1] = 126;
+    fio_u2buf16(((uint8_t *)target + 2), len);
+    FIO_MEMCPY((uint8_t *)target + 4, msg, len);
+    return len + 4;
+  }
+  /* Really Long Message  */
+  ((uint8_t *)target)[1] = 127;
+  fio_u2buf64(((uint8_t *)target + 2), len);
+  FIO_MEMCPY((uint8_t *)target + 10, msg, len);
+  return len + 10;
+}
+
+/**
+ * Wraps a WebSocket client message and writes it to the target buffer.
+ *
+ * The `first` and `last` flags can be used to support message fragmentation.
+ *
+ * * target: the target buffer to write to.
+ * * msg:    the message to be wrapped.
+ * * len:    the message length.
+ * * opcode: set to 1 for UTF-8 message, 2 for binary, etc'.
+ * * first:  set to 1 if `msg` points the beginning of the message.
+ * * last:   set to 1 if `msg + len` ends the message.
+ *
+ * Returns the number of bytes written. Always `websocket_wrapped_len(len) +
+ * 4`
+ */
+FIO_SFUNC uint64_t fio_websocket_client_wrap(void *target,
+                                             void *msg,
+                                             uint64_t len,
+                                             unsigned char opcode,
+                                             unsigned char first,
+                                             unsigned char last,
+                                             unsigned char rsv) {
+  uint64_t mask = (fio_rand64() | 0x01020408ULL) & 0xFFFFFFFF; /* safer */
+  mask |= mask << 32;
+  ((uint8_t *)target)[0] = 0 |
+                           /* opcode */ (((first ? opcode : 0) & 15)) |
+                           /* rsv */ ((rsv & 7) << 4) |
+                           /*fin*/ ((last & 1) << 7);
+  if (len < 126) {
+    ((uint8_t *)target)[1] = len | 128;
+    fio_u2buf32((void *)((uint8_t *)target + 2), (uint32_t)mask);
+    FIO_MEMCPY(((uint8_t *)target) + 6, msg, len);
+    fio_xmask((char *)target + 6, len, mask);
+    return len + 6;
+  } else if (len < (1UL << 16)) {
+    /* head is 4 bytes */
+    ((uint8_t *)target)[1] = 126 | 128;
+    fio_u2buf16((void *)((uint8_t *)target + 2), len);
+    fio_u2buf32((void *)((uint8_t *)target + 4), (uint32_t)mask);
+    FIO_MEMCPY((uint8_t *)target + 8, msg, len);
+    fio_xmask((char *)target + 8, len, mask);
+    return len + 8;
+  }
+  /* Really Long Message  */
+  ((uint8_t *)target)[1] = 255;
+  fio_u2buf64((void *)((uint8_t *)target + 2), len);
+  fio_u2buf32((void *)((uint8_t *)target + 10), (uint32_t)mask);
+  FIO_MEMCPY((uint8_t *)target + 14, msg, len);
+  fio_xmask((char *)target + 14, len, mask);
+  return len + 14;
+}
+
+/* *****************************************************************************
+Message Unwrapping
+***************************************************************************** */
+
+/* *****************************************************************************
+WebSocket Parser Type
+***************************************************************************** */
+
+/** The WebSocket parser type implementation */
+struct fio_websocket_parser_s {
+  int (*fn)(fio_websocket_parser_s *, fio_buf_info_s *, void *);
+  size_t expected;
+};
+
+/* *****************************************************************************
+Main Parsing Loop
+***************************************************************************** */
+
+FIO_SFUNC size_t fio_websocket_parse(fio_websocket_parser_s *p,
+                                     fio_buf_info_s buf,
+                                     void *udata) {
+  //   int i = 0;
+  //   char *buf_start = buf.buf;
+  //   if (!buf.len)
+  //     return 0;
+  //   if (!p->fn)
+  //     p->fn = fio_http1___start;
+  //   while (!(i = p->fn(p, &buf, udata)))
+  //     ;
+  //   if (i < 0)
+  //     return FIO_WEBSOCKET_PARSER_ERROR;
+  //   return buf.buf - buf_start;
+  // }
+  // #define WEBSOCKET___EXPECTED_CHUNKED ((size_t)(-1))
+}
+
+/* *****************************************************************************
+Reading the first line
+***************************************************************************** */
+
+/* *****************************************************************************
+Testing
+***************************************************************************** */
+#ifdef FIO_TEST_CSTL
+FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
+  /*
+   * TODO: test WebSocket parser here
+   */
+}
+
+#endif /* FIO_TEST_CSTL */
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+
+#undef FIO_WEBSOCKET_PARSER
+#endif /* FIO_WEBSOCKET_PARSER && FIO_EXTERN_COMPLETE */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
