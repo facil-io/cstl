@@ -705,14 +705,54 @@ FIO_SFUNC void *fio_memcpy0x(void *d, const void *s, size_t l) {
   return d;
 }
 
-/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
+/** an unsafe memcpy (no checks + no overlapping memory regions) up to 63B */
+FIO_IFUNC void *fio_memcpy_unsafe__63x(void *restrict d_,
+                                       const void *restrict s_,
+                                       size_t l) {
+  char *restrict d = (char *restrict)d_;
+  const char *restrict s = (const char *restrict)s_;
+
+  if (l > 31) {
+    fio_memcpy32(d, s);
+    d += l & 31;
+    s += l & 31;
+    fio_memcpy32(d, s);
+    return (void *)(d += 32);
+  }
+  if (l > 15) {
+    fio_memcpy16(d, s);
+    d += l & 15;
+    s += l & 15;
+    fio_memcpy16(d, s);
+    return (void *)(d += 16);
+  }
+  if (l > 7) {
+    fio_memcpy8(d, s);
+    d += l & 7;
+    s += l & 7;
+    fio_memcpy8(d, s);
+    return (void *)(d += 8);
+  }
+  if ((l & 4)) {
+    fio_memcpy4(d, s);
+    (d += 4), (s += 4);
+  }
+  if ((l & 2)) {
+    fio_memcpy2(d, s);
+    (d += 2), (s += 2);
+  }
+  if ((l & 1))
+    *d++ = *s;
+  return (void *)d;
+}
+/** an unsafe memcpy (no checks + assumes no overlapping memory regions) */
 FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
                                     const void *restrict s_,
                                     size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   if (l < 64)
-    goto small_memcpy;
+    return fio_memcpy_unsafe__63x(d_, s_, l);
 
 #if FIO_LIMIT_INTRINSIC_BUFFER
   while (l > 127) {
@@ -750,40 +790,6 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
   s += l & 31U;
   fio_memcpy32(d, s);
   return (void *)(d += 32);
-
-small_memcpy:
-  if (l > 31) {
-    fio_memcpy32(d, s);
-    d += l & 31;
-    s += l & 31;
-    fio_memcpy32(d, s);
-    return (void *)(d += 32);
-  }
-  if (l > 15) {
-    fio_memcpy16(d, s);
-    d += l & 15;
-    s += l & 15;
-    fio_memcpy16(d, s);
-    return (void *)(d += 16);
-  }
-  if (l > 7) {
-    fio_memcpy8(d, s);
-    d += l & 7;
-    s += l & 7;
-    fio_memcpy8(d, s);
-    return (void *)(d += 8);
-  }
-  if ((l & 4)) {
-    fio_memcpy4(d, s);
-    (d += 4), (s += 4);
-  }
-  if ((l & 2)) {
-    fio_memcpy2(d, s);
-    (d += 2), (s += 2);
-  }
-  if ((l & 1))
-    *d++ = *s;
-  return (void *)d;
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
@@ -877,22 +883,22 @@ FIO_SFUNC void *fio_memcpy_buffered__reversed_x(void *restrict d_,
   return (void *)d;
 }
 
-#define FIO_MEMCPYX_MAKER(lim)                                                 \
+#define FIO_MEMCPYX_MAKER(lim, postfix)                                        \
   FIO_SFUNC void *fio_memcpy##lim##x(void *restrict d,                         \
                                      const void *restrict s,                   \
                                      size_t l) {                               \
-    return fio_memcpy_unsafe_x(d, s, (l & lim));                               \
+    return fio_memcpy_unsafe_##postfix(d, s, (l & lim));                       \
   }
-FIO_MEMCPYX_MAKER(7)
-FIO_MEMCPYX_MAKER(15)
-FIO_MEMCPYX_MAKER(31)
-FIO_MEMCPYX_MAKER(63)
-FIO_MEMCPYX_MAKER(127)
-FIO_MEMCPYX_MAKER(255)
-FIO_MEMCPYX_MAKER(511)
-FIO_MEMCPYX_MAKER(1023)
-FIO_MEMCPYX_MAKER(2047)
-FIO_MEMCPYX_MAKER(4095)
+FIO_MEMCPYX_MAKER(7, _63x)
+FIO_MEMCPYX_MAKER(15, _63x)
+FIO_MEMCPYX_MAKER(31, _63x)
+FIO_MEMCPYX_MAKER(63, _63x)
+FIO_MEMCPYX_MAKER(127, x)
+FIO_MEMCPYX_MAKER(255, x)
+FIO_MEMCPYX_MAKER(511, x)
+FIO_MEMCPYX_MAKER(1023, x)
+FIO_MEMCPYX_MAKER(2047, x)
+FIO_MEMCPYX_MAKER(4095, x)
 #undef FIO_MEMCPYX_MAKER
 
 #undef FIO_MEMCPY___PARTIAL
