@@ -31432,9 +31432,9 @@ SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *tls,
                                   void (*on_selected)(fio_s *));
 
 /** Calls the `on_selected` callback for the `fio_tls_s` object. */
-SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
-                                     const char *protocol_name,
-                                     fio_s *);
+SFUNC int fio_tls_alpn_select(fio_tls_s *tls,
+                              const char *protocol_name,
+                              fio_s *);
 
 /**
  * Adds a certificate to the "trust" list, which automatically adds a peer
@@ -33086,9 +33086,19 @@ replace_old:
 }
 
 /** Calls the `on_selected` callback for the `fio_tls_s` object. */
-SFUNC fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
-                                     const char *protocol_name,
-                                     fio_s *);
+SFUNC int fio_tls_alpn_select(fio_tls_s *t,
+                              const char *protocol_name,
+                              fio_s *io) {
+  if (!t || !protocol_name)
+    return -1;
+  fio___tls_alpn_s seeking = {
+      .nm = fio_keystr(protocol_name, (uint32_t)strlen(protocol_name))};
+  fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
+  if (!alpn)
+    return -1;
+  alpn->fn(io);
+  return 0;
+}
 
 /**
  * Adds a certificate to the "trust" list, which automatically adds a peer
@@ -33447,6 +33457,11 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
   return 0;
 }
 
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                             tls_each_alpn_cb)(fio_s *io) {
+  ((size_t *)io)[0]++;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   struct {
     const char *nm;
@@ -33544,6 +33559,12 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
       .each_alpn = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn),
       .each_trust = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_trust));
   FIO_ASSERT(counter == 0x020203, "fio_tls_each iteration count error.");
+  fio_tls_alpn_add(t,
+                   "tst",
+                   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn_cb));
+  counter = 0;
+  fio_tls_alpn_select(t, "tst", (fio_s *)&counter);
+  FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
 }
 

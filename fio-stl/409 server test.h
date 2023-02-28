@@ -55,6 +55,11 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
   return 0;
 }
 
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+                             tls_each_alpn_cb)(fio_s *io) {
+  ((size_t *)io)[0]++;
+}
+
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   struct {
     const char *nm;
@@ -152,6 +157,12 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
       .each_alpn = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn),
       .each_trust = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_trust));
   FIO_ASSERT(counter == 0x020203, "fio_tls_each iteration count error.");
+  fio_tls_alpn_add(t,
+                   "tst",
+                   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn_cb));
+  counter = 0;
+  fio_tls_alpn_select(t, "tst", (fio_s *)&counter);
+  FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
 }
 

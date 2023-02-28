@@ -8833,12 +8833,16 @@ A `NULL` callback (`on_selected`) will be silently replaced with a no-op.
 #### `fio_tls_alpn_select`
 
 ```c
-fio_tls_s *fio_tls_alpn_select(fio_tls_s *tls,
+int fio_tls_alpn_select(fio_tls_s *tls,
                                const char *protocol_name,
                                fio_s *);
 ```
 
 Calls the `on_selected` callback for the `fio_tls_s` object.
+
+Returns -1 on error (i.e., if the ALPN selected can't be found).
+
+Returns 0 if a callback was called.
 
 #### `fio_tls_trust_add`
 
