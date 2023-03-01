@@ -455,7 +455,7 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
     p->state[i].controller =
         fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
   }
-  { /* TODO! test URL for extra information, such as `cert` and `key`*/
+  if (url) { /* TODO! test URL for extra information, such as `cert` and `key`*/
     fio_url_s u = fio_url_parse(url, strlen(url));
     if (u.query.len) {
       /* TODO! add query parsing logic with callbacks to "431 http handle.h" */
