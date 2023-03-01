@@ -169,7 +169,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
     ++start;
   if (start == buf->buf + buf->len) {
     buf->buf = start;
-    return fio_http1___finish(p, buf, udata);
+    return 1;
   }
   char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
@@ -263,6 +263,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
               fio_buf2u32_local("chun") &&
           (fio_buf2u32_local(c_start + 3) | 0x20202020UL) ==
               fio_buf2u32_local("nked")) {
+        if (value.len > 7 && value.buf[-8] != ' ' && value.buf[-8] != ',')
+          return -1;
         if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
           return -1;
         p->expected = HTTP1___EXPECTED_CHUNKED;

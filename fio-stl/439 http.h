@@ -694,7 +694,7 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
 
 http1_error:
   if (c->h)
-    fio_http_send_error_response(c->h, 403);
+    fio_http_send_error_response(c->h, 400);
   fio_close(io);
   return -1;
 }

@@ -1,16 +1,12 @@
-# facil.io - C STL - a Simple Template Library for C
+# facil.io 0.8.x for C - now with an integrated C STL (Simple Template Library)
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
 
-At the core of the [facil.io library](https://facil.io) is its powerful Simple Template Library for C (and C++).
+The [facil.io library](https://facil.io) is much more than a Web Application Framework and includes core tools and type templates that any C (and C++) project will find useful.
 
-The Simple Template Library is a single file library ([`fio-stl.h`](./fio-stl.h)), that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
+In addition to useful helpers, [facil.io](https://facil.io) allows developers to use MACROS to generate code for different common types, such as Hash Maps, Arrays, Binary-Safe Strings, etc'.
 
-In addition, the Simple Template Library offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, and custom memory allocators.
-
-In other words, some of the most common building blocks one would need in any C project are placed in this single header file.
-
-The header could be included multiple times with different results, creating different types or exposing different functionality.
+In other words, some of the most common building blocks one would need in any C project are placed in this convenient header file library.
 
 ### OS Support
 
@@ -20,9 +16,11 @@ Please note I cannot continually test the windows support as I avoid the OS... h
 
 ### Installing
 
-Simply copy the `fio-stl.h` file to your project's folder (using a single header file). Done.
+Simply copy the `fio-stl.h` file to your project's folder (using a single header file).  Done.
 
 Or... copy the `fio-stl` folder to your project's folder (using `"fio-stl/include.h"`). Done.
+
+Include the file as many times as required and enjoy.
 
 ### Running Tests
 

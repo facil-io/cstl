@@ -5362,7 +5362,6 @@ void map_keystr_example(void) {
   umap_set(&map, FIO_STR_INFO3("Three", 5, FIO_KEYSTR_CONST), 3, NULL);
   FIO_MAP_EACH(umap, &map, pos) {
     uintptr_t value = pos.value;
-    /* note that key strings are NOT nul terminated! (minimizes allocations) */
     printf("%.*s: %llu\n",
            (int)pos.key.len,
            pos.key.buf,

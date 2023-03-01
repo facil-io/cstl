@@ -15754,13 +15754,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     ((uint8_t *)mem)[token_index >> 1] = 0xFFU;       /* edge case? */
     ((uint8_t *)mem)[(token_index >> 1) + 1] = 0x01U; /* edge case? */
     ((uint8_t *)mem)[(token_index >> 1) + 2] = 0x7FU; /* edge case? */
-    ((char *)mem)[token_index] = 0;
-    ((char *)mem)[token_index + 1] = 0;
+    ((uint8_t *)mem)[token_index] = 0;
+    ((uint8_t *)mem)[token_index + 1] = 0;
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
-    ((char *)mem)[token_index] = 0x80;
-    ((char *)mem)[token_index + 1] = 0x80;
+    ((uint8_t *)mem)[token_index] = (char)0x80;
+    ((uint8_t *)mem)[token_index + 1] = (char)0x80;
 
     token_index = mem_len;
     start = fio_time_micro();
@@ -15771,9 +15771,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  "fio_memchr failed? @ %zu",
                  token_index);
       FIO_COMPILER_GUARD;
-      ((char *)mem)[token_index] = 0x80;
+      ((uint8_t *)mem)[token_index] = 0x80;
       token_index = (token_index - 1) & ((1ULL << len_i) - 1);
-      ((char *)mem)[token_index] = 0;
+      ((uint8_t *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
     ((char *)mem)[token_index] = 0x80;
@@ -15792,12 +15792,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  "memchr failed? @ %zu",
                  token_index);
       FIO_COMPILER_GUARD;
-      ((char *)mem)[token_index] = 0x80;
+      ((uint8_t *)mem)[token_index] = 0x80;
       token_index = (token_index - 1) & ((1ULL << len_i) - 1);
-      ((char *)mem)[token_index] = 0;
+      ((uint8_t *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
-    ((char *)mem)[token_index] = 0x80;
+    ((uint8_t *)mem)[token_index] = 0x80;
     fprintf(stderr,
             "\tsystem memchr\t(up to %zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
@@ -15852,7 +15852,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       }
       end = fio_time_micro();
       fprintf(stderr,
-              "\tfio_memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              "\tfio_memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
               repetitions);
@@ -15871,7 +15871,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       }
       end = fio_time_micro();
       fprintf(stderr,
-              "\tsystem memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
               repetitions);
@@ -38762,7 +38762,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
     ++start;
   if (start == buf->buf + buf->len) {
     buf->buf = start;
-    return fio_http1___finish(p, buf, udata);
+    return 1;
   }
   char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
   if (!eol)
@@ -38856,6 +38856,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
               fio_buf2u32_local("chun") &&
           (fio_buf2u32_local(c_start + 3) | 0x20202020UL) ==
               fio_buf2u32_local("nked")) {
+        if (value.len > 7 && value.buf[-8] != ' ' && value.buf[-8] != ',')
+          return -1;
         if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
           return -1;
         p->expected = HTTP1___EXPECTED_CHUNKED;
@@ -40185,7 +40187,7 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
 
 http1_error:
   if (c->h)
-    fio_http_send_error_response(c->h, 403);
+    fio_http_send_error_response(c->h, 400);
   fio_close(io);
   return -1;
 }

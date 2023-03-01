@@ -1,19 +1,14 @@
 # Change Log
 
-### v.0.8.0.beta1
+### v.0.8.0.beta4
 
-I believe C is a beautiful language and many more developers would enjoy it if a few more basic tools were made available to help beginners work with the language - this is why the 0.8.x version family extracted many of the most commonly used building blocks to a single header library ([the facil.io Simple Template Library for C, i.e., facil.io's C STL](https://github.com/facil-io/cstl)).
+- The 0.8.x versions is a **total rewrite** with a **new API**, totally revised and redesigned. Why?
 
-I know facil.io has these tools and could be used to make developers happy, not just when writing network applications, but when coding any C application.
+    1. Because facil.io has features that are useful for any C program, and I wanted to make these features more accessible and visible.
 
-In some ways, [facil.io's C STL, `fio-stl.h`](https://github.com/facil-io/cstl) is a small standard-library extension with a minimal STL, much like C++ has, only for C, and it holds the best portable core features facil.io offers.
+    2. Because the previous API wasn't consistent and the same words in function names didn't always have the same meaning.
 
-
-Both The [the facil.io C STL](https://github.com/facil-io/cstl) and the [IO Core library](https://github.com/facil-io/io-core) are now developed in independent repositories, separating extension development from core development.
-
-This approach will make it easier for contributors to edit the code for these amalgamation style libraries and submit PRs, as text editors (as well as `clang-format`) have an easier time handling 10 files with a 1000 line each than a single file with 10,000 lines.
-
-**Overview**:
+    3. Because I wanted to make the code bade easier to maintain and expand.
 
 - Major API changes!
 
@@ -29,7 +24,7 @@ This approach will make it easier for contributors to edit the code for these am
 
    Some changes are semantic - such as renaming `fio_atomic_xchange` to `fio_atomic_exchange`.
 
-   Some have meaningful side-effects. i.e., Hash Maps and Arrays are now limited to a theoretical capacity of `(1<<31) - 1` elements, improving memory usage for most common use-cases (though maps support the `FIO_MAP_BIG` macro that changed this to `(1<<63) - 1` elements).
+   Some have meaningful side-effects. i.e., Hash Maps and Arrays are now limited to a theoretical capacity of `(1<<31) - 1` elements, improving memory usage for most common use-cases (if you need more than 2 billion members, you might want to roll a non-generic solution anyway).
 
 - FIOBJ was re-written from the ground up, unifying the API used for core types and for the FIOBJ library.
 
@@ -39,26 +34,23 @@ This approach will make it easier for contributors to edit the code for these am
 
     Also, this update **should** improve type recognition performance for primitive types (`true`, `false`, `null`, numbers, floats, Arrays, Strings and Hash Maps), increasing pointer tagging usage (at the expense of the number range that optimizes away memory allocation).
 
-- Risky Hash algorithm was updated.
+- Risky Hash algorithm was updated and a Stable Hash algorithm was added.
 
-**Security**: Fixes a number of issues with the HTTP parser that could have been leveraged in potential exploit attempts such as request smuggling. Credit to @dcepelik (David Čepelík).
+**Security**: Fixes a number of issues with the HTTP parser that could have been leveraged in potential exploit attempts such as request smuggling. Credit to @dcepelik (David Čepelík). Later on the HTTP parser was rewritten, but with the same considerations in mind.
 
-**Compatibility**: (2021-07-14) The CSTL library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
+**Compatibility**: (2021-07-14) The library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
 
 **Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( GitHub: @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
 
 ---
 
-## Previous facil.io versions
+### v. 0.7.6 (2022-02-19)
 
-Previous versions had the core-STL feature-set spread across multiple files, resulting in some code duplication as well as a need to import multiple files for a single feature (such as the CLI helpers).
+**Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
 
----
+**Fix**: (`fiobj`) fixes an issue with type testing for `FIOBJ_T_NUMBER`. Credit goes to @alvkeke for opening issue #141.
 
-
-... For further facio.io IO library updates see the facil.io library CHANGELOG. However, this is the point when the CSTL was born.
-
-### v. 0.7.5 - 2020-05-18
+### v. 0.7.5 (2020-05-18)
 
 **Security**: backport the 0.8.x HTTP/1.1 parser and it's security updates to the 0.7.x version branch. This fixes a request smuggling attack vector and Transfer Encoding attack vector that were exposed by Sam Sanoop from [the Snyk Security team (snyk.io)](https://snyk.io). The parser was updated to deal with these potential issues.
 

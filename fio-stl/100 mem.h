@@ -2697,13 +2697,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     ((uint8_t *)mem)[token_index >> 1] = 0xFFU;       /* edge case? */
     ((uint8_t *)mem)[(token_index >> 1) + 1] = 0x01U; /* edge case? */
     ((uint8_t *)mem)[(token_index >> 1) + 2] = 0x7FU; /* edge case? */
-    ((char *)mem)[token_index] = 0;
-    ((char *)mem)[token_index + 1] = 0;
+    ((uint8_t *)mem)[token_index] = 0;
+    ((uint8_t *)mem)[token_index + 1] = 0;
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
-    ((char *)mem)[token_index] = 0x80;
-    ((char *)mem)[token_index + 1] = 0x80;
+    ((uint8_t *)mem)[token_index] = (char)0x80;
+    ((uint8_t *)mem)[token_index + 1] = (char)0x80;
 
     token_index = mem_len;
     start = fio_time_micro();
@@ -2714,9 +2714,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  "fio_memchr failed? @ %zu",
                  token_index);
       FIO_COMPILER_GUARD;
-      ((char *)mem)[token_index] = 0x80;
+      ((uint8_t *)mem)[token_index] = 0x80;
       token_index = (token_index - 1) & ((1ULL << len_i) - 1);
-      ((char *)mem)[token_index] = 0;
+      ((uint8_t *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
     ((char *)mem)[token_index] = 0x80;
@@ -2735,12 +2735,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                  "memchr failed? @ %zu",
                  token_index);
       FIO_COMPILER_GUARD;
-      ((char *)mem)[token_index] = 0x80;
+      ((uint8_t *)mem)[token_index] = 0x80;
       token_index = (token_index - 1) & ((1ULL << len_i) - 1);
-      ((char *)mem)[token_index] = 0;
+      ((uint8_t *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
-    ((char *)mem)[token_index] = 0x80;
+    ((uint8_t *)mem)[token_index] = 0x80;
     fprintf(stderr,
             "\tsystem memchr\t(up to %zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
