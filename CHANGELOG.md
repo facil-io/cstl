@@ -38,10 +38,6 @@
 
 **Security**: Fixes a number of issues with the HTTP parser that could have been leveraged in potential exploit attempts such as request smuggling. Credit to @dcepelik (David Čepelík). Later on the HTTP parser was rewritten, but with the same considerations in mind.
 
-**Compatibility**: (2021-07-14) The library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
-
-**Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( GitHub: @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
-
 ---
 
 ### v. 0.7.6 (2022-02-19)
@@ -49,6 +45,8 @@
 **Fix**: fixed some 32 bit compatibility concerns. Credit to Franz Brausse ( @fbrausse ) for the [PR @ boazsegev/facil.io#96](https://github.com/boazsegev/facil.io/pull/96).
 
 **Fix**: (`fiobj`) fixes an issue with type testing for `FIOBJ_T_NUMBER`. Credit goes to @alvkeke for opening issue #141.
+
+**Compatibility**: (2021-07-14) The library is now semi-official Windows compatible. Credit to Jan Biedermann ( GitHub: @janbiedermann ) for his contributions towards making this happen as well as his efforts to review, test and fix any hiccups.
 
 ### v. 0.7.5 (2020-05-18)
 
