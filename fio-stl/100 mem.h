@@ -2719,7 +2719,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       ((uint8_t *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
-    ((char *)mem)[token_index] = 0x80;
+    ((uint8_t *)mem)[token_index] = 0x80;
     fprintf(stderr,
             "\tfio_memchr\t(up to %zu bytes):\t%zuus\t/ %zu\n",
             mem_len,
@@ -2752,74 +2752,76 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
 
   fprintf(stderr, "* Speed testing memcmp:\n");
 
-  for (int len_i = 5; len_i < 21; ++len_i) {
+  for (int len_i = 2; len_i < 21; ++len_i) {
     const size_t repetitions = base_repetitions
-                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
-    for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
-         ++mem_len) {
-      char *mem = (char *)malloc(mem_len << 1);
-      FIO_ASSERT_ALLOC(mem);
-      uint64_t sig = (uintptr_t)mem;
-      sig ^= sig >> 13;
-      sig ^= sig << 17;
-      sig ^= sig << 29;
-      sig ^= sig << 31;
-      fio_memset(mem, sig, mem_len);
-      fio_memset(mem + mem_len, sig, mem_len);
-      size_t twister = 0;
+                               << (len_i < 13 ? (15 - (len_i & 15)) : 2);
+    const size_t mem_len = (1ULL << len_i);
+    char *mem = (char *)malloc(mem_len << 1);
+    FIO_ASSERT_ALLOC(mem);
+    uint64_t sig = (uintptr_t)mem;
+    sig ^= sig >> 13;
+    sig ^= sig << 17;
+    sig ^= sig << 29;
+    sig ^= sig << 31;
+    fio_memset(mem, sig, mem_len);
+    fio_memset(mem + mem_len, sig, mem_len);
+    size_t twister = 0;
 
-      FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
-                 "fio_memcmp sanity test FAILED (%zu eq)",
+    FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
+               "fio_memcmp sanity test FAILED (%zu eq)",
+               mem_len);
+    {
+      mem[mem_len - 2]--;
+      int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
+      int r2 = memcmp(mem + mem_len, mem, mem_len);
+      FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                 "fio_memcmp sanity test FAILED (%zu !eq)",
                  mem_len);
-      {
-        mem[mem_len - 2]--;
-        int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
-        int r2 = memcmp(mem + mem_len, mem, mem_len);
-        FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
-                   "fio_memcmp sanity test FAILED (%zu !eq)",
-                   mem_len);
-        mem[mem_len - 2]++;
-      }
-
-      twister = mem_len - 3;
-      start = fio_time_micro();
-      for (size_t i = 0; i < repetitions; ++i) {
-        int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
-        FIO_COMPILER_GUARD;
-        if (cmp) {
-          ++mem[twister--];
-          twister &= ((1ULL << (len_i - 1)) - 1);
-        } else {
-          --mem[twister];
-        }
-      }
-      end = fio_time_micro();
-      fprintf(stderr,
-              "\tfio_memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
-              mem_len,
-              (size_t)(end - start),
-              repetitions);
-
-      twister = mem_len - 3;
-      start = fio_time_micro();
-      for (size_t i = 0; i < repetitions; ++i) {
-        int cmp = memcmp(mem + mem_len, mem, mem_len);
-        FIO_COMPILER_GUARD;
-        if (cmp) {
-          ++mem[twister--];
-          twister &= ((1ULL << (len_i - 1)) - 1);
-        } else {
-          --mem[twister];
-        }
-      }
-      end = fio_time_micro();
-      fprintf(stderr,
-              "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
-              mem_len,
-              (size_t)(end - start),
-              repetitions);
-      free(mem);
+      mem[mem_len - 2]++;
     }
+
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
+      FIO_COMPILER_GUARD;
+      if (cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tfio_memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    FIO_MEMCPY(mem,
+               mem + mem_len,
+               mem_len); /* shouldn't be needed, but anyway */
+
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = memcmp(mem + mem_len, mem, mem_len);
+      FIO_COMPILER_GUARD;
+      if (cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+    free(mem);
   }
 #endif /* DEBUG */
   ((void)start), ((void)end);
