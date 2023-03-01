@@ -1273,7 +1273,7 @@ FIO_SFUNC int fio___memcmp_mini(char *restrict a,
     uint64_t ua[bytes / 8] FIO_ALIGN(16);                                      \
     uint64_t ub[bytes / 8] FIO_ALIGN(16);                                      \
     uint64_t flag = 0;                                                         \
-    if (test_for_non_even && (len & (bytes - 1))) {                            \
+    if (!test_for_non_even || (len & (bytes - 1))) {                           \
       for (size_t i = 0; i < (bytes / 8); ++i) {                               \
         fio_memcpy8(ua + i, a + (i << 3));                                     \
         fio_memcpy8(ub + i, b + (i << 3));                                     \
