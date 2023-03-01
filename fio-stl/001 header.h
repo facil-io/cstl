@@ -1123,21 +1123,6 @@ FIO_SFUNC size_t fio___msb_index_unsafe(uint64_t i) {
 #endif /* __builtin vs. map */
 }
 
-/**
- * A token seeking function. This is a fallback for `memchr`, but `memchr`
- * should be faster.
- */
-FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  if (!buffer || !len)
-    return NULL;
-  const char *r = (const char *)buffer;
-  uint64_t umsk = ((uint64_t)((uint8_t)token));
-  umsk |= (umsk << 32); /* make each byte in umsk == token */
-  umsk |= (umsk << 16);
-  umsk |= (umsk << 8);
-  if (len < 64)
-    goto small_memchr;
-
 #define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
   do {                                                                         \
     uint64_t flag = 0, v, u[group_size];                                       \
@@ -1167,6 +1152,63 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     return (void *)(r + fio___lsb_index_unsafe(flag));                         \
   } while (0)
 
+/* the small fio_memchr - poor SIMD, used for up to 64 bytes */
+FIO_SFUNC void *fio_memchr_small(const void *buffer,
+                                 const char token,
+                                 size_t len) {
+  const char *r = (const char *)buffer;
+  uint64_t umsk = ((uint64_t)((uint8_t)token));
+  umsk |= (umsk << 32); /* make each byte in umsk == token */
+  umsk |= (umsk << 16);
+  umsk |= (umsk << 8);
+  if (len > 15) {
+    for (;;) {
+      len -= 16;
+      FIO___MEMCHR_BITMAP_TEST(2);
+      if (!len)
+        return NULL;
+      if (len > 15)
+        continue;
+      r -= 16;
+      r += len & 15;
+      len = 16;
+    }
+  }
+  if (len > 7) {
+    FIO___MEMCHR_BITMAP_TEST(1);
+    r -= 8;
+    r += len & 7;
+    FIO___MEMCHR_BITMAP_TEST(1);
+    return NULL;
+  }
+  /* clang-format off */
+  switch(len) {
+  case 7: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 6: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 5: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 4: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 3: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 2: if (*r == token) return (void *)r; ++r; /* fall through */
+  case 1: if (*r == token) return (void *)r; ++r;
+  }
+  /* clang-format on */
+  return NULL;
+}
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+  if (!buffer || !len)
+    return NULL;
+  if (len < 64)
+    return fio_memchr_small(buffer, token, len);
+  const char *r = (const char *)buffer;
+  uint64_t umsk = ((uint64_t)((uint8_t)token));
+  umsk |= (umsk << 32); /* make each byte in umsk == token */
+  umsk |= (umsk << 16);
+  umsk |= (umsk << 8);
+
 #if FIO_LIMIT_INTRINSIC_BUFFER
   for (const char *const e = r + (len & (~UINT64_C(127))); r < e;) {
     FIO___MEMCHR_BITMAP_TEST(8);
@@ -1194,42 +1236,8 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   r += len & 31;
   FIO___MEMCHR_BITMAP_TEST(4);
   return NULL;
-
-small_memchr:
-  if (len > 15) {
-    for (;;) {
-      len -= 16;
-      FIO___MEMCHR_BITMAP_TEST(2);
-      if (!len)
-        return NULL;
-      if (len > 15)
-        continue;
-      r -= 16;
-      r += len & 15;
-      len = 16;
-    }
-  }
-  if (len > 7) {
-    FIO___MEMCHR_BITMAP_TEST(1);
-    r -= 8;
-    r += len & 7;
-    FIO___MEMCHR_BITMAP_TEST(1);
-    return NULL;
-  }
-#undef FIO___MEMCHR_BITMAP_TEST
-  /* clang-format off */
-  switch(len) {
-  case 7: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 6: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 5: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 4: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 3: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 2: if (*r == token) return (void *)r; ++r; /* fall through */
-  case 1: if (*r == token) return (void *)r; ++r;
-  }
-  /* clang-format on */
-  return NULL;
 }
+#undef FIO___MEMCHR_BITMAP_TEST
 
 /* *****************************************************************************
 fio_memcmp
@@ -1292,6 +1300,7 @@ FIO___MEMCMP_BYTES(16)
 FIO___MEMCMP_BYTES(32)
 FIO___MEMCMP_BYTES(64)
 FIO___MEMCMP_BYTES(128)
+FIO___MEMCMP_BYTES(256)
 
 FIO_IFUNC int fio___memcmp_mini(char *restrict a,
                                 char *restrict b,
@@ -1319,9 +1328,11 @@ FIO_SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return fio___memcmp16(a, b, len);
   if (len < 64)
     return fio___memcmp32(a, b, len);
-  if (len < 4096)
+  if (len < 2048)
     return fio___memcmp64(a, b, len);
-  return fio___memcmp128(a, b, len);
+  if (len < 4096)
+    return fio___memcmp128(a, b, len);
+  return fio___memcmp256(a, b, len);
 }
 
 /* *****************************************************************************

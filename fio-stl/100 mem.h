@@ -2690,7 +2690,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
-    const size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
+    size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
     void *mem = malloc(mem_len + 1);
     FIO_ASSERT_ALLOC(mem);
     fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x80), mem_len + 1);
@@ -2702,34 +2702,48 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     FIO_ASSERT(memchr((char *)mem + 1, 0, mem_len) ==
                    fio_memchr((char *)mem + 1, 0, mem_len),
                "fio_memchr != memchr");
+    ((char *)mem)[token_index] = 0x80;
+    ((char *)mem)[token_index + 1] = 0x80;
 
+    token_index = mem_len;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      FIO_ASSERT((char *)fio_memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + token_index),
-                 "fio_memchr failed?");
+      char *result = (char *)fio_memchr((char *)mem, 0, mem_len);
+      FIO_ASSERT(result == ((char *)mem + token_index) ||
+                     (!result && token_index == mem_len),
+                 "fio_memchr failed? @ %zu",
+                 token_index);
       FIO_COMPILER_GUARD;
+      ((char *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      ((char *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
-
+    ((char *)mem)[token_index] = 0x80;
     fprintf(stderr,
-            "\tfio_memchr\t(%zu bytes):\t%zuus\t/ %zu (len: %zu)\n",
-            token_index,
+            "\tfio_memchr\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
             (size_t)(end - start),
-            repetitions,
-            mem_len);
+            repetitions);
 
+    token_index = mem_len;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      FIO_ASSERT((char *)memchr((char *)mem + 1, 0, mem_len) ==
-                     ((char *)mem + token_index),
-                 "memchr failed?");
+      char *result = (char *)memchr((char *)mem, 0, mem_len);
+      FIO_ASSERT(result == ((char *)mem + token_index) ||
+                     (!result && token_index == mem_len),
+                 "memchr failed? @ %zu",
+                 token_index);
       FIO_COMPILER_GUARD;
+      ((char *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      ((char *)mem)[token_index] = 0;
     }
     end = fio_time_micro();
+    ((char *)mem)[token_index] = 0x80;
     fprintf(stderr,
-            "\tsystem memchr\t(%zu bytes):\t%zuus\t/ %zu\n",
-            token_index,
+            "\tsystem memchr\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
             (size_t)(end - start),
             repetitions);
 
@@ -2752,6 +2766,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       sig ^= sig << 31;
       fio_memset(mem, sig, mem_len);
       fio_memset(mem + mem_len, sig, mem_len);
+      size_t twister = 0;
 
       FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
                  "fio_memcmp sanity test FAILED (%zu eq)",
@@ -2766,28 +2781,40 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
         mem[mem_len - 2]++;
       }
 
+      twister = mem_len - 3;
       start = fio_time_micro();
       for (size_t i = 0; i < repetitions; ++i) {
         int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
-        mem[mem_len - 1] = (cmp) ? mem[mem_len - 1] + 1 : mem[mem_len - 1] - 1;
+        if (cmp) {
+          ++mem[twister--];
+          twister &= ((1ULL << (len_i - 1)) - 1);
+        } else {
+          --mem[twister];
+        }
       }
       end = fio_time_micro();
       fprintf(stderr,
-              "\tfio_memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              "\tfio_memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
               repetitions);
 
+      twister = mem_len - 3;
       start = fio_time_micro();
       for (size_t i = 0; i < repetitions; ++i) {
         int cmp = memcmp(mem + mem_len, mem, mem_len);
         FIO_COMPILER_GUARD;
-        mem[mem_len - 1] = (cmp) ? mem[mem_len - 1] + 1 : mem[mem_len - 1] - 1;
+        if (cmp) {
+          ++mem[twister--];
+          twister &= ((1ULL << (len_i - 1)) - 1);
+        } else {
+          --mem[twister];
+        }
       }
       end = fio_time_micro();
       fprintf(stderr,
-              "\tsystem memcmp\t(%zu bytes):\t%zuus\t/ %zu\n",
+              "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
               mem_len,
               (size_t)(end - start),
               repetitions);
