@@ -287,7 +287,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
               fio_buf2u32_local(u.scheme.buf) == fio_buf2u32_local("priv"))
                  ? FIO_SOCK_UNIX_PRIVATE
                  : FIO_SOCK_UNIX;
-    if (u.path.len >= 2048) {
+    if (u.path.len > 2047) {
       errno = EINVAL;
       FIO_LOG_ERROR(
           "Couldn't open unix socket to %s - host name too long (%zu).",
@@ -306,7 +306,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
   if (!u.port.len) {
     pr = NULL;
   } else {
-    if (u.port.len >= 64) {
+    if (u.port.len > 63) {
       errno = EINVAL;
       FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
                     url);
@@ -330,7 +330,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
     }
   }
   if (u.host.len) {
-    if (u.host.len >= 2048) {
+    if (u.host.len > 2047) {
       errno = EINVAL;
       FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
       return -1;

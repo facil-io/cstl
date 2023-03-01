@@ -103,7 +103,7 @@ FIO_URL - Implementation
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   /*
   Intention:
-  [schema://][user[:]][password[@]][host.com[:/]][:port/][/path][?quary][#target]
+  [schema://][[user][:password]@][host.com][:port][path][?quary][#target]
   */
   const char *end = url + len;
   const char *pos = url;
@@ -162,7 +162,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     break;
   }
 
-  // start_username:
+  /* start_username: */
   url = pos;
   while (pos < end && pos[0] != ':' && pos[0] != '/' && pos[0] != '@'
          /* && pos[0] != '#' && pos[0] != '?' */)
@@ -193,7 +193,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
 start_password:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != '@')
+  while (pos < end && pos[0] != '/' && pos[0] != '@' && pos[0] != '?')
     ++pos;
 
   if (pos >= end) {
@@ -202,10 +202,10 @@ start_password:
     r.host = r.user;
     r.user.len = 0;
     goto finish;
-    ;
   }
 
   switch (pos[0]) {
+  case '?': /* fall through */
   case '/':
     r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     r.host = r.user;
@@ -473,6 +473,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
               {
                   .host = {.buf = (char *)"example.com", .len = 11},
                   .port = {.buf = (char *)"8080", .len = 4},
+              },
+      },
+      {
+          .url = (char *)"example.com:8080?q=true",
+          .len = 23,
+          .expected =
+              {
+                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .port = {.buf = (char *)"8080", .len = 4},
+                  .query = {.buf = (char *)"q=true", .len = 6},
               },
       },
       {

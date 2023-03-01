@@ -447,12 +447,19 @@ void fio_http_listen___(void); /* IDE marker */
 SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s);
   fio_http_protocol_s *p = fio_http_protocol_new();
+  fio_tls_s *auto_tls_detected = NULL;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
     p->state[i].protocol =
         fio___http_protocol_get((fio___http_protocol_selector_e)i, 0);
     p->state[i].controller =
         fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
+  }
+  { /* TODO! test URL for extra information, such as `cert` and `key`*/
+    fio_url_s u = fio_url_parse(url, strlen(url));
+    if (u.query.len) {
+      /* TODO! add query parsing logic with callbacks to "431 http handle.h" */
+    }
   }
   if (s.tls) {
     s.tls = fio_tls_dup(s.tls);
@@ -465,6 +472,7 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
                       ? s.tls_io_func->build_context
                       : fio___io_func_default_build_context)(s.tls, 0);
   }
+  fio_tls_free(auto_tls_detected);
 
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
