@@ -818,7 +818,7 @@ static struct {
 #if FIO_HTTP_CACHE_STATIC
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       13
+#define FIO___HTTP_STATIC_CACHE_FOLD       27
 #define FIO___HTTP_STATIC_CACHE_STEP       27
 #define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
 
@@ -908,7 +908,7 @@ static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
 static void fio___http_str_cached_init(void) {
   memset(FIO___HTTP_STATIC_CACHE_IMAP, 0, 64 * 2);
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
-    uint64_t hash = fio_risky_hash(FIO___HTTP_STATIC_CACHE[i].str,
+    uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
                                    0);
     hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
@@ -931,9 +931,9 @@ static void fio___http_str_cached_init(void) {
   }
 }
 
-static char *fio___http_str_cached_static(uint64_t hash,
-                                          char *str,
+static char *fio___http_str_cached_static(char *str,
                                           size_t len) {
+  uint64_t hash = fio_stable_hash(str, len,0);
   hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
   for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
        ++attempts) {
@@ -995,17 +995,15 @@ avoid_caching:
 
 FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
 #if FIO_HTTP_CACHE_STATIC
-  uint64_t hash;
   char *tmp;
   if (!s.len)
     return NULL;
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
-    goto avoid_caching;
-  hash = fio_risky_hash(s.buf, s.len, 0);
-  tmp = fio___http_str_cached_static(hash, s.buf, s.len);
+    goto skip_cache_test;
+  tmp = fio___http_str_cached_static(s.buf, s.len);
   if (tmp)
     return fio_bstr_copy(tmp);
-avoid_caching:
+skip_cache_test:
 #endif /* FIO_HTTP_CACHE_STATIC */
   return fio_bstr_write(NULL, s.buf, s.len);
 }

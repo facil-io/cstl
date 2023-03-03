@@ -511,8 +511,8 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
-#if __has_builtin(__builtin_addcll)
-  return __builtin_addcll(a, b, carry_in, carry_out);
+#if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
+  return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
 #elif defined(__SIZEOF_INT128__) && 0
   /* This is actually slower as it occupies more CPU registers */
   __uint128_t u = (__uint128_t)a + b + carry_in;
@@ -531,8 +531,8 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
                                    uint64_t carry_in,
                                    uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
-#if __has_builtin(__builtin_subcll)
-  uint64_t u = __builtin_subcll(a, b, carry_in, carry_out);
+#if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
+  uint64_t u = __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
 #elif defined(__SIZEOF_INT128__)
   __uint128_t u = (__uint128_t)a - b - carry_in;
   if (carry_out)
