@@ -8461,10 +8461,10 @@ Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
 ***************************************************************************** */
 #define FIO_STABLE_HASH_ROUND_WORD(i)                                          \
   v[i] += w[i];                                                                \
+  v[i] += prime[i];                                                            \
   v[i] *= prime[i];                                                            \
-  w[i] = fio_lrot64(w[i], 17);                                                 \
-  v[i] += w[i] + seed;                                                         \
-  v[i] += v_with_offset[i];
+  w[i] = fio_lrot64(w[i], 19);                                                 \
+  v[i] += w[i] + seed;
 
 FIO_IFUNC void fio_stable_hash___inner(uint64_t dest[4],
                                        const void *restrict data_,
@@ -8476,7 +8476,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t dest[4],
   seed ^= fio_lrot64(seed, 47);
   seed = (seed << 1) + 1;
   uint64_t v[4] = {seed, seed, seed, seed};
-  uint64_t v_with_offset[4] = {0};
   uint64_t const prime[4] = {FIO_U32_HASH_PRIME0,
                              FIO_U32_HASH_PRIME1,
                              FIO_U32_HASH_PRIME2,
@@ -8490,8 +8489,6 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t dest[4],
       data += 8;
       FIO_STABLE_HASH_ROUND_WORD(i);
     }
-    for (size_t i = 0; i < 4; ++i)
-      v_with_offset[i] = fio_lrot64(v[(i + 1) & 3], 7);
   }
   { /* pad with zeros (even if %32 == 0) and add len to last word */
     uint64_t w[4] = {0};
@@ -8515,45 +8512,46 @@ SFUNC uint64_t fio_stable_hash(const void *data_, size_t len, uint64_t seed) {
   fio_stable_hash___inner(v, data_, len, seed);
   /* summing & avalanche */
   r = fio_u64x4_reduce_add(v);
-  {
-    for (size_t i = 0; i < 4; ++i)
-      v[i] = fio_bswap64(v[i]);
-  }
+  for (size_t i = 0; i < 4; ++i)
+    v[i] = fio_bswap64(v[i]);
+  r ^= fio_lrot64(r, 5);
   r += v[0] ^ v[1];
-  r ^= fio_lrot64(r, 13);
+  r ^= fio_lrot64(r, 27);
   r += v[1] ^ v[2];
-  r ^= fio_lrot64(r, 29);
+  r ^= fio_lrot64(r, 49);
   r += v[2] ^ v[3];
-  r += fio_lrot64(r, 33);
-  r += v[3] ^ v[0];
-  r ^= (r >> 29) * FIO_U32_HASH_PRIME4;
+  r ^= (r >> 29) * FIO_U64_HASH_PRIME0;
   r ^= fio_lrot64(r, 29);
   return r;
 }
-
 
 SFUNC void fio_stable_hash128(void *restrict dest,
                               const void *restrict data_,
                               size_t len,
                               uint64_t seed) {
 
-  fio_u256 v;
-  fio_stable_hash___inner(v.u64, data_, len, seed);
+  uint64_t v[4];
+  fio_stable_hash___inner(v, data_, len, seed);
   uint64_t r[2];
-  r[0] = fio_u256_reduce_add64(v);
-  r[1] = fio_u256_reduce_xor64(v);
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
-  r[0] *= FIO_U64_HASH_PRIME4;
-  r[1] *= FIO_U64_HASH_PRIME0;
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
+  uint64_t prime[2] = {FIO_U64_HASH_PRIME0, FIO_U64_HASH_PRIME1};
+  r[0] = fio_u64x4_reduce_add(v);
+  r[1] = fio_u64x4_reduce_xor(v);
+  for (size_t i = 0; i < 4; ++i)
+    v[i] = fio_bswap64(v[i]);
+  for (size_t i = 0; i < 2; ++i) {
+    r[i] ^= fio_lrot64(r[i], 5);
+    r[i] += v[0] ^ v[1];
+    r[i] ^= fio_lrot64(r[i], 27);
+    r[i] += v[1] ^ v[2];
+    r[i] ^= fio_lrot64(r[i], 49);
+    r[i] += v[2] ^ v[3];
+    r[i] ^= (r[i] >> 29) * prime[i];
+    r[i] ^= fio_lrot64(r[i], 29);
+  }
   fio_memcpy16(dest, r);
 }
 
-#undef FIO_STABLE_HASH_MUL_PRIME
 #undef FIO_STABLE_HASH_ROUND_WORD
-
 /* *****************************************************************************
 Random - Implementation
 ***************************************************************************** */
@@ -36583,8 +36581,8 @@ static struct {
 #if FIO_HTTP_CACHE_STATIC
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       27
-#define FIO___HTTP_STATIC_CACHE_STEP       27
+#define FIO___HTTP_STATIC_CACHE_FOLD       22
+#define FIO___HTTP_STATIC_CACHE_STEP       1
 #define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
 
 static struct {
@@ -36675,7 +36673,7 @@ static void fio___http_str_cached_init(void) {
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
-                                   0);
+                                   0); /* use stable hash (change resilient) */
     hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
     size_t protection = 0;
     while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
@@ -36698,7 +36696,7 @@ static void fio___http_str_cached_init(void) {
 
 static char *fio___http_str_cached_static(char *str,
                                           size_t len) {
-  uint64_t hash = fio_stable_hash(str, len,0);
+  uint64_t hash = fio_stable_hash(str, len,0); /* use stable hash (change resilient) */
   hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
   for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
        ++attempts) {

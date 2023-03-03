@@ -818,8 +818,8 @@ static struct {
 #if FIO_HTTP_CACHE_STATIC
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       27
-#define FIO___HTTP_STATIC_CACHE_STEP       27
+#define FIO___HTTP_STATIC_CACHE_FOLD       22
+#define FIO___HTTP_STATIC_CACHE_STEP       1
 #define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
 
 static struct {
@@ -910,7 +910,7 @@ static void fio___http_str_cached_init(void) {
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
-                                   0);
+                                   0); /* use stable hash (change resilient) */
     hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
     size_t protection = 0;
     while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
@@ -933,7 +933,7 @@ static void fio___http_str_cached_init(void) {
 
 static char *fio___http_str_cached_static(char *str,
                                           size_t len) {
-  uint64_t hash = fio_stable_hash(str, len,0);
+  uint64_t hash = fio_stable_hash(str, len,0); /* use stable hash (change resilient) */
   hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
   for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
        ++attempts) {
