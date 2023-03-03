@@ -900,13 +900,16 @@ static struct {
     FIO___HTTP_STATIC_CACHE_SET("x-forwarded-host"),
     FIO___HTTP_STATIC_CACHE_SET("x-forwarded-proto"),
     FIO___HTTP_STATIC_CACHE_SET("x-requested-with"),
-    {0}};
+    {{0}}};
 
 static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
     {0};
 
 static void fio___http_str_cached_init(void) {
-  memset(FIO___HTTP_STATIC_CACHE_IMAP, 0, 64 * 2);
+  memset(FIO___HTTP_STATIC_CACHE_IMAP,
+         0,
+         (FIO___HTTP_STATIC_CACHE_MASK + 1) *
+             sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
@@ -1913,21 +1916,21 @@ WebSocket / SSE Helpers
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *h) {
   fio_str_info_s val =
-      fio_http_request_header(h, FIO_STR_INFO2("connection", 10), 0);
+      fio_http_request_header(h, FIO_STR_INFO2((char*)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
   if (val.len < 7 || !(((fio_buf2u32_local(val.buf) | 0x32323232UL) ==
-                        fio_buf2u32_local("upgr")) |
+                        fio_buf2u32_local("upgr")) ||
                        ((fio_buf2u32_local(val.buf + 3) | 0x32323232UL) ==
                         fio_buf2u32_local("rade"))))
     return 0;
   /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
-  val = fio_http_request_header(h, FIO_STR_INFO2("upgrade", 7), 0);
+  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"upgrade", 7), 0);
   if (val.len < 7 || !(((fio_buf2u64_local(val.buf) | 0x3232323232323232ULL) ==
-                        fio_buf2u64_local("websocke")) |
+                        fio_buf2u64_local("websocke")) ||
                        ((fio_buf2u32_local(val.buf + 5) | 0x32323232UL) ==
                         fio_buf2u32_local("cket"))))
     return 0;
-  val = fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
   if (val.len != 24)
     return 0;
   return 1;
@@ -1938,11 +1941,11 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   h->status = 101;
   /* we ignore client version and force the RFC final version instead */
   fio_http_response_header_set(h,
-                               FIO_STR_INFO2("sec-websocket-version", 21),
+                               FIO_STR_INFO2((char*)"sec-websocket-version", 21),
                                FIO_STR_INFO2("13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
-        fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+        fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
     FIO_STR_INFO_TMP_VAR(accept_val, 64);
     if (k.len != 24)
       goto handshake_error;
@@ -1960,7 +1963,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
                                fio_sha1_len(),
                                0);
     fio_http_response_header_set(h,
-                                 FIO_STR_INFO2("sec-websocket-accept", 20),
+                                 FIO_STR_INFO2((char*)"sec-websocket-accept", 20),
                                  accept_val);
   }
   fio_http_write(h, .finish = 1);
@@ -2002,10 +2005,10 @@ FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
                                                  char *start,
                                                  char *const end) {
   for (;;) {
-    char *nxt = FIO_MEMCHR(start, ';', end - start);
+    char *nxt = (char *)FIO_MEMCHR(start, ';', end - start);
     if (!nxt)
       nxt = end;
-    char *eq = FIO_MEMCHR(start, '=', nxt - start);
+    char *eq = (char *)FIO_MEMCHR(start, '=', nxt - start);
     if (!eq)
       eq = nxt;
     /* write value to dst */

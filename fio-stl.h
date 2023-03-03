@@ -7508,19 +7508,19 @@ Collecting Monotonic / Real Time
 ***************************************************************************** */
 
 /** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real();
+FIO_IFUNC struct timespec fio_time_real(void);
 
 /** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono();
+FIO_IFUNC struct timespec fio_time_mono(void);
 
 /** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
-FIO_IFUNC int64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano(void);
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro();
+FIO_IFUNC int64_t fio_time_micro(void);
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli();
+FIO_IFUNC int64_t fio_time_milli(void);
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec);
@@ -7593,33 +7593,33 @@ Time Inline Helpers
 ***************************************************************************** */
 
 /** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real() {
+FIO_IFUNC struct timespec fio_time_real(void) {
   struct timespec t;
   clock_gettime(CLOCK_REALTIME, &t);
   return t;
 }
 
 /** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono() {
+FIO_IFUNC struct timespec fio_time_mono(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return t;
 }
 
 /** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
-FIO_IFUNC int64_t fio_time_nano() {
+FIO_IFUNC int64_t fio_time_nano(void) {
   struct timespec t = fio_time_real();
   return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
 }
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro() {
+FIO_IFUNC int64_t fio_time_micro(void) {
   struct timespec t = fio_time_real();
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli() { return fio_time2milli(fio_time_real()); }
+FIO_IFUNC int64_t fio_time_milli(void) { return fio_time2milli(fio_time_real()); }
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
@@ -8593,9 +8593,6 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
     fio___rand_buffer[(offset & 3)] ^= tmp;
   }
 }
-
-/* used here, defined later */
-FIO_IFUNC int64_t fio_time_nano();
 
 SFUNC void fio_rand_reseed(void) {
   const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
@@ -9673,7 +9670,7 @@ typedef struct {
 FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len);
 
 /** initializes a fio_u256 so the hash can consume streaming data. */
-FIO_IFUNC fio_sha256_s fio_sha256_init();
+FIO_IFUNC fio_sha256_s fio_sha256_init(void);
 /** Feed data into the hash */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
 /** finalizes a fio_u256 with the SHA 256 hash. */
@@ -9690,7 +9687,7 @@ typedef struct {
 FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len);
 
 /** initializes a fio_u512 so the hash can consume streaming data. */
-FIO_IFUNC fio_sha512_s fio_sha512_init();
+FIO_IFUNC fio_sha512_s fio_sha512_init(void);
 /** Feed data into the hash */
 SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
 /** finalizes a fio_u512 with the SHA 512 hash. */
@@ -9701,7 +9698,7 @@ Implementation - static / inline functions.
 ***************************************************************************** */
 
 /** initializes a fio_u256 so the hash can be consumed. */
-FIO_IFUNC fio_sha256_s fio_sha256_init() {
+FIO_IFUNC fio_sha256_s fio_sha256_init(void) {
   fio_sha256_s h = {.hash.u32 = {0x6A09E667ULL,
                                  0xBB67AE85ULL,
                                  0x3C6EF372ULL,
@@ -9721,7 +9718,7 @@ FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len) {
 }
 
 /** initializes a fio_u256 so the hash can be consumed. */
-FIO_IFUNC fio_sha512_s fio_sha512_init() {
+FIO_IFUNC fio_sha512_s fio_sha512_init(void) {
   fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
   return h;
 }
@@ -10711,7 +10708,7 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *nounce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
-  if (((auth[0] != fio_buf2u64_little(mac)) |
+  if (((auth[0] != fio_buf2u64_little(mac)) ||
        (auth[1] != fio_buf2u64_little(((char *)mac + 8)))))
     return -1;
   fio_chacha20(data, len, key, nounce, 1);
@@ -20545,7 +20542,7 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len);
 /** Copies a `fio_bstr` using "copy on write". */
 FIO_IFUNC char *fio_bstr_copy(char *bstr);
 /** Frees a binary string allocated by a `fio_bstr` function. Returns NULL.*/
-FIO_IFUNC char *fio_bstr_free(char *bstr);
+FIO_IFUNC void fio_bstr_free(char *bstr);
 
 /** Returns information about the fio_bstr. */
 FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr);
@@ -20763,15 +20760,14 @@ copy_anyway:
 }
 
 /** Frees a binary string allocated by a `fio_bstr` function. */
-FIO_IFUNC char *fio_bstr_free(char *bstr) {
+FIO_IFUNC void fio_bstr_free(char *bstr) {
   if (!bstr)
-    return NULL;
+    return;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
-    return NULL;
+    return;
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
   FIO_BSTR___LEAK_TESTER(-1);
-  return NULL;
 }
 
 /** internal helper - sets the length of the fio_bstr. */
@@ -31056,13 +31052,13 @@ SFUNC void fio_srv_stop(void);
 SFUNC void fio_srv_start(int workers);
 
 /** Returns true if server running and 0 if server stopped or shutting down. */
-SFUNC int fio_srv_is_running();
+SFUNC int fio_srv_is_running(void);
 
 /** Returns true if the current process is the server's master process. */
-SFUNC int fio_srv_is_master();
+SFUNC int fio_srv_is_master(void);
 
 /** Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker();
+SFUNC int fio_srv_is_worker(void);
 
 /** Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
@@ -31486,7 +31482,7 @@ TLS Context Helper Types
 ***************************************************************************** */
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
-SFUNC fio_tls_s *fio_tls_new();
+SFUNC fio_tls_s *fio_tls_new(void);
 
 /** Performs a `dup` operation, increasing the object's reference count. */
 SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *);
@@ -32619,15 +32615,15 @@ Starting the Server
 SFUNC void fio_srv_stop(void) { fio_atomic_or(&fio___srvdata.stop, 1); }
 
 /* Returns true if server running and 0 if server stopped or shutting down. */
-SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }
+SFUNC int fio_srv_is_running(void) { return !fio___srvdata.stop; }
 
 /* Returns true if the current process is the server's master process. */
-SFUNC int fio_srv_is_master() {
+SFUNC int fio_srv_is_master(void) {
   return fio___srvdata.root_pid == fio___srvdata.pid;
 }
 
 /* Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker() { return fio___srvdata.is_worker; }
+SFUNC int fio_srv_is_worker(void) { return fio___srvdata.is_worker; }
 
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
@@ -33081,7 +33077,7 @@ struct fio_tls_s {
 #undef FIO___STL_KEEP
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
-SFUNC fio_tls_s *fio_tls_new() {
+SFUNC fio_tls_s *fio_tls_new(void) {
   fio_tls_s *r = fio_tls_new2();
   FIO_ASSERT_ALLOC(r);
   *r = (fio_tls_s){.trust_sys = 0};
@@ -34964,8 +34960,9 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
                          .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
                          .on_root = 1,
                          .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
-             "(pub/sub) couldn't open a socket for "
-             "IPC.");
+             "(pub/sub) "
+             "couldn't open a socket for IPC\n\t\t%s",
+             FIO_POSTOFFICE.ipc_url);
 }
 #undef FIO___PUBSUB_HIDE_FROM_LOG
 /* *****************************************************************************
@@ -36663,13 +36660,16 @@ static struct {
     FIO___HTTP_STATIC_CACHE_SET("x-forwarded-host"),
     FIO___HTTP_STATIC_CACHE_SET("x-forwarded-proto"),
     FIO___HTTP_STATIC_CACHE_SET("x-requested-with"),
-    {0}};
+    {{0}}};
 
 static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
     {0};
 
 static void fio___http_str_cached_init(void) {
-  memset(FIO___HTTP_STATIC_CACHE_IMAP, 0, 64 * 2);
+  memset(FIO___HTTP_STATIC_CACHE_IMAP,
+         0,
+         (FIO___HTTP_STATIC_CACHE_MASK + 1) *
+             sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
@@ -37676,21 +37676,21 @@ WebSocket / SSE Helpers
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *h) {
   fio_str_info_s val =
-      fio_http_request_header(h, FIO_STR_INFO2("connection", 10), 0);
+      fio_http_request_header(h, FIO_STR_INFO2((char*)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
   if (val.len < 7 || !(((fio_buf2u32_local(val.buf) | 0x32323232UL) ==
-                        fio_buf2u32_local("upgr")) |
+                        fio_buf2u32_local("upgr")) ||
                        ((fio_buf2u32_local(val.buf + 3) | 0x32323232UL) ==
                         fio_buf2u32_local("rade"))))
     return 0;
   /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
-  val = fio_http_request_header(h, FIO_STR_INFO2("upgrade", 7), 0);
+  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"upgrade", 7), 0);
   if (val.len < 7 || !(((fio_buf2u64_local(val.buf) | 0x3232323232323232ULL) ==
-                        fio_buf2u64_local("websocke")) |
+                        fio_buf2u64_local("websocke")) ||
                        ((fio_buf2u32_local(val.buf + 5) | 0x32323232UL) ==
                         fio_buf2u32_local("cket"))))
     return 0;
-  val = fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
   if (val.len != 24)
     return 0;
   return 1;
@@ -37701,11 +37701,11 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   h->status = 101;
   /* we ignore client version and force the RFC final version instead */
   fio_http_response_header_set(h,
-                               FIO_STR_INFO2("sec-websocket-version", 21),
+                               FIO_STR_INFO2((char*)"sec-websocket-version", 21),
                                FIO_STR_INFO2("13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
-        fio_http_request_header(h, FIO_STR_INFO2("sec-websocket-key", 17), 0);
+        fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
     FIO_STR_INFO_TMP_VAR(accept_val, 64);
     if (k.len != 24)
       goto handshake_error;
@@ -37723,7 +37723,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
                                fio_sha1_len(),
                                0);
     fio_http_response_header_set(h,
-                                 FIO_STR_INFO2("sec-websocket-accept", 20),
+                                 FIO_STR_INFO2((char*)"sec-websocket-accept", 20),
                                  accept_val);
   }
   fio_http_write(h, .finish = 1);
@@ -37765,10 +37765,10 @@ FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
                                                  char *start,
                                                  char *const end) {
   for (;;) {
-    char *nxt = FIO_MEMCHR(start, ';', end - start);
+    char *nxt = (char *)FIO_MEMCHR(start, ';', end - start);
     if (!nxt)
       nxt = end;
-    char *eq = FIO_MEMCHR(start, '=', nxt - start);
+    char *eq = (char *)FIO_MEMCHR(start, '=', nxt - start);
     if (!eq)
       eq = nxt;
     /* write value to dst */
@@ -38896,8 +38896,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
     break;
   case 17: /* test for "transfer-encoding" (chunked?) */
     if (value.len >= 7 && (name.buf[16] == 'g') &&
-        ((fio_buf2u64_local(name.buf) == fio_buf2u64_local("transfer")) &
-         (fio_buf2u64_local(name.buf + 8) == fio_buf2u64_local("-encodin")))) {
+        !((fio_buf2u64_local(name.buf) ^ fio_buf2u64_local("transfer")) |
+         (fio_buf2u64_local(name.buf + 8) ^ fio_buf2u64_local("-encodin")))) {
       char *c_start = value.buf + value.len - 7;
       if ((fio_buf2u32_local(c_start) | 0x20202020UL) ==
               fio_buf2u32_local("chun") &&

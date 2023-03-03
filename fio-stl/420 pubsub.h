@@ -1218,8 +1218,9 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
                          .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
                          .on_root = 1,
                          .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
-             "(pub/sub) couldn't open a socket for "
-             "IPC.");
+             "(pub/sub) "
+             "couldn't open a socket for IPC\n\t\t%s",
+             FIO_POSTOFFICE.ipc_url);
 }
 #undef FIO___PUBSUB_HIDE_FROM_LOG
 /* *****************************************************************************

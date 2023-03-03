@@ -626,7 +626,7 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *nounce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
-  if (((auth[0] != fio_buf2u64_little(mac)) |
+  if (((auth[0] != fio_buf2u64_little(mac)) ||
        (auth[1] != fio_buf2u64_little(((char *)mac + 8)))))
     return -1;
   fio_chacha20(data, len, key, nounce, 1);

@@ -256,8 +256,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
     break;
   case 17: /* test for "transfer-encoding" (chunked?) */
     if (value.len >= 7 && (name.buf[16] == 'g') &&
-        ((fio_buf2u64_local(name.buf) == fio_buf2u64_local("transfer")) &
-         (fio_buf2u64_local(name.buf + 8) == fio_buf2u64_local("-encodin")))) {
+        !((fio_buf2u64_local(name.buf) ^ fio_buf2u64_local("transfer")) |
+         (fio_buf2u64_local(name.buf + 8) ^ fio_buf2u64_local("-encodin")))) {
       char *c_start = value.buf + value.len - 7;
       if ((fio_buf2u32_local(c_start) | 0x20202020UL) ==
               fio_buf2u32_local("chun") &&

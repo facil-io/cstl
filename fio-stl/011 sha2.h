@@ -33,7 +33,7 @@ typedef struct {
 FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len);
 
 /** initializes a fio_u256 so the hash can consume streaming data. */
-FIO_IFUNC fio_sha256_s fio_sha256_init();
+FIO_IFUNC fio_sha256_s fio_sha256_init(void);
 /** Feed data into the hash */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
 /** finalizes a fio_u256 with the SHA 256 hash. */
@@ -50,7 +50,7 @@ typedef struct {
 FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len);
 
 /** initializes a fio_u512 so the hash can consume streaming data. */
-FIO_IFUNC fio_sha512_s fio_sha512_init();
+FIO_IFUNC fio_sha512_s fio_sha512_init(void);
 /** Feed data into the hash */
 SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
 /** finalizes a fio_u512 with the SHA 512 hash. */
@@ -61,7 +61,7 @@ Implementation - static / inline functions.
 ***************************************************************************** */
 
 /** initializes a fio_u256 so the hash can be consumed. */
-FIO_IFUNC fio_sha256_s fio_sha256_init() {
+FIO_IFUNC fio_sha256_s fio_sha256_init(void) {
   fio_sha256_s h = {.hash.u32 = {0x6A09E667ULL,
                                  0xBB67AE85ULL,
                                  0x3C6EF372ULL,
@@ -81,7 +81,7 @@ FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len) {
 }
 
 /** initializes a fio_u256 so the hash can be consumed. */
-FIO_IFUNC fio_sha512_s fio_sha512_init() {
+FIO_IFUNC fio_sha512_s fio_sha512_init(void) {
   fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
   return h;
 }

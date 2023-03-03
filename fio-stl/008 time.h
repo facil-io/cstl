@@ -23,19 +23,19 @@ Collecting Monotonic / Real Time
 ***************************************************************************** */
 
 /** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real();
+FIO_IFUNC struct timespec fio_time_real(void);
 
 /** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono();
+FIO_IFUNC struct timespec fio_time_mono(void);
 
 /** Returns monotonic time in nano-seconds (now in 1 billionth of a second). */
-FIO_IFUNC int64_t fio_time_nano();
+FIO_IFUNC int64_t fio_time_nano(void);
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro();
+FIO_IFUNC int64_t fio_time_micro(void);
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli();
+FIO_IFUNC int64_t fio_time_milli(void);
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec);
@@ -108,33 +108,33 @@ Time Inline Helpers
 ***************************************************************************** */
 
 /** Returns human (watch) time... this value isn't as safe for measurements. */
-FIO_IFUNC struct timespec fio_time_real() {
+FIO_IFUNC struct timespec fio_time_real(void) {
   struct timespec t;
   clock_gettime(CLOCK_REALTIME, &t);
   return t;
 }
 
 /** Returns monotonic time. */
-FIO_IFUNC struct timespec fio_time_mono() {
+FIO_IFUNC struct timespec fio_time_mono(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return t;
 }
 
 /** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
-FIO_IFUNC int64_t fio_time_nano() {
+FIO_IFUNC int64_t fio_time_nano(void) {
   struct timespec t = fio_time_real();
   return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
 }
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
-FIO_IFUNC int64_t fio_time_micro() {
+FIO_IFUNC int64_t fio_time_micro(void) {
   struct timespec t = fio_time_real();
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli() { return fio_time2milli(fio_time_real()); }
+FIO_IFUNC int64_t fio_time_milli(void) { return fio_time2milli(fio_time_real()); }
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {

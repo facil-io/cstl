@@ -406,9 +406,6 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
   }
 }
 
-/* used here, defined later */
-FIO_IFUNC int64_t fio_time_nano();
-
 SFUNC void fio_rand_reseed(void) {
   const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
 #if defined(RUSAGE_SELF)

@@ -72,13 +72,13 @@ SFUNC void fio_srv_stop(void);
 SFUNC void fio_srv_start(int workers);
 
 /** Returns true if server running and 0 if server stopped or shutting down. */
-SFUNC int fio_srv_is_running();
+SFUNC int fio_srv_is_running(void);
 
 /** Returns true if the current process is the server's master process. */
-SFUNC int fio_srv_is_master();
+SFUNC int fio_srv_is_master(void);
 
 /** Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker();
+SFUNC int fio_srv_is_worker(void);
 
 /** Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
@@ -502,7 +502,7 @@ TLS Context Helper Types
 ***************************************************************************** */
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
-SFUNC fio_tls_s *fio_tls_new();
+SFUNC fio_tls_s *fio_tls_new(void);
 
 /** Performs a `dup` operation, increasing the object's reference count. */
 SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *);
@@ -1635,15 +1635,15 @@ Starting the Server
 SFUNC void fio_srv_stop(void) { fio_atomic_or(&fio___srvdata.stop, 1); }
 
 /* Returns true if server running and 0 if server stopped or shutting down. */
-SFUNC int fio_srv_is_running() { return !fio___srvdata.stop; }
+SFUNC int fio_srv_is_running(void) { return !fio___srvdata.stop; }
 
 /* Returns true if the current process is the server's master process. */
-SFUNC int fio_srv_is_master() {
+SFUNC int fio_srv_is_master(void) {
   return fio___srvdata.root_pid == fio___srvdata.pid;
 }
 
 /* Returns true if the current process is a server's worker process. */
-SFUNC int fio_srv_is_worker() { return fio___srvdata.is_worker; }
+SFUNC int fio_srv_is_worker(void) { return fio___srvdata.is_worker; }
 
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
@@ -2097,7 +2097,7 @@ struct fio_tls_s {
 #undef FIO___STL_KEEP
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
-SFUNC fio_tls_s *fio_tls_new() {
+SFUNC fio_tls_s *fio_tls_new(void) {
   fio_tls_s *r = fio_tls_new2();
   FIO_ASSERT_ALLOC(r);
   *r = (fio_tls_s){.trust_sys = 0};
