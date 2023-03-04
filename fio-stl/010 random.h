@@ -128,27 +128,21 @@ Here's a few resources about hashes that might explain more:
 #define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
-  uint64_t n = (uint64_t)(uintptr_t)ptr;
-  n ^= (n | 1) * FIO_U64_HASH_PRIME0;
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME1, 29);
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME2, 33);
-  n ^= fio_lrot64(n, 17);
-  n ^= fio_lrot64(n, 31);
-  n ^= fio_lrot64(n, 47);
-  return n;
+FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
+  seed ^= fio_lrot64(seed, 47);
+  seed += FIO_U64_HASH_PRIME0;
+  seed = seed | 1;
+  uint64_t h = n + seed;
+  h += fio_lrot64(seed, 5);
+  h += fio_bswap64(seed);
+  h += fio_lrot64(h, 27);
+  h += fio_lrot64(h, 49);
+  return h;
 }
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
-  n += seed;
-  n ^= (n | 1) * FIO_U64_HASH_PRIME0;
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME1, 29);
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME2, 33);
-  n ^= fio_lrot64(n, 17);
-  n ^= fio_lrot64(n, 31);
-  n ^= fio_lrot64(n, 47);
-  return n;
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
+  return fio_risky_num((uint64_t)(uintptr_t)ptr, FIO_U64_HASH_PRIME9);
 }
 
 /* *****************************************************************************

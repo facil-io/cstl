@@ -395,6 +395,12 @@ SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine);
 /** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
+
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC const char * fio_pubsub_ipc_url(void);
+
 /* *****************************************************************************
 
 
@@ -1692,6 +1698,19 @@ external_engine:
 
 
 ***************************************************************************** */
+
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
+  if (fio_srv_is_running() || len >= FIO___IPC_LEN)
+    return -1;
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
+  fio_string_write2(&url, NULL, FIO_STRING_WRITE_STR2(str, len));
+  return 0;
+}
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC const char *  fio_pubsub_ipc_url(void) {
+  return FIO_POSTOFFICE.ipc_url;
+}
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);

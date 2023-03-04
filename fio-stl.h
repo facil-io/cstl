@@ -8316,27 +8316,21 @@ Here's a few resources about hashes that might explain more:
 #define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
-  uint64_t n = (uint64_t)(uintptr_t)ptr;
-  n ^= (n | 1) * FIO_U64_HASH_PRIME0;
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME1, 29);
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME2, 33);
-  n ^= fio_lrot64(n, 17);
-  n ^= fio_lrot64(n, 31);
-  n ^= fio_lrot64(n, 47);
-  return n;
+FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
+  seed ^= fio_lrot64(seed, 47);
+  seed += FIO_U64_HASH_PRIME0;
+  seed = seed | 1;
+  uint64_t h = n + seed;
+  h += fio_lrot64(seed, 5);
+  h += fio_bswap64(seed);
+  h += fio_lrot64(h, 27);
+  h += fio_lrot64(h, 49);
+  return h;
 }
 
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
-FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
-  n += seed;
-  n ^= (n | 1) * FIO_U64_HASH_PRIME0;
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME1, 29);
-  n ^= fio_lrot64(n * FIO_U64_HASH_PRIME2, 33);
-  n ^= fio_lrot64(n, 17);
-  n ^= fio_lrot64(n, 31);
-  n ^= fio_lrot64(n, 47);
-  return n;
+FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
+  return fio_risky_num((uint64_t)(uintptr_t)ptr, FIO_U64_HASH_PRIME9);
 }
 
 /* *****************************************************************************
@@ -17904,7 +17898,6 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
 #if defined(__APPLE__)
   addr.sun_len = addr_len;
 #endif
-  // get the file descriptor
   int fd =
       socket(AF_UNIX, (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM, 0);
   if (fd == -1) {
@@ -17935,16 +17928,21 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       int umask_org = umask(0x1FF);
       btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+      int old_err = errno;
       umask(umask_org);
+      errno = old_err;
       FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
                     umask_org);
     } else
 #endif /* FIO_SOCK_AVOID_UMASK */
       /* else */ btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (btmp == -1) {
-      FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
+      FIO_LOG_DEBUG("couldn't bind unix socket to %s\n\terrno(%d): %s",
+                    address,
+                    errno,
+                    strerror(errno));
       fio_sock_close(fd);
-      unlink(addr.sun_path);
+      // unlink(addr.sun_path);
       return -1;
     }
 #ifndef FIO_OS_WIN
@@ -31896,7 +31894,8 @@ Wakeup Protocol
 
 FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
-  fio_sock_read(fio_fd_get(io), buf, 512);
+  ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
+  (void)r;
   fio___srvdata.wakeup_wait = 0;
 #if DEBUG
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
@@ -32848,9 +32847,12 @@ static void fio___srv_listen_on_data(fio_s *io) {
 }
 static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *l = (struct fio_listen_args *)settings_;
-  if (!l->hide_from_log && ((!l->on_root && fio_srv_is_worker()) ||
+  if (((!l->on_root && fio_srv_is_worker()) ||
                             (l->on_root && fio_srv_is_master())))
-    FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+    FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
+                    "(%d) stopped listening on %s",
+                    fio___srvdata.pid,
+                    l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -32890,8 +32892,10 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
-  if (!l->hide_from_log)
-    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
+                  "(%d) started listening on %s",
+                  fio___srvdata.pid,
+                  l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
@@ -34136,6 +34140,12 @@ SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine);
 
 /** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
+
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
+
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC const char * fio_pubsub_ipc_url(void);
 
 /* *****************************************************************************
 
@@ -35434,6 +35444,19 @@ external_engine:
 
 
 ***************************************************************************** */
+
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
+  if (fio_srv_is_running() || len >= FIO___IPC_LEN)
+    return -1;
+  fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
+  fio_string_write2(&url, NULL, FIO_STRING_WRITE_STR2(str, len));
+  return 0;
+}
+/** Returns the current IPC socket address (shouldn't be changed). */
+SFUNC const char *  fio_pubsub_ipc_url(void) {
+  return FIO_POSTOFFICE.ipc_url;
+}
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);

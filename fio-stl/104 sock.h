@@ -589,7 +589,6 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
 #if defined(__APPLE__)
   addr.sun_len = addr_len;
 #endif
-  // get the file descriptor
   int fd =
       socket(AF_UNIX, (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM, 0);
   if (fd == -1) {
@@ -620,16 +619,21 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       int umask_org = umask(0x1FF);
       btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+      int old_err = errno;
       umask(umask_org);
+      errno = old_err;
       FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
                     umask_org);
     } else
 #endif /* FIO_SOCK_AVOID_UMASK */
       /* else */ btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (btmp == -1) {
-      FIO_LOG_DEBUG("couldn't bind unix socket to %s", address);
+      FIO_LOG_DEBUG("couldn't bind unix socket to %s\n\terrno(%d): %s",
+                    address,
+                    errno,
+                    strerror(errno));
       fio_sock_close(fd);
-      unlink(addr.sun_path);
+      // unlink(addr.sun_path);
       return -1;
     }
 #ifndef FIO_OS_WIN
