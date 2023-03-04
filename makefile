@@ -108,7 +108,7 @@ endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
 OPTIMIZATION=-O3
 # optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined
-OPTIMIZATION_DEBUG=-O0 -g -fsanitize=address -fno-omit-frame-pointer
+OPTIMIZATION_DEBUG=-O0 -g -coverage -fsanitize=address -fno-omit-frame-pointer
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
@@ -711,9 +711,9 @@ documentation.%: ;
 .PHONY : set_debug_flags
 set_debug_flags:
 	$(eval OPTIMIZATION=$(OPTIMIZATION_DEBUG))
-	$(eval CFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
-	$(eval CXXFLAGS+=-coverage -DDEBUG=1 -fno-builtin)
-	$(eval LINKER_FLAGS=-coverage -g -DDEBUG=1 $(LINKER_FLAGS))
+	$(eval CFLAGS+= -DDEBUG=1 -fno-builtin)
+	$(eval CXXFLAGS+= -DDEBUG=1 -fno-builtin)
+	$(eval LINKER_FLAGS= -g -DDEBUG=1 $(LINKER_FLAGS))
 	@echo "* Set debug flags."
 
 $(TMP_ROOT)/%.d: ;

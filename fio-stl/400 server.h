@@ -1870,11 +1870,12 @@ static void fio___srv_listen_on_data(fio_s *io) {
 static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *l = (struct fio_listen_args *)settings_;
   if (((!l->on_root && fio_srv_is_worker()) ||
-                            (l->on_root && fio_srv_is_master())))
-    FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
-                    "(%d) stopped listening on %s",
-                    fio___srvdata.pid,
-                    l->url);
+       (l->on_root && fio_srv_is_master()))) {
+    if (l->hide_from_log)
+      FIO_LOG_DEBUG2("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+    else
+      FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+  }
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -1914,10 +1915,10 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
-  FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
-                  "(%d) started listening on %s",
-                  fio___srvdata.pid,
-                  l->url);
+  if (l->hide_from_log)
+    FIO_LOG_DEBUG2("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  else
+    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {

@@ -399,7 +399,7 @@ SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 
 /** Returns the current IPC socket address (shouldn't be changed). */
-SFUNC const char * fio_pubsub_ipc_url(void);
+SFUNC const char *fio_pubsub_ipc_url(void);
 
 /* *****************************************************************************
 
@@ -1708,9 +1708,7 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
   return 0;
 }
 /** Returns the current IPC socket address (shouldn't be changed). */
-SFUNC const char *  fio_pubsub_ipc_url(void) {
-  return FIO_POSTOFFICE.ipc_url;
-}
+SFUNC const char *fio_pubsub_ipc_url(void) { return FIO_POSTOFFICE.ipc_url; }
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);

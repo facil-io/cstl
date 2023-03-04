@@ -134,7 +134,9 @@ FIO_IFUNC int64_t fio_time_micro(void) {
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli(void) { return fio_time2milli(fio_time_real()); }
+FIO_IFUNC int64_t fio_time_milli(void) {
+  return fio_time2milli(fio_time_real());
+}
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {

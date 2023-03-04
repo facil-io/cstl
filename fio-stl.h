@@ -2721,7 +2721,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #undef FIO_LOG_PRINT__
 #define FIO_LOG_PRINT__(level, ...)                                            \
   do {                                                                         \
-    if (level <= FIO_LOG_LEVEL)                                                \
+    if ((level) <= FIO_LOG_LEVEL)                                              \
       FIO_LOG2STDERR(__VA_ARGS__);                                             \
   } while (0)
 
@@ -7619,7 +7619,9 @@ FIO_IFUNC int64_t fio_time_micro(void) {
 }
 
 /** Returns monotonic time in milliseconds. */
-FIO_IFUNC int64_t fio_time_milli(void) { return fio_time2milli(fio_time_real()); }
+FIO_IFUNC int64_t fio_time_milli(void) {
+  return fio_time2milli(fio_time_real());
+}
 
 /** Converts a `struct timespec` to milliseconds. */
 FIO_IFUNC int64_t fio_time2milli(struct timespec t) {
@@ -32848,11 +32850,12 @@ static void fio___srv_listen_on_data(fio_s *io) {
 static void fio___srv_listen_on_close(void *settings_) {
   struct fio_listen_args *l = (struct fio_listen_args *)settings_;
   if (((!l->on_root && fio_srv_is_worker()) ||
-                            (l->on_root && fio_srv_is_master())))
-    FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
-                    "(%d) stopped listening on %s",
-                    fio___srvdata.pid,
-                    l->url);
+       (l->on_root && fio_srv_is_master()))) {
+    if (l->hide_from_log)
+      FIO_LOG_DEBUG2("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+    else
+      FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+  }
 }
 
 FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
@@ -32892,10 +32895,10 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
   fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
-  FIO_LOG_PRINT__(l->hide_from_log ? FIO_LOG_LEVEL_DEBUG : FIO_LOG_LEVEL_INFO,
-                  "(%d) started listening on %s",
-                  fio___srvdata.pid,
-                  l->url);
+  if (l->hide_from_log)
+    FIO_LOG_DEBUG2("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  else
+    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
@@ -34145,7 +34148,7 @@ SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 
 /** Returns the current IPC socket address (shouldn't be changed). */
-SFUNC const char * fio_pubsub_ipc_url(void);
+SFUNC const char *fio_pubsub_ipc_url(void);
 
 /* *****************************************************************************
 
@@ -35454,9 +35457,7 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
   return 0;
 }
 /** Returns the current IPC socket address (shouldn't be changed). */
-SFUNC const char *  fio_pubsub_ipc_url(void) {
-  return FIO_POSTOFFICE.ipc_url;
-}
+SFUNC const char *fio_pubsub_ipc_url(void) { return FIO_POSTOFFICE.ipc_url; }
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);

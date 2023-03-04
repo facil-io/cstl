@@ -103,7 +103,7 @@ int __attribute__((weak)) FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 #undef FIO_LOG_PRINT__
 #define FIO_LOG_PRINT__(level, ...)                                            \
   do {                                                                         \
-    if (level <= FIO_LOG_LEVEL)                                                \
+    if ((level) <= FIO_LOG_LEVEL)                                              \
       FIO_LOG2STDERR(__VA_ARGS__);                                             \
   } while (0)
 
