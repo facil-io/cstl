@@ -918,18 +918,18 @@ FIO_SFUNC void fio___cli_print_help(void) {
     switch (i.line_type) {
     case FIO___CLI_STRING:
       argument_type_txt = FIO_BUF_INFO1(
-          (char *)"\x1B[0m   \x1B[2m<string value>"); /* fall through */
+          (char *)"\x1B[0m \x1B[2m<string value>"); /* fall through */
     case FIO___CLI_BOOL:
       FIO_ASSERT(i.line_type != FIO___CLI_BOOL || !def.len,
                  "(CLI) boolean values cannot have a default value:\n\t%s",
                  i.line.buf);
       if (!argument_type_txt.buf)
         argument_type_txt = FIO_BUF_INFO1(
-            (char *)"\x1B[0m   \x1B[2m(boolean)"); /* fall through */
+            (char *)"\x1B[0m \x1B[2m(boolean flag)"); /* fall through */
     case FIO___CLI_INT:
       if (!argument_type_txt.buf)
         argument_type_txt =
-            FIO_BUF_INFO1((char *)"\x1B[0m   \x1B[2m<integer value>");
+            FIO_BUF_INFO1((char *)"\x1B[0m \x1B[2m<integer value>");
       FIO_ASSERT(
           i.line.buf[0] == '-',
           "(CLI) argument lines MUST start with an '-argument-name':\n\t%s",
@@ -941,7 +941,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                       help_org_state.buf == help.buf);
         else
           help = fio___cli_write2line(help,
-                                      FIO_BUF_INFO1((char *)", "),
+                                      FIO_BUF_INFO1((char *)"\x1B[0m, \x1B[1m"),
                                       help_org_state.buf == help.buf);
         first_alias = al;
         help = fio___cli_write2line(help,
@@ -953,7 +953,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                   help_org_state.buf == help.buf);
       if (def.len) {
         help = fio___cli_write2line(help,
-                                    FIO_BUF_INFO1((char *)"\tdefault value: "),
+                                    FIO_BUF_INFO1((char *)", defaults to: "),
                                     help_org_state.buf == help.buf);
         help = fio___cli_write2line(help,
                                     FIO_STR2BUF_INFO(def),
