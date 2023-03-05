@@ -1640,6 +1640,13 @@ typedef struct fio_buf_info_s {
 #define FIO_STR2BUF_INFO(str_info)                                             \
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio_stack_mem___##name[(capacity)];                                     \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio_stack_mem___##name, .capa = (capacity)                          \
+  }
+
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
 *****************************************************************************

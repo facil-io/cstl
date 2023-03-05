@@ -23,16 +23,16 @@ HTTP Setting Defaults
 ***************************************************************************** */
 
 #ifndef FIO_HTTP_DEFAULT_MAX_HEADER_SIZE
-#define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE (1UL << 15)
+#define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE 32768 /* (1UL << 15) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_MAX_LINE_LEN
-#define FIO_HTTP_DEFAULT_MAX_LINE_LEN (1UL << 13)
+#define FIO_HTTP_DEFAULT_MAX_LINE_LEN 8192 /* (1UL << 13) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_MAX_BODY_SIZE
-#define FIO_HTTP_DEFAULT_MAX_BODY_SIZE (1UL << 25)
+#define FIO_HTTP_DEFAULT_MAX_BODY_SIZE 33554432 /* (1UL << 25) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE
-#define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE (1UL << 18)
+#define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE 262144 /* (1UL << 18) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_TIMEOUT
 #define FIO_HTTP_DEFAULT_TIMEOUT 50

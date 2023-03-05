@@ -2376,7 +2376,7 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
       .q = fio_srv_queue(),
       .node = FIO_LIST_INIT(q->node),
   };
-  if (!threads)
+  if (!threads || threads > 4095)
     return;
   q->q = &q->queue;
   FIO_LIST_PUSH(&fio___srvdata.async, &q->node);
