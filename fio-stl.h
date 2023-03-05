@@ -29434,6 +29434,36 @@ CLI Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
+#define FIO___CLI_ON_ALLOC(group) fio___cli_leak_counter(group, 1)
+#define FIO___CLI_ON_FREE(group)  fio___cli_leak_counter(group, -1)
+#define FIO___CLI_TEST4LEAKS()    fio___cli_leak_counter(0, 0)
+
+static void fio___cli_leak_counter(size_t group, int diff) {
+  static int counters[4];
+  if (!diff)
+    goto test_for_leaks;
+  counters[group] += diff;
+  return;
+test_for_leaks:
+  for (size_t i = 0; i < 4; ++i) {
+    if (!counters[i])
+      continue;
+    char *group_names[] = {(char *)"fio_cli_str",
+                           (char *)"fio_cli_ary",
+                           (char *)"fio_cli_reserved", /* unused */
+                           (char *)"fio_cli_help_writer"};
+    FIO_LOG_ERROR("(CLI):\n          "
+                  "%d memory leak(s) detected for type: %s",
+                  counters[i],
+                  group_names[i]);
+  }
+}
+#else
+#define FIO___CLI_ON_ALLOC(group)
+#define FIO___CLI_ON_FREE(group)
+#define FIO___CLI_TEST4LEAKS()
+#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 /* *****************************************************************************
 String for CLI
 ***************************************************************************** */
@@ -29448,6 +29478,7 @@ typedef struct {
 FIO_SFUNC void fio___cli_str_destroy(fio___cli_str_s *s) {
   if (!s || s->em || !s->str)
     return;
+  FIO___CLI_ON_FREE(0);
   FIO_MEM_FREE_(s->str, s->len);
   *s = (fio___cli_str_s){0};
 }
@@ -29473,6 +29504,7 @@ FIO_SFUNC fio___cli_str_s fio___cli_str_copy(fio_str_info_s s) {
   r.len = (uint32_t)s.len;
   r.str = (char *)FIO_MEM_REALLOC_(NULL, 0, s.len + 1, 0);
   FIO_ASSERT_ALLOC(r.str);
+  FIO___CLI_ON_ALLOC(0);
   FIO_MEMCPY(r.str, s.buf, s.len);
   r.str[r.len] = 0;
   return r;
@@ -29503,16 +29535,20 @@ typedef struct {
 } fio___cli_ary_s;
 
 FIO_SFUNC void fio___cli_ary_destroy(fio___cli_ary_s *a) {
-  if (!a)
+  if (!a || !a->ary)
     return;
   for (size_t i = 0; i < a->w; ++i)
     fio___cli_str_destroy(a->ary + i);
+  FIO_MEM_FREE_(a->ary, sizeof(*a->ary) * a->capa);
+  FIO___CLI_ON_FREE(1);
   *a = (fio___cli_ary_s){0};
 }
 FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
   FIO_ASSERT(a, "Internal CLI Error - no CLI array given!");
   if (a->w == a->capa) {
     /* increase capacity */
+    if (!a->ary)
+      FIO___CLI_ON_ALLOC(1);
     size_t new_capa = a->capa + 8;
     fio___cli_str_s *tmp =
         (fio___cli_str_s *)FIO_MEM_REALLOC_(a->ary,
@@ -29668,6 +29704,7 @@ CLI Destruction
 
 SFUNC void __attribute__((destructor)) fio_cli_end(void) {
   fio___cli_data_destroy();
+  FIO___CLI_TEST4LEAKS();
 }
 
 /* *****************************************************************************
@@ -29940,7 +29977,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
   uint32_t help_value32 = fio_buf2u32_local("help");
 
   fio___cli_build_argument_aliases(argv, description, args);
-  if(unnamed_min == -1) {
+  if (unnamed_min == -1) {
     unnamed_max = -1;
     unnamed_min = 0;
   }
@@ -30047,9 +30084,12 @@ FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
     size_t new_capa = (d.len + s.len) << 1;
     char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
     FIO_ASSERT_ALLOC(tmp);
+    FIO___CLI_ON_ALLOC(3);
     FIO_MEMCPY(tmp, d.buf, d.len);
-    if (!static_memory)
+    if (!static_memory) {
       FIO_MEM_FREE_(d.buf, d.capa);
+      FIO___CLI_ON_FREE(3);
+    }
     d.capa = new_capa;
     d.buf = tmp;
   }
@@ -30076,9 +30116,12 @@ FIO_SFUNC fio_str_info_s fio___cli_write2line_finalize(fio_str_info_s d,
       size_t new_capa = d.len + ((additional_bytes + 2) << 2);
       char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
       FIO_ASSERT_ALLOC(tmp);
+      FIO___CLI_ON_ALLOC(3);
       FIO_MEMCPY(tmp, d.buf, d.len);
-      if (!static_memory)
+      if (!static_memory) {
         FIO_MEM_FREE_(d.buf, d.capa);
+        FIO___CLI_ON_FREE(3);
+      }
       static_memory = 0;
       pos = tmp + (pos - d.buf);
       d.capa = new_capa;
@@ -30155,10 +30198,9 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                   argument_type_txt,
                                   help_org_state.buf == help.buf);
       if (def.len) {
-        help = fio___cli_write2line(
-            help,
-            FIO_BUF_INFO1((char *)"\tdefault value: "),
-            help_org_state.buf == help.buf);
+        help = fio___cli_write2line(help,
+                                    FIO_BUF_INFO1((char *)"\tdefault value: "),
+                                    help_org_state.buf == help.buf);
         help = fio___cli_write2line(help,
                                     FIO_STR2BUF_INFO(def),
                                     help_org_state.buf == help.buf);
@@ -30218,8 +30260,10 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                        app_name,
                                        help_org_state.buf == help.buf);
   fwrite(help.buf, 1, help.len, stdout);
-  if (help_org_state.buf != help.buf)
+  if (help_org_state.buf != help.buf) {
     FIO_MEM_FREE_(help.buf, help.capa);
+    FIO___CLI_ON_FREE(3);
+  }
   fio_cli_end();
   exit(0);
 }
@@ -30291,6 +30335,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
 /* *****************************************************************************
 CLI - cleanup
 ***************************************************************************** */
+#undef FIO___CLI_ON_ALLOC
+#undef FIO___CLI_ON_FREE
+#undef FIO___CLI_TEST4LEAKS
 #endif /* FIO_EXTERN_COMPLETE*/
 #endif /* FIO_CLI */
 #undef FIO_CLI
