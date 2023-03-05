@@ -233,14 +233,14 @@ String C / JSON escaping
  */
 SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
                                   fio_string_realloc_fn reallocate,
-                                  const void *src,
-                                  size_t len);
+                                  const void *raw,
+                                  size_t raw_len);
 
 /** Writes an escaped data into the string after un-escaping the data. */
 SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
                                     fio_string_realloc_fn reallocate,
-                                    const void *src,
-                                    size_t len);
+                                    const void *enscaped,
+                                    size_t enscaped_len);
 
 /* *****************************************************************************
 String Base64 support
@@ -249,8 +249,8 @@ String Base64 support
 /** Writes data to String using base64 encoding. */
 SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
                                      fio_string_realloc_fn reallocate,
-                                     const void *data,
-                                     size_t data_len,
+                                     const void *raw,
+                                     size_t raw_len,
                                      uint8_t url_encoded);
 
 /** Writes decoded base64 data to String. */
@@ -266,14 +266,30 @@ String URL Encoding support
 /** Writes data to String using URL encoding (a.k.a., percent encoding). */
 SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
                                    fio_string_realloc_fn reallocate,
-                                   const void *data,
-                                   size_t data_len);
+                                   const void *raw,
+                                   size_t raw_len);
 
 /** Writes decoded URL data to String. */
 SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
                                    fio_string_realloc_fn reallocate,
                                    const void *encoded,
                                    size_t encoded_len);
+
+/* *****************************************************************************
+String HTML escaping support
+***************************************************************************** */
+
+/** Writes HTML escaped data to a String. */
+SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
+                                       fio_string_realloc_fn reallocate,
+                                       const void *raw,
+                                       size_t raw_len);
+
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
+                                         fio_string_realloc_fn reallocate,
+                                         const void *enscaped,
+                                         size_t enscaped_len);
 
 /* *****************************************************************************
 String File Reading support
@@ -520,6 +536,15 @@ FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
                                        const void *encoded,
                                        size_t len);
 
+/** Writes HTML escaped data to a String. */
+FIO_IFUNC char *fio_bstr_write_html_escape(char *bstr,
+                                           const void *raw,
+                                           size_t len);
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+FIO_IFUNC char *fio_bstr_write_html_unescape(char *bstr,
+                                             const void *escaped,
+                                             size_t len);
+
 /** Writes to the String from a regular file `fd`. */
 FIO_IFUNC char *fio_bstr_readfd(char *bstr,
                                 int fd,
@@ -692,10 +717,6 @@ FIO_SFUNC char *fio_bstr___make_unique(char *bstr) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
-  // if (!fio_atomic_add(&meta->ref, 1)) {
-  //   fio_atomic_sub(&meta->ref, 1);
-  //   return bstr;
-  // }
   if (!meta->ref)
     return bstr;
   fio_str_info_s i = fio_bstr_info(bstr);
@@ -872,6 +893,25 @@ FIO_IFUNC char *fio_bstr_write_url_dec(char *bstr,
   bstr = fio_bstr___make_unique(bstr);
   fio_str_info_s i = fio_bstr_info(bstr);
   fio_string_write_url_dec(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+
+/** Writes HTML escaped data to a String. */
+FIO_IFUNC char *fio_bstr_write_html_escape(char *bstr,
+                                           const void *src,
+                                           size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_html_escape(&i, fio_bstr_reallocate, src, len);
+  return fio_bstr___len_set(i.buf, i.len);
+}
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+FIO_IFUNC char *fio_bstr_write_html_unescape(char *bstr,
+                                             const void *src,
+                                             size_t len) {
+  bstr = fio_bstr___make_unique(bstr);
+  fio_str_info_s i = fio_bstr_info(bstr);
+  fio_string_write_html_unescape(&i, fio_bstr_reallocate, src, len);
   return fio_bstr___len_set(i.buf, i.len);
 }
 
@@ -2053,8 +2093,8 @@ p valid; p decoder; nil
       41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 0,  0,  0,  0,  0,
   };
   int r = 0;
-  if (!dest || !encoded_)
-    return (r = -1);
+  if (!dest || !encoded_ || !len)
+    return r;
   const uint8_t *encoded = (const uint8_t *)encoded_;
   /* skip unknown data at end */
   while (len && !base64_valid[encoded[len - 1]]) {
@@ -2161,6 +2201,8 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
                                    const void *encoded,
                                    size_t encoded_len) {
   int r = 0;
+  if (!dest || !encoded || !encoded_len)
+    return r;
   uint8_t *pr = (uint8_t *)encoded;
   uint8_t *last = pr;
   uint8_t *end = pr + encoded_len;
@@ -2216,6 +2258,223 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
 }
 
 /* *****************************************************************************
+String HTML escaping support
+***************************************************************************** */
+
+/** Writes HTML escaped data to a String. */
+SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
+                                       fio_string_realloc_fn reallocate,
+                                       const void *data,
+                                       size_t data_len) {
+  /* produced using the following Ruby script:
+    a = (0..255).to_a.map {|i| i.chr }
+    100.times {|i| a[i] =  i > 9  ? "&x#{i.to_s(16)};" : "&\##{i.to_s(10)};"}
+    ('a'.ord..'z'.ord).each {|i| a[i] = i.chr }
+    ('A'.ord..'Z'.ord).each {|i| a[i] = i.chr }
+    ('0'.ord..'9'.ord).each {|i| a[i] = i.chr }
+    a['<'.ord] = "&lt;"
+    a['>'.ord] = "&gt;"
+    a['&'.ord] = "&\##{'&'.ord.to_s(16)};"
+    a['"'.ord] = "&\##{'"'.ord.to_s(16)};"
+    a["\'".ord] ="&\##{"\'".ord.to_s(16)};"
+    a['|'.ord] = "&\##{'|'.ord.to_s(16)};"
+    b = a.map {|s| s.length }
+    puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
+  */
+  static uint8_t html_escape_len[] = {
+      4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
+      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 5, 4, 5, 4, 5, 5, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 5, 5, 5, 5,
+      5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  int r = 0;
+  size_t start = 0;
+  size_t pos = 0;
+  if (!data_len || !data || !dest)
+    return r;
+  { /* reserve memory space */
+    size_t required_len = data_len;
+    for (size_t i = 0; i < data_len; ++i) {
+      required_len += html_escape_len[((uint8_t *)data)[i]];
+    }
+    if (fio_string___write_validate_len(dest, reallocate, &required_len)) {
+      return (r = -1); /* no partial encoding. */
+    };
+  }
+  for (;;) { /* copy and encode data */
+    while (pos < data_len && html_escape_len[((uint8_t *)data)[pos]] == 1)
+      ++pos;
+    if (pos != start) {
+      const size_t len = pos - start;
+      FIO_MEMCPY(dest->buf + dest->len, (uint8_t *)data + start, len);
+      dest->len += len;
+    }
+    if (pos == data_len)
+      break;
+    {
+      dest->buf[dest->len++] = '&';
+      switch (((uint8_t *)data)[pos]) {
+      case '<':
+        dest->buf[dest->len++] = 'l';
+        dest->buf[dest->len++] = 't';
+        break;
+      case '>':
+        dest->buf[dest->len++] = 'g';
+        dest->buf[dest->len++] = 't';
+        break;
+      default: /* note: &amp; is longer than &38; as are &quot; and friends.  */
+        if (((uint8_t *)data)[pos] < 10) {
+          dest->buf[dest->len++] = '#';
+          dest->buf[dest->len++] = '0' + ((uint8_t *)data)[pos];
+        } else {
+          uint8_t num = ((uint8_t *)data)[pos];
+          dest->buf[dest->len++] = 'x';
+          dest->buf[dest->len] = fio_i2c(num >> 4);
+          dest->len += !!(num >> 4);
+          dest->buf[dest->len++] = fio_i2c(num & 15);
+        }
+      }
+      dest->buf[dest->len++] = ';';
+    }
+    ++pos;
+    start = pos;
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
+                                         fio_string_realloc_fn reallocate,
+                                         const void *data,
+                                         size_t data_len) {
+  int r = 0;
+  if (!dest || !data || !data_len)
+    return r;
+  uint8_t *start = (uint8_t *)data;
+  uint8_t *const end = start + data_len;
+  { /* reserve memory space */
+    uint8_t *del = start;
+    size_t act_len = data_len;
+    while (end > del && (del = (uint8_t *)FIO_MEMCHR(del, '&', end - del))) {
+      uint8_t *tmp = ++del; /* keep at least 1 char for the output */
+      /* note that in some cases the `;` might be dropped (history) */
+      if (del[0] == 'x' || del[0] == '#') {
+        ++del;
+        uint64_t num =
+            (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
+        if (*del != ';' || num > 65535) /* untrusted, don't decode */
+          continue;
+        del += (del[0] == ';');
+        act_len -= del - tmp;
+        act_len += (num > 255);
+        continue;
+      } else if ((del[0] | 32) == 'l' && (del[1] | 32) == 't')
+        del += 2;
+      else if ((del[0] | 32) == 'g' && (del[1] | 32) == 't')
+        del += 2;
+      else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'm' && del[2] == 'p')
+        del += 3;
+      else if ((del[0] | 32) == 't' && (del[1] | 32) == 'a' && del[2] == 'b')
+        del += 3;
+      else if ((del[0] | 32) == 'q' && (del[1] | 32) == 'u' && del[2] == 'o' &&
+               del[3] == 't')
+        del += 4;
+      else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'p' && del[2] == 'o' &&
+               del[3] == 's')
+        del += 4;
+      else if ((del[0] | 32) == 'n' && (del[1] | 32) == 'b' && del[2] == 's' &&
+               del[3] == 'p')
+        del += 4;
+      else if ((del[0] | 32) == 'c' && (del[1] | 32) == 'o' && del[2] == 'p' &&
+               del[3] == 'y')
+        del += 4;
+      else /* untrusted, don't decode */
+        continue;
+      del += (del[0] == ';');
+      act_len -= del - tmp;
+    }
+    if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
+      return (r = -1); /* no partial decoding. */
+    };
+  }
+  { /* copy and unescape data */
+    uint8_t *del = start;
+    while (end > del &&
+           (del = (uint8_t *)FIO_MEMCHR((start = del), '&', end - del))) {
+      if (start != del) {
+        const size_t len = del - start;
+        FIO_MEMCPY(dest->buf + dest->len, start, len);
+        dest->len += len;
+        start = del;
+      }
+      ++del;
+      /* note that in some cases the `;` might be dropped (history) */
+      if (del[0] == 'x' || del[0] == '#') {
+        ++del;
+        uint64_t num =
+            (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
+        if (*del != ';' || num > 65535)
+          goto untrusted_no_encode;
+        dest->buf[dest->len] = (num >> 8);
+        dest->len += !!(num >> 8);
+        dest->buf[dest->len++] = (num & 0xFF);
+      } else if ((del[0] | 32) == 'l' && (del[1] | 32) == 't') {
+        del += 2;
+        dest->buf[dest->len++] = '<';
+      } else if ((del[0] | 32) == 'g' && (del[1] | 32) == 't') {
+        del += 2;
+        dest->buf[dest->len++] = '>';
+      } else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'm' &&
+                 del[2] == 'p') {
+        del += 3;
+        dest->buf[dest->len++] = '&';
+      } else if ((del[0] | 32) == 't' && (del[1] | 32) == 'a' &&
+                 del[2] == 'b') {
+        del += 3;
+        dest->buf[dest->len++] = '\t';
+      } else if ((del[0] | 32) == 'q' && (del[1] | 32) == 'u' &&
+                 del[2] == 'o' && del[3] == 't') {
+        del += 4;
+        dest->buf[dest->len++] = '"';
+      } else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'p' &&
+                 del[2] == 'o' && del[3] == 's') {
+        del += 4;
+        dest->buf[dest->len++] = '\'';
+      } else if ((del[0] | 32) == 'n' && (del[1] | 32) == 'b' &&
+                 del[2] == 's' && del[3] == 'p') {
+        del += 4;
+        dest->buf[dest->len++] = 160U;
+      } else if ((del[0] | 32) == 'c' && (del[1] | 32) == 'o' &&
+                 del[2] == 'p' && del[3] == 'y') {
+        del += 4;
+        dest->buf[dest->len++] = 169U;
+      } else /* untrusted, don't decode */
+        goto untrusted_no_encode;
+      del += (del < end && del[0] == ';');
+      continue;
+    untrusted_no_encode: /* untrusted, don't decode */
+      del += (del < end && del[0] == ';');
+      FIO_MEMCPY(dest->buf + dest->len, start, del - start);
+      dest->len += del - start;
+    }
+  }
+  if (start < end) {
+    const size_t len = end - start;
+    FIO_MEMCPY(dest->buf + dest->len, start, len);
+    dest->len += len;
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/* *****************************************************************************
 String File Reading support
 ***************************************************************************** */
 
@@ -2245,12 +2504,15 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             intptr_t start_at,
                             size_t limit) {
   int r = 0;
+  if (!dest) {
+    return r;
+  }
   size_t file_len = fio_fd_size(fd);
   start_at = fio___string_fd_normalise_offset(start_at, file_len);
   if (!limit || file_len < (size_t)(limit + start_at)) {
     limit = (intptr_t)file_len - start_at;
   }
-  if (!dest || !file_len || !limit || (size_t)start_at >= file_len) {
+  if (!file_len || !limit || (size_t)start_at >= file_len) {
     return (r = -1);
   }
   r = fio_string___write_validate_len(dest, reallocate, &limit);
@@ -2303,7 +2565,7 @@ SFUNC int fio_string_getdelim_fd(fio_str_info_s *dest,
                                  size_t limit) {
   int r = -1;
   if (!dest || fd == -1)
-    return r;
+    return (r = 0);
   size_t file_len = fio_fd_size(fd);
   if (!file_len)
     return r;
@@ -2695,6 +2957,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
         "fio_string_write_url_dec reported an error where none was expected!");
     FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
                "fio_string_write_url_enc/dec roundtrip failed!");
+  }
+  {
+    fprintf(stderr,
+            "* Testing HTML escaping / un-escaping (minimal support)\n");
+    char mem[3072];
+    fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
+    fio_str_info_s escaped = FIO_STR_INFO3(mem + 256, 0, 2048);
+    fio_str_info_s unescaped = FIO_STR_INFO3(mem + 2560, 0, 512);
+    for (size_t i = 0; i < 256; ++i)
+      mem[i] = (char)i;
+    FIO_ASSERT(!fio_string_write_html_escape(&escaped,
+                                             NULL,
+                                             original.buf,
+                                             original.len),
+               "fio_string_write_html_escape returned an error");
+    FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
+                                               NULL,
+                                               escaped.buf,
+                                               escaped.len),
+               "fio_string_write_html_unescape returned an error");
+    FIO_ASSERT(!FIO_STR_INFO_IS_EQ(original, escaped),
+               "fio_string_write_html_escape did nothing!");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
+               "fio_string_write_html_(un)escape roundtrip failed!");
   }
   { /* Comparison testing */
     fprintf(stderr, "* Testing comparison\n");

@@ -618,23 +618,23 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 ### String API - Base64 support
 
-#### `STR_write_b64enc`
+#### `STR_write_base64enc`
 
 ```c
-fio_str_info_s STR_write_b64enc(FIO_STR_PTR s,
-                                const void *data,
-                                size_t data_len,
-                                uint8_t url_encoded);
+fio_str_info_s STR_write_base64enc(FIO_STR_PTR s,
+                                    const void *data,
+                                    size_t data_len,
+                                    uint8_t url_encoded);
 ```
 
 Writes data at the end of the String, encoding the data as Base64 encoded data.
 
-#### `STR_write_b64dec`
+#### `STR_write_base64dec`
 
 ```c
-fio_str_info_s STR_write_b64dec(FIO_STR_PTR s,
-                                const void *encoded,
-                                size_t encoded_len);
+fio_str_info_s STR_write_base64dec(FIO_STR_PTR s,
+                                    const void *encoded,
+                                    size_t encoded_len);
 ```
 
 Writes decoded Base64 data to the end of the String.
@@ -664,5 +664,31 @@ fio_str_info_s STR_write_unescape(FIO_STR_PTR s,
 ```
 
 Writes an escaped data into the string after unescaping the data.
+
+### String API - HTML escaping support
+
+
+#### `STR_write_html_escape`
+
+```c
+fio_str_info_s STR_write_html_escape(FIO_STR_PTR s,
+                                     const void *data,
+                                     size_t data_len);
+
+```
+
+Writes HTML escaped data to a String.
+
+#### `STR_write_html_unescape`
+
+```c
+fio_str_info_s STR_write_html_unescape(FIO_STR_PTR s,
+                                       const void *escaped,
+                                       size_t len);
+```
+
+Writes HTML un-escaped data to a String - incomplete and minimal.
+
+**Note**: the un-escaping of HTML content includes a long list of named code-point. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
 
 -------------------------------------------------------------------------------

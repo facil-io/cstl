@@ -476,6 +476,21 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                                                size_t encoded_len);
 
 /* *****************************************************************************
+String API - HTML escaping support
+***************************************************************************** */
+
+/** Writes HTML escaped data to a String. */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_html_escape)(FIO_STR_PTR s,
+                                                               const void *raw,
+                                                               size_t len);
+
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                              write_html_unescape)(FIO_STR_PTR s,
+                                                   const void *escaped,
+                                                   size_t len);
+
+/* *****************************************************************************
 String API - writing data from files to the String
 ***************************************************************************** */
 
@@ -1384,6 +1399,41 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                              FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
                              encoded_,
                              len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
+}
+
+/* *****************************************************************************
+String API - HTML escaping support
+***************************************************************************** */
+
+/** Writes HTML escaped data to a String. */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_html_escape)(FIO_STR_PTR s_,
+                                                               const void *data,
+                                                               size_t len) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_html_escape(&i,
+                               FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                               data,
+                               len);
+  FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  return i;
+}
+
+/** Writes HTML un-escaped data to a String - incomplete and minimal. */
+IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                              write_html_unescape)(FIO_STR_PTR s_,
+                                                   const void *data,
+                                                   size_t len) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.capa)
+    return i;
+  fio_string_write_html_unescape(&i,
+                                 FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                                 data,
+                                 len);
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
   return i;
 }

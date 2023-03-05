@@ -432,6 +432,37 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 
 Writes decoded base64 data to String.
 
+
+### Core String HTML escaping support
+
+#### `fio_string_write_html_escape`
+
+```c
+int fio_string_write_html_escape(fio_str_info_s *restrict dest,
+                                 fio_string_realloc_fn reallocate,
+                                 const void *raw,
+                                 size_t len);
+```
+
+Writes HTML escaped data to a String.
+
+#### `fio_string_write_html_unescape`
+
+```c
+int fio_string_write_html_unescape(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *escaped,
+                                   size_t len);
+```
+
+Writes HTML (mostly) un-escaped data to a String.
+
+**Note**:
+
+The un-escaping of HTML content includes a long list of named code-point. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
+
+The supported named code-points include: `&lt`, `&gt`, `&amp`, `&tab`, `&quot`, `&apos`, `&nbsp`, `&copy` (with or without a trailing `;`).
+
 ### Core String File Reading support
 
 #### `fio_string_readfd`
@@ -548,6 +579,10 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 * `fio_bstr_write_base64enc` - see [`fio_string_write_base64enc`](#fio_string_write_base64enc) for details.
 * `fio_bstr_write_base64dec` - see [`fio_string_write_base64dec`](#fio_string_write_base64dec) for details.
 
+* `fio_bstr_write_html_escape` - see [`fio_string_write_html_escape`](#fio_string_write_html_escape) for details.
+* `fio_bstr_write_html_unescape` - see [`fio_string_write_html_unescape`](#fio_string_write_html_unescape) for details.
+
+
 * `fio_bstr_readfd` - see [`fio_string_readfd`](#fio_string_readfd) for details.
 * `fio_bstr_readfile` - see [`fio_string_readfile`](#fio_string_readfile) for details.
 * `fio_bstr_getdelim_fd` - see [`fio_string_getdelim_fd`](#fio_string_getdelim_fd) for details.
@@ -569,7 +604,7 @@ char *fio_bstr_copy(char *bstr);
 
 Returns a Copy-on-Write copy of the original `bstr`, increasing the original's reference count.
 
-This approach to Copy-on-Write is **not** thread-safe, as a data race exists between the `copy` operation and any operation that could mutate the string.
+This approach to Copy-on-Write is **not** completely thread-safe, as a data race exists when an original string (without additional `copy`s) is being actively edited by another thread while `copy` is being called (in which case the still-in-process `write` will apply to the new copy, which may result in a re-allocation and the pointer `copy` is using being invalidated).
 
 However, once the copy operation had completed in a thread-safe manner, further operations between the two instances do not need to be synchronized.
 
@@ -625,7 +660,7 @@ Sets the length of the `fio_bstr`.
 
 Returns `bstr`.
 
-#### `fio_bstr_reallocate`
+#### `fio_bstr_reallocate` - for internal use
 
 ```c
 int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
