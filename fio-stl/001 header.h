@@ -779,17 +779,12 @@ FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
     d += 64;
     s += 64;
   }
-  if (l & 32) {
-    fio_memcpy32(d, s);
-    d += 32;
-    s += 32;
-  }
-  d -= 32;
-  s -= 32;
-  d += l & 31U;
-  s += l & 31U;
-  fio_memcpy32(d, s);
-  return (void *)(d += 32);
+  d -= 64;
+  s -= 64;
+  d += l & 63U;
+  s += l & 63U;
+  fio_memcpy64(d, s);
+  return (void *)(d += 64);
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
