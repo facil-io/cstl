@@ -30248,7 +30248,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
   const int argc = sizeof(argv) / sizeof(argv[0]);
   fprintf(stderr, "* Testing CLI helpers.\n");
   { /* avoid macro for C++ */
-    const char *arguments[] = {
+    fio___cli_line_s arguments[] = {
         FIO_CLI_INT("-integer1 -i1 first integer"),
         FIO_CLI_INT("-integer2 -i2 second integer"),
         FIO_CLI_INT("-integer3 -i3 third integer"),
@@ -30261,7 +30261,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_PRINT_HEADER("Printing stuff"),
         FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
         FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
-        NULL,
+        {0},
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
   }
