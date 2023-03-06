@@ -1270,6 +1270,27 @@ static __attribute__((unused)) uint8_t fio__string_utf8_map[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     5, 5, 5, 5, 5, 5, 5, 5, 2, 2, 2, 2, 3, 3, 4, 0};
 
+/** Encodes `u` in UTF-8 format, writing it to `dest`. */
+FIO_IFUNC size_t fio___string_utf8_write(uint8_t *dest, size_t u) {
+  size_t at = 0;
+  if (u < 128) {
+    dest[at++] = u;
+  } else if (u < 2048) {
+    dest[at++] = 192 | (u >> 6);
+    dest[at++] = 128 | (u & 63);
+  } else if (u < 65536) {
+    dest[at++] = 224 | (u >> 12);
+    dest[at++] = 128 | ((u >> 6) & 63);
+    dest[at++] = 128 | (u & 63);
+  } else {
+    dest[at++] = 240 | ((u >> 18) & 7);
+    dest[at++] = 128 | ((u >> 12) & 63);
+    dest[at++] = 128 | ((u >> 6) & 63);
+    dest[at++] = 128 | (u & 63);
+  }
+  return at;
+}
+
 /**
  * Advances the `ptr` by one utf-8 character, placing the value of the UTF-8
  * character into the i32 variable (which must be a signed integer with 32bits
@@ -1706,7 +1727,7 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
     if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
         src[i] == ' ')
       continue;
-    /* skip valid UTF-8 */
+    /* skip if valid UTF-8 */
     switch (fio__string_utf8_map[src[i] >> 3]) {
     case 4:
       if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
@@ -1723,7 +1744,7 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
         break; /* from switch */
       }
       i += fio__string_utf8_map[src[i] >> 3] - 1;
-      continue;
+      continue; /* skip valid UTF-8 */
     }
     /* store first instance of character that needs escaping */
     /* constant time (non-branching) alternative to if(`set_at`) */
@@ -1927,21 +1948,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
           u += 0x10000;
           src += 6;
         }
-        if (u < 128) {
-          writer[at++] = u;
-        } else if (u < 2048) {
-          writer[at++] = 192 | (u >> 6);
-          writer[at++] = 128 | (u & 63);
-        } else if (u < 65536) {
-          writer[at++] = 224 | (u >> 12);
-          writer[at++] = 128 | ((u >> 6) & 63);
-          writer[at++] = 128 | (u & 63);
-        } else {
-          writer[at++] = 240 | ((u >> 18) & 7);
-          writer[at++] = 128 | ((u >> 12) & 63);
-          writer[at++] = 128 | ((u >> 6) & 63);
-          writer[at++] = 128 | (u & 63);
-        }
+        at += fio___string_utf8_write(writer + at, u);
         src += 5;
         break; /* from switch */
       } else
@@ -2354,6 +2361,56 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
                                          fio_string_realloc_fn reallocate,
                                          const void *data,
                                          size_t data_len) {
+  struct {
+    uint64_t code;
+    uint32_t clen;
+    uint8_t r[4];
+  } html_named_codes[] = {
+#define FIO___STRING_HTML_CODE_POINT(named_code, result)                       \
+  {.code = *(uint64_t *)(named_code "\0\0\0\0\0\0\0\0"),                       \
+   .clen = (uint32_t)(sizeof(named_code) - 1),                                 \
+   .r = result}
+      FIO___STRING_HTML_CODE_POINT("lt", "<"),
+      FIO___STRING_HTML_CODE_POINT("gt", ">"),
+      FIO___STRING_HTML_CODE_POINT("amp", "&"),
+      FIO___STRING_HTML_CODE_POINT("apos", "'"),
+      FIO___STRING_HTML_CODE_POINT("quot", "\""),
+      FIO___STRING_HTML_CODE_POINT("nbsp", "\xC2\xA0"),
+      FIO___STRING_HTML_CODE_POINT("tab", "\t"),
+      FIO___STRING_HTML_CODE_POINT("ge", "≥"),
+      FIO___STRING_HTML_CODE_POINT("le", "≤"),
+      FIO___STRING_HTML_CODE_POINT("ne", "≠"),
+      FIO___STRING_HTML_CODE_POINT("copy", "©"),
+      FIO___STRING_HTML_CODE_POINT("raquo", "»"),
+      FIO___STRING_HTML_CODE_POINT("laquo", "«"),
+      FIO___STRING_HTML_CODE_POINT("rdquo", "”"),
+      FIO___STRING_HTML_CODE_POINT("ldquo", "“"),
+      FIO___STRING_HTML_CODE_POINT("reg", "®"),
+      FIO___STRING_HTML_CODE_POINT("asymp", "≈"),
+      FIO___STRING_HTML_CODE_POINT("bdquo", "„"),
+      FIO___STRING_HTML_CODE_POINT("bull", "•"),
+      FIO___STRING_HTML_CODE_POINT("cent", "¢"),
+      FIO___STRING_HTML_CODE_POINT("euro", "€"),
+      FIO___STRING_HTML_CODE_POINT("dagger", "†"),
+      FIO___STRING_HTML_CODE_POINT("deg", "°"),
+      FIO___STRING_HTML_CODE_POINT("frac14", "¼"),
+      FIO___STRING_HTML_CODE_POINT("frac12", "½"),
+      FIO___STRING_HTML_CODE_POINT("frac34", "¾"),
+      FIO___STRING_HTML_CODE_POINT("hellip", "…"),
+      FIO___STRING_HTML_CODE_POINT("lsquo", "‘"),
+      FIO___STRING_HTML_CODE_POINT("mdash", "—"),
+      FIO___STRING_HTML_CODE_POINT("middot", "·"),
+      FIO___STRING_HTML_CODE_POINT("ndash", "–"),
+      FIO___STRING_HTML_CODE_POINT("para", "¶"),
+      FIO___STRING_HTML_CODE_POINT("plusmn", "±"),
+      FIO___STRING_HTML_CODE_POINT("pound", "£"),
+      FIO___STRING_HTML_CODE_POINT("prime", "′"),
+      FIO___STRING_HTML_CODE_POINT("rsquo", "’"),
+      FIO___STRING_HTML_CODE_POINT("sbquo", "‚"),
+      FIO___STRING_HTML_CODE_POINT("sect", "§"),
+      FIO___STRING_HTML_CODE_POINT("trade", "™"),
+      FIO___STRING_HTML_CODE_POINT("yen", "¥"),
+  };
   int r = 0;
   if (!dest || !data || !data_len)
     return r;
@@ -2371,54 +2428,35 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535) /* untrusted, don't decode */
           continue;
-        del += (del[0] == ';');
+        del += (del < end && del[0] == ';');
         act_len -= del - tmp;
-        act_len += (num > 255);
+        act_len += fio__string_utf8_map[num >> 3];
         continue;
-      } else if (del + 1 < end && (del[0] | 32) == 'l' && (del[1] | 32) == 't')
-        del += 2;
-      else if (del + 1 < end && (del[0] | 32) == 'g' && (del[1] | 32) == 't')
-        del += 2;
-      else if (del + 2 < end && (del[0] | 32) == 'a' && (del[1] | 32) == 'm' &&
-               (del[2] | 32) == 'p')
-        del += 3;
-      else if (del + 2 < end && (del[0] | 32) == 't' && (del[1] | 32) == 'a' &&
-               (del[2] | 32) == 'b')
-        del += 3;
-      else if (del + 2 < end && (del[0] | 32) == 'r' && (del[1] | 32) == 'e' &&
-               (del[2] | 32) == 'g')
-        del += 3;
-      else if (del + 2 < end && (del[0] | 32) == 'y' && (del[1] | 32) == 'e' &&
-               (del[2] | 32) == 'n')
-        del += 3;
-      else if (del + 3 < end && (del[0] | 32) == 'q' && (del[1] | 32) == 'u' &&
-               (del[2] | 32) == 'o' && (del[3] | 32) == 't')
-        del += 4;
-      else if (del + 3 < end && (del[0] | 32) == 'a' && (del[1] | 32) == 'p' &&
-               (del[2] | 32) == 'o' && (del[3] | 32) == 's')
-        del += 4;
-      else if (del + 3 < end && (del[0] | 32) == 'n' && (del[1] | 32) == 'b' &&
-               (del[2] | 32) == 's' && (del[3] | 32) == 'p')
-        del += 4;
-      else if (del + 3 < end && (del[0] | 32) == 'c' && (del[1] | 32) == 'o' &&
-               (del[2] | 32) == 'p' && (del[3] | 32) == 'y')
-        del += 4;
-      else if (del + 3 < end && (del[0] | 32) == 'c' && (del[1] | 32) == 'e' &&
-               (del[2] | 32) == 'n' && (del[3] | 32) == 't')
-        del += 4;
-      else if (del + 4 < end && (del[0] | 32) == 'p' && (del[1] | 32) == 'o' &&
-               (del[2] | 32) == 'u' && (del[3] | 32) == 'n' &&
-               (del[4] | 32) == 'd')
-        del += 5;
-      else /* untrusted, don't decode */
-        continue;
-      del += (del < end && del[0] == ';');
-      act_len -= del - tmp;
+      }
+      for (size_t i = 0;
+           i < sizeof(html_named_codes) / sizeof(html_named_codes[0]);
+           ++i) {
+        union {
+          uint64_t u64;
+          uint8_t u8[8];
+        } u = {0};
+        for (size_t p = 0; p < html_named_codes[i].clen; ++p)
+          u.u8[p] = del[p] | 32;
+        if (u.u64 != html_named_codes[i].code)
+          continue;
+        del += html_named_codes[i].clen;
+        del += (del < end && del[0] == ';');
+        act_len -= del - tmp;
+        for (size_t j = 0; html_named_codes[i].r[j]; ++j)
+          ++act_len;
+        break;
+      }
     }
     if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
       return (r = -1); /* no partial decoding. */
     };
   }
+
   { /* copy and unescape data */
     uint8_t *del = start;
     while (end > (start = del) &&
@@ -2441,74 +2479,32 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
           goto untrusted_no_encode;
-        dest->buf[dest->len] = (num >> 8);
-        dest->len += !!(num >> 8);
-        dest->buf[dest->len++] = (num & 0xFF);
-      } else if (del + 1 < end && (del[0] | 32) == 'l' &&
-                 (del[1] | 32) == 't') {
-        del += 2;
-        dest->buf[dest->len++] = '<';
-      } else if (del + 1 < end && (del[0] | 32) == 'g' &&
-                 (del[1] | 32) == 't') {
-        del += 2;
-        dest->buf[dest->len++] = '>';
-      } else if (del + 2 < end && (del[0] | 32) == 'a' &&
-                 (del[1] | 32) == 'm' && (del[2] | 32) == 'p') {
-        del += 3;
-        dest->buf[dest->len++] = '&';
-      } else if (del + 2 < end && (del[0] | 32) == 'r' &&
-                 (del[1] | 32) == 'e' && (del[2] | 32) == 'g') {
-        del += 3;
-        dest->buf[dest->len++] = 174U;
-      } else if (del + 2 < end && (del[0] | 32) == 'y' &&
-                 (del[1] | 32) == 'e' && (del[2] | 32) == 'n') {
-        del += 3;
-        dest->buf[dest->len++] = 165U;
-      } else if (del + 2 < end && (del[0] | 32) == 't' &&
-                 (del[1] | 32) == 'a' && (del[2] | 32) == 'b') {
-        del += 3;
-        dest->buf[dest->len++] = '\t';
-      } else if (del + 3 < end && (del[0] | 32) == 'q' &&
-                 (del[1] | 32) == 'u' && (del[2] | 32) == 'o' &&
-                 (del[3] | 32) == 't') {
-        del += 4;
-        dest->buf[dest->len++] = '"';
-      } else if (del + 3 < end && (del[0] | 32) == 'a' &&
-                 (del[1] | 32) == 'p' && (del[2] | 32) == 'o' &&
-                 (del[3] | 32) == 's') {
-        del += 4;
-        dest->buf[dest->len++] = '\'';
-      } else if (del + 3 < end && (del[0] | 32) == 'n' &&
-                 (del[1] | 32) == 'b' && (del[2] | 32) == 's' &&
-                 (del[3] | 32) == 'p') {
-        del += 4;
-        dest->buf[dest->len++] = 160U;
-      } else if (del + 3 < end && (del[0] | 32) == 'c' &&
-                 (del[1] | 32) == 'o' && (del[2] | 32) == 'p' &&
-                 (del[3] | 32) == 'y') {
-        del += 4;
-        dest->buf[dest->len++] = 169U;
-      } else if (del + 3 < end && (del[0] | 32) == 'c' &&
-                 (del[1] | 32) == 'e' && (del[2] | 32) == 'n' &&
-                 (del[3] | 32) == 't') {
-        del += 4;
-        dest->buf[dest->len++] = 162U;
-      } else if (del + 3 < end && (del[0] | 32) == 'e' &&
-                 (del[1] | 32) == 'u' && (del[2] | 32) == 'r' &&
-                 (del[3] | 32) == 'o') {
-        del += 4;
-        dest->buf[dest->len++] = 0xE2U;
-        dest->buf[dest->len++] = 0x82U;
-        dest->buf[dest->len++] = 0xACU;
-      } else if (del + 4 < end && (del[0] | 32) == 'p' &&
-                 (del[1] | 32) == 'o' && (del[2] | 32) == 'u' &&
-                 (del[3] | 32) == 'n' && (del[4] | 32) == 'd') {
-        del += 5;
-        dest->buf[dest->len++] = 163U;
-      } else /* untrusted, don't decode */
-        goto untrusted_no_encode;
-      del += (del < end && del[0] == ';');
-      continue;
+        dest->len +=
+            fio___string_utf8_write((uint8_t *)dest->buf + dest->len, num);
+        del += (del < end && del[0] == ';');
+        continue;
+      }
+      for (size_t i = 0;
+           i < sizeof(html_named_codes) / sizeof(html_named_codes[0]);
+           ++i) {
+        union {
+          uint64_t u64;
+          uint8_t u8[8];
+        } u = {0};
+        for (size_t p = 0; p < html_named_codes[i].clen; ++p)
+          u.u8[p] = del[p] | 32;
+        if (u.u64 != html_named_codes[i].code)
+          continue;
+        del += html_named_codes[i].clen;
+        del += (del < end && del[0] == ';');
+        start = del;
+        for (size_t j = 0; html_named_codes[i].r[j]; ++j) {
+          dest->buf[dest->len++] = html_named_codes[i].r[j];
+        }
+        break;
+      }
+      if (start == del)
+        continue;
     untrusted_no_encode: /* untrusted, don't decode */
       del += (del < end && del[0] == ';');
       FIO_MEMCPY(dest->buf + dest->len, start, del - start);
@@ -3009,8 +3005,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "fio_string_write_url_enc/dec roundtrip failed!");
   }
   { /* testing HTML escaping / un-escaping Support */
-    fprintf(stderr,
-            "* Testing HTML escaping / un-escaping (minimal support)\n");
+    fprintf(stderr, "* Testing HTML escaping / un-escaping (basic support)\n");
     char mem[3072];
     fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
     fio_str_info_s escaped = FIO_STR_INFO3(mem + 256, 0, 2048);
@@ -3033,23 +3028,30 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
                  "fio_string_write_html_(un)escape roundtrip failed!");
       original.len = 0;
+      fio_string_write(&original, NULL, "ÿ", strlen("ÿ"));
       original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
       original.buf[original.len++] = 0x82U;
       original.buf[original.len++] = 0xACU;
-      original.buf[original.len++] = 163U; /* pounds */
-      original.buf[original.len++] = 162U; /* cents */
-      original.buf[original.len++] = 169U; /* copyright */
-      original.buf[original.len++] = 174U; /* trademark */
-      original.buf[original.len++] = 160U; /* non-breaking-space */
-      original.buf[original.len++] = 38U;  /* & */
-      original.buf[original.len++] = 39U;  /* ' */
-      original.buf[original.len++] = 34U;  /* " */
+      original.buf[original.len++] = 0xC2U; /* pounds (UTF-8) */
+      original.buf[original.len++] = 0xA3U;
+      original.buf[original.len++] = 0xC2U; /* cents (UTF-8) */
+      original.buf[original.len++] = 0xA2U;
+      original.buf[original.len++] = 0xC2U; /* copyright (UTF-8) */
+      original.buf[original.len++] = 0xA9U;
+      original.buf[original.len++] = 0xC2U; /* trademark (UTF-8) */
+      original.buf[original.len++] = 0xAEU;
+      original.buf[original.len++] = 0xC2U; /* non-breaking-space (UTF-8) */
+      original.buf[original.len++] = 0xA0U;
+      original.buf[original.len++] = 0x26U; /* & */
+      original.buf[original.len++] = 0x27U; /* ' */
+      original.buf[original.len++] = 0x22U; /* " */
       original.buf[original.len] = 0;
       unescaped.len = escaped.len = 0;
-      fio_string_write(&escaped,
-                       NULL,
-                       "&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
-                       50);
+      fio_string_write(
+          &escaped,
+          NULL,
+          "&#255;&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
+          56);
     }
   }
   { /* Comparison testing */

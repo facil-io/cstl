@@ -461,7 +461,7 @@ Writes HTML (mostly) un-escaped data to a String.
 
 The un-escaping of HTML content includes a long list of named code-point. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
 
-The supported named code-points include: `&lt`, `&gt`, `&amp`, `&tab`, `&quot`, `&apos`, `&nbsp`, `&copy` (with or without a trailing `;`).
+The supported named code-points include a small group, among them: `&lt`, `&gt`, `&amp`, `&tab`, `&quot`, `&apos`, `&nbsp`, `&copy` (with or without a trailing `;`).
 
 ### Core String File Reading support
 
