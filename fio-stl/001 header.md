@@ -626,7 +626,7 @@ On most of `libc` implementations the library call will be faster. On embedded s
 
 Returns `dest` (the pointer originally received).
 
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_MEMCHR`
 
@@ -652,7 +652,7 @@ If `token` is found, returns the address of the token's first appearance. Otherw
 
 On most of `libc` implementations the library call will be faster. Test before deciding.
 
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
 #### `fio_memchr_unsafe`
 
@@ -670,7 +670,7 @@ If `token` is found, returns the address of the token's first appearance. Otherw
 
 On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
 
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_MEMCMP`
 
@@ -694,7 +694,7 @@ A fallback for `memcmp`, comparing two memory regions by byte values.
 
 Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
 
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_STRLEN`
 
@@ -708,17 +708,15 @@ This macro makes it easy to override the `strlen` implementation used by the lib
 
 By default this will be set to either `strlen` or `__builtin_strlen` (if available). It can also be set to `fio_strlen` if need be.
 
-#### `fio_memcmp`
+#### `fio_strlen`
 
 ```c
-static int fio_memcmp(const void *a, const void *b, size_t len);
+static size_t fio_strlen(const char *str);
 ```
 
-A fallback for `memcmp`, comparing two memory regions by byte values.
+A fallback for `strlen`, returning the length of the string.
 
-Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
 #### `FIO_MEMALT`
 
