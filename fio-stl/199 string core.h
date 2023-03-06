@@ -1862,10 +1862,11 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
                                     size_t len) {
   int r = 0;
   size_t at = 0;
-  size_t reduced = 0;
+  size_t reduced = len;
   if ((!len | !src_ | !dest))
     return r;
-  { /* calculate assumed `len` reduction (minimal reduction) */
+  if (dest->len + len >= dest->capa) { /* reserve only what we need */
+    reduced = 0;
     const char *tmp = (const char *)src_;
     const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
     for (;;) {
@@ -1882,10 +1883,10 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     }
     FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too long");
     reduced = len - reduced;
-  }
-  if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
-    r = -1;
-    len = dest->capa - (dest->len + 1);
+    if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
+      r = -1;
+      len = dest->capa - (dest->len + 1);
+    }
   }
   const uint8_t *src = (const uint8_t *)src_;
   const uint8_t *end = src + len;
@@ -1940,7 +1941,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
             src[5] == '\\' && src[6] == 'u' && fio_c2i(src[7]) < 16 &&
             fio_c2i(src[8]) < 16 && fio_c2i(src[9]) < 16 &&
             fio_c2i(src[10]) < 16) {
-          /* surrogate-pair */
+          /* surrogate-pair (high/low code points) */
           u = (u & 0x03FF) << 10;
           u |= (((((fio_c2i(src[7]) << 4) | fio_c2i(src[8])) << 8) |
                  ((fio_c2i(src[9]) << 4) | fio_c2i(src[10]))) &
@@ -2213,7 +2214,7 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
   uint8_t *pr = (uint8_t *)encoded;
   uint8_t *last = pr;
   uint8_t *end = pr + encoded_len;
-  { /* reserve memory space */
+  if (dest->len + encoded_len >= dest->capa) { /* reserve only what we need */
     size_t act_len = 0;
     while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
       act_len += pr - last;
@@ -2361,6 +2362,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
                                          fio_string_realloc_fn reallocate,
                                          const void *data,
                                          size_t data_len) {
+  int r = 0;
   struct {
     uint64_t code;
     uint32_t clen;
@@ -2411,14 +2413,14 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
       FIO___STRING_HTML_CODE_POINT("trade", "™"),
       FIO___STRING_HTML_CODE_POINT("yen", "¥"),
   };
-  int r = 0;
   if (!dest || !data || !data_len)
     return r;
+  size_t reduced = data_len + dest->len;
   uint8_t *start = (uint8_t *)data;
   uint8_t *const end = start + data_len;
-  { /* reserve memory space */
+  if (dest->len + data_len >= dest->capa) { /* reserve only what we need */
+    reduced = data_len;
     uint8_t *del = start;
-    size_t act_len = data_len;
     while (end > del && (del = (uint8_t *)FIO_MEMCHR(del, '&', end - del))) {
       uint8_t *tmp = ++del; /* keep at least 1 char for the output */
       /* note that in some cases the `;` might be dropped (history) */
@@ -2429,8 +2431,8 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
         if (*del != ';' || num > 65535) /* untrusted, don't decode */
           continue;
         del += (del < end && del[0] == ';');
-        act_len -= del - tmp;
-        act_len += fio__string_utf8_map[num >> 3];
+        reduced -= del - tmp;
+        reduced += fio__string_utf8_map[num >> 3];
         continue;
       }
       for (size_t i = 0;
@@ -2446,17 +2448,17 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
           continue;
         del += html_named_codes[i].clen;
         del += (del < end && del[0] == ';');
-        act_len -= del - tmp;
+        reduced -= del - tmp;
         for (size_t j = 0; html_named_codes[i].r[j]; ++j)
-          ++act_len;
+          ++reduced;
         break;
       }
     }
-    if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
+    if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
       return (r = -1); /* no partial decoding. */
     };
+    reduced += dest->len;
   }
-
   { /* copy and unescape data */
     uint8_t *del = start;
     while (end > (start = del) &&
@@ -2517,6 +2519,8 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
     dest->len += len;
   }
   dest->buf[dest->len] = 0;
+  FIO_ASSERT_DEBUG(dest->len < reduced + 1,
+                   "string HTML unescape reduced calculation error");
   return r;
 }
 
@@ -3053,6 +3057,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
           "&#255;&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
           56);
     }
+    original.buf[original.len] = 0;
+    unescaped.len = escaped.len = 0;
+    escaped.capa = 8;
+    FIO_ASSERT(fio_string_write_html_escape(&escaped,
+                                            NULL,
+                                            original.buf,
+                                            original.len),
+               "fio_string_write_html_escape should error on capacity");
   }
   { /* Comparison testing */
     fprintf(stderr, "* Testing comparison\n");
@@ -3107,7 +3119,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_bstr_free(s_copy);
     fio_bstr_free(str);
   }
-  {
+  { /* testing readfile */
     char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
     FIO_ASSERT(s && fio_bstr_len(s), "fio_bstr_readfile failed");
     FIO_LOG_DEBUG("readfile returned %zu bytes, starting with:\n%s",
