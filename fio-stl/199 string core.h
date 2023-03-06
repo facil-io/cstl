@@ -2375,29 +2375,44 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
         act_len -= del - tmp;
         act_len += (num > 255);
         continue;
-      } else if ((del[0] | 32) == 'l' && (del[1] | 32) == 't')
+      } else if (del + 1 < end && (del[0] | 32) == 'l' && (del[1] | 32) == 't')
         del += 2;
-      else if ((del[0] | 32) == 'g' && (del[1] | 32) == 't')
+      else if (del + 1 < end && (del[0] | 32) == 'g' && (del[1] | 32) == 't')
         del += 2;
-      else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'm' && del[2] == 'p')
+      else if (del + 2 < end && (del[0] | 32) == 'a' && (del[1] | 32) == 'm' &&
+               (del[2] | 32) == 'p')
         del += 3;
-      else if ((del[0] | 32) == 't' && (del[1] | 32) == 'a' && del[2] == 'b')
+      else if (del + 2 < end && (del[0] | 32) == 't' && (del[1] | 32) == 'a' &&
+               (del[2] | 32) == 'b')
         del += 3;
-      else if ((del[0] | 32) == 'q' && (del[1] | 32) == 'u' && del[2] == 'o' &&
-               del[3] == 't')
+      else if (del + 2 < end && (del[0] | 32) == 'r' && (del[1] | 32) == 'e' &&
+               (del[2] | 32) == 'g')
+        del += 3;
+      else if (del + 2 < end && (del[0] | 32) == 'y' && (del[1] | 32) == 'e' &&
+               (del[2] | 32) == 'n')
+        del += 3;
+      else if (del + 3 < end && (del[0] | 32) == 'q' && (del[1] | 32) == 'u' &&
+               (del[2] | 32) == 'o' && (del[3] | 32) == 't')
         del += 4;
-      else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'p' && del[2] == 'o' &&
-               del[3] == 's')
+      else if (del + 3 < end && (del[0] | 32) == 'a' && (del[1] | 32) == 'p' &&
+               (del[2] | 32) == 'o' && (del[3] | 32) == 's')
         del += 4;
-      else if ((del[0] | 32) == 'n' && (del[1] | 32) == 'b' && del[2] == 's' &&
-               del[3] == 'p')
+      else if (del + 3 < end && (del[0] | 32) == 'n' && (del[1] | 32) == 'b' &&
+               (del[2] | 32) == 's' && (del[3] | 32) == 'p')
         del += 4;
-      else if ((del[0] | 32) == 'c' && (del[1] | 32) == 'o' && del[2] == 'p' &&
-               del[3] == 'y')
+      else if (del + 3 < end && (del[0] | 32) == 'c' && (del[1] | 32) == 'o' &&
+               (del[2] | 32) == 'p' && (del[3] | 32) == 'y')
         del += 4;
+      else if (del + 3 < end && (del[0] | 32) == 'c' && (del[1] | 32) == 'e' &&
+               (del[2] | 32) == 'n' && (del[3] | 32) == 't')
+        del += 4;
+      else if (del + 4 < end && (del[0] | 32) == 'p' && (del[1] | 32) == 'o' &&
+               (del[2] | 32) == 'u' && (del[3] | 32) == 'n' &&
+               (del[4] | 32) == 'd')
+        del += 5;
       else /* untrusted, don't decode */
         continue;
-      del += (del[0] == ';');
+      del += (del < end && del[0] == ';');
       act_len -= del - tmp;
     }
     if (fio_string___write_validate_len(dest, reallocate, &act_len)) {
@@ -2406,8 +2421,8 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
   }
   { /* copy and unescape data */
     uint8_t *del = start;
-    while (end > del &&
-           (del = (uint8_t *)FIO_MEMCHR((start = del), '&', end - del))) {
+    while (end > (start = del) &&
+           (del = (uint8_t *)FIO_MEMCHR(del, '&', end - del))) {
       if (start != del) {
         const size_t len = del - start;
         FIO_MEMCPY(dest->buf + dest->len, start, len);
@@ -2415,9 +2430,13 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
         start = del;
       }
       ++del;
+      if (del == end)
+        break;
       /* note that in some cases the `;` might be dropped (history) */
       if (del[0] == 'x' || del[0] == '#') {
         ++del;
+        if (del == end)
+          break;
         uint64_t num =
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
@@ -2425,36 +2444,67 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
         dest->buf[dest->len] = (num >> 8);
         dest->len += !!(num >> 8);
         dest->buf[dest->len++] = (num & 0xFF);
-      } else if ((del[0] | 32) == 'l' && (del[1] | 32) == 't') {
+      } else if (del + 1 < end && (del[0] | 32) == 'l' &&
+                 (del[1] | 32) == 't') {
         del += 2;
         dest->buf[dest->len++] = '<';
-      } else if ((del[0] | 32) == 'g' && (del[1] | 32) == 't') {
+      } else if (del + 1 < end && (del[0] | 32) == 'g' &&
+                 (del[1] | 32) == 't') {
         del += 2;
         dest->buf[dest->len++] = '>';
-      } else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'm' &&
-                 del[2] == 'p') {
+      } else if (del + 2 < end && (del[0] | 32) == 'a' &&
+                 (del[1] | 32) == 'm' && (del[2] | 32) == 'p') {
         del += 3;
         dest->buf[dest->len++] = '&';
-      } else if ((del[0] | 32) == 't' && (del[1] | 32) == 'a' &&
-                 del[2] == 'b') {
+      } else if (del + 2 < end && (del[0] | 32) == 'r' &&
+                 (del[1] | 32) == 'e' && (del[2] | 32) == 'g') {
+        del += 3;
+        dest->buf[dest->len++] = 174U;
+      } else if (del + 2 < end && (del[0] | 32) == 'y' &&
+                 (del[1] | 32) == 'e' && (del[2] | 32) == 'n') {
+        del += 3;
+        dest->buf[dest->len++] = 165U;
+      } else if (del + 2 < end && (del[0] | 32) == 't' &&
+                 (del[1] | 32) == 'a' && (del[2] | 32) == 'b') {
         del += 3;
         dest->buf[dest->len++] = '\t';
-      } else if ((del[0] | 32) == 'q' && (del[1] | 32) == 'u' &&
-                 del[2] == 'o' && del[3] == 't') {
+      } else if (del + 3 < end && (del[0] | 32) == 'q' &&
+                 (del[1] | 32) == 'u' && (del[2] | 32) == 'o' &&
+                 (del[3] | 32) == 't') {
         del += 4;
         dest->buf[dest->len++] = '"';
-      } else if ((del[0] | 32) == 'a' && (del[1] | 32) == 'p' &&
-                 del[2] == 'o' && del[3] == 's') {
+      } else if (del + 3 < end && (del[0] | 32) == 'a' &&
+                 (del[1] | 32) == 'p' && (del[2] | 32) == 'o' &&
+                 (del[3] | 32) == 's') {
         del += 4;
         dest->buf[dest->len++] = '\'';
-      } else if ((del[0] | 32) == 'n' && (del[1] | 32) == 'b' &&
-                 del[2] == 's' && del[3] == 'p') {
+      } else if (del + 3 < end && (del[0] | 32) == 'n' &&
+                 (del[1] | 32) == 'b' && (del[2] | 32) == 's' &&
+                 (del[3] | 32) == 'p') {
         del += 4;
         dest->buf[dest->len++] = 160U;
-      } else if ((del[0] | 32) == 'c' && (del[1] | 32) == 'o' &&
-                 del[2] == 'p' && del[3] == 'y') {
+      } else if (del + 3 < end && (del[0] | 32) == 'c' &&
+                 (del[1] | 32) == 'o' && (del[2] | 32) == 'p' &&
+                 (del[3] | 32) == 'y') {
         del += 4;
         dest->buf[dest->len++] = 169U;
+      } else if (del + 3 < end && (del[0] | 32) == 'c' &&
+                 (del[1] | 32) == 'e' && (del[2] | 32) == 'n' &&
+                 (del[3] | 32) == 't') {
+        del += 4;
+        dest->buf[dest->len++] = 162U;
+      } else if (del + 3 < end && (del[0] | 32) == 'e' &&
+                 (del[1] | 32) == 'u' && (del[2] | 32) == 'r' &&
+                 (del[3] | 32) == 'o') {
+        del += 4;
+        dest->buf[dest->len++] = 0xE2U;
+        dest->buf[dest->len++] = 0x82U;
+        dest->buf[dest->len++] = 0xACU;
+      } else if (del + 4 < end && (del[0] | 32) == 'p' &&
+                 (del[1] | 32) == 'o' && (del[2] | 32) == 'u' &&
+                 (del[3] | 32) == 'n' && (del[4] | 32) == 'd') {
+        del += 5;
+        dest->buf[dest->len++] = 163U;
       } else /* untrusted, don't decode */
         goto untrusted_no_encode;
       del += (del < end && del[0] == ';');
@@ -2958,7 +3008,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
                "fio_string_write_url_enc/dec roundtrip failed!");
   }
-  {
+  { /* testing HTML escaping / un-escaping Support */
     fprintf(stderr,
             "* Testing HTML escaping / un-escaping (minimal support)\n");
     char mem[3072];
@@ -2972,15 +3022,35 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                                              original.buf,
                                              original.len),
                "fio_string_write_html_escape returned an error");
-    FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
-                                               NULL,
-                                               escaped.buf,
-                                               escaped.len),
-               "fio_string_write_html_unescape returned an error");
-    FIO_ASSERT(!FIO_STR_INFO_IS_EQ(original, escaped),
-               "fio_string_write_html_escape did nothing!");
-    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
-               "fio_string_write_html_(un)escape roundtrip failed!");
+    for (size_t i = 0; i < 2; ++i) {
+      FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
+                                                 NULL,
+                                                 escaped.buf,
+                                                 escaped.len),
+                 "fio_string_write_html_unescape returned an error");
+      FIO_ASSERT(!FIO_STR_INFO_IS_EQ(original, escaped),
+                 "fio_string_write_html_escape did nothing!");
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
+                 "fio_string_write_html_(un)escape roundtrip failed!");
+      original.len = 0;
+      original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
+      original.buf[original.len++] = 0x82U;
+      original.buf[original.len++] = 0xACU;
+      original.buf[original.len++] = 163U; /* pounds */
+      original.buf[original.len++] = 162U; /* cents */
+      original.buf[original.len++] = 169U; /* copyright */
+      original.buf[original.len++] = 174U; /* trademark */
+      original.buf[original.len++] = 160U; /* non-breaking-space */
+      original.buf[original.len++] = 38U;  /* & */
+      original.buf[original.len++] = 39U;  /* ' */
+      original.buf[original.len++] = 34U;  /* " */
+      original.buf[original.len] = 0;
+      unescaped.len = escaped.len = 0;
+      fio_string_write(&escaped,
+                       NULL,
+                       "&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
+                       50);
+    }
   }
   { /* Comparison testing */
     fprintf(stderr, "* Testing comparison\n");
