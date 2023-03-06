@@ -149,7 +149,7 @@ typedef struct {
  */
 #define FIO_STR_INIT_STATIC(buffer)                                            \
   {                                                                            \
-    .special = 4, .capa = strlen((buffer)), .len = strlen((buffer)),           \
+    .special = 4, .capa = FIO_STRLEN((buffer)), .len = FIO_STRLEN((buffer)),   \
     .buf = (char *)(buffer)                                                    \
   }
 
@@ -1536,9 +1536,9 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
              "small string pointer reporting error after write!");
   FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(&str)[4] &&
-                 strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
              "small string NUL missing after write (%zu)!",
-             strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
              "small string write error (%s)!",
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -1575,9 +1575,9 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
       FIO_NAME(FIO_STR_NAME, len)(&str));
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == str.buf,
              "Long String pointer reporting error after capacity update!");
-  FIO_ASSERT(strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
              "Long String NUL missing after capacity update (%zu)!",
-             strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
              "Long String value changed after capacity update (%s)!",
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -1611,21 +1611,22 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
 
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) ==
-                     fio_string_capa4len(strlen("Hello Big World!")) ||
+                     fio_string_capa4len(FIO_STRLEN("Hello Big World!")) ||
                  !FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
              "Long String `replace` capacity update error "
              "(%zu >=? %zu)!",
              FIO_NAME(FIO_STR_NAME, capa)(&str),
-             fio_string_capa4len(strlen("Hello Big World!")));
+             fio_string_capa4len(FIO_STRLEN("Hello Big World!")));
 
   if (FIO_NAME(FIO_STR_NAME, len)(&str) < (sizeof(str) - 2)) {
     FIO_NAME(FIO_STR_NAME, compact)(&str);
     FIO_ASSERT(FIO_STR_IS_SMALL(&str),
                "Compacting didn't change String to small!");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == strlen("Hello Big World!"),
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) ==
+                   FIO_STRLEN("Hello Big World!"),
                "Compacting altered String length! (%zu != %zu)!",
                FIO_NAME(FIO_STR_NAME, len)(&str),
-               strlen("Hello Big World!"));
+               FIO_STRLEN("Hello Big World!"));
     FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
                "Compact data error (%s)!",
                FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -1871,7 +1872,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     fio_str_info_s ue;
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
-    FIO_NAME(FIO_STR_NAME, write)(&unescaped, utf8_sample, strlen(utf8_sample));
+    FIO_NAME(FIO_STR_NAME, write)
+    (&unescaped, utf8_sample, FIO_STRLEN(utf8_sample));
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
       ue = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
@@ -1890,7 +1892,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
       encoded.buf = decoded.buf;
     }
-    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, strlen(utf8_sample)),
+    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,

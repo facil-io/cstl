@@ -264,7 +264,7 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC(buffer)                                            \
-  { .special = 4, .buf = (char *)(buffer), .len = strlen((buffer)) }
+  { .special = 4, .buf = (char *)(buffer), .len = FIO_STRLEN((buffer)) }
 ```
 
 #### `FIO_STR_INIT_STATIC2`

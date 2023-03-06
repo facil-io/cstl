@@ -368,7 +368,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
     if (!data[i].str)
       continue;
     if (data[i].sha256) {
-      fio_u256 sha256 = fio_sha256(data[i].str, strlen(data[i].str));
+      fio_u256 sha256 = fio_sha256(data[i].str, FIO_STRLEN(data[i].str));
       FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
                  "SHA256 mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
                  data[i].str,
@@ -382,7 +382,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[31]);
     }
     // if (data[i].sha512) {
-    //   fio_u512 sha512 = fio_sha512(data[i].str, strlen(data[i].str));
+    //   fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
     //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
     //              "SHA512 mismatch for \"%s\"",
     //              data[i].str);

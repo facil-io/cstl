@@ -897,7 +897,8 @@ FIO_SFUNC void fio___cli_print_help(void) {
 
   fio_buf_info_s app_name = {
       .buf = (char *)fio___cli_data.app_name,
-      .len = (fio___cli_data.app_name ? strlen(fio___cli_data.app_name) : 0)};
+      .len =
+          (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0)};
   FIO_STR_INFO_TMP_VAR(help, 8192);
   fio_str_info_s help_org_state = help;
 

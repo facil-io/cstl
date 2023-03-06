@@ -334,6 +334,32 @@ void FIO_WEAK fio___(void) {
 #endif
 
 /* *****************************************************************************
+Pointer Math
+***************************************************************************** */
+
+/** Masks a pointer's left-most bits, returning the right bits. */
+#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
+  ((T_type *)(((uintptr_t)(ptr)) & (((uintptr_t)1ULL << (bits)) - 1)))
+
+/** Masks a pointer's right-most bits, returning the left bits. */
+#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
+  ((T_type *)(((uintptr_t)(ptr)) & ((~(uintptr_t)0ULL) << (bits))))
+
+/** Add offset bytes to pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
+
+/** Subtract X bytes from pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
+
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
+#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
+  FIO_PTR_MATH_SUB(T_type,                                                     \
+                   ptr,                                                        \
+                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
+
+/* *****************************************************************************
 Miscellaneous helper macros
 ***************************************************************************** */
 
@@ -616,6 +642,9 @@ Memory Copying Primitives
 #endif
 #ifndef FIO_MEMSET
 #define FIO_MEMSET fio_memset
+#endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
 #endif
 #endif /* FIO_MEMALT */
 
@@ -1232,7 +1261,68 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   FIO___MEMCHR_BITMAP_TEST(4);
   return NULL;
 }
+
+/**
+ * A token seeking function.
+ *
+ * This is basically a fallback for implementing `strlen`.
+ */
+FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
+  if (!buffer)
+    return NULL;
+  const char *r = (const char *)buffer;
+  /* we must align memory, to avoid crushing when nearing last page boundary */
+  switch (((uintptr_t)r & 15)) {
+#define FIO___MEMCHR_UNSAFE_STEP()                                             \
+  if (*r == token)                                                             \
+    return (void *)r;                                                          \
+  ++r
+  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+#undef FIO___MEMCHR_UNSAFE_STEP
+  }
+  uint64_t umsk = ((uint64_t)((uint8_t)token));
+  umsk |= (umsk << 32); /* make each byte in umsk == token */
+  umsk |= (umsk << 16);
+  umsk |= (umsk << 8);
+  /* align on loop boundary */
+  FIO___MEMCHR_BITMAP_TEST(1);
+  r = FIO_PTR_MATH_RMASK(const char, r, 3);
+  FIO___MEMCHR_BITMAP_TEST(2);
+  r = FIO_PTR_MATH_RMASK(const char, r, 4);
+  FIO___MEMCHR_BITMAP_TEST(4);
+  r = FIO_PTR_MATH_RMASK(const char, r, 5);
+  FIO___MEMCHR_BITMAP_TEST(8);
+  r = FIO_PTR_MATH_RMASK(const char, r, 6);
+  for (;;) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+}
 #undef FIO___MEMCHR_BITMAP_TEST
+
+/* *****************************************************************************
+fio_strlen
+***************************************************************************** */
+#ifndef FIO_STRLEN
+#if __has_builtin(__builtin_strlen)
+/** `strlen` selector macro */
+#define FIO_STRLEN __builtin_strlen
+#else
+/** `strlen` selector macro */
+#define FIO_STRLEN strlen
+#endif
+#endif /* FIO_STRLEN */
+
+FIO_SFUNC size_t fio_strlen(const char *str) {
+  const char *nul = (const char *)fio_memchr_unsafe(str, 0);
+  return (size_t)(nul - str);
+}
 
 /* *****************************************************************************
 fio_memcmp
@@ -1336,32 +1426,6 @@ FIO_IFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   return fio___memcmp256(a, b, len);
 #endif /* FIO_LIMIT_INTRINSIC_BUFFER */
 }
-
-/* *****************************************************************************
-Pointer Math
-***************************************************************************** */
-
-/** Masks a pointer's left-most bits, returning the right bits. */
-#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
-
-/** Masks a pointer's right-most bits, returning the left bits. */
-#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << (bits))))
-
-/** Add offset bytes to pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
-
-/** Subtract X bytes from pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
-
-/** Find the root object (of a struct) from it's field (with sanitizer fix). */
-#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type,                                                     \
-                   ptr,                                                        \
-                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 
 /* *****************************************************************************
 Security Related macros
@@ -1609,7 +1673,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
+  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
 #define FIO_STR_INFO2(str, length)                                             \
@@ -1621,7 +1685,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \

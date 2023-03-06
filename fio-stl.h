@@ -466,6 +466,32 @@ void FIO_WEAK fio___(void) {
 #endif
 
 /* *****************************************************************************
+Pointer Math
+***************************************************************************** */
+
+/** Masks a pointer's left-most bits, returning the right bits. */
+#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
+  ((T_type *)(((uintptr_t)(ptr)) & (((uintptr_t)1ULL << (bits)) - 1)))
+
+/** Masks a pointer's right-most bits, returning the left bits. */
+#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
+  ((T_type *)(((uintptr_t)(ptr)) & ((~(uintptr_t)0ULL) << (bits))))
+
+/** Add offset bytes to pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
+
+/** Subtract X bytes from pointer, updating the pointer's type. */
+#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
+  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
+
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
+#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
+  FIO_PTR_MATH_SUB(T_type,                                                     \
+                   ptr,                                                        \
+                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
+
+/* *****************************************************************************
 Miscellaneous helper macros
 ***************************************************************************** */
 
@@ -748,6 +774,9 @@ Memory Copying Primitives
 #endif
 #ifndef FIO_MEMSET
 #define FIO_MEMSET fio_memset
+#endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
 #endif
 #endif /* FIO_MEMALT */
 
@@ -1364,7 +1393,68 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   FIO___MEMCHR_BITMAP_TEST(4);
   return NULL;
 }
+
+/**
+ * A token seeking function.
+ *
+ * This is basically a fallback for implementing `strlen`.
+ */
+FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
+  if (!buffer)
+    return NULL;
+  const char *r = (const char *)buffer;
+  /* we must align memory, to avoid crushing when nearing last page boundary */
+  switch (((uintptr_t)r & 15)) {
+#define FIO___MEMCHR_UNSAFE_STEP()                                             \
+  if (*r == token)                                                             \
+    return (void *)r;                                                          \
+  ++r
+  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+#undef FIO___MEMCHR_UNSAFE_STEP
+  }
+  uint64_t umsk = ((uint64_t)((uint8_t)token));
+  umsk |= (umsk << 32); /* make each byte in umsk == token */
+  umsk |= (umsk << 16);
+  umsk |= (umsk << 8);
+  /* align on loop boundary */
+  FIO___MEMCHR_BITMAP_TEST(1);
+  r = FIO_PTR_MATH_RMASK(const char, r, 3);
+  FIO___MEMCHR_BITMAP_TEST(2);
+  r = FIO_PTR_MATH_RMASK(const char, r, 4);
+  FIO___MEMCHR_BITMAP_TEST(4);
+  r = FIO_PTR_MATH_RMASK(const char, r, 5);
+  FIO___MEMCHR_BITMAP_TEST(8);
+  r = FIO_PTR_MATH_RMASK(const char, r, 6);
+  for (;;) {
+    FIO___MEMCHR_BITMAP_TEST(8);
+    FIO___MEMCHR_BITMAP_TEST(8);
+  }
+}
 #undef FIO___MEMCHR_BITMAP_TEST
+
+/* *****************************************************************************
+fio_strlen
+***************************************************************************** */
+#ifndef FIO_STRLEN
+#if __has_builtin(__builtin_strlen)
+/** `strlen` selector macro */
+#define FIO_STRLEN __builtin_strlen
+#else
+/** `strlen` selector macro */
+#define FIO_STRLEN strlen
+#endif
+#endif /* FIO_STRLEN */
+
+FIO_SFUNC size_t fio_strlen(const char *str) {
+  const char *nul = (const char *)fio_memchr_unsafe(str, 0);
+  return (size_t)(nul - str);
+}
 
 /* *****************************************************************************
 fio_memcmp
@@ -1468,32 +1558,6 @@ FIO_IFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   return fio___memcmp256(a, b, len);
 #endif /* FIO_LIMIT_INTRINSIC_BUFFER */
 }
-
-/* *****************************************************************************
-Pointer Math
-***************************************************************************** */
-
-/** Masks a pointer's left-most bits, returning the right bits. */
-#define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
-
-/** Masks a pointer's right-most bits, returning the left bits. */
-#define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << (bits))))
-
-/** Add offset bytes to pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_ADD(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) + (uintptr_t)(offset)))
-
-/** Subtract X bytes from pointer, updating the pointer's type. */
-#define FIO_PTR_MATH_SUB(T_type, ptr, offset)                                  \
-  ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
-
-/** Find the root object (of a struct) from it's field (with sanitizer fix). */
-#define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type,                                                     \
-                   ptr,                                                        \
-                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 
 /* *****************************************************************************
 Security Related macros
@@ -1741,7 +1805,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
+  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
 #define FIO_STR_INFO2(str, length)                                             \
@@ -1753,7 +1817,7 @@ typedef struct fio_buf_info_s {
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? strlen((str)) : 0), .buf = (str)})
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
 
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \
@@ -6519,11 +6583,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                ((char *)(s)),                                                  \
                (size_t)r,                                                      \
                (size_t)n);                                                     \
-    FIO_ASSERT((s) + strlen((s)) == p,                                         \
+    FIO_ASSERT((s) + FIO_STRLEN((s)) == p,                                     \
                "fio_atol test error! %s reading position not at end "          \
                "(!%zu == %zu)\n\t0x%p - 0x%p",                                 \
                (s),                                                            \
-               (size_t)strlen((s)),                                            \
+               (size_t)FIO_STRLEN((s)),                                        \
                (size_t)(p - (s)),                                              \
                (void *)p,                                                      \
                (void *)s);                                                     \
@@ -8938,7 +9002,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   fprintf(stderr, "* Testing Risky Hash and Risky Mask (sanity).\n");
   {
     char *str = (char *)"testing that risky hash is always the same hash";
-    const size_t len = strlen(str);
+    const size_t len = FIO_STRLEN(str);
     char buf[128];
     FIO_MEMCPY(buf, str, len);
     uint64_t org_hash = fio_risky_hash(buf, len, 0);
@@ -8955,7 +9019,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
   {
     char buf[64];
     const char *str = (char *)"this is a short text, to test risky masking, ok";
-    const size_t len = strlen(str); /* 47 */
+    const size_t len = FIO_STRLEN(str); /* 47 */
     for (int i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
@@ -9592,7 +9656,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
       },
   };
   for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
-    fio_sha1_s sha1 = fio_sha1(data[i].str, strlen(data[i].str));
+    fio_sha1_s sha1 = fio_sha1(data[i].str, FIO_STRLEN(data[i].str));
 
     FIO_ASSERT(!memcmp(sha1.digest, data[i].sha1, fio_sha1_len()),
                "SHA1 mismatch for \"%s\"",
@@ -10003,7 +10067,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
     if (!data[i].str)
       continue;
     if (data[i].sha256) {
-      fio_u256 sha256 = fio_sha256(data[i].str, strlen(data[i].str));
+      fio_u256 sha256 = fio_sha256(data[i].str, FIO_STRLEN(data[i].str));
       FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
                  "SHA256 mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
                  data[i].str,
@@ -10017,7 +10081,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[31]);
     }
     // if (data[i].sha512) {
-    //   fio_u512 sha512 = fio_sha512(data[i].str, strlen(data[i].str));
+    //   fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
     //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
     //              "SHA512 mismatch for \"%s\"",
     //              data[i].str);
@@ -10827,7 +10891,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
         },
         {.expected = NULL}};
     for (size_t i = 0; tests[i].expected; ++i) {
-      size_t len = strlen(tests[i].src);
+      size_t len = FIO_STRLEN(tests[i].src);
       char buffer[4096];
       FIO_MEMCPY(buffer, tests[i].src, len);
       fio_chacha20(buffer, len, tests[i].key, tests[i].nounce, 1);
@@ -10860,7 +10924,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
       fio_poly1305_auth(auth,
                         tests[t].key,
                         tests[t].msg,
-                        strlen(tests[t].msg),
+                        FIO_STRLEN(tests[t].msg),
                         NULL,
                         0);
       for (int i = 0; i < 16; ++i) {
@@ -15548,8 +15612,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     fio_memset(buf1, ~(uint64_t)0, sizeof(*buf1) * 64);
     char *data =
         (char *)"This should be an uneven amount of characters, say 53";
-    fio_memcpy(buf, data, strlen(data));
-    FIO_ASSERT(!memcmp(buf, data, strlen(data)) && buf[strlen(data)] == 0xFF,
+    fio_memcpy(buf, data, FIO_STRLEN(data));
+    FIO_ASSERT(!memcmp(buf, data, FIO_STRLEN(data)) &&
+                   buf[FIO_STRLEN(data)] == 0xFF,
                "fio_memcpy should not overflow or underflow on uneven "
                "amounts of bytes.");
   }
@@ -15559,7 +15624,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                         "so no undefined behavior should occur. "
                         "Should be true for larger offsets too. At least over "
                         "128 Bytes.";
-    size_t len = strlen(msg);
+    size_t len = FIO_STRLEN(msg);
     char buf[512];
     for (size_t offset = 0; offset < len; ++offset) {
       memset(buf, 0, sizeof(buf));
@@ -15588,6 +15653,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       int f = fio_memcmp(&a, &b, sizeof(a));
       FIO_ASSERT((s < 0 && f < 0) || (s > 0 && f > 0) || (!s && !f),
                  "fio_memcmp != memcmp (result meaning, not value).");
+    }
+  }
+  { /* test fio_memchr and fio_strlen */
+    char membuf[4096];
+    memset(membuf, 0xff, 4096);
+    membuf[4095] = 0;
+    for (size_t i = 0; i < 4095; ++i) {
+      membuf[i] = 0;
+      char *result = fio_memchr(membuf, 0, 4096);
+      size_t len = fio_strlen(membuf);
+      membuf[i] = ((i & 0xFFU) | 1U);
+      FIO_ASSERT(result == membuf + i, "fio_memchr failed.");
+      FIO_ASSERT(len == i, "fio_strlen failed.");
     }
   }
 #ifndef DEBUG
@@ -15920,6 +15998,77 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
             mem_len,
             (size_t)(end - start),
             repetitions);
+    free(mem);
+  }
+
+  fprintf(stderr, "* Speed testing strlen:\n");
+
+  for (int len_i = 2; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
+    const size_t mem_len = (1ULL << len_i) - 1;
+    size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
+    void *mem = malloc(mem_len + 1);
+    FIO_ASSERT_ALLOC(mem);
+    fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x80), mem_len + 1);
+    ((uint8_t *)mem)[token_index >> 1] = 0xFFU;       /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 1] = 0x01U; /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 2] = 0x7FU; /* edge case? */
+    ((uint8_t *)mem)[token_index] = 0;
+    ((uint8_t *)mem)[token_index + 1] = 0;
+    FIO_ASSERT(fio_strlen((char *)mem + 1) == strlen((char *)mem + 1),
+               "fio_strlen != strlen");
+    FIO_ASSERT(fio_strlen((char *)mem) == strlen((char *)mem),
+               "fio_strlen != strlen");
+    ((uint8_t *)mem)[token_index] = 0x80U;
+    ((uint8_t *)mem)[token_index + 1] = 0x80U;
+    ((uint8_t *)mem)[mem_len] = 0;
+    FIO_ASSERT(fio_strlen((char *)mem) == strlen((char *)mem) &&
+                   fio_strlen((char *)mem) == mem_len,
+               "fio_strlen != strlen");
+
+    token_index = mem_len - 1;
+    ((uint8_t *)mem)[token_index] = 0;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      size_t result = fio_strlen((char *)mem);
+      FIO_ASSERT(result == token_index,
+                 "fio_strlen failed? @ %zu",
+                 token_index);
+      FIO_COMPILER_GUARD;
+      ((uint8_t *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      token_index -= token_index == mem_len;
+      ((uint8_t *)mem)[token_index] = 0;
+    }
+    end = fio_time_micro();
+    ((uint8_t *)mem)[token_index] = 0x80;
+    fprintf(stderr,
+            "\tfio_strlen\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    token_index = mem_len - 1;
+    ((uint8_t *)mem)[token_index] = 0;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      size_t result = strlen((char *)mem);
+      FIO_ASSERT(result == token_index, "strlen failed? @ %zu", token_index);
+      FIO_COMPILER_GUARD;
+      ((uint8_t *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      token_index -= (token_index == mem_len);
+      ((uint8_t *)mem)[token_index] = 0;
+    }
+    end = fio_time_micro();
+    ((uint8_t *)mem)[token_index] = 0x80;
+    fprintf(stderr,
+            "\tsystem strlen\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
     free(mem);
   }
 #endif /* DEBUG */
@@ -17591,7 +17740,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
   char *pr = port;
 
   /* parse URL */
-  fio_url_s u = fio_url_parse(url, strlen(url));
+  fio_url_s u = fio_url_parse(url, FIO_STRLEN(url));
 #ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* Unix socket - force flag validation */
@@ -19831,8 +19980,8 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
       (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/')) {
     char *home = getenv("HOME");
     if (home) {
-      size_t filename_len = strlen(filename);
-      size_t home_len = strlen(home);
+      size_t filename_len = FIO_STRLEN(filename);
+      size_t home_len = FIO_STRLEN(home);
       if ((home_len + filename_len) >= (1 << 16)) {
         /* too long */
         FIO_LOG_ERROR("couldn't open file, as filename is too long %.*s...",
@@ -19915,7 +20064,7 @@ SFUNC int fio_filename_tmp(void) {
     tmp = P_tmpdir;
   }
 #endif
-  if (tmp && (len = strlen(tmp))) {
+  if (tmp && (len = FIO_STRLEN(tmp))) {
     FIO_MEMCPY(name_template, tmp, len);
     if (tmp[len - 1] != sep) {
       name_template[len++] = sep;
@@ -20235,8 +20384,9 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
 
 /** A macro to add a String to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR1(str_)                                            \
-  ((fio_string_write_s){.klass = 1,                                            \
-                        .info.str = {.len = strlen((str_)), .buf = (str_)}})
+  ((fio_string_write_s){                                                       \
+      .klass = 1,                                                              \
+      .info.str = {.len = FIO_STRLEN((str_)), .buf = (str_)}})
 
 /** A macro to add a String with known length to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
@@ -23002,9 +23152,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 1024);
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
-    FIO_ASSERT(
-        !fio_string_write(&unescaped, NULL, utf8_sample, strlen(utf8_sample)),
-        "Couldn't write UTF-8 example.");
+    FIO_ASSERT(!fio_string_write(&unescaped,
+                                 NULL,
+                                 utf8_sample,
+                                 FIO_STRLEN(utf8_sample)),
+               "Couldn't write UTF-8 example.");
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
@@ -23017,7 +23169,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
         !fio_string_write_unescape(&decoded, NULL, encoded.buf, encoded.len),
         "write unescape returned an error");
     FIO_ASSERT(encoded.len, "JSON encoding failed");
-    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, strlen(utf8_sample)),
+    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,
@@ -23117,7 +23269,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
                  "fio_string_write_html_(un)escape roundtrip failed!");
       original.len = 0;
-      fio_string_write(&original, NULL, "ÿ", strlen("ÿ"));
+      fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
       original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
       original.buf[original.len++] = 0x82U;
       original.buf[original.len++] = 0xACU;
@@ -23458,7 +23610,7 @@ typedef struct {
  */
 #define FIO_STR_INIT_STATIC(buffer)                                            \
   {                                                                            \
-    .special = 4, .capa = strlen((buffer)), .len = strlen((buffer)),           \
+    .special = 4, .capa = FIO_STRLEN((buffer)), .len = FIO_STRLEN((buffer)),   \
     .buf = (char *)(buffer)                                                    \
   }
 
@@ -24845,9 +24997,9 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
              "small string pointer reporting error after write!");
   FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(&str)[4] &&
-                 strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
              "small string NUL missing after write (%zu)!",
-             strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
              "small string write error (%s)!",
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -24884,9 +25036,9 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
       FIO_NAME(FIO_STR_NAME, len)(&str));
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == str.buf,
              "Long String pointer reporting error after capacity update!");
-  FIO_ASSERT(strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
              "Long String NUL missing after capacity update (%zu)!",
-             strlen(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
   FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
              "Long String value changed after capacity update (%s)!",
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -24920,21 +25072,22 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, ptr)(&str));
 
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) ==
-                     fio_string_capa4len(strlen("Hello Big World!")) ||
+                     fio_string_capa4len(FIO_STRLEN("Hello Big World!")) ||
                  !FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
              "Long String `replace` capacity update error "
              "(%zu >=? %zu)!",
              FIO_NAME(FIO_STR_NAME, capa)(&str),
-             fio_string_capa4len(strlen("Hello Big World!")));
+             fio_string_capa4len(FIO_STRLEN("Hello Big World!")));
 
   if (FIO_NAME(FIO_STR_NAME, len)(&str) < (sizeof(str) - 2)) {
     FIO_NAME(FIO_STR_NAME, compact)(&str);
     FIO_ASSERT(FIO_STR_IS_SMALL(&str),
                "Compacting didn't change String to small!");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == strlen("Hello Big World!"),
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) ==
+                   FIO_STRLEN("Hello Big World!"),
                "Compacting altered String length! (%zu != %zu)!",
                FIO_NAME(FIO_STR_NAME, len)(&str),
-               strlen("Hello Big World!"));
+               FIO_STRLEN("Hello Big World!"));
     FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
                "Compact data error (%s)!",
                FIO_NAME(FIO_STR_NAME, ptr)(&str));
@@ -25180,7 +25333,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     fio_str_info_s ue;
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
-    FIO_NAME(FIO_STR_NAME, write)(&unescaped, utf8_sample, strlen(utf8_sample));
+    FIO_NAME(FIO_STR_NAME, write)
+    (&unescaped, utf8_sample, FIO_STRLEN(utf8_sample));
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
       ue = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
@@ -25199,7 +25353,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
       encoded.buf = decoded.buf;
     }
-    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, strlen(utf8_sample)),
+    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,
@@ -30563,7 +30717,8 @@ FIO_SFUNC void fio___cli_print_help(void) {
 
   fio_buf_info_s app_name = {
       .buf = (char *)fio___cli_data.app_name,
-      .len = (fio___cli_data.app_name ? strlen(fio___cli_data.app_name) : 0)};
+      .len =
+          (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0)};
   FIO_STR_INFO_TMP_VAR(help, 8192);
   fio_str_info_s help_org_state = help;
 
@@ -33501,7 +33656,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   fio_sock_close(*pfd);
 #ifdef AF_UNIX
   /* delete the unix socket file, if any. */
-  fio_url_s u = fio_url_parse(l->url, strlen(l->url));
+  fio_url_s u = fio_url_parse(l->url, FIO_STRLEN(l->url));
   if (fio_srv_is_master() && !u.host.buf && !u.port.buf && u.path.buf) {
     unlink(u.path.buf);
   }
@@ -33509,7 +33664,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   fio_state_callback_remove(FIO_CALL_AT_EXIT,
                             fio___srv_listen_cleanup_task,
                             udata);
-  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
+  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + FIO_STRLEN(l->url) + 1);
 }
 
 static fio_protocol_s FIO___LISTEN_PROTOCOL = {
@@ -33544,7 +33699,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
 void fio_listen___(void); /* IDE Marker */
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   static int64_t port = 0;
-  size_t len = args.url ? strlen(args.url) + 1 : 0;
+  size_t len = args.url ? FIO_STRLEN(args.url) + 1 : 0;
   struct fio_listen_args *cpy = NULL;
   fio_str_info_s adr, tmp;
   int *fd_store;
@@ -33571,7 +33726,8 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
         port = 3000;
     }
     tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
-    if (!(adr.buf = getenv("ADDRESS")) || (adr.len = strlen(adr.buf)) > 58) {
+    if (!(adr.buf = getenv("ADDRESS")) ||
+        (adr.len = FIO_STRLEN(adr.buf)) > 58) {
       adr = FIO_STR_INFO2((char *)"0.0.0.0:", 8);
     }
     fio_string_write2(&tmp,
@@ -33823,7 +33979,7 @@ SFUNC int fio_tls_alpn_select(fio_tls_s *t,
   if (!t || !protocol_name)
     return -1;
   fio___tls_alpn_s seeking = {
-      .nm = fio_keystr(protocol_name, (uint32_t)strlen(protocol_name))};
+      .nm = fio_keystr(protocol_name, (uint32_t)FIO_STRLEN(protocol_name))};
   fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
   if (!alpn)
     return -1;
@@ -34160,8 +34316,8 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
     ex = {{NULL, "cert.pem", "key.pem", "1234"}};
   FIO_ASSERT(nm && nm[0] == (char)('0' + step), "nm error for tls_each_cert");
   for (size_t i = 1; i < 4; ++i) {
-    FIO_ASSERT(d.s[i] && ex.s[i] && strlen(ex.s[i]) == strlen(d.s[i]) &&
-                   !memcmp(ex.s[i], d.s[i], strlen(d.s[i])),
+    FIO_ASSERT(d.s[i] && ex.s[i] && FIO_STRLEN(ex.s[i]) == FIO_STRLEN(d.s[i]) &&
+                   !memcmp(ex.s[i], d.s[i], FIO_STRLEN(d.s[i])),
                "tls_each_cert string error for argument %zu",
                i);
   }
@@ -36293,9 +36449,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     fio_letter_s *l = fio_letter_new_compose(
         FIO_BUF_INFO2(
             test_info[i].channel,
-            (test_info[i].channel ? strlen(test_info[i].channel) : 0)),
+            (test_info[i].channel ? FIO_STRLEN(test_info[i].channel) : 0)),
         FIO_BUF_INFO2(test_info[i].msg,
-                      (test_info[i].msg ? strlen(test_info[i].msg) : 0)),
+                      (test_info[i].msg ? FIO_STRLEN(test_info[i].msg) : 0)),
         test_info[i].filter,
         test_info[i].flags);
     FIO_ASSERT(fio_letter_filter(l) == test_info[i].filter,
@@ -36303,7 +36459,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     FIO_ASSERT(fio_letter_flags(l) == test_info[i].flags,
                "letter flag identity error");
     if (test_info[i].msg) {
-      FIO_ASSERT(fio_letter_message_len(l) == strlen(test_info[i].msg),
+      FIO_ASSERT(fio_letter_message_len(l) == FIO_STRLEN(test_info[i].msg),
                  "letter message length error");
       FIO_ASSERT(!memcmp(fio_letter_message(l).buf,
                          test_info[i].msg,
@@ -36318,7 +36474,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
                  fio_letter_message_len(l));
     }
     if (test_info[i].channel) {
-      FIO_ASSERT(fio_letter_channel_len(l) == strlen(test_info[i].channel),
+      FIO_ASSERT(fio_letter_channel_len(l) == FIO_STRLEN(test_info[i].channel),
                  "letter channel length error");
       FIO_ASSERT(fio_letter_channel(l).buf &&
                      !memcmp(fio_letter_channel(l).buf,
@@ -37331,8 +37487,8 @@ static void fio___http_str_cached_init(void) {
              sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
-                                   FIO___HTTP_STATIC_CACHE[i].meta.len,
-                                   0); /* use stable hash (change resilient) */
+                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
+                                    0); /* use stable hash (change resilient) */
     hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
     size_t protection = 0;
     while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
@@ -37353,9 +37509,9 @@ static void fio___http_str_cached_init(void) {
   }
 }
 
-static char *fio___http_str_cached_static(char *str,
-                                          size_t len) {
-  uint64_t hash = fio_stable_hash(str, len,0); /* use stable hash (change resilient) */
+static char *fio___http_str_cached_static(char *str, size_t len) {
+  uint64_t hash =
+      fio_stable_hash(str, len, 0); /* use stable hash (change resilient) */
   hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
   for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
        ++attempts) {
@@ -38335,7 +38491,7 @@ WebSocket / SSE Helpers
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *h) {
   fio_str_info_s val =
-      fio_http_request_header(h, FIO_STR_INFO2((char*)"connection", 10), 0);
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
   if (val.len < 7 || !(((fio_buf2u32_local(val.buf) | 0x32323232UL) ==
                         fio_buf2u32_local("upgr")) ||
@@ -38343,13 +38499,15 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
                         fio_buf2u32_local("rade"))))
     return 0;
   /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
-  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"upgrade", 7), 0);
+  val = fio_http_request_header(h, FIO_STR_INFO2((char *)"upgrade", 7), 0);
   if (val.len < 7 || !(((fio_buf2u64_local(val.buf) | 0x3232323232323232ULL) ==
                         fio_buf2u64_local("websocke")) ||
                        ((fio_buf2u32_local(val.buf + 5) | 0x32323232UL) ==
                         fio_buf2u32_local("cket"))))
     return 0;
-  val = fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
+  val = fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                                0);
   if (val.len != 24)
     return 0;
   return 1;
@@ -38359,12 +38517,15 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
 SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   h->status = 101;
   /* we ignore client version and force the RFC final version instead */
-  fio_http_response_header_set(h,
-                               FIO_STR_INFO2((char*)"sec-websocket-version", 21),
-                               FIO_STR_INFO2("13", 2));
+  fio_http_response_header_set(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      FIO_STR_INFO2("13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
-        fio_http_request_header(h, FIO_STR_INFO2((char*)"sec-websocket-key", 17), 0);
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                                0);
     FIO_STR_INFO_TMP_VAR(accept_val, 64);
     if (k.len != 24)
       goto handshake_error;
@@ -38381,9 +38542,10 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
                                fio_sha1_digest(&sha),
                                fio_sha1_len(),
                                0);
-    fio_http_response_header_set(h,
-                                 FIO_STR_INFO2((char*)"sec-websocket-accept", 20),
-                                 accept_val);
+    fio_http_response_header_set(
+        h,
+        FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
+        accept_val);
   }
   fio_http_write(h, .finish = 1);
   return;
@@ -38952,7 +39114,7 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
   fio_str_info_s r = {0};
 #define HTTP_RETURN_STATUS(str)                                                \
   do {                                                                         \
-    r.len = strlen(str);                                                       \
+    r.len = FIO_STRLEN(str);                                                   \
     r.buf = (char *)str;                                                       \
     return r;                                                                  \
   } while (0);
@@ -43477,7 +43639,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         "\"string\":\"hello\\tjson\\bworld!\\r\\n\",\"hash\":{\"true\":true,"
         "\"false\":false},\"array2\":[1,2,3,4.2,\"five\",{\"hash\":true},[{"
         "\"hash\":{\"true\":true}}]]}";
-    o = fiobj_json_parse2(json, strlen(json), NULL);
+    o = fiobj_json_parse2(json, FIO_STRLEN(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
     FIO_ASSERT(fiobj_json_find2(o, (char *)"array2[6][0].hash.true", 22) ==
                    fiobj_true(),
@@ -43487,11 +43649,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     fprintf(stderr, "JSON: %s\n", FIO_NAME2(fiobj, cstr)(j).buf);
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
-                   strlen(json + 61),
+                   FIO_STRLEN(json + 61),
                "JSON roundtrip failed (length error).");
     FIO_ASSERT(!memcmp(json + 61,
                        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
-                       strlen(json + 61)),
+                       FIO_STRLEN(json + 61)),
                "JSON roundtrip failed (data error).");
     fiobj_free(o);
     fiobj_free(j);
@@ -43547,7 +43709,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     if (1) {
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped) ==
-                  strlen("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
+                  FIO_STRLEN("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
               !memcmp(
                   "number: " FIO_MACRO2STR(FIO_TEST_REPEAT),
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
@@ -43645,7 +43807,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     // fiobj_hash_set(o, uintptr_t hash, FIOBJ key, FIOBJ value, FIOBJ *old)
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed) ==
-                strlen("number: 1") &&
+                FIO_STRLEN("number: 1") &&
             !memcmp(
                 "number: 1",
                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
@@ -43654,7 +43816,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set) ==
-                strlen("number: 2") &&
+                FIO_STRLEN("number: 2") &&
             !memcmp("number: 2",
                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set)),

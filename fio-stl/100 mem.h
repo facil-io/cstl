@@ -2449,8 +2449,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
     fio_memset(buf1, ~(uint64_t)0, sizeof(*buf1) * 64);
     char *data =
         (char *)"This should be an uneven amount of characters, say 53";
-    fio_memcpy(buf, data, strlen(data));
-    FIO_ASSERT(!memcmp(buf, data, strlen(data)) && buf[strlen(data)] == 0xFF,
+    fio_memcpy(buf, data, FIO_STRLEN(data));
+    FIO_ASSERT(!memcmp(buf, data, FIO_STRLEN(data)) &&
+                   buf[FIO_STRLEN(data)] == 0xFF,
                "fio_memcpy should not overflow or underflow on uneven "
                "amounts of bytes.");
   }
@@ -2460,7 +2461,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
                         "so no undefined behavior should occur. "
                         "Should be true for larger offsets too. At least over "
                         "128 Bytes.";
-    size_t len = strlen(msg);
+    size_t len = FIO_STRLEN(msg);
     char buf[512];
     for (size_t offset = 0; offset < len; ++offset) {
       memset(buf, 0, sizeof(buf));
@@ -2489,6 +2490,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       int f = fio_memcmp(&a, &b, sizeof(a));
       FIO_ASSERT((s < 0 && f < 0) || (s > 0 && f > 0) || (!s && !f),
                  "fio_memcmp != memcmp (result meaning, not value).");
+    }
+  }
+  { /* test fio_memchr and fio_strlen */
+    char membuf[4096];
+    memset(membuf, 0xff, 4096);
+    membuf[4095] = 0;
+    for (size_t i = 0; i < 4095; ++i) {
+      membuf[i] = 0;
+      char *result = fio_memchr(membuf, 0, 4096);
+      size_t len = fio_strlen(membuf);
+      membuf[i] = ((i & 0xFFU) | 1U);
+      FIO_ASSERT(result == membuf + i, "fio_memchr failed.");
+      FIO_ASSERT(len == i, "fio_strlen failed.");
     }
   }
 #ifndef DEBUG
@@ -2821,6 +2835,77 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
             mem_len,
             (size_t)(end - start),
             repetitions);
+    free(mem);
+  }
+
+  fprintf(stderr, "* Speed testing strlen:\n");
+
+  for (int len_i = 2; len_i < 20; ++len_i) {
+    const size_t repetitions = base_repetitions
+                               << (len_i < 15 ? (15 - (len_i & 15)) : 0);
+    const size_t mem_len = (1ULL << len_i) - 1;
+    size_t token_index = ((mem_len >> 1) + (mem_len >> 2)) + 1;
+    void *mem = malloc(mem_len + 1);
+    FIO_ASSERT_ALLOC(mem);
+    fio_memset(mem, ((uint64_t)0x0101010101010101ULL * 0x80), mem_len + 1);
+    ((uint8_t *)mem)[token_index >> 1] = 0xFFU;       /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 1] = 0x01U; /* edge case? */
+    ((uint8_t *)mem)[(token_index >> 1) + 2] = 0x7FU; /* edge case? */
+    ((uint8_t *)mem)[token_index] = 0;
+    ((uint8_t *)mem)[token_index + 1] = 0;
+    FIO_ASSERT(fio_strlen((char *)mem + 1) == strlen((char *)mem + 1),
+               "fio_strlen != strlen");
+    FIO_ASSERT(fio_strlen((char *)mem) == strlen((char *)mem),
+               "fio_strlen != strlen");
+    ((uint8_t *)mem)[token_index] = 0x80U;
+    ((uint8_t *)mem)[token_index + 1] = 0x80U;
+    ((uint8_t *)mem)[mem_len] = 0;
+    FIO_ASSERT(fio_strlen((char *)mem) == strlen((char *)mem) &&
+                   fio_strlen((char *)mem) == mem_len,
+               "fio_strlen != strlen");
+
+    token_index = mem_len - 1;
+    ((uint8_t *)mem)[token_index] = 0;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      size_t result = fio_strlen((char *)mem);
+      FIO_ASSERT(result == token_index,
+                 "fio_strlen failed? @ %zu",
+                 token_index);
+      FIO_COMPILER_GUARD;
+      ((uint8_t *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      token_index -= token_index == mem_len;
+      ((uint8_t *)mem)[token_index] = 0;
+    }
+    end = fio_time_micro();
+    ((uint8_t *)mem)[token_index] = 0x80;
+    fprintf(stderr,
+            "\tfio_strlen\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    token_index = mem_len - 1;
+    ((uint8_t *)mem)[token_index] = 0;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      size_t result = strlen((char *)mem);
+      FIO_ASSERT(result == token_index, "strlen failed? @ %zu", token_index);
+      FIO_COMPILER_GUARD;
+      ((uint8_t *)mem)[token_index] = 0x80;
+      token_index = (token_index - 1) & ((1ULL << len_i) - 1);
+      token_index -= (token_index == mem_len);
+      ((uint8_t *)mem)[token_index] = 0;
+    }
+    end = fio_time_micro();
+    ((uint8_t *)mem)[token_index] = 0x80;
+    fprintf(stderr,
+            "\tsystem strlen\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
     free(mem);
   }
 #endif /* DEBUG */

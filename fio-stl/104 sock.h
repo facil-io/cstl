@@ -278,7 +278,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
   char *pr = port;
 
   /* parse URL */
-  fio_url_s u = fio_url_parse(url, strlen(url));
+  fio_url_s u = fio_url_parse(url, FIO_STRLEN(url));
 #ifdef AF_UNIX
   if (!u.host.buf && !u.port.buf && u.path.buf) {
     /* Unix socket - force flag validation */

@@ -426,7 +426,7 @@ This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for c
 
 ```c
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = strlen((str)), .buf = (str)})
+  ((fio_str_info_s){.len = FIO_STRLEN((str)), .buf = (str)})
 ```
 
 Converts a C String into a `fio_str_info_s`.
@@ -596,7 +596,7 @@ A fallback for `memcpy` and `memmove`, copies `length` bytes from `src` to `dest
 
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
-On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
+On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
@@ -622,7 +622,7 @@ A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
 
 The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
 
-On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
+On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
 
 Returns `dest` (the pointer originally received).
 
@@ -650,7 +650,25 @@ A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at 
 
 If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
 
-On most of `clib` implementations the library call will be faster. On embedded systems, test before deciding.
+On most of `libc` implementations the library call will be faster. Test before deciding.
+
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
+#### `fio_memchr_unsafe`
+
+```c
+static void *fio_memchr_unsafe(const void *buffer, const char token);
+```
+
+A fallback for `rawmemchr` (GNU), seeking a `token` that **must** (for certain) be in the memory starting at address `mem`.
+
+If `token` is found, returns the address of the token's first appearance. Otherwise anything could happen, including the computer becoming sentient and trying to save humanity.
+
+A fallback for `memchr_unsafe`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
+
+If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
+
+On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
@@ -665,6 +683,30 @@ On most of `clib` implementations the library call will be faster. On embedded s
 This macro makes it easy to override the `memcmp` implementation used by the library.
 
 By default this will be set to either `memcmp` or `__builtin_memcmp` (if available). It can also be set to `fio_memcmp` if need be.
+
+#### `fio_memcmp`
+
+```c
+static int fio_memcmp(const void *a, const void *b, size_t len);
+```
+
+A fallback for `memcmp`, comparing two memory regions by byte values.
+
+Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
+
+**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+
+#### `FIO_STRLEN`
+
+```c
+#ifndef
+#define FIO_MEMCMP strlen // or __builtin_memstrlen if available
+#endif
+```
+
+This macro makes it easy to override the `strlen` implementation used by the library.
+
+By default this will be set to either `strlen` or `__builtin_strlen` (if available). It can also be set to `fio_strlen` if need be.
 
 #### `fio_memcmp`
 
@@ -700,6 +742,9 @@ Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `
 #endif
 #ifndef FIO_MEMSET
 #define FIO_MEMSET fio_memset
+#endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
 #endif
 #endif /* FIO_MEMALT */
 ```
@@ -5672,7 +5717,7 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC(buffer)                                            \
-  { .special = 4, .buf = (char *)(buffer), .len = strlen((buffer)) }
+  { .special = 4, .buf = (char *)(buffer), .len = FIO_STRLEN((buffer)) }
 ```
 
 #### `FIO_STR_INIT_STATIC2`

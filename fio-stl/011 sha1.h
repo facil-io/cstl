@@ -316,7 +316,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
       },
   };
   for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
-    fio_sha1_s sha1 = fio_sha1(data[i].str, strlen(data[i].str));
+    fio_sha1_s sha1 = fio_sha1(data[i].str, FIO_STRLEN(data[i].str));
 
     FIO_ASSERT(!memcmp(sha1.digest, data[i].sha1, fio_sha1_len()),
                "SHA1 mismatch for \"%s\"",

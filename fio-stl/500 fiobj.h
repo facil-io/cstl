@@ -2207,7 +2207,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         "\"string\":\"hello\\tjson\\bworld!\\r\\n\",\"hash\":{\"true\":true,"
         "\"false\":false},\"array2\":[1,2,3,4.2,\"five\",{\"hash\":true},[{"
         "\"hash\":{\"true\":true}}]]}";
-    o = fiobj_json_parse2(json, strlen(json), NULL);
+    o = fiobj_json_parse2(json, FIO_STRLEN(json), NULL);
     FIO_ASSERT(o, "JSON parsing failed - no data returned.");
     FIO_ASSERT(fiobj_json_find2(o, (char *)"array2[6][0].hash.true", 22) ==
                    fiobj_true(),
@@ -2217,11 +2217,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     fprintf(stderr, "JSON: %s\n", FIO_NAME2(fiobj, cstr)(j).buf);
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
-                   strlen(json + 61),
+                   FIO_STRLEN(json + 61),
                "JSON roundtrip failed (length error).");
     FIO_ASSERT(!memcmp(json + 61,
                        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
-                       strlen(json + 61)),
+                       FIO_STRLEN(json + 61)),
                "JSON roundtrip failed (data error).");
     fiobj_free(o);
     fiobj_free(j);
@@ -2277,7 +2277,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     if (1) {
       FIO_ASSERT(
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(popped) ==
-                  strlen("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
+                  FIO_STRLEN("number: " FIO_MACRO2STR(FIO_TEST_REPEAT)) &&
               !memcmp(
                   "number: " FIO_MACRO2STR(FIO_TEST_REPEAT),
                   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(popped),
@@ -2375,7 +2375,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     // fiobj_hash_set(o, uintptr_t hash, FIOBJ key, FIOBJ value, FIOBJ *old)
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed) ==
-                strlen("number: 1") &&
+                FIO_STRLEN("number: 1") &&
             !memcmp(
                 "number: 1",
                 FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed),
@@ -2384,7 +2384,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(removed));
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set) ==
-                strlen("number: 2") &&
+                FIO_STRLEN("number: 2") &&
             !memcmp("number: 2",
                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(set),
                     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(set)),

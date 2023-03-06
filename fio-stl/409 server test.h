@@ -27,8 +27,8 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
     ex = {{NULL, "cert.pem", "key.pem", "1234"}};
   FIO_ASSERT(nm && nm[0] == (char)('0' + step), "nm error for tls_each_cert");
   for (size_t i = 1; i < 4; ++i) {
-    FIO_ASSERT(d.s[i] && ex.s[i] && strlen(ex.s[i]) == strlen(d.s[i]) &&
-                   !memcmp(ex.s[i], d.s[i], strlen(d.s[i])),
+    FIO_ASSERT(d.s[i] && ex.s[i] && FIO_STRLEN(ex.s[i]) == FIO_STRLEN(d.s[i]) &&
+                   !memcmp(ex.s[i], d.s[i], FIO_STRLEN(d.s[i])),
                "tls_each_cert string error for argument %zu",
                i);
   }

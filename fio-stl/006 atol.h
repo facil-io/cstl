@@ -877,11 +877,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                ((char *)(s)),                                                  \
                (size_t)r,                                                      \
                (size_t)n);                                                     \
-    FIO_ASSERT((s) + strlen((s)) == p,                                         \
+    FIO_ASSERT((s) + FIO_STRLEN((s)) == p,                                     \
                "fio_atol test error! %s reading position not at end "          \
                "(!%zu == %zu)\n\t0x%p - 0x%p",                                 \
                (s),                                                            \
-               (size_t)strlen((s)),                                            \
+               (size_t)FIO_STRLEN((s)),                                        \
                (size_t)(p - (s)),                                              \
                (void *)p,                                                      \
                (void *)s);                                                     \

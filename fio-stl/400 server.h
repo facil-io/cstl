@@ -1886,7 +1886,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   fio_sock_close(*pfd);
 #ifdef AF_UNIX
   /* delete the unix socket file, if any. */
-  fio_url_s u = fio_url_parse(l->url, strlen(l->url));
+  fio_url_s u = fio_url_parse(l->url, FIO_STRLEN(l->url));
   if (fio_srv_is_master() && !u.host.buf && !u.port.buf && u.path.buf) {
     unlink(u.path.buf);
   }
@@ -1894,7 +1894,7 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   fio_state_callback_remove(FIO_CALL_AT_EXIT,
                             fio___srv_listen_cleanup_task,
                             udata);
-  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + strlen(l->url) + 1);
+  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + FIO_STRLEN(l->url) + 1);
 }
 
 static fio_protocol_s FIO___LISTEN_PROTOCOL = {
@@ -1929,7 +1929,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
 void fio_listen___(void); /* IDE Marker */
 SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   static int64_t port = 0;
-  size_t len = args.url ? strlen(args.url) + 1 : 0;
+  size_t len = args.url ? FIO_STRLEN(args.url) + 1 : 0;
   struct fio_listen_args *cpy = NULL;
   fio_str_info_s adr, tmp;
   int *fd_store;
@@ -1956,7 +1956,8 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
         port = 3000;
     }
     tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
-    if (!(adr.buf = getenv("ADDRESS")) || (adr.len = strlen(adr.buf)) > 58) {
+    if (!(adr.buf = getenv("ADDRESS")) ||
+        (adr.len = FIO_STRLEN(adr.buf)) > 58) {
       adr = FIO_STR_INFO2((char *)"0.0.0.0:", 8);
     }
     fio_string_write2(&tmp,
@@ -2208,7 +2209,7 @@ SFUNC int fio_tls_alpn_select(fio_tls_s *t,
   if (!t || !protocol_name)
     return -1;
   fio___tls_alpn_s seeking = {
-      .nm = fio_keystr(protocol_name, (uint32_t)strlen(protocol_name))};
+      .nm = fio_keystr(protocol_name, (uint32_t)FIO_STRLEN(protocol_name))};
   fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
   if (!alpn)
     return -1;

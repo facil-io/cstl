@@ -150,8 +150,9 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
 
 /** A macro to add a String to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR1(str_)                                            \
-  ((fio_string_write_s){.klass = 1,                                            \
-                        .info.str = {.len = strlen((str_)), .buf = (str_)}})
+  ((fio_string_write_s){                                                       \
+      .klass = 1,                                                              \
+      .info.str = {.len = FIO_STRLEN((str_)), .buf = (str_)}})
 
 /** A macro to add a String with known length to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
@@ -2917,9 +2918,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 1024);
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
-    FIO_ASSERT(
-        !fio_string_write(&unescaped, NULL, utf8_sample, strlen(utf8_sample)),
-        "Couldn't write UTF-8 example.");
+    FIO_ASSERT(!fio_string_write(&unescaped,
+                                 NULL,
+                                 utf8_sample,
+                                 FIO_STRLEN(utf8_sample)),
+               "Couldn't write UTF-8 example.");
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
@@ -2932,7 +2935,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
         !fio_string_write_unescape(&decoded, NULL, encoded.buf, encoded.len),
         "write unescape returned an error");
     FIO_ASSERT(encoded.len, "JSON encoding failed");
-    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, strlen(utf8_sample)),
+    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,
@@ -3032,7 +3035,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
                  "fio_string_write_html_(un)escape roundtrip failed!");
       original.len = 0;
-      fio_string_write(&original, NULL, "ÿ", strlen("ÿ"));
+      fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
       original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
       original.buf[original.len++] = 0x82U;
       original.buf[original.len++] = 0xACU;

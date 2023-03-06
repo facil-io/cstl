@@ -747,7 +747,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
         },
         {.expected = NULL}};
     for (size_t i = 0; tests[i].expected; ++i) {
-      size_t len = strlen(tests[i].src);
+      size_t len = FIO_STRLEN(tests[i].src);
       char buffer[4096];
       FIO_MEMCPY(buffer, tests[i].src, len);
       fio_chacha20(buffer, len, tests[i].key, tests[i].nounce, 1);
@@ -780,7 +780,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
       fio_poly1305_auth(auth,
                         tests[t].key,
                         tests[t].msg,
-                        strlen(tests[t].msg),
+                        FIO_STRLEN(tests[t].msg),
                         NULL,
                         0);
       for (int i = 0; i < 16; ++i) {

@@ -1909,9 +1909,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     fio_letter_s *l = fio_letter_new_compose(
         FIO_BUF_INFO2(
             test_info[i].channel,
-            (test_info[i].channel ? strlen(test_info[i].channel) : 0)),
+            (test_info[i].channel ? FIO_STRLEN(test_info[i].channel) : 0)),
         FIO_BUF_INFO2(test_info[i].msg,
-                      (test_info[i].msg ? strlen(test_info[i].msg) : 0)),
+                      (test_info[i].msg ? FIO_STRLEN(test_info[i].msg) : 0)),
         test_info[i].filter,
         test_info[i].flags);
     FIO_ASSERT(fio_letter_filter(l) == test_info[i].filter,
@@ -1919,7 +1919,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
     FIO_ASSERT(fio_letter_flags(l) == test_info[i].flags,
                "letter flag identity error");
     if (test_info[i].msg) {
-      FIO_ASSERT(fio_letter_message_len(l) == strlen(test_info[i].msg),
+      FIO_ASSERT(fio_letter_message_len(l) == FIO_STRLEN(test_info[i].msg),
                  "letter message length error");
       FIO_ASSERT(!memcmp(fio_letter_message(l).buf,
                          test_info[i].msg,
@@ -1934,7 +1934,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
                  fio_letter_message_len(l));
     }
     if (test_info[i].channel) {
-      FIO_ASSERT(fio_letter_channel_len(l) == strlen(test_info[i].channel),
+      FIO_ASSERT(fio_letter_channel_len(l) == FIO_STRLEN(test_info[i].channel),
                  "letter channel length error");
       FIO_ASSERT(fio_letter_channel(l).buf &&
                      !memcmp(fio_letter_channel(l).buf,

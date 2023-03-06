@@ -306,8 +306,8 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
       (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/')) {
     char *home = getenv("HOME");
     if (home) {
-      size_t filename_len = strlen(filename);
-      size_t home_len = strlen(home);
+      size_t filename_len = FIO_STRLEN(filename);
+      size_t home_len = FIO_STRLEN(home);
       if ((home_len + filename_len) >= (1 << 16)) {
         /* too long */
         FIO_LOG_ERROR("couldn't open file, as filename is too long %.*s...",
@@ -390,7 +390,7 @@ SFUNC int fio_filename_tmp(void) {
     tmp = P_tmpdir;
   }
 #endif
-  if (tmp && (len = strlen(tmp))) {
+  if (tmp && (len = FIO_STRLEN(tmp))) {
     FIO_MEMCPY(name_template, tmp, len);
     if (tmp[len - 1] != sep) {
       name_template[len++] = sep;
