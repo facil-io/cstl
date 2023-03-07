@@ -3036,22 +3036,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                  "fio_string_write_html_(un)escape roundtrip failed!");
       original.len = 0;
       fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
-      original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
-      original.buf[original.len++] = 0x82U;
-      original.buf[original.len++] = 0xACU;
-      original.buf[original.len++] = 0xC2U; /* pounds (UTF-8) */
-      original.buf[original.len++] = 0xA3U;
-      original.buf[original.len++] = 0xC2U; /* cents (UTF-8) */
-      original.buf[original.len++] = 0xA2U;
-      original.buf[original.len++] = 0xC2U; /* copyright (UTF-8) */
-      original.buf[original.len++] = 0xA9U;
-      original.buf[original.len++] = 0xC2U; /* trademark (UTF-8) */
-      original.buf[original.len++] = 0xAEU;
-      original.buf[original.len++] = 0xC2U; /* non-breaking-space (UTF-8) */
-      original.buf[original.len++] = 0xA0U;
-      original.buf[original.len++] = 0x26U; /* & */
-      original.buf[original.len++] = 0x27U; /* ' */
-      original.buf[original.len++] = 0x22U; /* " */
+      original.buf[original.len++] = (char)0xE2; /* euro sign (UTF-8) */
+      original.buf[original.len++] = (char)0x82;
+      original.buf[original.len++] = (char)0xAC;
+      original.buf[original.len++] = (char)0xC2; /* pounds (UTF-8) */
+      original.buf[original.len++] = (char)0xA3;
+      original.buf[original.len++] = (char)0xC2; /* cents (UTF-8) */
+      original.buf[original.len++] = (char)0xA2;
+      original.buf[original.len++] = (char)0xC2; /* copyright (UTF-8) */
+      original.buf[original.len++] = (char)0xA9;
+      original.buf[original.len++] = (char)0xC2; /* trademark (UTF-8) */
+      original.buf[original.len++] = (char)0xAE;
+      original.buf[original.len++] = (char)0xC2; /* nbsp; (UTF-8) */
+      original.buf[original.len++] = (char)0xA0;
+      original.buf[original.len++] = (char)0x26; /* & */
+      original.buf[original.len++] = (char)0x27; /* ' */
+      original.buf[original.len++] = (char)0x22; /* " */
       original.buf[original.len] = 0;
       unescaped.len = escaped.len = 0;
       fio_string_write(

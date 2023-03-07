@@ -292,6 +292,10 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h>
 #endif
 
+#if __has_feature(address_sanitizer)
+#include <sanitizer/asan_interface.h>
+#endif /* address_sanitizer */
+
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
@@ -1394,17 +1398,26 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   return NULL;
 }
 
-/**
- * A token seeking function.
- *
- * This is basically a fallback for implementing `strlen`.
- */
-FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
+/** A token seeking function. */
+FIO_SFUNC
+#if __has_feature(address_sanitizer)
+__attribute__((no_sanitize("address"))) __attribute__((no_sanitize_address))
+#elif _MSC_VER
+__declspec(no_sanitize_address)
+#endif
+void *
+fio_memchr_unsafe(const void *buffer, const char token) {
   if (!buffer)
     return NULL;
+
+#if __has_feature(address_sanitizer)
+  /* by design, `fio_memchr_unsafe` may overflow when reading memory. */
+  return memchr(buffer, token, ((uintptr_t)(buffer)-1));
+#endif /* address_sanitizer */
+
   const char *r = (const char *)buffer;
   /* we must align memory, to avoid crushing when nearing last page boundary */
-  switch (((uintptr_t)r & 15)) {
+  switch (((uintptr_t)r & 7)) {
 #define FIO___MEMCHR_UNSAFE_STEP()                                             \
   if (*r == token)                                                             \
     return (void *)r;                                                          \
@@ -1422,15 +1435,10 @@ FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
   umsk |= (umsk << 8);
-  /* align on loop boundary */
-  FIO___MEMCHR_BITMAP_TEST(1);
-  r = FIO_PTR_MATH_RMASK(const char, r, 3);
-  FIO___MEMCHR_BITMAP_TEST(2);
-  r = FIO_PTR_MATH_RMASK(const char, r, 4);
-  FIO___MEMCHR_BITMAP_TEST(4);
-  r = FIO_PTR_MATH_RMASK(const char, r, 5);
-  FIO___MEMCHR_BITMAP_TEST(8);
-  r = FIO_PTR_MATH_RMASK(const char, r, 6);
+  /* align on loop boundary, some data will always be tested twice. */
+  for (size_t aligner = 0; aligner < 16; ++aligner)
+    FIO___MEMCHR_BITMAP_TEST(1);
+  r = FIO_PTR_MATH_RMASK(const char, r, 7);
   for (;;) {
     FIO___MEMCHR_BITMAP_TEST(8);
     FIO___MEMCHR_BITMAP_TEST(8);
@@ -1452,6 +1460,10 @@ fio_strlen
 #endif /* FIO_STRLEN */
 
 FIO_SFUNC size_t fio_strlen(const char *str) {
+#if __has_feature(address_sanitizer) /* address_sanitizer - redirect */
+  /* by design, `fio_strlen` may (safely) overflow when reading memory. */
+  return strlen(str);
+#endif
   const char *nul = (const char *)fio_memchr_unsafe(str, 0);
   return (size_t)(nul - str);
 }
@@ -23270,22 +23282,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                  "fio_string_write_html_(un)escape roundtrip failed!");
       original.len = 0;
       fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
-      original.buf[original.len++] = 0xE2U; /* euro sign (UTF-8) */
-      original.buf[original.len++] = 0x82U;
-      original.buf[original.len++] = 0xACU;
-      original.buf[original.len++] = 0xC2U; /* pounds (UTF-8) */
-      original.buf[original.len++] = 0xA3U;
-      original.buf[original.len++] = 0xC2U; /* cents (UTF-8) */
-      original.buf[original.len++] = 0xA2U;
-      original.buf[original.len++] = 0xC2U; /* copyright (UTF-8) */
-      original.buf[original.len++] = 0xA9U;
-      original.buf[original.len++] = 0xC2U; /* trademark (UTF-8) */
-      original.buf[original.len++] = 0xAEU;
-      original.buf[original.len++] = 0xC2U; /* non-breaking-space (UTF-8) */
-      original.buf[original.len++] = 0xA0U;
-      original.buf[original.len++] = 0x26U; /* & */
-      original.buf[original.len++] = 0x27U; /* ' */
-      original.buf[original.len++] = 0x22U; /* " */
+      original.buf[original.len++] = (char)0xE2; /* euro sign (UTF-8) */
+      original.buf[original.len++] = (char)0x82;
+      original.buf[original.len++] = (char)0xAC;
+      original.buf[original.len++] = (char)0xC2; /* pounds (UTF-8) */
+      original.buf[original.len++] = (char)0xA3;
+      original.buf[original.len++] = (char)0xC2; /* cents (UTF-8) */
+      original.buf[original.len++] = (char)0xA2;
+      original.buf[original.len++] = (char)0xC2; /* copyright (UTF-8) */
+      original.buf[original.len++] = (char)0xA9;
+      original.buf[original.len++] = (char)0xC2; /* trademark (UTF-8) */
+      original.buf[original.len++] = (char)0xAE;
+      original.buf[original.len++] = (char)0xC2; /* nbsp; (UTF-8) */
+      original.buf[original.len++] = (char)0xA0;
+      original.buf[original.len++] = (char)0x26; /* & */
+      original.buf[original.len++] = (char)0x27; /* ' */
+      original.buf[original.len++] = (char)0x22; /* " */
       original.buf[original.len] = 0;
       unescaped.len = escaped.len = 0;
       fio_string_write(
