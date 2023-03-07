@@ -1279,8 +1279,20 @@ FIO_SFUNC size_t fio___lsb_index_unsafe(uint64_t i) {
   return fio___single_bit_index_unsafe(i & ((~i) + 1));
 #endif /* __builtin vs. map */
 }
+
+/* converts a 0x808080800000 result to a bitmap */
+FIO_IFUNC uint64_t fio___memchr_result2bitmap(uint64_t result) {
+  result = fio_ltole64(result); /* map little endian to bitmap */
+  result >>= 7;                 /* move all 0x80 to 0x01 */
+  result |= result >> 7;        /* pack all 0x80 bits into one byte */
+  result |= result >> 14;
+  result |= result >> 28;
+  result &= 0xFFU;
+  return result;
+}
+
 /**
- * Returns the index of the least significant (lowest) bit - used in wrine_bin.
+ * Returns the index of the least significant (lowest) bit - used in write_bin.
  *
  * Placed here (mostly copied from bitmap module).
  */
@@ -1317,12 +1329,7 @@ FIO_SFUNC size_t fio___msb_index_unsafe(uint64_t i) {
     }                                                                          \
     flag = 0;                                                                  \
     for (size_t i = 0; i < group_size; ++i) { /* combine group to bitmap  */   \
-      u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
-      u[i] >>= 7;               /* move all 0x80 to 0x01 */                    \
-      u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
-      u[i] |= u[i] >> 14;                                                      \
-      u[i] |= u[i] >> 28;                                                      \
-      u[i] &= 0xFFU;                                                           \
+      u[i] = fio___memchr_result2bitmap(u[i]);                                 \
       flag |= (u[i] << (i << 3)); /* placed packed bitmap in u64 */            \
     }                                                                          \
     return (void *)(r + fio___lsb_index_unsafe(flag));                         \
@@ -1433,12 +1440,7 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
     }                                                                          \
     flag = 0;                                                                  \
     for (size_t i = 0; i < group_size; ++i) { /* combine group to bitmap  */   \
-      u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
-      u[i] >>= 7;               /* move all 0x80 to 0x01 */                    \
-      u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
-      u[i] |= u[i] >> 14;                                                      \
-      u[i] |= u[i] >> 28;                                                      \
-      u[i] &= 0xFFU;                                                           \
+      u[i] = fio___memchr_result2bitmap(u[i]);                                 \
       flag |= (u[i] << (i << 3)); /* placed packed bitmap in u64 */            \
     }                                                                          \
     return (void *)(uptr.i8 + fio___lsb_index_unsafe(flag));                   \
@@ -1501,9 +1503,89 @@ fio_strlen
 #endif
 #endif /* FIO_STRLEN */
 
-FIO_SFUNC size_t fio_strlen(const char *str) {
-  const char *nul = (const char *)fio_rawmemchr(str, 0);
-  return (size_t)(nul - str);
+FIO_SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
+  // const char *nul = (const char *)fio_rawmemchr(str, 0);
+  // return (size_t)(nul - str);
+  if (!str)
+    return 0;
+  const uintptr_t start = (uintptr_t)str;
+  /* we must align memory, to avoid crushing when nearing last page boundary */
+  switch ((start & 7)) {
+#define FIO___MEMCHR_UNSAFE_STEP()                                             \
+  if (!str[0])                                                                 \
+    return (uintptr_t)str - start;                                             \
+  ++str
+  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
+#undef FIO___MEMCHR_UNSAFE_STEP
+  }
+
+  /* 8 byte aligned */
+
+  uint64_t flag = 0;
+  uint64_t map[8] FIO_ALIGN(16) = {0};
+  uint64_t tmp[8] FIO_ALIGN(16) = {0};
+
+#define FIO___STRLEN_CYCLE(i)                                                  \
+  do {                                                                         \
+    map[i] = (*(const uint64_t *)(str + (i << 3)));                            \
+    tmp[i] =                                                                   \
+        map[i] - UINT64_C(0x0101010101010101); /* is 0 or >= 0x80 --> 0x8X */  \
+    map[i] = ~map[i];                          /* is < 0x80) --> 0x8X */       \
+    map[i] &= UINT64_C(0x8080808080808080);                                    \
+    map[i] &= tmp[i]; /* only 0x00 will now be 0x80  */                        \
+    flag |= map[i];                                                            \
+  } while (0)
+  for (size_t aligner = 0; aligner < 5; ++aligner) {
+    FIO___STRLEN_CYCLE(0);
+    if (flag)
+      goto found_nul_byte0;
+    str += 8;
+  }
+  str = FIO_PTR_MATH_RMASK(const char, str, 5); /* new loop alignment */
+  for (size_t aligner = 0; aligner < 3; ++aligner) {
+    for (size_t i = 0; i < 4; ++i)
+      FIO___STRLEN_CYCLE(i);
+    if (flag)
+      goto found_nul_byte4;
+    str += 32;
+  }
+  str = FIO_PTR_MATH_RMASK(const char, str, 6); /* new loop alignment */
+  for (;;) { /* loop while aligned on 64 byte boundary */
+    for (size_t i = 0; i < 8; ++i)
+      FIO___STRLEN_CYCLE(i);
+    if (flag)
+      goto found_nul_byte8;
+    str += 64;
+  }
+
+found_nul_byte8:
+  flag = 0;
+  for (size_t i = 0; i < 8; ++i) {
+    map[i] = fio___memchr_result2bitmap(map[i]);
+    flag |= (map[i] << (i << 3)); /* pack bitmap */
+  }
+  str += fio___lsb_index_unsafe(flag);
+  return (uintptr_t)str - start;
+
+found_nul_byte4:
+  flag = 0;
+  for (size_t i = 0; i < 4; ++i) {
+    map[i] = fio___memchr_result2bitmap(map[i]);
+    flag |= (map[i] << (i << 3)); /* pack bitmap */
+  }
+  str += fio___lsb_index_unsafe(flag);
+  return (uintptr_t)str - start;
+
+found_nul_byte0:
+  flag = fio___memchr_result2bitmap(map[0]);
+  str += fio___lsb_index_unsafe(flag);
+  return (uintptr_t)str - start;
 }
 
 /* *****************************************************************************
