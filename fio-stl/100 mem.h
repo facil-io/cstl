@@ -2500,7 +2500,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mem_helper_speeds)(void) {
       membuf[i] = 0;
       char *result = fio_memchr(membuf, 0, 4096);
       size_t len = fio_strlen(membuf);
-      membuf[i] = ((i & 0xFFU) | 1U);
+      membuf[i] = (char)((i & 0xFFU) | 1U);
       FIO_ASSERT(result == membuf + i, "fio_memchr failed.");
       FIO_ASSERT(len == i, "fio_strlen failed.");
     }

@@ -160,6 +160,26 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h>
 #endif
 
+/* Address Sanitizer Detection */
+#if defined(__SANITIZE_ADDRESS__)
+#define FIO___ASAN_DETECTED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define FIO___ASAN_DETECTED 1
+#endif
+#endif /* address_sanitizer */
+
+#ifdef FIO___ASAN_DETECTED
+#if defined(_MSC_VER)
+#define FIO___ASAN_AVOID __declspec(no_sanitize_address)
+#else
+#define FIO___ASAN_AVOID                                                       \
+  __attribute__((no_sanitize_address)) __attribute__((no_sanitize("address")))
+#endif
+#else
+#define FIO___ASAN_AVOID
+#endif
+
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
@@ -735,9 +755,9 @@ FIO_SFUNC void *fio_memcpy0x(void *d, const void *s, size_t l) {
 }
 
 /** an unsafe memcpy (no checks + no overlapping memory regions) up to 63B */
-FIO_IFUNC void *fio_memcpy_unsafe__63x(void *restrict d_,
-                                       const void *restrict s_,
-                                       size_t l) {
+FIO_IFUNC void *fio___memcpy_unsafe_63x(void *restrict d_,
+                                        const void *restrict s_,
+                                        size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
 
@@ -775,13 +795,13 @@ FIO_IFUNC void *fio_memcpy_unsafe__63x(void *restrict d_,
   return (void *)d;
 }
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions) */
-FIO_SFUNC void *fio_memcpy_unsafe_x(void *restrict d_,
-                                    const void *restrict s_,
-                                    size_t l) {
+FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
+                                      const void *restrict s_,
+                                      size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
   if (l < 64)
-    return fio_memcpy_unsafe__63x(d_, s_, l);
+    return fio___memcpy_unsafe_63x(d_, s_, l);
 
 #if FIO_LIMIT_INTRINSIC_BUFFER
   while (l > 127) {
@@ -907,22 +927,22 @@ FIO_SFUNC void *fio_memcpy_buffered__reversed_x(void *restrict d_,
   return (void *)d;
 }
 
-#define FIO_MEMCPYX_MAKER(lim, postfix)                                        \
+#define FIO_MEMCPYX_MAKER(lim, fn)                                             \
   FIO_SFUNC void *fio_memcpy##lim##x(void *restrict d,                         \
                                      const void *restrict s,                   \
                                      size_t l) {                               \
-    return fio_memcpy_unsafe_##postfix(d, s, (l & lim));                       \
+    return fn(d, s, (l & lim));                                                \
   }
-FIO_MEMCPYX_MAKER(7, _63x)
-FIO_MEMCPYX_MAKER(15, _63x)
-FIO_MEMCPYX_MAKER(31, _63x)
-FIO_MEMCPYX_MAKER(63, _63x)
-FIO_MEMCPYX_MAKER(127, x)
-FIO_MEMCPYX_MAKER(255, x)
-FIO_MEMCPYX_MAKER(511, x)
-FIO_MEMCPYX_MAKER(1023, x)
-FIO_MEMCPYX_MAKER(2047, x)
-FIO_MEMCPYX_MAKER(4095, x)
+FIO_MEMCPYX_MAKER(7, fio___memcpy_unsafe_63x)
+FIO_MEMCPYX_MAKER(15, fio___memcpy_unsafe_63x)
+FIO_MEMCPYX_MAKER(31, fio___memcpy_unsafe_63x)
+FIO_MEMCPYX_MAKER(63, fio___memcpy_unsafe_63x)
+FIO_MEMCPYX_MAKER(127, fio___memcpy_unsafe_x)
+FIO_MEMCPYX_MAKER(255, fio___memcpy_unsafe_x)
+FIO_MEMCPYX_MAKER(511, fio___memcpy_unsafe_x)
+FIO_MEMCPYX_MAKER(1023, fio___memcpy_unsafe_x)
+FIO_MEMCPYX_MAKER(2047, fio___memcpy_unsafe_x)
+FIO_MEMCPYX_MAKER(4095, fio___memcpy_unsafe_x)
 #undef FIO_MEMCPYX_MAKER
 
 #undef FIO_MEMCPY___PARTIAL
@@ -1019,7 +1039,7 @@ FIO_SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
 
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
-    return fio_memcpy_unsafe_x(d, s, bytes);
+    return fio___memcpy_unsafe_x(d, s, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
     return fio_memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
@@ -1262,21 +1282,53 @@ FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   return NULL;
 }
 
-/**
- * A token seeking function.
- *
- * This is basically a fallback for implementing `strlen`.
- */
-FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
+#undef FIO___MEMCHR_BITMAP_TEST
+#define FIO___MEMCHR_BITMAP_TEST(group_size)                                   \
+  do {                                                                         \
+    uint64_t flag = 0, v, u[group_size];                                       \
+    for (size_t i = 0; i < group_size; ++i) {  /* per 8 byte group */          \
+      u[i] = uptr.u64[i];                      /* avoid fio_memcpy8 (ASAN) */  \
+      u[i] ^= umsk;                            /* byte match == 0x00 */        \
+      v = u[i] - UINT64_C(0x0101010101010101); /* v: less than 0x80 => 0x80 */ \
+      u[i] = ~u[i]; /* u[i]: if the MSB was zero (less than 0x80) */           \
+      u[i] &= UINT64_C(0x8080808080808080);                                    \
+      u[i] &= v; /* only 0x00 will now be 0x80  */                             \
+      flag |= u[i];                                                            \
+    }                                                                          \
+    if (FIO_LIKELY(!flag)) {                                                   \
+      uptr.u64 += group_size;                                                  \
+      break; /* from do..while macro */                                        \
+    }                                                                          \
+    flag = 0;                                                                  \
+    for (size_t i = 0; i < group_size; ++i) { /* combine group to bitmap  */   \
+      u[i] = fio_ltole64(u[i]); /* little endian bitmap finds 1st byte */      \
+      u[i] >>= 7;               /* move all 0x80 to 0x01 */                    \
+      u[i] |= u[i] >> 7;        /* pack all 0x80 bits into one byte */         \
+      u[i] |= u[i] >> 14;                                                      \
+      u[i] |= u[i] >> 28;                                                      \
+      u[i] &= 0xFFU;                                                           \
+      flag |= (u[i] << (i << 3)); /* placed packed bitmap in u64 */            \
+    }                                                                          \
+    return (void *)(uptr.i8 + fio___lsb_index_unsafe(flag));                   \
+  } while (0)
+
+/** A token seeking function. */
+FIO_SFUNC FIO___ASAN_AVOID void *fio_rawmemchr(const void *buffer,
+                                               const char token) {
   if (!buffer)
     return NULL;
-  const char *r = (const char *)buffer;
+
+  union {
+    const char *i8;
+    const uint64_t *u64;
+  } uptr = {.i8 = (const char *)buffer};
+
   /* we must align memory, to avoid crushing when nearing last page boundary */
-  switch (((uintptr_t)r & 15)) {
+  switch (((uintptr_t)uptr.i8 & 7)) {
 #define FIO___MEMCHR_UNSAFE_STEP()                                             \
-  if (*r == token)                                                             \
-    return (void *)r;                                                          \
-  ++r
+  if (*uptr.i8 == token)                                                       \
+    return (void *)uptr.i8;                                                    \
+  ++uptr.i8
   case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
   case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
   case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
@@ -1290,15 +1342,13 @@ FIO_SFUNC void *fio_memchr_unsafe(const void *buffer, const char token) {
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
   umsk |= (umsk << 8);
-  /* align on loop boundary */
-  FIO___MEMCHR_BITMAP_TEST(1);
-  r = FIO_PTR_MATH_RMASK(const char, r, 3);
-  FIO___MEMCHR_BITMAP_TEST(2);
-  r = FIO_PTR_MATH_RMASK(const char, r, 4);
-  FIO___MEMCHR_BITMAP_TEST(4);
-  r = FIO_PTR_MATH_RMASK(const char, r, 5);
-  FIO___MEMCHR_BITMAP_TEST(8);
-  r = FIO_PTR_MATH_RMASK(const char, r, 6);
+
+  for (size_t aligner = 0; aligner < 8; ++aligner)
+    FIO___MEMCHR_BITMAP_TEST(1);
+  uptr.i8 = FIO_PTR_MATH_RMASK(const char, uptr.i8, 5); /* loop alignment */
+  for (size_t aligner = 0; aligner < 5; ++aligner)
+    FIO___MEMCHR_BITMAP_TEST(4);
+  uptr.i8 = FIO_PTR_MATH_RMASK(const char, uptr.i8, 7); /* loop alignment */
   for (;;) {
     FIO___MEMCHR_BITMAP_TEST(8);
     FIO___MEMCHR_BITMAP_TEST(8);
@@ -1320,7 +1370,7 @@ fio_strlen
 #endif /* FIO_STRLEN */
 
 FIO_SFUNC size_t fio_strlen(const char *str) {
-  const char *nul = (const char *)fio_memchr_unsafe(str, 0);
+  const char *nul = (const char *)fio_rawmemchr(str, 0);
   return (size_t)(nul - str);
 }
 

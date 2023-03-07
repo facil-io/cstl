@@ -654,10 +654,10 @@ On most of `libc` implementations the library call will be faster. Test before d
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
-#### `fio_memchr_unsafe`
+#### `fio_rawmemchr`
 
 ```c
-static void *fio_memchr_unsafe(const void *buffer, const char token);
+static void *fio_rawmemchr(const void *buffer, const char token);
 ```
 
 A fallback for `rawmemchr` (GNU), seeking a `token` that **must** (for certain) be in the memory starting at address `mem`.
