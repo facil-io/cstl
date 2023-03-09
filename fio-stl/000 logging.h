@@ -53,9 +53,9 @@ FIO_LOG2STDERR(const char *format, ...) {
   va_end(argv);
   if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
-      FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
-                 "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
-                 32);
+      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER, /* note: using libc */
+             "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
+             32);
       len___log = FIO_LOG____LENGTH_BORDER + 32;
     }
     tmp___log[len___log++] = '\n';

@@ -1806,7 +1806,8 @@ End persistent segment (end include-once guard)
 Tests Inclusion (everything + MEMALT)
 ***************************************************************************** */
 #if (defined(FIO_TEST_ALL) || defined(FIO___TEST_MACRO_SUSPENDED)) &&          \
-    !defined(H___FIO_TESTS_INC_FINISHED___H) && !defined(FIO___STL_KEEP)
+    !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
+    !defined(FIO___RECURSIVE_INCLUDE)
 
 /* Inclusion cycle three - facil.io memory allocator for all else. */
 #if !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
@@ -1827,7 +1828,7 @@ Tests Inclusion (everything + MEMALT)
 /* *****************************************************************************
 Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 ***************************************************************************** */
-#if defined(FIO_EXTERN) && !defined(FIO___STL_KEEP) &&                         \
+#if defined(FIO_EXTERN) && !defined(FIO___RECURSIVE_INCLUDE) &&                \
     (defined(FIO_TEST_ALL) || defined(FIO_EVERYTHING) || defined(FIO_BASIC))
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
@@ -1844,7 +1845,7 @@ Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 /* *****************************************************************************
 Everything Inclusion
 ***************************************************************************** */
-#if defined(FIO_EVERYTHING) && !defined(FIO___STL_KEEP)
+#if defined(FIO_EVERYTHING) && !defined(FIO___RECURSIVE_INCLUDE)
 
 #if !defined(H___FIO_EVERYTHING_FINISHED___H) &&                               \
     defined(H___FIO_EVERYTHING2___H)
@@ -1872,7 +1873,7 @@ Everything Inclusion
 /* *****************************************************************************
 Basics Inclusion
 ***************************************************************************** */
-#if defined(FIO_BASIC) && !defined(FIO___STL_KEEP)
+#if defined(FIO_BASIC) && !defined(FIO___RECURSIVE_INCLUDE)
 
 #if !defined(H___FIO_BASIC_FINISHED___H) && defined(H___FIO_BASIC2___H)
 /* Inclusion cycle three - facil.io memory allocator for all else. */
@@ -2326,13 +2327,13 @@ Recursive inclusion management
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#elif !defined(FIO___STL_KEEP) || (FIO___STL_KEEP + 1 != 100)
+#elif !defined(FIO___RECURSIVE_INCLUDE) || (FIO___RECURSIVE_INCLUDE + 1 != 100)
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
 #define SFUNC FIO_SFUNC
 #define IFUNC FIO_IFUNC
-#endif /* SFUNC_ vs FIO___STL_KEEP*/
+#endif /* SFUNC_ vs FIO___RECURSIVE_INCLUDE*/
 
 /* *****************************************************************************
 Pointer Tagging
@@ -2456,9 +2457,9 @@ FIO_LOG2STDERR(const char *format, ...) {
   va_end(argv);
   if (len___log > 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
-      FIO_MEMCPY(tmp___log + FIO_LOG____LENGTH_BORDER,
-                 "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
-                 32);
+      memcpy(tmp___log + FIO_LOG____LENGTH_BORDER, /* note: using libc */
+             "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!",
+             32);
       len___log = FIO_LOG____LENGTH_BORDER + 32;
     }
     tmp___log[len___log++] = '\n';
@@ -8551,7 +8552,8 @@ FIO_URL - Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) && !defined(FIO___STL_KEEP)
+#if defined(FIO_CLI) && !defined(H___FIO_CLI___H) &&                           \
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_CLI___H 1
 
 /* *****************************************************************************
@@ -10758,7 +10760,7 @@ FIO_SOCK - cleanup
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STATE) && !defined(H___FIO_STATE___H) &&                       \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_STATE___H
 /* *****************************************************************************
 State Callback API
@@ -11610,7 +11612,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
-#if defined(FIO_MEMORY_NAME) && !defined(FIO___STL_KEEP)
+#if defined(FIO_MEMORY_NAME) && !defined(FIO___RECURSIVE_INCLUDE)
 
 #undef FIO_MEM_ALIGN
 #undef FIO_MEM_ALIGN_NEW
@@ -14217,7 +14219,8 @@ Memory pool cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO___STL_KEEP)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) &&                         \
+    !defined(FIO___RECURSIVE_INCLUDE)
 
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
@@ -14375,7 +14378,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL &&                                \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -14564,7 +14567,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE &&                               \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -14743,7 +14746,7 @@ Cleanup
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
     FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL &&                                 \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_POLL_EGN___H
 /* *****************************************************************************
 
@@ -15004,7 +15007,8 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */
 
-#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) && !defined(FIO___STL_KEEP)
+#if defined(FIO_POLL) && !defined(H___FIO_POLL___H) &&                         \
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_POLL___H
 #undef FIO_POLL
 #endif /* FIO_POLL */
@@ -26238,7 +26242,7 @@ Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP) &&                         \
+#if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE) &&                \
     !defined(H___FIO_SERVER___H)
 #define H___FIO_SERVER___H
 /* *****************************************************************************
@@ -27012,9 +27016,9 @@ typedef struct {
   } while (0)
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 typedef struct {
   fio_thread_mutex_t lock;
@@ -27086,9 +27090,9 @@ IO Validity Map - Type
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 #else
 typedef void *fio_validity_map_s;
 #endif
@@ -27350,12 +27354,12 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   io->pr->on_close(io->udata); /* may destroy protocol object! */
   fio___srv_env_safe_destroy(&io->env);
 }
-#define FIO_REF_NAME       fio
-#define FIO_REF_INIT(o)    fio_s_init(&(o))
-#define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#define FIO___STL_KEEP     1
+#define FIO_REF_NAME            fio
+#define FIO_REF_INIT(o)         fio_s_init(&(o))
+#define FIO_REF_DESTROY(o)      fio_s_destroy(&(o))
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
@@ -28322,10 +28326,10 @@ struct fio_tls_s {
   uint8_t trust_sys; /** Set to 1 if system certificate registry is trusted */
 };
 
-#define FIO___STL_KEEP 1
-#define FIO_REF_NAME   fio_tls
+#define FIO___RECURSIVE_INCLUDE 1
+#define FIO_REF_NAME            fio_tls
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
 SFUNC fio_tls_s *fio_tls_new(void) {
@@ -28631,7 +28635,7 @@ Done with Server code
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SERVER) && HAVE_OPENSSL && !defined(FIO___STL_KEEP)
+#if defined(FIO_SERVER) && HAVE_OPENSSL && !defined(FIO___RECURSIVE_INCLUDE)
 
 /* *****************************************************************************
 OpenSSL Helper Settings
@@ -28759,7 +28763,7 @@ OpenSSL Helpers Cleanup
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_PUBSUB___H
 
 /* *****************************************************************************
@@ -29202,9 +29206,9 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Distribution Channel: manages subscriptions to named channels. */
 typedef struct fio_channel_s {
@@ -29221,9 +29225,9 @@ typedef struct fio_channel_s {
 #define FIO_REF_NAME             fio_channel
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Subscription: contains subscriber data. */
 typedef struct fio_subscription_s {
@@ -29242,9 +29246,9 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_NAME             fio_subscription
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Channel Map: maps named channels. */
 FIO_SFUNC void fio_channel_on_create(fio_channel_s *ch);
@@ -29275,9 +29279,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
     fio_channel_free((key));                                                   \
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /* *****************************************************************************
 
@@ -29453,9 +29457,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
-#define FIO___STL_KEEP
+#define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 #endif
 
 static struct FIO_POSTOFFICE {
@@ -29830,12 +29834,12 @@ error:
 Remote Letter Processing - validate unique delivery.
 ***************************************************************************** */
 
-#define FIO_OMAP_NAME  fio___letter_map
-#define FIO_MAP_KEY    uint64_t
-#define FIO_MAP_LRU    (1ULL << 16)
-#define FIO___STL_KEEP 1
+#define FIO_OMAP_NAME           fio___letter_map
+#define FIO_MAP_KEY             uint64_t
+#define FIO_MAP_LRU             (1ULL << 16)
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 FIO_SFUNC struct {
   fio___letter_map_s map;
@@ -30644,7 +30648,7 @@ https://www.rfc-editor.org/rfc/rfc9110.html
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -31419,7 +31423,7 @@ FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 /* *****************************************************************************
 String Cache
 ***************************************************************************** */
@@ -31871,7 +31875,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 Simple Property Set / Get
 ***************************************************************************** */
@@ -34418,7 +34422,8 @@ Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO___STL_KEEP)
+#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) &&                         \
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_HTTP___H
 /* *****************************************************************************
 HTTP Setting Defaults
@@ -34644,7 +34649,7 @@ fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 
 typedef struct {
   fio_http_settings_s settings;
@@ -34703,7 +34708,7 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 HTTP On Open - Accepting new connections
 ***************************************************************************** */
@@ -35508,9 +35513,10 @@ the SLT features and could be affected by their inclusion.
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_FIOBJ) && !defined(H___FIO_FIOBJ___H) &&                       \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_FIOBJ___H
-#define FIO___STL_KEEP 99 /* a magic value to keep FIO_EXTERN rules */
+#define FIO___RECURSIVE_INCLUDE 99 /* a magic value to keep FIO_EXTERN rules   \
+                                    */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -36782,7 +36788,7 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
   return args.json;
 }
 
-#undef FIO___STL_KEEP /* from now on, type helpers are internal */
+#undef FIO___RECURSIVE_INCLUDE /* from now on, type helpers are internal */
 /* *****************************************************************************
 
 
@@ -36817,15 +36823,15 @@ typedef struct {
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj____stack
 #define FIO_ARRAY_TYPE           fiobj____stack_element_s
-#define FIO___STL_KEEP
+#define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 typedef struct {
   int (*task)(fiobj_each_s *info);
@@ -37255,9 +37261,9 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
-#define FIO___STL_KEEP
+#define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /* FIOBJ JSON parser */
 typedef struct {
@@ -37552,7 +37558,7 @@ FIOBJ cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_MODULE_NAME) /* && !defined(FIO___STL_KEEP) */
+#if defined(FIO_MODULE_NAME) /* && !defined(FIO___RECURSIVE_INCLUDE) */
 
 /* *****************************************************************************
 Module Settings
@@ -37719,7 +37725,7 @@ Module Cleanup
 /* *****************************************************************************
 Common cleanup
 ***************************************************************************** */
-#ifndef FIO___STL_KEEP
+#ifndef FIO___RECURSIVE_INCLUDE
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
 #if (FIO_EXTERN + 1) < 3
@@ -37754,7 +37760,7 @@ Common cleanup
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#endif /* !FIO___STL_KEEP */
+#endif /* !FIO___RECURSIVE_INCLUDE */
 
 /* *****************************************************************************
 C++ extern end
@@ -37767,7 +37773,7 @@ C++ extern end
 /* *****************************************************************************
 Recursive inclusion / cleanup
 ***************************************************************************** */
-#if !defined(FIO___STL_KEEP) && defined(FIO___INCLUDE_AGAIN)
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO___INCLUDE_AGAIN)
 /* recursive include statement */
 #undef FIO___INCLUDE_AGAIN
 #include FIO_INCLUDE_FILE
@@ -37781,7 +37787,7 @@ Recursive inclusion / cleanup
 #undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
 #endif
 
-#endif /* !defined(FIO___STL_KEEP) && defined(FIO___INCLUDE_AGAIN) */
+#endif /* !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO___INCLUDE_AGAIN) */
 /* *****************************************************************************
 
 
@@ -44891,7 +44897,7 @@ Finish testing segment
 #include "002 url.h"
 #endif
 
-#if defined(FIO_CLI) && !defined(FIO___STL_KEEP)
+#if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "004 cli.h"
 #endif
 #ifdef FIO_JSON
@@ -44911,7 +44917,7 @@ Finish testing segment
 #include "010 mem.h"
 #endif
 
-#if defined(FIO_POLL) && !defined(FIO___STL_KEEP)
+#if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "102 poll api.h"
 #include "102 poll epoll.h"
 #include "102 poll kqueue.h"
@@ -44953,11 +44959,11 @@ Finish testing segment
 #include "304 ed25519.h"
 #endif
 
-#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP)
+#if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "400 server.h"
 
 #endif
-#if defined(FIO_PUBSUB) && !defined(FIO___STL_KEEP)
+#if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
 #endif
 
@@ -44965,15 +44971,15 @@ Finish testing segment
 #include "431 http1 parser.h"
 #endif
 
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO___STL_KEEP)
+#if defined(FIO_HTTP_HANDLE) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "431 http handle.h"
 #endif
 
-#if defined(FIO_HTTP) && !defined(FIO___STL_KEEP)
+#if defined(FIO_HTTP) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "439 http.h"
 #endif
 
-#if defined(FIO_FIOBJ) && !defined(FIO___STL_KEEP)
+#if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "500 fiobj.h"
 #endif
 

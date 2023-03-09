@@ -90,7 +90,7 @@ For example, in the header (i.e., `mymem.h`), use:
 ```c
 #define FIO_EXTERN
 #define FIO_MALLOC
-#include "fio-stl.h"
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 /* FIO_EXTERN automatically undefined in this case */
 ```
 
@@ -1061,6 +1061,8 @@ __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
 ```
 
 If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG2STDERR2` macro will be defined.
+
+**Note:** `FIO_LOG` always uses `libc` functions and cannot be used for authoring apps without `libc` unless `memcpy` and `vsnprintf` are implemented separately (and shadowed by a macro before the module is included).
 
 #### `FIO_LOG_LEVEL`
 
