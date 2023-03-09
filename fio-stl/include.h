@@ -6,17 +6,17 @@
 #ifndef FIO_INCLUDE_FILE
 #define FIO_INCLUDE_FILE "fio-stl/include.h"
 #include "000 core.h"
-#include "000 patches.h"
+#include "001 patches.h"
 #endif
 
 #include "000 dependencies.h"
-#include "000 header.h"
 
+#include "001 header.h"
 #ifdef FIO_LOG
-#include "000 logging.h"
+#include "001 logging.h"
 #endif
 #ifdef FIO_MEMALT
-#include "000 memalt.h"
+#include "001 memalt.h"
 #endif
 
 #ifdef FIO_ATOMIC

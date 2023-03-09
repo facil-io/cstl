@@ -5,7 +5,7 @@
 #include "fio-stl.h"
 ```
 
-If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG2STDERR2` macro will be defined.
+If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG_WRITE` macro will be defined.
 
 **Note:** `FIO_LOG` always uses `libc` functions and cannot be used for authoring apps without `libc` unless `memcpy` and `vsnprintf` are implemented separately (and shadowed by a macro before the module is included).
 
@@ -30,7 +30,7 @@ This `printf` style **function** will log a message to `stderr`, without allocat
 
 The function is defined as `weak`, allowing it to be overridden during the linking stage, so logging could be diverted... although, it's recommended to divert `stderr` rather then the logging function.
 
-#### `FIO_LOG2STDERR2(msg, ...)`
+#### `FIO_LOG_WRITE(msg, ...)`
 
 This macro routs to the `FIO_LOG2STDERR` function after prefixing the message with the file name and line number in which the error occurred.
 

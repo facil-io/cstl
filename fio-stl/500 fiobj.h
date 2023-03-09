@@ -37,8 +37,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_FIOBJ) && !defined(H___FIO_FIOBJ___H) &&                       \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_FIOBJ___H
-#define FIO___RECURSIVE_INCLUDE 99 /* a magic value to keep FIO_EXTERN rules   \
-                                    */
+#define FIO___RECURSIVE_INCLUDE                                                \
+  99 /* a magic value to keep FIO_EXTERN rules                                 \
+      */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -120,10 +121,6 @@ General Requirements / Macros
 Debugging / Leak Detection
 ***************************************************************************** */
 #if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-#define FIOBJ_MARK_MEMORY 1
-#endif
-
-#if FIOBJ_MARK_MEMORY
 size_t FIO_WEAK FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
 size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_ALLOC()                                              \
@@ -131,7 +128,7 @@ size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_FREE()                                               \
   fio_atomic_add(&FIOBJ_MARK_MEMORY_FREE_COUNTER, 1)
 #define FIOBJ_MARK_MEMORY_PRINT()                                              \
-  FIO_LOG_PRINT__(                                                             \
+  FIO___LOG_PRINT_LEVEL(                                                       \
       ((FIOBJ_MARK_MEMORY_ALLOC_COUNTER == FIOBJ_MARK_MEMORY_FREE_COUNTER)     \
            ? 4 /* FIO_LOG_LEVEL_INFO */                                        \
            : 3 /* FIO_LOG_LEVEL_WARNING */),                                   \

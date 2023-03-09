@@ -14,6 +14,9 @@ Please refer to the core documentation in the Markdown File.
 #ifndef H___FIO_CORE___H
 #define H___FIO_CORE___H
 
+/** An empty macro, adding white space. Used to avoid function like macros. */
+#define FIO_NOOP
+
 /* *****************************************************************************
 Version Macros
 
@@ -495,24 +498,39 @@ Logging Defaults (no-op)
 #define FIO__FILE__ __FILE__
 #endif
 
-/** An empty macro, adding white space. Used to avoid function like macros. */
-#define FIO_NOOP
-/* allow logging to quitely fail unless enabled */
-#define FIO_LOG2STDERR(...)   ((void)0)
-#define FIO_LOG2STDERR2(...)  ((void)0)
-#define FIO_LOG_PRINT__(...)  ((void)0)
-#define FIO_LOG_FATAL(...)    ((void)0)
-#define FIO_LOG_ERROR(...)    ((void)0)
-#define FIO_LOG_SECURITY(...) ((void)0)
-#define FIO_LOG_WARNING(...)  ((void)0)
-#define FIO_LOG_INFO(...)     ((void)0)
-#define FIO_LOG_DEBUG(...)    ((void)0)
-#define FIO_LOG_DEBUG2(...)   ((void)0)
+/** Logging level of zero (no logging). */
+#define FIO_LOG_LEVEL_NONE 0
+/** Log fatal errors. */
+#define FIO_LOG_LEVEL_FATAL 1
+/** Log errors and fatal errors. */
+#define FIO_LOG_LEVEL_ERROR 2
+/** Log warnings, errors and fatal errors. */
+#define FIO_LOG_LEVEL_WARNING 3
+/** Log every message (info, warnings, errors and fatal errors). */
+#define FIO_LOG_LEVEL_INFO 4
+/** Log everything, including debug messages. */
+#define FIO_LOG_LEVEL_DEBUG 5
+
+/** Sets the Logging Level */
+#define FIO_LOG_LEVEL_SET(new_level) (0)
+/** Returns the Logging Level */
+#define FIO_LOG_LEVEL_GET() (0)
+
+// clang-format off
+#define FIO___LOG_PRINT_LEVEL(level, ...) do { if ((level) <= FIO_LOG_LEVEL) FIO_LOG2STDERR(__VA_ARGS__); } while (0)
+#define FIO_LOG_WRITE(...)    FIO_LOG2STDERR("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
+#define FIO_LOG_FATAL(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_FATAL, "\x1B[1m\x1B[7mFATAL:\x1B[0m    " __VA_ARGS__)
+#define FIO_LOG_ERROR(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_ERROR, "\x1B[1mERROR:\x1B[0m    " __VA_ARGS__)
+#define FIO_LOG_SECURITY(...) FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_ERROR, "\x1B[1mSECURITY:\x1B[0m " __VA_ARGS__)
+#define FIO_LOG_WARNING(...)  FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_WARNING, "\x1B[2mWARNING:\x1B[0m  " __VA_ARGS__)
+#define FIO_LOG_INFO(...)     FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_INFO, "INFO:     " __VA_ARGS__)
+#define FIO_LOG_DEBUG(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_DEBUG,"DEBUG:    (" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__)
+#define FIO_LOG_DEBUG2(...)   FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_DEBUG, "DEBUG:    " __VA_ARGS__)
+// clang-format on
 
 #ifdef DEBUG
-#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
-#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
+#define FIO_LOG_DDEBUG(...)  FIO_LOG_DEBUG(__VA_ARGS__)
+#define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
 #else
 #define FIO_LOG_DDEBUG(...)  ((void)(0))
 #define FIO_LOG_DDEBUG2(...) ((void)(0))
@@ -523,6 +541,9 @@ Logging Defaults (no-op)
 /** Defines a point at which logging truncates (limited by stack memory) */
 #define FIO_LOG_LENGTH_LIMIT 1024
 #endif
+
+/** Returns the Logging Level */
+#define FIO_LOG2STDERR(...)
 
 /* *****************************************************************************
 Assertions
