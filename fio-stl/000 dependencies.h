@@ -144,7 +144,6 @@ Poor-man's Cryptographic Elements
 Core Inclusion
 ***************************************************************************** */
 #if defined(FIO_CORE)
-#undef FIO_CORE
 #undef FIO_ATOL
 #undef FIO_ATOMIC
 #undef FIO_FILES
@@ -163,6 +162,7 @@ Core Inclusion
 #define FIO_RAND
 #define FIO_TIME
 #define FIO_URL
+#undef FIO_CORE
 #endif
 
 /* *****************************************************************************

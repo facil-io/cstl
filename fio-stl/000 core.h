@@ -75,6 +75,10 @@ Settings - Behavioral defaults
 #define FIO_MEM_PAGE_SIZE_LOG 12 /* assumes 4096 bytes per page */
 #endif
 
+#if defined(FIO_NO_LOG) && defined(FIO_LEAK_COUNTER)
+#error FIO_NO_LOG and FIO_LEAK_COUNTER are exclusive, as memory leaks print to log.
+#endif
+
 /* *****************************************************************************
 Settings - Memory Function Selectors
 ***************************************************************************** */

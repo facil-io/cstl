@@ -31,7 +31,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /**
  * Enables logging macros that avoid heap memory allocations
  */
-#if !defined(H___FIO_LOG___H) && (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
+#if !defined(FIO_NO_LOG) && !defined(H___FIO_LOG___H) &&                       \
+    (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOG___H
 
 #undef FIO_LOG2STDERR
@@ -78,6 +79,16 @@ FIO_LOG2STDERR(const char *format, ...) {
 #endif
 #endif
 int FIO_WEAK FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
+FIO_IFUNC int fio___log_level_set(int i) { return (FIO_LOG_LEVEL = i); }
+FIO_IFUNC int fio___log_level(void) { return FIO_LOG_LEVEL; }
+
+#undef FIO_LOG_LEVEL_GET
+#undef FIO_LOG_LEVEL_SET
+
+/** Sets the Logging Level. */
+#define FIO_LOG_LEVEL_SET(new_level) fio___log_level_set(new_level)
+/** Returns the Logging Level. */
+#define FIO_LOG_LEVEL_GET() ((fio___log_level()))
 
 #endif /* FIO_LOG */
 #undef FIO_LOG

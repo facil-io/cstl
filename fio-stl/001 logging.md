@@ -9,9 +9,18 @@ If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be grea
 
 **Note:** `FIO_LOG` always uses `libc` functions and cannot be used for authoring apps without `libc` unless `memcpy` and `vsnprintf` are implemented separately (and shadowed by a macro before the module is included).
 
-#### `FIO_LOG_LEVEL`
+**Note**: in **all** of the following `msg` **must** be a string literal (`const char *`).
 
-An application wide integer with a value of either:
+#### `FIO_LOG_LEVEL_GET` and `FIO_LOG_LEVEL_SET`
+
+```c
+/** Sets the Logging Level */
+#define FIO_LOG_LEVEL_SET(new_level) (0)
+/** Returns the Logging Level */
+#define FIO_LOG_LEVEL_GET() (0)
+```
+
+An application wide integer get/set with a value of either:
 
 - `FIO_LOG_LEVEL_NONE` (0)
 - `FIO_LOG_LEVEL_FATAL` (1)
@@ -22,7 +31,7 @@ An application wide integer with a value of either:
 
 The initial value can be set using the `FIO_LOG_LEVEL_DEFAULT` macro. By default, the level is 4 (`FIO_LOG_LEVEL_INFO`) for normal compilation and 5 (`FIO_LOG_LEVEL_DEBUG`) for DEBUG compilation.
 
-**Note**: in **all** of the following `msg` **must** be a string literal (`const char *`).
+**Note:** although the integer itself is global and accessible, it shouldn't be used directly (in case `FIO_NO_LOG` is defined).
 
 #### `FIO_LOG2STDERR(msg, ...)`
 

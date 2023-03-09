@@ -904,10 +904,11 @@ static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
     {0};
 
 static void fio___http_str_cached_init(void) {
-  memset(FIO___HTTP_STATIC_CACHE_IMAP,
-         0,
-         (FIO___HTTP_STATIC_CACHE_MASK + 1) *
-             sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
+  FIO_MEMSET(FIO___HTTP_STATIC_CACHE_IMAP,
+             0,
+             (FIO___HTTP_STATIC_CACHE_MASK + 1) *
+                 sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
+
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
     uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
                                     FIO___HTTP_STATIC_CACHE[i].meta.len,
@@ -1392,8 +1393,8 @@ FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
     }
     if (!s.len)
       return;
-    char *div = (char *)memchr(s.buf, '=', s.len);
-    char *end = (char *)memchr(s.buf, ';', s.len);
+    char *div = (char *)FIO_MEMCHR(s.buf, '=', s.len);
+    char *end = (char *)FIO_MEMCHR(s.buf, ';', s.len);
     if (!end)
       end = s.buf + s.len;
     v.buf = s.buf;
@@ -2191,22 +2192,22 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
           ++end;
         buf.len = (size_t)(end - forwarded.buf);
         if (buf.len)
-          memcpy(buf.buf, forwarded.buf, buf.len);
+          FIO_MEMCPY(buf.buf, forwarded.buf, buf.len);
         break;
       }
     }
     if (!buf.len) { /* if we failed, use peer_addr */
       if (peer_addr.len) {
-        memcpy(buf.buf, peer_addr.buf, peer_addr.len);
+        FIO_MEMCPY(buf.buf, peer_addr.buf, peer_addr.len);
         buf.len = peer_addr.len;
       } else {
-        memcpy(buf.buf, "[unknown]", 9);
+        FIO_MEMCPY(buf.buf, "[unknown]", 9);
         buf.len = 9;
       }
     }
   }
-  memcpy(buf.buf + buf.len, " - - [", 6);
-  memcpy(buf.buf + buf.len + 6, date.buf, date.len);
+  FIO_MEMCPY(buf.buf + buf.len, " - - [", 6);
+  FIO_MEMCPY(buf.buf + buf.len + 6, date.buf, date.len);
   buf.len += date.len + 6;
   fio_string_write2(
       &buf,
@@ -2265,7 +2266,7 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
       ++cond.buf;
     if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
       return 0;
-    if (memcmp(cond.buf, etag.buf, etag.len)) {
+    if (FIO_MEMCMP(cond.buf, etag.buf, etag.len)) {
       cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
       if (!cond.buf)
         return 0;
@@ -2827,12 +2828,8 @@ FIO_SFUNC void fio_http_mime_register_essential(void) {
 Constructor / Destructor
 ***************************************************************************** */
 
-FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
-  fio___http_str_cached_init();
-  fio_http_mime_register_essential();
-}
-
-FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
+FIO_SFUNC void fio___http_cleanup(void *ignr_) {
+  (void)ignr_;
 #if FIO_HTTP_CACHE_LIMIT
   for (size_t i = 0; i < 2; ++i) {
     const char *names[] = {"cookie names", "header values"};
@@ -2860,6 +2857,12 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
                  FIO___HTTP_MIMETYPES.count,
                  fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
+}
+
+FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
+  fio___http_str_cached_init();
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___http_cleanup, NULL);
+  fio_http_mime_register_essential();
 }
 
 /* *****************************************************************************
