@@ -57,6 +57,7 @@ Everything Inclusion
     defined(H___FIO_EVERYTHING2___H)
 /* Inclusion cycle three - facil.io memory allocator for all else. */
 #define H___FIO_EVERYTHING_FINISHED___H
+#undef FIO_MEMALT
 #define FIO_MEMALT
 #define FIO___INCLUDE_AGAIN
 #elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_BASIC_FINISHED___H)
@@ -68,6 +69,12 @@ Everything Inclusion
 #define FIO___INCLUDE_AGAIN
 #elif !defined(H___FIO_EVERYTHING_FINISHED___H)
 /* Inclusion cycle one - import FIO_BASIC. */
+#undef FIO_SERVER
+#undef FIO_PUBSUB
+#undef FIO_HTTP
+#undef FIO_BASIC
+#undef FIO_SIGNAL
+#undef FIO_SOCK
 #define FIO_BASIC
 #define FIO_SIGNAL
 #define FIO_SOCK
@@ -97,6 +104,14 @@ Basics Inclusion
 #elif !defined(H___FIO_BASIC_FINISHED___H)
 /* Inclusion cycle one - default (system) memory allocator. */
 #define H___FIO_BASIC1___H
+#undef FIO_CLI
+#undef FIO_CORE
+#undef FIO_CRYPT
+#undef FIO_FIOBJ
+#undef FIO_MALLOC
+#undef FIO_STATE
+#undef FIO_THREADS
+#undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
 #define FIO_CRYPT
@@ -114,11 +129,15 @@ Basics Inclusion
 Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
-#undef FIO_CRYPT
+#undef FIO_CHACHA
+#undef FIO_ED25519
+#undef FIO_SHA1
+#undef FIO_SHA2
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
 #define FIO_SHA2
+#undef FIO_CRYPT
 #endif /* FIO_CRYPT */
 
 /* *****************************************************************************
@@ -126,6 +145,15 @@ Core Inclusion
 ***************************************************************************** */
 #if defined(FIO_CORE)
 #undef FIO_CORE
+#undef FIO_ATOL
+#undef FIO_ATOMIC
+#undef FIO_FILES
+#undef FIO_GLOB_MATCH
+#undef FIO_LOG
+#undef FIO_MATH
+#undef FIO_RAND
+#undef FIO_TIME
+#undef FIO_URL
 #define FIO_ATOL
 #define FIO_ATOMIC
 #define FIO_FILES
@@ -360,7 +388,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_MATH
 #endif
 
-#if defined(FIO_CLI) || defined(FIO_HTTP_HANDLE) ||                            \
+#if defined(FIO_CLI) || defined(FIO_FILES) || defined(FIO_HTTP_HANDLE) ||      \
     defined(FIO_MEMORY_NAME) || defined(FIO_POLL) || defined(FIO_STATE) ||     \
     defined(FIO_STR)
 #undef FIO_RAND

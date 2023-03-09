@@ -25,9 +25,6 @@
 #ifdef FIO_ATOL
 #include "002 atol.h"
 #endif
-#ifdef FIO_FILES
-#include "002 files.h"
-#endif
 #ifdef FIO_GLOB_MATCH
 #include "002 glob matching.h"
 #endif
@@ -55,6 +52,9 @@
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "004 cli.h"
+#endif
+#ifdef FIO_FILES
+#include "004 files.h"
 #endif
 #ifdef FIO_JSON
 #include "004 json.h"
