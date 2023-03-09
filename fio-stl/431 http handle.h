@@ -2329,6 +2329,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       file_type = fio_filename_type(filename.buf);
     }
     switch (file_type) {
+#ifdef S_IFDIR
     case S_IFDIR:
       fio_string_write(&filename,
                        NULL,
@@ -2337,8 +2338,11 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       if (!fio_filename_type(filename.buf))
         goto file_not_found;
       break;
+#endif
     case S_IFREG: break;
+#ifdef S_IFLNK
     case S_IFLNK: break;
+#endif
     default: goto file_not_found;
     }
 #else
