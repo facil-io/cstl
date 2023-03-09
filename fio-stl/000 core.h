@@ -529,8 +529,9 @@ Logging Defaults (no-op)
 // clang-format on
 
 #ifdef DEBUG
-#define FIO_LOG_DDEBUG(...)  FIO_LOG_DEBUG(__VA_ARGS__)
-#define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
+#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
 #else
 #define FIO_LOG_DDEBUG(...)  ((void)(0))
 #define FIO_LOG_DDEBUG2(...) ((void)(0))
