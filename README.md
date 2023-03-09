@@ -1,4 +1,4 @@
-# facil.io 0.8.x for C - now with an integrated C STL (Simple Template Library)
+# facil.io 0.8.x for C - now with an integrated C STL (Server Toolbox lIbrary)
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
 
@@ -7,12 +7,6 @@ The [facil.io library](https://facil.io) is much more than a Web Application Fra
 In addition to useful helpers, [facil.io](https://facil.io) allows developers to use MACROS to generate code for different common types, such as Hash Maps, Arrays, Binary-Safe Strings, etc'.
 
 In other words, some of the most common building blocks one would need in any C project are placed in this convenient header file library.
-
-### OS Support
-
-The library in written and tested on POSIX systems. Windows support was added afterwards, leaving the library with a POSIX oriented design.
-
-Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
 
 ### Installing
 
@@ -84,6 +78,8 @@ Optionally add reference counting to your type with a single line of code.
 **Note**: unlike `copy` which creates an independent copy, a `dup` operation duplicates the handle (does not copy the data), so both handles point to the same object.
 
 ```c
+#include "fio-stl/include.h" /* or "fio-stl.h" */
+
 /* Create a binary safe String type called `my_str_s` */
 #define FIO_STR_NAME my_str
 /* Use a reference counting for `my_str_s` (using the same name convention) */
@@ -91,7 +87,7 @@ Optionally add reference counting to your type with a single line of code.
 /* Make the reference counter the only constructor
  * rather then having it as an additional flavor */
 #define FIO_REF_CONSTRUCTOR_ONLY
-#include "fio-stl/include.h" /* or "fio-stl.h" */
+#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
 
 void reference_counted_shared_strings(void) {
   my_str_s *msg = my_str_new();
@@ -120,7 +116,7 @@ typedef struct {
 #define FIO_ARRAY_NAME           foo_ary
 #define FIO_ARRAY_TYPE           foo_s
 #define FIO_ARRAY_TYPE_CMP(a, b) (a.i == b.i && a.f == b.f)
-#include "fio-stl.h"
+#include "fio-stl/include.h" /* or "fio-stl.h" */
 
 void array_example(void) {
   foo_ary_s a = FIO_ARRAY_INIT;
@@ -143,9 +139,11 @@ Define your own Hash Maps for any key-value pair of any type.
 In this example we manually construct a dictionary hash map where short String objects are mapped to other (often longer) String objects.
 
 ```c
+#include "fio-stl/include.h" /* or "fio-stl.h" */
+
 /* Create a binary safe String type for Strings that aren't mutated often */
 #define FIO_STR_SMALL str
-#include "fio-stl/include.h" /* or "fio-stl.h" */
+#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
 
 /* Defines a key-value Unordered Map type called `dictionary_s` */
 #define FIO_MAP_NAME                  dictionary
@@ -184,13 +182,15 @@ void dictionary_example(void) {
 Easily define key-value String Hash Map, also sometimes called a "dictionary", using different smart defaults for short keys `FIO_MAP_KEY_KSTR` vs longer keys (or when expecting a sparsely populated map) `FIO_MAP_KEY_BSTR`.
 
 ```c
+#include "fio-stl/include.h" /* or "fio-stl.h" */
+
 /* Set the properties for the key-value Unordered Map type called `dict_s` */
 #define FIO_MAP_NAME       dict
 #define FIO_MAP_KEY_KSTR   /* pre-defined macro for using fio_keystr_s keys. */
 #define FIO_MAP_VALUE_BSTR /* pre-defined macro for using String values. */
 #define FIO_MAP_HASH_FN(str)                                                   \
   fio_risky_hash(str.buf, str.len, (uint64_t)&fio_risky_hash)
-#include "fio-stl/include.h" /* or "fio-stl.h" */
+#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
 
 void easy_dict_example(void) {
   dict_s dictionary = FIO_MAP_INIT;

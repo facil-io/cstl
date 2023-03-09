@@ -13,7 +13,7 @@
 /* *****************************************************************************
 Common cleanup
 ***************************************************************************** */
-#ifndef FIO___STL_KEEP
+#ifndef FIO___RECURSIVE_INCLUDE
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
 #if (FIO_EXTERN + 1) < 3
@@ -48,4 +48,31 @@ Common cleanup
 #define SFUNC SFUNC_
 #define IFUNC IFUNC_
 
-#endif /* !FIO___STL_KEEP */
+#endif /* !FIO___RECURSIVE_INCLUDE */
+
+/* *****************************************************************************
+C++ extern end
+***************************************************************************** */
+/* support C++ */
+#ifdef __cplusplus
+}
+#endif
+
+/* *****************************************************************************
+Recursive inclusion / cleanup
+***************************************************************************** */
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO___INCLUDE_AGAIN)
+/* recursive include statement */
+#undef FIO___INCLUDE_AGAIN
+#include FIO_INCLUDE_FILE
+#else
+#ifdef FIO_EVERYTHING___REMOVE_EXTERN
+#undef FIO_EXTERN
+#undef FIO_EVERYTHING___REMOVE_EXTERN
+#endif
+#ifdef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
+#undef FIO_EXTERN_COMPLETE
+#undef FIO_EVERYTHING___REMOVE_EXTERN_COMPLETE
+#endif
+
+#endif /* !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO___INCLUDE_AGAIN) */

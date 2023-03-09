@@ -233,15 +233,14 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
   /* test for special headers */
   switch (name.len) {
   case 6: /* test for "expect" */
-    if (fio_buf2u32_local(name.buf) == fio_buf2u32_local("expe") &&
-        fio_buf2u32_local(name.buf + 2) ==
-            fio_buf2u32_local("pect")) { /* Expect */
+    if (fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
+        fio_buf2u32u(name.buf + 2) == fio_buf2u32u("pect")) { /* Expect */
       return 0 - fio_http1_on_expect(value, udata);
     }
     break;
   case 14: /* test for "content-length" */
-    if (fio_buf2u64_local(name.buf) == fio_buf2u64_local("content-") &&
-        fio_buf2u64_local(name.buf + 6) == fio_buf2u64_local("t-length")) {
+    if (fio_buf2u64u(name.buf) == fio_buf2u64u("content-") &&
+        fio_buf2u64u(name.buf + 6) == fio_buf2u64u("t-length")) {
       char *tmp = value.buf;
       uint64_t clen = fio_atol10u(&tmp);
       if (tmp != value.buf + value.len)
@@ -256,13 +255,11 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
     break;
   case 17: /* test for "transfer-encoding" (chunked?) */
     if (value.len >= 7 && (name.buf[16] == 'g') &&
-        !((fio_buf2u64_local(name.buf) ^ fio_buf2u64_local("transfer")) |
-         (fio_buf2u64_local(name.buf + 8) ^ fio_buf2u64_local("-encodin")))) {
+        !((fio_buf2u64u(name.buf) ^ fio_buf2u64u("transfer")) |
+          (fio_buf2u64u(name.buf + 8) ^ fio_buf2u64u("-encodin")))) {
       char *c_start = value.buf + value.len - 7;
-      if ((fio_buf2u32_local(c_start) | 0x20202020UL) ==
-              fio_buf2u32_local("chun") &&
-          (fio_buf2u32_local(c_start + 3) | 0x20202020UL) ==
-              fio_buf2u32_local("nked")) {
+      if ((fio_buf2u32u(c_start) | 0x20202020UL) == fio_buf2u32u("chun") &&
+          (fio_buf2u32u(c_start + 3) | 0x20202020UL) == fio_buf2u32u("nked")) {
         if (value.len > 7 && value.buf[-8] != ' ' && value.buf[-8] != ',')
           return -1;
         if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
@@ -506,14 +503,14 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
 /* *****************************************************************************
 Testing
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#ifdef FIO_TEST_ALL
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
   /*
    * TODO: test HTTP parser here
    */
 }
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

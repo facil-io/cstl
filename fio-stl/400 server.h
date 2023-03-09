@@ -15,7 +15,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_SERVER) && !defined(FIO___STL_KEEP) &&                         \
+#if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE) &&                \
     !defined(H___FIO_SERVER___H)
 #define H___FIO_SERVER___H
 /* *****************************************************************************
@@ -789,9 +789,9 @@ typedef struct {
   } while (0)
 #define FIO_MAP_DESTROY_AFTER_COPY 0
 
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 typedef struct {
   fio_thread_mutex_t lock;
@@ -863,9 +863,9 @@ IO Validity Map - Type
 /* mostly for debugging possible threading issues. */
 #define FIO_VALIDATE_IO_MUTEX 0
 #endif
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 #else
 typedef void *fio_validity_map_s;
 #endif
@@ -1127,12 +1127,12 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   io->pr->on_close(io->udata); /* may destroy protocol object! */
   fio___srv_env_safe_destroy(&io->env);
 }
-#define FIO_REF_NAME       fio
-#define FIO_REF_INIT(o)    fio_s_init(&(o))
-#define FIO_REF_DESTROY(o) fio_s_destroy(&(o))
-#define FIO___STL_KEEP     1
+#define FIO_REF_NAME            fio
+#define FIO_REF_INIT(o)         fio_s_init(&(o))
+#define FIO_REF_DESTROY(o)      fio_s_destroy(&(o))
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
@@ -2099,10 +2099,10 @@ struct fio_tls_s {
   uint8_t trust_sys; /** Set to 1 if system certificate registry is trusted */
 };
 
-#define FIO___STL_KEEP 1
-#define FIO_REF_NAME   fio_tls
+#define FIO___RECURSIVE_INCLUDE 1
+#define FIO_REF_NAME            fio_tls
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** Performs a `new` operation, returning a new `fio_tls_s` context. */
 SFUNC fio_tls_s *fio_tls_new(void) {

@@ -68,7 +68,7 @@ For complex types, define any (or all) of the following macros:
 #define FIO_ARRAY_ENABLE_EMBEDDED 1
 ```
 
-To create the type and helper functions, include the Simple Template Library header.
+To create the type and helper functions, include The facil.io library header.
 
 For example:
 
@@ -81,7 +81,7 @@ typedef struct {
 #define FIO_ARRAY_NAME ary
 #define FIO_ARRAY_TYPE foo_s
 #define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 void example(void) {
   ary_s a = FIO_ARRAY_INIT;

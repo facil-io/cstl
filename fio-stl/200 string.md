@@ -19,6 +19,8 @@ The type (`FIO_STR_NAME_s`) and the functions will be automatically defined.
 
 For brevities sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
 
+**Note:** this module depends on the  `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
+
 ### Optimizations / Flavors
 
 Strings come in two main flavors, Strings optimized for mutability (default) vs. Strings optimized for memory consumption (defined using `FIO_STR_SMALL`).

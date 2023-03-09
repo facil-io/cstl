@@ -257,13 +257,13 @@ FIO_SFUNC uint64_t fio_websocket_server_wrap(void *target,
   } else if (len < (1UL << 16)) {
     /* head is 4 bytes */
     ((uint8_t *)target)[1] = 126;
-    fio_u2buf16(((uint8_t *)target + 2), len);
+    fio_u2buf16_be(((uint8_t *)target + 2), len);
     FIO_MEMCPY((uint8_t *)target + 4, msg, len);
     return len + 4;
   }
   /* Really Long Message  */
   ((uint8_t *)target)[1] = 127;
-  fio_u2buf64(((uint8_t *)target + 2), len);
+  fio_u2buf64_be(((uint8_t *)target + 2), len);
   FIO_MEMCPY((uint8_t *)target + 10, msg, len);
   return len + 10;
 }
@@ -298,23 +298,23 @@ FIO_SFUNC uint64_t fio_websocket_client_wrap(void *target,
                            /*fin*/ ((last & 1) << 7);
   if (len < 126) {
     ((uint8_t *)target)[1] = len | 128;
-    fio_u2buf32((void *)((uint8_t *)target + 2), (uint32_t)mask);
+    fio_u2buf32_be((void *)((uint8_t *)target + 2), (uint32_t)mask);
     FIO_MEMCPY(((uint8_t *)target) + 6, msg, len);
     fio_xmask((char *)target + 6, len, mask);
     return len + 6;
   } else if (len < (1UL << 16)) {
     /* head is 4 bytes */
     ((uint8_t *)target)[1] = 126 | 128;
-    fio_u2buf16((void *)((uint8_t *)target + 2), len);
-    fio_u2buf32((void *)((uint8_t *)target + 4), (uint32_t)mask);
+    fio_u2buf16_be((void *)((uint8_t *)target + 2), len);
+    fio_u2buf32_be((void *)((uint8_t *)target + 4), (uint32_t)mask);
     FIO_MEMCPY((uint8_t *)target + 8, msg, len);
     fio_xmask((char *)target + 8, len, mask);
     return len + 8;
   }
   /* Really Long Message  */
   ((uint8_t *)target)[1] = 255;
-  fio_u2buf64((void *)((uint8_t *)target + 2), len);
-  fio_u2buf32((void *)((uint8_t *)target + 10), (uint32_t)mask);
+  fio_u2buf64_be((void *)((uint8_t *)target + 2), len);
+  fio_u2buf32_be((void *)((uint8_t *)target + 10), (uint32_t)mask);
   FIO_MEMCPY((uint8_t *)target + 14, msg, len);
   fio_xmask((char *)target + 14, len, mask);
   return len + 14;
@@ -363,14 +363,14 @@ Reading the first line
 /* *****************************************************************************
 Testing
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#ifdef FIO_TEST_ALL
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
   /*
    * TODO: test WebSocket parser here
    */
 }
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

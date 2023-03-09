@@ -20,7 +20,7 @@ https://www.rfc-editor.org/rfc/rfc9110.html
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP_HANDLE) && !defined(H___FIO_HTTP_HANDLE___H) &&           \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_HTTP_HANDLE___H
 
 /* *****************************************************************************
@@ -699,7 +699,7 @@ typedef struct {
 
 FIO_IFUNC fio_str_info_s fio___http_parsed_headers_next(fio_str_info_s value) {
   for (;;) {
-    const size_t coded = (size_t)fio_buf2u16_local(value.buf + value.len + 1U);
+    const size_t coded = (size_t)fio_buf2u16u(value.buf + value.len + 1U);
     if (!coded)
       return (value = (fio_str_info_s){0});
     const size_t block_len = coded >> 2;
@@ -715,21 +715,19 @@ FIO_IFUNC fio___http_header_property_s
 fio___http_parsed_property_next(fio___http_header_property_s property) {
   for (;;) {
     size_t coded =
-        (size_t)fio_buf2u16_local(property.value.buf + property.value.len + 1);
+        (size_t)fio_buf2u16u(property.value.buf + property.value.len + 1);
     if (!(coded & 3))
       return (property = (fio___http_header_property_s){{0}, {0}});
     if ((coded & 3) == FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN) {
       property.value.buf += 2;
-      coded = (size_t)fio_buf2u16_local(property.value.buf +
-                                        property.value.len + 1);
+      coded = (size_t)fio_buf2u16u(property.value.buf + property.value.len + 1);
     }
     if ((coded & 3) != 2)
       return (property = (fio___http_header_property_s){{0}, {0}});
     coded >>= 2;
     property.name.buf = property.value.buf + property.value.len + 3;
     property.name.len = coded;
-    coded =
-        (size_t)fio_buf2u16_local(property.name.buf + property.name.len + 1);
+    coded = (size_t)fio_buf2u16u(property.name.buf + property.name.len + 1);
     FIO_ASSERT_DEBUG((coded & 3) == 2,
                      "header property value parsing format error");
     property.value.buf = property.name.buf + property.name.len + 3;
@@ -797,7 +795,7 @@ FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   return FIO_STR_INFO2(date_buf, date_len);
 }
 
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 /* *****************************************************************************
 String Cache
 ***************************************************************************** */
@@ -1249,7 +1247,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 Simple Property Set / Get
 ***************************************************************************** */
@@ -1918,17 +1916,16 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
   fio_str_info_s val =
       fio_http_request_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
-  if (val.len < 7 || !(((fio_buf2u32_local(val.buf) | 0x32323232UL) ==
-                        fio_buf2u32_local("upgr")) ||
-                       ((fio_buf2u32_local(val.buf + 3) | 0x32323232UL) ==
-                        fio_buf2u32_local("rade"))))
+  if (val.len < 7 ||
+      !(((fio_buf2u32u(val.buf) | 0x32323232UL) == fio_buf2u32u("upgr")) ||
+        ((fio_buf2u32u(val.buf + 3) | 0x32323232UL) == fio_buf2u32u("rade"))))
     return 0;
   /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
   val = fio_http_request_header(h, FIO_STR_INFO2((char *)"upgrade", 7), 0);
-  if (val.len < 7 || !(((fio_buf2u64_local(val.buf) | 0x3232323232323232ULL) ==
-                        fio_buf2u64_local("websocke")) ||
-                       ((fio_buf2u32_local(val.buf + 5) | 0x32323232UL) ==
-                        fio_buf2u32_local("cket"))))
+  if (val.len < 7 ||
+      !(((fio_buf2u64u(val.buf) | 0x3232323232323232ULL) ==
+         fio_buf2u64u("websocke")) ||
+        ((fio_buf2u32u(val.buf + 5) | 0x32323232UL) == fio_buf2u32u("cket"))))
     return 0;
   val = fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
@@ -2021,8 +2018,8 @@ FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
     size_t len = eq - start;
     if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
       return -1; /* too long */
-    fio_u2buf16_local(dst->buf + dst->len,
-                      ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
+    fio_u2buf16u(dst->buf + dst->len,
+                 ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
     dst->len += 2;
     if (len)
       FIO_MEMCPY(dst->buf + dst->len, start, len);
@@ -2034,8 +2031,8 @@ FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
     len = nxt - eq;
     if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
       return -1; /* too long */
-    fio_u2buf16_local(dst->buf + dst->len,
-                      ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
+    fio_u2buf16u(dst->buf + dst->len,
+                 ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
     dst->len += 2;
     if (len)
       FIO_MEMCPY(dst->buf + dst->len, eq, len);
@@ -2079,7 +2076,7 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
       size_t len = prop - i.buf;
       if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
         return -1; /* too long */
-      fio_u2buf16_local(dst->buf + dst->len, (len << 2));
+      fio_u2buf16u(dst->buf + dst->len, (len << 2));
       dst->len += 2;
       FIO_MEMCPY(dst->buf + dst->len, i.buf, len);
       dst->len += len;
@@ -2096,7 +2093,7 @@ FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
         len = dst->len - old_len;
         if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
           return -1;
-        fio_u2buf16_local(
+        fio_u2buf16u(
             dst->buf + old_len,
             ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN));
       }
@@ -2301,9 +2298,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   FIO_STR_INFO_TMP_VAR(filename, 4096);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
-    if ((m.len == 7 &&
-         (fio_buf2u64_local(m.buf) | 0x3232323232323232ULL) ==
-             (fio_buf2u64_local("options") | 0x3232323232323232ULL)))
+    if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x3232323232323232ULL) ==
+                           (fio_buf2u64u("options") | 0x3232323232323232ULL)))
       goto file_not_found;
   }
   rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
@@ -2447,9 +2443,8 @@ accept_encoding_header_test_done:
       if (ifrng.len && !FIO_STR_INFO_IS_EQ(ifrng, etag))
         goto range_request_review_finished;
     }
-    if (rng.len < 7 ||
-        fio_buf2u32_local(rng.buf) != fio_buf2u32_local("byte") ||
-        fio_buf2u16_local(rng.buf + 4) != fio_buf2u16_local("s="))
+    if (rng.len < 7 || fio_buf2u32u(rng.buf) != fio_buf2u32u("byte") ||
+        fio_buf2u16u(rng.buf + 4) != fio_buf2u16u("s="))
       goto range_request_review_finished;
     const size_t file_length = filename.len;
     char *ipos = rng.buf + 6;
@@ -2500,8 +2495,8 @@ range_request_review_finished:
   /* test for HEAD requests */
   {
     fio_str_info_s m = fio_keystr_info(&h->method);
-    if ((m.len == 4 && (fio_buf2u32_local(m.buf) | 0x32323232) ==
-                           (fio_buf2u32_local("head") | 0x32323232)))
+    if ((m.len == 4 && (fio_buf2u32u(m.buf) | 0x32323232) ==
+                           (fio_buf2u32u("head") | 0x32323232)))
       goto head_request;
   }
 
@@ -2866,14 +2861,14 @@ FIO_DESTRUCTOR(fio___http_str_cache_cleanup) {
 /* *****************************************************************************
 HTTP Handle Testing
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#ifdef FIO_TEST_ALL
 FIO_SFUNC void FIO_NAME_TEST(stl, http)(void) {
   /*
    * TODO: test module here
    */
 }
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */

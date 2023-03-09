@@ -17,7 +17,7 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
-    !defined(FIO___STL_KEEP)
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_PUBSUB___H
 
 /* *****************************************************************************
@@ -460,9 +460,9 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *letter);
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(obj)     fio_letter_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Distribution Channel: manages subscriptions to named channels. */
 typedef struct fio_channel_s {
@@ -479,9 +479,9 @@ typedef struct fio_channel_s {
 #define FIO_REF_NAME             fio_channel
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Subscription: contains subscriber data. */
 typedef struct fio_subscription_s {
@@ -500,9 +500,9 @@ FIO_SFUNC void fio_subscription_on_destroy(fio_subscription_s *sub);
 #define FIO_REF_NAME             fio_subscription
 #define FIO_REF_DESTROY(obj)     fio_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /** The Channel Map: maps named channels. */
 FIO_SFUNC void fio_channel_on_create(fio_channel_s *ch);
@@ -533,9 +533,9 @@ FIO_IFUNC uint64_t fio_channel___hash(char *buf, size_t len, int16_t filter) {
     fio_channel_free((key));                                                   \
   } while (0)
 #define FIO_MAP_KEY_DISCARD(key) fio_channel_free((key))
-#define FIO___STL_KEEP           1
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 /* *****************************************************************************
 
@@ -711,9 +711,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___postoffice_msmap,
 #define FIO_MAP_NAME             fio___postoffice_msmap
 #define FIO_MAP_VALUE            fio_subscription_s *
 #define FIO_MAP_VALUE_DESTROY(s) fio___subscription_unsubscribe(s)
-#define FIO___STL_KEEP
+#define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 #endif
 
 static struct FIO_POSTOFFICE {
@@ -860,8 +860,8 @@ Implementation
  * from an existing buffer. */
 FIO_IFUNC fio_letter_s *fio_letter_new_read(const char *head) {
   fio_letter_s *l = NULL;
-  uint32_t channel_len = fio_buf2u16_little(head + 10);
-  uint32_t message_len = fio_buf2u32_little(head + 12) & 0x00FFFFFFUL;
+  uint32_t channel_len = fio_buf2u16_le(head + 10);
+  uint32_t message_len = fio_buf2u32_le(head + 12) & 0x00FFFFFFUL;
   size_t len = FIO___LETTER_MINIMAL_LEN + channel_len + message_len;
   l = fio_letter_new(len);
   FIO_ASSERT_ALLOC(l);
@@ -919,12 +919,12 @@ len_error:
 
 /* returns a letter's message length (if any) */
 FIO_IFUNC size_t fio_letter_message_len(fio_letter_s *l) {
-  return (size_t)(0x00FFFFFFULL & fio_buf2u32_little(l->buf + 12));
+  return (size_t)(0x00FFFFFFULL & fio_buf2u32_le(l->buf + 12));
 }
 
 /* returns a letter's channel length (if any) */
 FIO_IFUNC size_t fio_letter_channel_len(fio_letter_s *l) {
-  return (size_t)(fio_buf2u16_little(l->buf + 10));
+  return (size_t)(fio_buf2u16_le(l->buf + 10));
 }
 
 /* returns a letter's channel. */
@@ -954,7 +954,7 @@ FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l) {
 /* returns a letter's ID (8 bytes random number)
  */
 FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l) {
-  return fio_buf2u32_local(l->buf);
+  return fio_buf2u32u(l->buf);
 }
 
 /* returns a letter's length */
@@ -1088,12 +1088,12 @@ error:
 Remote Letter Processing - validate unique delivery.
 ***************************************************************************** */
 
-#define FIO_OMAP_NAME  fio___letter_map
-#define FIO_MAP_KEY    uint64_t
-#define FIO_MAP_LRU    (1ULL << 16)
-#define FIO___STL_KEEP 1
+#define FIO_OMAP_NAME           fio___letter_map
+#define FIO_MAP_KEY             uint64_t
+#define FIO_MAP_LRU             (1ULL << 16)
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 
 FIO_SFUNC struct {
   fio___letter_map_s map;
@@ -1873,159 +1873,6 @@ SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine) {
   fio_queue_push(fio_srv_queue(), fio_pubsub_detach___task, engine, NULL);
 }
 
-/* *****************************************************************************
-Pub/Sub Testing
-***************************************************************************** */
-#ifdef FIO_TEST_CSTL
-
-/* *****************************************************************************
-Letter Testing
-***************************************************************************** */
-FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
-  fprintf(stderr,
-          "* Testing letter format (pub/sub "
-          "message exchange)\n");
-  struct test_info {
-    char *channel;
-    char *msg;
-    int16_t filter;
-    uint8_t flags;
-  } test_info[] = {
-      {(char *)"My Channel", (char *)"My channel Message", 0, 0},
-      {NULL, (char *)"My filter Message", 1, 255},
-      {(char *)"My Channel and Filter",
-       (char *)"My channel -filter Message",
-       257,
-       4},
-      {(char *)"My Channel and negative Filter",
-       (char *)"My channel - filter Message",
-       -3,
-       8},
-      {0},
-  };
-  for (int i = 0;
-       test_info[i].msg || test_info[i].channel || test_info[i].filter;
-       ++i) {
-    fio_letter_s *l = fio_letter_new_compose(
-        FIO_BUF_INFO2(
-            test_info[i].channel,
-            (test_info[i].channel ? FIO_STRLEN(test_info[i].channel) : 0)),
-        FIO_BUF_INFO2(test_info[i].msg,
-                      (test_info[i].msg ? FIO_STRLEN(test_info[i].msg) : 0)),
-        test_info[i].filter,
-        test_info[i].flags);
-    FIO_ASSERT(fio_letter_filter(l) == test_info[i].filter,
-               "letter filter identity error");
-    FIO_ASSERT(fio_letter_flags(l) == test_info[i].flags,
-               "letter flag identity error");
-    if (test_info[i].msg) {
-      FIO_ASSERT(fio_letter_message_len(l) == FIO_STRLEN(test_info[i].msg),
-                 "letter message length error");
-      FIO_ASSERT(!memcmp(fio_letter_message(l).buf,
-                         test_info[i].msg,
-                         fio_letter_message_len(l)),
-                 "message identity error (%s != %.*s)",
-                 test_info[i].msg,
-                 (int)fio_letter_message_len(l),
-                 fio_letter_message(l).buf);
-    } else {
-      FIO_ASSERT(!fio_letter_message_len(l),
-                 "letter message length error %d != 0",
-                 fio_letter_message_len(l));
-    }
-    if (test_info[i].channel) {
-      FIO_ASSERT(fio_letter_channel_len(l) == FIO_STRLEN(test_info[i].channel),
-                 "letter channel length error");
-      FIO_ASSERT(fio_letter_channel(l).buf &&
-                     !memcmp(fio_letter_channel(l).buf,
-                             test_info[i].channel,
-                             fio_letter_channel_len(l)),
-                 "channel identity error (%s != %.*s)",
-                 test_info[i].channel,
-                 (int)fio_letter_channel_len(l),
-                 fio_letter_channel(l).buf);
-    } else {
-      FIO_ASSERT(!fio_letter_channel_len(l), "letter channel length error");
-    }
-
-    fio_letter_free(l);
-  }
-}
-
-FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_on_message)(fio_msg_s *msg) {
-  ((int *)(msg->udata))[0] += 1;
-}
-FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_on_unsubscribe)(void *udata) {
-  ((int *)(udata))[0] -= 1;
-}
-
-FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
-  fprintf(stderr, "* Testing pub/sub round-trip.\n");
-  uintptr_t sub_handle = 0;
-  int state = 0, expected = 0, delta = 0;
-  fio_buf_info_s test_channel = FIO_BUF_INFO1((char *)"pubsub_test_channel");
-  subscribe_args_s sub[] = {
-      {
-          .channel = test_channel,
-          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
-          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .filter = -127,
-          .udata = &state,
-      },
-      {
-          .channel = test_channel,
-          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
-          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .subscription_handle_ptr = &sub_handle,
-          .udata = &state,
-          .filter = -127,
-      },
-      {
-          .channel = FIO_BUF_INFO1((char *)"pubsub_*"),
-          .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
-          .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .filter = -127,
-          .udata = &state,
-          .is_pattern = 1,
-      },
-  };
-  const int sub_count = (sizeof(sub) / sizeof(sub[0]));
-#define FIO___PUBLISH2TEST()                                                   \
-  fio_publish(.channel = test_channel,                                         \
-              .filter = -127,                                                  \
-              .engine = FIO_PUBSUB_CLUSTER);                                   \
-  expected += delta;                                                           \
-  fio_queue_perform_all(fio___srv_tasks);
-  for (int i = 0; i < sub_count; ++i) {
-    fio_subscribe FIO_NOOP(sub[i]);
-    ++delta;
-    FIO_ASSERT(state == expected,
-               "subscribe shouldn't have "
-               "affected state");
-    FIO___PUBLISH2TEST();
-    FIO_ASSERT(state == expected, "pub/sub test state incorrect (1-%d)", i);
-    FIO___PUBLISH2TEST();
-    FIO_ASSERT(state == expected, "pub/sub test state incorrect (2-%d)", i);
-  }
-  for (int i = 0; i < sub_count; ++i) {
-    fio_unsubscribe FIO_NOOP(sub[i]);
-    --delta;
-    --expected;
-    fio_queue_perform_all(fio___srv_tasks);
-    FIO_ASSERT(state == expected, "unsubscribe should call callback");
-    FIO___PUBLISH2TEST();
-    FIO_ASSERT(state == expected, "pub/sub test state incorrect (3-%d)", i);
-    FIO___PUBLISH2TEST();
-    FIO_ASSERT(state == expected, "pub/sub test state incorrect (4-%d)", i);
-  }
-#undef FIO___PUBLISH2TEST
-}
-FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
-  FIO_NAME_TEST(stl, letter)();
-  FIO_NAME_TEST(stl, pubsub_roundtrip)();
-}
-
-#endif /* FIO_TEST_CSTL */
 /* *****************************************************************************
 Pub/Sub Cleanup
 ***************************************************************************** */

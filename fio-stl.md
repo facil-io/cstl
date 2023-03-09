@@ -1,20 +1,20 @@
 ---
-title: facil.io - C STL - a Simple Template Library for C
+title: facil.io - C micro-framework for web applications
 sidebar: 0.8.x/_sidebar.md
 ---
-# facil.io - C STL - a Simple Template Library for C
+# facil.io - C micro-framework for web applications
 
-At the core of the [facil.io library](https://facil.io) is its powerful Simple Template Library for C (and C++).
+[facil.io](http://facil.io) is a C micro-framework for web applications. facil.io includes:
 
-The Simple Template Library is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
+* A fast HTTP/1.1 and Websocket static file + application server.
+* Support for custom network protocols for both server and client connections.
+* Dynamic types designed with web applications in mind (Strings, Hashes, Arrays etc').
+* Performant JSON parsing and formatting for easy network communication.
+* An easy solution to [the C10K problem](http://www.kegel.com/c10k.html).
+* A pub/sub process cluster engine for local and Websocket pub/sub.
+* Optional connectivity with Redis.
 
-The Simple Template Library also offers common functional primitives and helpers, such as bit operations, atomic operations, CLI parsing, JSON, task queues, a custom memory allocator and (of course) the facil.io protocol based server/client.
-
-In other words, all the common building blocks one could need in a C project are placed in this single header file.
-
-The header could be included multiple times with different results, creating different types or exposing different functionality.
-
-**Note**: the facil.io Web Application Framework builds on the C STL features to provide the IO server, pub / sub layer and types.
+This header library is the **C Server Toolbox Library** that makes it all happen.
 
 ## OS Support
 
@@ -22,101 +22,68 @@ The library in written and tested on POSIX systems. Windows support was added af
 
 Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
 
-## Simple Template Library (STL) Overview
+## Server Toolbox lIbrary (STL) Overview
 
-The core Simple Template Library (STL) is a single file header library (`fio-stl.h`).
+At the core of the [facil.io library](https://facil.io) is its powerful Server Toolbox lIbrary for C (and C++).
 
+The Server Toolbox lIbrary is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
 
-The [testable](#testing-the-library-fio_test_cstl) header library includes a Simple Template Library for the following common types:
+The [testable](#testing-the-library-fio_test_cstl) header library includes a Server Toolbox lIbrary for the following common types:
 
-* [Linked Lists](#linked-lists) - defined by `FIO_LIST_NAME`
+* [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
 
 * [Dynamic Arrays](#dynamic-arrays) - defined by `FIO_ARRAY_NAME`
 
 * [Hash Maps / Sets](#hash-tables-and-maps) - defined by `FIO_MAP_NAME`
-
-* [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
 
 * [Reference counting / Type wrapper](#reference-counting-and-type-wrapping) - defined by `FIO_REF_NAME`
 
 * [Soft / Dynamic Types (FIOBJ)](#fiobj-soft-dynamic-types) - defined by `FIO_FIOBJ`
 
 
-In addition, the core Simple Template Library (STL) includes helpers for common tasks, such as:
+In addition, the core Server Toolbox lIbrary (STL) includes helpers for common tasks, such as:
 
-* [Pointer Arithmetics](#pointer-arithmetics) (included by default)
-
-* [Pointer Tagging](#pointer-tagging-support) - defined by `FIO_PTR_TAG(p)`/`FIO_PTR_UNTAG(p)`
+* [Fast String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
 * [Logging and Assertion (without heap allocation)](#logging-and-assertions) - defined by `FIO_LOG`
-
-* [Atomic operations](#atomic-operations) - defined by `FIO_ATOMIC`
-
-* [Bit-Byte Operations](#bit-byte-operations) - defined by `FIO_BITWISE`
-
-* [Bitmap helpers](#bitmap-helpers) - defined by `FIO_BITMAP`
-
-* [Multi Precision Math Helpers](#multi-precision-math) - defined by `FIO_MATH`
-
-* [Glob Matching](#globe-matching) - defined by `FIO_GLOB_MATCH`
-
-* [Data Hashing (Risky Hash / Stable Hash)](#risky-hash--stable-hash-data-hashing) - defined by `FIO_RAND`
-
-* [SHA1](#sha1) and [ChaCha20 Poly1305](#chacha20--poly1305)- defined by `FIO_SHA1` and `FIO_CHACHA`
-
-* [Pseudo Random Generation](#pseudo-random-generation) - defined by `FIO_RAND`
-
-* [String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
 * [Binary Safe String Helpers](#binary-safe-core-string-helpers) - defined by `FIO_STR`
 
 * [Time Helpers](#time-helpers) - defined by `FIO_TIME`
 
-* [Task Queues and Timers](#task-queue) - defined by `FIO_QUEUE`
-
-* [Thread Portability Helpers](#threads-portable) - defined by `FIO_THREADS`
-
 * [File Utility Helpers](#file-utility-helpers) - defined by `FIO_FILES`
 
 * [Command Line Interface helpers](#cli-command-line-interface) - defined by `FIO_CLI`
 
-* [URL (URI) parsing](#url-uri-parsing) - defined by `FIO_URL`
-
-* [Custom JSON Parser](#custom-json-parser) - defined by `FIO_JSON`
-
-* [Quick Sort and Insert Sort](#quick-sort-and-insert-sort) - defined by `FIO_SORT_NAME`
-
-* [Basic Socket / IO Helpers](#basic-socket-io-helpers) - defined by `FIO_SOCK`
-
-* [Data Stream Containers](#data-stream-container) - defined by `FIO_STREAM`
-
-* [Polling with `epoll` / `kqueue` / `poll`](#basic-io-polling) - defined by `FIO_POLL`
-
-* [Signal (pass-through) Monitoring](#signal-monitoring) - defined by `FIO_SIGNAL`
-
-* [IO Multiplexing Server](#server) - defined by `FIO_SERVER`
+* [Task Queues and Timers](#task-queue) - defined by `FIO_QUEUE`
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
+* [Atomic operations](#atomic-operations) - defined by `FIO_ATOMIC`
+
+* [Pointer Arithmetics](#pointer-arithmetics) (included by default)
+
+* And much more...
+
 ### Static Functions by Default
 
-By default, the Simple Template Library will generate static functions where possible.
+By default, facil.io will generate static functions where possible.
 
 To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to generate externally visible code.
 
 ### Compilation Modes
 
-The Simple Template Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
+The Server Toolbox lIbrary types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
 
 #### `FIO_EXTERN`
 
-If defined, the the Simple Template Library will generate non-static code.
+If defined, the the Server Toolbox lIbrary will generate non-static code.
 
 If `FIO_EXTERN` is defined alone, only function declarations and inline functions will be generated.
 
 If `FIO_EXTERN_COMPLETE` is defined, the function definition (the implementation code) will also be generated.
 
-**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
+**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Server Toolbox lIbrary header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
 
 For example, in the header (i.e., `mymem.h`), use:
 
@@ -140,7 +107,7 @@ Later, in the implementation file, use:
 
 When defined, this macro will force full code generation.
 
-**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Simple Template Library header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
+**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Server Toolbox lIbrary header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
 
 #### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
@@ -189,11 +156,11 @@ Note, `FIO_EVERYTHING` functions will always be `static` unless `FIO_EXTERN` was
 
 -------------------------------------------------------------------------------
 
-## Testing the Library (`FIO_TEST_CSTL`)
+## Testing the Library (`FIO_TEST_ALL`)
 
-To test the library, define the `FIO_TEST_CSTL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
+To test the library, define the `FIO_TEST_ALL` macro and include the header. A testing function called `fio_test_dynamic_types` will be defined. Call that function in your code to test the library.
 
-#### `FIO_TEST_CSTL`
+#### `FIO_TEST_ALL`
 
 Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
 
@@ -207,7 +174,7 @@ This also prints out some minimal usage information about each allocator when ex
 
 ## Version and Common Helper Macros
 
-The facil.io C STL (Simple Template Library) offers a number of common helper macros that are also used internally. These are automatically included once the `fio-stl.h` is included.
+The facil.io C STL (Server Toolbox lIbrary) offers a number of common helper macros that are also used internally. These are automatically included once the `fio-stl.h` is included.
 
 ### Version Macros
 
@@ -466,59 +433,6 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 ```
 
 Converts a `fio_buf_info_s` into a `fio_str_info_s`.
-
--------------------------------------------------------------------------------
-
-## Byte Ordering - Little Endian vs. Big Endian
-
-To help with byte ordering on different systems, the following macros and functions are defined. Note that there's no built-in support for mixed endian systems.
-
-#### `__BIG_ENDIAN__`
-
-Defined and set to either 1 (on big endian systems) or 0 (little endian systems)
-
-#### `__LITTLE_ENDIAN__`
-
-Defined and set to either 1 (on little endian systems) or 0 (big endian systems)
-
-#### `fio_is_little_endian`, `fio_is_big_endian`
-
-```c
-
-```
-
-These functions perform runtime tests for endianess and may be optimized away by the compiler.
-
-#### `fio_bswap`
-
-Returns a number of the indicated type with it's byte representation swapped.
-
-- `fio_bswap16(i)`
-- `fio_bswap32(i)`
-- `fio_bswap64(i)`
-- `fio_bswap128(i)` (only on compilers that support this type)
-
-#### `fio_lton`, `fio_ntol`
-
-On big-endian systems, the following macros a NOOPs. On little-endian systems these macros flip the byte order.
-
-- `fio_lton16(i)`
-- `fio_ntol16(i)`
-- `fio_lton32(i)`
-- `fio_ntol32(i)`
-- `fio_lton64(i)`
-- `fio_ntol64(i)`
-- `fio_lton128(i)`
-- `fio_ntol128(i)`
-
-#### `fio_ltole`
-
-Converts a local number to little-endian. On big-endian systems, these macros flip the byte order. On little-endian systems these macros are a NOOP.
-
-- `fio_ltole16(i)`
-- `fio_ltole32(i)`
-- `fio_ltole64(i)`
-- `fio_ltole128(i)`
 
 -------------------------------------------------------------------------------
 
@@ -875,6 +789,270 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 Used internally to name test functions.
 
 -------------------------------------------------------------------------------
+
+## Byte Ordering and Copying - Little Endian vs. Big Endian
+
+To help with byte ordering on different systems, the following macros and functions are defined. Note that there's no built-in support for mixed endian systems.
+
+#### `__BIG_ENDIAN__`
+
+Defined and set to either 1 (on big endian systems) or 0 (little endian systems)
+
+#### `__LITTLE_ENDIAN__`
+
+Defined and set to either 1 (on little endian systems) or 0 (big endian systems)
+
+#### `fio_is_little_endian`, `fio_is_big_endian`
+
+```c
+unsigned int fio_is_little_endian(void);
+unsigned int fio_is_big_endian(void);
+```
+
+These functions perform runtime tests for endianess ... but may be optimized away by the compiler.
+
+#### `fio_bswap`
+
+Returns a number of the indicated type with it's byte representation swapped.
+
+- `fio_bswap16(i)`
+- `fio_bswap32(i)`
+- `fio_bswap64(i)`
+- `fio_bswap128(i)` (only on compilers that support this type)
+
+#### `fio_lton`, `fio_ntol`
+
+On big-endian systems, the following macros a NOOPs. On little-endian systems these macros flip the byte order.
+
+- `fio_lton16(i)`
+- `fio_ntol16(i)`
+- `fio_lton32(i)`
+- `fio_ntol32(i)`
+- `fio_lton64(i)`
+- `fio_ntol64(i)`
+- `fio_lton128(i)`
+- `fio_ntol128(i)`
+
+#### `fio_ltole`
+
+Converts a local number to little-endian. On big-endian systems, these macros flip the byte order. On little-endian systems these macros are a NOOP.
+
+- `fio_ltole16(i)`
+- `fio_ltole32(i)`
+- `fio_ltole64(i)`
+- `fio_ltole128(i)`
+
+#### Bit rotation (left / right)
+
+Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) according to the type width specified (i.e., `fio_rrot64` indicates a **r**ight rotation for `uint64_t`).
+
+- `fio_lrot8(i, bits)`
+- `fio_rrot8(i, bits)`
+- `fio_lrot16(i, bits)`
+- `fio_rrot16(i, bits)`
+- `fio_lrot32(i, bits)`
+- `fio_rrot32(i, bits)`
+- `fio_lrot64(i, bits)`
+- `fio_rrot64(i, bits)`
+- `fio_lrot128(i, bits)`
+- `fio_rrot128(i, bits)`
+
+- `FIO_LROT(i, bits)` (MACRO, can be used with any type size)
+- `FIO_RROT(i, bits)` (MACRO, can be used with any type size)
+
+#### Bytes to Numbers
+
+Reads a number from an unaligned memory buffer. The number or **bits** read from the buffer is indicated by the name of the function.
+
+**Big Endian**:
+
+- `fio_buf2u16_be(buffer)`
+- `fio_buf2u32_be(buffer)`
+- `fio_buf2u64_be(buffer)`
+- `fio_buf2u128_be(buffer)`
+
+**Little Endian**:
+
+- `fio_buf2u16_le(buffer)`
+- `fio_buf2u32_le(buffer)`
+- `fio_buf2u64_le(buffer)`
+- `fio_buf2u128_le(buffer)`
+
+**Native (Unspecified) Byte Order**:
+
+- `fio_buf2u16u(buffer)`
+- `fio_buf2u32u(buffer)`
+- `fio_buf2u64u(buffer)`
+- `fio_buf2u128u(buffer)`
+
+#### Numbers to Bytes (native / reversed / network ordered)
+
+Writes a number to an unaligned memory buffer. The number or bits written to the buffer is indicated by the name of the function.
+
+**Big Endian (default)**:
+
+- `fio_u2buf16_be(buffer, i)`
+- `fio_u2buf32_be(buffer, i)`
+- `fio_u2buf64_be(buffer, i)`
+- `fio_u2buf128_be(buffer, i)`
+
+**Little Endian**:
+
+- `fio_u2buf16_le(buffer, i)`
+- `fio_u2buf32_le(buffer, i)`
+- `fio_u2buf64_le(buffer, i)`
+- `fio_u2buf128_le(buffer, i)`
+
+**Native (Unspecified) Byte Order**:
+
+- `fio_u2buf16u(buffer, i)`
+- `fio_u2buf32u(buffer, i)`
+- `fio_u2buf64u(buffer, i)`
+- `fio_u2buf128u(buffer, i)`
+
+#### `fio_xmask`
+
+```c
+void fio_xmask(char *buf, size_t len, uint64_t mask);
+```
+
+Masks data using a 64 bit mask.
+
+The function may perform significantly better when the buffer's memory is aligned.
+
+#### Constant Time Helpers
+
+Performs the operation indicated in constant time.
+
+- `fio_ct_true(condition)`
+
+    Tests if `condition` is non-zero (returns `1` / `0`).
+
+- `fio_ct_false(condition)`
+
+    Tests if `condition` is zero (returns `1` / `0`).
+
+- `fio_ct_if_bool(bool, a_if_true, b_if_false)`
+
+    Tests if `bool == 1` (returns `a` / `b`).
+
+- `fio_ct_if(condition, a_if_true, b_if_false)`
+
+    Tests if `condition` is non-zero (returns `a` / `b`).
+
+- `fio_ct_max(a, b)`
+
+    Returns `a` if a >= `b` (performs a **signed** comparison).
+
+
+-------------------------------------------------------------------------------
+
+## Inspecting Byte / Bit Data
+
+**Note**: the 128 bit helpers are only available with systems / compilers that support 128 bit types.
+
+#### Bitmap helpers
+
+- `fio_bit_get(void *map, size_t bit)`
+
+- `fio_bit_set(void *map, size_t bit)`   (a **non-atomic** operation, **not** thread-safe)
+
+- `fio_bit_unset(void *map, size_t bit)` (a **non-atomic** operation, **not** thread-safe)
+
+Sets and un-sets bits in an arbitrary bitmap - non-atomic, **not** thread-safe.
+
+#### `fio_popcount` and Hemming 
+
+```c
+int fio_popcount(uint64_t n);
+```
+
+Returns the number of set bits in the number `n`.
+
+#### `fio_hemming_dist`
+
+```c
+#define fio_hemming_dist(n1, n2) fio_popcount(((uint64_t)(n1) ^ (uint64_t)(n2)))
+```
+
+Returns the Hemming Distance between the number `n1` and the number `n2`.
+
+Hemming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
+
+
+#### `fio_has_full_byte32`
+
+```c
+uint32_t fio_has_full_byte32(uint32_t row)
+```
+
+  Detects a byte where all the bits are set (`255`) within a 4 byte vector.
+
+#### `fio_has_zero_byte32`
+
+```c
+uint32_t fio_has_zero_byte32(uint32_t row)
+```
+
+  Detects a byte where no bits are set (0) within a 4 byte vector.
+
+#### `fio_has_byte32`
+
+```c
+uint32_t fio_has_byte32(uint32_t row, uint8_t byte)
+```
+
+  Detects if `byte` exists within a 4 byte vector.
+
+#### `fio_has_full_byte64`
+
+```c
+uint64_t fio_has_full_byte64(uint64_t row)
+```
+
+  Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+
+#### `fio_has_zero_byte64`
+
+```c
+uint64_t fio_has_zero_byte64(uint64_t row)
+```
+
+  Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
+
+#### `fio_has_byte64`
+
+```c
+uint64_t fio_has_byte64(uint64_t row, uint8_t byte)
+```
+
+  Detects if `byte` exists within an 8 byte vector.
+
+#### `fio_has_full_byte128`
+
+```c
+__uint128_t fio_has_full_byte128(__uint128_t row)
+```
+
+    Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+
+#### `fio_has_zero_byte128`
+
+```c
+__uint128_t fio_has_zero_byte128(__uint128_t row)
+```
+
+    Detects a byte where no bits are set (0) within an 8 byte vector.
+
+#### `fio_has_byte128`
+
+```c
+__uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
+```
+
+    Detects if `byte` exists within an 8 byte vector.
+
+-------------------------------------------------------------------------------
 ## Logging and Assertions
 
 ```c
@@ -960,817 +1138,269 @@ Note, this macro will **only** raise a `SIGINT` signal, but will not exit the pr
 Performs static assertion test (tested during compile time). Note that `cond` **must** be a constant expression and `msg` cannot be formatted.
 
 -------------------------------------------------------------------------------
-## Atomic operations
+## Doubly Linked Lists
 
 ```c
-#define FIO_ATOMIC
+// initial `include` defines the `FIO_LIST_NODE` macro and type
 #include "fio-stl.h"
+// list element 
+typedef struct {
+  FIO_LIST_NODE node;
+  char * data;
+} my_list_s;
 ```
 
-If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
+Doubly Linked Lists are an incredibly common and useful data structure.
 
-In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
+### Linked Lists Performance
 
-#### `fio_atomic_load(p_obj)`
+Memory overhead (on 64bit machines) is 16 bytes per node (or 8 bytes on 32 bit machines) for the `next` and `prev` pointers.
 
-Atomically loads and returns the value stored in the object pointed to by `p_obj`.
+Linked Lists use pointers in order to provide fast add/remove operations with O(1) speeds. This O(1) operation ignores the object allocation time and suffers from poor memory locality, but it's still very fast.
 
-#### `fio_atomic_exchange(p_obj, value)`
+However, Linked Lists suffer from slow seek/find and iteration operations.
 
-Atomically sets the object pointer to by `p_obj` to `value`, returning the
-previous value.
+Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
 
-#### `fio_atomic_add(p_obj, value)`
+### Linked Lists Macros
 
-A MACRO / function that performs `add` atomically.
+Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
 
-Returns the previous value.
-
-#### `fio_atomic_sub(p_obj, value)`
-
-A MACRO / function that performs `sub` atomically.
-
-Returns the previous value.
-
-#### `fio_atomic_and(p_obj, value)`
-
-A MACRO / function that performs `and` atomically.
-
-Returns the previous value.
-
-#### `fio_atomic_xor(p_obj, value)`
-
-A MACRO / function that performs `xor` atomically.
-
-Returns the previous value.
-
-#### `fio_atomic_or(p_obj, value)`
-
-A MACRO / function that performs `or` atomically.
-
-Returns the previous value.
-
-#### `fio_atomic_nand(p_obj, value)`
-
-A MACRO / function that performs `nand` atomically.
-
-Returns the previous value.
-
-#### `fio_atomic_add_fetch(p_obj, value)`
-
-A MACRO / function that performs `add` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_sub_fetch(p_obj, value)`
-
-A MACRO / function that performs `sub` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_and_fetch(p_obj, value)`
-
-A MACRO / function that performs `and` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_xor_fetch(p_obj, value)`
-
-A MACRO / function that performs `xor` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_or_fetch(p_obj, value)`
-
-A MACRO / function that performs `or` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_nand_fetch(p_obj, value)`
-
-A MACRO / function that performs `nand` atomically.
-
-Returns the new value.
-
-#### `fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired)`
-
-A MACRO / function that performs a system specific `fio_atomic_compare_exchange` using pointers.
-
-The behavior of this instruction is compiler / CPU architecture specific, where `p_expected` **SHOULD** be overwritten with the latest value of `p_obj`, but **MAY NOT**, depending on system and compiler implementations.
-
-Returns 1 for successful exchange or 0 for failure.
-
-### a SpinLock style MultiLock
-
-Atomic operations lend themselves easily to implementing spinlocks, so the facil.io STL includes one whenever atomic operations are defined (`FIO_ATOMIC`).
-
-Spinlocks are effective for very short critical sections or when a a failure to acquire a lock allows the program to redirect itself to other pending tasks. 
-
-However, in general, spinlocks should be avoided when a task might take a longer time to complete or when the program might need to wait for a high contention lock to become available.
-
-#### `fio_lock_i`
-
-A spinlock type based on a volatile unsigned char.
-
-**Note**: the spinlock contains one main / default lock (`sub == 0`) and 7 sub-locks (`sub >= 1 && sub <= 7`), which could be managed:
-
-- Separately: using the `fio_lock_sublock`, `fio_trylock_sublock` and `fio_unlock_sublock` functions.
-- Jointly: using the `fio_trylock_group`, `fio_lock_group` and `fio_unlock_group` functions.
-- Collectively: using the `fio_trylock_full`, `fio_lock_full` and `fio_unlock_full` functions.
-
-
-#### `fio_lock(fio_lock_i *)`
-
-Busy waits for the default lock (sub-lock `0`) to become available.
-
-#### `fio_trylock(fio_lock_i *)`
-
-Attempts to acquire the default lock (sub-lock `0`). Returns 0 on success and 1 on failure.
-
-#### `fio_unlock(fio_lock_i *)`
-
-Unlocks the default lock (sub-lock `0`), no matter which thread owns the lock.
-
-#### `fio_is_locked(fio_lock_i *)`
-
-Returns 1 if the (main) lock is engaged. Otherwise returns 0.
-
-#### `fio_lock_sublock(fio_lock_i *, uint8_t sub)`
-
-Busy waits for a sub-lock to become available.
-
-#### `fio_trylock_sublock(fio_lock_i *, uint8_t sub)`
-
-Attempts to acquire the sub-lock. Returns 0 on success and 1 on failure.
-
-#### `fio_unlock_sublock(fio_lock_i *, uint8_t sub)`
-
-Unlocks the sub-lock, no matter which thread owns the lock.
-
-#### `fio_is_sublocked(fio_lock_i *, uint8_t sub)`
-
-Returns 1 if the specified sub-lock is engaged. Otherwise returns 0.
-
-#### `uint8_t fio_trylock_group(fio_lock_i *lock, const uint8_t group)`
-
-Tries to lock a group of sub-locks.
-
-Combine a number of sub-locks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
-macro. i.e.:
+#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
 
 ```c
-if(fio_trylock_group(&lock,
-                     FIO_LOCK_SUBLOCK(1) |
-                     FIO_LOCK_SUBLOCK(2)) == 0) {
-  // act in lock and then release the SAME lock with:
-  fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
-}
+/** A linked list node type */
+#define FIO_LIST_NODE fio_list_node_s
+/** A linked list head type */
+#define FIO_LIST_HEAD fio_list_node_s
+/** A linked list arch-type */
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+
 ```
 
-Returns 0 on success and 1 on failure.
+These are the basic core types for a linked list node used by the Linked List macros.
 
-#### `void fio_lock_group(fio_lock_i *lock, uint8_t group)`
-
-Busy waits for a group lock to become available - not recommended.
-
-See `fio_trylock_group` for details.
-
-#### `void fio_unlock_group(fio_lock_i *lock, uint8_t group)`
-
-Unlocks a sub-lock group, no matter which thread owns which sub-lock.
-
-#### `fio_trylock_full(fio_lock_i *lock)`
-
-Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
-
-#### `fio_lock_full(fio_lock_i *lock)`
-
-Busy waits for all sub-locks to become available - not recommended.
-
-#### `fio_unlock_full(fio_lock_i *lock)`
-
-Unlocks all sub-locks, no matter which thread owns which lock.
-
--------------------------------------------------------------------------------
-
-## MultiLock with Thread Suspension
+#### `FIO_LIST_INIT(head)`
 
 ```c
-#define FIO_LOCK2
-#include "fio-stl.h"
+#define FIO_LIST_INIT(obj)                                                     \
+  (FIO_LIST_HEAD){ .next = &(obj), .prev = &(obj) }
 ```
 
-**BROKEN(!):** note that the `FIO_LOCK2` implementation currently does not work on all systems and assumes specific OS behavior.
+Initializes a linked list.
 
-If the `FIO_LOCK2` macro is defined than the multi-lock `fio_lock2_s` type and it's functions will be defined.
+#### `FIO_LIST_PUSH`
 
-The `fio_lock2` locking mechanism follows a bitwise approach to multi-locking, allowing a single lock to contain up to 31 sublocks (on 32 bit machines) or 63 sublocks (on 64 bit machines).
+```c
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+```
 
-This is a very powerful tool that allows simultaneous locking of multiple sublocks (similar to `fio_trylock_group`) while also supporting a thread "waitlist" where paused threads await their turn to access the lock and enter the critical section.
+UNSAFE macro for pushing a node to a list.
 
-The default implementation uses `pthread` (POSIX Threads) to access the thread's "ID", pause the thread (using `sigwait`) and resume the thread (with `pthread_kill`).
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
-The default behavior can be controlled using the following MACROS:
+#### `FIO_LIST_POP`
 
-* the `FIO_THREAD_T` macro should return a thread type, default: `pthread_t`
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+```
 
-* the `FIO_THREAD_ID()` macro should return this thread's FIO_THREAD_T.
+UNSAFE macro for popping a node from a list.
 
-* the `FIO_THREAD_PAUSE(id)` macro should temporarily pause thread execution.
+* `type` is the underlying `struct` type of the next list member.
 
-* the `FIO_THREAD_RESUME(id)` macro should resume thread execution.
+* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
 
-#### `fio_lock2_s`
+* `dest_prt` is the pointer that will accept the next list member.
+
+* `head` is the head of the list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+Note that using this macro with an empty list will produce **undefined behavior**.
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+```
+
+UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
+
+Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+#### `FIO_LIST_EACH`
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
+```
+
+Loops through every node in the linked list except the head.
+
+This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
+
+i.e.,
 
 ```c
 typedef struct {
-  volatile size_t lock;
-  fio___lock2_wait_s *waiting; /**/
-} fio_lock2_s;
-```
+  void * data;
+  FIO_LIST_HEAD node;
+} ptr_list_s;
 
-The `fio_lock2_s` type **must be considered opaque** and the struct's fields should **never** be accessed directly.
+FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
 
-The `fio_lock2_s` type is the lock's type.
+/* ... */
 
-#### `fio_trylock2`
-
-```c
-uint8_t fio_trylock2(fio_lock2_s *lock, size_t group);
-```
-
-Tries to lock a multilock.
-
-Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
-macro. i.e.:
-
-```c
-if(!fio_trylock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
-  // act in lock
-  fio_unlock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
+FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
+  do_something_with(pos->data);
 }
 ```
 
-Returns 0 on success and non-zero on failure.
-
-#### `fio_lock2`
+#### `FIO_LIST_IS_EMPTY`
 
 ```c
-void fio_lock2(fio_lock2_s *lock, size_t group);
+#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
 ```
 
-Locks a multilock, waiting as needed.
+Macro for testing if a list is empty.
 
-Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
-macro. i.e.:
 
-     fio_lock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2)));
+### Indexed Linked Lists Macros (always defined):
 
-Doesn't return until a successful lock was acquired.
 
-#### `fio_unlock2`
+Indexed linked lists are often used to either save memory or making it easier to reallocate the memory used for the whole list. This is performed by listing pointer offsets instead of the whole pointer, allowing the offsets to use smaller type sizes.
+
+For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, than a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
+
+#### `FIO_INDEXED_LIST##_HEAD` / `FIO_INDEXED_LIST##_NODE`
 
 ```c
-void fio_unlock2(fio_lock2_s *lock, size_t group);
+/** A 32 bit indexed linked list node type */
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+/** A 16 bit indexed linked list node type */
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+/** An 8 bit indexed linked list node type */
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+
+/** A 32 bit indexed linked list node type */
+typedef struct fio_index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio_index32_node_s;
+
+/** A 16 bit indexed linked list node type */
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+
+/** An 8 bit indexed linked list node type */
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
 ```
 
-Unlocks a multilock, regardless of who owns the locked group.
-
-Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
-macro. i.e.:
+#### `FIO_INDEXED_LIST_PUSH`
 
 ```c
-fio_unlock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
-````
-
--------------------------------------------------------------------------------
-## Bit-Byte operations:
-
-```c
-#define FIO_BITWISE
-#include "fio-stl.h"
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[n__].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
+    (root)[(head)].node_name.prev = n__;                                       \
+  } while (0)
 ```
 
-If the `FIO_BITWISE` macro is defined than the following macros will be
-defined:
+UNSAFE macro for pushing a node to a list.
 
-**Note**: the 128 bit helpers are only available with systems / compilers that support 128 bit types.
-
-#### Bit rotation (left / right)
-
-Returns a number with it's bits left rotated (`lrot`) or right rotated (`rrot`) according to the type width specified (i.e., `fio_rrot64` indicates a **r**ight rotation for `uint64_t`).
-
-- `fio_lrot8(i, bits)`
-- `fio_rrot8(i, bits)`
-- `fio_lrot16(i, bits)`
-- `fio_rrot16(i, bits)`
-- `fio_lrot32(i, bits)`
-- `fio_rrot32(i, bits)`
-- `fio_lrot64(i, bits)`
-- `fio_rrot64(i, bits)`
-- `fio_lrot128(i, bits)`
-- `fio_rrot128(i, bits)`
-
-- `FIO_LROT(i, bits)` (MACRO, can be used with any type size)
-- `FIO_RROT(i, bits)` (MACRO, can be used with any type size)
-
-#### Bytes to Numbers (native / reversed / network ordered)
-
-Reads a number from an unaligned memory buffer. The number or bits read from the buffer is indicated by the name of the function.
-
-Note: The following functions might use `__builtin_memcpy` when available. To use a the facil.io C implementation, define `FIO_BITWISE_USE_MEMCPY` as `0` and consider enabling unaligned memory access if the platform allows for it, by setting `FIO_UNALIGNED_ACCESS` to `1`.
-
-**Big Endian (default)**:
-
-- `fio_buf2u16(buffer)`
-- `fio_buf2u32(buffer)`
-- `fio_buf2u64(buffer)`
-- `fio_buf2u128(buffer)`
-
-**Little Endian**:
-
-- `fio_buf2u16_little(buffer)`
-- `fio_buf2u32_little(buffer)`
-- `fio_buf2u64_little(buffer)`
-- `fio_buf2u128_little(buffer)`
-
-**Native Byte Order**:
-
-- `fio_buf2u16_local(buffer)`
-- `fio_buf2u32_local(buffer)`
-- `fio_buf2u64_local(buffer)`
-- `fio_buf2u128_local(buffer)`
-
-**Reversed Byte Order**:
-
-- `fio_buf2u16_bswap(buffer)`
-- `fio_buf2u32_bswap(buffer)`
-- `fio_buf2u64_bswap(buffer)`
-- `fio_buf2u128_bswap(buffer)`
-
-#### Numbers to Bytes (native / reversed / network ordered)
-
-Writes a number to an unaligned memory buffer. The number or bits written to the buffer is indicated by the name of the function.
-
-**Big Endian (default)**:
-
-- `fio_u2buf16(buffer, i)`
-- `fio_u2buf32(buffer, i)`
-- `fio_u2buf64(buffer, i)`
-- `fio_u2buf128(buffer, i)`
-
-**Little Endian**:
-
-- `fio_u2buf16_little(buffer, i)`
-- `fio_u2buf32_little(buffer, i)`
-- `fio_u2buf64_little(buffer, i)`
-- `fio_u2buf128_little(buffer, i)`
-
-**Native Byte Order**:
-
-- `fio_u2buf16_local(buffer, i)`
-- `fio_u2buf32_local(buffer, i)`
-- `fio_u2buf64_local(buffer, i)`
-- `fio_u2buf128_local(buffer, i)`
-
-**Reversed Byte Order**:
-
-- `fio_u2buf16_bswap(buffer, i)`
-- `fio_u2buf32_bswap(buffer, i)`
-- `fio_u2buf64_bswap(buffer, i)`
-- `fio_u2buf128_bswap(buffer, i)`
-
-#### Constant Time Bit Operations
-
-Performs the operation indicated in constant time.
-
-- `fio_ct_true(condition)`
-
-    Tests if `condition` is non-zero (returns `1` / `0`).
-
-- `fio_ct_false(condition)`
-
-    Tests if `condition` is zero (returns `1` / `0`).
-
-- `fio_ct_if_bool(bool, a_if_true, b_if_false)`
-
-    Tests if `bool == 1` (returns `a` / `b`).
-
-- `fio_ct_if(condition, a_if_true, b_if_false)`
-
-    Tests if `condition` is non-zero (returns `a` / `b`).
-
-- `fio_ct_max(a, b)`
-
-    Returns `a` if a >= `b` (performs a **signed** comparison).
-
-#### Simulating SIMD instructions
-
-
-- `fio_has_full_byte32(uint32_t row)`
-
-	Detects a byte where all the bits are set (`255`) within a 4 byte vector.
-
-- `fio_has_zero_byte32(uint32_t row)`
-
-	Detects a byte where no bits are set (0) within a 4 byte vector.
-
-- `fio_has_byte32(uint32_t row, uint8_t byte)`
-
-	Detects if `byte` exists within a 4 byte vector.
-
-- `fio_has_full_byte64(uint64_t row)`
-
-	Detects a byte where all the bits are set (`255`) within an 8 byte vector.
-
-- `fio_has_zero_byte64(uint64_t row)`
-
-	Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
-
-- `fio_has_byte64(uint64_t row, uint8_t byte)`
-
-	Detects if `byte` exists within an 8 byte vector.
-
-- `fio_has_full_byte128(__uint128_t row)`
-
-    Detects a byte where all the bits are set (`255`) within an 8 byte vector.
-
-- `fio_has_zero_byte128(__uint128_t row)`
-
-    Detects a byte where no bits are set (0) within an 8 byte vector.
-
-- `fio_has_byte128(__uint128_t row, uint8_t byte)`
-
-    Detects if `byte` exists within an 8 byte vector.
-
-#### Numeral Array Shuffling
-
-Numeral vector / array shuffling is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
-
-Vector / array shuffling is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
-
-The naming convention is `fio_PRxL_reshuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
-
-**Note**: The use of **re**shuffle denotes that the shuffling occurs in-place, replacing current data (unlike the `fio_uxxx_shuffle##` math functions).
-
-i.e.: 
+#### `FIO_INDEXED_LIST_REMOVE`
 
 ```c
-void fio_u64x4_reshuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x8_reshuffle(uint64_t * v, uint8_t[8]);
-void fio_u64x16_reshuffle(uint64_t *v, uint8_t[16]);
-#define fio_u64x4_reshuffle(v, ...)  fio_u64x4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_reshuffle(v, ...)  fio_u64x8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_reshuffle(v, ...) fio_u64x16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+  } while (0)
 ```
 
-#### Numeral Array Reduction
+UNSAFE macro for removing a node from a list.
 
-Numeral vector / array reduction is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
-
-Vector / array reduction is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
-
-The naming convention is `fio_PRxL_reduce_OP` where:
-
-- `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl`
-
--  `L` is the length of the array in number of elements.
-
-- `OP` is the operation to be performed, one of: `add`, `mul` `xor`, `or`, `and`. Note that for `float` and `double` types, only `add` and `mul` are available.
-
-i.e.: 
+#### `FIO_INDEXED_LIST_REMOVE_RESET`
 
 ```c
-uint64_t fio_u64x4_reduce_add(uint64_t * v);
-uint64_t fio_u64x8_reduce_xor(uint64_t * v);
-uint64_t fio_u64x16_reduce_and(uint64_t * v);
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+  } while (0)
 ```
 
-#### `fio_popcount` and Hemming 
+UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
+
+#### `FIO_INDEXED_LIST_EACH`
 
 ```c
-int fio_popcount(uint64_t n);
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
+  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
+       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
 ```
 
-Returns the number of set bits in the number `n`.
-
-#### `fio_hemming_dist`
-
-```c
-#define fio_hemming_dist(n1, n2) fio_popcount(((uint64_t)(n1) ^ (uint64_t)(n2)))
-```
-
-Returns the Hemming Distance between the number `n1` and the number `n2`.
-
-Hemming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
-
-#### `fio_xmask`
-
-```c
-void fio_xmask(char *buf,
-               size_t len,
-               uint64_t mask);
-```
-
-Masks data using a 64 bit mask.
-
-The function may perform significantly better when the buffer's memory is aligned.
-
-#### `fio_xmask2`
-
-```c
-uint64_t fio_xmask2(char *buf,
-                    size_t len,
-                    uint64_t mask,
-                    uint64_t nonce);
-```
-
-Masks data using a 64 bit mask and a counter mode nonce.
-
-Returns the end state of the mask.
-
-The function may perform significantly better when the buffer's memory is aligned.
-
-**Note**: this function could be used to obfuscate data in locally stored buffers, mitigating risks such as data leaks that may occur when memory is swapped to disk. However, this function should **never** be used as an alternative to actual encryption.
-
--------------------------------------------------------------------------------
-
-## Bitmap helpers
-
-```c
-#define FIO_BITMAP
-#include "fio-stl.h"
-```
-
-If the `FIO_BITMAP` macro is defined than the following macros will be
-defined.
-
-In addition, the `FIO_ATOMIC` will be assumed to be defined, as setting bits in
-the bitmap is implemented using atomic operations.
-
-#### Bitmap helpers
-- `fio_bitmap_get(void *map, size_t bit)`
-- `fio_bitmap_set(void *map, size_t bit)`   (an atomic operation, thread-safe)
-- `fio_bitmap_unset(void *map, size_t bit)` (an atomic operation, thread-safe)
-
--------------------------------------------------------------------------------
-## Multi-Precision Math
-
-```c
-#define FIO_MATH
-#include "fio-stl.h"
-```
-
-If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
-
-Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
-
-### Multi-Precision Math Building Blocks
-
-The following simple operations can be used to build your own multi-precision implementation.
-
-#### `fio_math_addc64`
-
-```c
-uint64_t fio_math_addc64(uint64_t a,
-                         uint64_t b,
-                         uint64_t carry_in,
-                         uint64_t *carry_out);
-```
-
-Add with carry.
-
-#### `fio_math_subc64`
-
-```c
-uint64_t fio_math_subc64(uint64_t a,
-                         uint64_t b,
-                         uint64_t carry_in,
-                         uint64_t *carry_out);
-```
-
-Subtract with carry.
-
-#### `fio_math_mulc64`
-```c
-uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
-```
-
-Multiply with carry out.
-
-### Multi-Precision Helper Types
-
-The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types.
-
-
-#### `fio_u128`
-
-```c
-typedef union {
-  uint8_t u8[16];
-  uint16_t u16[8];
-  uint32_t u32[4];
-  uint64_t u64[2];
-  __uint128_t u128[1]; /* if supported by the compiler */
-} fio_u128;
-```
-
-An unsigned 128 bit union type.
-
-#### `fio_u256`
-
-```c
-typedef union {
-  uint8_t u8[32];
-  uint16_t u16[16];
-  uint32_t u32[8];
-  uint64_t u64[4];
-  __uint128_t u128[2]; /* if supported by the compiler */
-  __uint256_t u256[1]; /* if supported by the compiler */
-} fio_u256;
-```
-
-An unsigned 256 bit union type.
-
-#### `fio_u512`
-
-```c
-typedef union {
-  uint8_t u8[64];
-  uint16_t u16[32];
-  uint32_t u32[16];
-  uint64_t u64[8];
-  __uint128_t u128[4]; /* if supported by the compiler */
-  __uint256_t u256[2]; /* if supported by the compiler */
-} fio_u512;
-```
-
-An unsigned 512 bit union type.
-
-### Multi-Precision Math with Little Endian arrays
-
-The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
-
-
-#### `fio_math_add`
-
-```c
-uint64_t fio_math_add(uint64_t *dest,
-                      const uint64_t *a,
-                      const uint64_t *b,
-                      const size_t number_array_length);
-```
-
-Multi-precision ADD for `len*64` bit long a + b. Returns the carry.
-
-#### `fio_math_sub`
-
-```c
-uint64_t fio_math_sub(uint64_t *dest,
-                      const uint64_t *a,
-                      const uint64_t *b,
-                      const size_t number_array_length);
-```
-
-Multi-precision SUB for `len*64` bit long a + b. Returns the carry.
-
-#### `fio_math_mul`
-
-```c
-void fio_math_mul(uint64_t *restrict dest,
-                  const uint64_t *a,
-                  const uint64_t *b,
-                  const size_t number_array_length);
-```
-
-Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` long or buffer overflows will occur.
-
-#### `fio_math_div`
-```c
-void fio_math_div(uint64_t *dest,
-                  uint64_t *reminder,
-                  const uint64_t *a,
-                  const uint64_t *b,
-                  const size_t number_array_length);
-```
-
-Multi-precision DIV for `len*64` bit long a, b.
-
-This is **NOT constant time**.
-
-The algorithm might be slow, as my math isn't that good and I couldn't understand faster division algorithms (such as Newton–Raphson division)... so this is sort of a factorized variation on long division.
-
-#### `fio_math_shr`
-
-```c
-void fio_math_shr(uint64_t *dest,
-                  uint64_t *n,
-                  const size_t right_shift_bits,
-                  size_t number_array_length);
-```
-
-Multi-precision shift right for `len` word number `n`.
-
-#### `fio_math_shl`
-
-```c
-void fio_math_shl(uint64_t *dest,
-                  uint64_t *n,
-                  const size_t left_shift_bits,
-                  const size_t number_array_length);
-```
-
-Multi-precision shift left for `len*64` bit number `n`.
-
-#### `fio_math_inv`
-
-```c
-void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
-````
-
-Multi-precision Inverse for `len*64` bit number `n` (i.e., turns `1` into `-1`).
-
-#### `fio_math_msb_index`
-
-```c
-size_t fio_math_msb_index(uint64_t *n, const size_t len);
-````
-
-Multi-precision - returns the index for the most significant bit or -1.
-
-This can be used to collect a number's bit length.
-
-#### `fio_math_lsb_index`
-
-```c
-size_t fio_math_lsb_index(uint64_t *n, const size_t len);
-````
-
-Multi-precision - returns the index for the least significant bit or -1.
-
-This can be used to extract an exponent value in base 2.
-
-### Vector Math Helpers
-
-Vector helper functions start with the type of the vector. i.e. `fio_u128`. Next the operation name and the bit grouping are stated, i.e. `fio_u256_mul64`.
-
-When a vector operation is applied to a constant, the operation is prefixed with a `c`, i.e., `fio_u128_clrot32`.
-
-`fio_uxxx_load`, `fio_uxxx_load_le32` and `fio_uxxx_load_le64` functions are also provided.
-
-The following functions are available:
-
-* `fio_uxxx_mul##(vec_a, vec_b)` - performs the `mul` operation (`*`).
-* `fio_uxxx_add##(vec_a, vec_b)` - performs the `add` operation (`+`).
-* `fio_uxxx_sub##(vec_a, vec_b)` - performs the `sub` operation (`-`).
-* `fio_uxxx_div##(vec_a, vec_b)` - performs the `div` operation (`/`).
-* `fio_uxxx_reminder##(vec_a, vec_b)` - performs the `reminder` operation (`%`).
-
-
-* `fio_uxxx_cmul##(vec, single_element)` - performs the `mul` operation (`*`).
-* `fio_uxxx_cadd##(vec, single_element)` - performs the `add` operation (`+`).
-* `fio_uxxx_csub##(vec, single_element)` - performs the `sub` operation (`-`).
-* `fio_uxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
-* `fio_uxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
-
-* `fio_uxxx_and(vec_a, vec_b)` - performs the `and` operation (`&`) on the whole vector.
-* `fio_uxxx_or(vec_a, vec_b)` - performs the `or` operation (`|`) on the whole vector.
-* `fio_uxxx_xor(vec_a, vec_b)` - performs the `xor` operation (`^`) on the whole vector.
-
-* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`) with an X bit constant.
-* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`) with an X bit constant.
-* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`) with an X bit constant.
-
-* `fio_uxxx_flip(vec)` - performs the `flip` bit operation (`~`).
-
-* `fio_uxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
-
-* `fio_uxxx_load(const void * buffer)` loads data from the buffer, returning a properly aligned vector.
-
-* `fio_uxxx_load_le##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using little endian rather than local endian.
-
-* `fio_uxxx_load_be##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using big endian rather than local endian.
-
-Additionally, the same functions are available for `fio_vxxx` types (note the `v` that indicates it is a vector rather than a number). The naming is mostly a matter of convenience but also allow for future architecture dependent code to be applied to the `fio_vxxx` types / functions.
-
-Example use:
-
-```c
-fio_v256 const prime = {.u64 = {FIO_STABLE_HASH_PRIME0,
-                                FIO_STABLE_HASH_PRIME1,
-                                FIO_STABLE_HASH_PRIME2,
-                                FIO_STABLE_HASH_PRIME3}};
-fio_v256 v = fio_v256_load(buf), tmp;
-v = fio_v256_mul64(v, prime);
-tmp = fio_v256_clrot64(v, 31);
-v = fio_v256_xor64(v, tmp);
-// ...
-```
-
-**Note**: the implementation is portable and doesn't currently use any compiler vector builtins or types. We pray to the optimization gods instead (which don't always listen) and depend on compilation flags.
-
-
--------------------------------------------------------------------------------
+Loops through every index in the indexed list, **assuming `head` is valid**.
 ## String / Number conversion
 
 ```c
@@ -2035,6 +1665,1142 @@ Returns the number of digits of the **unsigned** number when using base `base`.
 
 This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
 -------------------------------------------------------------------------------
+## Atomic operations
+
+```c
+#define FIO_ATOMIC
+#include "fio-stl.h"
+```
+
+If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
+
+In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
+
+#### `fio_atomic_load(p_obj)`
+
+Atomically loads and returns the value stored in the object pointed to by `p_obj`.
+
+#### `fio_atomic_exchange(p_obj, value)`
+
+Atomically sets the object pointer to by `p_obj` to `value`, returning the
+previous value.
+
+#### `fio_atomic_add(p_obj, value)`
+
+A MACRO / function that performs `add` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_sub(p_obj, value)`
+
+A MACRO / function that performs `sub` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_and(p_obj, value)`
+
+A MACRO / function that performs `and` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_xor(p_obj, value)`
+
+A MACRO / function that performs `xor` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_or(p_obj, value)`
+
+A MACRO / function that performs `or` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_nand(p_obj, value)`
+
+A MACRO / function that performs `nand` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_add_fetch(p_obj, value)`
+
+A MACRO / function that performs `add` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_sub_fetch(p_obj, value)`
+
+A MACRO / function that performs `sub` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_and_fetch(p_obj, value)`
+
+A MACRO / function that performs `and` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_xor_fetch(p_obj, value)`
+
+A MACRO / function that performs `xor` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_or_fetch(p_obj, value)`
+
+A MACRO / function that performs `or` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_nand_fetch(p_obj, value)`
+
+A MACRO / function that performs `nand` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired)`
+
+A MACRO / function that performs a system specific `fio_atomic_compare_exchange` using pointers.
+
+The behavior of this instruction is compiler / CPU architecture specific, where `p_expected` **SHOULD** be overwritten with the latest value of `p_obj`, but **MAY NOT**, depending on system and compiler implementations.
+
+Returns 1 for successful exchange or 0 for failure.
+
+#### Atomic Bitmap helpers
+
+- `fio_atomic_bit_get(void *map, size_t bit)`
+
+- `fio_atomic_bit_set(void *map, size_t bit)`   (an **atomic** operation, thread-safe)
+
+- `fio_atomic_bit_unset(void *map, size_t bit)` (an **atomic** operation, thread-safe)
+
+Gets / Sets bits an atomic thread-safe way.
+
+### a SpinLock style MultiLock
+
+Atomic operations lend themselves easily to implementing spinlocks, so the facil.io STL includes one whenever atomic operations are defined (`FIO_ATOMIC`).
+
+Spinlocks are effective for very short critical sections or when a a failure to acquire a lock allows the program to redirect itself to other pending tasks. 
+
+However, in general, spinlocks should be avoided when a task might take a longer time to complete or when the program might need to wait for a high contention lock to become available.
+
+#### `fio_lock_i`
+
+A spinlock type based on a volatile unsigned char.
+
+**Note**: the spinlock contains one main / default lock (`sub == 0`) and 7 sub-locks (`sub >= 1 && sub <= 7`), which could be managed:
+
+- Separately: using the `fio_lock_sublock`, `fio_trylock_sublock` and `fio_unlock_sublock` functions.
+- Jointly: using the `fio_trylock_group`, `fio_lock_group` and `fio_unlock_group` functions.
+- Collectively: using the `fio_trylock_full`, `fio_lock_full` and `fio_unlock_full` functions.
+
+
+#### `fio_lock(fio_lock_i *)`
+
+Busy waits for the default lock (sub-lock `0`) to become available.
+
+#### `fio_trylock(fio_lock_i *)`
+
+Attempts to acquire the default lock (sub-lock `0`). Returns 0 on success and 1 on failure.
+
+#### `fio_unlock(fio_lock_i *)`
+
+Unlocks the default lock (sub-lock `0`), no matter which thread owns the lock.
+
+#### `fio_is_locked(fio_lock_i *)`
+
+Returns 1 if the (main) lock is engaged. Otherwise returns 0.
+
+#### `fio_lock_sublock(fio_lock_i *, uint8_t sub)`
+
+Busy waits for a sub-lock to become available.
+
+#### `fio_trylock_sublock(fio_lock_i *, uint8_t sub)`
+
+Attempts to acquire the sub-lock. Returns 0 on success and 1 on failure.
+
+#### `fio_unlock_sublock(fio_lock_i *, uint8_t sub)`
+
+Unlocks the sub-lock, no matter which thread owns the lock.
+
+#### `fio_is_sublocked(fio_lock_i *, uint8_t sub)`
+
+Returns 1 if the specified sub-lock is engaged. Otherwise returns 0.
+
+#### `uint8_t fio_trylock_group(fio_lock_i *lock, const uint8_t group)`
+
+Tries to lock a group of sub-locks.
+
+Combine a number of sub-locks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+macro. i.e.:
+
+```c
+if(fio_trylock_group(&lock,
+                     FIO_LOCK_SUBLOCK(1) |
+                     FIO_LOCK_SUBLOCK(2)) == 0) {
+  // act in lock and then release the SAME lock with:
+  fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
+}
+```
+
+Returns 0 on success and 1 on failure.
+
+#### `void fio_lock_group(fio_lock_i *lock, uint8_t group)`
+
+Busy waits for a group lock to become available - not recommended.
+
+See `fio_trylock_group` for details.
+
+#### `void fio_unlock_group(fio_lock_i *lock, uint8_t group)`
+
+Unlocks a sub-lock group, no matter which thread owns which sub-lock.
+
+#### `fio_trylock_full(fio_lock_i *lock)`
+
+Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
+
+#### `fio_lock_full(fio_lock_i *lock)`
+
+Busy waits for all sub-locks to become available - not recommended.
+
+#### `fio_unlock_full(fio_lock_i *lock)`
+
+Unlocks all sub-locks, no matter which thread owns which lock.
+
+-------------------------------------------------------------------------------
+
+## MultiLock with Thread Suspension
+
+```c
+#define FIO_LOCK2
+#include "fio-stl.h"
+```
+
+**BROKEN(!):** note that the `FIO_LOCK2` implementation currently does not work on all systems and assumes specific OS behavior.
+
+If the `FIO_LOCK2` macro is defined than the multi-lock `fio_lock2_s` type and it's functions will be defined.
+
+The `fio_lock2` locking mechanism follows a bitwise approach to multi-locking, allowing a single lock to contain up to 31 sublocks (on 32 bit machines) or 63 sublocks (on 64 bit machines).
+
+This is a very powerful tool that allows simultaneous locking of multiple sublocks (similar to `fio_trylock_group`) while also supporting a thread "waitlist" where paused threads await their turn to access the lock and enter the critical section.
+
+The default implementation uses `pthread` (POSIX Threads) to access the thread's "ID", pause the thread (using `sigwait`) and resume the thread (with `pthread_kill`).
+
+The default behavior can be controlled using the following MACROS:
+
+* the `FIO_THREAD_T` macro should return a thread type, default: `pthread_t`
+
+* the `FIO_THREAD_ID()` macro should return this thread's FIO_THREAD_T.
+
+* the `FIO_THREAD_PAUSE(id)` macro should temporarily pause thread execution.
+
+* the `FIO_THREAD_RESUME(id)` macro should resume thread execution.
+
+#### `fio_lock2_s`
+
+```c
+typedef struct {
+  volatile size_t lock;
+  fio___lock2_wait_s *waiting; /**/
+} fio_lock2_s;
+```
+
+The `fio_lock2_s` type **must be considered opaque** and the struct's fields should **never** be accessed directly.
+
+The `fio_lock2_s` type is the lock's type.
+
+#### `fio_trylock2`
+
+```c
+uint8_t fio_trylock2(fio_lock2_s *lock, size_t group);
+```
+
+Tries to lock a multilock.
+
+Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+macro. i.e.:
+
+```c
+if(!fio_trylock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
+  // act in lock
+  fio_unlock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
+}
+```
+
+Returns 0 on success and non-zero on failure.
+
+#### `fio_lock2`
+
+```c
+void fio_lock2(fio_lock2_s *lock, size_t group);
+```
+
+Locks a multilock, waiting as needed.
+
+Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+macro. i.e.:
+
+     fio_lock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2)));
+
+Doesn't return until a successful lock was acquired.
+
+#### `fio_unlock2`
+
+```c
+void fio_unlock2(fio_lock2_s *lock, size_t group);
+```
+
+Unlocks a multilock, regardless of who owns the locked group.
+
+Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+macro. i.e.:
+
+```c
+fio_unlock2(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
+````
+
+-------------------------------------------------------------------------------
+## File Utility Helpers
+
+```c
+#define FIO_FILES
+#include "fio-stl.h"
+```
+
+By defining the macro `FIO_FILES` the following file helper functions are defined:
+
+#### `fio_filename_open`
+
+```c
+int fio_filename_open(const char *filename, int flags);
+```
+
+Opens `filename`, returning the same as values as `open` on POSIX systems.
+
+If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing also for `"~\"`).
+
+#### `fio_filename_is_unsafe`
+
+```c
+int fio_filename_is_unsafe(const char *path);
+```
+
+Returns 1 if `path` possibly folds backwards (has "/../" or "//").
+
+#### `fio_filename_tmp`
+
+```c
+int fio_filename_tmp(void);
+```
+
+Creates a temporary file, returning its file descriptor.
+
+Returns -1 on error.
+
+#### `fio_filename_overwrite`
+
+```c
+int fio_filename_overwrite(const char *filename, const void *buf, size_t len);
+```
+
+Overwrites `filename` with the data in the buffer.
+
+If `path` starts with a `"~/"` than it will be relative to the user's home folder (on Windows, testing also for `"~\"`).
+
+Returns -1 on error or 0 on success. On error, the state of the file is undefined (may be doesn't exit / nothing written / partially written).
+
+#### `fio_fd_write`
+
+```c
+ssize_t fio_fd_write(int fd, const void *buf, size_t len);
+```
+
+Writes data to a file, returning the number of bytes written.
+
+Returns -1 on error.
+
+Since some systems have a limit on the number of bytes that can be written at a single time, this function fragments the system calls into smaller `write` blocks, allowing large data to be written.
+
+If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
+#### `fio_fd_read`
+
+```c
+size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+```
+
+
+Reads up to `len` bytes from `fd` starting at `start_at` offset.
+
+Returns the number of bytes read.
+
+Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
+
+If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
+#### `fio_filename_parse`
+
+```c
+fio_filename_s fio_filename_parse(const char *filename);
+/** A result type for the filename parsing helper. */
+typedef struct {
+  fio_buf_info_s folder;   /* folder name */
+  fio_buf_info_s basename; /* base file name */
+  fio_buf_info_s ext;      /* extension (without '.') */
+} fio_filename_s;
+```
+
+Parses a file name to folder, base name and extension (zero-copy).
+
+#### `FIO_FOLDER_SEPARATOR`
+
+```c
+#if FIO_OS_WIN
+#define FIO_FOLDER_SEPARATOR '\\'
+#else
+#define FIO_FOLDER_SEPARATOR '/'
+#endif
+```
+
+Selects the folder separation character according to the detected OS.
+
+**Note**: on windows both separators will be tested for.
+
+#### `fio_fd_find_next`
+
+```c
+size_t fio_fd_find_next(int fd, char token, size_t start_at);
+/** End of file value for `fio_fd_find_next` */
+#define FIO_FD_FIND_EOF ((size_t)-1)
+/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
+#define FIO_FD_FIND_BLOCK 4096
+```
+
+Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
+
+This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
+
+**Pros**: limits memory use and (re)allocations, easier overflow protection.
+
+**Cons**: may be slower, as data will most likely be copied again from the file.
+
+-------------------------------------------------------------------------------
+## Globe Matching
+
+```c
+#define FIO_GLOB_MATCH
+#include "fio-stl.h"
+```
+
+By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
+
+#### `fio_glob_match`
+
+```c
+uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str);
+```
+
+This function is a **binary** glob matching helper.
+
+Returns 1 on a match, otherwise returns 0.
+
+The following patterns are recognized:
+
+* `*` - matches any string, including an empty string.
+		
+	i.e., the following patterns will match against the string `"String"`:
+
+    `"*"`
+
+    `"*String*"`
+
+    `"S*ing"`
+
+* `?` - matches any single **byte** (does NOT support UTF-8 characters).
+		
+	i.e., the following patterns will match against the string `"String"`:
+
+    `"?tring"`
+
+    `"Strin?"`
+
+    `"St?ing"`
+
+* `[!...]` or `[^...]` - matches any **byte** that is **not** withing the brackets (does **not** support UTF-8 characters).
+
+    Byte ranges are supported using `'-'` (i.e., `[!0-9]`)
+
+	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+	
+	i.e., the following patterns will match against the string `"String"`:
+
+    `"[!a-z]tring"`
+
+    `"[^a-z]tring"`
+
+    `"[^F]tring"` (same as `"[!F]tring"`)
+
+* `[...]` - matches any **byte** that **is** withing the brackets (does **not** support UTF-8 characters).
+
+	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+	
+	i.e., the following patterns will match against the string `"String"`:
+
+    `"[A-Z]tring"`
+
+    `"[sS]tring"`
+
+
+-------------------------------------------------------------------------------
+
+## iMap - a Mapped Array
+
+The `FIO_TYPEDEF_IMAP_ARRAY` macro is one way to design a hash map and is **used internally** for some modules (to minimize dependencies or nested inclusions).
+
+It is used when both insertion order and iteration over the complete data set is of high priority, or when it is important to hold the same data as both an Array and a Hash Map.
+
+**Note**: there's no memory management when objects are removed or the iMap is destroyed.
+
+**Note**: for most use cases it is much better to create a type with the `FIO_MAP_NAME` macro.
+
+#### `FIO_TYPEDEF_IMAP_ARRAY`
+
+```c
+#define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
+                               array_type,                                     \
+                               imap_type,                                      \
+                               hash_fn,                                        \
+                               cmp_fn,                                         \
+                               is_valid_fn)
+```
+
+This MACRO defines the type and functions needed for an indexed array.
+
+An indexed array is simple ordered array who's objects are indexed using an almost-hash map, allowing for easy seeking while also enjoying the advantages provided by the array structure.
+
+The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index in array and any leftover hash data (the first half being tested during the random access and the leftover during comparison). The reserved value `0` indicates a free slot. The reserved value `~0` indicates a freed item (a free slot that was previously used).
+
+This is mostly for internal use and documentation is poor (PR, anyone?).
+
+The macro defines the following:
+
+- `array_name_s`        the main array container (.ary is the array itself)
+
+- `array_name_seeker_s` is a seeker type that finds objects.
+- `array_name_seek`     finds an object or its future position.
+
+- `array_name_reserve`  reserves a minimum imap storage capacity.
+- `array_name_capa`     the imap's theoretical storage capacity.
+
+- `array_name_set`      writes or overwrites data to the array.
+- `array_name_get`      returns a pointer to the object within the array.
+- `array_name_remove`   removes an object and resets its memory to zero.
+
+- `array_name_rehash`   re-builds the imap (use after sorting).
+
+
+Notes:
+
+- `hash_fn(ptr)`, `cmp_fn(a_ptr,b_ptr)` and `is_valid_fn(ptr)` accepts **pointers**  and needs to de-reference them in order to compare their content.
+
+-------------------------------------------------------------------------------
+## Multi-Precision Math
+
+```c
+#define FIO_MATH
+#include "fio-stl.h"
+```
+
+If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
+
+Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
+
+### Multi-Precision Math Building Blocks
+
+The following simple operations can be used to build your own multi-precision implementation.
+
+#### `fio_math_addc64`
+
+```c
+uint64_t fio_math_addc64(uint64_t a,
+                         uint64_t b,
+                         uint64_t carry_in,
+                         uint64_t *carry_out);
+```
+
+Add with carry.
+
+#### `fio_math_subc64`
+
+```c
+uint64_t fio_math_subc64(uint64_t a,
+                         uint64_t b,
+                         uint64_t carry_in,
+                         uint64_t *carry_out);
+```
+
+Subtract with carry.
+
+#### `fio_math_mulc64`
+```c
+uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
+```
+
+Multiply with carry out.
+
+### Multi-Precision Helper Types
+
+The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types.
+
+
+#### `fio_u128`
+
+```c
+typedef union {
+  uint8_t u8[16];
+  uint16_t u16[8];
+  uint32_t u32[4];
+  uint64_t u64[2];
+  __uint128_t u128[1]; /* if supported by the compiler */
+} fio_u128;
+```
+
+An unsigned 128 bit union type.
+
+#### `fio_u256`
+
+```c
+typedef union {
+  uint8_t u8[32];
+  uint16_t u16[16];
+  uint32_t u32[8];
+  uint64_t u64[4];
+  __uint128_t u128[2]; /* if supported by the compiler */
+  __uint256_t u256[1]; /* if supported by the compiler */
+} fio_u256;
+```
+
+An unsigned 256 bit union type.
+
+#### `fio_u512`
+
+```c
+typedef union {
+  uint8_t u8[64];
+  uint16_t u16[32];
+  uint32_t u32[16];
+  uint64_t u64[8];
+  __uint128_t u128[4]; /* if supported by the compiler */
+  __uint256_t u256[2]; /* if supported by the compiler */
+} fio_u512;
+```
+
+An unsigned 512 bit union type.
+
+### Multi-Precision Math with Little Endian arrays
+
+The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
+
+
+#### `fio_math_add`
+
+```c
+uint64_t fio_math_add(uint64_t *dest,
+                      const uint64_t *a,
+                      const uint64_t *b,
+                      const size_t number_array_length);
+```
+
+Multi-precision ADD for `len*64` bit long a + b. Returns the carry.
+
+#### `fio_math_sub`
+
+```c
+uint64_t fio_math_sub(uint64_t *dest,
+                      const uint64_t *a,
+                      const uint64_t *b,
+                      const size_t number_array_length);
+```
+
+Multi-precision SUB for `len*64` bit long a + b. Returns the carry.
+
+#### `fio_math_mul`
+
+```c
+void fio_math_mul(uint64_t *restrict dest,
+                  const uint64_t *a,
+                  const uint64_t *b,
+                  const size_t number_array_length);
+```
+
+Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` long or buffer overflows will occur.
+
+#### `fio_math_div`
+```c
+void fio_math_div(uint64_t *dest,
+                  uint64_t *reminder,
+                  const uint64_t *a,
+                  const uint64_t *b,
+                  const size_t number_array_length);
+```
+
+Multi-precision DIV for `len*64` bit long a, b.
+
+This is **NOT constant time**.
+
+The algorithm might be slow, as my math isn't that good and I couldn't understand faster division algorithms (such as Newton–Raphson division)... so this is sort of a factorized variation on long division.
+
+#### `fio_math_shr`
+
+```c
+void fio_math_shr(uint64_t *dest,
+                  uint64_t *n,
+                  const size_t right_shift_bits,
+                  size_t number_array_length);
+```
+
+Multi-precision shift right for `len` word number `n`.
+
+#### `fio_math_shl`
+
+```c
+void fio_math_shl(uint64_t *dest,
+                  uint64_t *n,
+                  const size_t left_shift_bits,
+                  const size_t number_array_length);
+```
+
+Multi-precision shift left for `len*64` bit number `n`.
+
+#### `fio_math_inv`
+
+```c
+void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
+````
+
+Multi-precision Inverse for `len*64` bit number `n` (i.e., turns `1` into `-1`).
+
+#### `fio_math_msb_index`
+
+```c
+size_t fio_math_msb_index(uint64_t *n, const size_t len);
+````
+
+Multi-precision - returns the index for the most significant bit or -1.
+
+This can be used to collect a number's bit length.
+
+#### `fio_math_lsb_index`
+
+```c
+size_t fio_math_lsb_index(uint64_t *n, const size_t len);
+````
+
+Multi-precision - returns the index for the least significant bit or -1.
+
+This can be used to extract an exponent value in base 2.
+
+### Vector Math Helpers
+
+Vector helper functions start with the type of the vector. i.e. `fio_u128`. Next the operation name and the bit grouping are stated, i.e. `fio_u256_mul64`.
+
+When a vector operation is applied to a constant, the operation is prefixed with a `c`, i.e., `fio_u128_clrot32`.
+
+`fio_uxxx_load`, `fio_uxxx_load_le32` and `fio_uxxx_load_le64` functions are also provided.
+
+The following functions are available:
+
+* `fio_uxxx_mul##(vec_a, vec_b)` - performs the `mul` operation (`*`).
+* `fio_uxxx_add##(vec_a, vec_b)` - performs the `add` operation (`+`).
+* `fio_uxxx_sub##(vec_a, vec_b)` - performs the `sub` operation (`-`).
+* `fio_uxxx_div##(vec_a, vec_b)` - performs the `div` operation (`/`).
+* `fio_uxxx_reminder##(vec_a, vec_b)` - performs the `reminder` operation (`%`).
+
+
+* `fio_uxxx_cmul##(vec, single_element)` - performs the `mul` operation (`*`).
+* `fio_uxxx_cadd##(vec, single_element)` - performs the `add` operation (`+`).
+* `fio_uxxx_csub##(vec, single_element)` - performs the `sub` operation (`-`).
+* `fio_uxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
+* `fio_uxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
+
+* `fio_uxxx_and(vec_a, vec_b)` - performs the `and` operation (`&`) on the whole vector.
+* `fio_uxxx_or(vec_a, vec_b)` - performs the `or` operation (`|`) on the whole vector.
+* `fio_uxxx_xor(vec_a, vec_b)` - performs the `xor` operation (`^`) on the whole vector.
+
+* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`) with an X bit constant.
+* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`) with an X bit constant.
+* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`) with an X bit constant.
+
+* `fio_uxxx_flip(vec)` - performs the `flip` bit operation (`~`).
+
+* `fio_uxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
+
+* `fio_uxxx_load(const void * buffer)` loads data from the buffer, returning a properly aligned vector.
+
+* `fio_uxxx_load_le##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using little endian rather than local endian.
+
+* `fio_uxxx_load_be##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using big endian rather than local endian.
+
+Example use:
+
+```c
+fio_u256 const prime = {.u64 = {FIO_U64_HASH_PRIME0,
+                                FIO_U64_HASH_PRIME1,
+                                FIO_U64_HASH_PRIME2,
+                                FIO_U64_HASH_PRIME3}};
+fio_u256 u = fio_u256_load(buf), tmp;
+u = fio_u256_mul64(u, prime);
+tmp = fio_u256_clrot64(u, 31);
+u = fio_u256_xor64(u, tmp);
+// ...
+```
+
+**Note**: the implementation is portable and doesn't currently use any compiler vector builtins or types. We pray to the optimization gods instead (which don't always listen) and depend on compilation flags.
+
+#### Numeral Array Shuffling
+
+Numeral vector / array shuffling is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
+
+Vector / array shuffling is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
+
+The naming convention is `fio_PRxL_reshuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
+
+**Note**: The use of **re**shuffle denotes that the shuffling occurs in-place, replacing current data (unlike the `fio_uxxx_shuffle##` math functions).
+
+i.e.: 
+
+```c
+void fio_u64x4_reshuffle(uint64_t * v, uint8_t[4]);
+void fio_u64x8_reshuffle(uint64_t * v, uint8_t[8]);
+void fio_u64x16_reshuffle(uint64_t *v, uint8_t[16]);
+#define fio_u64x4_reshuffle(v, ...)  fio_u64x4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)  fio_u64x8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...) fio_u64x16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+```
+
+#### Numeral Array Reduction
+
+Numeral vector / array reduction is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
+
+Vector / array reduction is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
+
+The naming convention is `fio_PRxL_reduce_OP` where:
+
+- `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl`
+
+-  `L` is the length of the array in number of elements.
+
+- `OP` is the operation to be performed, one of: `add`, `mul` `xor`, `or`, `and`. Note that for `float` and `double` types, only `add` and `mul` are available.
+
+i.e.: 
+
+```c
+uint64_t fio_u64x4_reduce_add(uint64_t * v);
+uint64_t fio_u64x8_reduce_xor(uint64_t * v);
+uint64_t fio_u64x16_reduce_and(uint64_t * v);
+```
+
+-------------------------------------------------------------------------------
+## Pseudo Random Generation
+
+```c
+#define FIO_RAND
+#include "fio-stl.h"
+```
+
+If the `FIO_RAND` macro is defined, the following, non-cryptographic psedo-random generator and hash functions will be defined.
+
+The "random" data is initialized / seeded automatically using a small number of functional cycles that collect data and hash it, hopefully resulting in enough jitter entropy.
+
+The data is collected using `getrusage` (or the system clock if `getrusage` is unavailable) and hashed using RiskyHash. The data is then combined with the previous state / cycle.
+
+The CPU "jitter" within the calculation **should** effect `getrusage` in a way that makes it impossible for an attacker to determine the resulting random state (assuming jitter exists).
+
+However, this is unlikely to prove cryptographically safe and isn't likely to produce a large number of entropy bits (even though a small number of bits have a large impact on the final state).
+
+The facil.io random generator functions appear both faster and more random then the standard `rand` on my computer (you can test it for yours).
+
+I designed it in the hopes of achieving a cryptographically safe PRNG, but it wasn't cryptographically analyzed, lacks a good source of entropy and should be considered as a good enough non-cryptographic PRNG for general use.
+
+**Note**: bitwise operations (`FIO_BITWISE`), Risky Hash and Stable Hash are automatically defined along with `FIO_RAND`, since they are required by the algorithm.
+
+### Psedo-Random Generator Functions
+
+#### `fio_rand64`
+
+```c
+uint64_t fio_rand64(void)
+```
+
+Returns 64 random bits. Probably **not** cryptographically safe.
+
+#### `fio_rand_bytes`
+
+```c
+void fio_rand_bytes(void *data_, size_t len)
+```
+
+Writes `len` random Bytes to the buffer pointed to by `data`. Probably **not**
+cryptographically safe.
+
+#### `fio_rand_feed2seed`
+
+```c
+static void fio_rand_feed2seed(void *buf_, size_t len);
+```
+
+An internal function (accessible from the translation unit) that allows a program to feed random data to the PRNG (`fio_rand64`).
+
+The random data will effect the random seed on the next reseeding.
+
+Limited to 1023 bytes of data per function call.
+
+#### `fio_rand_reseed`
+
+```c
+void fio_rand_reseed(void);
+```
+
+Forces the random generator state to rotate.
+
+SHOULD be called after `fork` to prevent the two processes from outputting the same random numbers (until a reseed is called automatically).
+
+### Risky Hash / Stable Hash (data hashing):
+
+Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
+
+Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
+
+Both algorithms are **non-cryptographic** and produce 64 bit hashes by default (though internally both use a 256 block that could be used to produce 128bit hashes). Both pass the SMHasher test suite for hashing functions.
+
+#### `fio_stable_hash`
+
+```c
+uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
+```
+
+Computes a 64 bit facil.io Stable Hash (once version 1.0 is released, this algorithm will not be updated, even if broken).
+
+#### `fio_stable_hash128`
+
+```c
+void fio_stable_hash128(void *restrict dest,
+                        const void *restrict data,
+                        size_t len,
+                        uint64_t seed);
+```
+
+Computes a 128 bit facil.io Stable Hash (once version 1 is released, this algorithm will not be updated, even if broken).
+
+#### `fio_risky_hash`
+
+```c
+uint64_t fio_risky_hash(const void *data, size_t len, uint64_t seed)
+```
+
+This is a non-streaming implementation of the RiskyHash v.3 algorithm.
+
+This function will produce a 64 bit hash for X bytes of data.
+
+**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
+
+#### `fio_risky_ptr`
+
+```c
+uint64_t fio_risky_ptr(void *ptr);
+```
+
+Adds a bit of entropy to pointer values.
+
+**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
+
+#### `fio_risky_num`
+
+```c
+uint64_t fio_risky_num(uint64_t number, uint64_t seed);
+```
+
+Adds a bit of entropy to numeral values.
+
+**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps, but that's about it.
+
+-------------------------------------------------------------------------------
+## Signal Monitoring
+
+```c
+#define FIO_SIGNAL
+#include "fio-stl.h"
+```
+
+OS signal callbacks are very limited in the actions they are allowed to take. In fact, one of the only actions they are allowed to take is to set a volatile atomic flag.
+
+The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.
+
+When defining `FIO_SIGNAL`, the following function are defined.
+
+#### `fio_signal_monitor`
+
+```c
+int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata);
+```
+
+Starts to monitor for the specified signal, setting an optional callback.
+
+If the signal is already being monitored, the callback and `udata` pointers are updated.
+
+**Note**: `udata` stands for "user data", it is an opaque pointer that is simply passed along to the callback.
+
+#### `fio_signal_review`
+
+```c
+int fio_signal_review(void);
+```
+
+Reviews all signals, calling any relevant callbacks.
+
+#### `fio_signal_forget`
+
+```c
+int fio_signal_forget(int sig);
+```
+
+Stops monitoring the specified signal.
+
+-------------------------------------------------------------------------------
+## Quick Sort and Insert Sort
+
+```c
+#define FIO_SORT_NAME
+#include "fio-stl.h"
+```
+
+If the `FIO_SORT_NAME` is defined (and named), the following functions will be defined.
+
+This can be performed multiple times for multiple types.
+
+### Sort Settings
+
+The following macros define the behavior of the sorting algorithm.
+
+#### `FIO_SORT_NAME`
+
+```c
+#define FIO_SORT_NAME num // will produce function names such as num_sort(...)
+```
+
+The prefix used for naming the sorting functions.
+
+**Note**: if not defined, than `FIO_SORT_NAME` will be defined as `FIO_SORT_TYPE##_vec`.
+
+#### `FIO_SORT_TYPE`
+
+```c
+// i.e.
+#define FIO_SORT_TYPE size_t
+```
+
+The type of the array members to be sorted.
+
+**Note**: this macro **MUST** be defined.
+
+#### `FIO_SORT_IS_BIGGER`
+
+```c
+#define FIO_SORT_IS_BIGGER(a, b) ((a) > (b))
+```
+
+Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
+
+#### `FIO_SORT_SWAP`
+
+```c
+#define FIO_SORT_SWAP(a, b)                                                    \
+  do {                                                                         \
+    FIO_SORT_TYPE tmp__ = (a);                                                 \
+    (a) = (b);                                                                 \
+    (b) = tmp__;                                                               \
+  } while (0)
+```
+
+Swaps array members. Usually there is no need to override the default macro.
+
+#### `FIO_SORT_THRESHOLD`
+
+```c
+#define FIO_SORT_THRESHOLD 96
+```
+
+The threshold below which quick-sort delegates to insert sort. Usually there is no need to override the default macro.
+
+
+### Sorting API
+
+#### `FIO_SORT_sort`
+
+```c
+void FIO_SORT_sort(FIO_SORT_TYPE *array, size_t count);
+```
+
+Sorts the first `count` members of `array`.
+
+Currently this wraps the [`FIO_SORT_qsort`](#fio_sort_qsort) function.
+
+#### `FIO_SORT_qsort`
+
+```c
+void FIO_SORT_qsort(FIO_SORT_TYPE *array, size_t count);
+```
+
+Sorts the first `count` members of `array` using quick-sort.
+
+
+#### `FIO_SORT_isort`
+
+```c
+void FIO_SORT_isort(FIO_SORT_TYPE *array, size_t count);
+```
+
+Sorts the first `count` members of `array` using insert-sort.
+
+Use only with small arrays (unless you are a fan of inefficiency).
+
+### Sort Example
+
+The following example code creates an array of random strings and then sorts the array.
+
+```c
+#define FIO_STR_SMALL sstr
+#define FIO_SORT_NAME      sstr
+#define FIO_SORT_TYPE sstr_s
+#define FIO_SORT_IS_BIGGER(a, b)                                               \
+  fio_string_is_greater(sstr_info(&a), sstr_info(&b))
+#define FIO_RAND
+#include "fio-stl.h"
+
+#define STRING_ARRAY_LENGTH 128
+int main(int argc, char const *argv[]) {
+  (void)argc;
+  (void)argv;
+  sstr_s ary[STRING_ARRAY_LENGTH] = {{0}};
+  /* fill array with random data and print state */
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    sstr_write_hex(ary + i, fio_rand64());
+  }
+  printf("Starting with array of strings as:\n");
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
+  }
+  /* sort array and print state */
+  sstr_qsort(ary, STRING_ARRAY_LENGTH);
+  printf("\n\nOrdered array of strings is:\n");
+  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
+    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
+    sstr_destroy(ary + i); /* cleanup */
+  }
+  return 0;
+}
+```
+
+-------------------------------------------------------------------------------
 ## Threads (portable)
 
 ```c
@@ -2234,454 +3000,6 @@ Destroys a simple conditional variable.
 
 
 -------------------------------------------------------------------------------
-## Time Helpers
-
-```c
-#define FIO_TIME
-#include "fio-stl.h"
-```
-
-By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
-
-#### `fio_time_real`
-
-```c
-struct timespec fio_time_real();
-```
-
-Returns human (watch) time... this value isn't as safe for measurements.
-
-#### `fio_time_mono`
-
-```c
-struct timespec fio_time_mono();
-```
-
-Returns monotonic time.
-
-#### `fio_time_nano`
-
-```c
-uint64_t fio_time_nano();
-```
-
-Returns monotonic time in nano-seconds (now in 1 micro of a second).
-
-#### `fio_time_micro`
-
-```c
-uint64_t fio_time_micro();
-```
-
-Returns monotonic time in micro-seconds (now in 1 millionth of a second).
-
-#### `fio_time_milli`
-
-```c
-uint64_t fio_time_milli();
-```
-
-Returns monotonic time in milliseconds.
-
-
-#### `fio_time2milli`
-
-```c
-uint64_t fio_time2milli(struct timespec t);
-```
-
-Converts a `struct timespec` to milliseconds.
-
-#### `fio_time2gm`
-
-```c
-struct tm fio_time2gm(time_t timer);
-```
-
-A faster (yet less localized) alternative to `gmtime_r`.
-
-See the libc `gmtime_r` documentation for details.
-
-Returns a `struct tm` object filled with the date information.
-
-This function is used internally for the formatting functions: , `fio_time2rfc7231`, `fio_time2rfc2109`, and `fio_time2rfc2822`.
-
-#### `fio_gm2time`
-
-```c
-time_t fio_gm2time(struct tm tm)
-```
-
-Converts a `struct tm` to time in seconds (assuming UTC).
-
-This function is less localized then the `mktime` / `timegm` library functions.
-
-#### `fio_time2rfc7231`
-
-```c
-size_t fio_time2rfc7231(char *target, time_t time);
-```
-
-Writes an RFC 7231 date representation (HTTP date format) to target.
-
-Requires 29 characters (for positive, 4 digit years).
-
-The format is similar to DDD, dd, MON, YYYY, HH:MM:SS GMT
-
-i.e.: Sun, 06 Nov 1994 08:49:37 GMT
-
-#### `fio_time2rfc2109`
-
-```c
-size_t fio_time2rfc2109(char *target, time_t time);
-```
-
-Writes an RFC 2109 date representation to target (HTTP Cookie Format).
-
-Requires 31 characters (for positive, 4 digit years).
-
-#### `fio_time2rfc2822`
-
-```c
-size_t fio_time2rfc2822(char *target, time_t time);
-```
-
-Writes an RFC 2822 date representation to target.
-
-Requires 28 or 29 characters (for positive, 4 digit years).
-
-#### `fio_time2log`
-
-```c
-size_t fio_time2log(char *target, time_t time);
-```
-
-Writes a date representation to target in common log format. i.e.: `[DD/MMM/yyyy:hh:mm:ss +0000]`
-
-Usually requires 29 characters (including square brackets and NUL).
-
-#### `fio_time2iso`
-
-```c
-size_t fio_time2iso(char *target, time_t time);
-```
-
-Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
-
-Usually requires 20 characters (including NUL).
-
--------------------------------------------------------------------------------
-## Pseudo Random Generation
-
-```c
-#define FIO_RAND
-#include "fio-stl.h"
-```
-
-If the `FIO_RAND` macro is defined, the following, non-cryptographic psedo-random generator and hash functions will be defined.
-
-The "random" data is initialized / seeded automatically using a small number of functional cycles that collect data and hash it, hopefully resulting in enough jitter entropy.
-
-The data is collected using `getrusage` (or the system clock if `getrusage` is unavailable) and hashed using RiskyHash. The data is then combined with the previous state / cycle.
-
-The CPU "jitter" within the calculation **should** effect `getrusage` in a way that makes it impossible for an attacker to determine the resulting random state (assuming jitter exists).
-
-However, this is unlikely to prove cryptographically safe and isn't likely to produce a large number of entropy bits (even though a small number of bits have a large impact on the final state).
-
-The facil.io random generator functions appear both faster and more random then the standard `rand` on my computer (you can test it for yours).
-
-I designed it in the hopes of achieving a cryptographically safe PRNG, but it wasn't cryptographically analyzed, lacks a good source of entropy and should be considered as a good enough non-cryptographic PRNG for general use.
-
-**Note**: bitwise operations (`FIO_BITWISE`), Risky Hash and Stable Hash are automatically defined along with `FIO_RAND`, since they are required by the algorithm.
-
-### Psedo-Random Generator Functions
-
-#### `fio_rand64`
-
-```c
-uint64_t fio_rand64(void)
-```
-
-Returns 64 random bits. Probably **not** cryptographically safe.
-
-#### `fio_rand_bytes`
-
-```c
-void fio_rand_bytes(void *data_, size_t len)
-```
-
-Writes `len` random Bytes to the buffer pointed to by `data`. Probably **not**
-cryptographically safe.
-
-#### `fio_rand_feed2seed`
-
-```c
-static void fio_rand_feed2seed(void *buf_, size_t len);
-```
-
-An internal function (accessible from the translation unit) that allows a program to feed random data to the PRNG (`fio_rand64`).
-
-The random data will effect the random seed on the next reseeding.
-
-Limited to 1023 bytes of data per function call.
-
-#### `fio_rand_reseed`
-
-```c
-void fio_rand_reseed(void);
-```
-
-Forces the random generator state to rotate.
-
-SHOULD be called after `fork` to prevent the two processes from outputting the same random numbers (until a reseed is called automatically).
-
-### Risky Hash / Stable Hash (data hashing):
-
-Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
-
-Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
-
-Both algorithms are **non-cryptographic** and produce 64 bit hashes by default (though internally both use a 256 block that could be used to produce 128bit hashes). Both pass the SMHasher test suite for hashing functions.
-
-#### `fio_stable_hash`
-
-```c
-uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
-```
-
-Computes a 64 bit facil.io Stable Hash (once version 1.0 is released, this algorithm will not be updated, even if broken).
-
-#### `fio_stable_hash128`
-
-```c
-void fio_stable_hash128(void *restrict dest,
-                        const void *restrict data,
-                        size_t len,
-                        uint64_t seed);
-```
-
-Computes a 128 bit facil.io Stable Hash (once version 1 is released, this algorithm will not be updated, even if broken).
-
-#### `fio_risky_hash`
-
-```c
-uint64_t fio_risky_hash(const void *data, size_t len, uint64_t seed)
-```
-
-This is a non-streaming implementation of the RiskyHash v.3 algorithm.
-
-This function will produce a 64 bit hash for X bytes of data.
-
-**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
-
-#### `fio_risky_ptr`
-
-```c
-uint64_t fio_risky_ptr(void *ptr);
-```
-
-Adds a bit of entropy to pointer values.
-
-**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
-
-#### `fio_risky_num`
-
-```c
-uint64_t fio_risky_num(uint64_t number, uint64_t seed);
-```
-
-Adds a bit of entropy to numeral values.
-
-**Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps, but that's about it.
-
-
-#### `fio_risky_mask`
-
-```c
-void fio_risky_mask(char *buf, size_t len);
-```
-
-Masks data using using `fio_xmask2` with sensible defaults for the key and the counter mode nonce.
-
-Used for mitigating memory access attacks when storing "secret" information in memory.
-
-**Notes**: 
-
-Uses the pointer as part of the key, so **masked data can't be moved**.
-
-This is **not** a cryptographically secure encryption. Even **if** the algorithm was secure, it would provide no more then a 32 bit level encryption, which isn't strong enough for any cryptographic use-case.
-
-However, this could be used to mitigate memory probing attacks. Secrets stored in the memory might remain accessible after the program exists or through core dump information. By storing "secret" information masked in this way, it mitigates the risk of secret information being easily recognized.
-
-
--------------------------------------------------------------------------------
-## SHA1
-
-```c
-#define FIO_SHA1
-#include "fio-stl.h"
-```
-
-By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
-
-Do **not** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
-
-#### `fio_sha1`
-
-```c
-fio_sha1_s fio_sha1(const void *data, uint64_t len);
-```
-
-A simple, non streaming, implementation of the SHA1 hashing algorithm.
-
-#### `fio_sha1_len`
-
-```c
-size_t fio_sha1_len(void);
-```
-
-Returns the digest length of SHA1 in bytes (which is always 20).
-
-#### `fio_sha1_digest`
-
-```c
-uint8_t *fio_sha1_digest(fio_sha1_s *s);
-```
-
-Returns the digest of a SHA1 object. The digest is always 20 bytes long.
-
--------------------------------------------------------------------------------
-## ChaCha20 & Poly1305
-
-```c
-#define FIO_CHACHA
-#include "fio-stl.h"
-```
-
-Non-streaming ChaCha20 and Poly1305 implementations are provided for cases when a cryptography library isn't available (or too heavy) but a good enough symmetric cryptographic solution is required. Please note that this implementation was not tested from a cryptographic viewpoint and although constant time was desired it might not have been achieved on all systems / CPUs.
-
-**Note:** some CPUs do not offer constant time MUL and might leak information through side-chain attacks.
-
-#### `fio_chacha20_poly1305_enc`
-
-```c
-void fio_chacha20_poly1305_enc(void *mac,
-                               void *data,
-                               size_t len,
-                               void *ad, /* additional data */
-                               size_t adlen,
-                               void *key,
-                               void *nounce);
-```
-
-Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
-
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
-* `ad`     MAY be omitted, will NOT be encrypted.
-* `data`   MAY be omitted, WILL be encrypted.
-* `mac`    MUST point to a buffer with (at least) 16 available bytes.
-
-#### `fio_chacha20_poly1305_dec`
-
-```c
-int fio_chacha20_poly1305_dec(void *mac,
-                              void *data,
-                              size_t len,
-                              void *ad, /* additional data */
-                              size_t adlen,
-                              void *key,
-                              void *nounce);
-```
-
-Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
-
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
-* `ad`     MAY be omitted ONLY IF originally omitted.
-* `data`   MAY be omitted, WILL be decrypted.
-* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
-
-Returns `-1` on error (authentication failed).
-
-#### `fio_chacha20`
-
-```c
-void fio_chacha20(void *data,
-                  size_t len,
-                  void *key,
-                  void *nounce,
-                  uint32_t counter);
-```
-
-Performs an in-place encryption/decryption of `data` using ChaCha20.
-
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
-* `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
-
-
-#### `fio_poly1305_auth`
-
-```c
-void fio_poly1305_auth(void *mac_dest,
-                       void *key256bits,
-                       void *message,
-                       size_t len,
-                       void *additional_data,
-                       size_t additional_data_len);
-```
-
-Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
-
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-
--------------------------------------------------------------------------------
-## iMap - a Mapped Array
-
-The `FIO_TYPEDEF_IMAP_ARRAY` macro is one way to design a hash map. It is used when both insertion order and iteration over the complete data set is of high priority. 
-
-#### `FIO_TYPEDEF_IMAP_ARRAY`
-
-```c
-#define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
-                               array_type,                                     \
-                               imap_type,                                      \
-                               hash_fn,                                        \
-                               cmp_fn,                                         \
-                               is_valid_fn)
-```
-
-This MACRO defines the type and functions needed for an indexed array.
-
-An indexed array is simple ordered array who's objects are indexed using an almost-hash map, allowing for easy seeking while also enjoying the advantages provided by the array structure.
-
-The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index in array and any leftover hash data (the first half being tested during the random access and the leftover during comparison). The reserved value `0` indicates a free slot. The reserved value `~0` indicates a freed item (a free slot that was previously used).
-
-This is mostly for internal use and documentation is poor (PR, anyone?).
-
-The macro defines the following:
-
-- `array_name_s`        the main array container (.ary is the array itself)
-
-- `array_name_seeker_s` is a seeker type that finds objects.
-- `array_name_seek`     finds an object or its future position.
-
-- `array_name_reserve`  reserves a minimum imap storage capacity.
-- `array_name_capa`     the imap's theoretical storage capacity.
-
-- `array_name_set`      writes or overwrites data to the array.
-- `array_name_get`      returns a pointer to the object within the array.
-- `array_name_remove`   removes an object and resets its memory to zero.
-
-- `array_name_rehash`   re-builds the imap (use after sorting).
-
-
-Notes:
-
-- `hash_fn(ptr)`, `cmp_fn(a_ptr,b_ptr)` and `is_valid_fn(ptr)` accepts **pointers**  and needs to de-reference them in order to compare their content.
-
--------------------------------------------------------------------------------
 ## URL (URI) parsing
 
 ```c
@@ -2717,7 +3035,7 @@ When the information is returned from `fio_url_parse`, the strings in the `fio_u
 
 #### `fio_buf_info_s` - revisited
 
-The `fio_buf_info_s` is used to return information about the parts of the URL's string bufferas detailed above. Since the `fio_url_s` does not return NUL terminated strings, this returned data structure is used.
+The `fio_buf_info_s` is used to return information about the parts of the URL's string buffers detailed above. Since the `fio_url_s` does not return NUL terminated strings, this returned data structure is used.
 
 ```c
 typedef struct fio_buf_info_s {
@@ -2777,6 +3095,170 @@ Invalid formats might produce unexpected results. No error testing performed.
 The `file`, `unix` and `priv` schemas are special in the sense that they produce no `host` (only `path`) and are parsed as if they contain file path information.
 
 -------------------------------------------------------------------------------
+## CLI (command line interface)
+
+```c
+#define FIO_CLI
+#include "fio-stl.h"
+```
+
+The facil.io library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
+
+* Auto-generation of the "help" / usage output.
+
+* Argument type testing (String, boolean, and integer types are supported).
+
+* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
+
+* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
+
+* Array style support and access to unnamed arguments.
+
+By defining `FIO_CLI`, the following functions will be defined.
+
+In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP`, flags, since CLI parsing and cleanup depends on them.
+
+**Note**: the `fio_cli` is **NOT** thread-safe unless limited to reading once multi-threading had started (read is immutable, write is where things can go wrong).
+
+#### `fio_cli_start`
+
+```c
+#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
+  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
+                (char const *[]){__VA_ARGS__, (char const *)NULL})
+
+/* the shadowed function: */
+void fio_cli_start   (int argc, char const *argv[],
+                      int unnamed_min, int unnamed_max,
+                      char const *description,
+                      char const **names);
+```
+
+The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
+
+The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
+
+If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
+
+The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
+
+Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
+
+* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_BOOL("-arg [-alias] desc.")` (cannot accept default values)
+
+* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
+
+* `FIO_CLI_PRINT("argument related line (printed as part of the previous argument)")`
+
+* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
+
+**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
+
+```c
+int main(int argc, char const *argv[]) {
+  fio_cli_start(argc, argv, 0, -1,
+                "this is a CLI example for the NAME application.\n"
+                "This example allows for unlimited arguments that will be printed.",
+                FIO_CLI_PRINT_HEADER("CLI type validation"),
+                FIO_CLI_STRING("--str -s (my default string) any data goes here"),
+                FIO_CLI_INT("--int -i (42) integer data goes here"),
+                FIO_CLI_BOOL("--bool -b flag (boolean) only - no data"),
+                FIO_CLI_PRINT("boolean flags cannot have default values."),
+                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
+                );
+  if (fio_cli_get("-s")) /* always true when default value is provided */
+    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
+
+  fprintf(stderr, "Integer: %d\n", (int)fio_cli_get_i("-i"));
+
+  fprintf(stderr, "Boolean: %d\n", (int)fio_cli_get_i("-b"));
+
+  if (fio_cli_unnamed_count()) {
+    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
+    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
+      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
+    }
+  }
+
+  fio_cli_end();
+  return 0;
+}
+```
+
+#### `fio_cli_end`
+
+```c
+void fio_cli_end(void);
+```
+
+Clears the CLI data storage.
+
+#### `fio_cli_get`
+
+```c
+char const *fio_cli_get(char const *name);
+```
+
+Returns the argument's value as a string, or NULL if the argument wasn't provided.
+
+#### `fio_cli_get_i`
+
+```c
+int64_t fio_cli_get_i(char const *name);
+```
+
+Returns the argument's value as an integer, or 0 if the argument wasn't provided.
+
+**Note:** the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
+
+#### `fio_cli_get_bool`
+
+```c
+#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
+```
+
+Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
+
+#### `fio_cli_unnamed_count`
+
+```c
+unsigned int fio_cli_unnamed_count(void);
+```
+
+Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
+
+#### `fio_cli_unnamed`
+
+```c
+char const *fio_cli_unnamed(unsigned int index);
+```
+
+Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
+
+#### `fio_cli_set`
+
+```c
+void fio_cli_set(char const *name, char const *value);
+```
+
+Sets a value for the named argument (value will propagate to named aliases).
+
+#### `fio_cli_set_i`
+
+```c
+void fio_cli_set_i(char const *name, int64_t i);
+```
+
+Sets a numeral value for the named argument (but **not** it's aliases).
+
+**Note**: this basically writes a string with a base 10 representation.
+
+
+-------------------------------------------------------------------------------
 ## Custom JSON Parser
 
 ```c
@@ -2791,6 +3273,8 @@ The parser allows for streaming data and decouples the parsing process from the 
 To use the JSON parser, define `FIO_JSON` before including the `fio-slt.h` file and later define the static callbacks required by the parser (see list of callbacks).
 
 **Note**: the FIOBJ soft types already use the JSON parser. For this reason, another JSON parser can't be implemented in the same translation unit as the FIOBJ implementation. To use another JSON parser, implement it in a different C file then  the one where the FIOBJ types are implemented.
+
+**Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
 
 #### `JSON_MAX_DEPTH`
 
@@ -3137,6 +3621,218 @@ void run_my_json_minifier(char *json, size_t len) {
 ```
 
 -------------------------------------------------------------------------------
+## Basic Socket / IO Helpers
+
+```c
+#define FIO_SOCK
+#include "fio-stl.h"
+```
+
+The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
+
+By defining `FIO_SOCK`, the following functions will be defined.
+
+**Note**:
+
+On Windows that `fd` is a 64 bit number with no promises made as to its value. On POSIX systems the `fd` is a 32 bit number which is sequential. 
+
+Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32bit type limit set on POSIX machines.
+
+However, for most implementations this should be a non-issue as it seems (from observation, not knowledge) that Windows maps `fd` values to a kernel array (rather than a process specific array) and it is unlikely that any Windows machine will actually open more than 2 Giga "handles" unless it's doing something wrong.
+
+**Note:** this module depends on the `FIO_URL` module which will be automatically included.
+
+#### `fio_sock_open`
+
+```c
+int fio_sock_open(const char *restrict address,
+                 const char *restrict port,
+                 uint16_t flags);
+```
+
+Creates a new socket according to the provided flags.
+
+The `port` string will be ignored when `FIO_SOCK_UNIX` is set.
+
+The `address` can be NULL for Server sockets (`FIO_SOCK_SERVER`) when binding to all available interfaces (this is actually recommended unless network filtering is desired).
+
+The `flag` integer can be a combination of any of the following flags:
+
+*  `FIO_SOCK_TCP` - Creates a TCP/IP socket.
+
+*  `FIO_SOCK_UDP` - Creates a UDP socket.
+
+*  `FIO_SOCK_UNIX` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
+
+*  `FIO_SOCK_UNIX_PRIVATE` - Same as `FIO_SOCK_UNIX`, only does not use `umask` and `chmod` to make the socket publicly available.
+
+*  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
+
+*  `FIO_SOCK_CLIENT` - Initializes a Client socket, calling `connect` using the `address` and `port` arguments.
+
+*  `FIO_SOCK_NONBLOCK` - Sets the new socket to non-blocking mode.
+
+If neither `FIO_SOCK_SERVER` nor `FIO_SOCK_CLIENT` are specified, the function will default to a server socket.
+
+**Note**:
+
+UDP Server Sockets might need to handle traffic from multiple clients, which could require a significantly larger OS buffer then the default buffer offered.
+
+Consider (from [this SO answer](https://stackoverflow.com/questions/2090850/specifying-udp-receive-buffer-size-at-runtime-in-linux/2090902#2090902), see [this blog post](https://medium.com/@CameronSparr/increase-os-udp-buffers-to-improve-performance-51d167bb1360), [this article](http://fasterdata.es.net/network-tuning/udp-tuning/) and [this article](https://access.redhat.com/documentation/en-US/JBoss_Enterprise_Web_Platform/5/html/Administration_And_Configuration_Guide/jgroups-perf-udpbuffer.html)):
+
+```c
+int n = 32*1024*1024; /* try for 32Mb */
+while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeof(n)) == -1) {
+  /* failed - repeat attempt at 1Mb interval */
+  if (n >= (4 * 1024 * 1024)) // OS may have returned max value
+    n -= 1024 * 1024;
+
+}
+```
+
+#### `fio_sock_open2`
+
+```c
+int fio_sock_open(const char *url, uint16_t flags);
+```
+
+See [`fio_sock_open`](#fio_sock_open) for details. Accepts a single, URL style string instead of an address / port pair.
+
+The `tcp` / `udp` information **may** appear in the URL schema if missing from the flags (i.e., `tcp://localhost:3000/`);
+
+If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or 
+`FIO_SOCK_UDP` that were originally given.
+
+**Note**: a `file://` or `unix://` (or even a simple `./file.sock`) URL will create a publicly available Unix Socket (permissions set to allow everyone RW access). To create a private Unix Socket (one with permissions equal to the processes `umask`), use a `prive://` schema (i.e., `priv://my.sock`).
+
+#### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
+
+```c
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+#define fio_sock_close(fd)            close(fd)
+/* on Windows only */
+#define accept fio_sock_accept
+```
+
+Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
+
+#### `fio_sock_wait_io`
+
+```c
+short fio_sock_wait_io(int fd, short events, int timeout)
+```
+
+Uses `poll` to wait until an IO device has one or more of the evens listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) have passed.
+
+Returns 0 on timeout, -1 on error or the events that are valid.
+
+#### `FIO_SOCK_POLL_RW` (macro)
+
+```c
+#define FIO_SOCK_POLL_RW(fd_)                                                  \
+  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for both read and write events (data availability and/or space in the outgoing buffer).
+
+#### `FIO_SOCK_POLL_R` (macro)
+
+```c
+#define FIO_SOCK_POLL_R(fd_)                                                   \
+  (struct pollfd) { .fd = fd_, .events = POLLIN }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for incoming data availability.
+
+
+#### `FIO_SOCK_POLL_W` (macro)
+
+```c
+#define FIO_SOCK_POLL_W(fd_)                                                   \
+  (struct pollfd) { .fd = fd_, .events = POLLOUT }
+```
+
+This helper macro helps to author a `struct pollfd` member who's set to polling for space in the outgoing `fd`'s buffer.
+
+#### `fio_sock_address_new`
+
+```c
+struct addrinfo *fio_sock_address_new(const char *restrict address,
+                                      const char *restrict port,
+                                      int sock_type);
+```
+
+Attempts to resolve an address to a valid IP6 / IP4 address pointer.
+
+The `sock_type` element should be a socket type, such as `SOCK_DGRAM` (UDP) or `SOCK_STREAM` (TCP/IP).
+
+The address should be freed using `fio_sock_address_free`.
+
+#### `fio_sock_address_free`
+
+```c
+void fio_sock_address_free(struct addrinfo *a);
+```
+
+Frees the pointer returned by `fio_sock_address_new`.
+
+#### `fio_sock_set_non_block`
+
+```c
+int fio_sock_set_non_block(int fd);
+```
+
+Sets a file descriptor / socket to non blocking state.
+
+#### `fio_sock_open_local`
+
+```c
+int fio_sock_open_local(struct addrinfo *addr);
+```
+
+Creates a new network socket and binds it to a local address.
+
+#### `fio_sock_open_remote`
+
+```c
+int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
+```
+
+Creates a new network socket and connects it to a remote address.
+
+#### `fio_sock_open_unix`
+
+```c
+int fio_sock_open_unix(const char *address, int is_client, int nonblock);
+```
+
+Creates a new Unix socket and binds it to a local address.
+
+**Note**: not available on all systems. On Windows, when Unix Sockets are available (which isn't always), the permissions for the socket are system defined (facil.io doesn't change them).
+
+
+#### `fio_sock_maximize_limits`
+
+```c
+size_t fio_sock_maximize_limits(size_t max_limit)
+```
+
+Attempts to maximize the allowed open file limits (with values up to `max_limit`). Returns the new known limit.
+
+#### `FIO_SOCK_AVOID_UMASK`
+
+This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).
+
+Using `umask` in multi-threaded environments could cause `umask` data corruption due to race condition (as two calls are actually required, making the operation non-atomic).
+
+If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
+
+This, however, may effect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
+
+**Note**: on Windows facil.io behaves as if this flag was set.
+
+-------------------------------------------------------------------------------
 ## State Callbacks
 
 The state callback API, which is also used internally by stateful modules such as the memory allocator, allows callbacks to be registered for specific changes in the state of the app.
@@ -3146,6 +3842,8 @@ This allows modules to react to changes in the state of the program without requ
 When using this module it is better if it is used as a global `FIO_EXTERN` module, so state notifications are not limited to the scope of the C file (the translation unit).
 
 By defining the `FIO_STATE` macro, the following are defined:
+
+**Note:** this module depends on the `FIO_RAND`, `FIO_ATOMIC`, and `FIO_IMAP_CORE` modules which will be automatically included.
 
 #### `fio_state_callback_add`
 
@@ -3243,6 +3941,145 @@ Callbacks for all cleanup oriented tasks are called in reverse order of creation
 During an event, changes to the callback list are ignored (callbacks can't add or remove other callbacks for the same event).
 
 -------------------------------------------------------------------------------
+## Time Helpers
+
+```c
+#define FIO_TIME
+#include "fio-stl.h"
+```
+
+By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
+
+**Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
+
+#### `fio_time_real`
+
+```c
+struct timespec fio_time_real();
+```
+
+Returns human (watch) time... this value isn't as safe for measurements.
+
+#### `fio_time_mono`
+
+```c
+struct timespec fio_time_mono();
+```
+
+Returns monotonic time.
+
+#### `fio_time_nano`
+
+```c
+uint64_t fio_time_nano();
+```
+
+Returns monotonic time in nano-seconds (now in 1 micro of a second).
+
+#### `fio_time_micro`
+
+```c
+uint64_t fio_time_micro();
+```
+
+Returns monotonic time in micro-seconds (now in 1 millionth of a second).
+
+#### `fio_time_milli`
+
+```c
+uint64_t fio_time_milli();
+```
+
+Returns monotonic time in milliseconds.
+
+
+#### `fio_time2milli`
+
+```c
+uint64_t fio_time2milli(struct timespec t);
+```
+
+Converts a `struct timespec` to milliseconds.
+
+#### `fio_time2gm`
+
+```c
+struct tm fio_time2gm(time_t timer);
+```
+
+A faster (yet less localized) alternative to `gmtime_r`.
+
+See the libc `gmtime_r` documentation for details.
+
+Returns a `struct tm` object filled with the date information.
+
+This function is used internally for the formatting functions: , `fio_time2rfc7231`, `fio_time2rfc2109`, and `fio_time2rfc2822`.
+
+#### `fio_gm2time`
+
+```c
+time_t fio_gm2time(struct tm tm)
+```
+
+Converts a `struct tm` to time in seconds (assuming UTC).
+
+This function is less localized then the `mktime` / `timegm` library functions.
+
+#### `fio_time2rfc7231`
+
+```c
+size_t fio_time2rfc7231(char *target, time_t time);
+```
+
+Writes an RFC 7231 date representation (HTTP date format) to target.
+
+Requires 29 characters (for positive, 4 digit years).
+
+The format is similar to DDD, dd, MON, YYYY, HH:MM:SS GMT
+
+i.e.: Sun, 06 Nov 1994 08:49:37 GMT
+
+#### `fio_time2rfc2109`
+
+```c
+size_t fio_time2rfc2109(char *target, time_t time);
+```
+
+Writes an RFC 2109 date representation to target (HTTP Cookie Format).
+
+Requires 31 characters (for positive, 4 digit years).
+
+#### `fio_time2rfc2822`
+
+```c
+size_t fio_time2rfc2822(char *target, time_t time);
+```
+
+Writes an RFC 2822 date representation to target.
+
+Requires 28 or 29 characters (for positive, 4 digit years).
+
+#### `fio_time2log`
+
+```c
+size_t fio_time2log(char *target, time_t time);
+```
+
+Writes a date representation to target in common log format. i.e.: `[DD/MMM/yyyy:hh:mm:ss +0000]`
+
+Usually requires 29 characters (including square brackets and NUL).
+
+#### `fio_time2iso`
+
+```c
+size_t fio_time2iso(char *target, time_t time);
+```
+
+Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
+
+Usually requires 20 characters (including NUL).
+
+-------------------------------------------------------------------------------
 ## Local Memory Allocation
 
 ```c
@@ -3250,7 +4087,7 @@ During an event, changes to the callback list are ignored (callbacks can't add o
 #include "fio-stl.h"
 ```
 
-The facil.io Simple Template Library includes a fast, concurrent, local memory allocator designed for grouping together objects with similar lifespans.
+The facil.io library includes a fast, concurrent, local memory allocator designed for grouping together objects with similar lifespans. [This has many advantages](https://youtu.be/nZNd5FjSquk).
 
 Multiple allocators can be defined using `FIO_MEMORY_NAME` and including `fio-stl.h` multiple times.
 
@@ -3258,25 +4095,11 @@ The shortcut `FIO_MALLOC` MACRO will define a local memory allocator shared by a
 
 When `FIO_MEMORY_DISABLE` is defined, all custom memory allocators will route to the system's `malloc`.
 
-### Why Use a Local Memory Allocation?
+**Note**: this module defines memory allocation macros for all subsequent modules in the same `include` statement.
 
-Using a local memory allocator allows types to [enjoy locality and enhanced performance within their allocation subgroup](https://youtu.be/nZNd5FjSquk).
+**Note**: when a memory allocator is defined, this module requires `FIO_STATE`, `FIO_THREADS`, `FIO_ATOMIC`, `FIO_IMAP_CORE`, and `FIO_RAND`, which will be automatically included.
 
-The facil.io Simple Template Library includes a fast, concurrent, memory allocator designed for shot-medium object life-spans.
-
-Multiple allocators can be defined using the `FIO_MEMORY_NAME` macro, allowing different objects types to have different memory allocators, resulting in better cache locality and less contention in multi-threaded programs.
-
-The facil.io allocator also increases security by zero-ing out the memory earlier and always returning zeroed out memory (see default `FIO_MEMORY_INITIALIZE_ALLOCATIONS`).
-
-Reallocated memory might be filled with junk data after the valid data, but this allocator solves this issue by offering [`fio_realloc2`](#fio_realloc2).
-
-Memory allocation overhead is small  ~ 0.006% by default, which is about 1 byte per 16,384 bytes). In addition there's a small per-process overhead for the allocator's state-machine (usually just 1 page / 4Kb per process). 
-
-However, the allocator is designed for common network scenarios where all long-term allocations are performed during the start-up phase or using a different memory allocator. It's also designed to favor smaller allocations and has a limit on the number of bytes it could handle before passing through to `mmap`.
-
-The memory allocator can be used in conjuncture with the system's `malloc` to minimize heap fragmentation (long-life objects use `malloc`, short life objects use `fio_malloc`) or as a memory pool for specific objects.
-
-**Note**: this custom allocator could increase memory fragmentation if long-life allocations are performed periodically (rather than performed during startup). Use [`fio_mmap`](#fio_mmap) or the system's `malloc` for long-term allocations.
+**Note**: Use [`fio_mmap`](#fio_mmap) or the system's `malloc` for long-term allocations.
 
 ### Memory Allocator Overview
 
@@ -3284,11 +4107,11 @@ To minimize contention, the memory allocator uses allocation "arenas" that can w
 
 The memory allocator collects "chunks" of memory from the system.
 
-Each chunk is divided into "blocks" or used in whole as a "big-blocks".
+Each chunk is divided into "blocks" or used in whole as a "big-block".
 
-Each block is assigned to an arena. Big block allocations aren't assigned to arenas and can't be performed in parallel.
+Each block is assigned to an arena. Big block allocations aren't assigned to arenas and aren't performed in parallel.
 
-Blocks and big-blocks are "sliced" in a similar manner to `sbrk` in order to allocate memory to the user.
+Blocks and big-blocks are "sliced" in a similar manner to `sbrk` in order to allocate the actual memory.
 
 A block (or big-block) is returned to the allocator for reuse only when it's memory was fully freed. A leaked allocation will prevent a block / big-block from being released back to the allocator.
 
@@ -3622,26 +4445,6 @@ If set to a number, will allocate memory on startup to the number of arenas indi
 
 It is usually better to avoid this unless using a single arena.
 
-#### `FIO_MEMORY_USE_FIO_MEMSET`
-
-```c
-#define FIO_MEMORY_USE_FIO_MEMSET 0
-```
-
-If true, uses a facil.io custom implementation for an aligned `memset`.
-
-It's recommended to avoid this unless a compiler / system doesn't have its own optimized implementation for zeroing out pages.
-
-#### `FIO_MEMORY_USE_FIO_MEMCOPY`
-
-```c
-#define FIO_MEMORY_USE_FIO_MEMCOPY 1
-```
-
-If true, uses a facil.io custom implementation for an aligned `memcpy`.
-
-Since the memory is known to be aligned, it's sometimes faster to use the facil.io aligned implementation that the system's generic implementation.
-
 #### `FIO_MEM_PAGE_ALLOC`, `FIO_MEM_PAGE_REALLOC` and `FIO_MEM_PAGE_FREE`
 
 ```c
@@ -3761,6 +4564,149 @@ The following are reserved macro names:
 
 
 -------------------------------------------------------------------------------
+## Basic IO Polling
+
+```c
+#define FIO_POLL
+#include "fio-stl.h"
+```
+
+IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
+
+The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
+
+"One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
+
+There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
+
+It is recommended to use the system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
+
+By defining `FIO_POLL`, the following functions will be defined.
+
+**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
+
+**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
+
+### `FIO_POLL` API
+
+
+#### `fio_poll_s`
+
+```c
+typedef struct fio_poll_s fio_poll_s;
+```
+
+The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
+
+#### `fio_poll_init`
+
+```c
+fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
+/* named argument support */
+#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
+```
+
+Creates a new polling object / queue.
+
+The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
+
+```c
+typedef struct {
+  /** callback for when data is availabl in the incoming buffer. */
+  void (*on_data)(void *udata);
+  /** callback for when the outgoing buffer allows a call to `write`. */
+  void (*on_ready)(void *udata);
+  /** callback for closed connections and / or connections with errors. */
+  void (*on_close)(void *udata);
+} fio_poll_settings_s;
+```
+
+#### `fio_poll_destroy`
+
+```c
+void fio_poll_destroy(fio_poll_s *p);
+```
+
+Destroys the polling object, freeing its resources.
+
+**Note**: the monitored file descriptors will remain untouched (possibly open).
+
+#### `fio_poll_monitor`
+
+```c
+int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
+```
+
+Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
+
+Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
+
+On systems where `POLLRDHUP` is supported, it is always monitored for.
+
+Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
+
+Returns -1 on error.
+
+#### `fio_poll_review`
+
+```c
+int fio_poll_review(fio_poll_s *p, int timeout);
+```
+
+Reviews if any of the monitored file descriptors has any events.
+
+`timeout` is in milliseconds.
+
+Returns the number of events called.
+
+**Note**:
+
+Polling is thread safe, but has different effects on different threads.
+
+Adding a new file descriptor from one thread while polling in a different thread will not poll that IO untill `fio_poll_review` is called again.
+
+#### `fio_poll_forget`
+
+```c
+void *fio_poll_forget(fio_poll_s *p, int fd);
+```
+
+Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
+
+### `FIO_POLL` Compile Time Macros
+
+#### `FIO_POLL_ENGINE`
+
+```c
+#define FIO_POLL_ENGINE_POLL   1
+#define FIO_POLL_ENGINE_EPOLL  2
+#define FIO_POLL_ENGINE_KQUEUE 3
+```
+
+Allows for both the detection and the manual selection (override) of the underlying IO multiplexing API.
+
+When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses less system calls.
+
+```c
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+```
+
+#### `FIO_POLL_ENGINE_STR`
+
+```c
+#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
+#define FIO_POLL_ENGINE_STR "poll"
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
+#define FIO_POLL_ENGINE_STR "epoll"
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
+#define FIO_POLL_ENGINE_STR "kqueue"
+#endif
+
+```
+
+A string MACRO representing the used IO multiplexing "engine".
+
+-------------------------------------------------------------------------------
 ## Task Queue
 
 ```c
@@ -3768,7 +4714,7 @@ The following are reserved macro names:
 #include "fio-stl.h"
 ```
 
-The Simple Template Library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
+The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
 
 Since delayed processing is a common task, this queue is provides an easy way to schedule and perform delayed tasks.
 
@@ -4059,216 +5005,6 @@ This is due to the fact that the tasks may try to reschedule themselves (if they
 When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
 
 -------------------------------------------------------------------------------
-## Basic Socket / IO Helpers
-
-```c
-#define FIO_SOCK
-#include "fio-stl.h"
-```
-
-The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
-
-By defining `FIO_SOCK`, the following functions will be defined.
-
-**Note**:
-
-On Windows that `fd` is a 64 bit number with no promises made as to its value. On POSIX systems the `fd` is a 32 bit number which is sequential. 
-
-Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32bit type limit set on POSIX machines.
-
-However, for most implementations this should be a non-issue as it seems (from observation, not knowledge) that Windows maps `fd` values to a kernel array (rather than a process specific array) and it is unlikely that any Windows machine will actually open more than 2 Giga "handles" unless it's doing something wrong.
-
-#### `fio_sock_open`
-
-```c
-int fio_sock_open(const char *restrict address,
-                 const char *restrict port,
-                 uint16_t flags);
-```
-
-Creates a new socket according to the provided flags.
-
-The `port` string will be ignored when `FIO_SOCK_UNIX` is set.
-
-The `address` can be NULL for Server sockets (`FIO_SOCK_SERVER`) when binding to all available interfaces (this is actually recommended unless network filtering is desired).
-
-The `flag` integer can be a combination of any of the following flags:
-
-*  `FIO_SOCK_TCP` - Creates a TCP/IP socket.
-
-*  `FIO_SOCK_UDP` - Creates a UDP socket.
-
-*  `FIO_SOCK_UNIX` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
-
-*  `FIO_SOCK_UNIX_PRIVATE` - Same as `FIO_SOCK_UNIX`, only does not use `umask` and `chmod` to make the socket publicly available.
-
-*  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
-
-*  `FIO_SOCK_CLIENT` - Initializes a Client socket, calling `connect` using the `address` and `port` arguments.
-
-*  `FIO_SOCK_NONBLOCK` - Sets the new socket to non-blocking mode.
-
-If neither `FIO_SOCK_SERVER` nor `FIO_SOCK_CLIENT` are specified, the function will default to a server socket.
-
-**Note**:
-
-UDP Server Sockets might need to handle traffic from multiple clients, which could require a significantly larger OS buffer then the default buffer offered.
-
-Consider (from [this SO answer](https://stackoverflow.com/questions/2090850/specifying-udp-receive-buffer-size-at-runtime-in-linux/2090902#2090902), see [this blog post](https://medium.com/@CameronSparr/increase-os-udp-buffers-to-improve-performance-51d167bb1360), [this article](http://fasterdata.es.net/network-tuning/udp-tuning/) and [this article](https://access.redhat.com/documentation/en-US/JBoss_Enterprise_Web_Platform/5/html/Administration_And_Configuration_Guide/jgroups-perf-udpbuffer.html)):
-
-```c
-int n = 32*1024*1024; /* try for 32Mb */
-while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeof(n)) == -1) {
-  /* failed - repeat attempt at 1Mb interval */
-  if (n >= (4 * 1024 * 1024)) // OS may have returned max value
-    n -= 1024 * 1024;
-
-}
-```
-
-#### `fio_sock_open2`
-
-```c
-int fio_sock_open(const char *url, uint16_t flags);
-```
-
-See [`fio_sock_open`](#fio_sock_open) for details. Accepts a single, URL style string instead of an address / port pair.
-
-The `tcp` / `udp` information **may** appear in the URL schema if missing from the flags (i.e., `tcp://localhost:3000/`);
-
-If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or 
-`FIO_SOCK_UDP` that were originally given.
-
-**Note**: a `file://` or `unix://` (or even a simple `./file.sock`) URL will create a publicly available Unix Socket (permissions set to allow everyone RW access). To create a private Unix Socket (one with permissions equal to the processes `umask`), use a `prive://` schema (i.e., `priv://my.sock`).
-
-#### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
-
-```c
-#define fio_sock_write(fd, data, len) write((fd), (data), (len))
-#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
-#define fio_sock_close(fd)            close(fd)
-/* on Windows only */
-#define accept fio_sock_accept
-```
-
-Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
-
-#### `fio_sock_wait_io`
-
-```c
-short fio_sock_wait_io(int fd, short events, int timeout)
-```
-
-Uses `poll` to wait until an IO device has one or more of the evens listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) have passed.
-
-Returns 0 on timeout, -1 on error or the events that are valid.
-
-#### `FIO_SOCK_POLL_RW` (macro)
-
-```c
-#define FIO_SOCK_POLL_RW(fd_)                                                  \
-  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
-```
-
-This helper macro helps to author a `struct pollfd` member who's set to polling for both read and write events (data availability and/or space in the outgoing buffer).
-
-#### `FIO_SOCK_POLL_R` (macro)
-
-```c
-#define FIO_SOCK_POLL_R(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLIN }
-```
-
-This helper macro helps to author a `struct pollfd` member who's set to polling for incoming data availability.
-
-
-#### `FIO_SOCK_POLL_W` (macro)
-
-```c
-#define FIO_SOCK_POLL_W(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLOUT }
-```
-
-This helper macro helps to author a `struct pollfd` member who's set to polling for space in the outgoing `fd`'s buffer.
-
-#### `fio_sock_address_new`
-
-```c
-struct addrinfo *fio_sock_address_new(const char *restrict address,
-                                      const char *restrict port,
-                                      int sock_type);
-```
-
-Attempts to resolve an address to a valid IP6 / IP4 address pointer.
-
-The `sock_type` element should be a socket type, such as `SOCK_DGRAM` (UDP) or `SOCK_STREAM` (TCP/IP).
-
-The address should be freed using `fio_sock_address_free`.
-
-#### `fio_sock_address_free`
-
-```c
-void fio_sock_address_free(struct addrinfo *a);
-```
-
-Frees the pointer returned by `fio_sock_address_new`.
-
-#### `fio_sock_set_non_block`
-
-```c
-int fio_sock_set_non_block(int fd);
-```
-
-Sets a file descriptor / socket to non blocking state.
-
-#### `fio_sock_open_local`
-
-```c
-int fio_sock_open_local(struct addrinfo *addr);
-```
-
-Creates a new network socket and binds it to a local address.
-
-#### `fio_sock_open_remote`
-
-```c
-int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
-```
-
-Creates a new network socket and connects it to a remote address.
-
-#### `fio_sock_open_unix`
-
-```c
-int fio_sock_open_unix(const char *address, int is_client, int nonblock);
-```
-
-Creates a new Unix socket and binds it to a local address.
-
-**Note**: not available on all systems. On Windows, when Unix Sockets are available (which isn't always), the permissions for the socket are system defined (facil.io doesn't change them).
-
-
-#### `fio_sock_maximize_limits`
-
-```c
-size_t fio_sock_maximize_limits(size_t max_limit)
-```
-
-Attempts to maximize the allowed open file limits (with values up to `max_limit`). Returns the new known limit.
-
-#### `FIO_SOCK_AVOID_UMASK`
-
-This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).
-
-Using `umask` in multi-threaded environments could cause `umask` data corruption due to race condition (as two calls are actually required, making the operation non-atomic).
-
-If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
-
-This, however, may effect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
-
-**Note**: on Windows facil.io behaves as if this flag was set.
-
--------------------------------------------------------------------------------
 ## Data Stream Container
 
 ```c
@@ -4441,241 +5177,6 @@ This macro should be set according to the specific allocator limits. By default,
 
 -------------------------------------------------------------------------------
 
-## Signal Monitoring
-
-```c
-#define FIO_SIGNAL
-#include "fio-stl.h"
-```
-
-OS signal callbacks are very limited in the actions they are allowed to take. In fact, one of the only actions they are allowed to take is to set a volatile atomic flag.
-
-The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.
-
-When defining `FIO_SIGNAL`, the following function are defined.
-
-#### `fio_signal_monitor`
-
-```c
-int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata);
-```
-
-Starts to monitor for the specified signal, setting an optional callback.
-
-If the signal is already being monitored, the callback and `udata` pointers are updated.
-
-**Note**: `udata` stands for "user data", it is an opaque pointer that is simply passed along to the callback.
-
-#### `fio_signal_review`
-
-```c
-int fio_signal_review(void);
-```
-
-Reviews all signals, calling any relevant callbacks.
-
-#### `fio_signal_forget`
-
-```c
-int fio_signal_forget(int sig);
-```
-
-Stops monitoring the specified signal.
-
--------------------------------------------------------------------------------
-## Globe Matching
-
-```c
-#define FIO_GLOB_MATCH
-#include "fio-stl.h"
-```
-
-By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
-
-#### `fio_glob_match`
-
-```c
-uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str);
-```
-
-This function is a **binary** glob matching helper.
-
-Returns 1 on a match, otherwise returns 0.
-
-The following patterns are recognized:
-
-* `*` - matches any string, including an empty string.
-		
-	i.e., the following patterns will match against the string `"String"`:
-
-    `"*"`
-
-    `"*String*"`
-
-    `"S*ing"`
-
-* `?` - matches any single **byte** (does NOT support UTF-8 characters).
-		
-	i.e., the following patterns will match against the string `"String"`:
-
-    `"?tring"`
-
-    `"Strin?"`
-
-    `"St?ing"`
-
-* `[!...]` or `[^...]` - matches any **byte** that is **not** withing the brackets (does **not** support UTF-8 characters).
-
-    Byte ranges are supported using `'-'` (i.e., `[!0-9]`)
-
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
-
-    `"[!a-z]tring"`
-
-    `"[^a-z]tring"`
-
-    `"[^F]tring"` (same as `"[!F]tring"`)
-
-* `[...]` - matches any **byte** that **is** withing the brackets (does **not** support UTF-8 characters).
-
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
-
-    `"[A-Z]tring"`
-
-    `"[sS]tring"`
-
-
--------------------------------------------------------------------------------
-
-## File Utility Helpers
-
-```c
-#define FIO_FILES
-#include "fio-stl.h"
-```
-
-By defining the macro `FIO_FILES` the following file helper functions are defined:
-
-#### `fio_filename_open`
-
-```c
-int fio_filename_open(const char *filename, int flags);
-```
-
-Opens `filename`, returning the same as values as `open` on POSIX systems.
-
-If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing also for `"~\"`).
-
-#### `fio_filename_is_unsafe`
-
-```c
-int fio_filename_is_unsafe(const char *path);
-```
-
-Returns 1 if `path` possibly folds backwards (has "/../" or "//").
-
-#### `fio_filename_tmp`
-
-```c
-int fio_filename_tmp(void);
-```
-
-Creates a temporary file, returning its file descriptor.
-
-Returns -1 on error.
-
-#### `fio_filename_overwrite`
-
-```c
-int fio_filename_overwrite(const char *filename, const void *buf, size_t len);
-```
-
-Overwrites `filename` with the data in the buffer.
-
-If `path` starts with a `"~/"` than it will be relative to the user's home folder (on Windows, testing also for `"~\"`).
-
-Returns -1 on error or 0 on success. On error, the state of the file is undefined (may be doesn't exit / nothing written / partially written).
-
-#### `fio_fd_write`
-
-```c
-ssize_t fio_fd_write(int fd, const void *buf, size_t len);
-```
-
-Writes data to a file, returning the number of bytes written.
-
-Returns -1 on error.
-
-Since some systems have a limit on the number of bytes that can be written at a single time, this function fragments the system calls into smaller `write` blocks, allowing large data to be written.
-
-If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
-
-#### `fio_fd_read`
-
-```c
-size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
-```
-
-
-Reads up to `len` bytes from `fd` starting at `start_at` offset.
-
-Returns the number of bytes read.
-
-Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
-
-If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
-
-#### `fio_filename_parse`
-
-```c
-fio_filename_s fio_filename_parse(const char *filename);
-/** A result type for the filename parsing helper. */
-typedef struct {
-  fio_buf_info_s folder;   /* folder name */
-  fio_buf_info_s basename; /* base file name */
-  fio_buf_info_s ext;      /* extension (without '.') */
-} fio_filename_s;
-```
-
-Parses a file name to folder, base name and extension (zero-copy).
-
-#### `FIO_FOLDER_SEPARATOR`
-
-```c
-#if FIO_OS_WIN
-#define FIO_FOLDER_SEPARATOR '\\'
-#else
-#define FIO_FOLDER_SEPARATOR '/'
-#endif
-```
-
-Selects the folder separation character according to the detected OS.
-
-**Note**: on windows both separators will be tested for.
-
-#### `fio_fd_find_next`
-
-```c
-size_t fio_fd_find_next(int fd, char token, size_t start_at);
-/** End of file value for `fio_fd_find_next` */
-#define FIO_FD_FIND_EOF ((size_t)-1)
-/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
-#define FIO_FD_FIND_BLOCK 4096
-```
-
-Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
-
-This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
-
-**Pros**: limits memory use and (re)allocations, easier overflow protection.
-
-**Cons**: may be slower, as data will most likely be copied again from the file.
-
--------------------------------------------------------------------------------
 ## Binary Safe Core String Helpers
 
 ```c
@@ -4689,6 +5190,8 @@ The main difference between using the Core String API directly and defining a St
 
 **Note**: the `fio_string` functions might fail or truncate data if memory allocation fails. Test the returned value for failure (success returns `0`, failure returns `-1`).
 
+
+**Note:** this module depends on the  `FIO_ATOL`,  `FIO_ATOMIC`, `FIO_RAND`, and `FIO_FILES` modules which will be automatically included.
 
 ### Core String Authorship
 
@@ -5470,6 +5973,8 @@ The type (`FIO_STR_NAME_s`) and the functions will be automatically defined.
 
 For brevities sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
 
+**Note:** this module depends on the  `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
+
 ### Optimizations / Flavors
 
 Strings come in two main flavors, Strings optimized for mutability (default) vs. Strings optimized for memory consumption (defined using `FIO_STR_SMALL`).
@@ -6213,7 +6718,7 @@ For complex types, define any (or all) of the following macros:
 #define FIO_ARRAY_ENABLE_EMBEDDED 1
 ```
 
-To create the type and helper functions, include the Simple Template Library header.
+To create the type and helper functions, include The facil.io library header.
 
 For example:
 
@@ -6226,7 +6731,7 @@ typedef struct {
 #define FIO_ARRAY_NAME ary
 #define FIO_ARRAY_TYPE foo_s
 #define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 void example(void) {
   ary_s a = FIO_ARRAY_INIT;
@@ -7195,470 +7700,6 @@ typedef struct map_each_s {
 
 -------------------------------------------------------------------------------
 
-## Linked Lists
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element 
-typedef struct {
-  char * data;
-  FIO_LIST_NODE node;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-```
-
-Doubly Linked Lists are an incredibly common and useful data structure.
-
-### Linked Lists Performance
-
-Memory overhead (on 64bit machines) is 16 bytes per node (or 8 bytes on 32 bit machines) for the `next` and `prev` pointers.
-
-Linked Lists use pointers in order to provide fast add/remove operations with O(1) speeds. This O(1) operation ignores the object allocation time and suffers from poor memory locality, but it's still very fast.
-
-However, Linked Lists suffer from slow seek/find and iteration operations.
-
-Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
-
-### Linked Lists Macros
-
-Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
-
-#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
-
-```c
-/** A linked list node type */
-#define FIO_LIST_NODE fio_list_node_s
-/** A linked list head type */
-#define FIO_LIST_HEAD fio_list_node_s
-/** A linked list arch-type */
-typedef struct fio_list_node_s {
-  struct fio_list_node_s *next;
-  struct fio_list_node_s *prev;
-} fio_list_node_s;
-
-```
-
-These are the basic core types for a linked list node used by the Linked List macros.
-
-#### `FIO_LIST_INIT(head)`
-
-```c
-#define FIO_LIST_INIT(obj)                                                     \
-  (FIO_LIST_HEAD){ .next = &(obj), .prev = &(obj) }
-```
-
-Initializes a linked list.
-
-#### `FIO_LIST_PUSH`
-
-```c
-#define FIO_LIST_PUSH(head, n)                                                 \
-  do {                                                                         \
-    (n)->prev = (head)->prev;                                                  \
-    (n)->next = (head);                                                        \
-    (head)->prev->next = (n);                                                  \
-    (head)->prev = (n);                                                        \
-  } while (0)
-```
-
-UNSAFE macro for pushing a node to a list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-#### `FIO_LIST_POP`
-
-```c
-#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
-  do {                                                                         \
-    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
-    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
-  } while (0)
-```
-
-UNSAFE macro for popping a node from a list.
-
-* `type` is the underlying `struct` type of the next list member.
-
-* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
-
-* `dest_prt` is the pointer that will accept the next list member.
-
-* `head` is the head of the list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-Note that using this macro with an empty list will produce **undefined behavior**.
-
-#### `FIO_LIST_REMOVE`
-
-```c
-#define FIO_LIST_REMOVE(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-
-#### `FIO_LIST_REMOVE_RESET`
-
-```c
-#define FIO_LIST_REMOVE_RESET(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
-
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-#### `FIO_LIST_EACH`
-
-```c
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.next)))
-```
-
-Loops through every node in the linked list except the head.
-
-This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
-
-i.e.,
-
-```c
-typedef struct {
-  void * data;
-  FIO_LIST_HEAD node;
-} ptr_list_s;
-
-FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
-
-/* ... */
-
-FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
-  do_something_with(pos->data);
-}
-```
-
-#### `FIO_LIST_IS_EMPTY`
-
-```c
-#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
-```
-
-Macro for testing if a list is empty.
-
-
-### Indexed Linked Lists Macros (always defined):
-
-
-Indexed linked lists are often used to either save memory or making it easier to reallocate the memory used for the whole list. This is performed by listing pointer offsets instead of the whole pointer, allowing the offsets to use smaller type sizes.
-
-For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, than a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
-
-#### `FIO_INDEXED_LIST32_HEAD` / `FIO_INDEXED_LIST32_NODE`
-
-```c
-/** A 32 bit indexed linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-/** A 16 bit indexed linked list node type */
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-/** An 8 bit indexed linked list node type */
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-
-/** A 32 bit indexed linked list node type */
-typedef struct fio_index32_node_s {
-  uint32_t next;
-  uint32_t prev;
-} fio_index32_node_s;
-
-/** A 16 bit indexed linked list node type */
-typedef struct fio_index16_node_s {
-  uint16_t next;
-  uint16_t prev;
-} fio_index16_node_s;
-
-/** An 8 bit indexed linked list node type */
-typedef struct fio_index8_node_s {
-  uint8_t next;
-  uint8_t prev;
-} fio_index8_node_s;
-```
-
-#### `FIO_INDEXED_LIST_PUSH`
-
-```c
-#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
-    (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
-  } while (0)
-```
-
-UNSAFE macro for pushing a node to a list.
-
-#### `FIO_INDEXED_LIST_REMOVE`
-
-```c
-#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list.
-
-#### `FIO_INDEXED_LIST_REMOVE_RESET`
-
-```c
-#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                            \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
-
-#### `FIO_INDEXED_LIST_EACH`
-
-```c
-#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
-       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
-```
-
-Loops through every index in the indexed list, **assuming `head` is valid**.
-
--------------------------------------------------------------------------------
-
-## Linked List Dynamic Type Definition
-
-### Linked Lists Overview
-
-Before creating linked lists, the library header should be included at least once.
-
-To create a linked list type, create a `struct` that includes a `FIO_LIST_NODE` typed element somewhere within the structure. For example:
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-```
-
-Next define the `FIO_LIST_NAME` macro. The linked list helpers and types will all be prefixed by this name. i.e.:
-
-```c
-#define FIO_LIST_NAME my_list /* defines list functions (example): my_list_push(...) */
-```
-
-Optionally, define the `FIO_LIST_TYPE` macro to point at the correct linked-list structure type. By default, the type for linked lists will be `<FIO_LIST_NAME>_s`.
-
-An example were we need to define the `FIO_LIST_TYPE` macro will follow later on.
-
-Optionally, define the `FIO_LIST_NODE_NAME` macro to point the linked list's node. By default, the node for linked lists will be `node`.
-
-Finally, include the `fio-stl.h` header to create the linked list helpers.
-
-```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
-#include "fio-stl.h"
-// list element 
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-// create linked list helper functions
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-
-void example(void) {
-  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
-  for (int i = 0; i < 10; ++i) {
-    my_list_s *n = malloc(sizeof(*n));
-    n->i = i;
-    my_list_push(&list, n);
-  }
-  int i = 0;
-  while (my_list_any(&list)) {
-    my_list_s *n = my_list_shift(&list);
-    if (i != n->i) {
-      fprintf(stderr, "list error - value mismatch\n"), exit(-1);
-    }
-    free(n);
-    ++i;
-  }
-  if (i != 10) {
-    fprintf(stderr, "list error - count error\n"), exit(-1);
-  }
-}
-```
-
-**Note**:
-
-Each node is limited to a single list (an item can't belong to more then one list, unless it's a list of pointers to that item).
-
-Items with more then a single node can belong to more then one list. i.e.:
-
-```c
-// list element 
-typedef struct {
-  long l;
-  FIO_LIST_NODE node;
-  int i;
-  FIO_LIST_NODE node2;
-  double d;
-} my_list_s;
-// list 1 
-#define FIO_LIST_NAME my_list
-#include "fio-stl.h"
-// list 2 
-#define FIO_LIST_NAME my_list2
-#define FIO_LIST_TYPE my_list_s
-#define FIO_LIST_NODE_NAME node2
-#include "fio-stl.h"
-```
-
-### Linked Lists (embeded) - API
-
-
-#### `FIO_LIST_INIT(head)`
-
-```c
-#define FIO_LIST_INIT(obj)                                                     \
-  (FIO_LIST_NODE){ .next = &(obj), .prev = &(obj) }
-```
-
-This macro initializes an uninitialized node (assumes the data in the node is junk). 
-
-#### `LIST_any`
-
-```c
-int LIST_any(FIO_LIST_HEAD *head)
-```
-Returns a non-zero value if there are any linked nodes in the list. 
-
-#### `LIST_is_empty`
-
-```c
-int LIST_is_empty(FIO_LIST_HEAD *head)
-```
-Returns a non-zero value if the list is empty. 
-
-#### `LIST_remove`
-
-```c
-FIO_LIST_TYPE *LIST_remove(FIO_LIST_TYPE *node)
-```
-Removes a node from the list, Returns NULL if node isn't linked. 
-
-#### `LIST_push`
-
-```c
-FIO_LIST_TYPE *LIST_push(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
-```
-Pushes an existing node to the end of the list. Returns node. 
-
-#### `LIST_pop`
-
-```c
-FIO_LIST_TYPE *LIST_pop(FIO_LIST_HEAD *head)
-```
-Pops a node from the end of the list. Returns NULL if list is empty. 
-
-#### `LIST_unshift`
-
-```c
-FIO_LIST_TYPE *LIST_unshift(FIO_LIST_HEAD *head, FIO_LIST_TYPE *node)
-```
-Adds an existing node to the beginning of the list. Returns node.
-
-#### `LIST_shift`
-
-```c
-FIO_LIST_TYPE *LIST_shift(FIO_LIST_HEAD *head)
-```
-Removed a node from the start of the list. Returns NULL if list is empty. 
-
-#### `LIST_root`
-
-```c
-FIO_LIST_TYPE *LIST_root(FIO_LIST_HEAD *ptr)
-```
-Returns a pointer to a list's element, from a pointer to a node. 
-
-#### `FIO_LIST_EACH`
-
-_Note: macro, name unchanged, works for all lists_
-
-```c
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls =                                                    \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls),                                                   \
-            (next____p_ls = FIO_PTR_FROM_FIELD(type, node_name,                \
-                                               next____p_ls->node_name.next)))
-```
-
-Loops through every node in the linked list (except the head).
-
-The `type` name should reference the list type.
-
-`node_name` should indicate which node should be used for iteration.
-
-`head` should point at the head of the list (usually a `FIO_LIST_HEAD` variable).
-
-`pos` can be any temporary variable name that will contain the current position in the iteration.
-
-The list **can** be mutated during the loop, but this is not recommended. Specifically, removing `pos` is safe, but pushing elements ahead of `pos` might result in an endless loop.
-
-_Note: this macro won't work with pointer tagging_
-
--------------------------------------------------------------------------------
 ## Reference Counting and Type Wrapping
 
 ```c
@@ -7795,446 +7836,128 @@ FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * object)
 If `FIO_REF_METADATA` is defined, than the metadata is accessible using this inlined function.
 
 -------------------------------------------------------------------------------
-## Quick Sort and Insert Sort
+## ChaCha20 & Poly1305
 
 ```c
-#define FIO_SORT_NAME
+#define FIO_CHACHA
 #include "fio-stl.h"
 ```
 
-If the `FIO_SORT_NAME` is defined (and named), the following functions will be defined.
+Non-streaming ChaCha20 and Poly1305 implementations are provided for cases when a cryptography library isn't available (or too heavy) but a good enough symmetric cryptographic solution is required. Please note that this implementation was not tested from a cryptographic viewpoint and although constant time was desired it might not have been achieved on all systems / CPUs.
 
-This can be performed multiple times for multiple types.
+**Note:** some CPUs do not offer constant time MUL and might leak information through side-chain attacks.
 
-### Sort Settings
+**Note:** this module depends on the `FIO_MATH` module which will be automatically included.
 
-The following macros define the behavior of the sorting algorithm.
-
-#### `FIO_SORT_NAME`
+#### `fio_chacha20_poly1305_enc`
 
 ```c
-#define FIO_SORT_NAME num // will produce function names such as num_sort(...)
+void fio_chacha20_poly1305_enc(void *mac,
+                               void *data,
+                               size_t len,
+                               void *ad, /* additional data */
+                               size_t adlen,
+                               void *key,
+                               void *nounce);
 ```
 
-The prefix used for naming the sorting functions.
+Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
 
-**Note**: a name is required.
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted, will NOT be encrypted.
+* `data`   MAY be omitted, WILL be encrypted.
+* `mac`    MUST point to a buffer with (at least) 16 available bytes.
 
-#### `FIO_SORT_TYPE`
+#### `fio_chacha20_poly1305_dec`
 
 ```c
-// i.e.
-#define FIO_SORT_TYPE size_t
+int fio_chacha20_poly1305_dec(void *mac,
+                              void *data,
+                              size_t len,
+                              void *ad, /* additional data */
+                              size_t adlen,
+                              void *key,
+                              void *nounce);
 ```
 
-The type of the array members to be sorted.
+Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
 
-**Note**: this macro **MUST** be defined.
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted ONLY IF originally omitted.
+* `data`   MAY be omitted, WILL be decrypted.
+* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
 
-#### `FIO_SORT_IS_BIGGER`
+Returns `-1` on error (authentication failed).
+
+#### `fio_chacha20`
 
 ```c
-#define FIO_SORT_IS_BIGGER(a, b) ((a) > (b))
+void fio_chacha20(void *data,
+                  size_t len,
+                  void *key,
+                  void *nounce,
+                  uint32_t counter);
 ```
 
-Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
+Performs an in-place encryption/decryption of `data` using ChaCha20.
 
-#### `FIO_SORT_SWAP`
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
+
+
+#### `fio_poly1305_auth`
 
 ```c
-#define FIO_SORT_SWAP(a, b)                                                    \
-  do {                                                                         \
-    FIO_SORT_TYPE tmp__ = (a);                                                 \
-    (a) = (b);                                                                 \
-    (b) = tmp__;                                                               \
-  } while (0)
+void fio_poly1305_auth(void *mac_dest,
+                       void *key256bits,
+                       void *message,
+                       size_t len,
+                       void *additional_data,
+                       size_t additional_data_len);
 ```
 
-Swaps array members. Usually there is no need to override the default macro.
+Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
 
-#### `FIO_SORT_THRESHOLD`
-
-```c
-#define FIO_SORT_THRESHOLD 96
-```
-
-The threshold below which quick-sort delegates to insert sort. Usually there is no need to override the default macro.
-
-
-### Sorting API
-
-#### `FIO_SORT_sort`
-
-```c
-void FIO_SORT_sort(FIO_SORT_TYPE *array, size_t count);
-```
-
-Sorts the first `count` members of `array`.
-
-Currently this wraps the [`FIO_SORT_qsort`](#fio_sort_qsort) function.
-
-#### `FIO_SORT_qsort`
-
-```c
-void FIO_SORT_qsort(FIO_SORT_TYPE *array, size_t count);
-```
-
-Sorts the first `count` members of `array` using quick-sort.
-
-
-#### `FIO_SORT_isort`
-
-```c
-void FIO_SORT_isort(FIO_SORT_TYPE *array, size_t count);
-```
-
-Sorts the first `count` members of `array` using insert-sort.
-
-Use only with small arrays (unless you are a fan of inefficiency).
-
-### Sort Example
-
-The following example code creates an array of random strings and then sorts the array.
-
-```c
-#define FIO_STR_SMALL sstr
-#define FIO_SORT_NAME      sstr
-#define FIO_SORT_TYPE sstr_s
-#define FIO_SORT_IS_BIGGER(a, b)                                               \
-  fio_string_is_greater(sstr_info(&a), sstr_info(&b))
-#define FIO_RAND
-#include "fio-stl.h"
-
-#define STRING_ARRAY_LENGTH 128
-int main(int argc, char const *argv[]) {
-  (void)argc;
-  (void)argv;
-  sstr_s ary[STRING_ARRAY_LENGTH] = {{0}};
-  /* fill array with random data and print state */
-  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
-    sstr_write_hex(ary + i, fio_rand64());
-  }
-  printf("Starting with array of strings as:\n");
-  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
-    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
-  }
-  /* sort array and print state */
-  sstr_qsort(ary, STRING_ARRAY_LENGTH);
-  printf("\n\nOrdered array of strings is:\n");
-  for (size_t i = 0; i < STRING_ARRAY_LENGTH; ++i) {
-    printf("[%zu] %s\n", i, sstr2ptr(ary + i));
-    sstr_destroy(ary + i); /* cleanup */
-  }
-  return 0;
-}
-```
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
 
 -------------------------------------------------------------------------------
-## CLI (command line interface)
+## SHA1
 
 ```c
-#define FIO_CLI
+#define FIO_SHA1
 #include "fio-stl.h"
 ```
 
-The Simple Template Library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
+By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
 
-* Auto-generation of the "help" / usage output.
+Do **not** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
 
-* Argument type testing (String, boolean, and integer types are supported).
-
-* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
-
-* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
-
-* Array style support and access to unnamed arguments.
-
-By defining `FIO_CLI`, the following functions will be defined.
-
-In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP`, flags, since CLI parsing and cleanup depends on them.
-
-**Note**: the `fio_cli` is **NOT** thread-safe unless limited to reading once multi-threading had started (read is immutable, write is where things can go wrong).
-
-#### `fio_cli_start`
+#### `fio_sha1`
 
 ```c
-#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
-  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
-                (char const *[]){__VA_ARGS__, (char const *)NULL})
-
-/* the shadowed function: */
-void fio_cli_start   (int argc, char const *argv[],
-                      int unnamed_min, int unnamed_max,
-                      char const *description,
-                      char const **names);
+fio_sha1_s fio_sha1(const void *data, uint64_t len);
 ```
 
-The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
+A simple, non streaming, implementation of the SHA1 hashing algorithm.
 
-The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
-
-If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
-
-The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
-
-Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
-
-* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_BOOL("-arg [-alias] desc.")` (cannot accept default values)
-
-* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
-
-* `FIO_CLI_PRINT("argument related line (printed as part of the previous argument)")`
-
-* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
-
-**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
+#### `fio_sha1_len`
 
 ```c
-int main(int argc, char const *argv[]) {
-  fio_cli_start(argc, argv, 0, -1,
-                "this is a CLI example for the NAME application.\n"
-                "This example allows for unlimited arguments that will be printed.",
-                FIO_CLI_PRINT_HEADER("CLI type validation"),
-                FIO_CLI_STRING("--str -s (my default string) any data goes here"),
-                FIO_CLI_INT("--int -i (42) integer data goes here"),
-                FIO_CLI_BOOL("--bool -b flag (boolean) only - no data"),
-                FIO_CLI_PRINT("boolean flags cannot have default values."),
-                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
-                );
-  if (fio_cli_get("-s")) /* always true when default value is provided */
-    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
-
-  fprintf(stderr, "Integer: %d\n", (int)fio_cli_get_i("-i"));
-
-  fprintf(stderr, "Boolean: %d\n", (int)fio_cli_get_i("-b"));
-
-  if (fio_cli_unnamed_count()) {
-    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
-    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
-      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
-    }
-  }
-
-  fio_cli_end();
-  return 0;
-}
+size_t fio_sha1_len(void);
 ```
 
-#### `fio_cli_end`
+Returns the digest length of SHA1 in bytes (which is always 20).
+
+#### `fio_sha1_digest`
 
 ```c
-void fio_cli_end(void);
+uint8_t *fio_sha1_digest(fio_sha1_s *s);
 ```
 
-Clears the CLI data storage.
-
-#### `fio_cli_get`
-
-```c
-char const *fio_cli_get(char const *name);
-```
-
-Returns the argument's value as a string, or NULL if the argument wasn't provided.
-
-#### `fio_cli_get_i`
-
-```c
-int64_t fio_cli_get_i(char const *name);
-```
-
-Returns the argument's value as an integer, or 0 if the argument wasn't provided.
-
-**Note:** the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
-
-#### `fio_cli_get_bool`
-
-```c
-#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
-```
-
-Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
-
-#### `fio_cli_unnamed_count`
-
-```c
-unsigned int fio_cli_unnamed_count(void);
-```
-
-Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
-
-#### `fio_cli_unnamed`
-
-```c
-char const *fio_cli_unnamed(unsigned int index);
-```
-
-Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
-
-#### `fio_cli_set`
-
-```c
-void fio_cli_set(char const *name, char const *value);
-```
-
-Sets a value for the named argument (value will propagate to named aliases).
-
-#### `fio_cli_set_i`
-
-```c
-void fio_cli_set_i(char const *name, int64_t i);
-```
-
-Sets a numeral value for the named argument (but **not** it's aliases).
-
-**Note**: this basically writes a string with a base 10 representation.
-
-
--------------------------------------------------------------------------------
-## Basic IO Polling
-
-```c
-#define FIO_POLL
-#include "fio-stl.h"
-```
-
-IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
-
-The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
-
-"One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
-
-There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
-
-It is recommended to use the system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
-
-By defining `FIO_POLL`, the following functions will be defined.
-
-**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
-
-**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
-
-### `FIO_POLL` API
-
-
-#### `fio_poll_s`
-
-```c
-typedef struct fio_poll_s fio_poll_s;
-```
-
-The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
-
-#### `fio_poll_init`
-
-```c
-fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
-/* named argument support */
-#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
-```
-
-Creates a new polling object / queue.
-
-The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
-
-```c
-typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
-  void (*on_data)(void *udata);
-  /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(void *udata);
-  /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(void *udata);
-} fio_poll_settings_s;
-```
-
-#### `fio_poll_destroy`
-
-```c
-void fio_poll_destroy(fio_poll_s *p);
-```
-
-Destroys the polling object, freeing its resources.
-
-**Note**: the monitored file descriptors will remain untouched (possibly open).
-
-#### `fio_poll_monitor`
-
-```c
-int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
-```
-
-Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
-
-Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
-
-On systems where `POLLRDHUP` is supported, it is always monitored for.
-
-Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
-
-Returns -1 on error.
-
-#### `fio_poll_review`
-
-```c
-int fio_poll_review(fio_poll_s *p, int timeout);
-```
-
-Reviews if any of the monitored file descriptors has any events.
-
-`timeout` is in milliseconds.
-
-Returns the number of events called.
-
-**Note**:
-
-Polling is thread safe, but has different effects on different threads.
-
-Adding a new file descriptor from one thread while polling in a different thread will not poll that IO untill `fio_poll_review` is called again.
-
-#### `fio_poll_forget`
-
-```c
-void *fio_poll_forget(fio_poll_s *p, int fd);
-```
-
-Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
-
-### `FIO_POLL` Compile Time Macros
-
-#### `FIO_POLL_ENGINE`
-
-```c
-#define FIO_POLL_ENGINE_POLL   1
-#define FIO_POLL_ENGINE_EPOLL  2
-#define FIO_POLL_ENGINE_KQUEUE 3
-```
-
-Allows for both the detection and the manual selection (override) of the underlying IO multiplexing API.
-
-When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses less system calls.
-
-```c
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
-```
-
-#### `FIO_POLL_ENGINE_STR`
-
-```c
-#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
-#define FIO_POLL_ENGINE_STR "poll"
-#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
-#define FIO_POLL_ENGINE_STR "epoll"
-#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
-#define FIO_POLL_ENGINE_STR "kqueue"
-#endif
-
-```
-
-A string MACRO representing the used IO multiplexing "engine".
+Returns the digest of a SHA1 object. The digest is always 20 bytes long.
 
 -------------------------------------------------------------------------------
 ## Server
@@ -10638,6 +10361,8 @@ int main(void) {
 ## Hash Function Testing
 
 During development I tested the Hash functions using [the SMHasher testing suite (@rurban's fork)](https://github.com/rurban/smhasher). The testing suite is often growing with more tests, so I do not know what the future may bring... but attached are the test results for Risky Hash, Stable Hash (64 and 128 bit variation) as they were at the time of (re)development (March, 2023).
+
+Note that even though Stable Hash appears faster in the tests, it may clobber more registers (resulting is some slowdowns when using cache values).
 ### Risky Hash SMHasher Results
 
 The following results were achieved on my personal computer when testing the facil.io Risky Hash (`fio_risky_hash`).

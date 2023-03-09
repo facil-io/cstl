@@ -5,7 +5,7 @@
 #include "fio-stl.h"
 ```
 
-The Simple Template Library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
+The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
 
 Since delayed processing is a common task, this queue is provides an easy way to schedule and perform delayed tasks.
 

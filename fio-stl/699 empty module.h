@@ -16,7 +16,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_MODULE_NAME) /* && !defined(FIO___STL_KEEP) */
+#if defined(FIO_MODULE_NAME) /* && !defined(FIO___RECURSIVE_INCLUDE) */
 
 /* *****************************************************************************
 Module Settings
@@ -75,10 +75,26 @@ Module Implementation - inlined static functions
 REMEMBER:
 ========
 
-All memory allocations should use:
+All short term / type memory allocations should use:
 * FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
 * FIO_MEM_FREE_(ptr, size)
 
+All long-term / system memory allocations should use:
+* FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE(ptr, size)
+
+Module and File Names:
+======================
+
+00# XXX.h - the module is a core module, independent or doesn't define a type
+1## XXX.h - the module doesn't define a type, but requires memory allocations
+2## XXX.h - the module defines a type
+3## XXX.h - hashes / crypto.
+4## XXX.h - server related modules
+5## XXX.h - FIOBJ related modules
+9## XXX.h - testing (usually use 902 XXX.h unless tests depend on other tests)
+
+When
 */
 
 /* do we have a constructor? */
@@ -130,16 +146,19 @@ SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {
 }
 
 /* *****************************************************************************
-Module Testing
+Module Testing - Please place testing in a dedicated testing file if possible.
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#if 0
+#ifdef FIO_TEST_ALL
+
 FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
   /*
    * TODO: test module here
    */
 }
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
+#endif /* 0 */
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */

@@ -1,5 +1,5 @@
-#ifndef FIO_TEST_CSTL
-#define FIO_TEST_CSTL
+#ifndef FIO_TEST_ALL
+#define FIO_TEST_ALL
 #endif
 
 #ifndef FIO_USE_THREAD_MUTEX

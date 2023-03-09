@@ -1402,7 +1402,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
 /* *****************************************************************************
 Dynamic Arrays - test
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#ifdef FIO_TEST_ALL
 
 /* make suer the functions are defined for the testing */
 #ifdef FIO_REF_CONSTRUCTOR_ONLY
@@ -1773,7 +1773,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
 #undef FIO_ARRAY_TEST_OBJ_SET
 #undef FIO_ARRAY_TEST_OBJ_IS
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Dynamic Arrays - cleanup
 ***************************************************************************** */

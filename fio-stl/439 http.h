@@ -16,7 +16,8 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) && !defined(FIO___STL_KEEP)
+#if defined(FIO_HTTP) && !defined(H___FIO_HTTP___H) &&                         \
+    !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_HTTP___H
 /* *****************************************************************************
 HTTP Setting Defaults
@@ -242,7 +243,7 @@ fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
-#define FIO___STL_KEEP 1
+#define FIO___RECURSIVE_INCLUDE 1
 
 typedef struct {
   fio_http_settings_s settings;
@@ -301,7 +302,7 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
-#undef FIO___STL_KEEP
+#undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 HTTP On Open - Accepting new connections
 ***************************************************************************** */
@@ -1053,14 +1054,14 @@ SFUNC fio_s *fio_http_io(fio_http_s *h) {
 /* *****************************************************************************
 HTTP Testing
 ***************************************************************************** */
-#ifdef FIO_TEST_CSTL
+#ifdef FIO_TEST_ALL
 FIO_SFUNC void FIO_NAME_TEST(stl, http_listen)(void) {
   /*
    * TODO: test module here
    */
 }
 
-#endif /* FIO_TEST_CSTL */
+#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Module Cleanup
 *****************************************************************************

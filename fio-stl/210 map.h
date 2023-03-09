@@ -17,16 +17,6 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_UMAP_NAME)
-#define FIO_MAP_NAME FIO_UMAP_NAME
-#undef FIO_MAP_ORDERED
-#define FIO_MAP_ORDERED 0
-#elif defined(FIO_OMAP_NAME)
-#define FIO_MAP_NAME FIO_OMAP_NAME
-#undef FIO_MAP_ORDERED
-#define FIO_MAP_ORDERED 1
-#endif
-
 #if defined(FIO_MAP_NAME)
 /* *****************************************************************************
 Map Settings - Sets have only keys (value == key) - Hash Maps have values
