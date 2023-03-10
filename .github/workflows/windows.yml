@@ -15,8 +15,8 @@ jobs:
     - uses: actions/checkout@v3
     - uses: ilammy/msvc-dev-cmd@v1
     - name: Test STL (debug) - no allocators
-      run: cl /Od /RTCsu /TC tests\stl.c /I. /DFIO_MEMORY_DISABLE=1 /DDEBUG /Fe./stl.exe && ./stl.exe
-    - name: Test STL
-      run: cl /O2 /Oi /TC tests\stl.c /I. /Fe./stl.exe && ./stl.exe
+      run: cl /Od /RTCsu /TC tests\stl.c /I. /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stl.exe && ./stl.exe
     - name: Test fio_mallc speed
       run: cl /O2 /Oi /TC tests\malloc.c /I. /Fe./malloc.exe && ./malloc.exe
+    - name: Test STL
+      run: cl /O2 /Oi /TC tests\stl.c /DFIO_LEAK_COUNTER=1 /I. /Fe./stl.exe && ./stl.exe
