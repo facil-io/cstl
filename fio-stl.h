@@ -558,7 +558,7 @@ Logging Defaults (no-op)
 #define FIO_LOG_LEVEL_GET() (0)
 
 // clang-format off
-#define FIO___LOG_PRINT_LEVEL(level, ...) do { if ((level) <= FIO_LOG_LEVEL) FIO_LOG2STDERR(__VA_ARGS__); } while (0)
+#define FIO___LOG_PRINT_LEVEL(level, ...) do { if ((level) <= FIO_LOG_LEVEL_GET()) FIO_LOG2STDERR(__VA_ARGS__); } while (0)
 #define FIO_LOG_WRITE(...)    FIO_LOG2STDERR("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
 #define FIO_LOG_FATAL(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_FATAL, "\x1B[1m\x1B[7mFATAL:\x1B[0m    " __VA_ARGS__)
 #define FIO_LOG_ERROR(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_ERROR, "\x1B[1mERROR:\x1B[0m    " __VA_ARGS__)
@@ -12661,7 +12661,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     arena_index = fio_risky_ptr(u.p) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if defined(DEBUG)
+#if defined(DEBUG) && 0
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
@@ -12679,6 +12679,10 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     if (!FIO_MEMORY_TRYLOCK(
             FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
+    FIO_LOG_DDEBUG("thread %p had to switch arena from %zu / %zu",
+                   fio_thread_current(),
+                   arena_index,
+                   (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
     ++arena_index;
     if (arena_index == FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
       arena_index = 0;
@@ -12688,7 +12692,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     FIO___MEMORY_ARENA_LOCK_WARNING();
 #undef FIO___MEMORY_ARENA_LOCK_WARNING
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
-    /* slow wait for last arena */
+    /* slow wait for arena */
     FIO_MEMORY_LOCK(
         FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
     return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
@@ -35543,9 +35547,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_FIOBJ) && !defined(H___FIO_FIOBJ___H) &&                       \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_FIOBJ___H
-#define FIO___RECURSIVE_INCLUDE                                                \
-  99 /* a magic value to keep FIO_EXTERN rules                                 \
-      */
+#define FIO___RECURSIVE_INCLUDE 99 /* 99 keeps EXTERN rules */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 

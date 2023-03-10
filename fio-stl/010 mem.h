@@ -1047,7 +1047,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     } u = {.t = fio_thread_current()};
     arena_index = fio_risky_ptr(u.p) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if defined(DEBUG)
+#if defined(DEBUG) && 0
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
@@ -1065,6 +1065,10 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     if (!FIO_MEMORY_TRYLOCK(
             FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
+    FIO_LOG_DDEBUG("thread %p had to switch arena from %zu / %zu",
+                   fio_thread_current(),
+                   arena_index,
+                   (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
     ++arena_index;
     if (arena_index == FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count)
       arena_index = 0;
@@ -1074,7 +1078,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     FIO___MEMORY_ARENA_LOCK_WARNING();
 #undef FIO___MEMORY_ARENA_LOCK_WARNING
 #if FIO_MEMORY_USE_THREAD_MUTEX && FIO_OS_POSIX
-    /* slow wait for last arena */
+    /* slow wait for arena */
     FIO_MEMORY_LOCK(
         FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
     return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
