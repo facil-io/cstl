@@ -271,6 +271,10 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     }
   } else {
     /* perform tasks in reverse */
+    if (e == FIO_CALL_AT_EXIT) {
+      /* destroy all before executing (memory leak counters) */
+      fio_state_callback_clear_all();
+    }
     while (len--) {
       ary[len].func(ary[len].arg);
     }

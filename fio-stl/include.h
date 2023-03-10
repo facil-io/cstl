@@ -50,9 +50,6 @@
 #include "002 url.h"
 #endif
 
-#if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "004 cli.h"
-#endif
 #ifdef FIO_FILES
 #include "004 files.h"
 #endif
@@ -62,11 +59,15 @@
 #ifdef FIO_SOCK
 #include "004 sock.h"
 #endif
-#ifdef FIO_STATE
+#if defined(FIO_STATE) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "004 state callbacks.h"
 #endif
 #ifdef FIO_TIME
 #include "004 time.h"
+#endif
+
+#if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "005 cli.h"
 #endif
 
 #if defined(FIO_MEMORY_NAME) || defined(FIO_MALLOC) || defined(FIOBJ_MALLOC)

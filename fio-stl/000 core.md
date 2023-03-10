@@ -170,6 +170,8 @@ If defined, facil.io will count allocations and deallocations for custom memory 
 
 This also prints out some minimal usage information about each allocator when exiting the program. 
 
+**Note**: enabling leak detection automatically adds the `FIO_LOG` module (to print errors), the `FIO_ATOMIC` module (for atomic counters) and the `FIO_STATE` module (for more predictable `at_exit` callbacks).
+
 -------------------------------------------------------------------------------
 
 ## Version and Common Helper Macros

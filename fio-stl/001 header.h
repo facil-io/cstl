@@ -159,6 +159,40 @@ Recursive inclusion management
 #endif /* SFUNC_ vs FIO___RECURSIVE_INCLUDE*/
 
 /* *****************************************************************************
+Leak Counter Helpers
+***************************************************************************** */
+#if (FIO_LEAK_COUNTER + 1) == 1
+/* No leak counting defined */
+#define FIO___LEAK_COUNTER_DEF(name)
+#define FIO___LEAK_COUNTER_ON_ALLOC(name)
+#define FIO___LEAK_COUNTER_ON_FREE(name)
+#else
+#undef FIO___LEAK_COUNTER_DEF
+#undef FIO___LEAK_COUNTER_ON_ALLOC
+#undef FIO___LEAK_COUNTER_ON_FREE
+#define FIO___LEAK_COUNTER_DEF(name)                                           \
+  FIO_SFUNC void FIO_NAME(fio___leak_counter, name)(int i) {                   \
+    static volatile int counter;                                               \
+    fio_atomic_add(&counter, i);                                               \
+    if (i)                                                                     \
+      return;                                                                  \
+    FIO_LOG_DDEBUG2("testing leaks for " FIO_MACRO2STR(name), counter);        \
+    if (counter)                                                               \
+      FIO_LOG_ERROR("%d leaks detected for " FIO_MACRO2STR(name), counter);    \
+  }                                                                            \
+  FIO_SFUNC void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {         \
+    FIO_NAME(fio___leak_counter, name)((int)(uintptr_t)i);                     \
+  }                                                                            \
+  FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
+    fio_state_callback_add(FIO_CALL_AT_EXIT,                                   \
+                           FIO_NAME(fio___leak_counter_cleanup, name),         \
+                           NULL);                                              \
+  }
+#define FIO___LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
+#define FIO___LEAK_COUNTER_ON_FREE(name)  FIO_NAME(fio___leak_counter, name)(-1)
+#endif
+
+/* *****************************************************************************
 Pointer Tagging
 ***************************************************************************** */
 #ifndef FIO_PTR_TAG

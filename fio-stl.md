@@ -170,6 +170,8 @@ If defined, facil.io will count allocations and deallocations for custom memory 
 
 This also prints out some minimal usage information about each allocator when exiting the program. 
 
+**Note**: enabling leak detection automatically adds the `FIO_LOG` module (to print errors), the `FIO_ATOMIC` module (for atomic counters) and the `FIO_STATE` module (for more predictable `at_exit` callbacks).
+
 -------------------------------------------------------------------------------
 
 ## Version and Common Helper Macros
@@ -2981,170 +2983,6 @@ Invalid formats might produce unexpected results. No error testing performed.
 The `file`, `unix` and `priv` schemas are special in the sense that they produce no `host` (only `path`) and are parsed as if they contain file path information.
 
 -------------------------------------------------------------------------------
-## CLI (command line interface)
-
-```c
-#define FIO_CLI
-#include "fio-stl.h"
-```
-
-The facil.io library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
-
-* Auto-generation of the "help" / usage output.
-
-* Argument type testing (String, boolean, and integer types are supported).
-
-* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
-
-* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
-
-* Array style support and access to unnamed arguments.
-
-By defining `FIO_CLI`, the following functions will be defined.
-
-In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP`, flags, since CLI parsing and cleanup depends on them.
-
-**Note**: the `fio_cli` is **NOT** thread-safe unless limited to reading once multi-threading had started (read is immutable, write is where things can go wrong).
-
-#### `fio_cli_start`
-
-```c
-#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
-  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
-                (char const *[]){__VA_ARGS__, (char const *)NULL})
-
-/* the shadowed function: */
-void fio_cli_start   (int argc, char const *argv[],
-                      int unnamed_min, int unnamed_max,
-                      char const *description,
-                      char const **names);
-```
-
-The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
-
-The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
-
-If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
-
-The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
-
-Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
-
-* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_BOOL("-arg [-alias] desc.")` (cannot accept default values)
-
-* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
-
-* `FIO_CLI_PRINT("argument related line (printed as part of the previous argument)")`
-
-* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
-
-**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
-
-```c
-int main(int argc, char const *argv[]) {
-  fio_cli_start(argc, argv, 0, -1,
-                "this is a CLI example for the NAME application.\n"
-                "This example allows for unlimited arguments that will be printed.",
-                FIO_CLI_PRINT_HEADER("CLI type validation"),
-                FIO_CLI_STRING("--str -s (my default string) any data goes here"),
-                FIO_CLI_INT("--int -i (42) integer data goes here"),
-                FIO_CLI_BOOL("--bool -b flag (boolean) only - no data"),
-                FIO_CLI_PRINT("boolean flags cannot have default values."),
-                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
-                );
-  if (fio_cli_get("-s")) /* always true when default value is provided */
-    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
-
-  fprintf(stderr, "Integer: %d\n", (int)fio_cli_get_i("-i"));
-
-  fprintf(stderr, "Boolean: %d\n", (int)fio_cli_get_i("-b"));
-
-  if (fio_cli_unnamed_count()) {
-    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
-    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
-      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
-    }
-  }
-
-  fio_cli_end();
-  return 0;
-}
-```
-
-#### `fio_cli_end`
-
-```c
-void fio_cli_end(void);
-```
-
-Clears the CLI data storage.
-
-#### `fio_cli_get`
-
-```c
-char const *fio_cli_get(char const *name);
-```
-
-Returns the argument's value as a string, or NULL if the argument wasn't provided.
-
-#### `fio_cli_get_i`
-
-```c
-int64_t fio_cli_get_i(char const *name);
-```
-
-Returns the argument's value as an integer, or 0 if the argument wasn't provided.
-
-**Note:** the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
-
-#### `fio_cli_get_bool`
-
-```c
-#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
-```
-
-Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
-
-#### `fio_cli_unnamed_count`
-
-```c
-unsigned int fio_cli_unnamed_count(void);
-```
-
-Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
-
-#### `fio_cli_unnamed`
-
-```c
-char const *fio_cli_unnamed(unsigned int index);
-```
-
-Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
-
-#### `fio_cli_set`
-
-```c
-void fio_cli_set(char const *name, char const *value);
-```
-
-Sets a value for the named argument (value will propagate to named aliases).
-
-#### `fio_cli_set_i`
-
-```c
-void fio_cli_set_i(char const *name, int64_t i);
-```
-
-Sets a numeral value for the named argument (but **not** it's aliases).
-
-**Note**: this basically writes a string with a base 10 representation.
-
-
--------------------------------------------------------------------------------
 ## File Utility Helpers
 
 ```c
@@ -4089,6 +3927,170 @@ size_t fio_time2iso(char *target, time_t time);
 Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
 
 Usually requires 20 characters (including NUL).
+
+-------------------------------------------------------------------------------
+## CLI (command line interface)
+
+```c
+#define FIO_CLI
+#include "fio-stl.h"
+```
+
+The facil.io library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
+
+* Auto-generation of the "help" / usage output.
+
+* Argument type testing (String, boolean, and integer types are supported).
+
+* Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
+
+* Support for unnamed options / arguments, including adjustable limits on how many a user may input.
+
+* Array style support and access to unnamed arguments.
+
+By defining `FIO_CLI`, the following functions will be defined.
+
+In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP`, flags, since CLI parsing and cleanup depends on them.
+
+**Note**: the `fio_cli` is **NOT** thread-safe unless limited to reading once multi-threading had started (read is immutable, write is where things can go wrong).
+
+#### `fio_cli_start`
+
+```c
+#define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
+  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
+                (char const *[]){__VA_ARGS__, (char const *)NULL})
+
+/* the shadowed function: */
+void fio_cli_start   (int argc, char const *argv[],
+                      int unnamed_min, int unnamed_max,
+                      char const *description,
+                      char const **names);
+```
+
+The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
+
+The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
+
+If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
+
+The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
+
+Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
+
+* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
+
+* `FIO_CLI_BOOL("-arg [-alias] desc.")` (cannot accept default values)
+
+* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
+
+* `FIO_CLI_PRINT("argument related line (printed as part of the previous argument)")`
+
+* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
+
+**Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
+
+```c
+int main(int argc, char const *argv[]) {
+  fio_cli_start(argc, argv, 0, -1,
+                "this is a CLI example for the NAME application.\n"
+                "This example allows for unlimited arguments that will be printed.",
+                FIO_CLI_PRINT_HEADER("CLI type validation"),
+                FIO_CLI_STRING("--str -s (my default string) any data goes here"),
+                FIO_CLI_INT("--int -i (42) integer data goes here"),
+                FIO_CLI_BOOL("--bool -b flag (boolean) only - no data"),
+                FIO_CLI_PRINT("boolean flags cannot have default values."),
+                FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
+                );
+  if (fio_cli_get("-s")) /* always true when default value is provided */
+    fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
+
+  fprintf(stderr, "Integer: %d\n", (int)fio_cli_get_i("-i"));
+
+  fprintf(stderr, "Boolean: %d\n", (int)fio_cli_get_i("-b"));
+
+  if (fio_cli_unnamed_count()) {
+    fprintf(stderr, "Printing unlisted / unrecognized arguments:\n");
+    for (size_t i = 0; i < fio_cli_unnamed_count(); ++i) {
+      fprintf(stderr, "%s\n", fio_cli_unnamed(i));
+    }
+  }
+
+  fio_cli_end();
+  return 0;
+}
+```
+
+#### `fio_cli_end`
+
+```c
+void fio_cli_end(void);
+```
+
+Clears the CLI data storage.
+
+#### `fio_cli_get`
+
+```c
+char const *fio_cli_get(char const *name);
+```
+
+Returns the argument's value as a string, or NULL if the argument wasn't provided.
+
+#### `fio_cli_get_i`
+
+```c
+int64_t fio_cli_get_i(char const *name);
+```
+
+Returns the argument's value as an integer, or 0 if the argument wasn't provided.
+
+**Note:** the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
+
+#### `fio_cli_get_bool`
+
+```c
+#define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
+```
+
+Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
+
+#### `fio_cli_unnamed_count`
+
+```c
+unsigned int fio_cli_unnamed_count(void);
+```
+
+Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
+
+#### `fio_cli_unnamed`
+
+```c
+char const *fio_cli_unnamed(unsigned int index);
+```
+
+Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
+
+#### `fio_cli_set`
+
+```c
+void fio_cli_set(char const *name, char const *value);
+```
+
+Sets a value for the named argument (value will propagate to named aliases).
+
+#### `fio_cli_set_i`
+
+```c
+void fio_cli_set_i(char const *name, int64_t i);
+```
+
+Sets a numeral value for the named argument (but **not** it's aliases).
+
+**Note**: this basically writes a string with a base 10 representation.
+
 
 -------------------------------------------------------------------------------
 ## Local Memory Allocation

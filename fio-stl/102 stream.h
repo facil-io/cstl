@@ -212,6 +212,8 @@ SFUNC void fio_stream_destroy(fio_stream_s *s) {
   return;
 }
 
+FIO___LEAK_COUNTER_DEF(fio_stream_packet_s)
+
 /* *****************************************************************************
 Stream API - packing data into packets and adding it to the stream
 ***************************************************************************** */
@@ -253,6 +255,7 @@ typedef struct {
 FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
   if (!p)
     return;
+  FIO___LEAK_COUNTER_ON_FREE(fio_stream_packet_s);
   union {
     fio_stream_packet_embd_s *em;
     fio_stream_packet_extrn_s *ext;
@@ -328,6 +331,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
           0);
       if (!tmp)
         goto error;
+      FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = FIO_PACKET_TYPE_EMBEDDED;
@@ -344,6 +348,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
         FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*ext), 0);
     if (!p)
       goto error;
+    FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
     p->next = NULL;
     ext = (fio_stream_packet_extrn_s *)(p + 1);
     *ext = (fio_stream_packet_extrn_s){
@@ -388,6 +393,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*f), 0);
   if (!p)
     goto error;
+  FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
   p->next = NULL;
   f = (fio_stream_packet_fd_s *)(p + 1);
   *f = (fio_stream_packet_fd_s){

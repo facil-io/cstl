@@ -760,11 +760,16 @@ HTTP Handle Implementation - possibly externed functions.
 Helpers - memory allocation & logging time collection
 ***************************************************************************** */
 
+FIO___LEAK_COUNTER_DEF(http___keystr_allocator)
+
 FIO_SFUNC void fio___http_keystr_free(void *ptr, size_t len) {
   FIO_MEM_FREE_(ptr, len);
+  if (ptr)
+    FIO___LEAK_COUNTER_ON_FREE(http___keystr_allocator);
   (void)len; /* if unused */
 }
 FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
+  FIO___LEAK_COUNTER_ON_ALLOC(http___keystr_allocator);
   return FIO_MEM_REALLOC_(NULL, 0, capa, 0);
 }
 

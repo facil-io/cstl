@@ -18,10 +18,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #ifdef FIO_REF_NAME
 
-#ifndef fio_atomic_add
-#error FIO_REF_NAME requires enabling the FIO_ATOMIC extension.
-#endif
-
 #ifndef FIO_REF_TYPE
 #define FIO_REF_TYPE FIO_NAME(FIO_REF_NAME, s)
 #endif
@@ -140,37 +136,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-#if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-static size_t FIO_NAME(FIO_REF_NAME, ___leak_tester);
-#undef FIO___REF_ON_ALLOC
-#define FIO___REF_ON_ALLOC()                                                   \
-  fio_atomic_add(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
-#undef FIO___REF_ON_FREE
-#define FIO___REF_ON_FREE()                                                    \
-  fio_atomic_sub(&FIO_NAME(FIO_REF_NAME, ___leak_tester), 1)
-
-static void FIO_NAME(FIO_REF_NAME, ___leak_test)(void *ignr_) {
-  if (FIO_NAME(FIO_REF_NAME, ___leak_tester)) {
-    FIO_LOG_ERROR(
-        "(" FIO_MACRO2STR(FIO_REF_NAME) "):\n          "
-                                        "%zd memory leak(s) detected for "
-                                        "type: " FIO_MACRO2STR(FIO_REF_TYPE),
-        FIO_NAME(FIO_REF_NAME, ___leak_tester));
-  }
-  (void)ignr_;
-}
-
-FIO_CONSTRUCTOR(FIO_NAME(FIO_REF_NAME, ___leak_test_schd)) {
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
-                         FIO_NAME(FIO_REF_NAME, ___leak_test),
-                         NULL);
-}
-#else
-#undef FIO___REF_ON_ALLOC
-#define FIO___REF_ON_ALLOC()
-#undef FIO___REF_ON_FREE
-#define FIO___REF_ON_FREE()
-#endif /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
+FIO___LEAK_COUNTER_DEF(FIO_REF_NAME)
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -190,7 +156,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
-  FIO___REF_ON_ALLOC();
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -215,7 +181,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
-  FIO___REF_ON_FREE();
+  FIO___LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
 }
 
 #ifdef FIO_REF_METADATA

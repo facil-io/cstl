@@ -109,17 +109,6 @@ void configure_client_context(SSL_CTX *ctx) {
 }
 #endif /* 0 */
 /* *****************************************************************************
-OpenSSL Helpers Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, openssl)(void) {
-  /*
-   * TODO: test module here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
 OpenSSL Helpers Cleanup
 ***************************************************************************** */
 
