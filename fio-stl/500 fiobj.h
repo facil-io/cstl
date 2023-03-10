@@ -1329,10 +1329,10 @@ FIOBJ Complex Iteration
 typedef struct {
   FIOBJ obj;
   size_t pos;
-} fiobj____stack_element_s;
+} fiobj___stack_element_s;
 
-#define FIO_ARRAY_NAME fiobj____active_stack
-#define FIO_ARRAY_TYPE fiobj____stack_element_s
+#define FIO_ARRAY_NAME fiobj___active_stack
+#define FIO_ARRAY_TYPE fiobj___stack_element_s
 #define FIO_ARRAY_COPY(dest, src)                                              \
   do {                                                                         \
     (dest).obj = fiobj_dup((src).obj);                                         \
@@ -1344,8 +1344,8 @@ typedef struct {
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
-#define FIO_ARRAY_NAME           fiobj____stack
-#define FIO_ARRAY_TYPE           fiobj____stack_element_s
+#define FIO_ARRAY_NAME           fiobj___stack
+#define FIO_ARRAY_TYPE           fiobj___stack_element_s
 #define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
@@ -1355,7 +1355,7 @@ typedef struct {
   void *arg;
   FIOBJ next;
   size_t count;
-  fiobj____stack_s stack;
+  fiobj___stack_s stack;
   uint32_t end;
   uint8_t stop;
 } fiobj_____each2_data_s;
@@ -1423,20 +1423,20 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       .udata = &d,
       .value = o,
   };
-  fiobj____stack_element_s i = {.obj = o, .pos = 0};
+  fiobj___stack_element_s i = {.obj = o, .pos = 0};
   uint32_t end = fiobj____each2_element_count(o);
   fiobj____each2_wrapper_task((fiobj_each_s *)&e_tmp);
   while (!d.stop && i.obj && i.pos < end) {
     i.pos = fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, i.pos);
     if (d.next != FIOBJ_INVALID) {
-      if (fiobj____stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
+      if (fiobj___stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
         FIO_LOG_ERROR("FIOBJ nesting level too deep (%u)."
                       "`fiobj_each2` stopping loop early.",
-                      (unsigned int)fiobj____stack_count(&d.stack));
+                      (unsigned int)fiobj___stack_count(&d.stack));
         d.stop = 1;
         continue;
       }
-      fiobj____stack_push(&d.stack, i);
+      fiobj___stack_push(&d.stack, i);
       i.pos = 0;
       i.obj = d.next;
       d.next = FIOBJ_INVALID;
@@ -1445,12 +1445,12 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       /* re-collect end position to acommodate for changes */
       end = fiobj____each2_element_count(i.obj);
     }
-    while (i.pos >= end && fiobj____stack_count(&d.stack)) {
-      fiobj____stack_pop(&d.stack, &i);
+    while (i.pos >= end && fiobj___stack_count(&d.stack)) {
+      fiobj___stack_pop(&d.stack, &i);
       end = fiobj____each2_element_count(i.obj);
     }
   };
-  fiobj____stack_destroy(&d.stack);
+  fiobj___stack_destroy(&d.stack);
   return d.count;
 }
 

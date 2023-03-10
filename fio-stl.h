@@ -19370,7 +19370,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, destroy)(FIO_STR_PTR s);
 FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s);
 
 /** Frees the pointer returned by `detach`. */
-SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
+FIO_IFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
 
 /* *****************************************************************************
 String API - String state (data pointers, length, capacity, etc')
@@ -19681,6 +19681,17 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void);
 
 ***************************************************************************** */
 
+/* used here, but declared later (reference counter is static / global). */
+
+SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void);
+SFUNC void FIO_NAME(FIO_STR_NAME, __object_free)(FIO_NAME(FIO_STR_NAME, s) * s);
+SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
+                                                       size_t new_capa);
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   __default_copy_and_reallocate)(fio_str_info_s *dest,
+                                                  size_t new_capa);
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa);
+
 /* *****************************************************************************
 String Macro Helpers
 ***************************************************************************** */
@@ -19695,7 +19706,8 @@ String Macro Helpers
 #define FIO_STR_BIG_DATA(s)       ((s)->buf)
 #define FIO_STR_BIG_IS_DYNAMIC(s) (!((s)->special & 4))
 #define FIO_STR_BIG_SET_STATIC(s) ((s)->special |= 4)
-#define FIO_STR_BIG_FREE_BUF(s)   (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
+#define FIO_STR_BIG_FREE_BUF(s)                                                \
+  (FIO_NAME(FIO_STR_NAME, __default_free)((s)->buf, FIO_STR_BIG_CAPA((s))))
 
 #define FIO_STR_IS_FROZEN(s) ((s)->special & 2)
 #define FIO_STR_FREEZE_(s)   ((s)->special |= 2)
@@ -19818,14 +19830,6 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, __info_update)(const FIO_STR_PTR s_,
   s->buf = info.buf;
 }
 
-/* using now, declared later. */
-
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
-                                                           size_t new_capa);
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
-                       __default_copy_and_reallocate)(fio_str_info_s *dest,
-                                                      size_t new_capa);
-
 /* Internal(!): updated String data according to `info`.  */
 FIO_IFUNC fio_string_realloc_fn FIO_NAME(FIO_STR_NAME,
                                          __realloc_func)(const FIO_STR_PTR s_) {
@@ -19846,8 +19850,7 @@ String Constructors (inline)
 
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
-  FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
+  FIO_NAME(FIO_STR_NAME, s) *const s = FIO_NAME(FIO_STR_NAME, __object_new)();
   if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
     *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
   }
@@ -19870,7 +19873,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, free)(FIO_STR_PTR s_) {
   if (!FIO_STR_IS_SMALL(s) && FIO_STR_BIG_IS_DYNAMIC(s)) {
     FIO_STR_BIG_FREE_BUF(s);
   }
-  FIO_MEM_FREE_(s, sizeof(*s));
+  FIO_NAME(FIO_STR_NAME, __object_free)(s);
 }
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
@@ -19904,26 +19907,22 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, data);
   FIO_NAME(FIO_STR_NAME, s) *const s =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
+
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
-      data =
-          (char *)FIO_MEM_REALLOC_(NULL,
-                                   0,
-                                   sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1),
-                                   0);
-      if (data)
-        FIO_MEMCPY(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
+      fio_str_info_s cpy = {.buf = FIO_STR_SMALL_DATA(s),
+                            .len = FIO_STR_SMALL_LEN(s)};
+      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      data = cpy.buf;
     }
   } else {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       data = FIO_STR_BIG_DATA(s);
     } else if (FIO_STR_BIG_LEN(s)) {
-      data = (char *)FIO_MEM_REALLOC_(NULL,
-                                      0,
-                                      sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1),
-                                      0);
-      if (data)
-        FIO_MEMCPY(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
+      fio_str_info_s cpy = {.buf = FIO_STR_BIG_DATA(s),
+                            .len = FIO_STR_BIG_LEN(s)};
+      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      data = cpy.buf;
     }
   }
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
@@ -20021,20 +20020,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
                          .capa = FIO_STR_SMALL_CAPA(s)};
     return i;
   }
-
-  {
-    const size_t capa2be = fio_string_capa4len(len);
-    char *buf = (char *)FIO_MEM_REALLOC_(NULL, 0, capa2be, 0);
-    if (!buf)
-      return i;
-    buf[len] = 0;
-    i = (fio_str_info_s){.buf = buf, .len = len, .capa = capa2be};
-  }
+  i = (fio_str_info_s){.buf = (char *)str, .len = len};
+  FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, len);
   FIO_STR_BIG_CAPA_SET(s, i.capa);
   FIO_STR_BIG_DATA(s) = i.buf;
   FIO_STR_BIG_LEN_SET(s, len);
-  if (str)
-    FIO_MEMCPY(FIO_STR_BIG_DATA(s), str, len);
   return i;
 }
 
@@ -20193,49 +20183,71 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 ***************************************************************************** */
 
 /* *****************************************************************************
+External functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
+
+/* *****************************************************************************
 String Core Callbacks - Memory management
 ***************************************************************************** */
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
-                                                           size_t new_capa) {
+SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void) {
+  FIO_NAME(FIO_STR_NAME, s) *r =
+      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, (sizeof(*r)), 0);
+  if (r)
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
+  return r;
+}
+SFUNC void FIO_NAME(FIO_STR_NAME,
+                    __object_free)(FIO_NAME(FIO_STR_NAME, s) * s) {
+  if (!s)
+    return;
+  FIO_MEM_FREE_(s, sizeof(*s));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
+}
+
+SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
+                                                       size_t new_capa) {
   new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
   if (!tmp)
     return -1;
+  if (!dest->buf)
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
 }
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
-                       __default_copy_and_reallocate)(fio_str_info_s *dest,
-                                                      size_t new_capa) {
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   __default_copy_and_reallocate)(fio_str_info_s *dest,
+                                                  size_t new_capa) {
+  if (dest->len && new_capa < dest->len)
+    new_capa = dest->len;
   new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
     return -1;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
+  ((char *)tmp)[dest->len] = 0;
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr) {
-  FIO_MEM_FREE_(ptr, -1);
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa) {
+  if (!ptr)
+    return;
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_MEM_FREE_(ptr, capa);
+  (void)capa; /* if unused */
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free2)(fio_str_info_s str) {
-  FIO_MEM_FREE_(str.buf, str.capa);
-}
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) {
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) { (void)str; }
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop2)(fio_str_info_s str) {
   (void)str;
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME,
-                        __default_free_noop2)(fio_str_info_s str) {
-  (void)str;
-}
-
-/* *****************************************************************************
-External functions
-***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Implementation - Memory management
@@ -20243,6 +20255,9 @@ String Implementation - Memory management
 
 /** Frees the pointer returned by `detach`. */
 SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
+  if (!ptr)
+    return;
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, -1);
 }
 
@@ -20949,11 +20964,10 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(cstr, "Welcome Home\0", 13),
                "`detach` string error: %s",
                cstr);
-    FIO_MEM_FREE(cstr, state.capa);
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
                "`detach` data wasn't cleared.");
-    FIO_NAME(FIO_STR_NAME, destroy)
-    (&str); /* does nothing, but what the heck... */
+    FIO_NAME(FIO_STR_NAME, destroy)(&str); /*not really needed... detached... */
+    FIO_NAME(FIO_STR_NAME, dealloc)(cstr);
   }
   {
     fprintf(stderr, "* Testing Base64 encoding / decoding.\n");
@@ -21268,10 +21282,10 @@ Dynamic Arrays - API
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 
 /* Allocates a new array object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
+SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
 
 /* Frees an array's internal data AND it's container! */
-FIO_IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -21545,27 +21559,6 @@ typedef struct {
 /* *****************************************************************************
 Inlined functions
 ***************************************************************************** */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new array object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
-  FIO_NAME(FIO_ARRAY_NAME, s) *a =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
-  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
-    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
-  }
-  return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
-}
-
-/* Frees an array's internal data AND it's container! */
-FIO_IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
-  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
-      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
-  FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
-  FIO_MEM_FREE_(ary, sizeof(*ary));
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
 /** Returns the number of elements in the Array. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
@@ -21707,9 +21700,34 @@ Dynamic Arrays - internal helpers
 
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy)) /* TODO! */
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */
+
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new array object on the heap and initializes it's memory. */
+SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
+  FIO_NAME(FIO_ARRAY_NAME, s) *a =
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
+    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
+  }
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
+  return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
+}
+
+/* Frees an array's internal data AND it's container! */
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
+  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
+  FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
+  FIO_MEM_FREE_(ary, sizeof(*ary));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Destroys any objects stored in the array and frees the internal state. */
 SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
@@ -21730,6 +21748,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
     }
 #endif
     FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
+    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
     return;
   case 1:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
@@ -21755,7 +21774,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
   case 0:
     if (abs_capa <= ary->capa)
       return ary->capa;
-    /* objects don't move, use the system's realloc */
+    /* objects don't move, use only realloc */
     if ((capa_ >= 0) || (capa_ < 0 && ary->start > 0)) {
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(ary->ary,
                                                0,
@@ -21763,17 +21782,17 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                sizeof(*tmp) * ary->end);
       if (!tmp)
         return ary->capa;
+      if (!ary->ary)
+        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
       ary->ary = tmp;
       return capa;
-    } else {
-      /* moving objects, starting with a fresh piece of memory */
+    } else { /* moving objects, starting with a fresh piece of memory */
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
         return ary->capa;
-      if (capa_ >= 0) {
-        /* copy items at begining of memory stack */
+      if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
         }
@@ -21785,20 +21804,20 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
             .ary = tmp,
         };
         return capa;
+      } else { /* copy items at ending of memory stack */
+        if (count) {
+          FIO_MEMCPY(tmp + (capa - count),
+                     ary->ary + ary->start,
+                     count * sizeof(*tmp));
+        }
+        FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
+        *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
+            .start = (capa - count),
+            .end = capa,
+            .capa = capa,
+            .ary = tmp,
+        };
       }
-      /* copy items at ending of memory stack */
-      if (count) {
-        FIO_MEMCPY(tmp + (capa - count),
-                   ary->ary + ary->start,
-                   count * sizeof(*tmp));
-      }
-      FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
-      *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
-          .start = (capa - count),
-          .end = capa,
-          .capa = capa,
-          .ary = tmp,
-      };
     }
     return capa;
   case 1:
@@ -21807,6 +21826,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
     if (!tmp)
       return FIO_ARRAY_EMBEDDED_CAPA;
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
     if (capa_ >= 0) {
       /* copy items at beginning of memory stack */
       if (ary->start) {
@@ -22228,6 +22248,7 @@ re_embed:
     }
     if (tmp) {
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
+      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
       (void)old_capa; /* if unused */
     }
   }
@@ -23131,10 +23152,10 @@ Construction / Deconstruction
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 
 /* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void);
+SFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void);
 
 /* Frees any internal data AND the object's container! */
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map);
+SFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -23379,27 +23400,6 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 Map Implementation - inlined static functions
 ***************************************************************************** */
 
-/* do we have a constructor? */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
-  FIO_NAME(FIO_MAP_NAME, s) *o =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
-  if (!o)
-    return (FIO_MAP_PTR)NULL;
-  *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
-  return (FIO_MAP_PTR)FIO_PTR_TAG(o);
-}
-/* Frees any internal data AND the object's container! */
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
-  FIO_NAME(FIO_MAP_NAME, destroy)(map);
-  FIO_NAME(FIO_MAP_NAME, s) *o =
-      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
-  FIO_MEM_FREE_(o, sizeof(*o));
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
@@ -23575,6 +23575,35 @@ Map Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, destroy))
+/* *****************************************************************************
+Constructors
+***************************************************************************** */
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
+  FIO_NAME(FIO_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  if (!o)
+    return (FIO_MAP_PTR)NULL;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, s));
+  *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
+  return (FIO_MAP_PTR)FIO_PTR_TAG(o);
+}
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_MAP_NAME, destroy)(map);
+  FIO_NAME(FIO_MAP_NAME, s) *o =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
+  FIO_MEM_FREE_(o, sizeof(*o));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, s));
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
 /* *****************************************************************************
 Internal Helpers
 ***************************************************************************** */
@@ -23733,6 +23762,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME,
   if (!o->bits || !o->map)
     return;
   const size_t capa = FIO_MAP_CAPA(o->bits);
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));
   FIO_MEM_FREE_(o->map, (capa * sizeof(*o->map)) + capa);
   (void)capa;
 }
@@ -23798,6 +23828,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, s)
       FIO_MEM_REALLOC_(NULL, 0, ((capa * sizeof(*cpy.map)) + capa), 0);
   if (!cpy.map)
     return cpy;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, destroy));
   if (!FIO_MEM_REALLOC_IS_SAFE_) {
     /* set only the imap, the rest can be junk data */
     FIO_MEMSET((cpy.map + capa), 0, capa);
@@ -36828,10 +36859,10 @@ FIOBJ Complex Iteration
 typedef struct {
   FIOBJ obj;
   size_t pos;
-} fiobj____stack_element_s;
+} fiobj___stack_element_s;
 
-#define FIO_ARRAY_NAME fiobj____active_stack
-#define FIO_ARRAY_TYPE fiobj____stack_element_s
+#define FIO_ARRAY_NAME fiobj___active_stack
+#define FIO_ARRAY_TYPE fiobj___stack_element_s
 #define FIO_ARRAY_COPY(dest, src)                                              \
   do {                                                                         \
     (dest).obj = fiobj_dup((src).obj);                                         \
@@ -36843,8 +36874,8 @@ typedef struct {
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
-#define FIO_ARRAY_NAME           fiobj____stack
-#define FIO_ARRAY_TYPE           fiobj____stack_element_s
+#define FIO_ARRAY_NAME           fiobj___stack
+#define FIO_ARRAY_TYPE           fiobj___stack_element_s
 #define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
@@ -36854,7 +36885,7 @@ typedef struct {
   void *arg;
   FIOBJ next;
   size_t count;
-  fiobj____stack_s stack;
+  fiobj___stack_s stack;
   uint32_t end;
   uint8_t stop;
 } fiobj_____each2_data_s;
@@ -36922,20 +36953,20 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       .udata = &d,
       .value = o,
   };
-  fiobj____stack_element_s i = {.obj = o, .pos = 0};
+  fiobj___stack_element_s i = {.obj = o, .pos = 0};
   uint32_t end = fiobj____each2_element_count(o);
   fiobj____each2_wrapper_task((fiobj_each_s *)&e_tmp);
   while (!d.stop && i.obj && i.pos < end) {
     i.pos = fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, i.pos);
     if (d.next != FIOBJ_INVALID) {
-      if (fiobj____stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
+      if (fiobj___stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
         FIO_LOG_ERROR("FIOBJ nesting level too deep (%u)."
                       "`fiobj_each2` stopping loop early.",
-                      (unsigned int)fiobj____stack_count(&d.stack));
+                      (unsigned int)fiobj___stack_count(&d.stack));
         d.stop = 1;
         continue;
       }
-      fiobj____stack_push(&d.stack, i);
+      fiobj___stack_push(&d.stack, i);
       i.pos = 0;
       i.obj = d.next;
       d.next = FIOBJ_INVALID;
@@ -36944,12 +36975,12 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       /* re-collect end position to acommodate for changes */
       end = fiobj____each2_element_count(i.obj);
     }
-    while (i.pos >= end && fiobj____stack_count(&d.stack)) {
-      fiobj____stack_pop(&d.stack, &i);
+    while (i.pos >= end && fiobj___stack_count(&d.stack)) {
+      fiobj___stack_pop(&d.stack, &i);
       end = fiobj____each2_element_count(i.obj);
     }
   };
-  fiobj____stack_destroy(&d.stack);
+  fiobj___stack_destroy(&d.stack);
   return d.count;
 }
 
@@ -37616,10 +37647,10 @@ typedef struct {
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 
 /* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void);
+SFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void);
 
 /* Frees any internal data AND the object's container! */
-FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj);
+SFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -37655,42 +37686,36 @@ Module and File Names:
 When
 */
 
-/* do we have a constructor? */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
-  FIO_NAME(FIO_MODULE_NAME, s) *o =
-      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
-  if (!o)
-    return (FIO_MODULE_PTR)NULL;
-  *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
-  return (FIO_MODULE_PTR)FIO_PTR_TAG(o);
-}
-/* Frees any internal data AND the object's container! */
-FIO_IFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
-  FIO_PTR_TAG_VALID_OR_RETURN(obj, 0);
-  FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
-  FIO_NAME(FIO_MODULE_NAME, s) *o =
-      FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
-  FIO_MEM_FREE_(o, sizeof(*o));
-  return 0;
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/*
-REMEMBER:
-========
+FIO___LEAK_COUNTER_DEF(FIO_MODULE_NAME)
 
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+SFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
+  FIO_NAME(FIO_MODULE_NAME, s) *o =
+      (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  if (!o)
+    return (FIO_MODULE_PTR)NULL;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_MODULE_NAME);
+  *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
+  return (FIO_MODULE_PTR)FIO_PTR_TAG(o);
+}
+/* Frees any internal data AND the object's container! */
+SFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
+  FIO_PTR_TAG_VALID_OR_RETURN(obj, 0);
+  FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
+  FIO_NAME(FIO_MODULE_NAME, s) *o =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
+  FIO_MEM_FREE_(o, sizeof(*o));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
+  return 0;
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Frees any internal data AND the object's container! */
 SFUNC void FIO_NAME(FIO_MODULE_NAME, destroy)(FIO_MODULE_PTR obj) {

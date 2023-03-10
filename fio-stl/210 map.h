@@ -227,10 +227,10 @@ Construction / Deconstruction
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 
 /* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void);
+SFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void);
 
 /* Frees any internal data AND the object's container! */
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map);
+SFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -475,27 +475,6 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 Map Implementation - inlined static functions
 ***************************************************************************** */
 
-/* do we have a constructor? */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
-  FIO_NAME(FIO_MAP_NAME, s) *o =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
-  if (!o)
-    return (FIO_MAP_PTR)NULL;
-  *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
-  return (FIO_MAP_PTR)FIO_PTR_TAG(o);
-}
-/* Frees any internal data AND the object's container! */
-FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
-  FIO_NAME(FIO_MAP_NAME, destroy)(map);
-  FIO_NAME(FIO_MAP_NAME, s) *o =
-      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
-  FIO_MEM_FREE_(o, sizeof(*o));
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
@@ -671,6 +650,35 @@ Map Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, destroy))
+/* *****************************************************************************
+Constructors
+***************************************************************************** */
+
+/* do we have a constructor? */
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new object on the heap and initializes it's memory. */
+FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
+  FIO_NAME(FIO_MAP_NAME, s) *o =
+      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
+  if (!o)
+    return (FIO_MAP_PTR)NULL;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, s));
+  *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
+  return (FIO_MAP_PTR)FIO_PTR_TAG(o);
+}
+/* Frees any internal data AND the object's container! */
+FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_MAP_NAME, destroy)(map);
+  FIO_NAME(FIO_MAP_NAME, s) *o =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
+  FIO_MEM_FREE_(o, sizeof(*o));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, s));
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
+
 /* *****************************************************************************
 Internal Helpers
 ***************************************************************************** */
@@ -829,6 +837,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME,
   if (!o->bits || !o->map)
     return;
   const size_t capa = FIO_MAP_CAPA(o->bits);
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));
   FIO_MEM_FREE_(o->map, (capa * sizeof(*o->map)) + capa);
   (void)capa;
 }
@@ -894,6 +903,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, s)
       FIO_MEM_REALLOC_(NULL, 0, ((capa * sizeof(*cpy.map)) + capa), 0);
   if (!cpy.map)
     return cpy;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, destroy));
   if (!FIO_MEM_REALLOC_IS_SAFE_) {
     /* set only the imap, the rest can be junk data */
     FIO_MEMSET((cpy.map + capa), 0, capa);

@@ -171,10 +171,10 @@ Dynamic Arrays - API
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
 
 /* Allocates a new array object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
+SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void);
 
 /* Frees an array's internal data AND it's container! */
-FIO_IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary);
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -448,27 +448,6 @@ typedef struct {
 /* *****************************************************************************
 Inlined functions
 ***************************************************************************** */
-#ifndef FIO_REF_CONSTRUCTOR_ONLY
-/* Allocates a new array object on the heap and initializes it's memory. */
-FIO_IFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
-  FIO_NAME(FIO_ARRAY_NAME, s) *a =
-      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
-  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
-    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
-  }
-  return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
-}
-
-/* Frees an array's internal data AND it's container! */
-FIO_IFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
-  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
-  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
-      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
-  FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
-  FIO_MEM_FREE_(ary, sizeof(*ary));
-}
-#endif /* FIO_REF_CONSTRUCTOR_ONLY */
-
 /** Returns the number of elements in the Array. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
@@ -610,9 +589,34 @@ Dynamic Arrays - internal helpers
 
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy)) /* TODO! */
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */
+
+#ifndef FIO_REF_CONSTRUCTOR_ONLY
+/* Allocates a new array object on the heap and initializes it's memory. */
+SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
+  FIO_NAME(FIO_ARRAY_NAME, s) *a =
+      (FIO_NAME(FIO_ARRAY_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*a), 0);
+  if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
+    *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
+  }
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
+  return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
+}
+
+/* Frees an array's internal data AND it's container! */
+SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
+  FIO_NAME(FIO_ARRAY_NAME, s) *ary =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
+  FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
+  FIO_MEM_FREE_(ary, sizeof(*ary));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
+}
+#endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
 /* Destroys any objects stored in the array and frees the internal state. */
 SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
@@ -633,6 +637,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
     }
 #endif
     FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
+    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
     return;
   case 1:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
@@ -658,7 +663,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
   case 0:
     if (abs_capa <= ary->capa)
       return ary->capa;
-    /* objects don't move, use the system's realloc */
+    /* objects don't move, use only realloc */
     if ((capa_ >= 0) || (capa_ < 0 && ary->start > 0)) {
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(ary->ary,
                                                0,
@@ -666,17 +671,17 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                sizeof(*tmp) * ary->end);
       if (!tmp)
         return ary->capa;
+      if (!ary->ary)
+        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
       ary->ary = tmp;
       return capa;
-    } else {
-      /* moving objects, starting with a fresh piece of memory */
+    } else { /* moving objects, starting with a fresh piece of memory */
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
         return ary->capa;
-      if (capa_ >= 0) {
-        /* copy items at begining of memory stack */
+      if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
         }
@@ -688,20 +693,20 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
             .ary = tmp,
         };
         return capa;
+      } else { /* copy items at ending of memory stack */
+        if (count) {
+          FIO_MEMCPY(tmp + (capa - count),
+                     ary->ary + ary->start,
+                     count * sizeof(*tmp));
+        }
+        FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
+        *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
+            .start = (capa - count),
+            .end = capa,
+            .capa = capa,
+            .ary = tmp,
+        };
       }
-      /* copy items at ending of memory stack */
-      if (count) {
-        FIO_MEMCPY(tmp + (capa - count),
-                   ary->ary + ary->start,
-                   count * sizeof(*tmp));
-      }
-      FIO_MEM_FREE_(ary->ary, sizeof(*ary->ary) * ary->capa);
-      *ary = (FIO_NAME(FIO_ARRAY_NAME, s)){
-          .start = (capa - count),
-          .end = capa,
-          .capa = capa,
-          .ary = tmp,
-      };
     }
     return capa;
   case 1:
@@ -710,6 +715,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
     if (!tmp)
       return FIO_ARRAY_EMBEDDED_CAPA;
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
     if (capa_ >= 0) {
       /* copy items at beginning of memory stack */
       if (ary->start) {
@@ -1131,6 +1137,7 @@ re_embed:
     }
     if (tmp) {
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
+      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
       (void)old_capa; /* if unused */
     }
   }

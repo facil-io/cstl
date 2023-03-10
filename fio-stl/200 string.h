@@ -228,7 +228,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, destroy)(FIO_STR_PTR s);
 FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s);
 
 /** Frees the pointer returned by `detach`. */
-SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
+FIO_IFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
 
 /* *****************************************************************************
 String API - String state (data pointers, length, capacity, etc')
@@ -539,6 +539,17 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void);
 
 ***************************************************************************** */
 
+/* used here, but declared later (reference counter is static / global). */
+
+SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void);
+SFUNC void FIO_NAME(FIO_STR_NAME, __object_free)(FIO_NAME(FIO_STR_NAME, s) * s);
+SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
+                                                       size_t new_capa);
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   __default_copy_and_reallocate)(fio_str_info_s *dest,
+                                                  size_t new_capa);
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa);
+
 /* *****************************************************************************
 String Macro Helpers
 ***************************************************************************** */
@@ -553,7 +564,8 @@ String Macro Helpers
 #define FIO_STR_BIG_DATA(s)       ((s)->buf)
 #define FIO_STR_BIG_IS_DYNAMIC(s) (!((s)->special & 4))
 #define FIO_STR_BIG_SET_STATIC(s) ((s)->special |= 4)
-#define FIO_STR_BIG_FREE_BUF(s)   (FIO_MEM_FREE_((s)->buf, FIO_STR_BIG_CAPA((s))))
+#define FIO_STR_BIG_FREE_BUF(s)                                                \
+  (FIO_NAME(FIO_STR_NAME, __default_free)((s)->buf, FIO_STR_BIG_CAPA((s))))
 
 #define FIO_STR_IS_FROZEN(s) ((s)->special & 2)
 #define FIO_STR_FREEZE_(s)   ((s)->special |= 2)
@@ -676,14 +688,6 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, __info_update)(const FIO_STR_PTR s_,
   s->buf = info.buf;
 }
 
-/* using now, declared later. */
-
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
-                                                           size_t new_capa);
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
-                       __default_copy_and_reallocate)(fio_str_info_s *dest,
-                                                      size_t new_capa);
-
 /* Internal(!): updated String data according to `info`.  */
 FIO_IFUNC fio_string_realloc_fn FIO_NAME(FIO_STR_NAME,
                                          __realloc_func)(const FIO_STR_PTR s_) {
@@ -704,8 +708,7 @@ String Constructors (inline)
 
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
-  FIO_NAME(FIO_STR_NAME, s) *const s =
-      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
+  FIO_NAME(FIO_STR_NAME, s) *const s = FIO_NAME(FIO_STR_NAME, __object_new)();
   if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
     *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
   }
@@ -728,7 +731,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, free)(FIO_STR_PTR s_) {
   if (!FIO_STR_IS_SMALL(s) && FIO_STR_BIG_IS_DYNAMIC(s)) {
     FIO_STR_BIG_FREE_BUF(s);
   }
-  FIO_MEM_FREE_(s, sizeof(*s));
+  FIO_NAME(FIO_STR_NAME, __object_free)(s);
 }
 
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
@@ -762,26 +765,22 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
   FIO_PTR_TAG_VALID_OR_RETURN(s_, data);
   FIO_NAME(FIO_STR_NAME, s) *const s =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
+
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
-      data =
-          (char *)FIO_MEM_REALLOC_(NULL,
-                                   0,
-                                   sizeof(*data) * (FIO_STR_SMALL_LEN(s) + 1),
-                                   0);
-      if (data)
-        FIO_MEMCPY(data, FIO_STR_SMALL_DATA(s), (FIO_STR_SMALL_LEN(s) + 1));
+      fio_str_info_s cpy = {.buf = FIO_STR_SMALL_DATA(s),
+                            .len = FIO_STR_SMALL_LEN(s)};
+      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      data = cpy.buf;
     }
   } else {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       data = FIO_STR_BIG_DATA(s);
     } else if (FIO_STR_BIG_LEN(s)) {
-      data = (char *)FIO_MEM_REALLOC_(NULL,
-                                      0,
-                                      sizeof(*data) * (FIO_STR_BIG_LEN(s) + 1),
-                                      0);
-      if (data)
-        FIO_MEMCPY(data, FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s) + 1);
+      fio_str_info_s cpy = {.buf = FIO_STR_BIG_DATA(s),
+                            .len = FIO_STR_BIG_LEN(s)};
+      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      data = cpy.buf;
     }
   }
   *s = (FIO_NAME(FIO_STR_NAME, s)){0};
@@ -879,20 +878,11 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
                          .capa = FIO_STR_SMALL_CAPA(s)};
     return i;
   }
-
-  {
-    const size_t capa2be = fio_string_capa4len(len);
-    char *buf = (char *)FIO_MEM_REALLOC_(NULL, 0, capa2be, 0);
-    if (!buf)
-      return i;
-    buf[len] = 0;
-    i = (fio_str_info_s){.buf = buf, .len = len, .capa = capa2be};
-  }
+  i = (fio_str_info_s){.buf = (char *)str, .len = len};
+  FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, len);
   FIO_STR_BIG_CAPA_SET(s, i.capa);
   FIO_STR_BIG_DATA(s) = i.buf;
   FIO_STR_BIG_LEN_SET(s, len);
-  if (str)
-    FIO_MEMCPY(FIO_STR_BIG_DATA(s), str, len);
   return i;
 }
 
@@ -1051,49 +1041,71 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
 ***************************************************************************** */
 
 /* *****************************************************************************
+External functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
+
+/* *****************************************************************************
 String Core Callbacks - Memory management
 ***************************************************************************** */
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
-                                                           size_t new_capa) {
+SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void) {
+  FIO_NAME(FIO_STR_NAME, s) *r =
+      (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, (sizeof(*r)), 0);
+  if (r)
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
+  return r;
+}
+SFUNC void FIO_NAME(FIO_STR_NAME,
+                    __object_free)(FIO_NAME(FIO_STR_NAME, s) * s) {
+  if (!s)
+    return;
+  FIO_MEM_FREE_(s, sizeof(*s));
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
+}
+
+SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
+                                                       size_t new_capa) {
   new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, new_capa, dest->len);
   if (!tmp)
     return -1;
+  if (!dest->buf)
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
 }
-FIO_SFUNC int FIO_NAME(FIO_STR_NAME,
-                       __default_copy_and_reallocate)(fio_str_info_s *dest,
-                                                      size_t new_capa) {
+SFUNC int FIO_NAME(FIO_STR_NAME,
+                   __default_copy_and_reallocate)(fio_str_info_s *dest,
+                                                  size_t new_capa) {
+  if (dest->len && new_capa < dest->len)
+    new_capa = dest->len;
   new_capa = fio_string_capa4len(new_capa);
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
     return -1;
+  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
+  ((char *)tmp)[dest->len] = 0;
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr) {
-  FIO_MEM_FREE_(ptr, -1);
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa) {
+  if (!ptr)
+    return;
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_MEM_FREE_(ptr, capa);
+  (void)capa; /* if unused */
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free2)(fio_str_info_s str) {
-  FIO_MEM_FREE_(str.buf, str.capa);
-}
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) {
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) { (void)str; }
+SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop2)(fio_str_info_s str) {
   (void)str;
 }
-FIO_SFUNC void FIO_NAME(FIO_STR_NAME,
-                        __default_free_noop2)(fio_str_info_s str) {
-  (void)str;
-}
-
-/* *****************************************************************************
-External functions
-***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
 String Implementation - Memory management
@@ -1101,6 +1113,9 @@ String Implementation - Memory management
 
 /** Frees the pointer returned by `detach`. */
 SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
+  if (!ptr)
+    return;
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, -1);
 }
 
@@ -1807,11 +1822,10 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(cstr, "Welcome Home\0", 13),
                "`detach` string error: %s",
                cstr);
-    FIO_MEM_FREE(cstr, state.capa);
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
                "`detach` data wasn't cleared.");
-    FIO_NAME(FIO_STR_NAME, destroy)
-    (&str); /* does nothing, but what the heck... */
+    FIO_NAME(FIO_STR_NAME, destroy)(&str); /*not really needed... detached... */
+    FIO_NAME(FIO_STR_NAME, dealloc)(cstr);
   }
   {
     fprintf(stderr, "* Testing Base64 encoding / decoding.\n");
