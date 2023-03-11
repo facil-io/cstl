@@ -834,7 +834,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
 /* deallocate the map's memory. */
 FIO_SFUNC void FIO_NAME(FIO_MAP_NAME,
                         __dealloc_map)(FIO_NAME(FIO_MAP_NAME, s) * o) {
-  if (!o->bits || !o->map)
+  if (!o->map)
     return;
   const size_t capa = FIO_MAP_CAPA(o->bits);
   FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));

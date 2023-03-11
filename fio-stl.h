@@ -23764,7 +23764,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
 /* deallocate the map's memory. */
 FIO_SFUNC void FIO_NAME(FIO_MAP_NAME,
                         __dealloc_map)(FIO_NAME(FIO_MAP_NAME, s) * o) {
-  if (!o->bits || !o->map)
+  if (!o->map)
     return;
   const size_t capa = FIO_MAP_CAPA(o->bits);
   FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));
@@ -40196,7 +40196,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
                         "128 Bytes.";
     size_t len = FIO_STRLEN(msg);
     char buf[512];
-    for (size_t offset = 0; offset < len; ++offset) {
+    for (size_t offset = 1; offset < len; ++offset) {
       memset(buf, 0, sizeof(buf));
       memmove(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);

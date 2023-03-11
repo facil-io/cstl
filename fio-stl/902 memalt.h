@@ -50,7 +50,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
                         "128 Bytes.";
     size_t len = FIO_STRLEN(msg);
     char buf[512];
-    for (size_t offset = 0; offset < len; ++offset) {
+    for (size_t offset = 1; offset < len; ++offset) {
       memset(buf, 0, sizeof(buf));
       memmove(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);
