@@ -331,24 +331,24 @@ FIO_SFUNC void fio___run_counter(void) {
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
+/* clang-format off */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
   __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
-  __declspec(allocate(".CRT$XCU")) void (                                      \
-      *FIO_NAME(fio___constructor, __COUNTER__))(void) = fname;                \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__) )(void) = fname; \
   static void fname(void)
 #else
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __declspec(allocate(".CRT$XCU")) void (                                      \
-      *FIO_NAME(fio___constructor, __COUNTER__))(void) = fname;                \
   __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__) )(void) = fname; \
   static void fname(void)
 #endif /* _WIN64 */
 #define FIO_DESTRUCTOR(fname)                                                  \
   static void fname(void);                                                     \
   FIO_CONSTRUCTOR(fname##__hook) { atexit(fname); }                            \
   static void fname(void)
+/* clang-format on */
 
 #else
 /** Marks a function as a constructor - if supported. */
