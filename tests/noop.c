@@ -1,5 +1,5 @@
 #define FIO_LOG
-#define FIO_TEST_ALL
+#define FIO_EVERYTHING
 #include "fio-stl/include.h"
 
 int main(int argc, char const *argv[]) {
