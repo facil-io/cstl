@@ -842,7 +842,7 @@ FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
 }
 
 FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
-  fio___srv_env_destroy(&e->env);
+  fio___srv_env_destroy(&e->env); /* no need to lock, performed in IO thread. */
   fio_thread_mutex_destroy(&e->lock);
   *e = (fio___srv_env_safe_s)FIO___SRV_ENV_SAFE_INIT;
 }

@@ -288,15 +288,18 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 
 #if defined(__clang__) || defined(__GNUC__)
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD             __asm__ volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
 #elif defined(_MSC_VER)
 #include <intrin.h>
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD _ReadWriteBarrier()
+#define FIO_COMPILER_GUARD             _ReadWriteBarrier()
+#define FIO_COMPILER_GUARD_INSTRUCTION _WriteBarrier()
 #pragma message("Warning: Windows deprecated it's low-level C memory barrier.")
 #else
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
-#define FIO_COMPILER_GUARD asm volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD             asm volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD_INSTRUCTION asm volatile("" :::)
 #endif
 
 /* *****************************************************************************
@@ -2649,14 +2652,15 @@ FIO_MEMCPY / fio_memcpy - memcpy fallback
 ***************************************************************************** */
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
-                                      const void *restrict s_,
-                                      size_t l) {
+FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
+                                        const void *restrict s_,
+                                        size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[32] FIO_ALIGN(16);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     fio_memcpy64(t, s);
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy64(d, t);
     l -= 64;
     d += 64;
@@ -2665,6 +2669,7 @@ FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
 #define FIO___MEMCPY_UNSAFE_STEP(bytes)                                        \
   do {                                                                         \
     fio_memcpy##bytes(t, s);                                                   \
+    FIO_COMPILER_GUARD_INSTRUCTION;                                            \
     fio_memcpy##bytes(d, t);                                                   \
     (d += bytes), (s += bytes);                                                \
   } while (0)
@@ -2686,9 +2691,9 @@ FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio_memcpy_buffered__reversed_x(void *restrict d_,
-                                                const void *restrict s_,
-                                                size_t l) {
+FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *restrict d_,
+                                                 const void *restrict s_,
+                                                 size_t l) {
   char *restrict d = (char *restrict)d_ + l;
   const char *restrict s = (const char *restrict)s_ + l;
   uint64_t t[8] FIO_ALIGN(16);
@@ -2747,9 +2752,9 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio___memcpy_unsafe_x(d, s, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    return fio_memcpy_buffered_x(d, s, bytes);
+    return fio___memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    return fio_memcpy_buffered__reversed_x(d, s, bytes);
+    return fio___memcpy_buffered_reversed_x(d, s, bytes);
   }
   return d;
 }
@@ -27120,7 +27125,7 @@ FIO_IFUNC int fio___srv_env_safe_remove(fio___srv_env_safe_s *e,
 }
 
 FIO_IFUNC void fio___srv_env_safe_destroy(fio___srv_env_safe_s *e) {
-  fio___srv_env_destroy(&e->env);
+  fio___srv_env_destroy(&e->env); /* no need to lock, performed in IO thread. */
   fio_thread_mutex_destroy(&e->lock);
   *e = (fio___srv_env_safe_s)FIO___SRV_ENV_SAFE_INIT;
 }
@@ -40193,18 +40198,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     char buf[512];
     for (size_t offset = 0; offset < len; ++offset) {
       memset(buf, 0, sizeof(buf));
-      memcpy(buf, msg, len);
+      memmove(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);
       FIO_ASSERT(!memcmp(buf + offset, msg, len),
                  "fio_memcpy failed on overlapping data (offset +%d, len %zu)",
                  offset,
                  len);
       memset(buf, 0, sizeof(buf));
-      memcpy(buf + offset, msg, len);
+      memmove(buf + offset, msg, len);
       fio_memcpy(buf, buf + offset, len);
-      if (memcmp(buf, msg, len)) {
-        FIO_LOG_DEBUG2("break point");
-      }
       FIO_ASSERT(!memcmp(buf, msg, len),
                  "fio_memcpy failed on overlapping data (offset -%d, len %zu)",
                  offset,

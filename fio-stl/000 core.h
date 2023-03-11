@@ -251,15 +251,18 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 
 #if defined(__clang__) || defined(__GNUC__)
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD             __asm__ volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
 #elif defined(_MSC_VER)
 #include <intrin.h>
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD _ReadWriteBarrier()
+#define FIO_COMPILER_GUARD             _ReadWriteBarrier()
+#define FIO_COMPILER_GUARD_INSTRUCTION _WriteBarrier()
 #pragma message("Warning: Windows deprecated it's low-level C memory barrier.")
 #else
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
-#define FIO_COMPILER_GUARD asm volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD             asm volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD_INSTRUCTION asm volatile("" :::)
 #endif
 
 /* *****************************************************************************

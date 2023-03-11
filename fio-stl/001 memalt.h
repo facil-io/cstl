@@ -62,14 +62,15 @@ FIO_MEMCPY / fio_memcpy - memcpy fallback
 ***************************************************************************** */
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
-                                      const void *restrict s_,
-                                      size_t l) {
+FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
+                                        const void *restrict s_,
+                                        size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[32] FIO_ALIGN(16);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     fio_memcpy64(t, s);
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy64(d, t);
     l -= 64;
     d += 64;
@@ -78,6 +79,7 @@ FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
 #define FIO___MEMCPY_UNSAFE_STEP(bytes)                                        \
   do {                                                                         \
     fio_memcpy##bytes(t, s);                                                   \
+    FIO_COMPILER_GUARD_INSTRUCTION;                                            \
     fio_memcpy##bytes(d, t);                                                   \
     (d += bytes), (s += bytes);                                                \
   } while (0)
@@ -99,9 +101,9 @@ FIO_SFUNC void *fio_memcpy_buffered_x(void *restrict d_,
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio_memcpy_buffered__reversed_x(void *restrict d_,
-                                                const void *restrict s_,
-                                                size_t l) {
+FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *restrict d_,
+                                                 const void *restrict s_,
+                                                 size_t l) {
   char *restrict d = (char *restrict)d_ + l;
   const char *restrict s = (const char *restrict)s_ + l;
   uint64_t t[8] FIO_ALIGN(16);
@@ -160,9 +162,9 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio___memcpy_unsafe_x(d, s, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    return fio_memcpy_buffered_x(d, s, bytes);
+    return fio___memcpy_buffered_x(d, s, bytes);
   } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    return fio_memcpy_buffered__reversed_x(d, s, bytes);
+    return fio___memcpy_buffered_reversed_x(d, s, bytes);
   }
   return d;
 }
