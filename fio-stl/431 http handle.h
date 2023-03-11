@@ -2653,7 +2653,7 @@ typedef struct {
 
 #define FIO___HTTP_MIME_IS_VALID(o) ((o)->ext != 0)
 #define FIO___HTTP_MIME_CMP(a, b)   ((a)->ext == (b)->ext)
-#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), (o)->len)
+#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), 0)
 
 #undef FIO_TYPEDEF_IMAP_REALLOC
 #define FIO_TYPEDEF_IMAP_REALLOC(ptr, old_size, new_size, copy_len)            \

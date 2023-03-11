@@ -4947,11 +4947,11 @@ iMap Creation Macro
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
     const imap_type hash = hash_fn(pobj);                                      \
-    imap_type tester = (hash & hash_mask);                                     \
+    imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */ \
+    imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */ \
     tester += (!tester) << a->capa_bits;                                       \
     tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
-    imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
       /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */  \
       for (size_t mini_steps = 0;;) {                                          \
@@ -33328,7 +33328,7 @@ typedef struct {
 
 #define FIO___HTTP_MIME_IS_VALID(o) ((o)->ext != 0)
 #define FIO___HTTP_MIME_CMP(a, b)   ((a)->ext == (b)->ext)
-#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), (o)->len)
+#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), 0)
 
 #undef FIO_TYPEDEF_IMAP_REALLOC
 #define FIO_TYPEDEF_IMAP_REALLOC(ptr, old_size, new_size, copy_len)            \

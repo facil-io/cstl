@@ -154,11 +154,11 @@ iMap Creation Macro
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
     const imap_type hash = hash_fn(pobj);                                      \
-    imap_type tester = (hash & hash_mask);                                     \
+    imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */ \
+    imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */ \
     tester += (!tester) << a->capa_bits;                                       \
     tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
-    imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
       /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */  \
       for (size_t mini_steps = 0;;) {                                          \
