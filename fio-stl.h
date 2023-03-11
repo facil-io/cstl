@@ -369,13 +369,11 @@ FIO_SFUNC void fio___run_counter(void) {
 /* clang-format off */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __pragma(comment(linker, "/include:" FIO_MACRO2STR(fname) "__"));            \
   __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #else
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __pragma(comment(linker, "/include:_" FIO_MACRO2STR(fname) "__"));           \
   __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #endif /* _WIN64 */
