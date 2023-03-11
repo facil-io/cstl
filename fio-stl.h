@@ -345,20 +345,17 @@ Constructors and Destructors
  * So we run the counter to 100 and get 999 safer sorts before breaking again.
  */
 FIO_SFUNC void fio___run_counter(void) {
-#define FIO__COUNTER_RUNNER                                                    \
-  (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__,  \
-      (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__,                 \
-      (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
-  FIO__COUNTER_RUNNER;
+  /* clang-format off */
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
+  /* clang-format on */
 }
 
 #if _MSC_VER
@@ -584,7 +581,8 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Static Endian Test
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
     (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
@@ -623,7 +621,8 @@ Static Endian Test
 
 /* *****************************************************************************
 Dynamic Endian Testing
-***************************************************************************** */
+*****************************************************************************
+*/
 
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
@@ -648,7 +647,8 @@ Security Related macros
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
@@ -686,7 +686,8 @@ Sleep / Thread Scheduling Macros
 
 /* *****************************************************************************
 String and Buffer Information Containers + Helper Macros
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -751,7 +752,8 @@ typedef struct fio_buf_info_s {
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1232,7 +1234,8 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1315,7 +1318,8 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1361,7 +1365,8 @@ FIO___MEMBUF_FN(8, 64, fio_lton64, _be)
 
 /* *****************************************************************************
 Constant-Time Selectors
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Returns 1 if the expression is true (input isn't zero). */
 FIO_IFUNC uintptr_t fio_ct_true(uintptr_t cond) {
@@ -1381,7 +1386,8 @@ FIO_IFUNC uintptr_t fio_ct_if_bool(uint8_t cond, uintptr_t a, uintptr_t b) {
   return (b ^ ((0 - (cond & 1)) & (a ^ b)));
 }
 
-/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
+/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise.
+ */
 FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
@@ -1526,7 +1532,8 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1569,7 +1576,8 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1666,7 +1674,8 @@ FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
 #endif /* __builtin_ctzll || __builtin_clzll */
 
 /**
- * Returns the index of the least significant (lowest) bit - used in fio_memchr.
+ * Returns the index of the least significant (lowest) bit - used in
+ * fio_memchr.
  *
  * Placed here (mostly copied from bitmap module).
  */
@@ -1679,7 +1688,8 @@ FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 }
 
 /**
- * Returns the index of the least significant (lowest) bit - used in write_bin.
+ * Returns the index of the least significant (lowest) bit - used in
+ * write_bin.
  *
  * Placed here (mostly copied from bitmap module).
  */
@@ -1700,7 +1710,8 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /**
  * Detects a byte where all the bits are set (255) within a 4 byte vector.
@@ -1805,7 +1816,8 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {
