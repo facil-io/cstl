@@ -168,6 +168,7 @@ FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
   }
+  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
 }
 
 /** Adds a callback to the list of callbacks to be called for the event. */
@@ -271,10 +272,6 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     }
   } else {
     /* perform tasks in reverse */
-    if (e == FIO_CALL_AT_EXIT) {
-      /* destroy all before executing (memory leak counters) */
-      fio_state_callback_clear_all();
-    }
     while (len--) {
       ary[len].func(ary[len].arg);
     }
@@ -286,15 +283,21 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
 State constructor / destructor
 ***************************************************************************** */
 
+FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
+  fio_state_callback_clear_all();
+  (void)ignr_;
+}
+
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         fio___state_cleanup_task_at_exit,
+                         NULL);
 }
 
-FIO_DESTRUCTOR(fio___state_cleanup) {
+FIO_DESTRUCTOR(fio___state_at_exit_hook) {
   fio_state_callback_force(FIO_CALL_AT_EXIT);
-  fio_state_callback_clear_all();
-  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
 }
 
 /* *****************************************************************************

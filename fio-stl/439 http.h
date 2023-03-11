@@ -424,7 +424,6 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
                                      c->settings->public_folder,
                                      fio_http_path(h),
                                      c->settings->max_age)) {
-    fio_http_free(h);
     return;
   }
   union {
@@ -860,7 +859,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
 
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
-  fio_defer(fio___http_controller_http1_on_finish_task, (void *)h, NULL);
+  fio_defer(fio___http_controller_http1_on_finish_task, (void *)(h), NULL);
 }
 
 /* *****************************************************************************

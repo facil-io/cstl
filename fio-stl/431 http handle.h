@@ -1948,7 +1948,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   fio_http_response_header_set(
       h,
       FIO_STR_INFO2((char *)"sec-websocket-version", 21),
-      FIO_STR_INFO2("13", 2));
+      FIO_STR_INFO2((char *)"13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
         fio_http_request_header(h,

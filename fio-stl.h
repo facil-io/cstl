@@ -9947,6 +9947,7 @@ FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
   }
+  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
 }
 
 /** Adds a callback to the list of callbacks to be called for the event. */
@@ -10050,10 +10051,6 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     }
   } else {
     /* perform tasks in reverse */
-    if (e == FIO_CALL_AT_EXIT) {
-      /* destroy all before executing (memory leak counters) */
-      fio_state_callback_clear_all();
-    }
     while (len--) {
       ary[len].func(ary[len].arg);
     }
@@ -10065,15 +10062,21 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
 State constructor / destructor
 ***************************************************************************** */
 
+FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
+  fio_state_callback_clear_all();
+  (void)ignr_;
+}
+
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
+  fio_state_callback_add(FIO_CALL_AT_EXIT,
+                         fio___state_cleanup_task_at_exit,
+                         NULL);
 }
 
-FIO_DESTRUCTOR(fio___state_cleanup) {
+FIO_DESTRUCTOR(fio___state_at_exit_hook) {
   fio_state_callback_force(FIO_CALL_AT_EXIT);
-  fio_state_callback_clear_all();
-  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
 }
 
 /* *****************************************************************************
@@ -32623,7 +32626,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   fio_http_response_header_set(
       h,
       FIO_STR_INFO2((char *)"sec-websocket-version", 21),
-      FIO_STR_INFO2("13", 2));
+      FIO_STR_INFO2((char *)"13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
         fio_http_request_header(h,
@@ -34878,7 +34881,6 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
                                      c->settings->public_folder,
                                      fio_http_path(h),
                                      c->settings->max_age)) {
-    fio_http_free(h);
     return;
   }
   union {
@@ -35314,7 +35316,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
 
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
-  fio_defer(fio___http_controller_http1_on_finish_task, (void *)h, NULL);
+  fio_defer(fio___http_controller_http1_on_finish_task, (void *)(h), NULL);
 }
 
 /* *****************************************************************************
@@ -44819,7 +44821,9 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, server)();
+#if !FIO_OS_WIN
   FIO_NAME_TEST(stl, pubsub)();
+#endif
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
