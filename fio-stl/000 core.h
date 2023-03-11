@@ -287,7 +287,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 /* *****************************************************************************
-Function Attributes, Constructors, Destructors
+Function Attributes
 ***************************************************************************** */
 
 /** Marks a function as `static`, `inline` and possibly unused. */
@@ -299,6 +299,31 @@ Function Attributes, Constructors, Destructors
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
 
+/* *****************************************************************************
+Constructors and Destructors
+***************************************************************************** */
+
+/* Some linkers (looking at you, Microsoft) sort constructors alphanumerically.
+ * This has the issue that they can sort 9 as larger than 100 (first digit).
+ * So we run the counter to 100 and get 999 safer sorts before breaking again.
+ */
+FIO_SFUNC void fio___run_counter(void) {
+#define FIO__COUNTER_RUNNER                                                    \
+  (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__,  \
+      (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__,                 \
+      (void)__COUNTER__, (void)__COUNTER__, (void)__COUNTER__
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+  FIO__COUNTER_RUNNER;
+}
+
 #if _MSC_VER
 #pragma section(".CRT$XCU", read)
 #undef FIO_CONSTRUCTOR
@@ -306,34 +331,31 @@ Function Attributes, Constructors, Destructors
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
-#define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
+#define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
   __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
-  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  __declspec(allocate(".CRT$XCU")) void (                                      \
+      *FIO_NAME(fio___constructor, __COUNTER__))(void) = fname;                \
   static void fname(void)
 #else
-#define FIO___CONSTRUCTOR_INTERNAL(fname)                                      \
+#define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __declspec(allocate(".CRT$XCU")) void (*fname##__)(void) = fname;            \
+  __declspec(allocate(".CRT$XCU")) void (                                      \
+      *FIO_NAME(fio___constructor, __COUNTER__))(void) = fname;                \
   __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
   static void fname(void)
-#endif
-#define FIO_CONSTRUCTOR(fname) FIO___CONSTRUCTOR_INTERNAL(fname)
-
-#define FIO_DESTRUCTOR_INTERNAL(fname)                                         \
+#endif /* _WIN64 */
+#define FIO_DESTRUCTOR(fname)                                                  \
   static void fname(void);                                                     \
   FIO_CONSTRUCTOR(fname##__hook) { atexit(fname); }                            \
   static void fname(void)
-#define FIO_DESTRUCTOR(fname) FIO_DESTRUCTOR_INTERNAL(fname)
 
 #else
 /** Marks a function as a constructor - if supported. */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static __attribute__((constructor)) void fname(void)
-
 /** Marks a function as a destructor - if supported. Consider using atexit() */
-#define FIO_DESTRUCTOR(fname)                                                  \
-  static __attribute__((destructor)) void fname(void)
+#define FIO_DESTRUCTOR(fname) static __attribute__((destructor)) void name(void)
 #endif
 
 /* *****************************************************************************
