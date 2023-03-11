@@ -340,38 +340,19 @@ Function Attributes
 Constructors and Destructors
 ***************************************************************************** */
 
-/* Some linkers (looking at you, Microsoft) sort constructors alphanumerically.
- * This has the issue that they can sort 9 as larger than 100 (first digit).
- * So we run the counter to 100 and get 999 safer sorts before breaking again.
- */
-FIO_SFUNC void fio___run_counter(void) {
-  /* clang-format off */
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__; (void)__COUNTER__;
-  /* clang-format on */
-}
-
 #if _MSC_VER
 #pragma section(".CRT$XCU", read)
 /** Marks a function as a constructor - if supported. */
-
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
 /* clang-format off */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __declspec(allocate(".CRT$XCU" #__COUNTER__)) void (*FIO_NAME(fio___constructor, fname))(void) = fname; \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #else
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __declspec(allocate(".CRT$XCU" #__COUNTER__)) void (*FIO_NAME(fio___constructor, fname))(void) = fname; \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #endif /* _WIN64 */
 #define FIO_DESTRUCTOR(fname)                                                  \
@@ -40919,6 +40900,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
   FIO_NAME_TEST(stl, letter)();
   FIO_NAME_TEST(stl, pubsub_roundtrip)();
+  fio___srv_cleanup_at_exit(NULL);
 }
 
 /* *****************************************************************************

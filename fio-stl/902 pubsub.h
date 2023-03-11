@@ -180,6 +180,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
   FIO_NAME_TEST(stl, letter)();
   FIO_NAME_TEST(stl, pubsub_roundtrip)();
+  fio___srv_cleanup_at_exit(NULL);
 }
 
 /* *****************************************************************************
