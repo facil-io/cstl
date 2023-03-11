@@ -363,22 +363,20 @@ FIO_SFUNC void fio___run_counter(void) {
 
 #if _MSC_VER
 #pragma section(".CRT$XCU", read)
-#undef FIO_CONSTRUCTOR
-#undef FIO_DESTRUCTOR
 /** Marks a function as a constructor - if supported. */
 
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
 /* clang-format off */
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __pragma(comment(linker, "/include:" #fname "__")); /* and next.... */       \
-  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__) )(void) = fname; \
+  __pragma(comment(linker, "/include:" FIO_MACRO2STR(fname) "__"));            \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #else
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static void fname(void);                                                     \
-  __pragma(comment(linker, "/include:_" #fname "__")); /* and next.... */      \
-  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__) )(void) = fname; \
+  __pragma(comment(linker, "/include:_" FIO_MACRO2STR(fname) "__"));           \
+  __declspec(allocate(".CRT$XCU")) void (*FIO_NAME(fio___constructor, __COUNTER__))(void) = fname; \
   static void fname(void)
 #endif /* _WIN64 */
 #define FIO_DESTRUCTOR(fname)                                                  \
