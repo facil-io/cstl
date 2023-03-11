@@ -360,9 +360,7 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, server)();
-#if !FIO_OS_WIN
   FIO_NAME_TEST(stl, pubsub)();
-#endif
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
