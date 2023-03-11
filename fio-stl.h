@@ -117,96 +117,6 @@ Settings - Behavioral defaults
 #endif
 
 /* *****************************************************************************
-Settings - Memory Function Selectors
-***************************************************************************** */
-#ifdef FIO_MEMALT
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY fio_memcpy
-#endif
-#ifndef FIO_MEMMOVE
-#define FIO_MEMMOVE fio_memcpy
-#endif
-#ifndef FIO_MEMCMP
-#define FIO_MEMCMP fio_memcmp
-#endif
-#ifndef FIO_MEMCHR
-#define FIO_MEMCHR fio_memchr
-#endif
-#ifndef FIO_MEMSET
-#define FIO_MEMSET fio_memset
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#endif /* FIO_MEMALT */
-
-/* memcpy selectors / overriding */
-#ifndef FIO_MEMCPY
-#if __has_builtin(__builtin_memcpy)
-/** `memcpy` selector macro */
-#define FIO_MEMCPY __builtin_memcpy
-#else
-/** `memcpy` selector macro */
-#define FIO_MEMCPY memcpy
-#endif
-#endif /* FIO_MEMCPY */
-
-/* memmove selectors / overriding */
-#ifndef FIO_MEMMOVE
-#if __has_builtin(__builtin_memmove)
-/** `memmov` selector macro */
-#define FIO_MEMMOVE __builtin_memmove
-#else
-/** `memmov` selector macro */
-#define FIO_MEMMOVE memmove
-#endif
-#endif /* FIO_MEMMOVE */
-
-/* memset selectors / overriding */
-#ifndef FIO_MEMSET
-#if __has_builtin(__builtin_memset)
-/** `memset` selector macro */
-#define FIO_MEMSET __builtin_memset
-#else
-/** `memset` selector macro */
-#define FIO_MEMSET memset
-#endif
-#endif /* FIO_MEMSET */
-
-/* memchr selectors / overriding */
-#ifndef FIO_MEMCHR
-#if __has_builtin(__builtin_memchr)
-/** `memchr` selector macro */
-#define FIO_MEMCHR __builtin_memchr
-#else
-/** `memchr` selector macro */
-#define FIO_MEMCHR memchr
-#endif
-#endif /* FIO_MEMCHR */
-
-/* strlen selectors / overriding */
-#ifndef FIO_STRLEN
-#if __has_builtin(__builtin_strlen)
-/** `strlen` selector macro */
-#define FIO_STRLEN __builtin_strlen
-#else
-/** `strlen` selector macro */
-#define FIO_STRLEN strlen
-#endif
-#endif /* FIO_STRLEN */
-
-/* memcmp selectors / overriding */
-#ifndef FIO_MEMCMP
-#if __has_builtin(__builtin_memcmp)
-/** `memcmp` selector macro */
-#define FIO_MEMCMP __builtin_memcmp
-#else
-/** `memcmp` selector macro */
-#define FIO_MEMCMP memcmp
-#endif
-#endif /* FIO_MEMCMP */
-
-/* *****************************************************************************
 C++ extern start
 ***************************************************************************** */
 /* support C++ */
@@ -997,6 +907,96 @@ typedef struct fio_index8_node_s {
        ((stopper___ils___ = (pos == head)),                                    \
         (pos = (root)[pos].node_name.prev)))
 #endif
+
+/* *****************************************************************************
+Settings - Memory Function Selectors
+***************************************************************************** */
+#ifdef FIO_MEMALT
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY fio_memcpy
+#endif
+#ifndef FIO_MEMMOVE
+#define FIO_MEMMOVE fio_memcpy
+#endif
+#ifndef FIO_MEMCMP
+#define FIO_MEMCMP fio_memcmp
+#endif
+#ifndef FIO_MEMCHR
+#define FIO_MEMCHR fio_memchr
+#endif
+#ifndef FIO_MEMSET
+#define FIO_MEMSET fio_memset
+#endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
+#endif
+#endif /* FIO_MEMALT */
+
+/* memcpy selectors / overriding */
+#ifndef FIO_MEMCPY
+#if __has_builtin(__builtin_memcpy)
+/** `memcpy` selector macro */
+#define FIO_MEMCPY __builtin_memcpy
+#else
+/** `memcpy` selector macro */
+#define FIO_MEMCPY memcpy
+#endif
+#endif /* FIO_MEMCPY */
+
+/* memmove selectors / overriding */
+#ifndef FIO_MEMMOVE
+#if __has_builtin(__builtin_memmove)
+/** `memmov` selector macro */
+#define FIO_MEMMOVE __builtin_memmove
+#else
+/** `memmov` selector macro */
+#define FIO_MEMMOVE memmove
+#endif
+#endif /* FIO_MEMMOVE */
+
+/* memset selectors / overriding */
+#ifndef FIO_MEMSET
+#if __has_builtin(__builtin_memset)
+/** `memset` selector macro */
+#define FIO_MEMSET __builtin_memset
+#else
+/** `memset` selector macro */
+#define FIO_MEMSET memset
+#endif
+#endif /* FIO_MEMSET */
+
+/* memchr selectors / overriding */
+#ifndef FIO_MEMCHR
+#if __has_builtin(__builtin_memchr)
+/** `memchr` selector macro */
+#define FIO_MEMCHR __builtin_memchr
+#else
+/** `memchr` selector macro */
+#define FIO_MEMCHR memchr
+#endif
+#endif /* FIO_MEMCHR */
+
+/* strlen selectors / overriding */
+#ifndef FIO_STRLEN
+#if __has_builtin(__builtin_strlen)
+/** `strlen` selector macro */
+#define FIO_STRLEN __builtin_strlen
+#else
+/** `strlen` selector macro */
+#define FIO_STRLEN strlen
+#endif
+#endif /* FIO_STRLEN */
+
+/* memcmp selectors / overriding */
+#ifndef FIO_MEMCMP
+#if __has_builtin(__builtin_memcmp)
+/** `memcmp` selector macro */
+#define FIO_MEMCMP __builtin_memcmp
+#else
+/** `memcmp` selector macro */
+#define FIO_MEMCMP memcmp
+#endif
+#endif /* FIO_MEMCMP */
 
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
@@ -4927,8 +4927,10 @@ iMap Creation Macro
       FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                    \
     a->capa_bits = (uint32_t)bits;                                             \
     a->ary = tmp;                                                              \
-    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE)                                     \
+    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE) {                                   \
+      FIO_MEMSET((tmp + a->w), 0, ((capa - a->w) * (sizeof(*tmp))));           \
       FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
+    }                                                                          \
     return 0;                                                                  \
   }                                                                            \
   /** Returns the index map position and array position of a value, if any. */ \
@@ -4945,13 +4947,13 @@ iMap Creation Macro
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
     const imap_type hash = hash_fn(pobj);                                      \
-    imap_type tester = hash & hash_mask;                                       \
+    imap_type tester = (hash & hash_mask);                                     \
     tester += (!tester) << a->capa_bits;                                       \
     tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
-      /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
+      /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */  \
       for (size_t mini_steps = 0;;) {                                          \
         pos &= pos_mask;                                                       \
         const imap_type pos_hash = imap[pos] & hash_mask;                      \
@@ -4978,7 +4980,7 @@ iMap Creation Macro
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
         ++mini_steps;                                                          \
       }                                                                        \
-      pos += (imap_type)0x43F82D0BUL; /* big step */                           \
+      pos += (imap_type)0xC19F5985UL; /* big step */                           \
     }                                                                          \
   }                                                                            \
   /** fills an empty imap with the info about existing elements. */            \
@@ -33326,7 +33328,7 @@ typedef struct {
 
 #define FIO___HTTP_MIME_IS_VALID(o) ((o)->ext != 0)
 #define FIO___HTTP_MIME_CMP(a, b)   ((a)->ext == (b)->ext)
-#define FIO___HTTP_MIME_HASH(o)     fio_risky_ptr(((void *)(uintptr_t)((o)->ext)))
+#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), (o)->len)
 
 #undef FIO_TYPEDEF_IMAP_REALLOC
 #define FIO_TYPEDEF_IMAP_REALLOC(ptr, old_size, new_size, copy_len)            \
@@ -33544,18 +33546,7 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 }
 
 /* *****************************************************************************
-HTTP Handle Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, http)(void) {
-  /*
-   * TODO: test module here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
-Module Cleanup
+Cleanup
 ***************************************************************************** */
 #undef FIO___HTTP_TIME_DIV
 #undef FIO___HTTP_TIME_UNIT

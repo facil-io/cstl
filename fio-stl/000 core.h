@@ -80,96 +80,6 @@ Settings - Behavioral defaults
 #endif
 
 /* *****************************************************************************
-Settings - Memory Function Selectors
-***************************************************************************** */
-#ifdef FIO_MEMALT
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY fio_memcpy
-#endif
-#ifndef FIO_MEMMOVE
-#define FIO_MEMMOVE fio_memcpy
-#endif
-#ifndef FIO_MEMCMP
-#define FIO_MEMCMP fio_memcmp
-#endif
-#ifndef FIO_MEMCHR
-#define FIO_MEMCHR fio_memchr
-#endif
-#ifndef FIO_MEMSET
-#define FIO_MEMSET fio_memset
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#endif /* FIO_MEMALT */
-
-/* memcpy selectors / overriding */
-#ifndef FIO_MEMCPY
-#if __has_builtin(__builtin_memcpy)
-/** `memcpy` selector macro */
-#define FIO_MEMCPY __builtin_memcpy
-#else
-/** `memcpy` selector macro */
-#define FIO_MEMCPY memcpy
-#endif
-#endif /* FIO_MEMCPY */
-
-/* memmove selectors / overriding */
-#ifndef FIO_MEMMOVE
-#if __has_builtin(__builtin_memmove)
-/** `memmov` selector macro */
-#define FIO_MEMMOVE __builtin_memmove
-#else
-/** `memmov` selector macro */
-#define FIO_MEMMOVE memmove
-#endif
-#endif /* FIO_MEMMOVE */
-
-/* memset selectors / overriding */
-#ifndef FIO_MEMSET
-#if __has_builtin(__builtin_memset)
-/** `memset` selector macro */
-#define FIO_MEMSET __builtin_memset
-#else
-/** `memset` selector macro */
-#define FIO_MEMSET memset
-#endif
-#endif /* FIO_MEMSET */
-
-/* memchr selectors / overriding */
-#ifndef FIO_MEMCHR
-#if __has_builtin(__builtin_memchr)
-/** `memchr` selector macro */
-#define FIO_MEMCHR __builtin_memchr
-#else
-/** `memchr` selector macro */
-#define FIO_MEMCHR memchr
-#endif
-#endif /* FIO_MEMCHR */
-
-/* strlen selectors / overriding */
-#ifndef FIO_STRLEN
-#if __has_builtin(__builtin_strlen)
-/** `strlen` selector macro */
-#define FIO_STRLEN __builtin_strlen
-#else
-/** `strlen` selector macro */
-#define FIO_STRLEN strlen
-#endif
-#endif /* FIO_STRLEN */
-
-/* memcmp selectors / overriding */
-#ifndef FIO_MEMCMP
-#if __has_builtin(__builtin_memcmp)
-/** `memcmp` selector macro */
-#define FIO_MEMCMP __builtin_memcmp
-#else
-/** `memcmp` selector macro */
-#define FIO_MEMCMP memcmp
-#endif
-#endif /* FIO_MEMCMP */
-
-/* *****************************************************************************
 C++ extern start
 ***************************************************************************** */
 /* support C++ */
@@ -960,6 +870,96 @@ typedef struct fio_index8_node_s {
        ((stopper___ils___ = (pos == head)),                                    \
         (pos = (root)[pos].node_name.prev)))
 #endif
+
+/* *****************************************************************************
+Settings - Memory Function Selectors
+***************************************************************************** */
+#ifdef FIO_MEMALT
+#ifndef FIO_MEMCPY
+#define FIO_MEMCPY fio_memcpy
+#endif
+#ifndef FIO_MEMMOVE
+#define FIO_MEMMOVE fio_memcpy
+#endif
+#ifndef FIO_MEMCMP
+#define FIO_MEMCMP fio_memcmp
+#endif
+#ifndef FIO_MEMCHR
+#define FIO_MEMCHR fio_memchr
+#endif
+#ifndef FIO_MEMSET
+#define FIO_MEMSET fio_memset
+#endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
+#endif
+#endif /* FIO_MEMALT */
+
+/* memcpy selectors / overriding */
+#ifndef FIO_MEMCPY
+#if __has_builtin(__builtin_memcpy)
+/** `memcpy` selector macro */
+#define FIO_MEMCPY __builtin_memcpy
+#else
+/** `memcpy` selector macro */
+#define FIO_MEMCPY memcpy
+#endif
+#endif /* FIO_MEMCPY */
+
+/* memmove selectors / overriding */
+#ifndef FIO_MEMMOVE
+#if __has_builtin(__builtin_memmove)
+/** `memmov` selector macro */
+#define FIO_MEMMOVE __builtin_memmove
+#else
+/** `memmov` selector macro */
+#define FIO_MEMMOVE memmove
+#endif
+#endif /* FIO_MEMMOVE */
+
+/* memset selectors / overriding */
+#ifndef FIO_MEMSET
+#if __has_builtin(__builtin_memset)
+/** `memset` selector macro */
+#define FIO_MEMSET __builtin_memset
+#else
+/** `memset` selector macro */
+#define FIO_MEMSET memset
+#endif
+#endif /* FIO_MEMSET */
+
+/* memchr selectors / overriding */
+#ifndef FIO_MEMCHR
+#if __has_builtin(__builtin_memchr)
+/** `memchr` selector macro */
+#define FIO_MEMCHR __builtin_memchr
+#else
+/** `memchr` selector macro */
+#define FIO_MEMCHR memchr
+#endif
+#endif /* FIO_MEMCHR */
+
+/* strlen selectors / overriding */
+#ifndef FIO_STRLEN
+#if __has_builtin(__builtin_strlen)
+/** `strlen` selector macro */
+#define FIO_STRLEN __builtin_strlen
+#else
+/** `strlen` selector macro */
+#define FIO_STRLEN strlen
+#endif
+#endif /* FIO_STRLEN */
+
+/* memcmp selectors / overriding */
+#ifndef FIO_MEMCMP
+#if __has_builtin(__builtin_memcmp)
+/** `memcmp` selector macro */
+#define FIO_MEMCMP __builtin_memcmp
+#else
+/** `memcmp` selector macro */
+#define FIO_MEMCMP memcmp
+#endif
+#endif /* FIO_MEMCMP */
 
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)

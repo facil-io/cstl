@@ -2653,7 +2653,7 @@ typedef struct {
 
 #define FIO___HTTP_MIME_IS_VALID(o) ((o)->ext != 0)
 #define FIO___HTTP_MIME_CMP(a, b)   ((a)->ext == (b)->ext)
-#define FIO___HTTP_MIME_HASH(o)     fio_risky_ptr(((void *)(uintptr_t)((o)->ext)))
+#define FIO___HTTP_MIME_HASH(o)     fio_risky_num(((o)->ext), (o)->len)
 
 #undef FIO_TYPEDEF_IMAP_REALLOC
 #define FIO_TYPEDEF_IMAP_REALLOC(ptr, old_size, new_size, copy_len)            \
@@ -2871,18 +2871,7 @@ FIO_CONSTRUCTOR(fio___http_str_cache_static_builder) {
 }
 
 /* *****************************************************************************
-HTTP Handle Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, http)(void) {
-  /*
-   * TODO: test module here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
-Module Cleanup
+Cleanup
 ***************************************************************************** */
 #undef FIO___HTTP_TIME_DIV
 #undef FIO___HTTP_TIME_UNIT

@@ -134,8 +134,10 @@ iMap Creation Macro
       FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                    \
     a->capa_bits = (uint32_t)bits;                                             \
     a->ary = tmp;                                                              \
-    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE)                                     \
+    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE) {                                   \
+      FIO_MEMSET((tmp + a->w), 0, ((capa - a->w) * (sizeof(*tmp))));           \
       FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));               \
+    }                                                                          \
     return 0;                                                                  \
   }                                                                            \
   /** Returns the index map position and array position of a value, if any. */ \
@@ -152,13 +154,13 @@ iMap Creation Macro
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
     const imap_type hash = hash_fn(pobj);                                      \
-    imap_type tester = hash & hash_mask;                                       \
+    imap_type tester = (hash & hash_mask);                                     \
     tester += (!tester) << a->capa_bits;                                       \
     tester -= (hash_mask == tester) << a->capa_bits;                           \
     size_t attempts = 11;                                                      \
     imap_type pos = hash;                                                      \
     for (;;) {                                                                 \
-      /* test up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
+      /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */  \
       for (size_t mini_steps = 0;;) {                                          \
         pos &= pos_mask;                                                       \
         const imap_type pos_hash = imap[pos] & hash_mask;                      \
@@ -185,7 +187,7 @@ iMap Creation Macro
         pos += 3 + mini_steps; /* 0, 3, 7 =  max of 56 byte distance */        \
         ++mini_steps;                                                          \
       }                                                                        \
-      pos += (imap_type)0x43F82D0BUL; /* big step */                           \
+      pos += (imap_type)0xC19F5985UL; /* big step */                           \
     }                                                                          \
   }                                                                            \
   /** fills an empty imap with the info about existing elements. */            \
