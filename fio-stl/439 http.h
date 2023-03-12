@@ -356,7 +356,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
     fio_http_write(h, .finish = 1);
 }
 
-FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
+FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
+                                                                   void *h_) {
   union {
     int (*fn)(fio_http_s *);
     void *ptr;
@@ -364,6 +365,19 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
   fio_http_s *h = (fio_http_s *)h_;
   if (cb.fn(h))
     fio_http_send_error_response(h, 403);
+  fio_http_websockets_set_response(h);
+}
+
+FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
+                                                            void *h_) {
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  if (cb.fn(h))
+    fio_http_send_error_response(h, 403);
+  fio_http_send_error_response(h, 403);
 }
 
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
@@ -380,14 +394,14 @@ FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
 websocket_requested:
   cb.fn = c->settings->on_upgrade2websockets;
   fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback,
+                 fio___http_perform_user_upgrade_callback_websockets,
                  cb.ptr,
                  (void *)h);
   return -1;
 sse_requested:
   cb.fn = c->settings->on_upgrade2sse;
   fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback,
+                 fio___http_perform_user_upgrade_callback_sse,
                  cb.ptr,
                  (void *)h);
   return -1;

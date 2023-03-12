@@ -32612,15 +32612,15 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
       fio_http_request_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
   if (val.len < 7 ||
-      !(((fio_buf2u32u(val.buf) | 0x32323232UL) == fio_buf2u32u("upgr")) ||
-        ((fio_buf2u32u(val.buf + 3) | 0x32323232UL) == fio_buf2u32u("rade"))))
+      !(((fio_buf2u32u(val.buf) | 0x20202020UL) == fio_buf2u32u("upgr")) ||
+        ((fio_buf2u32u(val.buf + 3) | 0x20202020) == fio_buf2u32u("rade"))))
     return 0;
   /* test for "Upgrade: websocket" (TODO? allow for multi-value?) */
   val = fio_http_request_header(h, FIO_STR_INFO2((char *)"upgrade", 7), 0);
   if (val.len < 7 ||
-      !(((fio_buf2u64u(val.buf) | 0x3232323232323232ULL) ==
+      !(((fio_buf2u64u(val.buf) | 0x2020202020202020ULL) ==
          fio_buf2u64u("websocke")) ||
-        ((fio_buf2u32u(val.buf + 5) | 0x32323232UL) == fio_buf2u32u("cket"))))
+        ((fio_buf2u32u(val.buf + 5) | 0x20202020UL) == fio_buf2u32u("cket"))))
     return 0;
   val = fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
@@ -32633,6 +32633,12 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
 /** Sets response data to agree to a WebSockets Upgrade.*/
 SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
   h->status = 101;
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"connection", 10),
+                               FIO_STR_INFO2((char *)"Upgrade", 7));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"upgrade", 7),
+                               FIO_STR_INFO2((char *)"websocket", 9));
   /* we ignore client version and force the RFC final version instead */
   fio_http_response_header_set(
       h,
@@ -32993,8 +32999,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   FIO_STR_INFO_TMP_VAR(filename, 4096);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
-    if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x3232323232323232ULL) ==
-                           (fio_buf2u64u("options") | 0x3232323232323232ULL)))
+    if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x2020202020202020ULL) ==
+                           (fio_buf2u64u("options") | 0x2020202020202020ULL)))
       goto file_not_found;
   }
   rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
@@ -33194,8 +33200,8 @@ range_request_review_finished:
   /* test for HEAD requests */
   {
     fio_str_info_s m = fio_keystr_info(&h->method);
-    if ((m.len == 4 && (fio_buf2u32u(m.buf) | 0x32323232) ==
-                           (fio_buf2u32u("head") | 0x32323232)))
+    if ((m.len == 4 && (fio_buf2u32u(m.buf) | 0x20202020UL) ==
+                           (fio_buf2u32u("head") | 0x20202020UL)))
       goto head_request;
   }
 
@@ -34450,17 +34456,6 @@ Reading the first line
 ***************************************************************************** */
 
 /* *****************************************************************************
-Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
-  /*
-   * TODO: test WebSocket parser here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
 Cleanup
 ***************************************************************************** */
 
@@ -34824,7 +34819,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
     fio_http_write(h, .finish = 1);
 }
 
-FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
+FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
+                                                                   void *h_) {
   union {
     int (*fn)(fio_http_s *);
     void *ptr;
@@ -34832,6 +34828,19 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback(void *cb_, void *h_) {
   fio_http_s *h = (fio_http_s *)h_;
   if (cb.fn(h))
     fio_http_send_error_response(h, 403);
+  fio_http_websockets_set_response(h);
+}
+
+FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
+                                                            void *h_) {
+  union {
+    int (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
+  fio_http_s *h = (fio_http_s *)h_;
+  if (cb.fn(h))
+    fio_http_send_error_response(h, 403);
+  fio_http_send_error_response(h, 403);
 }
 
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
@@ -34848,14 +34857,14 @@ FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
 websocket_requested:
   cb.fn = c->settings->on_upgrade2websockets;
   fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback,
+                 fio___http_perform_user_upgrade_callback_websockets,
                  cb.ptr,
                  (void *)h);
   return -1;
 sse_requested:
   cb.fn = c->settings->on_upgrade2sse;
   fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback,
+                 fio___http_perform_user_upgrade_callback_sse,
                  cb.ptr,
                  (void *)h);
   return -1;
