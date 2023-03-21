@@ -106,21 +106,21 @@ typedef struct {
   uint8_t is_pattern;
   /** If set, subscription will be limited to the root / master process. */
   uint8_t master_only;
-} subscribe_args_s;
+} fio_subscribe_args_s;
 
 /**
  * Subscribes to a channel / filter pair.
  *
  * The on_unsubscribe callback will be called on failure.
  */
-SFUNC void fio_subscribe(subscribe_args_s args);
+SFUNC void fio_subscribe(fio_subscribe_args_s args);
 
 /**
  * Subscribes to a channel / filter pair.
  *
- * See `subscribe_args_s` for details.
+ * See `fio_subscribe_args_s` for details.
  */
-#define fio_subscribe(...) fio_subscribe((subscribe_args_s){__VA_ARGS__})
+#define fio_subscribe(...) fio_subscribe((fio_subscribe_args_s){__VA_ARGS__})
 
 /**
  * Cancels an existing subscriptions.
@@ -134,7 +134,7 @@ SFUNC void fio_subscribe(subscribe_args_s args);
  *
  * Returns -1 if the subscription could not be found. Otherwise returns 0.
  */
-SFUNC int fio_unsubscribe(subscribe_args_s args);
+SFUNC int fio_unsubscribe(fio_subscribe_args_s args);
 
 /**
  * Cancels an existing subscriptions.
@@ -145,7 +145,8 @@ SFUNC int fio_unsubscribe(subscribe_args_s args);
  *
  * Returns -1 if the subscription could not be found. Otherwise returns 0.
  */
-#define fio_unsubscribe(...) fio_unsubscribe((subscribe_args_s){__VA_ARGS__})
+#define fio_unsubscribe(...)                                                   \
+  fio_unsubscribe((fio_subscribe_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
 Pub/Sub - Publish
@@ -1531,7 +1532,7 @@ FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_) {
 /** Subscribes to a named channel in the
  * numerical filter's namespace. */
 void fio_subscribe___(void); /* sublimetext marker */
-SFUNC void fio_subscribe FIO_NOOP(subscribe_args_s args) {
+SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   fio_subscription_s *s = fio_subscription_new();
   if (!s)
     goto sub_error;
@@ -1612,7 +1613,7 @@ sub_error:
 
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
-int fio_unsubscribe FIO_NOOP(subscribe_args_s args) {
+int fio_unsubscribe FIO_NOOP(fio_subscribe_args_s args) {
   if (args.master_only && !args.io)
     goto is_master_only;
   if (!args.subscription_handle_ptr) {

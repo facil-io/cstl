@@ -116,7 +116,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   uintptr_t sub_handle = 0;
   int state = 0, expected = 0, delta = 0;
   fio_buf_info_s test_channel = FIO_BUF_INFO1((char *)"pubsub_test_channel");
-  subscribe_args_s sub[] = {
+  fio_subscribe_args_s sub[] = {
       {
           .channel = test_channel,
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
