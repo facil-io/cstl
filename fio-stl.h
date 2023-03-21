@@ -34377,7 +34377,7 @@ API - Parsing (unwrapping)
 
 /** returns the length of the buffer required to wrap a message `len` long */
 FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len) {
-  return 2ULL + ((len > 125) << 1) +
+  return len + 2ULL + ((len > 125) << 1) +
          ((0ULL - (len > ((1UL << 16) - 1))) & 6ULL);
 }
 
@@ -36016,7 +36016,9 @@ SFUNC int fio_websocket_write(fio_http_s *h,
 #if HAVE_ZLIB /* compress? */
   // if(len > 512 && c->state.ws.deflate) ;
 #endif
-  char *payload = fio_bstr_reserve(NULL, fio_websocket_wrapped_len(len) + 5);
+  char *payload =
+      fio_bstr_reserve(NULL,
+                       fio_websocket_wrapped_len(len) + (c->is_client << 2));
   payload = fio_bstr_len_set(
       payload,
       (c->is_client

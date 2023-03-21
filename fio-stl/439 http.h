@@ -1355,7 +1355,9 @@ SFUNC int fio_websocket_write(fio_http_s *h,
 #if HAVE_ZLIB /* compress? */
   // if(len > 512 && c->state.ws.deflate) ;
 #endif
-  char *payload = fio_bstr_reserve(NULL, fio_websocket_wrapped_len(len) + 5);
+  char *payload =
+      fio_bstr_reserve(NULL,
+                       fio_websocket_wrapped_len(len) + (c->is_client << 2));
   payload = fio_bstr_len_set(
       payload,
       (c->is_client

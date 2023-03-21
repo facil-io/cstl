@@ -160,7 +160,7 @@ API - Parsing (unwrapping)
 
 /** returns the length of the buffer required to wrap a message `len` long */
 FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len) {
-  return 2ULL + ((len > 125) << 1) +
+  return len + 2ULL + ((len > 125) << 1) +
          ((0ULL - (len > ((1UL << 16) - 1))) & 6ULL);
 }
 
