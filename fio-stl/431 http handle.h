@@ -137,6 +137,12 @@ FIO_IFUNC void *fio_http_udata(fio_http_s *);
 /** Sets the opaque user pointer associated with the HTTP handle. */
 FIO_IFUNC void *fio_http_udata_set(fio_http_s *, void *);
 
+/** Gets the second opaque user pointer associated with the HTTP handle. */
+FIO_IFUNC void *fio_http_udata2(fio_http_s *);
+
+/** Sets a second opaque user pointer associated with the HTTP handle. */
+FIO_IFUNC void *fio_http_udata2_set(fio_http_s *, void *);
+
 /** Gets the HTTP Controller associated with the HTTP handle. */
 FIO_IFUNC fio_http_controller_s *fio_http_controller(fio_http_s *h);
 
@@ -352,6 +358,15 @@ SFUNC int fio_http_is_finished(fio_http_s *);
 /** Returns true if the HTTP handle's response is streaming. */
 SFUNC int fio_http_is_streaming(fio_http_s *);
 
+/** Returns true if the HTTP connection was (or should have been) upgraded. */
+SFUNC int fio_http_is_upgraded(fio_http_s *h);
+
+/** Returns true if the HTTP handle establishes a WebSocket Upgrade. */
+SFUNC int fio_http_is_websocket(fio_http_s *);
+
+/** Returns true if the HTTP handle establishes an EventSource connection. */
+SFUNC int fio_http_is_sse(fio_http_s *);
+
 /** Gets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status(fio_http_s *);
 
@@ -419,7 +434,7 @@ SFUNC size_t fio_http_response_header_each(fio_http_s *,
 /** Arguments for the fio_http_write function. */
 typedef struct fio_http_write_args_s {
   /** The data to be written. */
-  const void *data;
+  const void *buf;
   /** The length of the data to be written. */
   size_t len;
   /** The offset at which writing should begin. */
@@ -651,18 +666,20 @@ HTTP Handle Implementation - inlined static functions
     return (((type **)h)[index_] = ptr);                                       \
   }
 
-SFUNC void fio___http_controller_validate(fio_http_controller_s *c);
+SFUNC fio_http_controller_s *fio___http_controller_validate(
+    fio_http_controller_s *c);
 
 /* Create fio_http_udata_(get|set) functions */
 FIO___HTTP_GETSET_PTR(void, udata, 0, (void)0)
+/* Create fio_http_pdata_(get|set) functions */
+FIO___HTTP_GETSET_PTR(void, udata2, 1, (void)0)
 /* Create fio_http_cdata_(get|set) functions */
-FIO___HTTP_GETSET_PTR(void, cdata, 1, (void)0)
+FIO___HTTP_GETSET_PTR(void, cdata, 2, (void)0)
 /* Create fio_http_controller_(get|set) functions */
 FIO___HTTP_GETSET_PTR(fio_http_controller_s,
                       controller,
-                      2,
-                      if (!ptr->private_flags)
-                          fio___http_controller_validate(ptr))
+                      3,
+                      ptr = fio___http_controller_validate(ptr))
 
 #undef FIO___HTTP_GETSET_PTR
 /*
@@ -744,10 +761,10 @@ fio___http_parsed_property_next(fio___http_header_property_s property) {
        value = fio___http_parsed_headers_next(value))
 
 #undef FIO_HTTP_HEADER_VALUE_EACH_PROPERTY
-#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, property)                   \
+#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value_, property)                  \
   for (fio___http_header_property_s property =                                 \
            fio___http_parsed_property_next(                                    \
-               (fio___http_header_property_s){.value = value});                \
+               (fio___http_header_property_s){.value = value_});               \
        property.name.len;                                                      \
        property = fio___http_parsed_property_next(property))
 
@@ -1153,16 +1170,28 @@ Controller Validation
 FIO_SFUNC void fio___mock_controller_cb(fio_http_s *h) { (void)h; }
 FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
                                        fio_http_write_args_s args) {
-  if (args.data) {
+  if (args.buf) {
     if (args.dealloc)
-      args.dealloc((void *)args.data);
+      args.dealloc((void *)args.buf);
   } else if (args.fd != -1) {
     close(args.fd);
   }
   (void)h;
 }
 
-SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
+FIO_SFUNC fio_http_controller_s FIO___MOCK_CONTROLLER = {
+    .on_destroyed = fio___mock_controller_cb,
+    .send_headers = fio___mock_controller_cb,
+    .write_body = fio___mock_c_write_body,
+    .on_finish = fio___mock_controller_cb,
+};
+
+SFUNC fio_http_controller_s *fio___http_controller_validate(
+    fio_http_controller_s *c) {
+  if (!c)
+    c = &FIO___MOCK_CONTROLLER;
+  if (c->private_flags)
+    return c;
   if (!c->on_destroyed)
     c->on_destroyed = fio___mock_controller_cb;
   if (!c->send_headers)
@@ -1171,6 +1200,7 @@ SFUNC void fio___http_controller_validate(fio_http_controller_s *c) {
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
     c->on_finish = fio___mock_controller_cb;
+  return c;
 }
 
 /* *****************************************************************************
@@ -1179,13 +1209,17 @@ HTTP Handle Type
 
 #define FIO_HTTP_STATE_STREAMING      1
 #define FIO_HTTP_STATE_FINISHED       2
-#define FIO_HTTP_STATE_COOKIES_PARSED 4
+#define FIO_HTTP_STATE_UPGRADED       4
+#define FIO_HTTP_STATE_WEBSOCKET      8
+#define FIO_HTTP_STATE_SSE            16
+#define FIO_HTTP_STATE_COOKIES_PARSED 32
 
 FIO_SFUNC int fio____http_write_start(fio_http_s *, fio_http_write_args_s *);
 FIO_SFUNC int fio____http_write_cont(fio_http_s *, fio_http_write_args_s *);
 
 struct fio_http_s {
   void *udata;
+  void *udata2;
   void *cdata;
   fio_http_controller_s *controller;
   int (*writer)(fio_http_s *, fio_http_write_args_s *);
@@ -1213,7 +1247,7 @@ struct fio_http_s {
 #define FIO_REF_NAME fio_http
 #define FIO_REF_INIT(h)                                                        \
   h = (fio_http_s) {                                                           \
-    .writer = fio____http_write_start,                                         \
+    .controller = &FIO___MOCK_CONTROLLER, .writer = fio____http_write_start,   \
     .received_at = fio_http_get_timestump(), .body.fd = -1                     \
   }
 #define FIO_REF_DESTROY(h) fio_http_destroy(&(h))
@@ -1301,6 +1335,24 @@ SFUNC int fio_http_is_finished(fio_http_s *h) {
 SFUNC int fio_http_is_streaming(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   return (!!(h->state & FIO_HTTP_STATE_STREAMING));
+}
+
+/** Returns true if the HTTP connection was (or should have been) upgraded. */
+SFUNC int fio_http_is_upgraded(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (!!(h->state & FIO_HTTP_STATE_UPGRADED));
+}
+
+/** Returns true if the HTTP handle establishes a WebSocket Upgrade. */
+SFUNC int fio_http_is_websocket(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (!!(h->state & FIO_HTTP_STATE_WEBSOCKET));
+}
+
+/** Returns true if the HTTP handle establishes an EventSource connection. */
+SFUNC int fio_http_is_sse(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (!!(h->state & FIO_HTTP_STATE_SSE));
 }
 
 /* *****************************************************************************
@@ -1843,6 +1895,13 @@ FIO_SFUNC int fio____http_write_done(fio_http_s *h,
   (void)h, (void)args;
 }
 
+FIO_SFUNC int fio____http_write_upgraded(fio_http_s *h,
+                                         fio_http_write_args_s *args) {
+  h->controller->write_body(h, *args);
+  h->sent += args->len;
+  return 0;
+}
+
 FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
   /* if response has an `etag` header matching `if-none-match`, skip */
@@ -1874,13 +1933,15 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
 }
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
-  if (args->data || args->fd) {
+  if (args->buf || args->fd) {
     h->controller->write_body(h, *args);
     h->sent += args->len;
   }
   if (args->finish) {
     h->state |= FIO_HTTP_STATE_FINISHED;
-    h->writer = fio____http_write_done;
+    h->writer = (h->state & FIO_HTTP_STATE_UPGRADED)
+                    ? fio____http_write_upgraded
+                    : fio____http_write_done;
     h->controller->on_finish(h);
   }
   return 0;
@@ -1892,7 +1953,7 @@ void fio_http_write___(void); /* IDE Marker */
  * sending all headers (no further headers may be sent).
  */
 SFUNC void fio_http_write FIO_NOOP(fio_http_s *h, fio_http_write_args_s args) {
-  if (!h || (fio_http_is_finished(h) | (!h->controller)))
+  if (!h || !h->controller)
     goto handle_error;
   if (h->writer(h, &args))
     goto handle_error;
@@ -1901,8 +1962,8 @@ SFUNC void fio_http_write FIO_NOOP(fio_http_s *h, fio_http_write_args_s args) {
 handle_error:
   if (args.fd)
     close(args.fd);
-  if (args.dealloc && args.data)
-    args.dealloc((void *)args.data);
+  if (args.dealloc && args.buf)
+    args.dealloc((void *)args.buf);
 }
 
 /* *****************************************************************************
@@ -1981,7 +2042,11 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
         FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
         accept_val);
   }
-  fio_http_write(h, .finish = 1);
+  { /* finish up */
+    h->state |= FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET;
+    fio_http_write_args_s args = {.finish = 1};
+    fio_http_write FIO_NOOP(h, args);
+  }
   return;
 handshake_error:
   fio_http_send_error_response(h, 403);
@@ -1989,20 +2054,34 @@ handshake_error:
 }
 
 /** Sets request data to request a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_request(fio_http_s *h);
+SFUNC void fio_http_websockets_set_request(fio_http_s *h); /* TODO! */
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *h) {
-  /* TODO! */
+  fio_str_info_s val =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"accept", 6), 0);
+  if (val.len == 17 && fio_buf2u64u(val.buf) == fio_buf2u64u("text/eve") &&
+      fio_buf2u64u(val.buf + 8) == fio_buf2u64u("nt-strea") &&
+      val.buf[16] == 'm') {
+    FIO_LOG_DDEBUG("EventSource connection requested.");
+    return 1;
+  }
   return 0;
-  (void)h;
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_set_response(fio_http_s *h);
+SFUNC void fio_http_sse_set_response(fio_http_s *h) { /* TODO! validate  */
+  fio_http_response_header_set_if_missing(
+      h,
+      FIO_STR_INFO2((char *)"content-type", 12),
+      FIO_STR_INFO2((char *)"text/event-stream", 17));
+  h->state |= FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE;
+  fio_http_write_args_s args = {.finish = 1};
+  fio_http_write FIO_NOOP(h, args);
+}
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_set_request(fio_http_s *h);
+SFUNC void fio_http_sse_set_request(fio_http_s *h); /* TODO! */
 
 /* *****************************************************************************
 Header Parsing Helpers - Implementation
@@ -2162,7 +2241,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                     FIO_STRING_WRITE_UNUM(status),
                     FIO_STRING_WRITE_STR2(".html", 5));
   char *body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
-  fio_http_write_args_s args = {.data = body,
+  fio_http_write_args_s args = {.buf = body,
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
                                 .finish = 1};
@@ -2521,11 +2600,14 @@ range_request_review_finished:
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"content-type", 12),
                                  mime_type);
-  fio_http_write(h,
-                 .fd = fd,
-                 .len = filename.len,     /* now holds body length */
-                 .offset = filename.capa, /* now holds starting offset */
-                 .finish = 1);
+  { /* send response (avoid macro for C++ compatibility) */
+    fio_http_write_args_s args = {
+        .fd = fd,
+        .len = filename.len,     /* now holds body length */
+        .offset = filename.capa, /* now holds starting offset */
+        .finish = 1};
+    fio_http_write FIO_NOOP(h, args);
+  }
   return 0;
 
 file_not_found:
@@ -2537,7 +2619,10 @@ head_request:
   /* TODO! HEAD responses should close?. */
   if (fd != -1)
     close(fd);
-  fio_http_write(h, .finish = 1);
+  {
+    fio_http_write_args_s args = {.finish = 1};
+    fio_http_write FIO_NOOP(h, args);
+  }
   return 0;
 }
 

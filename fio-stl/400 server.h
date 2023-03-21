@@ -2021,7 +2021,7 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
   fio___srvdata.tick = fio_time_milli();
   fio___srvdata.root_pid = fio___srvdata.pid = getpid();
-  fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.protocols);
+  fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.async);
   fio_poll_init(&fio___srvdata.poll_data,
                 .on_data = fio___srv_poll_on_data_schd,
                 .on_ready = fio___srv_poll_on_ready_schd,

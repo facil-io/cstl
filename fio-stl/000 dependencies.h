@@ -296,6 +296,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_HTTP1_PARSER
 #endif
 
+#if defined(FIO_HTTP)
+#undef FIO_WEBSOCKET_PARSER
+#define FIO_WEBSOCKET_PARSER
+#endif
+
 #if defined(FIO_POLL) || defined(FIO_SERVER)
 #undef FIO_SOCK
 #define FIO_SOCK

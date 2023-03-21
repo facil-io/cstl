@@ -1487,12 +1487,6 @@ Byte masking (XOR)
  */
 FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
   register char *buf = (char *)buf_;
-  union {
-    uint64_t u64;
-    uint64_t u32;
-    uint64_t u16;
-    uint8_t u8;
-  } u = {.u64 = mask};
   for (size_t i = 31; i < len; i += 32) {
     for (size_t g = 0; g < 4; ++g) {
       fio_u2buf64u(buf, (fio_buf2u64u(buf) ^ mask));
@@ -1504,17 +1498,55 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
       fio_u2buf64u(buf, (fio_buf2u64u(buf) ^ mask));
       buf += 8;
     }
-#define FIO___XMASK_IF_LEN(bytes, bits)                                        \
-  if (len & bytes) {                                                           \
-    fio_u2buf##bits##u(buf, (fio_buf2u##bits##u(buf) ^ mask));                 \
-    buf += bytes;                                                              \
+  if (len & 8) {
+    fio_u2buf64u(buf, (fio_buf2u64u(buf) ^ mask));
+    buf += 8;
   }
-  FIO___XMASK_IF_LEN(8, 64)
-  FIO___XMASK_IF_LEN(4, 32)
-  FIO___XMASK_IF_LEN(2, 16)
-#undef FIO___XMASK_IF_LEN
-  if (len & 1) {
-    *buf ^= u.u8;
+  if (len & 7) {
+    uint64_t tmp;
+    fio_memcpy7x(&tmp, buf, len);
+    tmp ^= mask;
+    fio_memcpy7x(buf, &tmp, len);
+  }
+}
+
+/**
+ * Masks data using a persistent 64 bit mask.
+ *
+ * When the buffer's memory is aligned, the function may perform significantly
+ * better.
+ */
+FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
+                             const char *src,
+                             size_t len,
+                             uint64_t mask) {
+  if (dest == src) {
+    fio_xmask(dest, len, mask);
+    return;
+  }
+  for (size_t i = 31; i < len; i += 32) {
+    for (size_t g = 0; g < 4; ++g) {
+      fio_u2buf64u(dest, (fio_buf2u64u(src) ^ mask));
+      dest += 8;
+      src += 8;
+    }
+  }
+  if (len & 16)
+    for (size_t g = 0; g < 2; ++g) {
+      fio_u2buf64u(dest, (fio_buf2u64u(src) ^ mask));
+      dest += 8;
+      src += 8;
+    }
+  if (len & 8) {
+    fio_u2buf64u(dest, (fio_buf2u64u(src) ^ mask));
+    dest += 8;
+    src += 8;
+  }
+  if (len & 7) {
+    uint64_t tmp;
+    fio_memcpy7x(&tmp, src, len);
+    tmp ^= mask;
+    fio_memcpy7x(dest, &tmp, len);
   }
 }
 

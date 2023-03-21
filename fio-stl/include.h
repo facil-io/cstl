@@ -127,6 +127,9 @@
 #ifdef FIO_HTTP1_PARSER
 #include "431 http1 parser.h"
 #endif
+#ifdef FIO_WEBSOCKET_PARSER
+#include "431 websocket parser.h"
+#endif
 
 #if defined(FIO_HTTP_HANDLE) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "431 http handle.h"
