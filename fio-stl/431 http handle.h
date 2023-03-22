@@ -2071,13 +2071,22 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_response(fio_http_s *h) { /* TODO! validate  */
-  fio_http_response_header_set_if_missing(
-      h,
-      FIO_STR_INFO2((char *)"content-type", 12),
-      FIO_STR_INFO2((char *)"text/event-stream", 17));
-  h->state |= FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE;
-  fio_http_write_args_s args = {.finish = 1};
-  fio_http_write FIO_NOOP(h, args);
+  if (h->state)
+    return;
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-type", 12),
+                               FIO_STR_INFO2((char *)"text/event-stream", 17));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"cache-control", 13),
+                               FIO_STR_INFO2((char *)"no-store", 8));
+  fio___http_hmap_remove(HTTP_HDR_RESPONSE(h),
+                         FIO_STR_INFO2((char *)"content-length", 14),
+                         NULL);
+  h->state |=
+      FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE;
+  h->controller->send_headers(h);
+  h->writer = fio____http_write_upgraded;
+  h->controller->on_finish(h);
 }
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
