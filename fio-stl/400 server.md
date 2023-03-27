@@ -402,7 +402,7 @@ struct fio_protocol_s {
   } reserved;
   /** Called when an IO is attached to a protocol. */
   void (*on_attach)(fio_s *io);
-  /** Called when a data is available. */
+  /** Called when a data is available - MUST `fio_read` until no data is available. */
   void (*on_data)(fio_s *io);
   /** called once all pending `fio_write` calls are finished. */
   void (*on_ready)(fio_s *io);

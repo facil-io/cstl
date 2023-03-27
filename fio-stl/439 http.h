@@ -407,6 +407,9 @@ typedef struct {
       fio_tls_free(o.settings.tls);                                            \
     if (o.settings.on_finish)                                                  \
       o.settings.on_finish(&o.settings);                                       \
+    if (o.tls_ctx)                                                             \
+      o.state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.io_functions.free_context(  \
+          o.tls_ctx);                                                          \
   } while (0)
 #include FIO_INCLUDE_FILE
 
@@ -490,16 +493,10 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                         (void *)c,
                         p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
-#if DEBUG
-  FIO_LOG_DEBUG2("(%d) HTTP accepted a new connection at fd %d,"
-                 "\n\tattached to client %p (io %p)."
-                 "\n\tattached protocol %p",
-                 getpid(),
-                 fd,
-                 c,
-                 c->io,
-                 fio_protocol_get(c->io));
-#endif
+  FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
+                  getpid(),
+                  fd,
+                  c->io);
 }
 
 /* *****************************************************************************
@@ -534,34 +531,50 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
     goto refuse_upgrade;
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
+#if HAVE_ZLIB && 0           /* TODO: logs and fix extension handling logic */
   FIO_HTTP_HEADER_EACH_VALUE(/* TODO: setup WebSocket extension */
                              h,
                              1,
                              FIO_STR_INFO2((char *)"sec-websocket-extensions",
                                            24),
                              val) {
-#if HAVE_ZLIB && 1 /* TODO: logs and fix extension handling logic */
-    FIO_LOG_INFO("WebSocket extension requested: %.*s", (int)val.len, val.buf);
+    FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
+                    (int)val.len,
+                    val.buf);
     if (!FIO_STR_INFO_IS_EQ(val,
                             FIO_STR_INFO2((char *)"permessage-deflate", 18)))
       continue;
+    size_t client_bits = 0, server_bits = 0;
     FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(val, p) {
-      FIO_LOG_INFO("\t %.*s: %.*s",
-                   (int)p.name.len,
-                   p.name.buf,
-                   (int)p.value.len,
-                   p.value.buf);
+      FIO_LOG_DDEBUG2("\t %.*s: %.*s",
+                      (int)p.name.len,
+                      p.name.buf,
+                      (int)p.value.len,
+                      p.value.buf);
       if (FIO_STR_INFO_IS_EQ(p.name,
                              FIO_STR_INFO2((char *)"client_max_window_bits",
                                            22))) { /* used by chrome */
         char *iptr = p.value.buf;
-        size_t llzwindow = iptr ? fio_atol10u(&iptr) : 0;
-        if (llzwindow < 8 || llzwindow > 15)
-          llzwindow = 0;
+        client_bits = iptr ? fio_atol10u(&iptr) : 0;
+        if (client_bits < 8 || client_bits > 15)
+          client_bits = (size_t)-1;
+      }
+      if (FIO_STR_INFO_IS_EQ(
+              p.name,
+              FIO_STR_INFO2((char *)"server_max_window_bits", 22))) {
+        char *iptr = p.value.buf;
+        server_bits = iptr ? fio_atol10u(&iptr) : 0;
+        if (server_bits < 8 || server_bits > 15)
+          server_bits = (size_t)-1;
       }
     }
+    if (client_bits)
+      ; /* TODO */
+    if (server_bits)
+      ; /* TODO */
+    break;
+  } /* HAVE_ZLIB */
 #endif
-  }
   fio_http_websockets_set_response(h);
   return;
 refuse_upgrade:
@@ -657,6 +670,24 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
 }
 
 /* *****************************************************************************
+ALPN Helpers
+***************************************************************************** */
+
+FIO_SFUNC void fio___http_on_select_h1(fio_s *io) {
+  FIO_LOG_DDEBUG2("TLS ALPN HTTP/1.1 selected for %p", io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio_protocol_set(
+      io,
+      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+            ->state[FIO___HTTP_PROTOCOL_HTTP1]
+            .protocol));
+}
+FIO_SFUNC void fio___http_on_select_h2(fio_s *io) {
+  FIO_LOG_ERROR("TLS ALPN HTTP/2 not supported for %p", io);
+  (void)io;
+}
+
+/* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
 
@@ -689,14 +720,16 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   }
   if (s.tls) {
     s.tls = fio_tls_dup(s.tls);
+    /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+    // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
     fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
     if (!s.tls_io_func)
       s.tls_io_func = &tmp_fn;
     for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
       p->state[i].protocol.io_functions = *s.tls_io_func;
-    p->tls_ctx = (s.tls_io_func->build_context
-                      ? s.tls_io_func->build_context
-                      : fio___io_func_default_build_context)(s.tls, 0);
+    p->tls_ctx =
+        (s.tls_io_func->build_context ? s.tls_io_func->build_context
+                                      : tmp_fn.build_context)(s.tls, 0);
   }
   fio_tls_free(auto_tls_detected);
 
@@ -845,9 +878,10 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 }
 
 /* *****************************************************************************
-HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knoledge)
+HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knowledge)
 ***************************************************************************** */
 
+#if 0 /* skip pre-knowledge test? */
 /** Called when an IO is attached to a protocol. */
 FIO_SFUNC void fio___http1_accept_on_attach_client_tmp(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
@@ -857,6 +891,7 @@ FIO_SFUNC void fio___http1_accept_on_attach_client_tmp(fio_s *io) {
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .protocol));
 }
+#endif
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
@@ -870,7 +905,8 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
   if (!r) /* nothing happened */
     return;
   c->len = r;
-  if (FIO_MEMCMP(
+  if (prior_knowledge.buf[0] != c->buf[0] ||
+      FIO_MEMCMP(
           prior_knowledge.buf,
           c->buf,
           (c->len > prior_knowledge.len ? prior_knowledge.len : c->len))) {
@@ -1505,7 +1541,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
     fio_write2(c->io, .buf = tmp, .len = wlen, .copy = 1);
     return 0;
   }
-#if HAVE_ZLIB /* compress? */
+#if HAVE_ZLIB /* TODO: compress? */
   // if(len > 512 && c->state.ws.deflate) ;
 #endif
   char *payload =
@@ -1544,8 +1580,6 @@ FIO_SFUNC void fio___http_controller_ws_on_finish(fio_http_s *h) {
 FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
                                                    fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-#if HAVE_ZLIB /* compress? */
-#endif
   if (args.buf && args.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) {
     unsigned char is_text =
         !!fio_string_utf8_valid(FIO_STR_INFO2((char *)args.buf, args.len));
@@ -1670,8 +1704,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   (void)is_client, (void)s;
   switch (s) {
   case FIO___HTTP_PROTOCOL_ACCEPT:
-    r = (fio_protocol_s){.on_attach = fio___http1_accept_on_attach_client_tmp,
-                         .on_data = fio___http1_accept_on_data,
+    r = (fio_protocol_s){.on_data = fio___http1_accept_on_data,
                          .on_close = fio___http_on_close};
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:

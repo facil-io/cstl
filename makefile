@@ -504,7 +504,7 @@ FIO_TLS_TEST_OPENSSL:="\\n\
 \#include <openssl/bio.h> \\n\
 \#include <openssl/err.h> \\n\
 \#include <openssl/ssl.h> \\n\
-\#if OPENSSL_VERSION_NUMBER < 0x10100000L \\n\
+\#if OPENSSL_VERSION_MAJOR < 3L \\n\
 \#error \"OpenSSL version too small\" \\n\
 \#endif \\n\
 int main(void) { \\n\

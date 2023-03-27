@@ -118,8 +118,11 @@
 
 #if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "400 server.h"
-
+#if defined(HAVE_OPENSSL)
+#include "402 openssl.h"
 #endif
+#endif /* FIO_SERVER */
+
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
 #endif

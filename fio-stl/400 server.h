@@ -335,16 +335,18 @@ desired.
 struct fio_io_functions_s {
   /** Helper that converts a `fio_tls_s` into the implementation's context. */
   void *(*build_context)(fio_tls_s *tls, uint8_t is_client);
-  /** called once the IO was attached and the TLS object was set. */
+  /** Helper to free the context built by build_context. */
+  void (*free_context)(void *context);
+  /** called when a new IO is first attached to a valid protocol. */
   void (*start)(fio_s *io);
   /** Called to perform a non-blocking `read`, same as the system call. */
-  ssize_t (*read)(int fd, void *buf, size_t len, void *tls_ctx);
+  ssize_t (*read)(int fd, void *buf, size_t len, void *context);
   /** Called to perform a non-blocking `write`, same as the system call. */
-  ssize_t (*write)(int fd, const void *buf, size_t len, void *tls_ctx);
+  ssize_t (*write)(int fd, const void *buf, size_t len, void *context);
   /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-  int (*flush)(int fd, void *tls_ctx);
+  int (*flush)(int fd, void *context);
   /** Decreases a fio_tls_s object's reference count, or frees the object. */
-  void (*free)(void *tls_ctx);
+  void (*free)(void *context);
 };
 
 /**************************************************************************/ /**
@@ -543,6 +545,7 @@ SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *tls,
 /** Calls the `on_selected` callback for the `fio_tls_s` object. */
 SFUNC int fio_tls_alpn_select(fio_tls_s *tls,
                               const char *protocol_name,
+                              size_t name_length,
                               fio_s *);
 
 /**
@@ -730,6 +733,13 @@ static void *fio___io_func_default_build_context(fio_tls_s *tls,
   return NULL;
   (void)tls, (void)is_client;
 }
+/** Builds a local TLS context out of the fio_tls_s object. */
+static void fio___io_func_default_free_context(void *context) {
+  FIO_ASSERT(0,
+             "SSL/TLS `free_context` was called, but no SSL/TLS "
+             "implementation found.");
+  (void)context;
+}
 
 FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
@@ -748,6 +758,8 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
     pr->on_timeout = fio___srv_on_ev_on_timeout;
   if (!pr->io_functions.build_context)
     pr->io_functions.build_context = fio___io_func_default_build_context;
+  if (!pr->io_functions.free_context)
+    pr->io_functions.free_context = fio___io_func_default_free_context;
   if (!pr->io_functions.start)
     pr->io_functions.start = fio___srv_on_ev_mock;
   if (!pr->io_functions.read)
@@ -760,8 +772,8 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
     pr->io_functions.free = fio___srv_on_close_mock;
 }
 
-/* the MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
-static fio_protocol_s MOCK_PROTOCOL;
+/* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
+static fio_protocol_s FIO___MOCK_PROTOCOL;
 
 FIO_IFUNC void fio___srv_init_protocol_test(fio_protocol_s *pr) {
   if (!fio_atomic_or(&pr->reserved.flags, 1))
@@ -1091,7 +1103,7 @@ struct fio_s {
 
 FIO_SFUNC void fio_s_init(fio_s *io) {
   *io = (fio_s){
-      .pr = &MOCK_PROTOCOL,
+      .pr = &FIO___MOCK_PROTOCOL,
       .node = FIO_LIST_INIT(io->node),
       .stream = FIO_STREAM_INIT(io->stream),
       .env = FIO___SRV_ENV_SAFE_INIT,
@@ -1100,17 +1112,15 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
       .fd = -1,
   };
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
-  FIO_LIST_REMOVE(&MOCK_PROTOCOL.reserved.protocols);
-  FIO_LIST_PUSH(&fio___srvdata.protocols, &MOCK_PROTOCOL.reserved.protocols);
+  FIO_LIST_REMOVE(&FIO___MOCK_PROTOCOL.reserved.protocols);
+  FIO_LIST_PUSH(&fio___srvdata.protocols,
+                &FIO___MOCK_PROTOCOL.reserved.protocols);
   fio_set_valid(io);
 }
 
 FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_set_invalid(io);
   FIO_LIST_REMOVE(&io->node);
-  fio_sock_close(io->fd);
-  fio_stream_destroy(&io->stream);
-  fio_poll_forget(&fio___srvdata.poll_data, io->fd);
 #ifdef DEBUG
   FIO_LOG_DDEBUG2("detaching and destroying %p (fd %d): %zu bytes total",
                   (void *)io,
@@ -1126,6 +1136,9 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   io->pr->io_functions.free(io->tls);
   io->pr->on_close(io->udata); /* may destroy protocol object! */
   fio___srv_env_safe_destroy(&io->env);
+  fio_sock_close(io->fd);
+  fio_stream_destroy(&io->stream);
+  fio_poll_forget(&fio___srvdata.poll_data, io->fd);
 }
 #define FIO_REF_NAME            fio
 #define FIO_REF_INIT(o)         fio_s_init(&(o))
@@ -1148,13 +1161,14 @@ static void fio___protocol_set_task(void *io_, void *old_) {
                    (void *)io,
                    POLLIN | POLLOUT);
   io->pr->on_attach(io);
-  io->pr->io_functions.start(io);
+  if (old == &FIO___MOCK_PROTOCOL) /* avoid calling `start` more than once */
+    io->pr->io_functions.start(io);
 }
 
 /** Sets a new protocol object, returning the old protocol. */
 SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   if (!pr)
-    pr = &MOCK_PROTOCOL;
+    pr = &FIO___MOCK_PROTOCOL;
   fio___srv_init_protocol_test(pr);
   fio_protocol_s *old = io->pr;
   if (pr == old)
@@ -1176,7 +1190,7 @@ SFUNC fio_s *fio_attach_fd(int fd,
   fio_s *io = NULL;
   fio_protocol_s *old = NULL;
   if (!protocol)
-    protocol = &MOCK_PROTOCOL;
+    protocol = &FIO___MOCK_PROTOCOL;
   fio___srv_init_protocol_test(protocol);
   if (fd == -1)
     goto error;
@@ -2026,7 +2040,7 @@ FIO_CONSTRUCTOR(fio___srv) {
                 .on_data = fio___srv_poll_on_data_schd,
                 .on_ready = fio___srv_poll_on_ready_schd,
                 .on_close = fio___srv_poll_on_close_schd);
-  fio___srv_init_protocol_test(&MOCK_PROTOCOL);
+  fio___srv_init_protocol_test(&FIO___MOCK_PROTOCOL);
   fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
@@ -2101,6 +2115,26 @@ struct fio_tls_s {
 
 #define FIO___RECURSIVE_INCLUDE 1
 #define FIO_REF_NAME            fio_tls
+#define FIO_REF_DESTROY(tls)                                                   \
+  do {                                                                         \
+    FIO_IMAP_EACH(fio___tls_alpn_map, &tls.alpn, i) {                          \
+      fio_keystr_destroy(&tls.alpn.ary[i].nm, FIO_STRING_FREE_KEY);            \
+    }                                                                          \
+    FIO_IMAP_EACH(fio___tls_trust_map, &tls.trust, i) {                        \
+      fio_keystr_destroy(&tls.trust.ary[i].nm, FIO_STRING_FREE_KEY);           \
+    }                                                                          \
+    FIO_IMAP_EACH(fio___tls_cert_map, &tls.cert, i) {                          \
+      fio_keystr_destroy(&tls.cert.ary[i].nm, FIO_STRING_FREE_KEY);            \
+      fio_keystr_destroy(&tls.cert.ary[i].public_cert_file,                    \
+                         FIO_STRING_FREE_KEY);                                 \
+      fio_keystr_destroy(&tls.cert.ary[i].private_key_file,                    \
+                         FIO_STRING_FREE_KEY);                                 \
+      fio_keystr_destroy(&tls.cert.ary[i].pk_password, FIO_STRING_FREE_KEY);   \
+    }                                                                          \
+    fio___tls_alpn_map_destroy(&tls.alpn);                                     \
+    fio___tls_trust_map_destroy(&tls.trust);                                   \
+    fio___tls_cert_map_destroy(&tls.cert);                                     \
+  } while (0)
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
@@ -2119,21 +2153,6 @@ SFUNC fio_tls_s *fio_tls_dup(fio_tls_s *tls) { return fio_tls_dup2(tls); }
 SFUNC void fio_tls_free(fio_tls_s *tls) {
   if (!tls)
     return;
-  FIO_IMAP_EACH(fio___tls_alpn_map, &tls->alpn, i) {
-    fio_keystr_destroy(&tls->alpn.ary[i].nm, FIO_STRING_FREE_KEY);
-  }
-  FIO_IMAP_EACH(fio___tls_trust_map, &tls->trust, i) {
-    fio_keystr_destroy(&tls->trust.ary[i].nm, FIO_STRING_FREE_KEY);
-  }
-  FIO_IMAP_EACH(fio___tls_cert_map, &tls->cert, i) {
-    fio_keystr_destroy(&tls->cert.ary[i].nm, FIO_STRING_FREE_KEY);
-    fio_keystr_destroy(&tls->cert.ary[i].public_cert_file, FIO_STRING_FREE_KEY);
-    fio_keystr_destroy(&tls->cert.ary[i].private_key_file, FIO_STRING_FREE_KEY);
-    fio_keystr_destroy(&tls->cert.ary[i].pk_password, FIO_STRING_FREE_KEY);
-  }
-  fio___tls_alpn_map_destroy(&tls->alpn);
-  fio___tls_trust_map_destroy(&tls->trust);
-  fio___tls_cert_map_destroy(&tls->cert);
   fio_tls_free2(tls);
 }
 
@@ -2186,8 +2205,13 @@ SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *t,
     return t;
   if (!on_selected)
     on_selected = fio___srv_on_ev_mock;
+  size_t pr_name_len = strlen(protocol_name);
+  if (pr_name_len > 255) {
+    FIO_LOG_ERROR("fio_tls_alpn_add called with name longer than 255 chars!");
+    return t;
+  }
   fio___tls_alpn_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)protocol_name),
+      .nm = fio_keystr_copy(FIO_STR_INFO2((char *)protocol_name, pr_name_len),
                             FIO_STRING_ALLOC_KEY),
       .fn = on_selected,
   };
@@ -2205,14 +2229,20 @@ replace_old:
 /** Calls the `on_selected` callback for the `fio_tls_s` object. */
 SFUNC int fio_tls_alpn_select(fio_tls_s *t,
                               const char *protocol_name,
+                              size_t name_length,
                               fio_s *io) {
   if (!t || !protocol_name)
     return -1;
   fio___tls_alpn_s seeking = {
-      .nm = fio_keystr(protocol_name, (uint32_t)FIO_STRLEN(protocol_name))};
+      .nm = fio_keystr(protocol_name, (uint32_t)name_length)};
   fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
-  if (!alpn)
+  if (!alpn) {
+    FIO_LOG_DDEBUG2("TLS ALPN %.*s not found in %zu long list",
+                    (int)name_length,
+                    protocol_name,
+                    t->alpn.count);
     return -1;
+  }
   alpn->fn(io);
   return 0;
 }
