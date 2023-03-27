@@ -43383,7 +43383,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
                    "tst",
                    FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn_cb));
   counter = 0;
-  fio_tls_alpn_select(t, "tst", (fio_s *)&counter);
+  fio_tls_alpn_select(t, "tst", 3, (fio_s *)&counter);
   FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
 }
