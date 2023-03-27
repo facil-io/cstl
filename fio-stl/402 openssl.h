@@ -264,16 +264,18 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
   } else {
     SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_NONE, NULL);
   }
-
+  if (!fio_tls_cert_count(tls) && !is_client) {
+    /* add self-signed certificate to context */
+    X509 *cert = fio_tls_create_self_signed("localhost");
+    SSL_CTX_use_certificate(ctx->ctx, cert);
+    SSL_CTX_use_PrivateKey(ctx->ctx, fio___openssl_pkey);
+  }
   fio_tls_each(tls,
                .udata = ctx,
                .udata2 = store,
                .each_cert = fio___openssl_each_cert,
                .each_trust = fio___openssl_each_trust);
-  if (!fio_tls_trust_count(tls))
-    ;
-  if (!fio_tls_cert_count(tls) && !is_client)
-    ;
+
   if (fio_tls_alpn_count(tls)) {
     FIO_STR_INFO_TMP_VAR(alpn_list, 1024);
     fio_tls_each(tls,
