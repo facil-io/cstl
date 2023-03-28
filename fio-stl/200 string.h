@@ -348,6 +348,11 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
 /* *****************************************************************************
 String API - Content Manipulation and Review
 ***************************************************************************** */
+/* undo
+   #define write      fio___w_write
+   from "001 patches.h"
+ */
+#undef write
 
 /** Writes data at the end of the String. */
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s,
