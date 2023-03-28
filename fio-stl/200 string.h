@@ -947,14 +947,14 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
     return i;
   }
   /* resize may be used to reserve memory in advance while setting size  */
-  if (i.capa < size) {
+  if (i.capa > size) {
+    i.len = size;
+    i.buf[i.len] = 0;
+  } else {
     fio_string_write(&i,
                      FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
                      NULL,
                      size - i.len);
-  } else {
-    i.len = size;
-    i.buf[i.len] = 0;
   }
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
 

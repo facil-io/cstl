@@ -945,8 +945,8 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   /* TODO, skip wakeup for same thread caller? */
-  if (!fio___srvdata.wakeup || fio___srvdata.wakeup_wait ||
-      fio_queue_count(fio_srv_queue()) > 3)
+  if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
+      fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
   fio___srvdata.wakeup_wait = 1;
   char buf[1] = {~0};

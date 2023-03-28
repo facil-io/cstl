@@ -873,7 +873,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
       .buf = (char *)fio___cli_data.app_name,
       .len =
           (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0)};
-  FIO_STR_INFO_TMP_VAR(help, 8192);
+  FIO_STR_INFO_TMP_VAR(help, 8191);
   fio_str_info_s help_org_state = help;
 
   help = fio___cli_write2line(help,

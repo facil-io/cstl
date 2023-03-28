@@ -726,9 +726,10 @@ typedef struct fio_buf_info_s {
 
 /** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
 #define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
-  char fio_stack_mem___##name[(capacity)];                                     \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
   fio_str_info_s name = (fio_str_info_s) {                                     \
-    .buf = fio_stack_mem___##name, .capa = (capacity)                          \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
 
 /* *****************************************************************************
@@ -2239,7 +2240,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_ATOMIC
 #endif
 
-#if defined(FIO_STR)
+#if defined(FIO_STR) || defined(FIO_HTTP)
 #undef FIO_FILES
 #define FIO_FILES
 #endif
@@ -11556,7 +11557,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
       .buf = (char *)fio___cli_data.app_name,
       .len =
           (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0)};
-  FIO_STR_INFO_TMP_VAR(help, 8192);
+  FIO_STR_INFO_TMP_VAR(help, 8191);
   fio_str_info_s help_org_state = help;
 
   help = fio___cli_write2line(help,
@@ -20147,14 +20148,14 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
     return i;
   }
   /* resize may be used to reserve memory in advance while setting size  */
-  if (i.capa < size) {
+  if (i.capa > size) {
+    i.len = size;
+    i.buf[i.len] = 0;
+  } else {
     fio_string_write(&i,
                      FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
                      NULL,
                      size - i.len);
-  } else {
-    i.len = size;
-    i.buf[i.len] = 0;
   }
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
 
@@ -27281,8 +27282,8 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   /* TODO, skip wakeup for same thread caller? */
-  if (!fio___srvdata.wakeup || fio___srvdata.wakeup_wait ||
-      fio_queue_count(fio_srv_queue()) > 3)
+  if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
+      fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
   fio___srvdata.wakeup_wait = 1;
   char buf[1] = {~0};
@@ -28943,17 +28944,24 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
   if (public_cert_file && private_key_file) { /* load certificate */
     SSL_CTX_set_default_passwd_cb(s->ctx, fio___openssl_pem_password_cb);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, (void *)pk_password);
+    FIO_LOG_DDEBUG2("loading TLS certificates: %s & %s",
+                    public_cert_file,
+                    private_key_file);
     /* Set the key and cert */
     if (SSL_CTX_use_certificate_chain_file(s->ctx, public_cert_file) <= 0) {
       ERR_print_errors_fp(stderr);
-      FIO_ASSERT(0, "OpenSSL couldn't open PEM file for certificate.");
+      FIO_ASSERT(0,
+                 "OpenSSL couldn't open PEM file for certificate: %s",
+                 public_cert_file);
     }
 
     if (SSL_CTX_use_PrivateKey_file(s->ctx,
                                     private_key_file,
                                     SSL_FILETYPE_PEM) <= 0) {
       ERR_print_errors_fp(stderr);
-      FIO_ASSERT(0, "OpenSSL couldn't open PEM file for private key.");
+      FIO_ASSERT(0,
+                 "OpenSSL couldn't open PEM file for private key: %s",
+                 private_key_file);
     }
     SSL_CTX_set_default_passwd_cb(s->ctx, NULL);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, NULL);
@@ -29035,7 +29043,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
                .each_trust = fio___openssl_each_trust);
 
   if (fio_tls_alpn_count(tls)) {
-    FIO_STR_INFO_TMP_VAR(alpn_list, 1024);
+    FIO_STR_INFO_TMP_VAR(alpn_list, 1023);
     fio_tls_each(tls,
                  .udata = ctx,
                  .udata2 = &alpn_list,
@@ -31676,7 +31684,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  * i.e.:
  *
  * ```c
- *  FIO_STR_INFO_TMP_VAR(buf, 1024); // tmp buffer for the parsed output
+ *  FIO_STR_INFO_TMP_VAR(buf, 1023); // tmp buffer for the parsed output
  *  fio_http_s *h = fio_http_new();  // using a mock HTTP handle
  *  fio_http_request_header_add(
  *      h,
@@ -33160,7 +33168,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
                                 0);
-    FIO_STR_INFO_TMP_VAR(accept_val, 64);
+    FIO_STR_INFO_TMP_VAR(accept_val, 63);
     if (k.len != 24)
       goto handshake_error;
     fio_string_write(&accept_val, NULL, k.buf, k.len);
@@ -33382,8 +33390,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     status = 404;
   h->status = status;
   /* TODO: load body template, fill details and send it...? */
-  char buf[32];
-  fio_str_info_s filename = FIO_STR_INFO3(buf, 0, 32);
+  FIO_STR_INFO_TMP_VAR(filename, 31);
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -33393,6 +33400,13 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
                                 .finish = 1};
+  if (!body) {
+    fio_str_info_s status_str = fio_http_status2str(status);
+    args.buf = status_str.buf;
+    args.len = status_str.len;
+    args.copy = 1;
+    args.dealloc = NULL;
+  }
   fio_http_write FIO_NOOP(h, args);
 }
 
@@ -33402,8 +33416,7 @@ HTTP Logging
 
 /** Logs an HTTP (response) to STDOUT. */
 SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
-  char buf_mem[1024];
-  fio_str_info_s buf = FIO_STR_INFO3(buf_mem, 0, 1023);
+  FIO_STR_INFO_TMP_VAR(buf, 1023);
   intptr_t bytes_sent = h->sent;
   uint64_t time_start, time_end;
   time_start = h->received_at;
@@ -33533,8 +33546,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   int fd = -1;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
-  FIO_STR_INFO_TMP_VAR(etag, 32);
-  FIO_STR_INFO_TMP_VAR(filename, 4096);
+  FIO_STR_INFO_TMP_VAR(etag, 31);
+  FIO_STR_INFO_TMP_VAR(filename, 4095);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
     if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x2020202020202020ULL) ==
@@ -35374,6 +35387,9 @@ All memory allocations should use:
 HTTP Settings Validation
 ***************************************************************************** */
 
+static void fio___http_default_on_http_request(fio_http_s *h) {
+  fio_http_send_error_response(h, 404);
+}
 static void fio___http_default_noop(fio_http_s *h) { ((void)h); }
 static int fio___http_default_authenticate(fio_http_s *h) {
   ((void)h);
@@ -35404,9 +35420,10 @@ static void fio___http_default_on_eventsource_reconnect(fio_http_s *h,
   (void)h, (void)id;
 }
 
-static void http_settings_validate(fio_http_settings_s *s) {
+static void http_settings_validate(fio_http_settings_s *s, int is_client) {
   if (!s->on_http)
-    s->on_http = fio___http_default_noop;
+    s->on_http = is_client ? fio___http_default_noop
+                           : fio___http_default_on_http_request;
   if (!s->on_finish)
     s->on_finish = fio___http_default_on_finish;
   if (!s->on_authenticate_sse)
@@ -35441,8 +35458,18 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->timeout = FIO_HTTP_DEFAULT_TIMEOUT;
   if (!s->ws_timeout)
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
-  // if (!s->public_folder) s->public_folder = 0;
-  // if (!s->public_folder_length) s->public_folder_length = 0;
+  if (s->public_folder.buf) {
+    if (s->public_folder.len > 1 &&
+        s->public_folder.buf[s->public_folder.len - 1] == '/' &&
+        !(s->public_folder.len == 2 && s->public_folder.buf[0] == '~'))
+      --s->public_folder.len;
+    if (!fio_filename_is_folder(s->public_folder.buf)) {
+      FIO_LOG_ERROR(
+          "HTTP public folder is not a folder, setting ignored.\n\t%s",
+          s->public_folder.buf);
+      s->public_folder = ((fio_str_info_s){0});
+    }
+  }
 }
 
 /* *****************************************************************************
@@ -35479,10 +35506,12 @@ typedef struct {
     fio_protocol_s protocol;
     fio_http_controller_s controller;
   } state[FIO___HTTP_PROTOCOL_NONE + 1];
+  char public_folder_buf[];
 } fio_http_protocol_s;
 #include FIO_INCLUDE_FILE
 
 #define FIO_REF_NAME             fio_http_protocol
+#define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
@@ -35781,8 +35810,8 @@ FIO_SFUNC void fio___http_listen_on_start(void *p_) {
 
 void fio_http_listen___(void); /* IDE marker */
 SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
-  http_settings_validate(&s);
-  fio_http_protocol_s *p = fio_http_protocol_new();
+  http_settings_validate(&s, 0);
+  fio_http_protocol_s *p = fio_http_protocol_new(s.public_folder.len + 1);
   fio_tls_s *auto_tls_detected = NULL;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
@@ -35820,12 +35849,9 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
-  p->settings.public_folder.len -=
-      (p->settings.public_folder.len &&
-       (p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
-            '/' ||
-        p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
-            '\\'));
+  p->settings.public_folder.buf = p->public_folder_buf;
+  if (s.public_folder.len)
+    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
   return fio_listen(.url = url,
                     .on_open = fio___http_on_open,
                     .on_start = fio___http_listen_on_start,
@@ -35927,19 +35953,22 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               size_t content_length,
                                               void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  fio_http_s *h = c->h;
   if (content_length > c->settings->max_body_size)
     goto too_big;
   if (content_length)
     fio_http_body_expect(c->h, content_length);
 #if FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
-  (!(c->h) ? fio_http_request_header_add
-           : fio_http_response_header_add)(c->h,
-                                           FIO_BUF2STR_INFO(name),
-                                           FIO_BUF2STR_INFO(value));
+  (!(h->status) ? fio_http_request_header_add
+                : fio_http_response_header_add)(h,
+                                                FIO_BUF2STR_INFO(name),
+                                                FIO_BUF2STR_INFO(value));
 #endif
   return 0;
 too_big:
-  fio_http_send_error_response(c->h, 413);
+  c->h = NULL;
+  fio_dup(c->io);
+  fio_http_send_error_response(h, 413);
   return -1;
   (void)name, (void)value;
 }
@@ -36044,8 +36073,12 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
   return 0;
 
 http1_error:
-  if (c->h)
-    fio_http_send_error_response(c->h, 400);
+  if (c->h) {
+    fio_http_s *h = c->h;
+    c->h = NULL;
+    fio_dup(c->io);
+    fio_http_send_error_response(h, 400);
+  }
   fio_close(io);
   return -1;
 }

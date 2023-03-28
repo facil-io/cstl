@@ -537,7 +537,7 @@ SFUNC int fio_http_response_header_parse(fio_http_s *h,
  * i.e.:
  *
  * ```c
- *  FIO_STR_INFO_TMP_VAR(buf, 1024); // tmp buffer for the parsed output
+ *  FIO_STR_INFO_TMP_VAR(buf, 1023); // tmp buffer for the parsed output
  *  fio_http_s *h = fio_http_new();  // using a mock HTTP handle
  *  fio_http_request_header_add(
  *      h,
@@ -2021,7 +2021,7 @@ SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
                                 0);
-    FIO_STR_INFO_TMP_VAR(accept_val, 64);
+    FIO_STR_INFO_TMP_VAR(accept_val, 63);
     if (k.len != 24)
       goto handshake_error;
     fio_string_write(&accept_val, NULL, k.buf, k.len);
@@ -2243,8 +2243,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     status = 404;
   h->status = status;
   /* TODO: load body template, fill details and send it...? */
-  char buf[32];
-  fio_str_info_s filename = FIO_STR_INFO3(buf, 0, 32);
+  FIO_STR_INFO_TMP_VAR(filename, 31);
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -2254,6 +2253,13 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
                                 .finish = 1};
+  if (!body) {
+    fio_str_info_s status_str = fio_http_status2str(status);
+    args.buf = status_str.buf;
+    args.len = status_str.len;
+    args.copy = 1;
+    args.dealloc = NULL;
+  }
   fio_http_write FIO_NOOP(h, args);
 }
 
@@ -2263,8 +2269,7 @@ HTTP Logging
 
 /** Logs an HTTP (response) to STDOUT. */
 SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
-  char buf_mem[1024];
-  fio_str_info_s buf = FIO_STR_INFO3(buf_mem, 0, 1023);
+  FIO_STR_INFO_TMP_VAR(buf, 1023);
   intptr_t bytes_sent = h->sent;
   uint64_t time_start, time_end;
   time_start = h->received_at;
@@ -2394,8 +2399,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   int fd = -1;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
-  FIO_STR_INFO_TMP_VAR(etag, 32);
-  FIO_STR_INFO_TMP_VAR(filename, 4096);
+  FIO_STR_INFO_TMP_VAR(etag, 31);
+  FIO_STR_INFO_TMP_VAR(filename, 4095);
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
     if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x2020202020202020ULL) ==

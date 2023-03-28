@@ -291,6 +291,9 @@ All memory allocations should use:
 HTTP Settings Validation
 ***************************************************************************** */
 
+static void fio___http_default_on_http_request(fio_http_s *h) {
+  fio_http_send_error_response(h, 404);
+}
 static void fio___http_default_noop(fio_http_s *h) { ((void)h); }
 static int fio___http_default_authenticate(fio_http_s *h) {
   ((void)h);
@@ -321,9 +324,10 @@ static void fio___http_default_on_eventsource_reconnect(fio_http_s *h,
   (void)h, (void)id;
 }
 
-static void http_settings_validate(fio_http_settings_s *s) {
+static void http_settings_validate(fio_http_settings_s *s, int is_client) {
   if (!s->on_http)
-    s->on_http = fio___http_default_noop;
+    s->on_http = is_client ? fio___http_default_noop
+                           : fio___http_default_on_http_request;
   if (!s->on_finish)
     s->on_finish = fio___http_default_on_finish;
   if (!s->on_authenticate_sse)
@@ -358,8 +362,18 @@ static void http_settings_validate(fio_http_settings_s *s) {
     s->timeout = FIO_HTTP_DEFAULT_TIMEOUT;
   if (!s->ws_timeout)
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
-  // if (!s->public_folder) s->public_folder = 0;
-  // if (!s->public_folder_length) s->public_folder_length = 0;
+  if (s->public_folder.buf) {
+    if (s->public_folder.len > 1 &&
+        s->public_folder.buf[s->public_folder.len - 1] == '/' &&
+        !(s->public_folder.len == 2 && s->public_folder.buf[0] == '~'))
+      --s->public_folder.len;
+    if (!fio_filename_is_folder(s->public_folder.buf)) {
+      FIO_LOG_ERROR(
+          "HTTP public folder is not a folder, setting ignored.\n\t%s",
+          s->public_folder.buf);
+      s->public_folder = ((fio_str_info_s){0});
+    }
+  }
 }
 
 /* *****************************************************************************
@@ -396,10 +410,12 @@ typedef struct {
     fio_protocol_s protocol;
     fio_http_controller_s controller;
   } state[FIO___HTTP_PROTOCOL_NONE + 1];
+  char public_folder_buf[];
 } fio_http_protocol_s;
 #include FIO_INCLUDE_FILE
 
 #define FIO_REF_NAME             fio_http_protocol
+#define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
@@ -698,8 +714,8 @@ FIO_SFUNC void fio___http_listen_on_start(void *p_) {
 
 void fio_http_listen___(void); /* IDE marker */
 SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
-  http_settings_validate(&s);
-  fio_http_protocol_s *p = fio_http_protocol_new();
+  http_settings_validate(&s, 0);
+  fio_http_protocol_s *p = fio_http_protocol_new(s.public_folder.len + 1);
   fio_tls_s *auto_tls_detected = NULL;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
@@ -737,12 +753,9 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
-  p->settings.public_folder.len -=
-      (p->settings.public_folder.len &&
-       (p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
-            '/' ||
-        p->settings.public_folder.buf[p->settings.public_folder.len - 1] ==
-            '\\'));
+  p->settings.public_folder.buf = p->public_folder_buf;
+  if (s.public_folder.len)
+    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
   return fio_listen(.url = url,
                     .on_open = fio___http_on_open,
                     .on_start = fio___http_listen_on_start,
@@ -844,19 +857,22 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               size_t content_length,
                                               void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  fio_http_s *h = c->h;
   if (content_length > c->settings->max_body_size)
     goto too_big;
   if (content_length)
     fio_http_body_expect(c->h, content_length);
 #if FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
-  (!(c->h) ? fio_http_request_header_add
-           : fio_http_response_header_add)(c->h,
-                                           FIO_BUF2STR_INFO(name),
-                                           FIO_BUF2STR_INFO(value));
+  (!(h->status) ? fio_http_request_header_add
+                : fio_http_response_header_add)(h,
+                                                FIO_BUF2STR_INFO(name),
+                                                FIO_BUF2STR_INFO(value));
 #endif
   return 0;
 too_big:
-  fio_http_send_error_response(c->h, 413);
+  c->h = NULL;
+  fio_dup(c->io);
+  fio_http_send_error_response(h, 413);
   return -1;
   (void)name, (void)value;
 }
@@ -961,8 +977,12 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
   return 0;
 
 http1_error:
-  if (c->h)
-    fio_http_send_error_response(c->h, 400);
+  if (c->h) {
+    fio_http_s *h = c->h;
+    c->h = NULL;
+    fio_dup(c->io);
+    fio_http_send_error_response(h, 400);
+  }
   fio_close(io);
   return -1;
 }

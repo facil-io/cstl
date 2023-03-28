@@ -436,6 +436,19 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
 Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
+#### `FIO_STR_INFO_TMP_VAR(name, capacity)`
+
+```c
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
+  }
+```
+
+Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
+
 -------------------------------------------------------------------------------
 
 ## Memory Copying, Seeking and Setting

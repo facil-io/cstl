@@ -1,4 +1,4 @@
-# facil.io 0.8.x for C - now with an integrated C STL (Server Toolbox lIbrary)
+# facil.io 0.8.x for C - now with an integrated C STL (Server Toolbox library)
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
 
@@ -45,7 +45,10 @@ cls && cl /Ox tests\stl.c /I. && stl.exe
 
 ### Binary-Safe Dynamic Strings
 
-The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar cons / pros):
+The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar cons / pros).
+
+I addition, the `fio_bstr` provides reference counted immutable strings with a "copy-on-write" fallback for when a string has to be mutated, making them a perfect choice for cached Strings.
+
 
 ```c
 /* include Core String functionality */
@@ -66,40 +69,6 @@ void hello_binary_strings(void) {
   printf("Copied string:   %s\n", copy);
   fio_bstr_free(org);
   fio_bstr_free(copy);
-}
-```
-
-### Reference Counting Binary-Safe Dynamic Strings
-
-Easily use a template to create your own binary safe String type that is always `NUL` terminated.
-
-Optionally add reference counting to your type with a single line of code.
-
-**Note**: unlike `copy` which creates an independent copy, a `dup` operation duplicates the handle (does not copy the data), so both handles point to the same object.
-
-```c
-#include "fio-stl/include.h" /* or "fio-stl.h" */
-
-/* Create a binary safe String type called `my_str_s` */
-#define FIO_STR_NAME my_str
-/* Use a reference counting for `my_str_s` (using the same name convention) */
-#define FIO_REF_NAME my_str
-/* Make the reference counter the only constructor
- * rather then having it as an additional flavor */
-#define FIO_REF_CONSTRUCTOR_ONLY
-#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
-
-void reference_counted_shared_strings(void) {
-  my_str_s *msg = my_str_new();
-  my_str_write(msg, "Hello World", 11);
-  /* increase reference - duplicates the handle, but the string data is shared(!) */
-  my_str_s *ref = my_str_dup(msg);
-  my_str_write(ref, ", written to both handles.", 26);
-  printf("%s\n", my_str_ptr(msg));
-  printf("%s\n", my_str_ptr(ref));
-  my_str_free(msg);
-  printf("Still valid, as we had 2 references:\n\t%s\n", my_str_ptr(ref));
-  my_str_free(ref);
 }
 ```
 
@@ -129,6 +98,37 @@ void array_example(void) {
             pos->i);
   }
   foo_ary_destroy(&a);
+}
+```
+
+### Hash Map Binary Safe Strings
+
+Easily define key-value String Hash Map, also sometimes called a "dictionary", using different smart defaults for short keys `FIO_MAP_KEY_KSTR` vs longer keys (or when expecting a sparsely populated map) `FIO_MAP_KEY_BSTR`.
+
+```c
+#include "fio-stl/include.h" /* or "fio-stl.h" */
+
+/* Set the properties for the key-value Unordered Map type called `dict_s` */
+#define FIO_MAP_NAME       dict
+#define FIO_MAP_KEY_KSTR   /* pre-defined macro for using fio_keystr_s keys. */
+#define FIO_MAP_VALUE_BSTR /* pre-defined macro for using String values. */
+#define FIO_MAP_HASH_FN(str)                                                   \
+  fio_risky_hash(str.buf, str.len, (uint64_t)&fio_risky_hash)
+#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
+
+void easy_dict_example(void) {
+  dict_s dictionary = FIO_MAP_INIT;
+  dict_set(&dictionary,
+           FIO_STR_INFO1("Hello"),
+           FIO_STR_INFO1("Hello World!"),
+           NULL);
+  dict_set(&dictionary,
+           FIO_STR_INFO1("42"),
+           FIO_STR_INFO1("Meaning of life..."),
+           NULL);
+  printf("Hello: %s\n", dict_get(&dictionary, FIO_STR_INFO1("Hello")).buf);
+  printf("42:    %s\n", dict_get(&dictionary, FIO_STR_INFO1("42")).buf);
+  dict_destroy(&dictionary);
 }
 ```
 
@@ -177,34 +177,91 @@ void dictionary_example(void) {
 }
 ```
 
-### Hash Map Binary Safe Strings
 
-Easily define key-value String Hash Map, also sometimes called a "dictionary", using different smart defaults for short keys `FIO_MAP_KEY_KSTR` vs longer keys (or when expecting a sparsely populated map) `FIO_MAP_KEY_BSTR`.
+### JSON and Soft Types
+
+Languages such as JavaScript and Ruby allow developers to mix types easily and naturally, such as having an Array of mixed numeral and String types.
+
+The facil.io library offers a solution that allows developers to do the same in C, using soft types and pointer tagging.
 
 ```c
-#include "fio-stl/include.h" /* or "fio-stl.h" */
+#define FIO_FIOBJ
+#include FIO_INCLUDE_FILE
 
-/* Set the properties for the key-value Unordered Map type called `dict_s` */
-#define FIO_MAP_NAME       dict
-#define FIO_MAP_KEY_KSTR   /* pre-defined macro for using fio_keystr_s keys. */
-#define FIO_MAP_VALUE_BSTR /* pre-defined macro for using String values. */
-#define FIO_MAP_HASH_FN(str)                                                   \
-  fio_risky_hash(str.buf, str.len, (uint64_t)&fio_risky_hash)
-#include FIO_INCLUDE_FILE /* subsequent include statements should prefer MACRO */
+void json_example(void) {
+  /* we will create a hash map to contain all our key-value pairs */
+  FIOBJ map = fiobj_hash_new();
+  /* note that the ownership of `array` is placed inside the hash map. */
+  FIOBJ array = fiobj_hash_set3(map, "array", 5, fiobj_array_new());
+  for (size_t i = 0; i < 5; ++i) {
+    /* add numerals to array */
+    fiobj_array_unshift(array, fiobj_num_new(0 - (intptr_t)i));
+    fiobj_array_push(array, fiobj_num_new((intptr_t)i + 1));
+  }
+  /* add a string to the array - note that the array will own the new String */
+  fiobj_array_push(array, fiobj_str_new_cstr("done", 4));
+  FIOBJ json_output = fiobj2json(FIOBJ_INVALID, map, 1);
+  printf("JSON output of our hash:\n%s\n", fiobj_str_ptr(json_output));
+  /* free the Hash Map - will free also all values (array, strings) and keys */
+  fiobj_free(map);
+  /* rebuild the map object from the JSON String */
+  FIOBJ json_data = fiobj_json_parse(fiobj2cstr(json_output), NULL);
+  /* free the JSON String */
+  fiobj_free(json_output);
+  /* seek an object in a complex object using a JSON style lookup string. */
+  printf(
+      "The 7th object in the \"array\" key is: %s\n",
+      fiobj2cstr(fiobj_json_find(json_data, FIO_STR_INFO2("array[6]", 8))).buf);
+  /* free the rebuilt map */
+  fiobj_free(json_data);
+}
+```
 
-void easy_dict_example(void) {
-  dict_s dictionary = FIO_MAP_INIT;
-  dict_set(&dictionary,
-           FIO_STR_INFO1("Hello"),
-           FIO_STR_INFO1("Hello World!"),
-           NULL);
-  dict_set(&dictionary,
-           FIO_STR_INFO1("42"),
-           FIO_STR_INFO1("Meaning of life..."),
-           NULL);
-  printf("Hello: %s\n", dict_get(&dictionary, FIO_STR_INFO1("Hello")).buf);
-  printf("42:    %s\n", dict_get(&dictionary, FIO_STR_INFO1("42")).buf);
-  dict_destroy(&dictionary);
+### HTTP / WebSocket Server
+
+And, of course, the HTTP / WebSocket / EventSource (SSE) and pub/sub Server is included.
+
+Here's a simple static file server:
+
+```c
+#define FIO_CLI  /* provide a CLI interface for selecting public folder name */
+#define FIO_HTTP /* HTTP server / parse and handle modules */
+#define FIO_LOG  /* always log */
+#include FIO_INCLUDE_FILE
+
+/* This function handles HTTP requests, which is the same as the default. */
+FIO_SFUNC void on_request(fio_http_s *h) {
+  /* sends a static 404.html file, if exists. */
+  fio_http_send_error_response(h, 404); 
+}
+
+/* The main function. */
+int main(int argc, char const *argv[]) {
+  /* provide a CLI interface for selecting the public folder */
+  fio_cli_start(argc,
+                argv,
+                0,
+                1,
+                "a simple HTTP static file server. Use, for example:\n"
+                "\tNAME -www ./public\n"
+                "\tNAME ./public\n",
+                FIO_CLI_STRING("--public-folder -www (.) the public root folder for static files."));
+  if (fio_cli_unnamed_count())
+    fio_cli_set("-www", fio_cli_unnamed(0));
+
+  /* assert that the public folder is indeed a folder */
+  FIO_ASSERT(fio_filename_is_folder(fio_cli_get("-www")),
+             "not a folder:\n\t%s",
+             fio_cli_get("-www"));
+
+  /* listen for HTTP connections (and test for error) */
+  FIO_ASSERT(!fio_http_listen(NULL,
+                              .public_folder = FIO_STR_INFO1((char *)fio_cli_get("-www")),
+                              .on_http = on_request,
+                              .log = 1),
+             "Couldn't listen for HTTP connections.");
+  fio_srv_start(0);
+  return 0;
 }
 ```
 

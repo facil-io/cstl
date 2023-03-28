@@ -185,17 +185,24 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
   if (public_cert_file && private_key_file) { /* load certificate */
     SSL_CTX_set_default_passwd_cb(s->ctx, fio___openssl_pem_password_cb);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, (void *)pk_password);
+    FIO_LOG_DDEBUG2("loading TLS certificates: %s & %s",
+                    public_cert_file,
+                    private_key_file);
     /* Set the key and cert */
     if (SSL_CTX_use_certificate_chain_file(s->ctx, public_cert_file) <= 0) {
       ERR_print_errors_fp(stderr);
-      FIO_ASSERT(0, "OpenSSL couldn't open PEM file for certificate.");
+      FIO_ASSERT(0,
+                 "OpenSSL couldn't open PEM file for certificate: %s",
+                 public_cert_file);
     }
 
     if (SSL_CTX_use_PrivateKey_file(s->ctx,
                                     private_key_file,
                                     SSL_FILETYPE_PEM) <= 0) {
       ERR_print_errors_fp(stderr);
-      FIO_ASSERT(0, "OpenSSL couldn't open PEM file for private key.");
+      FIO_ASSERT(0,
+                 "OpenSSL couldn't open PEM file for private key: %s",
+                 private_key_file);
     }
     SSL_CTX_set_default_passwd_cb(s->ctx, NULL);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, NULL);
@@ -277,7 +284,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
                .each_trust = fio___openssl_each_trust);
 
   if (fio_tls_alpn_count(tls)) {
-    FIO_STR_INFO_TMP_VAR(alpn_list, 1024);
+    FIO_STR_INFO_TMP_VAR(alpn_list, 1023);
     fio_tls_each(tls,
                  .udata = ctx,
                  .udata2 = &alpn_list,
