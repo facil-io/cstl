@@ -1291,9 +1291,11 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
     else /* arenas !> threads (birthday) */
       arean_count = (arean_count << 1) + 2;
 #else
-#if _MSC_VER
-#pragma message(                                                               \
-    "Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.")
+#if _MSC_VER || __MINGW32__
+    /* https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
+    SYSTEM_INFO win_system_info;
+    GetSystemInfo(&win_system_info);
+    arean_count = (size_t)win_system_info.dwNumberOfProcessors;
 #else
 #warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.
 #endif
