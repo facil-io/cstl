@@ -2674,7 +2674,7 @@ Binary String Type - Embedded Strings
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
-  const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
+  const size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
   if (!dest->capa)
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(

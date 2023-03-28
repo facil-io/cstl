@@ -1120,8 +1120,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
 }
 
 /**
- * Reserves at least `amount` of bytes for the string's data (reserved count
- * includes used data).
+ * Reserves at least `amount` of bytes for the string's data.
  *
  * Returns the current state of the String.
  */
@@ -1135,7 +1134,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   state = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (FIO_STR_IS_FROZEN(s))
     return state;
-  if (state.capa < amount) {
+  amount += state.len;
+  if (state.capa <= amount) {
     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount);
     state.buf[state.len] = 0;
     FIO_NAME(FIO_STR_NAME, __info_update)(s_, state);

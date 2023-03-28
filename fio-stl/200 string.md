@@ -475,7 +475,7 @@ Actual effects depend on the underlying memory allocator and it's implementation
 fio_str_info_s STR_reserve(FIO_STR_PTR s, size_t amount);
 ```
 
-Reserves at least `amount` of bytes for the string's data (reserved count includes used data).
+Reserves at least `amount` of new bytes to be added to the string's data.
 
 Returns the current state of the String.
 

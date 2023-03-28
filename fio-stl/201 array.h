@@ -199,15 +199,12 @@ FIO_IFUNC int FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(FIO_ARRAY_PTR ary);
 FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary);
 
 /**
- * Reserves a minimal capacity for the array.
+ * Reserves a minimal capacity for additional elements to be added to the array.
  *
  * If `capa` is negative, new memory will be allocated at the beginning of the
  * array rather then it's end.
  *
  * Returns the array's new capacity.
- *
- * Note: the reserved capacity includes existing data. If the requested reserved
- * capacity is equal (or less) then the existing capacity, nothing will be done.
  */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary,
                                                  int32_t capa);
@@ -653,14 +650,16 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
 /** Reserves a minimal capacity for the array. */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                  int32_t capa_) {
-  const uint32_t abs_capa =
-      (capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_);
-  const uint32_t capa = FIO_ARRAY_SIZE2WORDS(abs_capa);
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
+  uint32_t abs_capa = ((capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_));
+  uint32_t capa;
   FIO_ARRAY_TYPE *tmp;
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
+    abs_capa += ary->end - ary->start;
+    capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= ary->capa)
       return ary->capa;
     /* objects don't move, use only realloc */
@@ -710,6 +709,8 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     }
     return capa;
   case 1:
+    abs_capa += ary->start;
+    capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= FIO_ARRAY_EMBEDDED_CAPA)
       return FIO_ARRAY_EMBEDDED_CAPA;
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
@@ -774,7 +775,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   if (total < offset || total + offset < total)
     return NULL; /* item count overflow */
 
-  const uint32_t capa = FIO_NAME(FIO_ARRAY_NAME, reserve)(dest_, total);
+  const uint32_t capa = FIO_NAME(FIO_ARRAY_NAME, reserve)(dest_, added);
 
   if (!FIO_ARRAY_IS_EMBEDDED(dest) && dest->start + total > capa) {
     /* we need to move the existing items due to the offset */

@@ -162,13 +162,11 @@ Returns the current, temporary, array capacity (it's dynamic).
 uint32_t ARY_reserve(ARY_s * ary, int32_t capa);
 ```
 
-Reserves a minimal capacity for the array.
+Reserves capacity for new members to be added to the array.
 
 If `capa` is negative, new memory will be allocated at the beginning of the array rather then it's end.
 
 Returns the array's new capacity.
-
-**Note**: the reserved capacity includes existing data / capacity. If the requested reserved capacity is equal (or less) then the existing capacity, nothing will be done.
 
 #### `ARY_concat`
 

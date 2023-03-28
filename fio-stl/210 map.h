@@ -987,6 +987,7 @@ API implementation
 SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  capa += o->count;
   if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> 31))
     return;
   uint_fast8_t bits = o->bits + 1;

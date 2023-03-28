@@ -2243,7 +2243,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     status = 404;
   h->status = status;
   /* TODO: load body template, fill details and send it...? */
-  FIO_STR_INFO_TMP_VAR(filename, 31);
+  FIO_STR_INFO_TMP_VAR(filename, 127);
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -2253,10 +2253,22 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
                                 .finish = 1};
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-type", 12),
+                               body ? FIO_STR_INFO2((char *)"text/html", 9)
+                                    : FIO_STR_INFO2((char *)"text/plain", 10));
   if (!body) {
     fio_str_info_s status_str = fio_http_status2str(status);
-    args.buf = status_str.buf;
-    args.len = status_str.len;
+    filename.len = 0;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("Error ", 6),
+                      FIO_STRING_WRITE_UNUM(status),
+                      FIO_STRING_WRITE_STR2(": ", 2),
+                      FIO_STRING_WRITE_STR_INFO(status_str),
+                      FIO_STRING_WRITE_STR2(".", 1));
+    args.buf = filename.buf;
+    args.len = filename.len;
     args.copy = 1;
     args.dealloc = NULL;
   }

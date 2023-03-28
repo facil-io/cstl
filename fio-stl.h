@@ -19164,7 +19164,7 @@ Binary String Type - Embedded Strings
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
-  const size_t new_capa = fio_string_capa4len(len + 1 + sizeof(bstr_m[0]));
+  const size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
   if (!dest->capa)
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
@@ -20321,8 +20321,7 @@ SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
 }
 
 /**
- * Reserves at least `amount` of bytes for the string's data (reserved count
- * includes used data).
+ * Reserves at least `amount` of bytes for the string's data.
  *
  * Returns the current state of the String.
  */
@@ -20336,7 +20335,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   state = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (FIO_STR_IS_FROZEN(s))
     return state;
-  if (state.capa < amount) {
+  amount += state.len;
+  if (state.capa <= amount) {
     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount);
     state.buf[state.len] = 0;
     FIO_NAME(FIO_STR_NAME, __info_update)(s_, state);
@@ -21369,15 +21369,12 @@ FIO_IFUNC int FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(FIO_ARRAY_PTR ary);
 FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary);
 
 /**
- * Reserves a minimal capacity for the array.
+ * Reserves a minimal capacity for additional elements to be added to the array.
  *
  * If `capa` is negative, new memory will be allocated at the beginning of the
  * array rather then it's end.
  *
  * Returns the array's new capacity.
- *
- * Note: the reserved capacity includes existing data. If the requested reserved
- * capacity is equal (or less) then the existing capacity, nothing will be done.
  */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary,
                                                  int32_t capa);
@@ -21823,14 +21820,16 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
 /** Reserves a minimal capacity for the array. */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                  int32_t capa_) {
-  const uint32_t abs_capa =
-      (capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_);
-  const uint32_t capa = FIO_ARRAY_SIZE2WORDS(abs_capa);
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
+  uint32_t abs_capa = ((capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_));
+  uint32_t capa;
   FIO_ARRAY_TYPE *tmp;
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
+    abs_capa += ary->end - ary->start;
+    capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= ary->capa)
       return ary->capa;
     /* objects don't move, use only realloc */
@@ -21880,6 +21879,8 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     }
     return capa;
   case 1:
+    abs_capa += ary->start;
+    capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= FIO_ARRAY_EMBEDDED_CAPA)
       return FIO_ARRAY_EMBEDDED_CAPA;
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
@@ -21944,7 +21945,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
   if (total < offset || total + offset < total)
     return NULL; /* item count overflow */
 
-  const uint32_t capa = FIO_NAME(FIO_ARRAY_NAME, reserve)(dest_, total);
+  const uint32_t capa = FIO_NAME(FIO_ARRAY_NAME, reserve)(dest_, added);
 
   if (!FIO_ARRAY_IS_EMBEDDED(dest) && dest->start + total > capa) {
     /* we need to move the existing items due to the offset */
@@ -23971,6 +23972,7 @@ API implementation
 SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  capa += o->count;
   if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> 31))
     return;
   uint_fast8_t bits = o->bits + 1;
@@ -33390,7 +33392,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     status = 404;
   h->status = status;
   /* TODO: load body template, fill details and send it...? */
-  FIO_STR_INFO_TMP_VAR(filename, 31);
+  FIO_STR_INFO_TMP_VAR(filename, 127);
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -33400,10 +33402,22 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
                                 .finish = 1};
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-type", 12),
+                               body ? FIO_STR_INFO2((char *)"text/html", 9)
+                                    : FIO_STR_INFO2((char *)"text/plain", 10));
   if (!body) {
     fio_str_info_s status_str = fio_http_status2str(status);
-    args.buf = status_str.buf;
-    args.len = status_str.len;
+    filename.len = 0;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("Error ", 6),
+                      FIO_STRING_WRITE_UNUM(status),
+                      FIO_STRING_WRITE_STR2(": ", 2),
+                      FIO_STRING_WRITE_STR_INFO(status_str),
+                      FIO_STRING_WRITE_STR2(".", 1));
+    args.buf = filename.buf;
+    args.len = filename.len;
     args.copy = 1;
     args.dealloc = NULL;
   }

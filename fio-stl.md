@@ -6455,7 +6455,7 @@ Actual effects depend on the underlying memory allocator and it's implementation
 fio_str_info_s STR_reserve(FIO_STR_PTR s, size_t amount);
 ```
 
-Reserves at least `amount` of bytes for the string's data (reserved count includes used data).
+Reserves at least `amount` of new bytes to be added to the string's data.
 
 Returns the current state of the String.
 
@@ -6838,13 +6838,11 @@ Returns the current, temporary, array capacity (it's dynamic).
 uint32_t ARY_reserve(ARY_s * ary, int32_t capa);
 ```
 
-Reserves a minimal capacity for the array.
+Reserves capacity for new members to be added to the array.
 
 If `capa` is negative, new memory will be allocated at the beginning of the array rather then it's end.
 
 Returns the array's new capacity.
-
-**Note**: the reserved capacity includes existing data / capacity. If the requested reserved capacity is equal (or less) then the existing capacity, nothing will be done.
 
 #### `ARY_concat`
 
@@ -7490,7 +7488,7 @@ The number of objects in the map capacity.
 void map_reserve(FIO_MAP_PTR map, size_t capa);
 ```
 
-Reserves at minimum the capacity requested.
+Reserves at minimum the capacity requested for new members. May reserve more than the capacity requested.
 
 ### Adding / Removing Elements from the Map
 
