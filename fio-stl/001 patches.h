@@ -53,6 +53,8 @@ Patches for Windows
 #else
 #warning some functionality is enabled by patchwork.
 #endif
+#define _CRT_NONSTDC_NO_WARNINGS
+
 #include <fcntl.h>
 #include <io.h>
 #include <processthreadsapi.h>
@@ -110,22 +112,16 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
 
-#if !defined(fstat)
-#define fstat _fstat
-#endif /* fstat */
-#if !defined(stat)
-#define stat _stat
-#endif /* stat */
-#if !defined(unlink)
-#define unlink _unlink
-#endif /* unlink */
-
-#ifndef getpid
-#define getpid _getpid
-#endif /* getpid */
-#ifndef pid_t
-#define pid_t int
-#endif /* pid_t */
+/** patch for clock_gettime */
+FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv);
+/** patch for pread */
+FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset);
+/** patch for pwrite */
+FIO_SFUNC ssize_t fio_pwrite(int fd,
+                             const void *buf,
+                             size_t count,
+                             off_t offset);
+FIO_SFUNC int fio_kill(int pid, int signum);
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -182,24 +178,29 @@ FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
 #define CLOCK_MONOTONIC 1
 #endif
 
-/** patch for clock_gettime */
-FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv);
-/** patch for pread */
-FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset);
-/** patch for pwrite */
-FIO_SFUNC ssize_t fio_pwrite(int fd,
-                             const void *buf,
-                             size_t count,
-                             off_t offset);
-FIO_SFUNC int fio_kill(int pid, int signum);
+#define kill(...)       fio_kill(__VA_ARGS__)
+#define pread(...)      fio_pread(__VA_ARGS__)
+#define pwrite(...)     fio_pwrite(__VA_ARGS__)
+#define gmtime_r(...)   fio___w_gmtime_r(__VA_ARGS__)
+#define strcasecmp(...) fio___w_strcasecmp(__VA_ARGS__)
+#define write(...)      fio___w_write(__VA_ARGS__)
+#define read(...)       fio___w_read(__VA_ARGS__)
 
-#define kill       fio_kill
-#define pread      fio_pread
-#define pwrite     fio_pwrite
-#define gmtime_r   fio___w_gmtime_r
-#define strcasecmp fio___w_strcasecmp
-#define write      fio___w_write
-#define read       fio___w_read
+#if !defined(fstat)
+#define fstat(...) _fstat(__VA_ARGS__)
+#endif /* fstat */
+#if !defined(stat)
+#define stat(...) _stat(__VA_ARGS__)
+#endif /* stat */
+#if !defined(unlink)
+#define unlink(...) _unlink(__VA_ARGS__)
+#endif /* unlink */
+#ifndef getpid
+#define getpid(...) _getpid(__VA_ARGS__)
+#endif /* getpid */
+#ifndef pid_t
+#define pid_t int
+#endif /* pid_t */
 
 #if !FIO_HAVE_UNIX_TOOLS
 /* patch clock_gettime */
