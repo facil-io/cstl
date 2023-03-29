@@ -194,7 +194,7 @@ FIO_SFUNC int kill(int pid, int signum);
 #define pid_t int
 #endif /* pid_t */
 
-#if !FIO_HAVE_UNIX_TOOLS
+#if !FIO_HAVE_UNIX_TOOLS || defined(__MINGW32__)
 #define pipe(fds) _pipe(fds, 65536, _O_BINARY)
 #endif
 
@@ -253,6 +253,7 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   }
   return -1;
 }
+#endif /* __MINGW32__ */
 
 /** patch for pread */
 FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
@@ -274,7 +275,6 @@ bad_file:
   errno = EBADF;
   return -1;
 }
-#endif /* __MINGW32__ */
 
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
