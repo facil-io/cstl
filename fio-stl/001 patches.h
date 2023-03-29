@@ -90,14 +90,6 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 }
 
 /* *****************************************************************************
-
-
-            MinGW and CYGWin already provide their own patches
-
-
-***************************************************************************** */
-#if !FIO_HAVE_UNIX_TOOLS
-/* *****************************************************************************
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
@@ -108,20 +100,23 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   return result;
 }
 
+#ifndef __MINGW32__
+/** patch for strcasecmp */
 FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
   return _stricmp(s1, s2);
 }
-
+/** patch for write */
 FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
   return _write(fd, b, l);
 }
-
+/** patch for read */
 FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
-
 /** patch for clock_gettime */
 FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
+#endif /* __MINGW32__ */
+
 /** patch for pread */
 FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
@@ -200,15 +195,14 @@ FIO_SFUNC int kill(int pid, int signum);
 #endif /* pid_t */
 
 #if !FIO_HAVE_UNIX_TOOLS
-/* patch clock_gettime */
-#define clock_gettime fio_clock_gettime
-#define pipe(fds)     _pipe(fds, 65536, _O_BINARY)
+#define pipe(fds) _pipe(fds, 65536, _O_BINARY)
 #endif
 
 /* *****************************************************************************
 Patched function Implementation
 ***************************************************************************** */
 
+#ifndef __MINGW32__
 /* based on:
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
  */
@@ -280,6 +274,7 @@ bad_file:
   errno = EBADF;
   return -1;
 }
+#endif /* __MINGW32__ */
 
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
@@ -368,11 +363,6 @@ cleanup_after_error:
     CloseHandle(handle);
   return -1;
 }
-
-/* *****************************************************************************
-End of possibly pre-patched area.
-***************************************************************************** */
-#endif /* !FIO_HAVE_UNIX_TOOLS */
 /* *****************************************************************************
 
 

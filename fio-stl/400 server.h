@@ -1574,6 +1574,7 @@ static void fio___srv_wait_for_worker(void *thr_) {
 
 /** Worker sentinel */
 static void *fio___srv_worker_sentinel(void *pid_data) {
+#ifdef WEXITSTATUS
   pid_t pid = (pid_t)(uintptr_t)pid_data;
   int status = 0;
   (void)status;
@@ -1597,6 +1598,11 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
     fio_thread_detach(&thr);
     fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
   }
+#else /* Non POSIX? no `fork`? */
+  FIO_ASSERT(
+      0,
+      "facil.io doesn't know how to spawn and wait on workers on this system.");
+#endif
   return NULL;
 }
 

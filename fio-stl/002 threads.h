@@ -72,7 +72,7 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 #endif
 
 /* *****************************************************************************
-Module API
+API for forking processes, spawning threads and waiting on mutexes
 ***************************************************************************** */
 
 /** Should behave the same as the POSIX system call `fork`. */
@@ -351,12 +351,12 @@ Windows Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 /** Should behave the same as the POSIX system call `fork`. */
-#ifdef fork
+#if defined(fork) || defined(WEXITSTATUS)
 FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
 #else
 FIO_IFUNC_F int fio_thread_fork(void) { return -1; }
 #endif
-#endif
+#endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
 /** Starts a new thread, returns 0 on success and -1 on failure. */

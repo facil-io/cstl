@@ -13,6 +13,23 @@ Please note that due to thread return value and methodology differences, `FIO_TH
 
 The following methods are provided when the `FIO_THREADS` macro is defined before including the `fio-stl.h` header.
 
+### Process functions
+
+#### `FIO_THREADS_FORK_BYO`
+
+* **BYO**: **B**ring **Y**our **O**wn.
+
+If this macro is defined, these processes forking functions are only declared, but they are **not** defined (implemented).
+
+The implementation expects you to provide your own alternatives.
+
+#### `fio_thread_fork`
+
+```c
+int fio_thread_fork(void);
+```
+
+Behaves (or should behave) the same as the POSIX system call `fork`.
 
 ### Thread functions
 
@@ -22,7 +39,7 @@ The following methods are provided when the `FIO_THREADS` macro is defined befor
 
 If this macro is defined, these thread functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own inline alternatives.
+The implementation expects you to provide your own alternatives.
 
 #### `fio_thread_create`
 ```c
@@ -109,7 +126,7 @@ Sets the current thread's priority level as a `fio_thread_priority_e` enum (see 
 
 If this macro is defined, these mutex functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own inline alternatives.
+The implementation expects you to provide your own alternatives.
 
 #### `FIO_THREAD_MUTEX_INIT`
 
@@ -161,7 +178,7 @@ Destroys the simple Mutex (cleanup).
 
 If this macro is defined, these conditional variable functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own inline alternatives.
+The implementation expects you to provide your own alternatives.
 
 #### `fio_thread_cond_init`
 
