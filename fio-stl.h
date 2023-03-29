@@ -3317,6 +3317,14 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 }
 
 /* *****************************************************************************
+
+
+            MinGW and CYGWin already provide their own patches
+
+
+***************************************************************************** */
+#if !FIO_HAVE_UNIX_TOOLS
+/* *****************************************************************************
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
@@ -3587,6 +3595,11 @@ cleanup_after_error:
     CloseHandle(handle);
   return -1;
 }
+
+/* *****************************************************************************
+End of possibly pre-patched area.
+***************************************************************************** */
+#endif /* !FIO_HAVE_UNIX_TOOLS */
 /* *****************************************************************************
 
 
@@ -13020,7 +13033,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void) {
     FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)();
     return;
   }
-  FIO_LOG_DEBUG2("MEMORY reinitializeing " FIO_MACRO2STR(
+  FIO_LOG_DEBUG2("MEMORY reinitializing " FIO_MACRO2STR(
       FIO_NAME(FIO_MEMORY_NAME, malloc)) " state");
   FIO_MEMORY_LOCK_TYPE_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
@@ -13859,7 +13872,7 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
         ((uintptr_t)ptr);
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
     if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER) {
-      /* extend max_len to accomodate possible length */
+      /* extend max_len to accommodate possible length */
       max_len =
           ((uintptr_t)c + FIO_MEMORY_SYS_ALLOCATION_SIZE) - ((uintptr_t)ptr);
     } else

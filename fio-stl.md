@@ -4176,7 +4176,7 @@ Allocations above the allocator limit will be redirected to `mmap`, as if `fio_m
 #### `fio_calloc`
 
 ```c
-void * fio_realloc2(void *ptr, size_t new_size, size_t copy_length);
+void * fio_calloc(size_t size_per_unit, size_t unit_count);
 ```
 
 Same as calling `fio_malloc(size_per_unit * unit_count)`.
@@ -4344,7 +4344,7 @@ The following compile time MACROS can effect the tuning and configuration of the
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
 ```
 
-If true, all allocations (including `realloc2` but excluding `realloc`) will return initialized memory memory and memory will be zeroed out earlier.
+If true, all allocations (including `realloc2` but excluding `realloc`) will return initialized memory and memory will be zeroed out earlier.
 
 **Note**: when using `realloc` (vs., `realloc2`), the allocator does not know the size of the original allocation or its copy limits, so the memory isn't guaranteed to be initialized unless using `realloc2` which promises that any memory over `copy_len`is initialized.
 
