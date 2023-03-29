@@ -93,35 +93,32 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
-FIO_IFUNC struct tm *fio___w_gmtime_r(const time_t *timep, struct tm *result) {
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
   if (t && result)
     *result = *t;
   return result;
 }
 
-FIO_IFUNC int fio___w_strcasecmp(const char *s1, const char *s2) {
+FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
   return _stricmp(s1, s2);
 }
 
-FIO_IFUNC int fio___w_write(int fd, const void *b, unsigned int l) {
+FIO_IFUNC int write(int fd, const void *b, unsigned int l) {
   return _write(fd, b, l);
 }
 
-FIO_IFUNC int fio___w_read(int const fd, void *const b, unsigned const l) {
+FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
   return _read(fd, b, l);
 }
 
 /** patch for clock_gettime */
-FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv);
+FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
 /** patch for pread */
-FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset);
+FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
-FIO_SFUNC ssize_t fio_pwrite(int fd,
-                             const void *buf,
-                             size_t count,
-                             off_t offset);
-FIO_SFUNC int fio_kill(int pid, int signum);
+FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
+FIO_SFUNC int kill(int pid, int signum);
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -178,25 +175,17 @@ FIO_SFUNC int fio_kill(int pid, int signum);
 #define CLOCK_MONOTONIC 1
 #endif
 
-#define kill(...)       fio_kill(__VA_ARGS__)
-#define pread(...)      fio_pread(__VA_ARGS__)
-#define pwrite(...)     fio_pwrite(__VA_ARGS__)
-#define gmtime_r(...)   fio___w_gmtime_r(__VA_ARGS__)
-#define strcasecmp(...) fio___w_strcasecmp(__VA_ARGS__)
-#define write(...)      fio___w_write(__VA_ARGS__)
-#define read(...)       fio___w_read(__VA_ARGS__)
-
 #if !defined(fstat)
-#define fstat(...) _fstat(__VA_ARGS__)
+#define fstat _fstat
 #endif /* fstat */
 #if !defined(stat)
-#define stat(...) _stat(__VA_ARGS__)
+#define stat _stat
 #endif /* stat */
 #if !defined(unlink)
-#define unlink(...) _unlink(__VA_ARGS__)
+#define unlink _unlink
 #endif /* unlink */
 #ifndef getpid
-#define getpid(...) _getpid(__VA_ARGS__)
+#define getpid _getpid
 #endif /* getpid */
 #ifndef pid_t
 #define pid_t int
@@ -216,7 +205,7 @@ Patched function Implementation
  * https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows
  */
 /** patch for clock_gettime */
-FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
+FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
   static union {
@@ -264,7 +253,7 @@ FIO_SFUNC int fio_clock_gettime(const uint32_t clk_type, struct timespec *tv) {
 }
 
 /** patch for pread */
-FIO_SFUNC ssize_t fio_pread(int fd, void *buf, size_t count, off_t offset) {
+FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   ssize_t bytes_read = 0;
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
@@ -285,10 +274,7 @@ bad_file:
 }
 
 /** patch for pwrite */
-FIO_SFUNC ssize_t fio_pwrite(int fd,
-                             const void *buf,
-                             size_t count,
-                             off_t offset) {
+FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   ssize_t bytes_written = 0;
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
@@ -307,7 +293,7 @@ bad_file:
 }
 
 /** patch for kill */
-FIO_SFUNC int fio_kill(int pid, int sig) {
+FIO_SFUNC int kill(int pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   HANDLE handle;
   DWORD status;
