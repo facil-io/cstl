@@ -7611,7 +7611,7 @@ FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
 
 #else
 
-FIO_IFUNC_F int fio_thread_fork(void) {
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
   return (fio_thread_pid_t)-1;
 }
