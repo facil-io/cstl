@@ -9256,57 +9256,79 @@ Returns true (`1`) if the engine is attached to the system.
 
 ### User Defined Pub/Sub Message Metadata
 
+#### `fio_msg_metadata_fn`
+
 ```c
-/* *****************************************************************************
- * Message metadata (advance usage API)
- **************************************************************************** */
-
-
-
-/** Pub/Sub Metadata callback type. */
 typedef void *(*fio_msg_metadata_fn)(fio_str_info_s ch,
                                      fio_str_info_s msg,
                                      uint8_t is_json);
+```
 
-/**
- * It's possible to attach metadata to facil.io named messages (filter == 0)
- * before they are published.
- *
- * This allows, for example, messages to be encoded as network packets for
- * outgoing protocols (i.e., encoding for WebSocket transmissions), improving
- * performance in large network based broadcasting.
- *
- * Up to `FIO_PUBSUB_METADATA_LIMIT` metadata callbacks can be attached.
- *
- * The callback should return a `void *` pointer.
- *
- * To remove a callback, call `fio_message_metadata_remove` with the returned
- * value.
- *
- * The cluster messaging system allows some messages to be flagged as JSON and
- * this flag is available to the metadata callback.
- *
- * Returns zero (0) on success or -1 on failure.
- *
- * Multiple `fio_message_metadata_add` calls increase a reference count and
- * should be matched by the same number of `fio_message_metadata_remove`.
- */
-int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
-                             void (*cleanup)(void *));
+Pub/Sub Metadata callback type.
 
-/**
- * Removed the metadata callback.
- *
- * Removal might be delayed if live metatdata exists.
- */
+#### `fio_message_metadata_add`
+
+```c
+int fio_message_metadata_add(fio_msg_metadata_fn metadata_func, void (*cleanup)(void *));
+```
+
+It's possible to attach metadata to facil.io named messages (filter == 0) before they are published.
+
+This allows, for example, messages to be encoded as network packets for outgoing protocols (i.e., encoding for WebSocket transmissions), improving performance in large network based broadcasting.
+
+Up to `FIO_PUBSUB_METADATA_LIMIT` metadata callbacks can be attached.
+
+The callback should return a `void *` pointer.
+
+To remove a callback, call `fio_message_metadata_remove` with the returned value.
+
+The cluster messaging system allows some messages to be flagged as JSON and this flag is available to the metadata callback.
+
+Returns zero (0) on success or -1 on failure.
+
+Multiple `fio_message_metadata_add` calls increase a reference count and should be matched by the same number of `fio_message_metadata_remove`.
+
+#### `fio_message_metadata_remove`
+
+```c
 void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func);
+```
 
-/**
- * Finds the message's metadata, returning the data or NULL.
- *
- * Note: channels with non-zero filters don't have metadata attached.
- */
+
+Removed the metadata callback.
+
+Removal might be delayed if live metatdata exists.
+
+#### `fio_message_metadata`
+
+```c
 void *fio_message_metadata(fio_msg_metadata_fn metadata_func);
+```
+
+
+Finds the message's metadata, returning the data or NULL.
+
+Note: channels with non-zero filters don't have metadata attached.
+
+### Pub/Sub Connectivity Helpers
+
+#### `fio_pubsub_ipc_url_set`
+
+```c
+int fio_pubsub_ipc_url_set(char *str, size_t len);
+```
+
+Returns the current IPC socket address (cannot be changed after `fio_srv_start` was called).
+
+Returns -1 on error (i.e., server is already running or length is too long).
+
+#### `fio_pubsub_ipc_url`
+
+```c
+const char *fio_pubsub_ipc_url(void);
+```
+
+Returns the current IPC socket address (shouldn't be changed).
 
 -------------------------------------------------------------------------------
 ## HTTP Server
