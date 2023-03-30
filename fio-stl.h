@@ -43812,20 +43812,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     const char *msg;
     uint16_t flag;
   } server_tests[] = {
-      {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
+    {"127.0.0.1", "9437", "TCP", FIO_SOCK_TCP},
 #ifdef AF_UNIX
-#ifdef P_tmpdir
-      {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
-       NULL,
-       "Unix",
-       FIO_SOCK_UNIX},
+#if defined(P_tmpdir) && !defined(__MINGW32__)
+    {P_tmpdir "/tmp_unix_testing_socket_facil_io.sock",
+     NULL,
+     "Unix",
+     FIO_SOCK_UNIX},
 #else
-      {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
+    {"./tmp_unix_testing_socket_facil_io.sock", NULL, "Unix", FIO_SOCK_UNIX},
 #endif
 #endif
-      /* accept doesn't work with UDP, not like this... UDP test is seperate */
-      // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
-      {.address = NULL},
+    /* accept doesn't work with UDP, not like this... UDP test is seperate */
+    // {"127.0.0.1", "9437", "UDP", FIO_SOCK_UDP},
+    {.address = NULL},
   };
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
