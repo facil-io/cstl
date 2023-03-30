@@ -22,7 +22,7 @@ jobs:
     - name: reset exit code 2
       run: cmd /c "exit 0"
     - name: Test STL (debug) - no allocators
-      run: cl /Od /RTCsu /TC tests\stl.c /I. /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stl.exe && ./stl.exe
+      run: cl /Od /RTCsu /TC tests\stl.c /I. /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stld.exe && ./stld.exe
     - name: reset exit code 3
       run: cmd /c "exit 0"
     - name: Test fio_malloc speed
