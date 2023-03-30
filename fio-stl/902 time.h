@@ -33,6 +33,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
 #endif
 
+#if FIO_OS_WIN && !defined(gmtime_r)
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  struct tm *t = gmtime(timep);
+  if (t && result)
+    *result = *t;
+  return result;
+}
+#endif
+
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
   fprintf(stderr, "* Testing facil.io fio_time2gm vs gmtime_r\n");
   struct tm tm1 = {0}, tm2 = {0};

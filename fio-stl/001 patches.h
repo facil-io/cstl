@@ -77,13 +77,6 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  struct tm *t = gmtime(timep);
-  if (t && result)
-    *result = *t;
-  return result;
-}
-
 #ifndef __MINGW32__
 /** patch for strcasecmp */
 FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
