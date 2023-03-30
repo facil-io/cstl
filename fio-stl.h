@@ -3387,6 +3387,24 @@ FIO_SFUNC int kill(int pid, int signum);
 #define O_TMPFILE O_TEMPORARY
 #endif
 
+#ifdef __MINGW32__
+#define TH32CS_SNAPPROCESS 2
+
+#define __WCONTINUED 8
+#define __WIFCONTINUED(status) ((status) == __W_CONTINUED)
+#define __WTERMSIG(status) ((status) & 0x7F)
+#define __WIFEXITED(status) (__WTERMSIG(status) == 0)
+#define __WEXITSTATUS(status) (((status) & 0xFF00) >> 8)
+#define __WNOWAIT 0x01000000
+
+#define WCONTINUED __WCONTINUED
+#define WIFEXITED(status) __WIFEXITED(status)
+#define WEXITSTATUS(status) __WEXITSTATUS(status)
+#define WNOHANG 1
+#define WNOWAIT __WNOWAIT
+#define WUNTRACED 2
+#endif
+
 #if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
     CLOCK_REALTIME == CLOCK_MONOTONIC
 #undef CLOCK_MONOTONIC
@@ -3420,6 +3438,13 @@ FIO_SFUNC int kill(int pid, int signum);
 #ifndef pid_t
 #define pid_t int
 #endif /* pid_t */
+#ifndef uid_t
+#define uid_t unsigned int
+#endif
+
+#ifdef __MINGW32__
+FIO_SFUNC int waitpid(pid_t pid, int * status, int options);
+#endif
 
 #if !FIO_HAVE_UNIX_TOOLS || defined(__MINGW32__)
 #define pipe(fds) _pipe(fds, 65536, _O_BINARY)
@@ -3590,6 +3615,154 @@ cleanup_after_error:
     CloseHandle(handle);
   return -1;
 }
+
+#ifdef __MINGW32__
+/** patch for waitpid 
+ * taken from: https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h
+ * __waitpid_internal may be useful to implement other wait functions
+ */
+struct rusage {
+    struct timeval ru_utime; /* user time used */
+    struct timeval ru_stime; /* system time used */
+};
+
+typedef struct tagPROCESSENTRY32W {
+    DWORD   dwSize;
+    DWORD   cntUsage;
+    DWORD   th32ProcessID;
+    ULONG_PTR th32DefaultHeapID;
+    DWORD   th32ModuleID;
+    DWORD   cntThreads;
+    DWORD   th32ParentProcessID;
+    LONG    pcPriClassBase;
+    DWORD   dwFlags;
+    WCHAR   szExeFile[MAX_PATH];
+} PROCESSENTRY32W;
+
+typedef PROCESSENTRY32W *  LPPROCESSENTRY32W;
+
+typedef struct siginfo_t {
+    int si_signo; /* signal number */
+    int si_code; /* signal code */
+    int si_errno; /* if non-zero, errno associated with this signal, as defined in <errno.h> */
+    pid_t si_pid; /* sending process ID */
+    uid_t si_uid; /* real user ID of sending process */
+    void * si_addr; /* address of faulting instruction */
+    int si_status; /* exit value of signal */
+    long si_band; /* band event of SIGPOLL */
+} siginfo_t;
+
+HANDLE WINAPI CreateToolhelp32Snapshot(DWORD dwFlags, DWORD th32ProcessID);
+BOOL WINAPI Process32FirstW(HANDLE hSnapshot, LPPROCESSENTRY32W lppe);
+BOOL WINAPI Process32NextW(HANDLE hSnapshot, LPPROCESSENTRY32W lppe);
+
+static int __filter_anychild(PROCESSENTRY32W * pe, DWORD pid) {
+    return pe->th32ParentProcessID == GetCurrentProcessId();
+}
+
+static int __filter_pid(PROCESSENTRY32W * pe, DWORD pid) {
+    return pe->th32ProcessID == pid;
+}
+
+FIO_SFUNC int __waitpid_internal(pid_t pid, int * status, int options, siginfo_t * infop, struct rusage * rusage) {
+    int saved_status = 0;
+    HANDLE hProcess = INVALID_HANDLE_VALUE, hSnapshot = INVALID_HANDLE_VALUE;
+    int (*filter)(PROCESSENTRY32W*, DWORD);
+    PROCESSENTRY32W pe;
+    DWORD wait_status = 0, exit_code = 0;
+    int nohang = WNOHANG == (WNOHANG & options);
+    options &= ~(WUNTRACED | __WNOWAIT | __WCONTINUED | WNOHANG);
+    if (options) {
+        errno = -EINVAL;
+        return -1;
+    }
+
+    if (pid == -1) {
+        /* wait for any child */
+        filter = __filter_anychild;
+    } else if (pid < -1) {
+        /* wait for any process from the group */
+        abort(); /* not implemented */
+    } else if (pid == 0) {
+        /* wait for any process from the current group */
+        abort(); /* not implemented */
+    } else {
+        /* wait for process with given pid */
+        filter = __filter_pid;
+    }
+
+    hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (INVALID_HANDLE_VALUE == hSnapshot) {
+        errno = ECHILD;
+        return -1;
+    }
+    pe.dwSize = sizeof(pe);
+    if (!Process32FirstW(hSnapshot, &pe)) {
+        CloseHandle(hSnapshot);
+        errno = ECHILD;
+        return -1;
+    }
+    do {
+        if (filter(&pe, pid)) {    
+            hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, 0, pe.th32ProcessID);
+            if (INVALID_HANDLE_VALUE == hProcess) {
+                CloseHandle(hSnapshot);
+                errno = ECHILD;
+                return -1;
+            }
+            break;
+        }
+    }
+    while (Process32NextW(hSnapshot, &pe));
+    if (INVALID_HANDLE_VALUE == hProcess) {
+        CloseHandle(hSnapshot);
+        errno = ECHILD;
+        return -1;
+    }
+
+    wait_status = WaitForSingleObject(hProcess, nohang ? 0 : INFINITE);
+
+    if (WAIT_OBJECT_0 == wait_status) {
+        if (GetExitCodeProcess(hProcess, &exit_code))
+            saved_status |= (exit_code & 0xFF) << 8;
+    } else if (WAIT_TIMEOUT == wait_status && nohang) {
+        return 0;
+    } else {
+        CloseHandle(hProcess);
+        CloseHandle(hSnapshot);
+        errno = ECHILD;
+        return -1;
+    }
+    if (rusage) {
+        memset(rusage, 0, sizeof(*rusage));
+        /*
+        FIXME: causes FILETIME to conflict
+        FILETIME creation_time, exit_time, kernel_time, user_time;
+        if (GetProcessTimes(hProcess, &creation_time, &exit_time, &kernel_time, &user_time))
+        {
+             __filetime2timeval(kernel_time, &rusage->ru_stime);
+             __filetime2timeval(user_time, &rusage->ru_utime);
+        }
+        */
+    }
+    if (infop) {
+        memset(infop, 0, sizeof(*infop));
+    }
+
+    CloseHandle(hProcess);
+    CloseHandle(hSnapshot);
+
+    if (status)
+        *status = saved_status;
+
+    return pe.th32ParentProcessID;
+}
+
+FIO_SFUNC int waitpid(pid_t pid, int * status, int options) {
+    return __waitpid_internal(pid, status, options, NULL, NULL);
+}
+#endif
+
 /* *****************************************************************************
 
 
