@@ -2762,34 +2762,34 @@ FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
 }
 
 /** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *restrict d_,
-                                                 const void *restrict s_,
+FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
+                                                 const void *s_,
                                                  size_t l) {
-  char *restrict d = (char *restrict)d_ + l;
-  const char *restrict s = (const char *restrict)s_ + l;
+  char *d = (char *)d_ + l;
+  const char *s = (const char *)s_ + l;
   uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     (s -= 64), (d -= 64), (l -= 64);
     fio_memcpy64(t, s);
-    FIO_COMPILER_GUARD;
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy64(d, t);
   }
   if ((l & 32)) {
     (d -= 32), (s -= 32);
     fio_memcpy32(t, s);
-    FIO_COMPILER_GUARD;
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy32(d, t);
   }
   if ((l & 16)) {
     (d -= 16), (s -= 16);
     fio_memcpy16(t, s);
-    FIO_COMPILER_GUARD;
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy16(d, t);
   }
   if ((l & 8)) {
     (d -= 8), (s -= 8);
     fio_memcpy8(t, s);
-    FIO_COMPILER_GUARD;
+    FIO_COMPILER_GUARD_INSTRUCTION;
     fio_memcpy8(d, t);
   }
   if ((l & 4)) {
@@ -41763,7 +41763,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
   { /* test fio_memcpy as memmove */
     fprintf(stderr, "* testing fio_memcpy with overlapping memory (memmove)\n");
     char *msg = (char *)"fio_memcpy should work also as memmove, "
-                        "so no undefined behavior should occur. "
+                        "so undefined behavior should not occur. "
                         "Should be true for larger offsets too. At least over "
                         "128 Bytes.";
     size_t len = FIO_STRLEN(msg);

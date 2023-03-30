@@ -45,7 +45,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
   { /* test fio_memcpy as memmove */
     fprintf(stderr, "* testing fio_memcpy with overlapping memory (memmove)\n");
     char *msg = (char *)"fio_memcpy should work also as memmove, "
-                        "so no undefined behavior should occur. "
+                        "so undefined behavior should not occur. "
                         "Should be true for larger offsets too. At least over "
                         "128 Bytes.";
     size_t len = FIO_STRLEN(msg);
