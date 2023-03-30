@@ -3310,13 +3310,6 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
 Inlined patched and MACRO statements
 ***************************************************************************** */
 
-FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
-  struct tm *t = gmtime(timep);
-  if (t && result)
-    *result = *t;
-  return result;
-}
-
 #ifndef __MINGW32__
 /** patch for strcasecmp */
 FIO_IFUNC int strcasecmp(const char *s1, const char *s2) {
@@ -44924,6 +44917,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO___GMTIME_TEST_RANGE (1001LL * 376) /* test 0.5 millenia */
 #else
 #define FIO___GMTIME_TEST_RANGE (3003LL * 376) /* test ~3  millenia */
+#endif
+
+#if FIO_OS_WIN && !defined(gmtime_r)
+FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
+  struct tm *t = gmtime(timep);
+  if (t && result)
+    *result = *t;
+  return result;
+}
 #endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, time)(void) {
