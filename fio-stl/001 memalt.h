@@ -442,19 +442,12 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
     map[i] &= tmp[i]; /* only 0x00 will now be 0x80  */                        \
     flag |= map[i];                                                            \
   } while (0)
-  for (size_t aligner = 0; aligner < 5; ++aligner) {
+
+  for (size_t aligner = 0; aligner < 8; ++aligner) {
     FIO___STRLEN_CYCLE(0);
     if (flag)
       goto found_nul_byte0;
     str += 8;
-  }
-  str = FIO_PTR_MATH_RMASK(const char, str, 5); /* new loop alignment */
-  for (size_t aligner = 0; aligner < 3; ++aligner) {
-    for (size_t i = 0; i < 4; ++i)
-      FIO___STRLEN_CYCLE(i);
-    if (flag)
-      goto found_nul_byte4;
-    str += 32;
   }
   str = FIO_PTR_MATH_RMASK(const char, str, 6); /* new loop alignment */
   for (;;) { /* loop while aligned on 64 byte boundary */
@@ -468,15 +461,6 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
 found_nul_byte8:
   flag = 0;
   for (size_t i = 0; i < 8; ++i) {
-    map[i] = fio_has_byte2bitmap(map[i]);
-    flag |= (map[i] << (i << 3)); /* pack bitmap */
-  }
-  str += fio_lsb_index_unsafe(flag);
-  return (uintptr_t)str - start;
-
-found_nul_byte4:
-  flag = 0;
-  for (size_t i = 0; i < 4; ++i) {
     map[i] = fio_has_byte2bitmap(map[i]);
     flag |= (map[i] << (i << 3)); /* pack bitmap */
   }
