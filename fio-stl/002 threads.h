@@ -383,11 +383,11 @@ Windows Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 
-#if defined(fork) || defined(WEXITSTATUS)
 FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
-  return (fio_thread_pid_t)getpid();
+  return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
+#if defined(fork) && defined(WEXITSTATUS)
 FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
