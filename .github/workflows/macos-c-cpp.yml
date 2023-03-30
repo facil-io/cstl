@@ -1,0 +1,26 @@
+name: MacOS C/C++ CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test STL (debug) - no allocators
+      run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/test
+    - name: Test STL
+      run: make test
+    - name: Test fio_malloc speed
+      run: make tests/malloc
+    - name: clean
+      run: make clean
+    - name: Test STL in debug mode
+      run: make db/test
