@@ -1167,7 +1167,7 @@ FIO_SFUNC void fio___letter_on_close_in_child(void *p) {
     return;
   fio_srv_stop();
   FIO_LOG_FATAL("(%d) lost connection with manager process, shutting down!",
-                getpid());
+                (int)fio_thread_getpid());
 }
 FIO_SFUNC void fio___letter_on_timeout(fio_s *io) {
   static const char ping_buf[FIO___LETTER_MINIMAL_LEN] = {0};

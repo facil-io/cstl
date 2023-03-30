@@ -48,22 +48,6 @@ Patches for Windows
 
 ***************************************************************************** */
 #if FIO_OS_WIN
-#if _MSC_VER
-#pragma message("Warning: some functionality is enabled by patchwork.")
-#else
-#warning some functionality is enabled by patchwork.
-#endif
-#define _CRT_NONSTDC_NO_WARNINGS
-
-#include <fcntl.h>
-#include <io.h>
-#include <processthreadsapi.h>
-#include <sys/types.h>
-
-#include <sys/stat.h>
-#include <sysinfoapi.h>
-#include <time.h>
-#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
 
 /* *****************************************************************************
 Windows initialization
@@ -187,12 +171,6 @@ FIO_SFUNC int kill(int pid, int signum);
 #if !defined(unlink)
 #define unlink _unlink
 #endif /* unlink */
-#ifndef getpid
-#define getpid _getpid
-#endif /* getpid */
-#ifndef pid_t
-#define pid_t int
-#endif /* pid_t */
 
 #if !FIO_HAVE_UNIX_TOOLS || defined(__MINGW32__)
 #define pipe(fds) _pipe(fds, 65536, _O_BINARY)

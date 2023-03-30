@@ -232,17 +232,32 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___PRINTF_STYLE  printf
+#define FIO___KILL_SELF()   kill(0, SIGINT)
+
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
-#ifndef _CRT_SECURE_NO_WARNINGS
+#undef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS 1
-#endif
+#undef _CRT_NONSTDC_NO_WARNINGS
+#define _CRT_NONSTDC_NO_WARNINGS 1
+#include <windows.h>
+#endif /* WIN32_LEAN_AND_MEAN */
+
+#include <fcntl.h>
+#include <io.h>
+#include <processthreadsapi.h>
+#include <sys/types.h>
+
+#include <sys/stat.h>
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
+#define FIO___KILL_SELF() TerminateProcess(GetCurrentProcess(), 1)
 
 #if defined(__MINGW32__)
 /* Mingw supports */
@@ -258,10 +273,17 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
 #endif /* __CYGWIN__ __MINGW32__ */
+
+#if _MSC_VER
+#pragma message("Warning: some functionality is enabled by patchwork.")
+#else
+#warning some functionality is enabled by patchwork.
+#endif
+
 #else
 #define FIO_HAVE_UNIX_TOOLS 0
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
-#endif
+#endif /* OS / Compiler detection */
 
 #include <ctype.h>
 #include <errno.h>
@@ -444,7 +466,7 @@ Logging Defaults (no-op)
 #ifdef DEBUG
 #define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
 #define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
+#define FIO_ASSERT___PERFORM_SIGNAL() FIO___KILL_SELF();
 #else
 #define FIO_LOG_DDEBUG(...)  ((void)(0))
 #define FIO_LOG_DDEBUG2(...) ((void)(0))

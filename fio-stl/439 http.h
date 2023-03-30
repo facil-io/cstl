@@ -179,6 +179,15 @@ SFUNC int fio_http_listen(const char *url, fio_http_settings_s settings);
 /** Allows all clients to connect (bypasses authentication). */
 FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
+/** Returns the IO object associated with the HTTP object (request only). */
+SFUNC fio_s *fio_http_io(fio_http_s *);
+
+/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
+/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+#define fio_http_subscribe(h, ...)                                             \
+  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -189,14 +198,15 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
                                    size_t len,
                                    uint8_t is_text);
 
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-#define fio_http_subscribe(h, ...)                                             \
-  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
-
-/** Returns the IO object associated with the HTTP object (request only). */
-SFUNC fio_s *fio_http_io(fio_http_s *);
+/**
+ * Sets a specific on_message callback for this connection.
+ *
+ * Returns -1 on error (i.e., upgrade still in negotiation).
+ */
+SFUNC int fio_http_on_message_set(fio_http_s *h,
+                                  void (*on_message)(fio_http_s *,
+                                                     fio_buf_info_s,
+                                                     uint8_t));
 
 /** Optional WebSocket subscription callback. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg);
@@ -230,26 +240,6 @@ SFUNC int fio_http_sse_write(fio_http_s *h, fio_http_sse_write_args_s args);
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
 
 /* *****************************************************************************
-Upgrade Helpers
-***************************************************************************** */
-
-/** Allows all clients to connect (bypasses authentication). */
-FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
-  ((void)h);
-  return 0;
-}
-
-/**
- * Sets a specific on_message callback for this connection.
- *
- * Returns -1 on error (i.e., upgrade still in negotiation).
- */
-SFUNC int fio_http_on_message_set(fio_http_s *h,
-                                  void (*on_message)(fio_http_s *,
-                                                     fio_buf_info_s,
-                                                     uint8_t));
-
-/* *****************************************************************************
 Module Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -269,6 +259,12 @@ FIO_IFUNC int fio_http_subscribe FIO_NOOP(fio_http_s *h,
       args.on_message = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT;
   }
   fio_subscribe FIO_NOOP(args);
+  return 0;
+}
+
+/** Allows all clients to connect (bypasses authentication). */
+FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
+  ((void)h);
   return 0;
 }
 
@@ -510,7 +506,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                         p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
   FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
-                  getpid(),
+                  (int)fio_thread_getpid(),
                   fd,
                   c->io);
 }
@@ -949,7 +945,9 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
 }
 
 FIO_SFUNC void fio___http_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) HTTP connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) HTTP connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_http_free(c->h);
@@ -1414,7 +1412,9 @@ FIO_SFUNC void fio___websocket_on_attach(fio_s *io) {
 
 /** Called after the connection was closed, and pending tasks completed. */
 FIO_SFUNC void fio___websocket_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) WebSocket connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) WebSocket connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_bstr_free(c->state.ws.msg);
@@ -1663,7 +1663,9 @@ FIO_SFUNC void fio___sse_on_shutdown(fio_s *io) {
 
 /** Called after the connection was closed, and pending tasks completed. */
 FIO_SFUNC void fio___sse_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   // fio_bstr_free(c->state.sse.msg);

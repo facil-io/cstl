@@ -2956,8 +2956,7 @@ FIO_SFUNC void fio___http_cleanup(void *ignr_) {
   for (size_t i = 0; i < 2; ++i) {
     const char *names[] = {"cookie names", "header values"};
     FIO_LOG_DEBUG2(
-        "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
-        getpid(),
+        "freeing %zu strings from %s cache (capacity was: %zu)",
         fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
         names[i],
         fio___http_str_cache_capa(&FIO___HTTP_STRING_CACHE[i].cache));

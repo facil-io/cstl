@@ -269,17 +269,32 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___PRINTF_STYLE  printf
+#define FIO___KILL_SELF()   kill(0, SIGINT)
+
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
-#ifndef _CRT_SECURE_NO_WARNINGS
+#undef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS 1
-#endif
+#undef _CRT_NONSTDC_NO_WARNINGS
+#define _CRT_NONSTDC_NO_WARNINGS 1
+#include <windows.h>
+#endif /* WIN32_LEAN_AND_MEAN */
+
+#include <fcntl.h>
+#include <io.h>
+#include <processthreadsapi.h>
+#include <sys/types.h>
+
+#include <sys/stat.h>
+#include <sysinfoapi.h>
+#include <time.h>
+#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
+#define FIO___KILL_SELF() TerminateProcess(GetCurrentProcess(), 1)
 
 #if defined(__MINGW32__)
 /* Mingw supports */
@@ -295,10 +310,17 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
 #endif /* __CYGWIN__ __MINGW32__ */
+
+#if _MSC_VER
+#pragma message("Warning: some functionality is enabled by patchwork.")
+#else
+#warning some functionality is enabled by patchwork.
+#endif
+
 #else
 #define FIO_HAVE_UNIX_TOOLS 0
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
-#endif
+#endif /* OS / Compiler detection */
 
 #include <ctype.h>
 #include <errno.h>
@@ -481,7 +503,7 @@ Logging Defaults (no-op)
 #ifdef DEBUG
 #define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
 #define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() kill(0, SIGINT);
+#define FIO_ASSERT___PERFORM_SIGNAL() FIO___KILL_SELF();
 #else
 #define FIO_LOG_DDEBUG(...)  ((void)(0))
 #define FIO_LOG_DDEBUG2(...) ((void)(0))
@@ -3275,22 +3297,6 @@ Patches for Windows
 
 ***************************************************************************** */
 #if FIO_OS_WIN
-#if _MSC_VER
-#pragma message("Warning: some functionality is enabled by patchwork.")
-#else
-#warning some functionality is enabled by patchwork.
-#endif
-#define _CRT_NONSTDC_NO_WARNINGS
-
-#include <fcntl.h>
-#include <io.h>
-#include <processthreadsapi.h>
-#include <sys/types.h>
-
-#include <sys/stat.h>
-#include <sysinfoapi.h>
-#include <time.h>
-#include <winsock2.h> /* struct timeval is here... why? Microsoft. */
 
 /* *****************************************************************************
 Windows initialization
@@ -3414,12 +3420,6 @@ FIO_SFUNC int kill(int pid, int signum);
 #if !defined(unlink)
 #define unlink _unlink
 #endif /* unlink */
-#ifndef getpid
-#define getpid _getpid
-#endif /* getpid */
-#ifndef pid_t
-#define pid_t int
-#endif /* pid_t */
 
 #if !FIO_HAVE_UNIX_TOOLS || defined(__MINGW32__)
 #define pipe(fds) _pipe(fds, 65536, _O_BINARY)
@@ -7241,6 +7241,7 @@ developer.
 #include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+typedef pid_t fio_thread_pid_t;
 typedef pthread_t fio_thread_t;
 typedef pthread_mutex_t fio_thread_mutex_t;
 typedef pthread_cond_t fio_thread_cond_t;
@@ -7249,6 +7250,7 @@ typedef pthread_cond_t fio_thread_cond_t;
 
 #elif FIO_OS_WIN
 #include <synchapi.h>
+typedef DWORD fio_thread_pid_t;
 typedef HANDLE fio_thread_t;
 typedef CRITICAL_SECTION fio_thread_mutex_t;
 typedef CONDITION_VARIABLE fio_thread_cond_t;
@@ -7283,11 +7285,26 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 #endif
 
 /* *****************************************************************************
-API for forking processes, spawning threads and waiting on mutexes
+API for forking processes
 ***************************************************************************** */
 
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F int fio_thread_fork(void);
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void);
+
+/** Should behave the same as the POSIX system call `getpid`. */
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void);
+
+/** Should behave the same as the POSIX system call `kill`. */
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig);
+
+/** Should behave the same as the POSIX system call `waitpid`. */
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid,
+                                   int *stat_loc,
+                                   int options);
+
+/* *****************************************************************************
+API for spawning threads
+***************************************************************************** */
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
@@ -7328,24 +7345,9 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void);
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e);
 
-/**
- * Initializes a simple Mutex.
- *
- * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
- */
-FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
-
-/** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
-
-/** Attempts to lock a simple Mutex, returning zero on success. */
-FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
-
-/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
-
-/** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+/* *****************************************************************************
+API for mutexes
+***************************************************************************** */
 
 /**
  * Initializes a simple Mutex.
@@ -7365,6 +7367,10 @@ FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 
 /** Destroys the simple Mutex (cleanup). */
 FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+
+/* *****************************************************************************
+API for conditional variables
+***************************************************************************** */
 
 /** Initializes a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
@@ -7385,13 +7391,33 @@ FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
 FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
 /* *****************************************************************************
+
+
 POSIX Implementation - inlined static functions
+
+
 ***************************************************************************** */
 #if FIO_OS_POSIX
 
 #ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `getpid`. */
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+  return (fio_thread_pid_t)getpid();
+}
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+  return (fio_thread_pid_t)fork();
+}
+
+/** Should behave the same as the POSIX system call `kill`. */
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+  return kill((pid_t)i, s);
+}
+
+/** Should behave the same as the POSIX system call `waitpid`. */
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+  return waitpid((pid_t)i, s, o);
+}
 #endif
 
 #ifndef FIO_THREADS_BYO
@@ -7555,18 +7581,239 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) {
 #endif /* FIO_THREADS_COND_BYO */
 
 /* *****************************************************************************
+
+
 Windows Implementation - inlined static functions
+
+
 ***************************************************************************** */
 #elif FIO_OS_WIN
 #include <process.h>
+#include <processthreadsapi.h>
+#include <tlhelp32.h>
 
 #ifndef FIO_THREADS_FORK_BYO
-/** Should behave the same as the POSIX system call `fork`. */
+
 #if defined(fork) || defined(WEXITSTATUS)
-FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+  return (fio_thread_pid_t)getpid();
+}
+
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+  return (fio_thread_pid_t)fork();
+}
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+  return kill((pid_t)i, s);
+}
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+  return waitpid((pid_t)i, s, o);
+}
+
 #else
-FIO_IFUNC_F int fio_thread_fork(void) { return -1; }
+
+FIO_IFUNC_F int fio_thread_fork(void) {
+  FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
+  return (fio_thread_pid_t)-1;
+}
+
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig) {
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  HANDLE handle;
+  DWORD status;
+  if (sig < 0 || sig >= NSIG) {
+    errno = EINVAL;
+    return -1;
+  }
+#ifdef SIGCONT
+  if (sig == SIGCONT) {
+    errno = ENOSYS;
+    return -1;
+  }
 #endif
+
+  if (pid == -1)
+    pid = 0;
+
+  if (!pid)
+    handle = GetCurrentProcess();
+  else
+    handle =
+        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
+  if (!handle)
+    goto something_went_wrong;
+
+  switch (sig) {
+#ifdef SIGKILL
+  case SIGKILL:
+#endif
+  case SIGTERM:
+  case SIGINT: /* terminate */
+    if (!TerminateProcess(handle, 1))
+      goto something_went_wrong;
+    break;
+  case 0: /* check status */
+    if (!GetExitCodeProcess(handle, &status))
+      goto something_went_wrong;
+    if (status != STILL_ACTIVE) {
+      errno = ESRCH;
+      goto cleanup_after_error;
+    }
+    break;
+  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
+  }
+
+  if (pid) {
+    CloseHandle(handle);
+  }
+  return 0;
+
+something_went_wrong:
+
+  switch (GetLastError()) {
+  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
+  case ERROR_ACCESS_DENIED:
+    errno = EPERM;
+    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
+      errno = ESRCH;
+    break;
+  default: errno = GetLastError();
+  }
+cleanup_after_error:
+  if (handle && pid)
+    CloseHandle(handle);
+  return -1;
+}
+
+#ifndef WNOHANG
+#define WNOHANG 1
+#endif /* WNOHANG */
+
+#ifndef WUNTRACED
+#define WUNTRACED 2
+#endif /* WUNTRACED */
+
+#ifndef WCONTINUED
+#define WCONTINUED 8
+#endif /* WCONTINUED */
+
+#ifndef WNOWAIT
+#define WNOWAIT 0x01000000
+#endif /* WNOWAIT */
+
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(status) (((status)&0xFF00) >> 8)
+#endif /* WEXITSTATUS */
+
+#ifndef WIFEXITED
+#define WIFEXITED(status) (WTERMSIG(status) == 0)
+#endif /* WIFEXITED */
+
+#ifndef WIFSIGNALED
+#define WIFSIGNALED(status) (((signed char)(__WTERMSIG(status) + 1) >> 1) > 0)
+#endif /* WIFSIGNALED */
+
+#ifndef WTERMSIG
+#define WTERMSIG(status) ((status)&0x7F)
+#endif /* WTERMSIG */
+
+#ifndef WIFSTOPPED
+#define WIFSTOPPED(status) (((status)&0xFF) == 0x7F)
+#endif /* WIFSTOPPED */
+
+#ifndef WSTOPSIG
+#define WSTOPSIG(status) WEXITSTATUS(status)
+#endif /* WSTOPSIG */
+
+static int fio___thread_waitpid_anychild(PROCESSENTRY32W *pe, DWORD pid) {
+  return pe->th32ParentProcessID == GetCurrentProcessId();
+}
+
+static int fio___thread_waitpid_pid(PROCESSENTRY32W *pe, DWORD pid) {
+  return pe->th32ProcessID == pid;
+}
+
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
+  /* adopted from:
+   * https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h Copyright
+   * Copyright (c) 2019 win32ports, MIT license
+   */
+  int saved_status = 0;
+  HANDLE hProcess = INVALID_HANDLE_VALUE, hSnapshot = INVALID_HANDLE_VALUE;
+  int (*are_these_the_druides_were_looking_for)(PROCESSENTRY32W *, DWORD);
+  PROCESSENTRY32W pe;
+  DWORD wait_status = 0, exit_code = 0;
+  int nohang = WNOHANG == (WNOHANG & opt);
+  opt &= ~(WUNTRACED | WNOWAIT | WCONTINUED | WNOHANG);
+  if (opt) {
+    errno = -EINVAL;
+    return -1;
+  }
+
+  if (pid > 0 || pid == -1) {
+    FIO_LOG_ERROR(
+        "fio_thread_waitpid not implemented for pid < -1 || pid ==0.");
+    return -1;
+  }
+
+  are_these_the_druides_were_looking_for = fio___thread_waitpid_pid;
+  if (pid == -1) /* wait for any child */
+    are_these_the_druides_were_looking_for = fio___thread_waitpid_anychild;
+
+  hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (INVALID_HANDLE_VALUE == hSnapshot) {
+    errno = ECHILD;
+    return -1;
+  }
+
+  pe.dwSize = sizeof(pe);
+  if (!Process32FirstW(hSnapshot, &pe)) {
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+  do {
+    if (are_these_the_druides_were_looking_for(&pe, pid)) {
+      hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION,
+                             0,
+                             pe.th32ProcessID);
+      if (INVALID_HANDLE_VALUE == hProcess) {
+        CloseHandle(hSnapshot);
+        errno = ECHILD;
+        return -1;
+      }
+      break;
+    }
+  } while (Process32NextW(hSnapshot, &pe));
+  if (INVALID_HANDLE_VALUE == hProcess) {
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+
+  wait_status = WaitForSingleObject(hProcess, nohang ? 0 : INFINITE);
+
+  if (WAIT_OBJECT_0 == wait_status) {
+    if (GetExitCodeProcess(hProcess, &exit_code))
+      saved_status |= (exit_code & 0xFF) << 8;
+  } else if (WAIT_TIMEOUT == wait_status && nohang) {
+    return 0;
+  } else {
+    CloseHandle(hProcess);
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+
+  CloseHandle(hProcess);
+  CloseHandle(hSnapshot);
+
+  if (status)
+    *status = saved_status;
+
+  return pe.th32ParentProcessID;
+}
+
+#endif /* already patched by some other implementation */
 #endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
@@ -7705,7 +7952,11 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
 #endif /* FIO_OS_WIN */
 
 /* *****************************************************************************
-Multi-Threaded `memcpy`
+
+
+Multi-Threaded `memcpy` (naive and slow)
+
+
 ***************************************************************************** */
 
 #ifndef FIO_MEMCPY_THREADS
@@ -10063,7 +10314,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
 
   FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
-                  (int)(getpid()),
+                  (int)(fio_thread_getpid()),
                   fio___state_tasks_names[e]);
 
   /* copy task queue */
@@ -27232,8 +27483,8 @@ static struct {
   fio___srv_env_safe_s env;
   fio_poll_s poll_data;
   int64_t tick;
-  pid_t root_pid;
-  pid_t pid;
+  fio_thread_pid_t root_pid;
+  fio_thread_pid_t pid;
   fio_s *wakeup;
   int wakeup_fd;
   int wakeup_wait;
@@ -27906,14 +28157,14 @@ static void fio___srv_wait_for_worker(void *thr_) {
 /** Worker sentinel */
 static void *fio___srv_worker_sentinel(void *pid_data) {
 #ifdef WEXITSTATUS
-  pid_t pid = (pid_t)(uintptr_t)pid_data;
+  fio_thread_pid_t pid = (fio_thread_pid_t)(uintptr_t)pid_data;
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
   fio_state_callback_add(FIO_CALL_ON_FINISH,
                          fio___srv_wait_for_worker,
                          (void *)thr);
-  if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
+  if (fio_thread_waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
     FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
   if (!WIFEXITED(status) || WEXITSTATUS(status)) {
     FIO_LOG_WARNING("abnormal worker exit detected");
@@ -27929,7 +28180,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
     fio_thread_detach(&thr);
     fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
   }
-#else /* Non POSIX? no `fork`? */
+#else /* Non POSIX? no `fork`? no fio_thread_waitpid? */
   FIO_ASSERT(
       0,
       "facil.io doesn't know how to spawn and wait on workers on this system.");
@@ -27950,8 +28201,8 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   /* do not allow master tasks to run in worker */
   fio_queue_perform_all(fio___srv_tasks);
   /* perform actual fork */
-  pid_t pid = fio_thread_fork();
-  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  fio_thread_pid_t pid = fio_thread_fork();
+  FIO_ASSERT(pid != (fio_thread_pid_t)-1, "system call `fork` failed.");
   if (!pid)
     goto is_worker_process;
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
@@ -27968,7 +28219,7 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   return;
 
 is_worker_process:
-  fio___srvdata.pid = getpid();
+  fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.is_worker = 1;
   FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
@@ -28344,7 +28595,7 @@ Managing data after a fork
 ***************************************************************************** */
 FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
   (void)ignr_;
-  fio___srvdata.pid = getpid();
+  fio___srvdata.pid = fio_thread_getpid();
   fio_queue_perform_all(fio___srv_tasks);
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
@@ -28371,7 +28622,7 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
   fio___srvdata.tick = fio_time_milli();
-  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
+  fio___srvdata.root_pid = fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.async);
   fio_poll_init(&fio___srvdata.poll_data,
                 .on_data = fio___srv_poll_on_data_schd,
@@ -28919,13 +29170,16 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
       if (in < end)
         continue;
       FIO_LOG_DDEBUG2("(%d) ALPN Failed! No protocol name match for %p",
-                      getpid(),
+                      (int)fio_thread_getpid(),
                       io);
       return SSL_TLSEXT_ERR_ALERT_FATAL;
     }
     *out = in + 1;
     *outlen = len;
-    FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p", getpid(), buf, io);
+    FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p",
+                    (int)fio_thread_getpid(),
+                    buf,
+                    io);
     return SSL_TLSEXT_ERR_OK;
     (void)tls_;
   }
@@ -29190,7 +29444,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
 
   /* attach socket */
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
-                  getpid(),
+                  (int)fio_thread_getpid(),
                   (void *)io);
   BIO *bio = BIO_new_socket(fio_fd_get(io), 0);
   SSL_set_bio(ssl, bio, bio);
@@ -30431,7 +30685,7 @@ FIO_SFUNC void fio___letter_on_close_in_child(void *p) {
     return;
   fio_srv_stop();
   FIO_LOG_FATAL("(%d) lost connection with manager process, shutting down!",
-                getpid());
+                (int)fio_thread_getpid());
 }
 FIO_SFUNC void fio___letter_on_timeout(fio_s *io) {
   static const char ping_buf[FIO___LETTER_MINIMAL_LEN] = {0};
@@ -34103,8 +34357,7 @@ FIO_SFUNC void fio___http_cleanup(void *ignr_) {
   for (size_t i = 0; i < 2; ++i) {
     const char *names[] = {"cookie names", "header values"};
     FIO_LOG_DEBUG2(
-        "(%d) freeing %zu strings from %s cache (capacity was: %zu)",
-        getpid(),
+        "freeing %zu strings from %s cache (capacity was: %zu)",
         fio___http_str_cache_count(&FIO___HTTP_STRING_CACHE[i].cache),
         names[i],
         fio___http_str_cache_capa(&FIO___HTTP_STRING_CACHE[i].cache));
@@ -35287,6 +35540,15 @@ SFUNC int fio_http_listen(const char *url, fio_http_settings_s settings);
 /** Allows all clients to connect (bypasses authentication). */
 FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
+/** Returns the IO object associated with the HTTP object (request only). */
+SFUNC fio_s *fio_http_io(fio_http_s *);
+
+/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
+/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+#define fio_http_subscribe(h, ...)                                             \
+  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -35297,14 +35559,15 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
                                    size_t len,
                                    uint8_t is_text);
 
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-#define fio_http_subscribe(h, ...)                                             \
-  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
-
-/** Returns the IO object associated with the HTTP object (request only). */
-SFUNC fio_s *fio_http_io(fio_http_s *);
+/**
+ * Sets a specific on_message callback for this connection.
+ *
+ * Returns -1 on error (i.e., upgrade still in negotiation).
+ */
+SFUNC int fio_http_on_message_set(fio_http_s *h,
+                                  void (*on_message)(fio_http_s *,
+                                                     fio_buf_info_s,
+                                                     uint8_t));
 
 /** Optional WebSocket subscription callback. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg);
@@ -35338,26 +35601,6 @@ SFUNC int fio_http_sse_write(fio_http_s *h, fio_http_sse_write_args_s args);
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
 
 /* *****************************************************************************
-Upgrade Helpers
-***************************************************************************** */
-
-/** Allows all clients to connect (bypasses authentication). */
-FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
-  ((void)h);
-  return 0;
-}
-
-/**
- * Sets a specific on_message callback for this connection.
- *
- * Returns -1 on error (i.e., upgrade still in negotiation).
- */
-SFUNC int fio_http_on_message_set(fio_http_s *h,
-                                  void (*on_message)(fio_http_s *,
-                                                     fio_buf_info_s,
-                                                     uint8_t));
-
-/* *****************************************************************************
 Module Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -35377,6 +35620,12 @@ FIO_IFUNC int fio_http_subscribe FIO_NOOP(fio_http_s *h,
       args.on_message = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT;
   }
   fio_subscribe FIO_NOOP(args);
+  return 0;
+}
+
+/** Allows all clients to connect (bypasses authentication). */
+FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
+  ((void)h);
   return 0;
 }
 
@@ -35618,7 +35867,7 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
                         p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
   FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
-                  getpid(),
+                  (int)fio_thread_getpid(),
                   fd,
                   c->io);
 }
@@ -36057,7 +36306,9 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
 }
 
 FIO_SFUNC void fio___http_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) HTTP connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) HTTP connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_http_free(c->h);
@@ -36522,7 +36773,9 @@ FIO_SFUNC void fio___websocket_on_attach(fio_s *io) {
 
 /** Called after the connection was closed, and pending tasks completed. */
 FIO_SFUNC void fio___websocket_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) WebSocket connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) WebSocket connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_bstr_free(c->state.ws.msg);
@@ -36771,7 +37024,9 @@ FIO_SFUNC void fio___sse_on_shutdown(fio_s *io) {
 
 /** Called after the connection was closed, and pending tasks completed. */
 FIO_SFUNC void fio___sse_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p", getpid(), udata);
+  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p",
+                  (int)fio_thread_getpid(),
+                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   // fio_bstr_free(c->state.sse.msg);

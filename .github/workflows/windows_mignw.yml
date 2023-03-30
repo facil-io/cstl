@@ -19,10 +19,10 @@ jobs:
         platform: x64
         cc: 1
     - name: Test No-Op (debug)
-      run: cc -O0 -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -o ./noop.exe && ./noop.exe
+      run: cc -O0 -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -lws2_32 -o ./noop.exe && ./noop.exe
     - name: Test STL (debug) - no allocators
-      run: cc -O0 -fstack-protector-all tests\stl.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -DDEBUG -o ./stl.exe && ./stl.exe
-    - name: Test fio_mallc speed
-      run: cc -O2 -march=native tests\malloc.c -I. -o ./malloc.exe && ./malloc.exe
+      run: cc -O0 -fstack-protector-all tests\stl.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -DDEBUG -lws2_32 -o ./stl.exe && ./stl.exe
+    - name: Test fio_malloc speed
+      run: cc -O2 -march=native tests\malloc.c -I. -lws2_32 -o ./malloc.exe && ./malloc.exe
     - name: Test STL
-      run: cc -O2 -march=native tests\stl.c -DFIO_LEAK_COUNTER=1 -I. -o ./stl.exe && ./stl.exe
+      run: cc -O2 -march=native tests\stl.c -DFIO_LEAK_COUNTER=1 -I. -lws2_32 -o ./stl.exe && ./stl.exe

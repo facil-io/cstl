@@ -901,8 +901,8 @@ static struct {
   fio___srv_env_safe_s env;
   fio_poll_s poll_data;
   int64_t tick;
-  pid_t root_pid;
-  pid_t pid;
+  fio_thread_pid_t root_pid;
+  fio_thread_pid_t pid;
   fio_s *wakeup;
   int wakeup_fd;
   int wakeup_wait;
@@ -1575,14 +1575,14 @@ static void fio___srv_wait_for_worker(void *thr_) {
 /** Worker sentinel */
 static void *fio___srv_worker_sentinel(void *pid_data) {
 #ifdef WEXITSTATUS
-  pid_t pid = (pid_t)(uintptr_t)pid_data;
+  fio_thread_pid_t pid = (fio_thread_pid_t)(uintptr_t)pid_data;
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
   fio_state_callback_add(FIO_CALL_ON_FINISH,
                          fio___srv_wait_for_worker,
                          (void *)thr);
-  if (waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
+  if (fio_thread_waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
     FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
   if (!WIFEXITED(status) || WEXITSTATUS(status)) {
     FIO_LOG_WARNING("abnormal worker exit detected");
@@ -1598,7 +1598,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
     fio_thread_detach(&thr);
     fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker, (void *)thr);
   }
-#else /* Non POSIX? no `fork`? */
+#else /* Non POSIX? no `fork`? no fio_thread_waitpid? */
   FIO_ASSERT(
       0,
       "facil.io doesn't know how to spawn and wait on workers on this system.");
@@ -1619,8 +1619,8 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   /* do not allow master tasks to run in worker */
   fio_queue_perform_all(fio___srv_tasks);
   /* perform actual fork */
-  pid_t pid = fio_thread_fork();
-  FIO_ASSERT(pid != (pid_t)-1, "system call `fork` failed.");
+  fio_thread_pid_t pid = fio_thread_fork();
+  FIO_ASSERT(pid != (fio_thread_pid_t)-1, "system call `fork` failed.");
   if (!pid)
     goto is_worker_process;
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
@@ -1637,7 +1637,7 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   return;
 
 is_worker_process:
-  fio___srvdata.pid = getpid();
+  fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.is_worker = 1;
   FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
@@ -2013,7 +2013,7 @@ Managing data after a fork
 ***************************************************************************** */
 FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
   (void)ignr_;
-  fio___srvdata.pid = getpid();
+  fio___srvdata.pid = fio_thread_getpid();
   fio_queue_perform_all(fio___srv_tasks);
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
@@ -2040,7 +2040,7 @@ FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
   fio___srvdata.tick = fio_time_milli();
-  fio___srvdata.root_pid = fio___srvdata.pid = getpid();
+  fio___srvdata.root_pid = fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.async);
   fio_poll_init(&fio___srvdata.poll_data,
                 .on_data = fio___srv_poll_on_data_schd,

@@ -21,15 +21,39 @@ The following methods are provided when the `FIO_THREADS` macro is defined befor
 
 If this macro is defined, these processes forking functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own alternatives.
+The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `fio_thread_fork`
 
 ```c
-int fio_thread_fork(void);
+fio_thread_pid_t fio_thread_fork(void);
 ```
 
 Behaves (or should behave) the same as the POSIX system call `fork`.
+
+#### `fio_thread_getpid`
+
+```c
+fio_thread_pid_t fio_thread_getpid(void);
+```
+
+Behaves (or should behave) the same as the POSIX system call `getpid`.
+
+#### `fio_thread_kill`
+
+```c
+int fio_thread_kill(fio_thread_pid_t pid, int sig);
+```
+
+Behaves (or should behave) the same as the POSIX system call `kill`.
+
+#### `fio_thread_waitpid`
+
+```c
+int fio_thread_waitpid(fio_thread_pid_t pid, int *stat_loc, int options);
+```
+
+Behaves (or should behave) the same as the POSIX system call `waitpid`.
 
 ### Thread functions
 
@@ -39,7 +63,7 @@ Behaves (or should behave) the same as the POSIX system call `fork`.
 
 If this macro is defined, these thread functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own alternatives.
+The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `fio_thread_create`
 ```c
@@ -126,7 +150,7 @@ Sets the current thread's priority level as a `fio_thread_priority_e` enum (see 
 
 If this macro is defined, these mutex functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own alternatives.
+The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `FIO_THREAD_MUTEX_INIT`
 
@@ -178,7 +202,7 @@ Destroys the simple Mutex (cleanup).
 
 If this macro is defined, these conditional variable functions are only declared, but they are **not** defined (implemented).
 
-The implementation expects you to provide your own alternatives.
+The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `fio_thread_cond_init`
 

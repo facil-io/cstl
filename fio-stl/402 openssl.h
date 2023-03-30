@@ -160,13 +160,16 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
       if (in < end)
         continue;
       FIO_LOG_DDEBUG2("(%d) ALPN Failed! No protocol name match for %p",
-                      getpid(),
+                      (int)fio_thread_getpid(),
                       io);
       return SSL_TLSEXT_ERR_ALERT_FATAL;
     }
     *out = in + 1;
     *outlen = len;
-    FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p", getpid(), buf, io);
+    FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p",
+                    (int)fio_thread_getpid(),
+                    buf,
+                    io);
     return SSL_TLSEXT_ERR_OK;
     (void)tls_;
   }
@@ -431,7 +434,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
 
   /* attach socket */
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
-                  getpid(),
+                  (int)fio_thread_getpid(),
                   (void *)io);
   BIO *bio = BIO_new_socket(fio_fd_get(io), 0);
   SSL_set_bio(ssl, bio, bio);

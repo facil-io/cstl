@@ -30,6 +30,7 @@ developer.
 #include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+typedef pid_t fio_thread_pid_t;
 typedef pthread_t fio_thread_t;
 typedef pthread_mutex_t fio_thread_mutex_t;
 typedef pthread_cond_t fio_thread_cond_t;
@@ -38,6 +39,7 @@ typedef pthread_cond_t fio_thread_cond_t;
 
 #elif FIO_OS_WIN
 #include <synchapi.h>
+typedef DWORD fio_thread_pid_t;
 typedef HANDLE fio_thread_t;
 typedef CRITICAL_SECTION fio_thread_mutex_t;
 typedef CONDITION_VARIABLE fio_thread_cond_t;
@@ -72,11 +74,26 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 #endif
 
 /* *****************************************************************************
-API for forking processes, spawning threads and waiting on mutexes
+API for forking processes
 ***************************************************************************** */
 
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F int fio_thread_fork(void);
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void);
+
+/** Should behave the same as the POSIX system call `getpid`. */
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void);
+
+/** Should behave the same as the POSIX system call `kill`. */
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig);
+
+/** Should behave the same as the POSIX system call `waitpid`. */
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid,
+                                   int *stat_loc,
+                                   int options);
+
+/* *****************************************************************************
+API for spawning threads
+***************************************************************************** */
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
@@ -117,24 +134,9 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void);
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e);
 
-/**
- * Initializes a simple Mutex.
- *
- * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
- */
-FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
-
-/** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
-
-/** Attempts to lock a simple Mutex, returning zero on success. */
-FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
-
-/** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
-
-/** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+/* *****************************************************************************
+API for mutexes
+***************************************************************************** */
 
 /**
  * Initializes a simple Mutex.
@@ -154,6 +156,10 @@ FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 
 /** Destroys the simple Mutex (cleanup). */
 FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+
+/* *****************************************************************************
+API for conditional variables
+***************************************************************************** */
 
 /** Initializes a simple conditional variable. */
 FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
@@ -174,13 +180,33 @@ FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
 FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
 /* *****************************************************************************
+
+
 POSIX Implementation - inlined static functions
+
+
 ***************************************************************************** */
 #if FIO_OS_POSIX
 
 #ifndef FIO_THREADS_FORK_BYO
+/** Should behave the same as the POSIX system call `getpid`. */
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+  return (fio_thread_pid_t)getpid();
+}
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+  return (fio_thread_pid_t)fork();
+}
+
+/** Should behave the same as the POSIX system call `kill`. */
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+  return kill((pid_t)i, s);
+}
+
+/** Should behave the same as the POSIX system call `waitpid`. */
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+  return waitpid((pid_t)i, s, o);
+}
 #endif
 
 #ifndef FIO_THREADS_BYO
@@ -344,18 +370,239 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) {
 #endif /* FIO_THREADS_COND_BYO */
 
 /* *****************************************************************************
+
+
 Windows Implementation - inlined static functions
+
+
 ***************************************************************************** */
 #elif FIO_OS_WIN
 #include <process.h>
+#include <processthreadsapi.h>
+#include <tlhelp32.h>
 
 #ifndef FIO_THREADS_FORK_BYO
-/** Should behave the same as the POSIX system call `fork`. */
+
 #if defined(fork) || defined(WEXITSTATUS)
-FIO_IFUNC_F int fio_thread_fork(void) { return (int)fork(); }
+FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+  return (fio_thread_pid_t)getpid();
+}
+
+FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+  return (fio_thread_pid_t)fork();
+}
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+  return kill((pid_t)i, s);
+}
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+  return waitpid((pid_t)i, s, o);
+}
+
 #else
-FIO_IFUNC_F int fio_thread_fork(void) { return -1; }
+
+FIO_IFUNC_F int fio_thread_fork(void) {
+  FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
+  return (fio_thread_pid_t)-1;
+}
+
+FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig) {
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  HANDLE handle;
+  DWORD status;
+  if (sig < 0 || sig >= NSIG) {
+    errno = EINVAL;
+    return -1;
+  }
+#ifdef SIGCONT
+  if (sig == SIGCONT) {
+    errno = ENOSYS;
+    return -1;
+  }
 #endif
+
+  if (pid == -1)
+    pid = 0;
+
+  if (!pid)
+    handle = GetCurrentProcess();
+  else
+    handle =
+        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
+  if (!handle)
+    goto something_went_wrong;
+
+  switch (sig) {
+#ifdef SIGKILL
+  case SIGKILL:
+#endif
+  case SIGTERM:
+  case SIGINT: /* terminate */
+    if (!TerminateProcess(handle, 1))
+      goto something_went_wrong;
+    break;
+  case 0: /* check status */
+    if (!GetExitCodeProcess(handle, &status))
+      goto something_went_wrong;
+    if (status != STILL_ACTIVE) {
+      errno = ESRCH;
+      goto cleanup_after_error;
+    }
+    break;
+  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
+  }
+
+  if (pid) {
+    CloseHandle(handle);
+  }
+  return 0;
+
+something_went_wrong:
+
+  switch (GetLastError()) {
+  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
+  case ERROR_ACCESS_DENIED:
+    errno = EPERM;
+    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
+      errno = ESRCH;
+    break;
+  default: errno = GetLastError();
+  }
+cleanup_after_error:
+  if (handle && pid)
+    CloseHandle(handle);
+  return -1;
+}
+
+#ifndef WNOHANG
+#define WNOHANG 1
+#endif /* WNOHANG */
+
+#ifndef WUNTRACED
+#define WUNTRACED 2
+#endif /* WUNTRACED */
+
+#ifndef WCONTINUED
+#define WCONTINUED 8
+#endif /* WCONTINUED */
+
+#ifndef WNOWAIT
+#define WNOWAIT 0x01000000
+#endif /* WNOWAIT */
+
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(status) (((status)&0xFF00) >> 8)
+#endif /* WEXITSTATUS */
+
+#ifndef WIFEXITED
+#define WIFEXITED(status) (WTERMSIG(status) == 0)
+#endif /* WIFEXITED */
+
+#ifndef WIFSIGNALED
+#define WIFSIGNALED(status) (((signed char)(__WTERMSIG(status) + 1) >> 1) > 0)
+#endif /* WIFSIGNALED */
+
+#ifndef WTERMSIG
+#define WTERMSIG(status) ((status)&0x7F)
+#endif /* WTERMSIG */
+
+#ifndef WIFSTOPPED
+#define WIFSTOPPED(status) (((status)&0xFF) == 0x7F)
+#endif /* WIFSTOPPED */
+
+#ifndef WSTOPSIG
+#define WSTOPSIG(status) WEXITSTATUS(status)
+#endif /* WSTOPSIG */
+
+static int fio___thread_waitpid_anychild(PROCESSENTRY32W *pe, DWORD pid) {
+  return pe->th32ParentProcessID == GetCurrentProcessId();
+}
+
+static int fio___thread_waitpid_pid(PROCESSENTRY32W *pe, DWORD pid) {
+  return pe->th32ProcessID == pid;
+}
+
+FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
+  /* adopted from:
+   * https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h Copyright
+   * Copyright (c) 2019 win32ports, MIT license
+   */
+  int saved_status = 0;
+  HANDLE hProcess = INVALID_HANDLE_VALUE, hSnapshot = INVALID_HANDLE_VALUE;
+  int (*are_these_the_druides_were_looking_for)(PROCESSENTRY32W *, DWORD);
+  PROCESSENTRY32W pe;
+  DWORD wait_status = 0, exit_code = 0;
+  int nohang = WNOHANG == (WNOHANG & opt);
+  opt &= ~(WUNTRACED | WNOWAIT | WCONTINUED | WNOHANG);
+  if (opt) {
+    errno = -EINVAL;
+    return -1;
+  }
+
+  if (pid > 0 || pid == -1) {
+    FIO_LOG_ERROR(
+        "fio_thread_waitpid not implemented for pid < -1 || pid ==0.");
+    return -1;
+  }
+
+  are_these_the_druides_were_looking_for = fio___thread_waitpid_pid;
+  if (pid == -1) /* wait for any child */
+    are_these_the_druides_were_looking_for = fio___thread_waitpid_anychild;
+
+  hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (INVALID_HANDLE_VALUE == hSnapshot) {
+    errno = ECHILD;
+    return -1;
+  }
+
+  pe.dwSize = sizeof(pe);
+  if (!Process32FirstW(hSnapshot, &pe)) {
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+  do {
+    if (are_these_the_druides_were_looking_for(&pe, pid)) {
+      hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION,
+                             0,
+                             pe.th32ProcessID);
+      if (INVALID_HANDLE_VALUE == hProcess) {
+        CloseHandle(hSnapshot);
+        errno = ECHILD;
+        return -1;
+      }
+      break;
+    }
+  } while (Process32NextW(hSnapshot, &pe));
+  if (INVALID_HANDLE_VALUE == hProcess) {
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+
+  wait_status = WaitForSingleObject(hProcess, nohang ? 0 : INFINITE);
+
+  if (WAIT_OBJECT_0 == wait_status) {
+    if (GetExitCodeProcess(hProcess, &exit_code))
+      saved_status |= (exit_code & 0xFF) << 8;
+  } else if (WAIT_TIMEOUT == wait_status && nohang) {
+    return 0;
+  } else {
+    CloseHandle(hProcess);
+    CloseHandle(hSnapshot);
+    errno = ECHILD;
+    return -1;
+  }
+
+  CloseHandle(hProcess);
+  CloseHandle(hSnapshot);
+
+  if (status)
+    *status = saved_status;
+
+  return pe.th32ParentProcessID;
+}
+
+#endif /* already patched by some other implementation */
 #endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
@@ -494,7 +741,11 @@ FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
 #endif /* FIO_OS_WIN */
 
 /* *****************************************************************************
-Multi-Threaded `memcpy`
+
+
+Multi-Threaded `memcpy` (naive and slow)
+
+
 ***************************************************************************** */
 
 #ifndef FIO_MEMCPY_THREADS
