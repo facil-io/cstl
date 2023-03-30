@@ -18,7 +18,7 @@ jobs:
       run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/test
     - name: Test STL
       run: make test
-    - name: Test fio_mallc speed
+    - name: Test fio_malloc speed
       run: make tests/malloc
     - name: clean
       run: make clean

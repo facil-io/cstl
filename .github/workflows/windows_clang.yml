@@ -1,0 +1,27 @@
+name: Windows Clang CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: egor-tensin/setup-clang@v1
+      with:
+        platform: x64
+    - name: Test No-Op (debug)
+      run: clang -O0 -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -o ./noop.exe && ./noop.exe
+    - name: Test STL (debug) - no allocators
+      run: clang -O0 -fstack-protector-all tests\stl.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -DDEBUG -o ./stld.exe && ./stld.exe
+    - name: Test fio_malloc speed
+      run: clang -O2 -march=native tests\malloc.c -I. -o ./malloc.exe && ./malloc.exe
+    - name: Test STL
+      run: clang -O2 -march=native tests\stl.c -DFIO_LEAK_COUNTER=1 -I. -o ./stl.exe && ./stl.exe
