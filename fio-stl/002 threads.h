@@ -200,7 +200,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
 
 /** Should behave the same as the POSIX system call `kill`. */
 FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
-  return kill((pid_t)i, s);
+  return fio___internal_kill((pid_t)i, s);
 }
 
 /** Should behave the same as the POSIX system call `waitpid`. */
@@ -392,7 +392,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
 FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
-  return kill((pid_t)i, s);
+  return fio___internal_kill((pid_t)i, s);
 }
 FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);

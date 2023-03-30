@@ -3338,7 +3338,7 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
 FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
-FIO_SFUNC int kill(int pid, int signum);
+FIO_SFUNC int fio___internal_kill(int pid, int signum);
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -3507,7 +3507,7 @@ bad_file:
 }
 
 /** patch for kill */
-FIO_SFUNC int kill(int pid, int sig) {
+FIO_SFUNC int fio___internal_kill(int pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   HANDLE handle;
   DWORD status;
@@ -3584,6 +3584,7 @@ Patches for POSIX
 
 ***************************************************************************** */
 #elif FIO_OS_POSIX /* POSIX patches */
+#define fio___internal_kill kill
 #endif
 
 /* *****************************************************************************
@@ -7395,7 +7396,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
 
 /** Should behave the same as the POSIX system call `kill`. */
 FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
-  return kill((pid_t)i, s);
+  return fio___internal_kill((pid_t)i, s);
 }
 
 /** Should behave the same as the POSIX system call `waitpid`. */
@@ -7587,7 +7588,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
 FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
-  return kill((pid_t)i, s);
+  return fio___internal_kill((pid_t)i, s);
 }
 FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);
@@ -31253,7 +31254,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);
-    kill(fio___srvdata.root_pid, SIGINT);
+    fio___internal_kill(fio___srvdata.root_pid, SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
   /* TODO! clear master-only subscriptions */

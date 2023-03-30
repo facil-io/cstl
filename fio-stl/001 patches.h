@@ -105,7 +105,7 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
 FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
-FIO_SFUNC int kill(int pid, int signum);
+FIO_SFUNC int fio___internal_kill(int pid, int signum);
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -274,7 +274,7 @@ bad_file:
 }
 
 /** patch for kill */
-FIO_SFUNC int kill(int pid, int sig) {
+FIO_SFUNC int fio___internal_kill(int pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   HANDLE handle;
   DWORD status;
@@ -351,6 +351,7 @@ Patches for POSIX
 
 ***************************************************************************** */
 #elif FIO_OS_POSIX /* POSIX patches */
+#define fio___internal_kill kill
 #endif
 
 /* *****************************************************************************
