@@ -1751,7 +1751,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);
-    kill(fio___srvdata.root_pid, SIGINT);
+    fio_thread_kill(fio___srvdata.root_pid, SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
   /* TODO! clear master-only subscriptions */

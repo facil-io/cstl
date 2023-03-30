@@ -387,7 +387,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
-#if defined(fork) && defined(WEXITSTATUS)
+#if defined(fork) && defined(WEXITSTATUS) /* unix features pre-patched */
 FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }

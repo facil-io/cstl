@@ -3331,7 +3331,6 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
 FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
-FIO_SFUNC int kill(int pid, int signum);
 
 #ifndef O_APPEND
 #define O_APPEND      _O_APPEND
@@ -3499,74 +3498,6 @@ bad_file:
   return -1;
 }
 
-/** patch for kill */
-FIO_SFUNC int kill(int pid, int sig) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  HANDLE handle;
-  DWORD status;
-  if (sig < 0 || sig >= NSIG) {
-    errno = EINVAL;
-    return -1;
-  }
-#ifdef SIGCONT
-  if (sig == SIGCONT) {
-    errno = ENOSYS;
-    return -1;
-  }
-#endif
-
-  if (pid == -1)
-    pid = 0;
-
-  if (!pid)
-    handle = GetCurrentProcess();
-  else
-    handle =
-        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if (!handle)
-    goto something_went_wrong;
-
-  switch (sig) {
-#ifdef SIGKILL
-  case SIGKILL:
-#endif
-  case SIGTERM:
-  case SIGINT: /* terminate */
-    if (!TerminateProcess(handle, 1))
-      goto something_went_wrong;
-    break;
-  case 0: /* check status */
-    if (!GetExitCodeProcess(handle, &status))
-      goto something_went_wrong;
-    if (status != STILL_ACTIVE) {
-      errno = ESRCH;
-      goto cleanup_after_error;
-    }
-    break;
-  default: /* not supported? */ errno = ENOSYS; goto cleanup_after_error;
-  }
-
-  if (pid) {
-    CloseHandle(handle);
-  }
-  return 0;
-
-something_went_wrong:
-
-  switch (GetLastError()) {
-  case ERROR_INVALID_PARAMETER: errno = ESRCH; break;
-  case ERROR_ACCESS_DENIED:
-    errno = EPERM;
-    if (handle && GetExitCodeProcess(handle, &status) && status != STILL_ACTIVE)
-      errno = ESRCH;
-    break;
-  default: errno = GetLastError();
-  }
-cleanup_after_error:
-  if (handle && pid)
-    CloseHandle(handle);
-  return -1;
-}
 /* *****************************************************************************
 
 
@@ -7575,7 +7506,7 @@ FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
-#if defined(fork) && defined(WEXITSTATUS)
+#if defined(fork) && defined(WEXITSTATUS) /* unix features pre-patched */
 FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
@@ -31246,7 +31177,7 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);
-    kill(fio___srvdata.root_pid, SIGINT);
+    fio_thread_kill(fio___srvdata.root_pid, SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
   /* TODO! clear master-only subscriptions */
