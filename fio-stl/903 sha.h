@@ -154,6 +154,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           .sha256 = (char *)"\xBA\x78\x16\xBF\x8F\x01\xCF\xEA\x41\x41\x40\xDE"
                             "\x5D\xAE\x22\x23\xB0\x03\x61\xA3\x96\x17\x7A\x9C"
                             "\xB4\x10\xFF\x61\xF2\x00\x15\xAD",
+          .sha512 =
+              (char *)"\xDD\xAF\x35\xA1\x93\x61\x7A\xBA\xCC\x41\x73\x49\xAE"
+                      "\x20\x41\x31\x12\xE6\xFA\x4E\x89\xA9\x7E\xA2\x0A\x9E"
+                      "\xEE\xE6\x4B\x55\xD3\x9A\x21\x92\x99\x2A\x27\x4F\xC1"
+                      "\xA8\x36\xBA\x3C\x23\xA3\xFE\xEB\xBD\x45\x4D\x44\x23"
+                      "\x64\x3C\xE8\x0E\x2A\x9A\xC9\x4F\xA5\x4C\xA4\x9F",
       },
       {
           .str = (char *)"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnl"
@@ -161,6 +167,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           .sha256 = (char *)"\x24\x8D\x6A\x61\xD2\x06\x38\xB8\xE5\xC0\x26"
                             "\x93\x0C\x3E\x60\x39\xA3\x3C\xE4\x59\x64\xFF"
                             "\x21\x67\xF6\xEC\xED\xD4\x19\xDB\x06\xC1",
+          .sha512 =
+              (char *)"\x20\x4A\x8F\xC6\xDD\xA8\x2F\x0A\x0C\xED\x7B\xEB\x8E\x08"
+                      "\xA4\x16\x57\xC1\x6E\xF4\x68\xB2\x28\xA8\x27\x9B\xE3\x31"
+                      "\xA7\x03\xC3\x35\x96\xFD\x15\xC1\x3B\x1B\x07\xF9\xAA\x1D"
+                      "\x3B\xEA\x57\x78\x9C\xA0\x31\xAD\x85\xC7\xA7\x1D\xD7\x03"
+                      "\x54\xEC\x63\x12\x38\xCA\x34\x45",
       },
       {
           .str = (char *)"The quick brown fox jumps over the lazy dog",
@@ -216,12 +228,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[30],
                  sha256.u8[31]);
     }
-    // if (data[i].sha512) {
-    //   fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
-    //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
-    //              "SHA512 mismatch for \"%s\"",
-    //              data[i].str);
-    // }
+    if (data[i].sha512) {
+      fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
+      FIO_ASSERT(
+          !memcmp(sha512.u8, data[i].sha512, 64),
+          "SHA512 mismatch for \"%s\":\n\t %X%X%X%X%X%X%X%X...%X%X%X%X%X%X%X%X",
+          data[i].str,
+          sha512.u8[0],
+          sha512.u8[1],
+          sha512.u8[2],
+          sha512.u8[3],
+          sha512.u8[4],
+          sha512.u8[5],
+          sha512.u8[6],
+          sha512.u8[7],
+          sha512.u8[24],
+          sha512.u8[25],
+          sha512.u8[26],
+          sha512.u8[27],
+          sha512.u8[28],
+          sha512.u8[29],
+          sha512.u8[30],
+          sha512.u8[31]);
+    }
   }
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
@@ -234,16 +263,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                          13,
                          0,
                          1);
-  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-  //                        (char *)"fio_sha512",
-  //                        5,
-  //                        0,
-  //                        0);
-  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-  //                        (char *)"fio_sha512",
-  //                        13,
-  //                        0,
-  //                        1);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+                         (char *)"fio_sha512",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+                         (char *)"fio_sha512",
+                         13,
+                         0,
+                         1);
 #if HAVE_OPENSSL
   fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),

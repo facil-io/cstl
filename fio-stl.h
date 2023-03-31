@@ -26230,7 +26230,14 @@ FIO_IFUNC fio_u256 fio_sha256(const void *data, uint64_t len) {
 
 /** initializes a fio_u256 so the hash can be consumed. */
 FIO_IFUNC fio_sha512_s fio_sha512_init(void) {
-  fio_sha512_s h = {.hash.u64 = {0ULL}}; /* TODO! */
+  fio_sha512_s h = {.hash.u64 = {0x6A09E667F3BCC908ULL,
+                                 0xBB67AE8584CAA73BULL,
+                                 0x3C6EF372FE94F82BULL,
+                                 0xA54FF53A5F1D36F1ULL,
+                                 0x510E527FADE682D1ULL,
+                                 0x9B05688C2B3E6C1FULL,
+                                 0x1F83D9ABFB41BD6BULL,
+                                 0x5BE0CD19137E2179ULL}};
   return h;
 }
 
@@ -26362,18 +26369,109 @@ Implementation - SHA-512
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
-  /* TODO! */
-  (void)h;
-  (void)block;
+  const uint64_t sha512_consts[80] = {
+      0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F,
+      0xE9B5DBA58189DBBC, 0x3956C25BF348B538, 0x59F111F1B605D019,
+      0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242,
+      0x12835B0145706FBE, 0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2,
+      0x72BE5D74F27B896F, 0x80DEB1FE3B1696B1, 0x9BDC06A725C71235,
+      0xC19BF174CF692694, 0xE49B69C19EF14AD2, 0xEFBE4786384F25E3,
+      0x0FC19DC68B8CD5B5, 0x240CA1CC77AC9C65, 0x2DE92C6F592B0275,
+      0x4A7484AA6EA6E483, 0x5CB0A9DCBD41FBD4, 0x76F988DA831153B5,
+      0x983E5152EE66DFAB, 0xA831C66D2DB43210, 0xB00327C898FB213F,
+      0xBF597FC7BEEF0EE4, 0xC6E00BF33DA88FC2, 0xD5A79147930AA725,
+      0x06CA6351E003826F, 0x142929670A0E6E70, 0x27B70A8546D22FFC,
+      0x2E1B21385C26C926, 0x4D2C6DFC5AC42AED, 0x53380D139D95B3DF,
+      0x650A73548BAF63DE, 0x766A0ABB3C77B2A8, 0x81C2C92E47EDAEE6,
+      0x92722C851482353B, 0xA2BFE8A14CF10364, 0xA81A664BBC423001,
+      0xC24B8B70D0F89791, 0xC76C51A30654BE30, 0xD192E819D6EF5218,
+      0xD69906245565A910, 0xF40E35855771202A, 0x106AA07032BBD1B8,
+      0x19A4C116B8D2D0C8, 0x1E376C085141AB53, 0x2748774CDF8EEB99,
+      0x34B0BCB5E19B48A8, 0x391C0CB3C5C95A63, 0x4ED8AA4AE3418ACB,
+      0x5B9CCA4F7763E373, 0x682E6FF3D6B2B8A3, 0x748F82EE5DEFB2FC,
+      0x78A5636F43172F60, 0x84C87814A1F0AB72, 0x8CC702081A6439EC,
+      0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915,
+      0xC67178F2E372532B, 0xCA273ECEEA26619C, 0xD186B8C721C0C207,
+      0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178, 0x06F067AA72176FBA,
+      0x0A637DC5A2C898A6, 0x113F9804BEF90DAE, 0x1B710B35131C471B,
+      0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
+      0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A,
+      0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817};
+
+  uint64_t t1, t2; /* used often... */
+  /* copy original state */
+  uint64_t v[8] FIO_ALIGN(16);
+  for (size_t i = 0; i < 8; ++i)
+    v[i] = h->u64[i];
+
+  /* read data as an array of 16 big endian 64 bit integers. */
+  uint64_t w[16] FIO_ALIGN(16);
+  fio_memcpy128(w, block);
+  for (size_t i = 0; i < 16; ++i)
+    w[i] = fio_lton64(w[i]); /* no-op on big endien systems */
+
+#define FIO___SHA512_ROUND_UNROLL(s)                                           \
+  t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
+       (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
+        fio_rrot64(v[(4 - s) & 7], 41)) +                                      \
+       ((v[(4 - s) & 7] & v[(5 - s) & 7]) ^                                    \
+        ((~v[(4 - s) & 7]) & v[(6 - s) & 7]));                                 \
+  t2 =                                                                         \
+      (fio_rrot64(v[(0 - s) & 7], 28) ^ fio_rrot64(v[(0 - s) & 7], 34) ^       \
+       fio_rrot64(v[(0 - s) & 7], 39)) +                                       \
+      ((v[(0 - s) & 7] & v[(1 - s) & 7]) ^ (v[(0 - s) & 7] & v[(2 - s) & 7]) ^ \
+       (v[(1 - s) & 7] & v[(2 - s) & 7]));                                     \
+  v[(3 - s) & 7] += t1;                                                        \
+  v[(7 - s) & 7] = t1 + t2
+
+  /* perform 80 "shuffle" rounds */
+  for (size_t i = 0; i < 16; i += 8) {
+    FIO___SHA512_ROUND_UNROLL(0);
+    FIO___SHA512_ROUND_UNROLL(1);
+    FIO___SHA512_ROUND_UNROLL(2);
+    FIO___SHA512_ROUND_UNROLL(3);
+    FIO___SHA512_ROUND_UNROLL(4);
+    FIO___SHA512_ROUND_UNROLL(5);
+    FIO___SHA512_ROUND_UNROLL(6);
+    FIO___SHA512_ROUND_UNROLL(7);
+  }
+#undef FIO___SHA512_ROUND_UNROLL
+#define FIO___SHA512_ROUND_UNROLL(s)                                           \
+  t1 = (i + s + 14) & 15;                                                      \
+  t2 = (i + s + 1) & 15;                                                       \
+  t1 = fio_rrot64(w[t1], 19) ^ fio_rrot64(w[t1], 61) ^ (w[t1] >> 6);           \
+  t2 = fio_rrot64(w[t2], 1) ^ fio_rrot64(w[t2], 8) ^ (w[t2] >> 7);             \
+  w[i + s & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];             \
+  t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
+       (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
+        fio_rrot64(v[(4 - s) & 7], 41)) +                                      \
+       ((v[(4 - s) & 7] & v[(5 - s) & 7]) ^                                    \
+        ((~v[(4 - s) & 7]) & v[(6 - s) & 7]));                                 \
+  t2 =                                                                         \
+      (fio_rrot64(v[(0 - s) & 7], 28) ^ fio_rrot64(v[(0 - s) & 7], 34) ^       \
+       fio_rrot64(v[(0 - s) & 7], 39)) +                                       \
+      ((v[(0 - s) & 7] & v[(1 - s) & 7]) ^ (v[(0 - s) & 7] & v[(2 - s) & 7]) ^ \
+       (v[(1 - s) & 7] & v[(2 - s) & 7]));                                     \
+  v[(3 - s) & 7] += t1;                                                        \
+  v[(7 - s) & 7] = t1 + t2
+
+  for (size_t i = 16; i < 80; i += 8) {
+    FIO___SHA512_ROUND_UNROLL(0);
+    FIO___SHA512_ROUND_UNROLL(1);
+    FIO___SHA512_ROUND_UNROLL(2);
+    FIO___SHA512_ROUND_UNROLL(3);
+    FIO___SHA512_ROUND_UNROLL(4);
+    FIO___SHA512_ROUND_UNROLL(5);
+    FIO___SHA512_ROUND_UNROLL(6);
+    FIO___SHA512_ROUND_UNROLL(7);
+  }
+  /* sum/store state */
+  for (size_t i = 0; i < 8; ++i)
+    h->u64[i] += v[i];
 }
 
 /** Feed data into the hash */
 SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
-  (void)h;
-  (void)data;
-  (void)len;
-  /* TODO! */
-
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;
@@ -26398,25 +26496,24 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
     fio___sha512_round(&h->hash, r);
     r += 128;
   }
-  fio_memcpy63x(h->cache.u64, r, len);
+  fio_memcpy127x(h->cache.u64, r, len);
 }
 
 /** finalizes a fio_u512 with the SHA 512 hash. */
 SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
-  /* TODO! */
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
   const size_t total = h->total_len;
   const size_t remainder = total & 127;
   h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
-  if ((remainder) > 119) { /* make sure there's room to attach `total_len` */
+  if ((remainder) > 112) { /* make sure there's room to attach `total_len` */
     fio___sha512_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 128);
   }
   h->cache.u64[15] = fio_lton64((total << 3));
   fio___sha512_round(&h->hash, h->cache.u8);
   for (size_t i = 0; i < 8; ++i)
-    h->hash.u64[i] = fio_ntol64(h->hash.u64[i]); /* back to big endien */
+    h->hash.u64[i] = fio_ntol64(h->hash.u64[i]); /* back to/from big endien */
   h->total_len = ((uint64_t)0ULL - 1ULL);
   return h->hash;
 }
@@ -45937,6 +46034,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           .sha256 = (char *)"\xBA\x78\x16\xBF\x8F\x01\xCF\xEA\x41\x41\x40\xDE"
                             "\x5D\xAE\x22\x23\xB0\x03\x61\xA3\x96\x17\x7A\x9C"
                             "\xB4\x10\xFF\x61\xF2\x00\x15\xAD",
+          .sha512 =
+              (char *)"\xDD\xAF\x35\xA1\x93\x61\x7A\xBA\xCC\x41\x73\x49\xAE"
+                      "\x20\x41\x31\x12\xE6\xFA\x4E\x89\xA9\x7E\xA2\x0A\x9E"
+                      "\xEE\xE6\x4B\x55\xD3\x9A\x21\x92\x99\x2A\x27\x4F\xC1"
+                      "\xA8\x36\xBA\x3C\x23\xA3\xFE\xEB\xBD\x45\x4D\x44\x23"
+                      "\x64\x3C\xE8\x0E\x2A\x9A\xC9\x4F\xA5\x4C\xA4\x9F",
       },
       {
           .str = (char *)"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnl"
@@ -45944,6 +46047,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           .sha256 = (char *)"\x24\x8D\x6A\x61\xD2\x06\x38\xB8\xE5\xC0\x26"
                             "\x93\x0C\x3E\x60\x39\xA3\x3C\xE4\x59\x64\xFF"
                             "\x21\x67\xF6\xEC\xED\xD4\x19\xDB\x06\xC1",
+          .sha512 =
+              (char *)"\x20\x4A\x8F\xC6\xDD\xA8\x2F\x0A\x0C\xED\x7B\xEB\x8E\x08"
+                      "\xA4\x16\x57\xC1\x6E\xF4\x68\xB2\x28\xA8\x27\x9B\xE3\x31"
+                      "\xA7\x03\xC3\x35\x96\xFD\x15\xC1\x3B\x1B\x07\xF9\xAA\x1D"
+                      "\x3B\xEA\x57\x78\x9C\xA0\x31\xAD\x85\xC7\xA7\x1D\xD7\x03"
+                      "\x54\xEC\x63\x12\x38\xCA\x34\x45",
       },
       {
           .str = (char *)"The quick brown fox jumps over the lazy dog",
@@ -45999,12 +46108,29 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[30],
                  sha256.u8[31]);
     }
-    // if (data[i].sha512) {
-    //   fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
-    //   FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
-    //              "SHA512 mismatch for \"%s\"",
-    //              data[i].str);
-    // }
+    if (data[i].sha512) {
+      fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
+      FIO_ASSERT(
+          !memcmp(sha512.u8, data[i].sha512, 64),
+          "SHA512 mismatch for \"%s\":\n\t %X%X%X%X%X%X%X%X...%X%X%X%X%X%X%X%X",
+          data[i].str,
+          sha512.u8[0],
+          sha512.u8[1],
+          sha512.u8[2],
+          sha512.u8[3],
+          sha512.u8[4],
+          sha512.u8[5],
+          sha512.u8[6],
+          sha512.u8[7],
+          sha512.u8[24],
+          sha512.u8[25],
+          sha512.u8[26],
+          sha512.u8[27],
+          sha512.u8[28],
+          sha512.u8[29],
+          sha512.u8[30],
+          sha512.u8[31]);
+    }
   }
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
@@ -46017,16 +46143,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                          13,
                          0,
                          1);
-  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-  //                        (char *)"fio_sha512",
-  //                        5,
-  //                        0,
-  //                        0);
-  // fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-  //                        (char *)"fio_sha512",
-  //                        13,
-  //                        0,
-  //                        1);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+                         (char *)"fio_sha512",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
+                         (char *)"fio_sha512",
+                         13,
+                         0,
+                         1);
 #if HAVE_OPENSSL
   fprintf(stderr, "* Comparing to " OPENSSL_VERSION_TEXT "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
