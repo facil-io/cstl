@@ -26519,9 +26519,8 @@ SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
 }
 
 /* *****************************************************************************
-Module Cleanup
+Cleanup
 ***************************************************************************** */
-
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SHA2 */
 #undef FIO_SHA2
@@ -45559,6 +45558,7 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
 FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
   fprintf(stderr, "* Testing ChaCha20 Poly1305\n");
   { /* test ChaCha20 independently */
+    fprintf(stderr, "\t * Testing ChaCha20 separately\n");
     struct {
       char key[33];
       char nounce[13];
@@ -45621,6 +45621,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
     }
   }
   { /* test Poly1305 independently */
+    fprintf(stderr, "\t * Testing Poly1305 separately\n");
     struct {
       char key[33];
       char *msg;
@@ -45658,6 +45659,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
     }
   }
   { /* test ChaCha20Poly1305 */
+    fprintf(stderr, "\t * Testing ChaCha20Poly1305 together\n");
     struct {
       char key[33];
       char nounce[13];
