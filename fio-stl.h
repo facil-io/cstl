@@ -35289,7 +35289,7 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
   uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127);
   switch (len_indicator) {
   case 126:
-    if (buf->len < 4 + mask_l)
+    if (buf->len < (4ULL + mask_l))
       return 1;
     p->expect = fio_buf2u16_be(buf->buf + 2);
     p->mask = mask_f ? fio_buf2u32u(buf->buf + 4) : 0;
@@ -35298,7 +35298,7 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
     break;
 
   case 127:
-    if (buf->len < 10 + mask_l)
+    if (buf->len < (10ULL + mask_l))
       return 1;
     p->expect = fio_buf2u64_be(buf->buf + 2);
     if (p->expect & 0xFF00000000000000ULL)
@@ -35309,7 +35309,7 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
     break;
 
   default:
-    if (buf->len < 2 + mask_l)
+    if (buf->len < (2ULL + mask_l))
       return 1;
     p->expect = len_indicator;
     p->mask = mask_f ? fio_buf2u32u(buf->buf + 2) : 0;
