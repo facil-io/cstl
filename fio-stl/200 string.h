@@ -1306,9 +1306,9 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 0)))
-FIO_NAME(FIO_STR_NAME,
-         vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
+SFUNC fio_str_info_s FIO___PRINTF_STYLE(2, 0)
+    FIO_NAME(FIO_STR_NAME,
+             vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
@@ -1325,8 +1325,8 @@ FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 3)))
-FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
+SFUNC fio_str_info_s FIO___PRINTF_STYLE(2, 3)
+    FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
   va_list argv;
   va_start(argv, format);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, vprintf)(s_, format, argv);

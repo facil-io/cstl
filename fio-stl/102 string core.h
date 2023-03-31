@@ -209,14 +209,14 @@ String printf style support
 ***************************************************************************** */
 
 /** Similar to fio_string_write, only using printf semantics. */
-SFUNC __attribute__((format(FIO___PRINTF_STYLE, 3, 0))) int fio_string_printf(
+SFUNC FIO___PRINTF_STYLE(3, 0) int fio_string_printf(
     fio_str_info_s *dest,
     fio_string_realloc_fn reallocate,
     const char *format,
     ...);
 
 /** Similar to fio_string_write, only using vprintf semantics. */
-SFUNC __attribute__((format(FIO___PRINTF_STYLE, 3, 0))) int fio_string_vprintf(
+SFUNC FIO___PRINTF_STYLE(3, 0) int fio_string_vprintf(
     fio_str_info_s *dest,
     fio_string_realloc_fn reallocate,
     const char *format,
@@ -570,8 +570,9 @@ FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
                                      size_t limit);
 
 /** Writes a `fio_bstr` in `printf` style. */
-FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
-fio_bstr_printf(char *bstr, const char *format, ...);
+FIO_IFUNC FIO___PRINTF_STYLE(2, 0) char *fio_bstr_printf(char *bstr,
+                                                         const char *format,
+                                                         ...);
 
 /** default reallocation callback implementation - mostly for internal use. */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
@@ -911,8 +912,9 @@ FIO_IFUNC char *fio_bstr_write_html_unescape(char *bstr,
   return fio_bstr___len_set(i.buf, i.len);
 }
 
-FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
-fio_bstr_printf(char *bstr, const char *format, ...) {
+FIO_IFUNC FIO___PRINTF_STYLE(2, 0) char *fio_bstr_printf(char *bstr,
+                                                         const char *format,
+                                                         ...) {
   bstr = fio_bstr___make_unique(bstr);
   va_list argv;
   va_start(argv, format);
@@ -1222,11 +1224,11 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
 ***************************************************************************** */
 
 /* Similar to fio_string_write, only using vprintf semantics. */
-SFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
-fio_string_vprintf(fio_str_info_s *dest,
-                   fio_string_realloc_fn reallocate,
-                   const char *format,
-                   va_list argv) {
+SFUNC int FIO___PRINTF_STYLE(3, 0)
+    fio_string_vprintf(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       const char *format,
+                       va_list argv) {
   int r = 0;
   va_list argv_cpy;
   va_copy(argv_cpy, argv);
@@ -1246,11 +1248,11 @@ fio_string_vprintf(fio_str_info_s *dest,
 }
 
 /** Similar to fio_string_write, only using printf semantics. */
-SFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
-fio_string_printf(fio_str_info_s *dest,
-                  fio_string_realloc_fn reallocate,
-                  const char *format,
-                  ...) {
+SFUNC int FIO___PRINTF_STYLE(3, 4)
+    fio_string_printf(fio_str_info_s *dest,
+                      fio_string_realloc_fn reallocate,
+                      const char *format,
+                      ...) {
   int r = 0;
   va_list argv;
   va_start(argv, format);

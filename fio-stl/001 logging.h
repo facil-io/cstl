@@ -37,8 +37,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 #undef FIO_LOG2STDERR
 
-static __attribute__((format(FIO___PRINTF_STYLE, 1, 0), unused)) void
-FIO_LOG2STDERR(const char *format, ...) {
+FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
+                                                       ...) {
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
 #define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 34)

@@ -268,7 +268,6 @@ OS Specific includes and Macros
 #if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
-#define FIO___PRINTF_STYLE  printf
 #define FIO___KILL_SELF()   kill(0, SIGINT)
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
@@ -300,12 +299,14 @@ OS Specific includes and Macros
 /* Mingw supports */
 #define FIO_HAVE_UNIX_TOOLS    2
 #define __USE_MINGW_ANSI_STDIO 1
-#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
 #elif defined(__CYGWIN__)
 /* TODO: cygwin support */
 #define FIO_HAVE_UNIX_TOOLS    3
 #define __USE_MINGW_ANSI_STDIO 1
-#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
 #else
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
@@ -343,6 +344,12 @@ typedef SSIZE_T ssize_t;
 #if FIO_HAVE_UNIX_TOOLS
 #include <sys/param.h>
 #include <unistd.h>
+#endif
+
+/* assume GCC / Clang style if no specific style provided. */
+#ifndef FIO___PRINTF_STYLE
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(printf, string_index, check_index)))
 #endif
 
 /* *****************************************************************************
@@ -2604,8 +2611,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 #undef FIO_LOG2STDERR
 
-static __attribute__((format(FIO___PRINTF_STYLE, 1, 0), unused)) void
-FIO_LOG2STDERR(const char *format, ...) {
+FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
+                                                       ...) {
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
 #define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 34)
@@ -16850,14 +16857,14 @@ String printf style support
 ***************************************************************************** */
 
 /** Similar to fio_string_write, only using printf semantics. */
-SFUNC __attribute__((format(FIO___PRINTF_STYLE, 3, 0))) int fio_string_printf(
+SFUNC FIO___PRINTF_STYLE(3, 0) int fio_string_printf(
     fio_str_info_s *dest,
     fio_string_realloc_fn reallocate,
     const char *format,
     ...);
 
 /** Similar to fio_string_write, only using vprintf semantics. */
-SFUNC __attribute__((format(FIO___PRINTF_STYLE, 3, 0))) int fio_string_vprintf(
+SFUNC FIO___PRINTF_STYLE(3, 0) int fio_string_vprintf(
     fio_str_info_s *dest,
     fio_string_realloc_fn reallocate,
     const char *format,
@@ -17211,8 +17218,9 @@ FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
                                      size_t limit);
 
 /** Writes a `fio_bstr` in `printf` style. */
-FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
-fio_bstr_printf(char *bstr, const char *format, ...);
+FIO_IFUNC FIO___PRINTF_STYLE(2, 0) char *fio_bstr_printf(char *bstr,
+                                                         const char *format,
+                                                         ...);
 
 /** default reallocation callback implementation - mostly for internal use. */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len);
@@ -17552,8 +17560,9 @@ FIO_IFUNC char *fio_bstr_write_html_unescape(char *bstr,
   return fio_bstr___len_set(i.buf, i.len);
 }
 
-FIO_IFUNC __attribute__((format(FIO___PRINTF_STYLE, 2, 0))) char *
-fio_bstr_printf(char *bstr, const char *format, ...) {
+FIO_IFUNC FIO___PRINTF_STYLE(2, 0) char *fio_bstr_printf(char *bstr,
+                                                         const char *format,
+                                                         ...) {
   bstr = fio_bstr___make_unique(bstr);
   va_list argv;
   va_start(argv, format);
@@ -17863,11 +17872,11 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
 ***************************************************************************** */
 
 /* Similar to fio_string_write, only using vprintf semantics. */
-SFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 0)))
-fio_string_vprintf(fio_str_info_s *dest,
-                   fio_string_realloc_fn reallocate,
-                   const char *format,
-                   va_list argv) {
+SFUNC int FIO___PRINTF_STYLE(3, 0)
+    fio_string_vprintf(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       const char *format,
+                       va_list argv) {
   int r = 0;
   va_list argv_cpy;
   va_copy(argv_cpy, argv);
@@ -17887,11 +17896,11 @@ fio_string_vprintf(fio_str_info_s *dest,
 }
 
 /** Similar to fio_string_write, only using printf semantics. */
-SFUNC int __attribute__((format(FIO___PRINTF_STYLE, 3, 4)))
-fio_string_printf(fio_str_info_s *dest,
-                  fio_string_realloc_fn reallocate,
-                  const char *format,
-                  ...) {
+SFUNC int FIO___PRINTF_STYLE(3, 4)
+    fio_string_printf(fio_str_info_s *dest,
+                      fio_string_realloc_fn reallocate,
+                      const char *format,
+                      ...) {
   int r = 0;
   va_list argv;
   va_start(argv, format);
@@ -20658,9 +20667,9 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 0)))
-FIO_NAME(FIO_STR_NAME,
-         vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
+SFUNC fio_str_info_s FIO___PRINTF_STYLE(2, 0)
+    FIO_NAME(FIO_STR_NAME,
+             vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
   if (!i.capa)
     return i;
@@ -20677,8 +20686,8 @@ FIO_NAME(FIO_STR_NAME,
  *
  * Data is written to the end of the String.
  */
-SFUNC fio_str_info_s __attribute__((format(FIO___PRINTF_STYLE, 2, 3)))
-FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
+SFUNC fio_str_info_s FIO___PRINTF_STYLE(2, 3)
+    FIO_NAME(FIO_STR_NAME, printf)(FIO_STR_PTR s_, const char *format, ...) {
   va_list argv;
   va_start(argv, format);
   fio_str_info_s state = FIO_NAME(FIO_STR_NAME, vprintf)(s_, format, argv);

@@ -231,7 +231,6 @@ OS Specific includes and Macros
 #if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
-#define FIO___PRINTF_STYLE  printf
 #define FIO___KILL_SELF()   kill(0, SIGINT)
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
@@ -263,12 +262,14 @@ OS Specific includes and Macros
 /* Mingw supports */
 #define FIO_HAVE_UNIX_TOOLS    2
 #define __USE_MINGW_ANSI_STDIO 1
-#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
 #elif defined(__CYGWIN__)
 /* TODO: cygwin support */
 #define FIO_HAVE_UNIX_TOOLS    3
 #define __USE_MINGW_ANSI_STDIO 1
-#define FIO___PRINTF_STYLE     __MINGW_PRINTF_FORMAT
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
 #else
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
@@ -306,6 +307,12 @@ typedef SSIZE_T ssize_t;
 #if FIO_HAVE_UNIX_TOOLS
 #include <sys/param.h>
 #include <unistd.h>
+#endif
+
+/* assume GCC / Clang style if no specific style provided. */
+#ifndef FIO___PRINTF_STYLE
+#define FIO___PRINTF_STYLE(string_index, check_index)                          \
+  __attribute__((format(printf, string_index, check_index)))
 #endif
 
 /* *****************************************************************************
