@@ -20,7 +20,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
-TODO: ED 25519, ED 448
+TODO: ED 25519
 
 ED-25519 key generation, key exchange and signatures are crucial to complete the
 minimal building blocks that would allow to secure inter-machine communication
@@ -49,17 +49,6 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
-/* *****************************************************************************
-Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ED25519)(void) {
-  /*
-   * TODO: test module here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

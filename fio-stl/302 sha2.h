@@ -293,7 +293,7 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
   t2 = (i + s + 1) & 15;                                                       \
   t1 = fio_rrot64(w[t1], 19) ^ fio_rrot64(w[t1], 61) ^ (w[t1] >> 6);           \
   t2 = fio_rrot64(w[t2], 1) ^ fio_rrot64(w[t2], 8) ^ (w[t2] >> 7);             \
-  w[i + s & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];             \
+  w[(i + s) & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];           \
   t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
        (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
         fio_rrot64(v[(4 - s) & 7], 41)) +                                      \

@@ -26441,7 +26441,7 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
   t2 = (i + s + 1) & 15;                                                       \
   t1 = fio_rrot64(w[t1], 19) ^ fio_rrot64(w[t1], 61) ^ (w[t1] >> 6);           \
   t2 = fio_rrot64(w[t2], 1) ^ fio_rrot64(w[t2], 8) ^ (w[t2] >> 7);             \
-  w[i + s & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];             \
+  w[(i + s) & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];           \
   t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
        (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
         fio_rrot64(v[(4 - s) & 7], 41)) +                                      \
@@ -26546,7 +26546,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
-TODO: ED 25519, ED 448
+TODO: ED 25519
 
 ED-25519 key generation, key exchange and signatures are crucial to complete the
 minimal building blocks that would allow to secure inter-machine communication
@@ -26575,17 +26575,6 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
-/* *****************************************************************************
-Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ED25519)(void) {
-  /*
-   * TODO: test module here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
