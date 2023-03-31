@@ -9362,9 +9362,9 @@ FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
 FIO_IFUNC int fio_sock_dup(int original) {
   int fd = -1;
   SOCKET tmpfd = INVALID_SOCKET;
-  WSAPROTOCOL_INFOA info;
-  if (!WSADuplicateSocketA(original, GetCurrentProcessId(), &info) &&
-      (tmpfd = WSASocketA(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &info, 0, 0)) !=
+  WSAPROTOCOL_INFO info;
+  if (!WSADuplicateSocket(original, GetCurrentProcessId(), &info) &&
+      (tmpfd = WSASocket(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &info, 0, 0)) !=
           INVALID_SOCKET) {
     if (FIO_SOCK_FD_ISVALID(tmpfd))
       fd = (int)tmpfd;
