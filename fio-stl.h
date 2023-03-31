@@ -280,6 +280,9 @@ OS Specific includes and Macros
 #define _CRT_SECURE_NO_WARNINGS 1
 #undef _CRT_NONSTDC_NO_WARNINGS
 #define _CRT_NONSTDC_NO_WARNINGS 1
+#ifndef UNICODE
+#define UNICODE 1
+#endif
 #include <windows.h>
 #endif /* WIN32_LEAN_AND_MEAN */
 
@@ -21009,7 +21012,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    FIO_LOG_DEBUG("* Skipped `compact` test (irrelevant for type).");
+    FIO_LOG_DEBUG2("* Skipped `compact` test (irrelevant for type).");
   }
 
   {

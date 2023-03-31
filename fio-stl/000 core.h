@@ -243,6 +243,9 @@ OS Specific includes and Macros
 #define _CRT_SECURE_NO_WARNINGS 1
 #undef _CRT_NONSTDC_NO_WARNINGS
 #define _CRT_NONSTDC_NO_WARNINGS 1
+#ifndef UNICODE
+#define UNICODE 1
+#endif
 #include <windows.h>
 #endif /* WIN32_LEAN_AND_MEAN */
 

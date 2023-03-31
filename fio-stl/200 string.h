@@ -1648,7 +1648,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    FIO_LOG_DEBUG("* Skipped `compact` test (irrelevant for type).");
+    FIO_LOG_DEBUG2("* Skipped `compact` test (irrelevant for type).");
   }
 
   {
