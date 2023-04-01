@@ -9579,6 +9579,8 @@ int fio_http_websocket_write(fio_http_s *h, const void *buf, size_t len, uint8_t
 
 Writes a WebSocket message. Fails if connection wasn't upgraded yet.
 
+**Note**: calls to the HTTP handle function `fio_http_write` may route to this function after the library performs a best guess attempt at the correct `is_text`.
+
 #### `fio_http_on_message_set`
 
 ```c
@@ -9640,6 +9642,8 @@ typedef struct {
   fio_buf_info_s data;
 } fio_http_sse_write_args_s;
 ```
+
+**Note**: calls to the HTTP handle function `fio_http_write` may route to this function, in which case both `event` and `id` are omitted.
 
 #### `FIO_HTTP_SSE_SUBSCRIBE_DIRECT`
 
