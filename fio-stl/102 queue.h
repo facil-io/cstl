@@ -430,7 +430,7 @@ no_mem:
   return -1;
 }
 
-int fio_queue_push_urgent___(void); /* sublimetext marker */
+int fio_queue_push_urgent___(void); /* IDE marker */
 /** Pushes a task to the head of the queue. Returns -1 on error (no memory). */
 SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
                                          fio_queue_task_s task) {
@@ -699,7 +699,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
   return r;
 }
 
-void fio_timer_schedule___(void); /* sublimetext marker */
+void fio_timer_schedule___(void); /* IDE marker */
 /** Adds a time-bound event to the timer queue. */
 SFUNC void fio_timer_schedule FIO_NOOP(fio_timer_queue_s *timer,
                                        fio_timer_schedule_args_s args) {

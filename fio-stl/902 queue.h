@@ -255,12 +255,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
             "* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
     fprintf(stderr, "  Note: Errors SHOULD print out to the log.\n");
     fio_queue_init(&q2);
-    uintptr_t tester = 0;
+    volatile uintptr_t tester = 0;
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
 
     /* test failuers */
     fio_timer_schedule(&tq,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 100,
                        .repetitions = -1);
@@ -269,7 +269,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     tester = 0;
     fio_timer_schedule(NULL,
                        .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 100,
                        .repetitions = -1);
@@ -278,7 +278,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     tester = 0;
     fio_timer_schedule(&tq,
                        .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 0,
                        .repetitions = -1);
@@ -290,7 +290,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     tester = 0;
     fio_timer_schedule(&tq,
                        .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 1,
                        .repetitions = -1,
@@ -320,7 +320,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
     int64_t milli_now = fio_time_milli();
     fio_timer_schedule(&tq,
                        .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 100,
                        .repetitions = 1,
@@ -329,7 +329,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, queue)(void) {
                "fio_timer_schedule should have scheduled the task.");
     fio_timer_schedule(&tq,
                        .fn = fio___queue_test_timer_task,
-                       .udata1 = &tester,
+                       .udata1 = (void *)&tester,
                        .on_finish = fio___queue_test_sample_task,
                        .every = 1,
                        // .repetitions = 1, // auto-value is 1
