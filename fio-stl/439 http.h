@@ -587,7 +587,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
     break;
   } /* HAVE_ZLIB */
 #endif
-  fio_http_websockets_set_response(h);
+  fio_http_websockets_send_response(h);
   return;
 refuse_upgrade:
   c->state.http = old;
@@ -607,7 +607,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
   c = (fio___http_connection_s *)fio_http_cdata(h);
   if (c->h) /* request after eventsource? an attack vector? */
     goto refuse_upgrade;
-  fio_http_sse_set_response(h);
+  fio_http_sse_send_response(h);
   return;
 refuse_upgrade:
   fio_http_send_error_response(h, 403);

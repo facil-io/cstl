@@ -472,7 +472,7 @@ WebSocket / SSE Helpers
 SFUNC int fio_http_websockets_requested(fio_http_s *);
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_response(fio_http_s *);
+SFUNC void fio_http_websockets_send_response(fio_http_s *);
 
 /** Sets request data to request a WebSockets Upgrade.*/
 SFUNC void fio_http_websockets_set_request(fio_http_s *);
@@ -481,7 +481,7 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *);
 SFUNC int fio_http_sse_requested(fio_http_s *);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_set_response(fio_http_s *);
+SFUNC void fio_http_sse_send_response(fio_http_s *);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *);
@@ -1970,14 +1970,6 @@ handle_error:
 WebSocket / SSE Helpers
 ***************************************************************************** */
 
-/* *****************************************************************************
-
-
-                                TODO WIP Marker!!!
-
-
-***************************************************************************** */
-
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *h) {
   fio_str_info_s val =
@@ -2003,7 +1995,7 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_response(fio_http_s *h) {
+SFUNC void fio_http_websockets_send_response(fio_http_s *h) {
   h->status = 101;
   fio_http_response_header_set(h,
                                FIO_STR_INFO2((char *)"connection", 10),
@@ -2054,7 +2046,38 @@ handshake_error:
 }
 
 /** Sets request data to request a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_request(fio_http_s *h); /* TODO! */
+SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"connection", 10),
+                              FIO_STR_INFO2((char *)"Upgrade", 7));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"pragma", 6),
+                              FIO_STR_INFO2((char *)"no-cache", 8));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"cache-control", 13),
+                              FIO_STR_INFO2((char *)"no-cache", 8));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"connection", 10),
+                              FIO_STR_INFO2((char *)"keep-alive", 10));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"upgrade", 7),
+                              FIO_STR_INFO2((char *)"websocket", 9));
+  fio_http_request_header_set(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      FIO_STR_INFO2((char *)"13", 2));
+
+  {
+    uint64_t tmp[2] = {fio_rand64(), fio_rand64()};
+    FIO_STR_INFO_TMP_VAR(key, 64);
+    fio_string_write_base64enc(&key, NULL, tmp, 16, 0);
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                                FIO_STR_INFO2((char *)"13", 2));
+  }
+  /* sec-websocket-extensions ? */
+  /* send request? */
+}
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *h) {
@@ -2070,7 +2093,7 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_set_response(fio_http_s *h) { /* TODO! validate  */
+SFUNC void fio_http_sse_send_response(fio_http_s *h) { /* TODO! validate  */
   if (h->state)
     return;
   fio_http_response_header_set(h,
@@ -2090,7 +2113,18 @@ SFUNC void fio_http_sse_set_response(fio_http_s *h) { /* TODO! validate  */
 }
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_set_request(fio_http_s *h); /* TODO! */
+SFUNC void fio_http_sse_set_request(fio_http_s *h) {
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept", 6),
+                              FIO_STR_INFO2((char *)"text/event-stream", 17));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"connection", 10),
+                              FIO_STR_INFO2((char *)"keep-alive", 10));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"cache-control", 13),
+                              FIO_STR_INFO2((char *)"no-cache", 8));
+  /* TODO: send request? */
+}
 
 /* *****************************************************************************
 Header Parsing Helpers - Implementation
@@ -2222,14 +2256,6 @@ SFUNC int fio_http_request_header_parse(fio_http_s *h,
                                         fio_str_info_s header_name) {
   return fio___http_header_parse(HTTP_HDR_REQUEST(h), buf_parsed, header_name);
 }
-
-/* *****************************************************************************
-
-
-                                TODO WIP Marker!!!
-
-
-***************************************************************************** */
 
 /* *****************************************************************************
 Error Handling
@@ -2394,6 +2420,14 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
 
 /* *****************************************************************************
 Param Parsing (TODO! - parse query, parse mime/multipart parse text/json)
+***************************************************************************** */
+
+/* *****************************************************************************
+
+
+                                TODO WIP Marker!!!
+
+
 ***************************************************************************** */
 
 /* *****************************************************************************
