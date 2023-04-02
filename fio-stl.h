@@ -7949,15 +7949,6 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
 #endif /* FIO_THREADS_MUTEX_BYO */
 #endif /* FIO_OS_WIN */
 /* *****************************************************************************
-Module Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
-  /* TODO? test module here */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
 
@@ -11672,7 +11663,7 @@ FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
 FIO_SFUNC fio_str_info_s fio___cli_write2line_finalize(fio_str_info_s d,
                                                        fio_buf_info_s app_name,
                                                        uint8_t static_memory) {
-  /* TODO: replace "NAME" with `app_name` */
+  /* replace "NAME" with `app_name` */
   size_t additional_bytes = app_name.len > 4 ? app_name.len - 4 : 0;
   char *pos = (char *)FIO_MEMCHR(d.buf, 'N', d.len);
   uint32_t name_val = fio_buf2u32u("NAME");
@@ -15569,7 +15560,7 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/* TODO! task queue leak detection */
+/* task queue leak detection */
 FIO___LEAK_COUNTER_DEF(fio_queue)
 FIO___LEAK_COUNTER_DEF(fio_queue_task_rings)
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
@@ -21920,7 +21911,7 @@ Dynamic Arrays - internal helpers
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
 FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy)) /* TODO! */
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */
@@ -27238,10 +27229,6 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 #define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
 
 /* *****************************************************************************
-TODO!: Helpers fio_srv_queue_get && fio_srv_pid
-***************************************************************************** */
-
-/* *****************************************************************************
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -27531,7 +27518,6 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
-  /* TODO, skip wakeup for same thread caller? */
   if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
       fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
@@ -27650,7 +27636,7 @@ FIO_IFUNC void fio_invalidate_all() {
 }
 
 /** Returns an approximate number of IO objects attached. */
-SFUNC size_t fio_io_count(void) { /* TODO: remove? */
+SFUNC size_t fio_io_count(void) {
   return fio_validity_map_count(&fio___srvdata.valid);
 }
 
@@ -27917,7 +27903,7 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
       total += r;
       fio_stream_advance(&io->stream, r);
       continue;
-    } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
+    } else if ((r == -1) & ((errno == EWOULDBLOCK) || (errno == EAGAIN) ||
                             (errno == EINTR))) {
       break;
     } else {
@@ -28342,7 +28328,7 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
     fio_touch(io);
     return r;
   }
-  if ((!len) | ((r == -1) & ((errno == EAGAIN) | (errno == EWOULDBLOCK) |
+  if ((!len) | ((r == -1) & ((errno == EAGAIN) || (errno == EWOULDBLOCK) ||
                              (errno == EINTR))))
     return 0;
   fio_close(io);
@@ -29230,7 +29216,6 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
     X509 *cert = fio_tls_create_self_signed(server_name);
     SSL_CTX_use_certificate(s->ctx, cert);
     SSL_CTX_use_PrivateKey(s->ctx, fio___openssl_pkey);
-    // X509_free(cert); /* TODO: test: did we move ownership or duplicate? */
   }
   return 0;
 }
@@ -31277,7 +31262,6 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
     fio_thread_kill(fio___srvdata.root_pid, SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
-  /* TODO! clear master-only subscriptions */
 }
 
 /* *****************************************************************************
@@ -32038,7 +32022,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr);
 The HTTP Controller
 ***************************************************************************** */
 
-/** (TODO: review necessary callbacks)
+/**
  * The HTTP Controller manages all the callbacks required by the HTTP Handler in
  * order for HTTP responses and requests to be sent.
  */
@@ -32660,6 +32644,13 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
+  /* TODO! auto-finish if freed without finishing? */
+  // if (!(h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_UPGRADED))) {
+  //   h->status = 500; /* ignored if headers already sent */
+  //   fio_http_write_args_s args = {.finish = 1};
+  //   fio_http_write FIO_NOOP(h, args);
+  // }
+
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
   fio_keystr_destroy(&h->query, fio___http_keystr_free);
@@ -32671,7 +32662,6 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
-  /* TODO! auto-finish if freed without finishing? */
   if (h->controller)
     h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
@@ -32725,6 +32715,8 @@ SFUNC size_t fio_http_status(fio_http_s *h) { return h->status; }
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  if (!status)
+    status = 200;
   return (h->status = status);
 }
 /* *****************************************************************************
@@ -33499,7 +33491,7 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_send_response(fio_http_s *h) { /* TODO! validate  */
+SFUNC void fio_http_sse_send_response(fio_http_s *h) {
   if (h->state)
     return;
   fio_http_response_header_set(h,
@@ -33674,8 +33666,8 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!status || status > 1000)
     status = 404;
   h->status = status;
-  /* TODO: load body template, fill details and send it...? */
   FIO_STR_INFO_TMP_VAR(filename, 127);
+  /* read static error code file */
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -33689,7 +33681,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                FIO_STR_INFO2((char *)"content-type", 12),
                                body ? FIO_STR_INFO2((char *)"text/html", 9)
                                     : FIO_STR_INFO2((char *)"text/plain", 10));
-  if (!body) {
+  if (!body) { /* write a short error response (plain text fallback) */
     fio_str_info_s status_str = fio_http_status2str(status);
     filename.len = 0;
     fio_string_write2(&filename,
@@ -34862,6 +34854,8 @@ static int fio_http1___read_body(fio_http1_parser_s *p,
   if (fio_http1_on_body_chunk(*buf, udata))
     return -1;
   buf->buf += buf->len;
+  p->expected -= buf->len;
+  buf->len = 0;
   return 1;
 }
 
@@ -34938,17 +34932,6 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
   return (p->fn = fio_http1___read_trailer)(p, buf, udata);
 }
 
-/* *****************************************************************************
-Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
-  /*
-   * TODO: test HTTP parser here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

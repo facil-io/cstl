@@ -587,7 +587,7 @@ Dynamic Arrays - internal helpers
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
 FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy)) /* TODO! */
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */

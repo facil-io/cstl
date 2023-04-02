@@ -424,6 +424,8 @@ static int fio_http1___read_body(fio_http1_parser_s *p,
   if (fio_http1_on_body_chunk(*buf, udata))
     return -1;
   buf->buf += buf->len;
+  p->expected -= buf->len;
+  buf->len = 0;
   return 1;
 }
 
@@ -500,17 +502,6 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
   return (p->fn = fio_http1___read_trailer)(p, buf, udata);
 }
 
-/* *****************************************************************************
-Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MODULE_NAME)(void) {
-  /*
-   * TODO: test HTTP parser here
-   */
-}
-
-#endif /* FIO_TEST_ALL */
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

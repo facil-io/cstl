@@ -632,7 +632,7 @@ SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr);
 The HTTP Controller
 ***************************************************************************** */
 
-/** (TODO: review necessary callbacks)
+/**
  * The HTTP Controller manages all the callbacks required by the HTTP Handler in
  * order for HTTP responses and requests to be sent.
  */
@@ -1254,6 +1254,13 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
+  /* TODO! auto-finish if freed without finishing? */
+  // if (!(h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_UPGRADED))) {
+  //   h->status = 500; /* ignored if headers already sent */
+  //   fio_http_write_args_s args = {.finish = 1};
+  //   fio_http_write FIO_NOOP(h, args);
+  // }
+
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
   fio_keystr_destroy(&h->query, fio___http_keystr_free);
@@ -1265,7 +1272,6 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
-  /* TODO! auto-finish if freed without finishing? */
   if (h->controller)
     h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
@@ -1319,6 +1325,8 @@ SFUNC size_t fio_http_status(fio_http_s *h) { return h->status; }
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  if (!status)
+    status = 200;
   return (h->status = status);
 }
 /* *****************************************************************************
@@ -2093,7 +2101,7 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_send_response(fio_http_s *h) { /* TODO! validate  */
+SFUNC void fio_http_sse_send_response(fio_http_s *h) {
   if (h->state)
     return;
   fio_http_response_header_set(h,
@@ -2268,8 +2276,8 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!status || status > 1000)
     status = 404;
   h->status = status;
-  /* TODO: load body template, fill details and send it...? */
   FIO_STR_INFO_TMP_VAR(filename, 127);
+  /* read static error code file */
   fio_string_write2(&filename,
                     NULL,
                     FIO_STRING_WRITE_UNUM(status),
@@ -2283,7 +2291,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
                                FIO_STR_INFO2((char *)"content-type", 12),
                                body ? FIO_STR_INFO2((char *)"text/html", 9)
                                     : FIO_STR_INFO2((char *)"text/plain", 10));
-  if (!body) {
+  if (!body) { /* write a short error response (plain text fallback) */
     fio_str_info_s status_str = fio_http_status2str(status);
     filename.len = 0;
     fio_string_write2(&filename,

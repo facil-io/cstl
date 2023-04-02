@@ -293,7 +293,7 @@ Queue Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/* TODO! task queue leak detection */
+/* task queue leak detection */
 FIO___LEAK_COUNTER_DEF(fio_queue)
 FIO___LEAK_COUNTER_DEF(fio_queue_task_rings)
 /** Destroys a queue and re-initializes it, after freeing any used resources. */

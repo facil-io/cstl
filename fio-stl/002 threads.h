@@ -820,15 +820,6 @@ SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
 #endif /* FIO_THREADS_MUTEX_BYO */
 #endif /* FIO_OS_WIN */
 /* *****************************************************************************
-Module Testing
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, threads)(void) {
-  /* TODO? test module here */
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
 

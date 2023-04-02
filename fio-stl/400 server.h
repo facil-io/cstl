@@ -651,10 +651,6 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 #define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
 
 /* *****************************************************************************
-TODO!: Helpers fio_srv_queue_get && fio_srv_pid
-***************************************************************************** */
-
-/* *****************************************************************************
 Simple Server Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -944,7 +940,6 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
-  /* TODO, skip wakeup for same thread caller? */
   if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
       fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
@@ -1063,7 +1058,7 @@ FIO_IFUNC void fio_invalidate_all() {
 }
 
 /** Returns an approximate number of IO objects attached. */
-SFUNC size_t fio_io_count(void) { /* TODO: remove? */
+SFUNC size_t fio_io_count(void) {
   return fio_validity_map_count(&fio___srvdata.valid);
 }
 
@@ -1330,7 +1325,7 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
       total += r;
       fio_stream_advance(&io->stream, r);
       continue;
-    } else if ((r == -1) & ((errno == EWOULDBLOCK) | (errno == EAGAIN) |
+    } else if ((r == -1) & ((errno == EWOULDBLOCK) || (errno == EAGAIN) ||
                             (errno == EINTR))) {
       break;
     } else {
@@ -1755,7 +1750,7 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
     fio_touch(io);
     return r;
   }
-  if ((!len) | ((r == -1) & ((errno == EAGAIN) | (errno == EWOULDBLOCK) |
+  if ((!len) | ((r == -1) & ((errno == EAGAIN) || (errno == EWOULDBLOCK) ||
                              (errno == EINTR))))
     return 0;
   fio_close(io);

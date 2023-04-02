@@ -1754,7 +1754,6 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
     fio_thread_kill(fio___srvdata.root_pid, SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
-  /* TODO! clear master-only subscriptions */
 }
 
 /* *****************************************************************************

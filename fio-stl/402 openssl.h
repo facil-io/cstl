@@ -215,7 +215,6 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
     X509 *cert = fio_tls_create_self_signed(server_name);
     SSL_CTX_use_certificate(s->ctx, cert);
     SSL_CTX_use_PrivateKey(s->ctx, fio___openssl_pkey);
-    // X509_free(cert); /* TODO: test: did we move ownership or duplicate? */
   }
   return 0;
 }

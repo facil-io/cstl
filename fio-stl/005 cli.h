@@ -829,7 +829,7 @@ FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
 FIO_SFUNC fio_str_info_s fio___cli_write2line_finalize(fio_str_info_s d,
                                                        fio_buf_info_s app_name,
                                                        uint8_t static_memory) {
-  /* TODO: replace "NAME" with `app_name` */
+  /* replace "NAME" with `app_name` */
   size_t additional_bytes = app_name.len > 4 ? app_name.len - 4 : 0;
   char *pos = (char *)FIO_MEMCHR(d.buf, 'N', d.len);
   uint32_t name_val = fio_buf2u32u("NAME");
