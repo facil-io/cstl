@@ -71,6 +71,8 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
       SetConsoleMode(c, mode);
     }
   }
+  /* by default, windows read files using _O_TEXT, which affects behavior */
+  _set_fmode(_O_BINARY);
 }
 
 /* *****************************************************************************

@@ -241,9 +241,9 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
       continue;
     }
 #else
-    if (lseek(fd,
-              (start_at + (start_at < 0)),
-              ((start_at < 0) ? SEEK_END : SEEK_SET)) == (off_t)-1) {
+    if ((off_t)lseek(fd,
+                     (start_at + (start_at < 0)),
+                     ((start_at < 0) ? SEEK_END : SEEK_SET)) == (off_t)-1) {
       if (errno == EINTR)
         continue;
       return -1;
