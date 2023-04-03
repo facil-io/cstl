@@ -3337,8 +3337,6 @@ FIO_IFUNC int read(int const fd, void *const b, unsigned const l) {
 FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv);
 #endif /* __MINGW32__ */
 
-/** patch for pread */
-FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 
@@ -3403,6 +3401,9 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #if !defined(stat)
 #define stat _stat
 #endif /* stat */
+#if !defined(lseek)
+#define lseek _lseeki64
+#endif /* lseek */
 #if !defined(unlink)
 #define unlink _unlink
 #endif /* unlink */
@@ -3467,27 +3468,6 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   return -1;
 }
 #endif /* __MINGW32__ */
-
-/** patch for pread */
-FIO_SFUNC ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  ssize_t bytes_read = 0;
-  HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == INVALID_HANDLE_VALUE)
-    goto bad_file;
-  OVERLAPPED overlapped = {0};
-  if (offset > 0)
-    overlapped.Offset = offset;
-  if (ReadFile(handle, buf, count, (u_long *)&bytes_read, &overlapped))
-    return bytes_read;
-  if (GetLastError() == ERROR_HANDLE_EOF)
-    return bytes_read;
-  errno = EIO;
-  return -1;
-bad_file:
-  errno = EBADF;
-  return -1;
-}
 
 /** patch for pwrite */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
@@ -8525,7 +8505,6 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
-#if FIO_OS_POSIX
   size_t r = 0;
   if (fd == -1 || !len || !buf) {
     errno = ENOENT;
@@ -8533,10 +8512,10 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
   }
   char *d = (char *)buf;
   for (;;) {
-    /* use read sizes of up to 27 bits */
-    const size_t to_read =
+    const size_t to_read = /* use read sizes of up to 27 bits */
         (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
     ssize_t act;
+#if (_POSIX_C_SOURCE + 1) > 200809L
     if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
       r += act;
       len -= act;
@@ -8545,39 +8524,27 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
         return r;
       continue;
     }
+#else
+    if (lseek(fd,
+              (start_at + (start_at < 0)),
+              ((start_at < 0) ? SEEK_END : SEEK_SET)) == (off_t)-1) {
+      if (errno == EINTR)
+        continue;
+      return -1;
+    }
+    if ((act = read(fd, d + r, to_read)) > 0) {
+      r += act;
+      len -= act;
+      start_at += act;
+      if (!len)
+        return r;
+      continue;
+    }
+#endif
     if (act == -1 && errno == EINTR)
       continue;
     return r;
   }
-
-#elif FIO_OS_WIN
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  ssize_t r = 0;
-  HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  LARGE_INTEGER offset = {.QuadPart = (LONGLONG)start_at};
-  if (handle == INVALID_HANDLE_VALUE)
-    goto bad_file;
-  for (;;) {
-    SetFilePointerEx(handle, offset, NULL, FILE_BEGIN);
-    OVERLAPPED overlapped = {0};
-    if (start_at > 0)
-      overlapped.Offset = (DWORD)start_at;
-    errno = 0;
-    if (ReadFile(handle, buf, len, (u_long *)&r, &overlapped))
-      return r;
-    if (GetLastError() == ERROR_HANDLE_EOF)
-      return r;
-    if (errno == EINTR)
-      continue;
-    errno = EIO;
-    return -1;
-  }
-bad_file:
-  errno = EBADF;
-  return -1;
-#else
-#error unknown OS, canno implement fio_fd_read
-#endif
 }
 
 /* *****************************************************************************
