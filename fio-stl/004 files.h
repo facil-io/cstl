@@ -250,14 +250,15 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   ssize_t r = 0;
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
+  LARGE_INTEGER offset = {.QuadPart = (LONGLONG)start_at};
   if (handle == INVALID_HANDLE_VALUE)
     goto bad_file;
   for (;;) {
-    SetFilePointerEx(handle, start_at, NULL, FILE_BEGIN);
+    SetFilePointerEx(handle, offset, NULL, FILE_BEGIN);
     OVERLAPPED overlapped = {0};
     if (start_at > 0)
-      overlapped.Offset = start_at;
-    errno == 0;
+      overlapped.Offset = (DWORD)start_at;
+    errno = 0;
     if (ReadFile(handle, buf, len, (u_long *)&r, &overlapped))
       return r;
     if (GetLastError() == ERROR_HANDLE_EOF)
