@@ -292,7 +292,7 @@ FIO_SFUNC void *fio_memchr_small(const void *buffer,
  * A token seeking function. This is a fallback for `memchr`, but `memchr`
  * should be faster.
  */
-FIO_SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   if (!buffer || !len)
     return NULL;
   if (len < 64)
