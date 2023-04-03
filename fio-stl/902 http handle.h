@@ -125,19 +125,36 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
   { /* test body writer */
     size_t written = 0;
     do {
-      char buf[32];
-      fio_rand_bytes(buf, sizeof(buf));
-      fio_http_body_write(h, buf, sizeof(buf));
+      union {
+        char buf[32];
+        uint64_t u64[4];
+        void *p[4];
+      } w, r;
+      fio_rand_bytes(r.buf, sizeof(r.buf));
+      fio_http_body_write(h, r.buf, sizeof(r.buf));
       fio_http_body_seek(h, written);
-      fio_str_info_s got = fio_http_body_read(h, sizeof(buf));
-      written += sizeof(buf);
+      fio_str_info_s got = fio_http_body_read(h, sizeof(r.buf));
+      FIO_MEMSET(w.buf, 0, sizeof(w.buf));
+      FIO_MEMCPY(w.buf, got.buf, got.len);
+      written += sizeof(r.buf);
       FIO_ASSERT(written == fio_http_body_length(h),
                  "fio_http_body_length error (%zu != %zu)",
                  fio_http_body_length(h),
                  written);
-      FIO_ASSERT(FIO_STR_INFO_IS_EQ(FIO_STR_INFO2(buf, sizeof(buf)), got),
-                 "fio_http_body_write-fio_http_body_read roundtrip error @ %zu",
-                 written - sizeof(buf));
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(FIO_STR_INFO2(r.buf, sizeof(r.buf)), got),
+                 "fio_http_body_write-fio_http_body_read roundtrip error @ %zu"
+                 "\n\t expected (32):\t%p%p%p%p)"
+                 "\n\t got (%zu):     \t%p%p%p%p)",
+                 written - sizeof(r.buf),
+                 r.p[0],
+                 r.p[1],
+                 r.p[2],
+                 r.p[3],
+                 got.len,
+                 w.p[0],
+                 w.p[1],
+                 w.p[2],
+                 w.p[3]);
     } while (written < (FIO_HTTP_BODY_RAM_LIMIT << 1));
     fio_http_body_seek(h, 0);
     fio_http_body_write(h, "\n1234", 5);
