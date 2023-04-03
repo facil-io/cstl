@@ -362,6 +362,8 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, server)();
   FIO_NAME_TEST(stl, pubsub)();
   fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, http_s)();
+  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sha1)();

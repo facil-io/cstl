@@ -161,6 +161,12 @@ FIO_IFUNC void *fio_http_cdata_set(fio_http_s *h, void *cdata);
 Data associated with the Request (usually set by the HTTP protocol)
 ***************************************************************************** */
 
+/** Gets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status(fio_http_s *);
+
+/** Sets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
+
 /** Gets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
@@ -366,12 +372,6 @@ SFUNC int fio_http_is_websocket(fio_http_s *);
 
 /** Returns true if the HTTP handle establishes an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
-
-/** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status(fio_http_s *);
-
-/** Sets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
 
 /**
  * Gets the header information associated with the HTTP handle.
@@ -1120,7 +1120,7 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
       index = 0;
   }
   if ((uint32_t)index >= count)
-    index = count - 1;
+    return r;
   r = fio_bstr_info(fio___http_sary_get(a, index));
   return r;
 }
@@ -1775,9 +1775,18 @@ Body Management - buffer
 
 FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   h->body.fd = fio_filename_tmp();
+  if (h->body.fd == -1)
+    return -1;
   fio_buf_info_s b = fio_bstr_buf(h->body.buf);
-  fio_fd_write(h->body.fd, b.buf, b.len);
-  return 0 - (h->body.fd == -1);
+  ssize_t written = fio_fd_write(h->body.fd, b.buf, b.len);
+  if (written == (ssize_t)b.len)
+    return 0;
+  close(h->body.fd);
+  FIO_LOG_ERROR("fio_http_s couldn't transfer data to temporary file "
+                "(transferred %zd / %zu)",
+                written,
+                b.len);
+  return (h->body.fd = -1);
 }
 FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t len) {
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), len);

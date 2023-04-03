@@ -159,6 +159,7 @@
 #include "902 files.h"
 #include "902 fiobj.h"
 #include "902 glob matching.h"
+#include "902 http handle.h"
 #include "902 imap.h"
 #include "902 math.h"
 #include "902 memalt.h"

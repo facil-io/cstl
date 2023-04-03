@@ -161,7 +161,7 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
   ssize_t total = 0;
   const char *buf = (const char *)buf_;
   const size_t write_limit = (1ULL << 17);
-  while (len > write_limit) {
+  while (len > (write_limit - 1)) {
     ssize_t w = write(fd, buf, write_limit);
     if (w > 0) {
       len -= w;
@@ -169,7 +169,8 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
       total += w;
       continue;
     }
-    /* if (w == -1 && errno == EINTR) continue; */
+    if (w == -1 && errno == EINTR)
+      continue;
     if (total == 0)
       return -1;
     return total;
@@ -179,8 +180,11 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
     if (w > 0) {
       len -= w;
       buf += w;
+      total += w;
       continue;
     }
+    if (w == -1 && errno == EINTR)
+      continue;
     if (total == 0)
       return -1;
     return total;
@@ -217,12 +221,12 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+  size_t r = 0;
   if (fd == -1 || !len || !buf) {
     errno = ENOENT;
-    return 0;
+    return r;
   }
   char *d = (char *)buf;
-  size_t r = 0;
   for (;;) {
     /* use read sizes of up to 27 bits */
     const size_t to_read =

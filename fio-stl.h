@@ -8466,7 +8466,7 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
   ssize_t total = 0;
   const char *buf = (const char *)buf_;
   const size_t write_limit = (1ULL << 17);
-  while (len > write_limit) {
+  while (len > (write_limit - 1)) {
     ssize_t w = write(fd, buf, write_limit);
     if (w > 0) {
       len -= w;
@@ -8474,7 +8474,8 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
       total += w;
       continue;
     }
-    /* if (w == -1 && errno == EINTR) continue; */
+    if (w == -1 && errno == EINTR)
+      continue;
     if (total == 0)
       return -1;
     return total;
@@ -8484,8 +8485,11 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
     if (w > 0) {
       len -= w;
       buf += w;
+      total += w;
       continue;
     }
+    if (w == -1 && errno == EINTR)
+      continue;
     if (total == 0)
       return -1;
     return total;
@@ -8522,12 +8526,12 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+  size_t r = 0;
   if (fd == -1 || !len || !buf) {
     errno = ENOENT;
-    return 0;
+    return r;
   }
   char *d = (char *)buf;
-  size_t r = 0;
   for (;;) {
     /* use read sizes of up to 27 bits */
     const size_t to_read =
@@ -31551,6 +31555,12 @@ FIO_IFUNC void *fio_http_cdata_set(fio_http_s *h, void *cdata);
 Data associated with the Request (usually set by the HTTP protocol)
 ***************************************************************************** */
 
+/** Gets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status(fio_http_s *);
+
+/** Sets the status associated with the HTTP handle (response). */
+SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
+
 /** Gets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
@@ -31756,12 +31766,6 @@ SFUNC int fio_http_is_websocket(fio_http_s *);
 
 /** Returns true if the HTTP handle establishes an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
-
-/** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status(fio_http_s *);
-
-/** Sets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
 
 /**
  * Gets the header information associated with the HTTP handle.
@@ -32510,7 +32514,7 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
       index = 0;
   }
   if ((uint32_t)index >= count)
-    index = count - 1;
+    return r;
   r = fio_bstr_info(fio___http_sary_get(a, index));
   return r;
 }
@@ -33165,9 +33169,18 @@ Body Management - buffer
 
 FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   h->body.fd = fio_filename_tmp();
+  if (h->body.fd == -1)
+    return -1;
   fio_buf_info_s b = fio_bstr_buf(h->body.buf);
-  fio_fd_write(h->body.fd, b.buf, b.len);
-  return 0 - (h->body.fd == -1);
+  ssize_t written = fio_fd_write(h->body.fd, b.buf, b.len);
+  if (written == (ssize_t)b.len)
+    return 0;
+  close(h->body.fd);
+  FIO_LOG_ERROR("fio_http_s couldn't transfer data to temporary file "
+                "(transferred %zd / %zu)",
+                written,
+                b.len);
+  return (h->body.fd = -1);
 }
 FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t len) {
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), len);
@@ -41489,6 +41502,167 @@ Cleanup
 
 
 
+                        fio_http_s Test Helper
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_TEST_ALL) && !defined(FIO___TEST_REINCLUDE) &&                 \
+    !defined(H___FIO_HTTP_HANDLE_TEST___H)
+#define H___FIO_HTTP_HANDLE_TEST___H
+// #ifndef H___FIO_MODULE_NAME___H
+// #define FIO_MODULE_NAME
+// #define FIO___TEST_REINCLUDE
+// #include FIO_INCLUDE_FILE
+// #undef FIO___TEST_REINCLUDE
+// #endif
+
+FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
+  fprintf(stderr, "* Testing HTTP handle (fio_http_s).\n");
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT(!fio_http_cdata(h), "fio_http_cdata should start as NULL");
+  fio_http_cdata_set(h, (void *)(uintptr_t)42);
+  FIO_ASSERT((uintptr_t)fio_http_cdata(h) == 42,
+             "fio_http_cdata roundtrip error");
+  FIO_ASSERT(!fio_http_udata(h), "fio_http_udata should start as NULL");
+  fio_http_udata_set(h, (void *)(uintptr_t)43);
+  FIO_ASSERT((uintptr_t)fio_http_udata(h) == 43,
+             "fio_http_udata roundtrip error");
+  FIO_ASSERT(!fio_http_udata2(h), "fio_http_udata2 should start as NULL");
+  fio_http_udata2_set(h, (void *)(uintptr_t)44);
+  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 44,
+             "fio_http_udata2 roundtrip error");
+
+  FIO_ASSERT(!fio_http_status(h), "fio_http_status should start as NULL");
+  fio_http_status_set(h, 101);
+  FIO_ASSERT((uintptr_t)fio_http_status(h) == 101,
+             "fio_http_status roundtrip error");
+
+  FIO_ASSERT(!fio_http_method(h).buf, "fio_http_method should start as empty");
+  fio_http_method_set(h, FIO_STR_INFO1("POST"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
+             "fio_http_method roundtrip error");
+
+  FIO_ASSERT(!fio_http_path(h).buf, "fio_http_path should start as empty");
+  fio_http_path_set(h, FIO_STR_INFO1("/path"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_path(h), FIO_STR_INFO1("/path")),
+             "fio_http_path roundtrip error");
+
+  FIO_ASSERT(!fio_http_query(h).buf, "fio_http_query should start as empty");
+  fio_http_query_set(h, FIO_STR_INFO1("query=null"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h), FIO_STR_INFO1("query=null")),
+             "fio_http_query roundtrip error");
+
+  FIO_ASSERT(!fio_http_version(h).buf,
+             "fio_http_version should start as empty");
+  fio_http_version_set(h, FIO_STR_INFO1("HTTP/1.1"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_version(h), FIO_STR_INFO1("HTTP/1.1")),
+             "fio_http_version roundtrip error");
+
+  { /* test multiple header support */
+    fio_str_info_s test_data[] = {
+        FIO_STR_INFO1("header-name"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 001"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 002"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 003"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 004"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 005"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 006"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 007"),
+        FIO_STR_INFO1("a long enough value to require memory allocation 008"),
+    };
+    size_t count = sizeof(test_data) / sizeof(test_data[0]);
+    FIO_ASSERT(!fio_http_request_header(h, test_data[0], 0).buf,
+               "fio_http_request_header should start as empty");
+    FIO_ASSERT(!fio_http_response_header(h, test_data[0], 0).buf,
+               "fio_http_response_header should start as empty");
+    for (size_t i = 1; i < count; ++i) {
+      FIO_ASSERT(!fio_http_request_header(h, test_data[0], i - 1ULL).buf,
+                 "fio_http_request_header index (%zu) should start as empty",
+                 (size_t)(i - 1ULL));
+      FIO_ASSERT(!fio_http_response_header(h, test_data[0], i - 1ULL).buf,
+                 "fio_http_response_header index (%zu) should start as empty",
+                 (size_t)(i - 1ULL));
+      fio_str_info_s req_h =
+          fio_http_request_header_add(h, test_data[0], test_data[i]);
+      fio_str_info_s res_h =
+          fio_http_response_header_add(h, test_data[0], test_data[i]);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(req_h, test_data[i]),
+                 "fio_http_request_header_set error");
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(res_h, test_data[i]),
+                 "fio_http_response_header_set error");
+      req_h = fio_http_request_header(h, test_data[0], i - 1ULL);
+      res_h = fio_http_response_header(h, test_data[0], i - 1ULL);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(req_h, test_data[i]),
+                 "fio_http_request_header_set error");
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(res_h, test_data[i]),
+                 "fio_http_response_header_set error");
+    }
+    for (size_t i = 0; i < count - 1; ++i) {
+      fio_str_info_s req_h = fio_http_request_header(h, test_data[0], i);
+      fio_str_info_s res_h = fio_http_response_header(h, test_data[0], i);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(req_h, test_data[i + 1]),
+                 "fio_http_request_header_set error");
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(res_h, test_data[i + 1]),
+                 "fio_http_response_header_set error");
+    }
+    fio_http_request_header_set(h, test_data[0], test_data[1]);
+    fio_http_response_header_set(h, test_data[0], test_data[1]);
+    FIO_ASSERT(!fio_http_request_header(h, test_data[0], 1ULL).buf,
+               "fio_http_request_header_set index should reset header values");
+    FIO_ASSERT(!fio_http_response_header(h, test_data[0], 1ULL).buf,
+               "fio_http_response_header_set index should reset header values");
+  }
+  { /* test body writer */
+    size_t written = 0;
+    do {
+      char buf[32];
+      fio_rand_bytes(buf, sizeof(buf));
+      fio_http_body_write(h, buf, sizeof(buf));
+      fio_http_body_seek(h, written);
+      fio_str_info_s got = fio_http_body_read(h, sizeof(buf));
+      written += sizeof(buf);
+      FIO_ASSERT(written == fio_http_body_length(h),
+                 "fio_http_body_length error (%zu != %zu)",
+                 fio_http_body_length(h),
+                 written);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(FIO_STR_INFO2(buf, sizeof(buf)), got),
+                 "fio_http_body_write-fio_http_body_read roundtrip error @ %zu",
+                 written - sizeof(buf));
+    } while (written < (FIO_HTTP_BODY_RAM_LIMIT << 1));
+    fio_http_body_seek(h, 0);
+    fio_http_body_write(h, "\n1234", 5);
+    fio_str_info_s ln = fio_http_body_read_until(h, '\n', 0);
+    FIO_ASSERT(ln.buf && ln.len && ln.buf[ln.len - 1] == '\n',
+               "fio_http_body_read_until token error");
+  }
+
+  /* almost done, just make sure reference counting doesn't destroy object */
+  fio_http_free(fio_http_dup(h));
+  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 44 &&
+                 FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
+             "fio_http_s reference counting shouldn't object");
+
+  fio_http_free(h);
+}
+
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+#endif /* FIO_TEST_ALL */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_TEST_ALL           /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
                         FIO_IMAP_CORE Test Helper
 
 
@@ -46558,6 +46732,8 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   FIO_NAME_TEST(stl, server)();
   FIO_NAME_TEST(stl, pubsub)();
   fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, http_s)();
+  fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, risky)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, sha1)();
@@ -46774,6 +46950,7 @@ Finish testing segment
 #include "902 files.h"
 #include "902 fiobj.h"
 #include "902 glob matching.h"
+#include "902 http handle.h"
 #include "902 imap.h"
 #include "902 math.h"
 #include "902 memalt.h"
