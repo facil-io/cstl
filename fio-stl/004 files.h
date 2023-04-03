@@ -410,11 +410,10 @@ SFUNC int fio_filename_tmp(void) {
   name_template[len++] = sep;
   FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
   len += 13;
-  len += fio_ltoa(name_template + len, (fio_rand64() >> 16), 32);
+  len += fio_ltoa(name_template + len, fio_rand64(), 32);
   do {
-    FIO_MEMCPY(name_template + len, "XXXXXXXXXXXX", 12);
-    name_template[12 + len] = 0;
-    fd = mkstemp(name_template);
+    fio_ltoa(name_template + len, fio_rand64(), 32);
+    fd = open(name_template, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
   } while (fd == -1 && errno == EEXIST);
   return fd;
   (void)tmp;
