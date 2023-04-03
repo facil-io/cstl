@@ -373,7 +373,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_ATOMIC
 #endif
 
-#if defined(FIO_STR) || defined(FIO_HTTP)
+#if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STREAM)
 #undef FIO_FILES
 #define FIO_FILES
 #endif

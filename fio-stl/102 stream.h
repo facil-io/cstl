@@ -519,8 +519,10 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
       if (written) {
         ssize_t act;
       retry_on_signal:
-        act =
-            pread(u.f->fd, buf[0] + buf_offset, written, u.f->offset + offset);
+        act = fio_fd_read(u.f->fd,
+                          buf[0] + buf_offset,
+                          written,
+                          u.f->offset + offset);
         if (act <= 0) {
           /* no more data in the file? */
           FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));

@@ -221,6 +221,7 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
+#if FIO_OS_POSIX
   size_t r = 0;
   if (fd == -1 || !len || !buf) {
     errno = ENOENT;
@@ -244,6 +245,34 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
       continue;
     return r;
   }
+
+#elif FIO_OS_WIN
+  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
+  ssize_t r = 0;
+  HANDLE handle = (HANDLE)_get_osfhandle(fd);
+  if (handle == INVALID_HANDLE_VALUE)
+    goto bad_file;
+  for (;;) {
+    SetFilePointerEx(handle, start_at, NULL, FILE_BEGIN);
+    OVERLAPPED overlapped = {0};
+    if (start_at > 0)
+      overlapped.Offset = start_at;
+    errno == 0;
+    if (ReadFile(handle, buf, len, (u_long *)&r, &overlapped))
+      return r;
+    if (GetLastError() == ERROR_HANDLE_EOF)
+      return r;
+    if (errno == EINTR)
+      continue;
+    errno = EIO;
+    return -1;
+  }
+bad_file:
+  errno = EBADF;
+  return -1;
+#else
+#error unknown OS, canno implement fio_fd_read
+#endif
 }
 
 /* *****************************************************************************
@@ -474,12 +503,9 @@ SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at) {
     return r;
   char buf[FIO_FD_FIND_BLOCK];
   for (;;) {
-    size_t l =
-        (size_t)pread(fd, buf, (size_t)FIO_FD_FIND_BLOCK, (off_t)start_at);
-    if (l == FIO_FD_FIND_EOF && errno == EINTR)
-      continue; /* try again */
-    if (l + 1ULL < 2ULL)
-      return r; /* single modular math test for -1 and 0 */
+    size_t l = fio_fd_read(fd, buf, (size_t)FIO_FD_FIND_BLOCK, (off_t)start_at);
+    if (!l)
+      return r;
     char *pos = (char *)FIO_MEMCHR(buf, token, l);
     if (!pos) {
       start_at += l;
