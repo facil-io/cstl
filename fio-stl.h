@@ -33172,6 +33172,8 @@ FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   if (h->body.fd == -1)
     return -1;
   fio_buf_info_s b = fio_bstr_buf(h->body.buf);
+  if (!b.len)
+    return 0;
   ssize_t written = fio_fd_write(h->body.fd, b.buf, b.len);
   if (written == (ssize_t)b.len)
     return 0;
