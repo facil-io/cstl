@@ -390,36 +390,31 @@ SFUNC int fio_filename_tmp(void) {
   if (!tmp)
     tmp = getenv("TEMP");
 #if defined(P_tmpdir)
-  if (!tmp && sizeof(P_tmpdir) <= 464 && sizeof(P_tmpdir) > 0) {
+  if (!tmp && sizeof(P_tmpdir) < 464 && sizeof(P_tmpdir) > 0) {
     tmp = P_tmpdir;
   }
 #endif
-  if (tmp && (len = FIO_STRLEN(tmp))) {
+  if (tmp && (len = FIO_STRLEN(tmp)) && len < 464) {
     FIO_MEMCPY(name_template, tmp, len);
-    if (tmp[len - 1] != sep) {
-      name_template[len++] = sep;
-    }
+    len -= (tmp[len - 1] == sep || tmp[len - 1] == '/');
   } else {
     /* use current folder */
     name_template[len++] = '.';
-    name_template[len++] = sep;
   }
-
+#ifdef O_TMPFILE
+  name_template[len] = 0;
+  fd = open(name_template, O_TMPFILE | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+  if (fd != -1)
+    return fd;
+#endif
+  name_template[len++] = sep;
   FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
   len += 13;
+  len += fio_ltoa(name_template + len, (fio_rand64() >> 16), 32);
   do {
-#ifdef O_TMPFILE
-    uint64_t r = fio_rand64();
-    size_t delta = fio_ltoa(name_template + len, r, 32);
-    name_template[delta + len] = 0;
-    fd = open(name_template,
-              O_CREAT | O_TMPFILE | O_EXCL | O_RDWR,
-              (S_IWUSR | S_IRUSR));
-#else
     FIO_MEMCPY(name_template + len, "XXXXXXXXXXXX", 12);
     name_template[12 + len] = 0;
     fd = mkstemp(name_template);
-#endif
   } while (fd == -1 && errno == EEXIST);
   return fd;
   (void)tmp;

@@ -1775,8 +1775,18 @@ Body Management - buffer
 
 FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   h->body.fd = fio_filename_tmp();
-  if (h->body.fd == -1)
+  if (h->body.fd == -1) {
+#if 1
+    static int error_printed = 0;
+    if (!error_printed) {
+      error_printed = 1;
+      FIO_LOG_ERROR("fio_http_s couldn't open temporary file! (%d) %s",
+                    errno,
+                    strerror(errno));
+    }
+#endif
     return -1;
+  }
   fio_buf_info_s b = fio_bstr_buf(h->body.buf);
   if (!b.len)
     return 0;
@@ -1801,7 +1811,7 @@ FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
   char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
   if (end)
-    r.len = end - r.buf;
+    r.len = (end - r.buf) + 1;
   return r;
 }
 FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {

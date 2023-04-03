@@ -3761,7 +3761,6 @@ FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
   size_t base2 = base * base;
   size_t base3 = base2 * base;
   size_t base4 = base3 * base;
-  size_t base5 = base4 * base;
   size_t r = 1;
   for (;;) {
     if (i < base)
@@ -3773,7 +3772,7 @@ FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
     if (i < base4)
       return r + 3;
     r += 4;
-    i /= base5;
+    i /= base4;
   }
 }
 
@@ -3848,7 +3847,7 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
   *dest-- = 0;
   while (i >= base) {
     uint64_t nxt = i / base;
-    *dest-- = fio_i2c(i - (nxt * 10ULL));
+    *dest-- = fio_i2c(i - (nxt * base));
     i = nxt;
   }
   *dest = fio_i2c(i);
@@ -8695,36 +8694,31 @@ SFUNC int fio_filename_tmp(void) {
   if (!tmp)
     tmp = getenv("TEMP");
 #if defined(P_tmpdir)
-  if (!tmp && sizeof(P_tmpdir) <= 464 && sizeof(P_tmpdir) > 0) {
+  if (!tmp && sizeof(P_tmpdir) < 464 && sizeof(P_tmpdir) > 0) {
     tmp = P_tmpdir;
   }
 #endif
-  if (tmp && (len = FIO_STRLEN(tmp))) {
+  if (tmp && (len = FIO_STRLEN(tmp)) && len < 464) {
     FIO_MEMCPY(name_template, tmp, len);
-    if (tmp[len - 1] != sep) {
-      name_template[len++] = sep;
-    }
+    len -= (tmp[len - 1] == sep || tmp[len - 1] == '/');
   } else {
     /* use current folder */
     name_template[len++] = '.';
-    name_template[len++] = sep;
   }
-
+#ifdef O_TMPFILE
+  name_template[len] = 0;
+  fd = open(name_template, O_TMPFILE | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+  if (fd != -1)
+    return fd;
+#endif
+  name_template[len++] = sep;
   FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
   len += 13;
+  len += fio_ltoa(name_template + len, (fio_rand64() >> 16), 32);
   do {
-#ifdef O_TMPFILE
-    uint64_t r = fio_rand64();
-    size_t delta = fio_ltoa(name_template + len, r, 32);
-    name_template[delta + len] = 0;
-    fd = open(name_template,
-              O_CREAT | O_TMPFILE | O_EXCL | O_RDWR,
-              (S_IWUSR | S_IRUSR));
-#else
     FIO_MEMCPY(name_template + len, "XXXXXXXXXXXX", 12);
     name_template[12 + len] = 0;
     fd = mkstemp(name_template);
-#endif
   } while (fd == -1 && errno == EEXIST);
   return fd;
   (void)tmp;
@@ -33169,8 +33163,18 @@ Body Management - buffer
 
 FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
   h->body.fd = fio_filename_tmp();
-  if (h->body.fd == -1)
+  if (h->body.fd == -1) {
+#if 1
+    static int error_printed = 0;
+    if (!error_printed) {
+      error_printed = 1;
+      FIO_LOG_ERROR("fio_http_s couldn't open temporary file! (%d) %s",
+                    errno,
+                    strerror(errno));
+    }
+#endif
     return -1;
+  }
   fio_buf_info_s b = fio_bstr_buf(h->body.buf);
   if (!b.len)
     return 0;
@@ -33195,7 +33199,7 @@ FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
   char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
   if (end)
-    r.len = end - r.buf;
+    r.len = (end - r.buf) + 1;
   return r;
 }
 FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {

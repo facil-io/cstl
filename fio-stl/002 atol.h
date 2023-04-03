@@ -235,7 +235,6 @@ FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
   size_t base2 = base * base;
   size_t base3 = base2 * base;
   size_t base4 = base3 * base;
-  size_t base5 = base4 * base;
   size_t r = 1;
   for (;;) {
     if (i < base)
@@ -247,7 +246,7 @@ FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
     if (i < base4)
       return r + 3;
     r += 4;
-    i /= base5;
+    i /= base4;
   }
 }
 
@@ -322,7 +321,7 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
   *dest-- = 0;
   while (i >= base) {
     uint64_t nxt = i / base;
-    *dest-- = fio_i2c(i - (nxt * 10ULL));
+    *dest-- = fio_i2c(i - (nxt * base));
     i = nxt;
   }
   *dest = fio_i2c(i);
