@@ -283,7 +283,6 @@ FIO_IFUNC size_t fio_fd_size(int fd) {
   if (fstat(fd, &stt))
     return r;
   return (r = stt.st_size);
-  // S_ISDIR(stat.st_mode)
 }
 
 FIO_IFUNC size_t fio_filename_type(const char *filename) {

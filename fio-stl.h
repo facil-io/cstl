@@ -8569,7 +8569,6 @@ FIO_IFUNC size_t fio_fd_size(int fd) {
   if (fstat(fd, &stt))
     return r;
   return (r = stt.st_size);
-  // S_ISDIR(stat.st_mode)
 }
 
 FIO_IFUNC size_t fio_filename_type(const char *filename) {
@@ -16031,14 +16030,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_STREAM) && !defined(H___FIO_STREAM___H)
 #define H___FIO_STREAM___H
-
-#if !FIO_HAVE_UNIX_TOOLS
-#if _MSC_VER
-#pragma message("POSIX behavior is expected by the fio_stream API.")
-#else
-#warning "POSIX behavior is expected by the fio_stream API."
-#endif
-#endif /* FIO_HAVE_UNIX_TOOLS */
 #include <sys/stat.h>
 
 #ifndef FIO_STREAM_COPY_PER_PACKET
@@ -16181,11 +16172,6 @@ FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
 /* *****************************************************************************
 Stream Implementation - inlined static functions
 ***************************************************************************** */
-
-#if FIO_OS_WIN && _MSC_VER && !defined(fstat)
-#define fstat           _fstat64
-#define FIO_FSTAT_UNDEF 1
-#endif /* FIO_OS_WIN && _MSC_VER */
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -16394,13 +16380,10 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
 
   if (!len) {
     /* review file total length and auto-calculate */
-    struct stat st;
-    if (fstat(fd, &st))
+    len = fio_fd_size(fd);
+    if (!len || offset >= len || len >= 0x7FFFFFFF)
       goto error;
-    if (st.st_size <= 0 || offset >= (size_t)st.st_size ||
-        (uint64_t)st.st_size >= ((uint64_t)1UL << 32))
-      goto error;
-    len = (size_t)st.st_size - offset;
+    len -= offset;
   }
 
   p = (fio_stream_packet_s *)
@@ -16624,13 +16607,8 @@ SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
 }
 
 /* *****************************************************************************
-Module Cleanup
+Cleanup
 ***************************************************************************** */
-#ifdef FIO_FSTAT_UNDEF
-#undef FIO_FSTAT_UNDEF
-#undef fstat
-#endif
-
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_STREAM___TYPE_BITS
 #endif /* FIO_STREAM */
