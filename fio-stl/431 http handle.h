@@ -472,7 +472,7 @@ WebSocket / SSE Helpers
 SFUNC int fio_http_websockets_requested(fio_http_s *);
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_send_response(fio_http_s *);
+SFUNC void fio_http_upgrade_websockets(fio_http_s *);
 
 /** Sets request data to request a WebSockets Upgrade.*/
 SFUNC void fio_http_websockets_set_request(fio_http_s *);
@@ -481,7 +481,7 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *);
 SFUNC int fio_http_sse_requested(fio_http_s *);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_send_response(fio_http_s *);
+SFUNC void fio_http_upgrade_sse(fio_http_s *);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *);
@@ -1254,12 +1254,7 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
-  /* TODO! auto-finish if freed without finishing? */
-  // if (!(h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_UPGRADED))) {
-  //   h->status = 500; /* ignored if headers already sent */
-  //   fio_http_write_args_s args = {.finish = 1};
-  //   fio_http_write FIO_NOOP(h, args);
-  // }
+  h->controller->on_destroyed(h);
 
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
@@ -1272,8 +1267,6 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio_bstr_free(h->body.buf);
   if (h->body.fd != -1)
     close(h->body.fd);
-  if (h->controller)
-    h->controller->on_destroyed(h);
   FIO_REF_INIT(*h);
   return h;
 }
@@ -1938,16 +1931,19 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
   if (h->status && args->len && fio___http_response_etag_if_none_match(h))
     return -1;
   /* test if streaming / single body response */
-  if (args->finish) {
-    /* validate / set Content-Length (not streaming) */
-    char ibuf[32];
-    fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
-    fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
-    v.len = fio_digits10u(args->len);
-    fio_ltoa10u(v.buf, args->len, v.len);
-    fio___http_hmap_set2(hdrs, k, v, -1);
-  } else {
-    h->state |= FIO_HTTP_STATE_STREAMING;
+  if (!fio___http_hmap_get_ptr(hdrs,
+                               FIO_STR_INFO2((char *)"content-length", 14))) {
+    if (args->finish) {
+      /* validate / set Content-Length (not streaming) */
+      char ibuf[32];
+      fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
+      fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+      v.len = fio_digits10u(args->len);
+      fio_ltoa10u(v.buf, args->len, v.len);
+      fio___http_hmap_set2(hdrs, k, v, -1);
+    } else {
+      h->state |= FIO_HTTP_STATE_STREAMING;
+    }
   }
   /* validate Date header */
   fio___http_hmap_set2(
@@ -2024,7 +2020,7 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_send_response(fio_http_s *h) {
+SFUNC void fio_http_upgrade_websockets(fio_http_s *h) {
   h->status = 101;
   fio_http_response_header_set(h,
                                FIO_STR_INFO2((char *)"connection", 10),
@@ -2122,7 +2118,7 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
-SFUNC void fio_http_sse_send_response(fio_http_s *h) {
+SFUNC void fio_http_upgrade_sse(fio_http_s *h) {
   if (h->state)
     return;
   fio_http_response_header_set(h,

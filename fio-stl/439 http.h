@@ -524,10 +524,7 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (FIO_LIKELY(fio_is_open(c->io)))
     cb.fn(h);
-  else {
-    fio_http_write_args_s args = {.finish = 1};
-    fio_http_write FIO_NOOP(h, args);
-  }
+  fio_http_free(h);
 }
 
 FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
@@ -587,11 +584,13 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
     break;
   } /* HAVE_ZLIB */
 #endif
-  fio_http_websockets_send_response(h);
+  fio_http_upgrade_websockets(h);
   return;
+
 refuse_upgrade:
   c->state.http = old;
   fio_http_send_error_response(h, 403);
+  fio_http_free(h);
 }
 
 FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
@@ -607,10 +606,12 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
   c = (fio___http_connection_s *)fio_http_cdata(h);
   if (c->h) /* request after eventsource? an attack vector? */
     goto refuse_upgrade;
-  fio_http_sse_send_response(h);
+  fio_http_upgrade_sse(h);
   return;
+
 refuse_upgrade:
   fio_http_send_error_response(h, 403);
+  fio_http_free(h);
 }
 
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
@@ -671,6 +672,7 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
                                      c->settings->public_folder,
                                      fio_http_path(h),
                                      c->settings->max_age)) {
+    fio_http_free(h);
     return;
   }
   union {
@@ -869,6 +871,7 @@ too_big:
   c->h = NULL;
   fio_dup(c->io);
   fio_http_send_error_response(h, 413);
+  fio_http_free(h);
   return -1;
   (void)name, (void)value;
 }
@@ -980,6 +983,7 @@ http1_error:
     c->h = NULL;
     fio_dup(c->io);
     fio_http_send_error_response(h, 400);
+    fio_http_free(h);
   }
   fio_close(io);
   return -1;
@@ -1105,9 +1109,7 @@ stream_chunk:
              .copy = (uint8_t)args.copy);
   /* print chunk trailer */
   {
-    fio_buf_info_s trailer = args.finish
-                                 ? FIO_BUF_INFO2((char *)"\r\n0\r\n\r\n", 7)
-                                 : FIO_BUF_INFO2((char *)"\r\n", 2);
+    fio_buf_info_s trailer = FIO_BUF_INFO2((char *)"\r\n", 2);
     fio_write2(c->io, .buf = trailer.buf, .len = trailer.len, .copy = 1);
   }
   return;
@@ -1120,16 +1122,12 @@ no_write_err:
   }
 }
 
-FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
-                                                          void *ignr_) {
-  fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
+                                                          void *upgraded) {
+  fio___http_connection_s *c = (fio___http_connection_s *)c_;
   c->suspend = 0;
-  if (c->log)
-    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
-  if (fio_http_is_upgraded(h))
+  if (upgraded)
     goto upgraded;
-  fio_http_free(h);
   if (fio_is_open(c->io)) {
     fio___http1_process_data(c->io, c);
   }
@@ -1137,35 +1135,33 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *h_,
     fio_unsuspend(c->io);
   fio_undup(c->io);
   return;
-  (void)ignr_;
 
 upgraded:
   if (c->h || !fio_is_open(c->io))
     goto something_is_wrong;
-  c->h = h;
+  c->h = (fio_http_s *)upgraded;
   {
-    const size_t pr_i = fio_http_is_websocket(h) ? FIO___HTTP_PROTOCOL_WS
-                                                 : FIO___HTTP_PROTOCOL_SSE;
+    const size_t pr_i = fio_http_is_websocket(c->h) ? FIO___HTTP_PROTOCOL_WS
+                                                    : FIO___HTTP_PROTOCOL_SSE;
     fio_protocol_set(
         c->io,
         &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .protocol));
     fio_http_controller_set(
-        h,
+        c->h,
         &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .controller));
     if (pr_i == FIO___HTTP_PROTOCOL_SSE) {
       fio_str_info_s last_id =
-          fio_http_request_header(h,
+          fio_http_request_header(c->h,
                                   FIO_STR_INFO2((char *)"last-event-id", 13),
                                   0);
       if (last_id.buf)
-        c->settings->on_eventsource_reconnect(h, FIO_STR2BUF_INFO(last_id));
+        c->settings->on_eventsource_reconnect(c->h, FIO_STR2BUF_INFO(last_id));
     }
   }
-
   fio_unsuspend(c->io);
   fio_undup(c->io);
   return;
@@ -1173,13 +1169,19 @@ upgraded:
 something_is_wrong:
   fio_protocol_set(c->io, NULL); /* make zombie, timeout will clear it. */
   fio_undup(c->io);
-  fio_http_free(h);
   fio___http_connection_free(c); /* free HTTP connection element */
 }
 
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
-  fio_defer(fio___http_controller_http1_on_finish_task, (void *)(h), NULL);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (fio_http_is_streaming(h))
+    fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
+  if (c->log)
+    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+  fio_defer(fio___http_controller_http1_on_finish_task,
+            (void *)(c),
+            fio_http_is_upgraded(h) ? (void *)h : NULL);
 }
 
 /* *****************************************************************************
@@ -1708,8 +1710,22 @@ FIO_SFUNC void fio___http_controller_on_destroyed_task(void *c_, void *ignr_) {
   (void)ignr_;
 }
 
-// /** Called when an HTTP handle is freed. */
+/** Called when an HTTP handle is freed. */
 FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
+  if (!(fio_http_is_upgraded(h) | fio_http_is_finished(h))) {
+    /* auto-finish if freed without finishing */
+    if (!fio_http_status(h))
+      fio_http_status_set(h, 500); /* ignored if headers already sent */
+    fio_http_write_args_s args = {.finish = 1}; /* never sets upgrade flag */
+    fio_http_write FIO_NOOP(h, args);
+  }
+  fio_queue_push(fio_srv_queue(),
+                 fio___http_controller_on_destroyed_task,
+                 fio_http_cdata(h));
+}
+
+/** Called when an HTTP handle is freed. */
+FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
   fio_queue_push(fio_srv_queue(),
                  fio___http_controller_on_destroyed_task,
                  fio_http_cdata(h));
@@ -1795,19 +1811,19 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     r = (fio_http_controller_s){
         .on_finish = fio___http_controller_ws_on_finish,
         .write_body = fio___http_controller_ws_write_body,
-        .on_destroyed = fio__http_controller_on_destroyed,
+        .on_destroyed = fio__http_controller_on_destroyed2,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
     r = (fio_http_controller_s){
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .on_destroyed = fio__http_controller_on_destroyed,
+        .on_destroyed = fio__http_controller_on_destroyed2,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
-        .on_destroyed = fio__http_controller_on_destroyed,
+        .on_destroyed = fio__http_controller_on_destroyed2,
     };
     return r;
   default:
