@@ -12292,7 +12292,7 @@ FIO_SFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
 /* hope for the best? */
 #ifdef MAP_ALIGNED
   result = mmap(next_alloc,
-                pages,
+                bytes,
                 PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_ALIGNED(alignment_log),
                 -1,
