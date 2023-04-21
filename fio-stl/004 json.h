@@ -17,9 +17,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_JSON) && !defined(H___FIO_JSON_H)
 #define H___FIO_JSON_H
 
-#ifndef JSON_MAX_DEPTH
+#ifndef FIO_JSON_MAX_DEPTH
 /** Maximum allowed JSON nesting level. Values above 64K might fail. */
-#define JSON_MAX_DEPTH 512
+#define FIO_JSON_MAX_DEPTH 512
 #endif
 
 /** The JSON parser type. Memory must be initialized to 0 before first uses. */
@@ -29,7 +29,7 @@ typedef struct {
   /** expectation bit flag: 0=key, 1=colon, 2=value, 4=comma/closure . */
   uint8_t expect;
   /** nesting bit flags - dictionary bit = 0, array bit = 1. */
-  uint8_t nesting[(JSON_MAX_DEPTH + 7) >> 3];
+  uint8_t nesting[(FIO_JSON_MAX_DEPTH + 7) >> 3];
 } fio_json_parser_s;
 
 #define FIO_JSON_INIT                                                          \
@@ -261,7 +261,7 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '{':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    if (p->depth == JSON_MAX_DEPTH)
+    if (p->depth == FIO_JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
     fio_bit_unset(p->nesting, p->depth);
@@ -284,7 +284,7 @@ FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
   case '[':
     if (p->depth && !(p->expect & 2))
       goto missing_separator;
-    if (p->depth == JSON_MAX_DEPTH)
+    if (p->depth == FIO_JSON_MAX_DEPTH)
       goto too_deep;
     ++p->depth;
     fio_json_on_start_array(p);

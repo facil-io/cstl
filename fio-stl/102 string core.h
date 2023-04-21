@@ -1892,7 +1892,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
       step += ((tmp[1] == 'x') << 1); /* step == 3 */
       step += (tmp[1] == 'u');        /* UTF-8 output <= 3 */
       reduced += step;
-      tmp += step;
+      tmp += step + 1;
       if (tmp + 1 > stop)
         break;
     }
@@ -2004,7 +2004,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
   }
   dest->len += at;
   dest->buf[dest->len] = 0;
-  FIO_ASSERT_DEBUG(at < reduced + 1,
+  FIO_ASSERT_DEBUG(r || (at < reduced + 1),
                    "string unescape reduced calculation error");
   return r;
 }
@@ -2295,6 +2295,7 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
     ('a'.ord..'z'.ord).each {|i| a[i] = i.chr }
     ('A'.ord..'Z'.ord).each {|i| a[i] = i.chr }
     ('0'.ord..'9'.ord).each {|i| a[i] = i.chr }
+    (32..126).each {|i| a[i] = i.chr }
     a['<'.ord] = "&lt;"
     a['>'.ord] = "&gt;"
     a['&'.ord] = "&\##{'&'.ord.to_s(16)};"
@@ -2306,10 +2307,10 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
   */
   static uint8_t html_escape_len[] = {
       4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
-      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 5, 4, 5, 4, 5, 5, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 5, 5, 5, 5,
-      5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 5, 1, 1, 1, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,

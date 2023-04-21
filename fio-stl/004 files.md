@@ -90,6 +90,14 @@ typedef struct {
 
 Parses a file name to folder, base name and extension (zero-copy).
 
+#### `fio_filename_parse2`
+
+```c
+fio_filename_s fio_filename_parse2(const char *filename, size_t len);
+```
+
+Same as [`fio_filename_parse`](#fio_filename_parse), only limited to `len` characters - use in cases where the `filename` string might not end with a `NUL` character.
+
 #### `FIO_FOLDER_SEPARATOR`
 
 ```c

@@ -685,8 +685,10 @@ typedef struct fio_buf_info_s {
 
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len)))
+  ((s1).len == (s2).len &&                                                     \
+   (!(s1).len || (s1).buf == (s2).buf ||                                       \
+    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
+     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
 
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
@@ -1312,38 +1314,76 @@ FIO_IFUNC uint8_t fio_buf2u8_be(const void *c) { return *(const uint8_t *)c; }
 FIO_IFUNC void fio_u2buf8_be(void *buf, uint8_t i) { *((uint8_t *)buf) = i; }
 
 #define FIO___U2U_NOOP(i) (i)
-#define FIO___U2U_NOOP(i) (i)
-#define FIO___U2U_NOOP(i) (i)
-#define FIO___MEMBUF_FN(bytes, bits, wrapper, postfix)                         \
+#define FIO___MEMBUF_FN(bytes, n_bits, bits, wrapper, postfix)                 \
   /** Converts an unaligned byte stream to a bits bit number. */               \
-  FIO_IFUNC uint##bits##_t fio_buf2u##bits##postfix(const void *c) {           \
+  FIO_IFUNC uint##bits##_t fio_buf2u##n_bits##postfix(const void *c) {         \
     uint##bits##_t tmp;                                                        \
     fio_memcpy##bytes(&tmp, c);                                                \
     return wrapper(tmp);                                                       \
   }                                                                            \
   /** Writes a bits bit number to an unaligned buffer. */                      \
-  FIO_IFUNC void fio_u2buf##bits##postfix(void *buf, uint##bits##_t i) {       \
+  FIO_IFUNC void fio_u2buf##n_bits##postfix(void *buf, uint##bits##_t i) {     \
     i = wrapper(i);                                                            \
     fio_memcpy##bytes(buf, &i);                                                \
   }
 /* unspecified byte order (native ordering) */
-FIO___MEMBUF_FN(2, 16, FIO___U2U_NOOP, u)
-FIO___MEMBUF_FN(4, 32, FIO___U2U_NOOP, u)
-FIO___MEMBUF_FN(8, 64, FIO___U2U_NOOP, u)
+FIO___MEMBUF_FN(2, 16, 16, FIO___U2U_NOOP, u)
+FIO___MEMBUF_FN(4, 32, 32, FIO___U2U_NOOP, u)
+FIO___MEMBUF_FN(8, 64, 64, FIO___U2U_NOOP, u)
 /* little endian byte order (native ordering) */
-FIO___MEMBUF_FN(2, 16, fio_ltole16, _le)
-FIO___MEMBUF_FN(4, 32, fio_ltole32, _le)
-FIO___MEMBUF_FN(8, 64, fio_ltole64, _le)
+FIO___MEMBUF_FN(2, 16, 16, fio_ltole16, _le)
+FIO___MEMBUF_FN(4, 32, 32, fio_ltole32, _le)
+FIO___MEMBUF_FN(8, 64, 64, fio_ltole64, _le)
 /* big / network endian byte order (native ordering) */
-FIO___MEMBUF_FN(2, 16, fio_lton16, _be)
-FIO___MEMBUF_FN(4, 32, fio_lton32, _be)
-FIO___MEMBUF_FN(8, 64, fio_lton64, _be)
+FIO___MEMBUF_FN(2, 16, 16, fio_lton16, _be)
+FIO___MEMBUF_FN(4, 32, 32, fio_lton32, _be)
+FIO___MEMBUF_FN(8, 64, 64, fio_lton64, _be)
 #undef FIO___MEMBUF_FN
+
+/** Converts an unaligned byte stream to a 24 bit number. */
+FIO_IFUNC uint32_t fio_buf2u24u(const void *c) {
+  uint32_t tmp = 0;
+  fio_memcpy3(&tmp, c);
+#if __BIG_ENDIAN__
+  c = c >> 8;
+#endif
+  return tmp;
+} /** Writes a 24 bit number to an unaligned buffer. */
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
+#if __BIG_ENDIAN__
+  i = i << 8;
+#endif
+  fio_memcpy3(buf, &i);
+}
+
+/** Converts an unaligned byte stream to a 24 bit number. */
+FIO_IFUNC uint32_t fio_buf2u24_le(const void *c) {
+  uint32_t tmp = ((uint32_t)((uint8_t *)c)[0]) |
+                 ((uint32_t)((uint8_t *)c)[1] << 8) |
+                 ((uint32_t)((uint8_t *)c)[2] << 16);
+  return tmp;
+} /** Writes a 24 bit number to an unaligned buffer. */
+FIO_IFUNC void fio_u2buf24_le(void *buf, uint32_t i) {
+  ((uint8_t *)buf)[0] = i & 0xFFU;
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFFU;
+  ((uint8_t *)buf)[2] = (i >> 16) & 0xFFU;
+}
+/** Converts an unaligned byte stream to a 24 bit number. */
+FIO_IFUNC uint32_t fio_buf2u24_be(const void *c) {
+  uint32_t tmp = ((uint32_t)((uint8_t *)c)[0] << 16) |
+                 ((uint32_t)((uint8_t *)c)[1] << 8) |
+                 ((uint32_t)((uint8_t *)c)[2]);
+  return tmp;
+} /** Writes a 24 bit number to an unaligned buffer. */
+FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
+  ((uint8_t *)buf)[0] = (i >> 16) & 0xFFU;
+  ((uint8_t *)buf)[1] = (i >> 8) & 0xFFU;
+  ((uint8_t *)buf)[2] = (i)&0xFFU;
+}
 
 /* *****************************************************************************
 Constant-Time Selectors
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
 FIO_IFUNC uintptr_t fio_ct_true(uintptr_t cond) {

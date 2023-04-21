@@ -266,10 +266,12 @@ Testing function
 ***************************************************************************** */
 
 FIO_SFUNC void fio____test_dynamic_types__stack_poisoner(void) {
-#define FIO___STACK_POISON_LENGTH (1ULL << 16)
+#define FIO___STACK_POISON_LENGTH (1ULL << 18)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
   FIO_COMPILER_GUARD;
-  FIO_MEMSET(buf, (int)(~0U), FIO___STACK_POISON_LENGTH);
+  FIO_MEMSET(buf, (int)(0xA0U), FIO___STACK_POISON_LENGTH);
+  FIO_COMPILER_GUARD;
+  fio_rand_bytes(buf, FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
   fio_trylock(buf);
 #undef FIO___STACK_POISON_LENGTH
@@ -334,6 +336,8 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, fio_big_str)();
   FIO_NAME_TEST(stl, fio_small_str)();
+  fprintf(stderr, "===============\n");
+  FIO_NAME_TEST(stl, mustache)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, time)();
   fprintf(stderr, "===============\n");

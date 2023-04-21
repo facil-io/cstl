@@ -98,6 +98,7 @@ Basics Inclusion
 /* Inclusion cycle two - FIOBJ & its dedicated memory allocator. */
 #define H___FIO_BASIC2___H
 #define FIO_FIOBJ
+#define FIO_MUSTACHE
 #define FIOBJ_MALLOC
 #define FIO___INCLUDE_AGAIN
 
@@ -109,6 +110,7 @@ Basics Inclusion
 #undef FIO_CRYPT
 #undef FIO_FIOBJ
 #undef FIO_MALLOC
+#undef FIO_MUSTACHE
 #undef FIO_STATE
 #undef FIO_THREADS
 #undef FIOBJ_MALLOC
@@ -315,7 +317,7 @@ FIO_MAP Ordering & Naming Shortcut
 #if defined(FIO_HTTP_HANDLE) || defined(FIO_STR_NAME) ||                       \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
-    (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY))
+    (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) || defined(FIO_MUSTACHE)
 #undef FIO_STR
 #define FIO_STR
 #endif
@@ -358,9 +360,14 @@ FIO_MAP Ordering & Naming Shortcut
 
 ***************************************************************************** */
 
+#if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STREAM)
+#undef FIO_FILES
+#define FIO_FILES
+#endif
+
 #if defined(FIO_CLI) || defined(FIO_HTTP_HANDLE) ||                            \
     defined(FIO_HTTP1_PARSER) || defined(FIO_JSON) || defined(FIO_STR) ||      \
-    defined(FIO_TIME)
+    defined(FIO_TIME) || defined(FIO_FILES)
 #undef FIO_ATOL
 #define FIO_ATOL
 #endif
@@ -371,11 +378,6 @@ FIO_MAP Ordering & Naming Shortcut
     defined(FIO_QUEUE)
 #undef FIO_ATOMIC
 #define FIO_ATOMIC
-#endif
-
-#if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STREAM)
-#undef FIO_FILES
-#define FIO_FILES
 #endif
 
 #if defined(FIO_PUBSUB)

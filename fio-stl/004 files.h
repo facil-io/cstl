@@ -116,6 +116,8 @@ typedef struct {
 /** Parses a file name to folder, base name and extension (zero-copy). */
 SFUNC fio_filename_s fio_filename_parse(const char *filename);
 
+/** Parses a file name to folder, base name and extension (zero-copy). */
+SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len);
 /**
  * Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
  *
@@ -483,6 +485,57 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
   }
 }
 
+/** Parses a file name to folder, base name and extension (zero-copy). */
+SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len) {
+  fio_filename_s r = {{0}};
+  if (!filename || !filename[0])
+    return r;
+  const char *pos = filename;
+  const char *end = filename + len;
+  r.basename.buf = (char *)filename;
+  for (;;) {
+    if (pos == end)
+      goto done;
+    switch (*pos) {
+    case 0:
+    done:
+      if (r.ext.buf) {
+        r.ext.len = pos - r.ext.buf;
+        if (!r.basename.len) {
+          r.basename = FIO_BUF_INFO2(--r.ext.buf, ++r.ext.len);
+          r.ext.buf = NULL;
+          r.ext.len = 0;
+        }
+      } else {
+        r.basename.len = (size_t)(pos - r.basename.buf);
+      }
+      if (!r.folder.len)
+        r.folder.buf = NULL;
+      if (!r.basename.len)
+        r.basename.buf = NULL;
+      if (!r.ext.len)
+        r.ext.buf = NULL;
+      return r;
+#ifdef FIO_OS_WIN
+    case '/': /* pass through (on windows test both variants) */
+#endif
+    case FIO_FOLDER_SEPARATOR:
+      r.folder.buf = (char *)filename;
+      r.folder.len = (size_t)(pos - filename) + 1;
+      r.basename.buf = (char *)pos + 1;
+      r.ext.buf = NULL;
+      r.basename.len = 0;
+      break;
+    case '.':
+      if (!r.ext.buf) {
+        r.ext.buf = (char *)pos + 1;
+        r.basename.len = (char *)pos - r.basename.buf;
+      }
+      break;
+    }
+    ++pos;
+  }
+}
 /** Returns index for next `token` in `fd`, or -1 at EOF. */
 SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at) {
   size_t r = FIO_FD_FIND_EOF;

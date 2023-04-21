@@ -90,6 +90,10 @@
 #include "102 queue.h"
 #endif
 
+#ifdef FIO_MUSTACHE
+#include "104 mustache.h"
+#endif
+
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
 #include "200 string.h"
 #endif
@@ -163,6 +167,7 @@
 #include "902 imap.h"
 #include "902 math.h"
 #include "902 memalt.h"
+#include "902 mustache.h"
 #include "902 poll.h"
 #include "902 pubsub.h"
 #include "902 queue.h"

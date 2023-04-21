@@ -1992,7 +1992,7 @@ SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
 SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
   for (;;) {
   top:
-    if (!n.len)
+    if (!n.len || (n.len == 1 && n.buf[0] == '.'))
       return o;
     switch (FIOBJ_TYPE_CLASS(o)) {
     case FIOBJ_T_ARRAY: {

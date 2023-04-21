@@ -3129,6 +3129,14 @@ typedef struct {
 
 Parses a file name to folder, base name and extension (zero-copy).
 
+#### `fio_filename_parse2`
+
+```c
+fio_filename_s fio_filename_parse2(const char *filename, size_t len);
+```
+
+Same as [`fio_filename_parse`](#fio_filename_parse), only limited to `len` characters - use in cases where the `filename` string might not end with a `NUL` character.
+
 #### `FIO_FOLDER_SEPARATOR`
 
 ```c
@@ -3179,17 +3187,17 @@ To use the JSON parser, define `FIO_JSON` before including the `fio-slt.h` file 
 
 **Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
 
-#### `JSON_MAX_DEPTH`
+#### `FIO_JSON_MAX_DEPTH`
 
 ```c
-#ifndef JSON_MAX_DEPTH
+#ifndef FIO_JSON_MAX_DEPTH
 /** Maximum allowed JSON nesting level. Values above 64K might fail. */
-#define JSON_MAX_DEPTH 512
+#define FIO_JSON_MAX_DEPTH 512
 #endif
 ```
 The JSON parser isn't recursive, but it allocates a nesting bitmap on the stack, which consumes stack memory.
 
-To ensure the stack isn't abused, the parser will limit JSON nesting levels to a customizable `JSON_MAX_DEPTH` number of nesting levels.
+To ensure the stack isn't abused, the parser will limit JSON nesting levels to a customizable `FIO_JSON_MAX_DEPTH` number of nesting levels.
 
 #### `fio_json_parser_s`
 
@@ -3200,7 +3208,7 @@ typedef struct {
   /** expectation bit flag: 0=key, 1=colon, 2=value, 4=comma/closure . */
   uint8_t expect;
   /** nesting bit flags - dictionary bit = 0, array bit = 1. */
-  uint8_t nesting[(JSON_MAX_DEPTH + 7) >> 3];
+  uint8_t nesting[(FIO_JSON_MAX_DEPTH + 7) >> 3];
 } fio_json_parser_s;
 ```
 

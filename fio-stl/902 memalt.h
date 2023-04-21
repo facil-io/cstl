@@ -29,6 +29,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
   uint64_t start, end;
+  fprintf(stderr, "* Testing memcpy, memchr and memset alternatives.\n");
 
   { /* test fio_memcpy possible overflow. */
     uint64_t buf1[64];
