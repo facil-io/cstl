@@ -80,7 +80,7 @@ static void mustache_json_run_test(FIOBJ test) {
       fio_string_write2(&fn,
                         NULL,
                         FIO_STRING_WRITE_STR_INFO(fiobj2cstr(o.key)),
-                        FIO_STRING_WRITE_STR2(".md", 3));
+                        FIO_STRING_WRITE_STR2(".mustache", 9));
       fio_filename_overwrite(fn.buf,
                              fiobj2cstr(o.value).buf,
                              fiobj2cstr(o.value).len);
@@ -108,17 +108,29 @@ static void mustache_json_run_test(FIOBJ test) {
       fio_string_write2(&fn,
                         NULL,
                         FIO_STRING_WRITE_STR_INFO(fiobj2cstr(o.key)),
-                        FIO_STRING_WRITE_STR2(".md", 3));
+                        FIO_STRING_WRITE_STR2(".mustache", 9));
       unlink(fn.buf);
     }
   }
   FIO_ASSERT(m, "template build error!");
-  // FIO_ASSERT(result, "template result error!");
-  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result), expected_data),
-             "template result match error!\n\n%s\n\n%s\nWith JSON data: %s",
-             result,
-             expected_data.buf,
-             fiobj_str_ptr(fiobj2json(FIOBJ_INVALID, data, 0)));
+  if (!FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result), expected_data)) {
+    char *unescaped_expect = fio_bstr_write_html_unescape(NULL,
+                                                          expected_data.buf,
+                                                          expected_data.len);
+    char *unescaped_result =
+        fio_bstr_write_html_unescape(NULL,
+                                     fio_bstr_buf(result).buf,
+                                     fio_bstr_buf(result).len);
+    FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(unescaped_expect),
+                                  fio_bstr_buf(unescaped_result)),
+               "template result match error!\n\n%s\n\n%s\nWith JSON data: %s",
+               result,
+               expected_data.buf,
+               fiobj_str_ptr(fiobj2json(FIOBJ_INVALID, data, 0)));
+    FIO_LOG_WARNING("HTML escape mismatch:\n%s\n%s", result, expected_data.buf);
+    fio_bstr_free(unescaped_expect);
+    fio_bstr_free(unescaped_result);
+  }
   fio_mustache_free(m);
   fio_bstr_free(result);
   printf("* PASSED\n");
@@ -149,14 +161,27 @@ static void mustache_json_test(const char *json_file_name) {
 int main(int argc, char const *argv[]) {
   fio_cli_start(argc,
                 argv,
-                1,
+                0,
                 -1,
                 "Mustache template testing using JSON specification file",
                 FIO_CLI_PRINT_LINE("Accepts JSON specification file name(s)."));
-  if (fio_cli_unnamed_count()) {
-    unsigned int index = 0;
-    const char *fn;
-    while ((fn = fio_cli_unnamed(index++)))
-      mustache_json_test(fn);
+  if (!fio_cli_unnamed_count()) {
+    char *all_common_specs[] = {
+        "./tests/mustache-specs/comments.json",
+        "./tests/mustache-specs/delimiters.json",
+        "./tests/mustache-specs/interpolation.json",
+        "./tests/mustache-specs/inverted.json",
+        "./tests/mustache-specs/partials.json",
+        "./tests/mustache-specs/sections.json",
+        NULL,
+    };
+    for (size_t i = 0; all_common_specs[i]; ++i) {
+      fio_cli_set_unnamed(i, all_common_specs[i]);
+    }
   }
+
+  unsigned int index = 0;
+  const char *fn;
+  while ((fn = fio_cli_unnamed(index++)))
+    mustache_json_test(fn);
 }

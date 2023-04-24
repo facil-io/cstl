@@ -3439,6 +3439,14 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #define CLOCK_MONOTONIC 1
 #endif
 
+#ifndef PATH_MAX
+#ifdef MAX_PATH
+#define PATH_MAX MAX_PATH
+#else /* although this value is usually (in practice) 256 + 4, we go big. */
+#define PATH_MAX 1024
+#endif
+#endif
+
 #if !defined(fstat)
 #define fstat _fstat
 #endif /* fstat */
@@ -19008,10 +19016,10 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
     (32..126).each {|i| a[i] = i.chr }
     a['<'.ord] = "&lt;"
     a['>'.ord] = "&gt;"
-    a['&'.ord] = "&\##{'&'.ord.to_s(16)};"
-    a['"'.ord] = "&\##{'"'.ord.to_s(16)};"
-    a["\'".ord] ="&\##{"\'".ord.to_s(16)};"
-    a['|'.ord] = "&\##{'|'.ord.to_s(16)};"
+    a['&'.ord] = "&x#{'&'.ord.to_s(16)};"
+    a['"'.ord] = "&x#{'"'.ord.to_s(16)};"
+    a["\'".ord] ="&x#{"\'".ord.to_s(16)};"
+    a['|'.ord] = "&x#{'|'.ord.to_s(16)};"
     b = a.map {|s| s.length }
     puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
   */
@@ -19459,7 +19467,11 @@ Settings
 #endif
 #ifndef FIO_MUSTACHE_LAMBDA_SUPPORT
 /** Supports raw text for lambda style languages. */
-#define FIO_MUSTACHE_LAMBDA_SUPPORT 0
+#define FIO_MUSTACHE_LAMBDA_SUPPORT 1
+#endif
+#ifndef FIO_MUSTACHE_ISOLATE_PARTIALS
+/** Limits the scope of partial templates to the context of their section. */
+#define FIO_MUSTACHE_ISOLATE_PARTIALS 1
 #endif
 
 /* *****************************************************************************
@@ -19496,12 +19508,18 @@ struct fio_mustache_bargs_s {
   void *(*write_text)(void *udata, fio_buf_info_s txt);
   /* same as `write_text`, but should also  HTML escape (sanitize) data. */
   void *(*write_text_escaped)(void *udata, fio_buf_info_s raw);
-  /* callback should return the String value of `name` as a `fio_buf_info_s`. */
-  fio_buf_info_s (*get_val)(void *ctx, fio_buf_info_s name);
-  /* callback should return the String value of `var` as a `fio_buf_info_s`. */
-  fio_buf_info_s (*val2str)(void *var);
-  /* callback should return the context for the value of `name[indx]`, if any */
-  void *(*enter)(void *ctx, fio_buf_info_s name, size_t indx, fio_buf_info_s t);
+  /* callback should return a new context pointer with the value of `name`. */
+  void *(*get_var)(void *ctx, fio_buf_info_s name);
+  /* if context is an Array, should return a context pointer @ index. */
+  void *(*get_var_index)(void *ctx, size_t index);
+  /* should return the String value of context `var` as a `fio_buf_info_s`. */
+  fio_buf_info_s (*var2str)(void *var);
+  /* should return non-zero if the context pointer refers to a valid value. */
+  int (*var_is_truthful)(void *ctx);
+#if FIO_MUSTACHE_LAMBDA_SUPPORT
+  /* returns non-zero if `ctx` is a lambda and handles section manually. */
+  int (*is_lambda)(void *ctx, fio_buf_info_s raw_template_section);
+#endif
   /* the root context for finding named values. */
   void *ctx;
   /* opaque user data (settable as well as readable), the final return value. */
@@ -19514,39 +19532,10 @@ SFUNC void *fio_mustache_build(fio_mustache_s *m, fio_mustache_bargs_s);
   fio_mustache_build((m), ((fio_mustache_bargs_s){__VA_ARGS__}))
 
 /* *****************************************************************************
-Module Implementation - inlined static functions
-***************************************************************************** */
-/*
-REMEMBER:
-========
-
-All short term / type memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-All long-term / system memory allocations should use:
-* FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE(ptr, size)
-
-Module and File Names:
-======================
-
-00# XXX.h - the module is a core module, independent or doesn't define a type
-1## XXX.h - the module doesn't define a type, but requires memory allocations
-2## XXX.h - the module defines a type
-3## XXX.h - hashes / crypto.
-4## XXX.h - server related modules
-5## XXX.h - FIOBJ related modules
-9## XXX.h - testing (usually use 902 XXX.h unless tests depend on other tests)
-
-When
-*/
-
-/* *****************************************************************************
 Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-// FIO___LEAK_COUNTER_DEF(fio_mustache_s)
+FIO___LEAK_COUNTER_DEF(fio_mustache_s)
 
 /* *****************************************************************************
 Instructions (relative state)
@@ -19557,17 +19546,19 @@ Instruction refer to offsets rather than absolute values.
 ***************************************************************************** */
 /* for ease of use, instructions are always a 1 byte numeral, */
 typedef enum {
-  FIO___MUSTACHE_I_STACK_POP,  /* 0 extra data (marks end of array / list)? */
-  FIO___MUSTACHE_I_STACK_PUSH, /* 32 bit extra data (goes to position) */
-  FIO___MUSTACHE_I_GOTO_PUSH,  /* 32 bit extra data (goes to position) */
-  FIO___MUSTACHE_I_TXT,        /* 16 bits length + data */
-  FIO___MUSTACHE_I_VAR,        /* 16 bits length + data */
-  FIO___MUSTACHE_I_VAR_RAW,    /* 16 bits length + data */
-  FIO___MUSTACHE_I_ARY,        /* 16 bits length + 32 bit skip-pos + data */
-  FIO___MUSTACHE_I_MISSING,    /* 16 bits length + 32 bit skip-pos + data */
-#if FIO_MUSTACHE_PRESERVE_PADDING
+  FIO___MUSTACHE_I_STACK_POP,    /* 0 extra data (marks end of array / list)? */
+  FIO___MUSTACHE_I_STACK_PUSH,   /* 32 bit extra data (goes to position) */
+  FIO___MUSTACHE_I_GOTO_PUSH,    /* 32 bit extra data (goes to position) */
+  FIO___MUSTACHE_I_TXT,          /* 16 bits length + data */
+  FIO___MUSTACHE_I_VAR,          /* 16 bits length + data */
+  FIO___MUSTACHE_I_VAR_RAW,      /* 16 bits length + data */
+  FIO___MUSTACHE_I_ARY,          /* 16 bits length + 32 bit skip-pos + data */
+  FIO___MUSTACHE_I_MISSING,      /* 16 bits length + 32 bit skip-pos + data */
   FIO___MUSTACHE_I_PADDING_PUSH, /* 16 bits length + data */
   FIO___MUSTACHE_I_PADDING_POP,  /* 0 extra data */
+#if FIO_MUSTACHE_PRESERVE_PADDING
+  FIO___MUSTACHE_I_VAR_PADDED,
+  FIO___MUSTACHE_I_VAR_RAW_PADDED,
 #endif
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
   FIO___MUSTACHE_I_METADATA, /* raw text data, written for lambda support */
@@ -19581,8 +19572,11 @@ typedef struct fio___mustache_bldr_s {
   char *root;
   struct fio___mustache_bldr_s *prev;
   void *ctx;
+  fio_buf_info_s padding;
   fio_mustache_bargs_s *args;
-  uint32_t padding;
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+  uint32_t stop;
+#endif
 } fio___mustache_bldr_s;
 
 FIO_SFUNC char *fio___mustache_i_stack_pop(char *p, fio___mustache_bldr_s *);
@@ -19593,9 +19587,12 @@ FIO_SFUNC char *fio___mustache_i_var(char *p, fio___mustache_bldr_s *);
 FIO_SFUNC char *fio___mustache_i_var_raw(char *p, fio___mustache_bldr_s *);
 FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *);
 FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *);
-#if FIO_MUSTACHE_PRESERVE_PADDING
 FIO_SFUNC char *fio___mustache_i_padding_push(char *p, fio___mustache_bldr_s *);
 FIO_SFUNC char *fio___mustache_i_padding_pop(char *p, fio___mustache_bldr_s *);
+#if FIO_MUSTACHE_PRESERVE_PADDING
+FIO_SFUNC char *fio___mustache_i_var_padded(char *p, fio___mustache_bldr_s *);
+FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *,
+                                                fio___mustache_bldr_s *);
 #endif
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
 FIO_SFUNC char *fio___mustache_i_metadata(char *p, fio___mustache_bldr_s *);
@@ -19611,9 +19608,11 @@ FIO_SFUNC void *fio___mustache_build_section(char *p, fio___mustache_bldr_s a) {
     [FIO___MUSTACHE_I_VAR_RAW] = fio___mustache_i_var_raw,
     [FIO___MUSTACHE_I_ARY] = fio___mustache_i_ary,
     [FIO___MUSTACHE_I_MISSING] = fio___mustache_i_missing,
-#if FIO_MUSTACHE_PRESERVE_PADDING
     [FIO___MUSTACHE_I_PADDING_PUSH] = fio___mustache_i_padding_push,
     [FIO___MUSTACHE_I_PADDING_POP] = fio___mustache_i_padding_pop,
+#if FIO_MUSTACHE_PRESERVE_PADDING
+    [FIO___MUSTACHE_I_VAR_PADDED] = fio___mustache_i_var_padded,
+    [FIO___MUSTACHE_I_VAR_RAW_PADDED] = fio___mustache_i_var_raw_padded,
 #endif
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
     [FIO___MUSTACHE_I_METADATA] = fio___mustache_i_metadata,
@@ -19629,68 +19628,66 @@ FIO_SFUNC void *fio___mustache_build_section(char *p, fio___mustache_bldr_s a) {
 Instructions - Helpers
 ***************************************************************************** */
 
-FIO_IFUNC fio_buf_info_s fio___mustache_get_var(fio___mustache_bldr_s *b,
-                                                fio_buf_info_s val_name) {
-  fio_buf_info_s r = FIO_BUF_INFO2(NULL, 0);
-  if (val_name.len == 1 && val_name.buf[0] == '.')
-    goto get_self;
-  if (FIO_MEMCHR(val_name.buf, '.', val_name.len))
-    goto limited_context;
-  do {
-    r = b->args->get_val(b->ctx, val_name);
-    if (r.buf)
-      return r;
-  } while ((b = b->prev));
-  return r;
-get_self:
-  r = b->args->val2str(b->ctx);
-  return r;
-limited_context:
-  while (b && !b->ctx)
-    b = b->prev;
-  if (!b)
-    return r;
-  r = b->args->get_val(b->ctx, val_name);
-  return r;
+/* consumes `val_name`, in whole or in part, returning the variable found.
+ * sets `val_name` to the unconsumed partial remaining.
+ */
+FIO_IFUNC void *fio___mustache_get_var_in_context(fio_mustache_bargs_s *a,
+                                                  void *ctx,
+                                                  fio_buf_info_s *val_name) {
+  void *v = ctx;
+  if (val_name->len == 1 && val_name->buf[0] == '.') {
+    val_name->len = 0;
+    return v;
+  }
+  v = a->get_var(ctx, *val_name);
+  if (v) {
+    val_name->len = 0;
+    return v;
+  }
+  char *s = val_name->buf;
+  char *end = val_name->buf + val_name->len;
+  for (;;) {
+    if (s == end)
+      return v;
+    s = (char *)FIO_MEMCHR(s, '.', (size_t)(end - s));
+    if (!s)
+      return v;
+    v = a->get_var(ctx,
+                   FIO_BUF_INFO2(val_name->buf, (size_t)(s - val_name->buf)));
+    ++s;
+    if (!v)
+      continue;
+    val_name->buf = s;
+    val_name->len = (size_t)(end - s);
+    return v;
+  }
 }
 
-FIO_IFUNC void *fio___mustache_get_ctx(fio___mustache_bldr_s *b,
-                                       fio_buf_info_s val_name,
-                                       size_t i,
-                                       uint32_t meta) {
-  void *r = NULL;
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
-  fio_buf_info_s t = {.buf = b->root + meta + 3,
-                      .len = fio_buf2u16u(b->root + meta + 1)};
-#else
-  fio_buf_info_s t = {0};
+FIO_IFUNC void *fio___mustache_get_var(fio___mustache_bldr_s *b,
+                                       fio_buf_info_s val_name) {
+  void *v;
+  for (;;) {
+    if (b->ctx)
+      v = fio___mustache_get_var_in_context(b->args, b->ctx, &val_name);
+    if (v)
+      break;
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+    if (b->stop)
+      return v;
 #endif
-  if (FIO_MEMCHR(val_name.buf, '.', val_name.len))
-    goto limited_context;
-  do {
-    r = b->args->enter(b->ctx, val_name, i, t);
-    if (r)
-      return r;
-  } while ((b = b->prev));
-  return r;
-  (void)meta; /* if unused */
-limited_context:
-  while (b && !b->ctx)
     b = b->prev;
-  if (!b)
-    return r;
-  r = b->args->enter(b->ctx, val_name, i, t);
-  return r;
+    if (!b)
+      return v;
+  }
+  while (val_name.len && v)
+    v = fio___mustache_get_var_in_context(b->args, v, &val_name);
+  return v;
 }
-
-#if FIO_MUSTACHE_PRESERVE_PADDING
 
 FIO_SFUNC void fio___mustache_write_padding(fio___mustache_bldr_s *b) {
-  while (b && b->padding) {
-    if (b->padding > 1) {
-      char *pos = b->root + b->padding;
-      fio_buf_info_s pad = FIO_BUF_INFO2(pos + 3, fio_buf2u16u(pos + 1));
-      b->args->udata = b->args->write_text(b->args->udata, pad);
+  while (b && b->padding.len) {
+    if (b->padding.buf) {
+      b->args->udata = b->args->write_text(b->args->udata, b->padding);
     }
     b = b->prev;
   }
@@ -19713,7 +19710,8 @@ FIO_SFUNC void fio___mustache_write_text_complex(
     if (!pos)
       break;
     ++pos;
-    fio___mustache_write_padding(b);
+    if (txt.buf[0] != '\n' || (size_t)(pos - txt.buf) > 1)
+      fio___mustache_write_padding(b);
     b->args->udata =
         writer(b->args->udata, FIO_BUF_INFO2(txt.buf, (size_t)(pos - txt.buf)));
     txt.buf = pos;
@@ -19737,19 +19735,8 @@ FIO_IFUNC void fio___mustache_writer_route(
                     void *(*writer)(void *, fio_buf_info_s txt)) = {
       fio___mustache_write_text_complex,
       fio___mustache_write_text_simple};
-  router[!b->padding](b, txt, writer);
+  router[!(b->padding.len)](b, txt, writer);
 }
-
-#else /* FIO_MUSTACHE_PRESERVE_PADDING */
-
-FIO_IFUNC void fio___mustache_writer_route(
-    fio___mustache_bldr_s *b,
-    fio_buf_info_s txt,
-    void *(*writer)(void *, fio_buf_info_s txt)) {
-  b->args->udata = writer(b->args->udata, txt);
-}
-
-#endif /* FIO_MUSTACHE_PRESERVE_PADDING */
 
 /* *****************************************************************************
 Instruction Implementations
@@ -19765,11 +19752,12 @@ FIO_SFUNC char *fio___mustache_i_stack_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
-  // .ctx = b->ctx,
-#if FIO_MUSTACHE_PRESERVE_PADDING
-    .padding = !!b->padding,
-#endif
+    .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+    .ctx = b->ctx,
+    .stop = 1,
+#endif
   };
   fio___mustache_build_section(npos, builder);
   return p;
@@ -19779,11 +19767,12 @@ FIO_SFUNC char *fio___mustache_i_goto_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
-  // .ctx = b->ctx,
-#if FIO_MUSTACHE_PRESERVE_PADDING
-    .padding = !!b->padding,
-#endif
+    .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+    .ctx = b->ctx,
+    .stop = 1,
+#endif
   };
   fio___mustache_build_section(npos, builder);
   p += 5;
@@ -19795,45 +19784,71 @@ FIO_SFUNC char *fio___mustache_i_txt(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_writer_route(b, txt, b->args->write_text);
   return p;
 }
-FIO_SFUNC char *fio___mustache_i_var(char *p, fio___mustache_bldr_s *b) {
+
+FIO_IFUNC char *fio___mustache_i_var_internal(
+    char *p,
+    fio___mustache_bldr_s *b,
+    void *(*writer)(void *, fio_buf_info_s txt)) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
   p = var.buf + var.len;
-  var = fio___mustache_get_var(b, var);
-  fio___mustache_writer_route(b, var, b->args->write_text_escaped);
+  void *v = fio___mustache_get_var(b, var);
+  if (!v)
+    return p;
+  var = b->args->var2str(v);
+#if FIO_MUSTACHE_PRESERVE_PADDING
+  fio___mustache_writer_route(b, var, writer);
+#else
+  fio___mustache_write_padding(b);
+  b->args->udata = writer(b->args->udata, var);
+#endif
   return p;
+}
+FIO_SFUNC char *fio___mustache_i_var(char *p, fio___mustache_bldr_s *b) {
+  return fio___mustache_i_var_internal(p, b, b->args->write_text_escaped);
 }
 FIO_SFUNC char *fio___mustache_i_var_raw(char *p, fio___mustache_bldr_s *b) {
-  fio_buf_info_s var = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
-  p = var.buf + var.len;
-  var = fio___mustache_get_var(b, var);
-  fio___mustache_writer_route(b, var, b->args->write_text);
-  return p;
+  return fio___mustache_i_var_internal(p, b, b->args->write_text);
 }
+
 FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 7, fio_buf2u16u(p + 1));
   uint32_t skip_pos = fio_buf2u32u(p + 3);
   p = b->root + skip_pos;
 
-  size_t index = 0;
-  for (;;) {
+  void *v = fio___mustache_get_var(b, var);
+  if (!(b->args->var_is_truthful(v)))
+    return p;
+
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
-    void *nctx = fio___mustache_get_ctx(b, var, index, skip_pos);
-#else
-    void *nctx = fio___mustache_get_ctx(b, var, index, 0);
+  fio_buf_info_s section_raw_txt = FIO_BUF_INFO2(NULL, 0);
+  if (p[0] == FIO___MUSTACHE_I_METADATA)
+    section_raw_txt = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
 #endif
+
+  size_t index = 0;
+  void *nctx = b->args->get_var_index(v, index++);
+  if (!nctx)
+    nctx = v;
+  do {
+    fio___mustache_bldr_s builder = {
+        .root = b->root,
+        .prev = b,
+        .ctx = nctx,
+        .padding = FIO_BUF_INFO2(NULL, b->padding.len),
+        .args = b->args,
+    };
+
+#if FIO_MUSTACHE_LAMBDA_SUPPORT
+    if (!b->args->is_lambda(nctx, section_raw_txt))
+#endif
+      fio___mustache_build_section(var.buf + var.len, builder);
+
+    nctx = b->args->get_var_index(v, index++);
+  } while (nctx);
+  for (;;) {
     if (!nctx)
       break;
     ++index;
-    fio___mustache_bldr_s builder = {
-      .root = b->root,
-      .prev = b,
-      .ctx = nctx,
-#if FIO_MUSTACHE_PRESERVE_PADDING
-      .padding = !!b->padding,
-#endif
-      .args = b->args,
-    };
-    fio___mustache_build_section(var.buf + var.len, builder);
   }
   return p;
 }
@@ -19841,37 +19856,69 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 7, fio_buf2u16u(p + 1));
   uint32_t skip_pos = fio_buf2u32u(p + 3);
   p = b->root + skip_pos;
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
-  void *nctx = fio___mustache_get_ctx(b, var, 0, skip_pos);
-#else
-  void *nctx = fio___mustache_get_ctx(b, var, 0, 0);
-#endif
-  if (!nctx) {
-    fio___mustache_bldr_s builder = {
+
+  void *v = fio___mustache_get_var(b, var);
+  if (b->args->var_is_truthful(v)) {
+    return p;
+  }
+
+  fio___mustache_bldr_s builder = {
       .root = b->root,
       .prev = b,
-    // .ctx = b->ctx,
-#if FIO_MUSTACHE_PRESERVE_PADDING
-      .padding = !!b->padding,
-#endif
+      .padding = FIO_BUF_INFO2(NULL, b->padding.len),
       .args = b->args,
-    };
-    fio___mustache_build_section(var.buf + var.len, builder);
-  }
+  };
+  fio___mustache_build_section(var.buf + var.len, builder);
   return p;
 }
 
-#if FIO_MUSTACHE_PRESERVE_PADDING
 FIO_SFUNC char *fio___mustache_i_padding_push(char *p,
                                               fio___mustache_bldr_s *b) {
-  b->padding = (uint32_t)(p - b->root);
-  return p + 3 + fio_buf2u16u(p + 1);
+  b->padding = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
+  return p + 3 + b->padding.len;
 }
 FIO_SFUNC char *fio___mustache_i_padding_pop(char *p,
                                              fio___mustache_bldr_s *b) {
-  b->padding = !!(b->prev && b->prev->padding);
+  b->padding = FIO_BUF_INFO2(NULL, 0);
+  if (b->prev)
+    b->padding.len = b->prev->padding.len;
   return p + 1;
 }
+
+#if FIO_MUSTACHE_PRESERVE_PADDING
+
+FIO_SFUNC char *fio___mustache_i_var_padded(char *p, fio___mustache_bldr_s *b) {
+  fio_buf_info_s var = FIO_BUF_INFO2(p + 5, fio_buf2u16u(p + 1));
+  fio_buf_info_s padding = FIO_BUF_INFO2(p + 5 + var.len, fio_buf2u16u(p + 3));
+  p = padding.buf + padding.len;
+  void *v = fio___mustache_get_var(b, var);
+  if (!v)
+    return p;
+  var = b->args->var2str(v);
+  if (!var.len)
+    return p;
+  fio___mustache_bldr_s b2 = *b;
+  b2.padding = padding;
+  fio___mustache_writer_route(&b2, var, b->args->write_text_escaped);
+  return p;
+}
+FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
+                                                fio___mustache_bldr_s *b) {
+  fio_buf_info_s var = FIO_BUF_INFO2(p + 5, fio_buf2u16u(p + 1));
+  fio_buf_info_s padding = FIO_BUF_INFO2(p + 5 + var.len, fio_buf2u16u(p + 3));
+  p = padding.buf + padding.len;
+  void *v = fio___mustache_get_var(b, var);
+  if (!v)
+    return p;
+  var = b->args->var2str(v);
+  if (!var.len)
+    return p;
+  fio___mustache_bldr_s b2 = *b;
+  b2.padding = padding;
+  fio___mustache_writer_route(&b2, var, b->args->write_text);
+  return p;
+}
+
 #endif
 
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
@@ -19930,9 +19977,11 @@ typedef struct fio___mustache_parser_s {
   fio___mustache_delimiter_s delim;
   fio_buf_info_s fname;
   fio_buf_info_s path;
-  fio_buf_info_s data;
+  fio_buf_info_s backwards;
+  fio_buf_info_s forwards;
   uint32_t starts_at;
   uint32_t depth;
+  uint32_t dirty;
 } fio___mustache_parser_s;
 
 /* *****************************************************************************
@@ -19946,8 +19995,8 @@ fio___mustache_load_template(fio___mustache_parser_s *p, fio_buf_info_s fname) {
    * 3. Working folder.
    */
   fio_buf_info_s r = {0};
-  fio_buf_info_s const extensions[] = {FIO_BUF_INFO1((char *)".md"),
-                                       FIO_BUF_INFO1((char *)".markdown"),
+  fio_buf_info_s const extensions[] = {FIO_BUF_INFO1((char *)".mustache"),
+                                       FIO_BUF_INFO1((char *)".html"),
                                        FIO_BUF_INFO2((char *)"", 0),
                                        {0}};
   FIO_STR_INFO_TMP_VAR(fn, (PATH_MAX | 2094));
@@ -20026,6 +20075,39 @@ Tag Helpers
 FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p);
 FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p);
 
+FIO_IFUNC void fio___mustache_stand_alone_skip_eol(fio___mustache_parser_s *p) {
+  size_t offset =
+      !p->dirty && p->forwards.buf[0] == '\r' && p->forwards.buf[1] == '\n';
+  p->forwards.buf += offset;
+  p->forwards.len -= offset;
+  offset = !p->dirty && p->forwards.buf[0] == '\n';
+  p->forwards.buf += offset;
+  p->forwards.len -= offset;
+}
+
+FIO_IFUNC int fio___mustache_parse_add_text(fio___mustache_parser_s *p,
+                                            fio_buf_info_s txt) {
+  union {
+    uint64_t u64[1];
+    char u8[8];
+  } buf;
+  buf.u8[0] = FIO___MUSTACHE_I_TXT;
+  FIO_ASSERT_DEBUG(txt.len < (1 << 16),
+                   "(mustache) text instruction overflow!");
+  fio_u2buf16u(buf.u8 + 1, txt.len);
+  p->root = fio_bstr_write2(p->root,
+                            FIO_STRING_WRITE_STR2(buf.u8, 3),
+                            FIO_STRING_WRITE_STR2(txt.buf, txt.len));
+  return 0;
+}
+
+FIO_IFUNC int fio___mustache_parse_comment(fio___mustache_parser_s *p,
+                                           fio_buf_info_s comment) {
+  fio___mustache_stand_alone_skip_eol(p);
+  return 0;
+  (void)comment;
+}
+
 FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
                                                fio_buf_info_s var) {
   union {
@@ -20045,15 +20127,15 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
     goto value_name_mismatch;
 
   fio_u2buf32u(prev + 3, fio_bstr_len(p->root) + 1);
+  fio___mustache_stand_alone_skip_eol(p);
 
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
   do
     --var.buf;
-  while ((var.buf[0] != p->delim.in.buf[0] ||
-          !p->delim.in.cmp(p->delim.in.buf, var.buf)) &&
-         var.buf > p->prev->data.buf);
-  old_var_name =
-      FIO_BUF_INFO2(p->prev->data.buf, (size_t)(var.buf - p->prev->data.buf));
+  while (var.buf[0] != p->delim.in.buf[0] ||
+         !p->delim.in.cmp(p->delim.in.buf, var.buf));
+  old_var_name = FIO_BUF_INFO2(p->prev->forwards.buf,
+                               (size_t)(var.buf - p->prev->forwards.buf));
   if (old_var_name.len < (1U << 16)) {
     buf.u8[1] = FIO___MUSTACHE_I_METADATA;
     fio_u2buf16u(buf.u8 + 2, old_var_name.len);
@@ -20086,55 +20168,53 @@ section_not_open:
 
 FIO_IFUNC int fio___mustache_parse_section_start(fio___mustache_parser_s *p,
                                                  fio_buf_info_s var,
-                                                 fio_buf_info_s padding,
                                                  size_t inverted) {
   if (p->depth == FIO_MUSTACHE_MAX_DEPTH)
     return -1;
+  fio___mustache_stand_alone_skip_eol(p);
+
   fio___mustache_parser_s new_section = {
       .root = p->root,
       .prev = p,
       .delim = p->delim,
-      .data = p->data,
+      .forwards = p->forwards,
       .args = p->args,
       .starts_at = (uint32_t)fio_bstr_len(p->root),
       .depth = p->depth + 1,
+      .dirty = p->dirty,
   };
   union {
     uint64_t u64[1];
     char u8[8];
   } buf;
-  for (size_t i = 0; i < 2; ++i) {
-    size_t offset =
-        (new_section.data.buf[0] == '\r' || new_section.data.buf[0] == '\n');
-    new_section.data.buf += offset;
-    new_section.data.len -= offset;
-  }
   buf.u8[0] = FIO___MUSTACHE_I_ARY + inverted;
   fio_u2buf16u(buf.u8 + 1, var.len);
   /* + 32 bit value to be filled by closure. */
-  new_section.root = fio_bstr_write2(p->root,
+  new_section.root = fio_bstr_write2(new_section.root,
                                      FIO_STRING_WRITE_STR2(buf.u8, 7),
                                      FIO_STRING_WRITE_STR2(var.buf, var.len));
 #if FIO_MUSTACHE_PRESERVE_PADDING
-  buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
-  fio_u2buf16u(buf.u8 + 1, padding.len);
-  new_section.root =
-      fio_bstr_write2(new_section.root,
-                      FIO_STRING_WRITE_STR2(buf.u8, 3),
-                      FIO_STRING_WRITE_STR2(padding.buf, padding.len));
+  if (!p->dirty && p->backwards.len) {
+    buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
+    fio_u2buf16u(buf.u8 + 1, p->backwards.len);
+    new_section.root = fio_bstr_write2(
+        new_section.root,
+        FIO_STRING_WRITE_STR2(buf.u8, 3),
+        FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
+  }
 #endif
   int r = fio___mustache_parse_block(&new_section);
   p->root = new_section.root;
-  p->data = new_section.data;
+  p->forwards = new_section.forwards;
   return r;
-  (void)padding; /* if unused */
 }
 
 FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
-                                           fio_buf_info_s filename,
-                                           fio_buf_info_s padding) {
+                                           fio_buf_info_s filename) {
   if (p->depth == FIO_MUSTACHE_MAX_DEPTH)
     return -1;
+
+  fio___mustache_stand_alone_skip_eol(p);
 
   fio_buf_info_s file_content = fio___mustache_load_template(p, filename);
   if (!file_content.len)
@@ -20149,13 +20229,14 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
   size_t ipos = fio_bstr_len(p->root) + 1;
   p->root = fio_bstr_write(p->root, buf.u8, 5);
 
-#if FIO_MUSTACHE_PRESERVE_PADDING
-  buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
-  fio_u2buf16u(buf.u8 + 1, padding.len);
-  p->root = fio_bstr_write2(p->root,
-                            FIO_STRING_WRITE_STR2(buf.u8, 3),
-                            FIO_STRING_WRITE_STR2(padding.buf, padding.len));
-#endif
+  if (!p->dirty && p->backwards.len) {
+    buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
+    fio_u2buf16u(buf.u8 + 1, p->backwards.len);
+    p->root = fio_bstr_write2(
+        p->root,
+        FIO_STRING_WRITE_STR2(buf.u8, 3),
+        FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
+  }
 
   fio___mustache_parser_s new_section = {
       .root = p->root,
@@ -20163,18 +20244,19 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
       .delim = fio___mustache_delimiter_init(),
       .path = fio_filename_parse2(filename.buf, filename.len).folder,
       .fname = filename,
-      .data = file_content,
+      .forwards = file_content,
       .args = p->args,
       .starts_at = (uint32_t)fio_bstr_len(p->root),
       .depth = p->depth + 1,
+      .dirty = 0,
   };
 
   int r = fio___mustache_parse_template_file(&new_section);
   buf.u8[0] = FIO___MUSTACHE_I_STACK_POP;
   p->root = fio_bstr_write(new_section.root, buf.u8, 1);
   fio_u2buf32u(p->root + ipos, fio_bstr_len(p->root));
+  fio___mustache_free_template(p, file_content);
   return r;
-  (void)padding; /* if unused */
 }
 
 FIO_IFUNC int fio___mustache_parse_set_delim(fio___mustache_parser_s *p,
@@ -20190,6 +20272,8 @@ FIO_IFUNC int fio___mustache_parse_set_delim(fio___mustache_parser_s *p,
       {3, fio_memcpy3, fio___mustache_delcmp3},
       {4, fio_memcpy4, fio___mustache_delcmp4},
   };
+
+  fio___mustache_stand_alone_skip_eol(p);
 
   char *end = buf.buf + buf.len;
   char *pos = buf.buf;
@@ -20223,26 +20307,19 @@ delim_tag_error:
 
 FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
                                             fio_buf_info_s var,
-                                            fio_buf_info_s padding,
                                             size_t raw) {
   union {
     uint64_t u64[1];
     char u8[8];
   } buf;
-  if (padding.len > ((1 << 16) - 1))
-    padding.len = 0;
+  if (p->backwards.len > ((1 << 16) - 1))
+    p->backwards.len = 0;
 
 #if FIO_MUSTACHE_PRESERVE_PADDING
-  if (padding.len)
+  if (p->backwards.len)
     goto padded;
 #else
-  if (padding.len) {
-    buf.u8[0] = (char)(FIO___MUSTACHE_I_TXT);
-    fio_u2buf16u(buf.u8 + 1, padding.len);
-    p->root = fio_bstr_write2(p->root,
-                              FIO_STRING_WRITE_STR2(buf.u8, 3),
-                              FIO_STRING_WRITE_STR2(padding.buf, padding.len));
-  }
+  fio___mustache_parse_add_text(p, p->backwards);
 #endif
   buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR + raw);
   fio_u2buf16u(buf.u8 + 1, var.len);
@@ -20252,35 +20329,17 @@ FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
   return 0;
 #if FIO_MUSTACHE_PRESERVE_PADDING
 padded:
-  buf.u8[0] = (char)(FIO___MUSTACHE_I_PADDING_PUSH);
-  fio_u2buf16u(buf.u8 + 1, padding.len);
-  buf.u8[3] = (char)(FIO___MUSTACHE_I_VAR + raw);
-  fio_u2buf16u(buf.u8 + 4, var.len);
-  buf.u8[6] = (char)(FIO___MUSTACHE_I_PADDING_POP);
-  p->root = fio_bstr_write2(p->root,
-                            FIO_STRING_WRITE_STR2(buf.u8, 3),
-                            FIO_STRING_WRITE_STR2(padding.buf, padding.len),
-                            FIO_STRING_WRITE_STR2(buf.u8 + 3, 3),
-                            FIO_STRING_WRITE_STR2(var.buf, var.len),
-                            FIO_STRING_WRITE_STR2(buf.u8 + 6, 1));
+  /* TODO: fixme (what if padding value is already used?) */
+  buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR_PADDED + raw);
+  fio_u2buf16u(buf.u8 + 1, var.len);
+  fio_u2buf16u(buf.u8 + 3, p->backwards.len);
+  p->root = fio_bstr_write2(
+      p->root,
+      FIO_STRING_WRITE_STR2(buf.u8, 5),
+      FIO_STRING_WRITE_STR2(var.buf, var.len),
+      FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
   return 0;
 #endif
-}
-
-FIO_IFUNC int fio___mustache_parse_add_text(fio___mustache_parser_s *p,
-                                            fio_buf_info_s txt) {
-  union {
-    uint64_t u64[1];
-    char u8[8];
-  } buf;
-  buf.u8[0] = FIO___MUSTACHE_I_TXT;
-  FIO_ASSERT_DEBUG(txt.len < (1 << 16),
-                   "(mustache) text instruction overflow!");
-  fio_u2buf16u(buf.u8 + 1, txt.len);
-  p->root = fio_bstr_write2(p->root,
-                            FIO_STRING_WRITE_STR2(buf.u8, 3),
-                            FIO_STRING_WRITE_STR2(txt.buf, txt.len));
-  return 0;
 }
 
 /* *****************************************************************************
@@ -20288,8 +20347,7 @@ Tag Consumer
 ***************************************************************************** */
 
 FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
-                                               fio_buf_info_s buf,
-                                               fio_buf_info_s padding) {
+                                               fio_buf_info_s buf) {
   /* remove white-space from name */
   for (; buf.len &&
          (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t');)
@@ -20307,7 +20365,7 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   if (!(id == '/' || id == '#' || id == '^' || id == '>' || id == '!' ||
         id == '&' || (id == '=' && buf.buf[buf.len - 1] == '=') ||
         (id == '{' && buf.buf[buf.len - 1] == '}')))
-    return fio___mustache_parse_var_name(p, buf, padding, 0); /* escaped var */
+    return fio___mustache_parse_var_name(p, buf, 0); /* escaped var */
 
   /* tag starts with a marker, seek new tag starting point */
   do {
@@ -20321,10 +20379,10 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   /* test for tag type and route to handler */
   switch (id) {
   case '/': return fio___mustache_parse_section_end(p, buf);
-  case '#': return fio___mustache_parse_section_start(p, buf, padding, 0);
-  case '^': return fio___mustache_parse_section_start(p, buf, padding, 1);
-  case '>': return fio___mustache_parse_partial(p, buf, padding);
-  case '!': return 0;
+  case '#': return fio___mustache_parse_section_start(p, buf, 0);
+  case '^': return fio___mustache_parse_section_start(p, buf, 1);
+  case '>': return fio___mustache_parse_partial(p, buf);
+  case '!': return fio___mustache_parse_comment(p, buf);
   case '=': /* fall through */
   case '{':
     do /* it is known that (buf.buf ends as '=' or '}')*/
@@ -20333,8 +20391,7 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
 
     if (id == '=')
       return fio___mustache_parse_set_delim(p, buf); /* fall through */
-  default:                                           /* raw var */
-    return fio___mustache_parse_var_name(p, buf, padding, 1);
+  default: /* raw var */ return fio___mustache_parse_var_name(p, buf, 1);
   }
 }
 
@@ -20344,106 +20401,96 @@ File Consumer parser
 
 FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
   int r = 0;
-  const char *pos = p->data.buf;
-  const char *end = p->data.buf + p->data.len;
-  unsigned dirty = 0;
-  p->root = fio_bstr_reserve(p->root, (size_t)(end - p->data.buf));
+  const char *end = p->forwards.buf + p->forwards.len;
+  fio_buf_info_s tag;
+  p->backwards = FIO_BUF_INFO2(p->forwards.buf, 0);
+  p->root = fio_bstr_reserve(p->root, p->forwards.len);
   /* consume each line (in case it's a stand alone line) */
-  while (pos < end) {
-    if (FIO_UNLIKELY(*pos == p->delim.in.buf[0] &&
-                     p->delim.in.cmp(pos, p->delim.in.buf))) {
+  for (;;) {
+    p->backwards.len = (size_t)(p->forwards.buf - p->backwards.buf);
+    if (p->forwards.buf >= end)
+      break;
+    if (FIO_UNLIKELY(*p->forwards.buf == p->delim.in.buf[0] &&
+                     p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
-      const char *start = pos;
-      pos += p->delim.in.len;
+      p->forwards.buf += p->delim.in.len;
+      tag = FIO_BUF_INFO2(p->forwards.buf, 0);
       for (;;) {
-        if (pos + p->delim.out.len > end) {
-          FIO_LOG_ERROR(
-              "(mustache) template error, un-terminated {{tag}}: %.*s",
-              (int)(end - start > 10 ? (int)10 : (int)(end - start)),
-              start);
-          return (r = -1);
-        }
-        if (*pos == p->delim.out.buf[0] &&
-            p->delim.out.cmp(pos, p->delim.out.buf))
+        if (p->forwards.buf + p->delim.out.len > end)
+          goto incomplete_tag_error;
+        if (p->forwards.buf[0] == p->delim.out.buf[0] &&
+            p->delim.out.cmp(p->forwards.buf, p->delim.out.buf))
           break;
-        ++pos;
+        ++(p->forwards.buf);
       }
       /* advance tag ending when triple mustache is detected. */
-      pos += (pos < end && pos[0] == '}' &&
-              p->delim.out.cmp(pos + 1, p->delim.out.buf));
-      fio_buf_info_s stand_alone = {0};
-      if (start != p->data.buf) {
-        /* if stand-alone, add padding and than pop it, otherwise emit txt */
-        if (!dirty &&
-            (!pos[p->delim.out.len] || pos[p->delim.out.len] == '\n' ||
-             pos[p->delim.out.len] == '\r')) {
-          stand_alone =
-              FIO_BUF_INFO2(p->data.buf, (size_t)(start - p->data.buf));
-        } else { /* not stand-alone, add txt */
-          fio___mustache_parse_add_text(
-              p,
-              FIO_BUF_INFO2(p->data.buf, (size_t)(start - p->data.buf)));
-        }
+      p->forwards.buf +=
+          ((p->forwards.buf + p->delim.out.len) < end &&
+           p->forwards.buf[0] == '}' &&
+           p->delim.out.cmp(p->forwards.buf + 1, p->delim.out.buf));
+      /* finalize tag */
+      tag.len = p->forwards.buf - tag.buf;
+      if (!tag.len)
+        goto empty_tag_error;
+      p->forwards.buf += p->delim.out.len;
+      p->forwards.len = (size_t)(end - p->forwards.buf);
+      p->dirty |= (unsigned)(p->forwards.buf[0] && p->forwards.buf[0] != '\r' &&
+                             p->forwards.buf[0] != '\n');
+      if (p->dirty && p->backwards.len) { /* not stand-alone, add txt */
+        fio___mustache_parse_add_text(p, p->backwards);
+        p->backwards = FIO_BUF_INFO2(NULL, 0);
       }
-      start += p->delim.in.len;
-      p->data.buf = (char *)pos + p->delim.out.len;
-      size_t tmp_len = fio_bstr_len(p->root);
-      if ((r = fio___mustache_parse_consume_tag(
-               p,
-               FIO_BUF_INFO2((char *)start, (size_t)(pos - start)),
-               stand_alone)))
+      if ((r = fio___mustache_parse_consume_tag(p, tag)))
         goto done;
-      p->data.buf += !dirty && p->data.buf[0] == '\r' &&
-                     p->root[tmp_len] != FIO___MUSTACHE_I_TXT &&
-#if FIO_MUSTACHE_PRESERVE_PADDING
-                     p->root[tmp_len] != FIO___MUSTACHE_I_PADDING_PUSH &&
-#endif
-                     p->root[tmp_len] != FIO___MUSTACHE_I_VAR &&
-                     p->root[tmp_len] != FIO___MUSTACHE_I_VAR_RAW;
-      p->data.buf += !dirty && p->data.buf[0] == '\n' &&
-                     p->root[tmp_len] != FIO___MUSTACHE_I_TXT &&
-#if FIO_MUSTACHE_PRESERVE_PADDING
-                     p->root[tmp_len] != FIO___MUSTACHE_I_PADDING_PUSH &&
-#endif
-                     p->root[tmp_len] != FIO___MUSTACHE_I_VAR &&
-                     p->root[tmp_len] != FIO___MUSTACHE_I_VAR_RAW;
-      pos = p->data.buf; /* may have progressed on ARY tag recursion */
-      dirty = (p->data.buf[-1] != '\n');
+      p->backwards = FIO_BUF_INFO2(p->forwards.buf, 0);
       continue;
     }
-    if (((pos + 1) - p->data.buf == ((1 << 16) - 1)) || *pos == '\n') {
-      fio___mustache_parse_add_text(
-          p,
-          FIO_BUF_INFO2(p->data.buf, (size_t)((pos + 1) - p->data.buf)));
-      p->data.buf = (char *)(pos + 1);
-      dirty = (*pos != '\n');
-    } else
-      dirty |= (*pos != ' ' && *pos != '\t');
-    ++pos;
+    p->dirty = (unsigned)(p->forwards.buf[0] != '\n') &
+               (p->dirty | (unsigned)(p->forwards.buf[0] != ' ' &&
+                                      p->forwards.buf[0] != '\t'));
+    ++p->forwards.buf;
+    if (p->backwards.len == ((1 << 16) - 2) || p->forwards.buf[-1] == '\n') {
+      p->backwards.len = p->forwards.buf - p->backwards.buf;
+      fio___mustache_parse_add_text(p, p->backwards);
+      p->backwards.buf = p->forwards.buf;
+    }
   }
   /* print leftover text? */
-  if (p->data.buf < end) {
-    fio___mustache_parse_add_text(
-        p,
-        FIO_BUF_INFO2(p->data.buf, (size_t)(end - p->data.buf)));
-  }
+  if (p->backwards.len)
+    fio___mustache_parse_add_text(p, p->backwards);
+
 done:
   r += ((r == -2) << 1); /* end-tag stop shouldn't propagate onward. */
   return r;
+incomplete_tag_error:
+  FIO_LOG_ERROR("(mustache) template error, un-terminated {{tag}}:\n\t%.*s",
+                (int)(end - (p->backwards.buf + p->backwards.len) > 32
+                          ? (int)32
+                          : (int)(end - (p->backwards.buf + p->backwards.len))),
+                (p->backwards.buf + p->backwards.len));
+  return (r = -1);
+empty_tag_error:
+  FIO_LOG_ERROR("(mustache) template error, empty {{tag}}:\n\t%.*s",
+                (int)(end - (p->backwards.buf + p->backwards.len) > 32
+                          ? (int)32
+                          : (int)(end - (p->backwards.buf + p->backwards.len))),
+                (p->backwards.buf + p->backwards.len));
+  return (r = -1);
 }
 
 FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
   /* remove (possible) filename comment line */
-  if (p->data.buf[0] == '@' && p->data.buf[1] == ':') {
-    char *pos = (char *)FIO_MEMCHR(p->data.buf, '\n', p->data.len);
+  if (p->forwards.buf[0] == '@' && p->forwards.buf[1] == ':') {
+    char *pos = (char *)FIO_MEMCHR(p->forwards.buf, '\n', p->forwards.len);
     if (!pos)
       return 0; /* done with file... though nothing happened. */
   }
   /* consume (possible) YAML front matter */
-  if (p->data.buf[0] == '-' && p->data.buf[1] == '-' && p->data.buf[2] == '-' &&
-      (p->data.buf[3] == '\n' || p->data.buf[3] == '\r')) {
-    const char *end = p->data.buf + p->data.len;
-    const char *pos = p->data.buf;
+  if (p->forwards.buf[0] == '-' && p->forwards.buf[1] == '-' &&
+      p->forwards.buf[2] == '-' &&
+      (p->forwards.buf[3] == '\n' || p->forwards.buf[3] == '\r')) {
+    const char *end = p->forwards.buf + p->forwards.len;
+    const char *pos = p->forwards.buf;
     for (;;) {
       pos = (const char *)FIO_MEMCHR(pos, '\n', end - pos);
       if (!pos)
@@ -20457,9 +20504,9 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
       }
     }
     p->args->on_yaml_front_matter(
-        FIO_BUF_INFO2(p->data.buf, (size_t)(pos - p->data.buf)));
-    p->data.len = (size_t)(pos - p->data.buf);
-    p->data.buf = (char *)pos;
+        FIO_BUF_INFO2(p->forwards.buf, (size_t)(pos - p->forwards.buf)));
+    p->forwards.len = (size_t)(pos - p->forwards.buf);
+    p->forwards.buf = (char *)pos;
   }
   return fio___mustache_parse_block(p);
 }
@@ -20489,23 +20536,32 @@ FIO_SFUNC void *fio___mustache_dflt_write_text_escaped(void *u,
   return (void *)fio_bstr_write_html_escape((char *)u, raw.buf, raw.len);
 }
 
-FIO_SFUNC fio_buf_info_s fio___mustache_dflt_get_val(void *ctx,
-                                                     fio_buf_info_s name) {
-  return FIO_BUF_INFO2(NULL, 0);
+/* callback should return a new context pointer with the value of `name`. */
+void *fio___mustache_dflt_get_var(void *ctx, fio_buf_info_s name) {
+  return NULL;
   (void)ctx, (void)name;
 }
-FIO_SFUNC fio_buf_info_s fio___mustache_dflt_val2str(void *ctx) {
+/* if context is an Array, should return a context pointer @ index. */
+void *fio___mustache_dflt_get_var_index(void *ctx, size_t index) {
+  return NULL;
+  (void)ctx, (void)index;
+}
+/* should return the String value of context `var` as a `fio_buf_info_s`. */
+fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
   return FIO_BUF_INFO2(NULL, 0);
-  (void)ctx;
+  (void)var;
 }
 
-FIO_SFUNC void *fio___mustache_dflt_enter(void *ctx,
-                                          fio_buf_info_s name,
-                                          size_t indx,
-                                          fio_buf_info_s t) {
-  return NULL;
-  (void)ctx, (void)name, (void)indx, (void)t;
+FIO_SFUNC int fio___mustache_dflt_var_is_truthful(void *v) { return !!v; }
+
+#if FIO_MUSTACHE_LAMBDA_SUPPORT
+/* returns non-zero if `ctx` is a lambda and handles section manually. */
+int fio___mustache_dflt_is_lambda(void *ctx,
+                                  fio_buf_info_s raw_template_section) {
+  return 0;
+  (void)raw_template_section, (void)ctx;
 }
+#endif
 
 /* *****************************************************************************
 Public API
@@ -20548,7 +20604,7 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   parser.delim = fio___mustache_delimiter_init();
   parser.depth = 0;
   parser.fname = a.filename;
-  parser.data = a.data;
+  parser.forwards = a.data;
   parser.path = base_path;
   if (fio___mustache_parse_template_file(&parser)) { /* parser failed(!) */
     fio_bstr_free(parser.root);
@@ -20557,14 +20613,19 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
     a.free_file_data(a.data);
+  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
 
 /* Frees the mustache template object (or reduces it's reference count). */
-SFUNC void fio_mustache_free(fio_mustache_s *m) { fio_bstr_free((char *)m); }
+SFUNC void fio_mustache_free(fio_mustache_s *m) {
+  FIO___LEAK_COUNTER_ON_FREE(fio_mustache_s);
+  fio_bstr_free((char *)m);
+}
 
 /** Increases the mustache template's reference count. */
 SFUNC fio_mustache_s *fio_mustache_dup(fio_mustache_s *m) {
+  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)fio_bstr_copy((char *)m);
 }
 
@@ -20579,12 +20640,19 @@ SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
   FIO_ASSERT(args.write_text_escaped && args.write_text,
              "(mustache) fio_mustache_build requires both writer "
              "callbacks!\n\t\t(or none, for a fio_bstr_s return)");
-  if (!args.get_val)
-    args.get_val = fio___mustache_dflt_get_val;
-  if (!args.val2str)
-    args.val2str = fio___mustache_dflt_val2str;
-  if (!args.enter)
-    args.enter = fio___mustache_dflt_enter;
+  if (!args.get_var)
+    args.get_var = fio___mustache_dflt_get_var;
+  if (!args.get_var_index)
+    args.get_var_index = fio___mustache_dflt_get_var_index;
+  if (!args.var2str)
+    args.var2str = fio___mustache_dflt_var2str;
+  if (!args.var_is_truthful)
+    args.var_is_truthful = fio___mustache_dflt_var_is_truthful;
+#if FIO_MUSTACHE_LAMBDA_SUPPORT
+  if (!args.is_lambda)
+    args.is_lambda = fio___mustache_dflt_is_lambda;
+#endif
+
   fio___mustache_bldr_s builder = {.root = (char *)m,
                                    .args = &args,
                                    .ctx = args.ctx};

@@ -366,6 +366,7 @@ FIO_IFUNC char *fio___mustache_i_var_internal(
 #if FIO_MUSTACHE_PRESERVE_PADDING
   fio___mustache_writer_route(b, var, writer);
 #else
+  fio___mustache_write_padding(b);
   b->args->udata = writer(b->args->udata, var);
 #endif
   return p;
@@ -562,8 +563,8 @@ fio___mustache_load_template(fio___mustache_parser_s *p, fio_buf_info_s fname) {
    * 3. Working folder.
    */
   fio_buf_info_s r = {0};
-  fio_buf_info_s const extensions[] = {FIO_BUF_INFO1((char *)".md"),
-                                       FIO_BUF_INFO1((char *)".markdown"),
+  fio_buf_info_s const extensions[] = {FIO_BUF_INFO1((char *)".mustache"),
+                                       FIO_BUF_INFO1((char *)".html"),
                                        FIO_BUF_INFO2((char *)"", 0),
                                        {0}};
   FIO_STR_INFO_TMP_VAR(fn, (PATH_MAX | 2094));
