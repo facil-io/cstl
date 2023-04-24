@@ -2298,10 +2298,10 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
     (32..126).each {|i| a[i] = i.chr }
     a['<'.ord] = "&lt;"
     a['>'.ord] = "&gt;"
-    a['&'.ord] = "&\##{'&'.ord.to_s(16)};"
-    a['"'.ord] = "&\##{'"'.ord.to_s(16)};"
-    a["\'".ord] ="&\##{"\'".ord.to_s(16)};"
-    a['|'.ord] = "&\##{'|'.ord.to_s(16)};"
+    a['&'.ord] = "&x#{'&'.ord.to_s(16)};"
+    a['"'.ord] = "&x#{'"'.ord.to_s(16)};"
+    a["\'".ord] ="&x#{"\'".ord.to_s(16)};"
+    a['|'.ord] = "&x#{'|'.ord.to_s(16)};"
     b = a.map {|s| s.length }
     puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
   */

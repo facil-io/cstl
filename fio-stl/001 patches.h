@@ -154,6 +154,14 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #define CLOCK_MONOTONIC 1
 #endif
 
+#ifndef PATH_MAX
+#ifdef MAX_PATH
+#define PATH_MAX MAX_PATH
+#else /* although this value is usually (in practice) 256 + 4, we go big. */
+#define PATH_MAX 1024
+#endif
+#endif
+
 #if !defined(fstat)
 #define fstat _fstat
 #endif /* fstat */
