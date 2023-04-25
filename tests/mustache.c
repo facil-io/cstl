@@ -2,28 +2,6 @@
 #define FIO_LOG
 #include "fio-stl/include.h"
 
-FIO_SFUNC void *mtest_write_text(void *udata, fio_buf_info_s txt) {
-  return fio_bstr_write(udata, txt.buf, txt.len);
-}
-
-FIO_SFUNC void *mtest_write_text_escaped(void *udata, fio_buf_info_s raw) {
-  return fio_bstr_write_html_escape(udata, raw.buf, raw.len);
-}
-
-FIO_SFUNC fio_buf_info_s mtest_val2str(void *var) {
-  fio_buf_info_s r = {0};
-  if (!var || var == fiobj_null())
-    return r;
-  fio_str_info_s tmp = fiobj2cstr(var);
-  r = FIO_STR2BUF_INFO(tmp);
-  return r;
-}
-
-FIO_SFUNC int mtest_var_is_truthful(void *v) {
-  return v && v != fiobj_null() && v != fiobj_false() &&
-         (!FIOBJ_TYPE_IS(v, FIOBJ_T_ARRAY) || fiobj_array_count(v));
-}
-
 FIO_SFUNC void *mtest_get_var(void *ctx, fio_buf_info_s name) {
   if (!ctx)
     return NULL;
@@ -38,22 +16,18 @@ FIO_SFUNC void *mtest_get_var_index(void *ctx, size_t index) {
   return fiobj_array_get(ctx, index);
 }
 
-FIO_SFUNC void *mtest_enter(void *ctx,
-                            fio_buf_info_s name,
-                            size_t indx,
-                            fio_buf_info_s t) {
-  if (!ctx)
-    return NULL;
-  ctx = fiobj_json_find2((FIOBJ)ctx, name.buf, name.len);
-  if (!ctx)
-    return NULL;
-  if (FIOBJ_TYPE_IS(ctx, FIOBJ_T_ARRAY)) {
-    return fiobj_array_get(ctx, (int32_t)indx);
-  }
-  if (!indx && ctx != fiobj_false() && ctx != fiobj_null())
-    return ctx;
-  return NULL;
-  (void)t;
+FIO_SFUNC fio_buf_info_s mtest_val2str(void *var) {
+  fio_buf_info_s r = {0};
+  if (!var || var == fiobj_null())
+    return r;
+  fio_str_info_s tmp = fiobj2cstr(var);
+  r = FIO_STR2BUF_INFO(tmp);
+  return r;
+}
+
+FIO_SFUNC int mtest_var_is_truthful(void *v) {
+  return v && v != fiobj_null() && v != fiobj_false() &&
+         (!FIOBJ_TYPE_IS(v, FIOBJ_T_ARRAY) || fiobj_array_count(v));
 }
 
 static void mustache_json_run_test(FIOBJ test) {
@@ -87,15 +61,12 @@ static void mustache_json_run_test(FIOBJ test) {
     }
   }
   fio_mustache_s *m = fio_mustache_load(.data = template_data);
-  char *result =
-      fio_mustache_build(m,
-                         .write_text = mtest_write_text,
-                         .write_text_escaped = mtest_write_text_escaped,
-                         .get_var = mtest_get_var,
-                         .get_var_index = mtest_get_var_index,
-                         .var2str = mtest_val2str,
-                         .var_is_truthful = mtest_var_is_truthful,
-                         .ctx = data);
+  char *result = fio_mustache_build(m,
+                                    .get_var = mtest_get_var,
+                                    .get_var_index = mtest_get_var_index,
+                                    .var2str = mtest_val2str,
+                                    .var_is_truthful = mtest_var_is_truthful,
+                                    .ctx = data);
 
   if (!FIOBJ_IS_INVALID(fiobj_hash_get3(test, "partials", 8))) {
     FIOBJ list = fiobj_hash_get3(test, "partials", 8);
@@ -131,9 +102,11 @@ static void mustache_json_run_test(FIOBJ test) {
     fio_bstr_free(unescaped_expect);
     fio_bstr_free(unescaped_result);
   }
+  printf("* PASSED (%zu/%zu bytes used by mustache object)\n",
+         fio_bstr_len((char *)m),
+         fio_bstr_info((char *)m).capa);
   fio_mustache_free(m);
   fio_bstr_free(result);
-  printf("* PASSED\n");
 }
 
 static void mustache_json_test(const char *json_file_name) {

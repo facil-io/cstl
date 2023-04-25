@@ -35,7 +35,7 @@ Settings
 #endif
 #ifndef FIO_MUSTACHE_LAMBDA_SUPPORT
 /** Supports raw text for lambda style languages. */
-#define FIO_MUSTACHE_LAMBDA_SUPPORT 1
+#define FIO_MUSTACHE_LAMBDA_SUPPORT 0
 #endif
 #ifndef FIO_MUSTACHE_ISOLATE_PARTIALS
 /** Limits the scope of partial templates to the context of their section. */
@@ -54,9 +54,14 @@ typedef struct {
   fio_buf_info_s data;
   /** The file's name (even if preloaded, used for partials load paths) */
   fio_buf_info_s filename;
-  fio_buf_info_s (*load_file_data)(fio_buf_info_s filename);
-  void (*free_file_data)(fio_buf_info_s file_data);
-  void (*on_yaml_front_matter)(fio_buf_info_s yaml_front_matter);
+  /** Loads the file's content, returning a `fio_buf_info_s` structure. */
+  fio_buf_info_s (*load_file_data)(fio_buf_info_s filename, void *udata);
+  /** Frees the file's content from its `fio_buf_info_s` structure. */
+  void (*free_file_data)(fio_buf_info_s file_data, void *udata);
+  /** Called when YAML front matter data was found. */
+  void (*on_yaml_front_matter)(fio_buf_info_s yaml_front_matter, void *udata);
+  /** Opaque user data. */
+  void *udata;
 } fio_mustache_load_args_s;
 
 /* Allocates a new object on the heap and initializes it's memory. */
@@ -84,10 +89,8 @@ struct fio_mustache_bargs_s {
   fio_buf_info_s (*var2str)(void *var);
   /* should return non-zero if the context pointer refers to a valid value. */
   int (*var_is_truthful)(void *ctx);
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
   /* returns non-zero if `ctx` is a lambda and handles section manually. */
   int (*is_lambda)(void *ctx, fio_buf_info_s raw_template_section);
-#endif
   /* the root context for finding named values. */
   void *ctx;
   /* opaque user data (settable as well as readable), the final return value. */
@@ -408,16 +411,13 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
 
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
     if (!b->args->is_lambda(nctx, section_raw_txt))
+#else
+    if (!b->args->is_lambda(nctx, FIO_BUF_INFO2(NULL, 0)))
 #endif
       fio___mustache_build_section(var.buf + var.len, builder);
 
     nctx = b->args->get_var_index(v, index++);
   } while (nctx);
-  for (;;) {
-    if (!nctx)
-      break;
-    ++index;
-  }
   return p;
 }
 FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
@@ -594,7 +594,7 @@ fio___mustache_load_template(fio___mustache_parser_s *p, fio_buf_info_s fname) {
               FIO_STRING_WRITE_STR2(tp->path.buf, tp->path.len),
               FIO_STRING_WRITE_STR2(fname.buf, fname.len),
               FIO_STRING_WRITE_STR2(extensions[i].buf, extensions[i].len));
-          r = p->args->load_file_data(FIO_STR2BUF_INFO(fn));
+          r = p->args->load_file_data(FIO_STR2BUF_INFO(fn), p->args->udata);
           if (r.len)
             goto file_loaded_successfully;
         }
@@ -614,7 +614,7 @@ absolute_path_or_cwd:
         NULL,
         FIO_STRING_WRITE_STR2(fname.buf, fname.len),
         FIO_STRING_WRITE_STR2(extensions[i].buf, extensions[i].len));
-    r = p->args->load_file_data(FIO_STR2BUF_INFO(fn));
+    r = p->args->load_file_data(FIO_STR2BUF_INFO(fn), p->args->udata);
     if (r.len)
       goto file_loaded_successfully;
   }
@@ -632,7 +632,7 @@ already_exists:
 
 FIO_SFUNC void fio___mustache_free_template(fio___mustache_parser_s *p,
                                             fio_buf_info_s d) {
-  p->args->free_file_data(d);
+  p->args->free_file_data(d, p->args->udata);
 }
 
 /* *****************************************************************************
@@ -1072,7 +1072,8 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
       }
     }
     p->args->on_yaml_front_matter(
-        FIO_BUF_INFO2(p->forwards.buf, (size_t)(pos - p->forwards.buf)));
+        FIO_BUF_INFO2(p->forwards.buf, (size_t)(pos - p->forwards.buf)),
+        p->args->udata);
     p->forwards.len = (size_t)(pos - p->forwards.buf);
     p->forwards.buf = (char *)pos;
   }
@@ -1082,25 +1083,38 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
 /* *****************************************************************************
 Default functions
 ***************************************************************************** */
-FIO_SFUNC fio_buf_info_s fio___mustache_dflt_load_file_data(fio_buf_info_s fn) {
+FIO_SFUNC fio_buf_info_s fio___mustache_dflt_load_file_data(fio_buf_info_s fn,
+                                                            void *udata) {
   char *data = fio_bstr_readfile(NULL, fn.buf, 0, 0);
   return fio_bstr_buf(data);
+  (void)udata;
 }
 
-FIO_SFUNC void fio___mustache_dflt_free_file_data(fio_buf_info_s d) {
+FIO_SFUNC void fio___mustache_dflt_free_file_data(fio_buf_info_s d,
+                                                  void *udata) {
   fio_bstr_free(d.buf);
+  (void)udata;
 }
 
-FIO_SFUNC void fio___mustache_dflt_on_yaml_front_matter(fio_buf_info_s y) {
-  (void)y;
+FIO_SFUNC void fio___mustache_dflt_on_yaml_front_matter(fio_buf_info_s y,
+                                                        void *udata) {
+  (void)y, (void)udata;
+}
+
+FIO_IFUNC void *fio___mustach_reserve_str(void *str, size_t len) {
+  if (fio_bstr_info((char *)str).capa < fio_bstr_len((char *)str) + len)
+    str = fio_bstr_reserve((char *)str, fio_bstr_len((char *)str) + len);
+  return str;
 }
 
 FIO_SFUNC void *fio___mustache_dflt_write_text(void *u, fio_buf_info_s txt) {
+  u = fio___mustach_reserve_str(u, txt.len);
   return (void *)fio_bstr_write((char *)u, txt.buf, txt.len);
 }
 
 FIO_SFUNC void *fio___mustache_dflt_write_text_escaped(void *u,
                                                        fio_buf_info_s raw) {
+  u = fio___mustach_reserve_str(u, raw.len);
   return (void *)fio_bstr_write_html_escape((char *)u, raw.buf, raw.len);
 }
 
@@ -1122,14 +1136,12 @@ fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
 
 FIO_SFUNC int fio___mustache_dflt_var_is_truthful(void *v) { return !!v; }
 
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
 /* returns non-zero if `ctx` is a lambda and handles section manually. */
 int fio___mustache_dflt_is_lambda(void *ctx,
                                   fio_buf_info_s raw_template_section) {
   return 0;
   (void)raw_template_section, (void)ctx;
 }
-#endif
 
 /* *****************************************************************************
 Public API
@@ -1159,7 +1171,7 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
     else
       fn = FIO_BUF2STR_INFO(a.filename);
     if (!a.data.buf && fn.buf) {
-      a.data = a.load_file_data(FIO_STR2BUF_INFO(fn));
+      a.data = a.load_file_data(FIO_STR2BUF_INFO(fn), a.udata);
       if (!a.data.buf)
         return NULL;
       should_free_data = 1;
@@ -1180,7 +1192,7 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   }
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
-    a.free_file_data(a.data);
+    a.free_file_data(a.data, a.udata);
   FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
@@ -1216,10 +1228,8 @@ SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
     args.var2str = fio___mustache_dflt_var2str;
   if (!args.var_is_truthful)
     args.var_is_truthful = fio___mustache_dflt_var_is_truthful;
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
   if (!args.is_lambda)
     args.is_lambda = fio___mustache_dflt_is_lambda;
-#endif
 
   fio___mustache_bldr_s builder = {.root = (char *)m,
                                    .args = &args,

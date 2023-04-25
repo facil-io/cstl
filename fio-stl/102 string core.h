@@ -471,20 +471,20 @@ FIO_IFUNC char *fio_bstr_copy(char *bstr);
 FIO_IFUNC void fio_bstr_free(char *bstr);
 
 /** Returns information about the fio_bstr. */
-FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr);
+FIO_IFUNC fio_str_info_s fio_bstr_info(const char *bstr);
 /** Returns information about the fio_bstr. */
-FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr);
+FIO_IFUNC fio_buf_info_s fio_bstr_buf(const char *bstr);
 /** Gets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
-FIO_IFUNC size_t fio_bstr_len(char *bstr);
+FIO_IFUNC size_t fio_bstr_len(const char *bstr);
 /** Sets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
 FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len);
 
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
-FIO_SFUNC int fio_bstr_is_greater(char *a, char *b);
+FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b);
 /** Compares to see if fio_bstr a is equal to another String. */
-FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b);
+FIO_SFUNC int fio_bstr_is_eq2info(const char *a_, fio_str_info_s b);
 /** Compares to see if fio_bstr a is equal to another String. */
-FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b);
+FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b);
 
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write(char *bstr,
@@ -705,7 +705,9 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
 FIO_IFUNC char *fio_bstr___len_set(char *bstr, size_t len) {
   if (!bstr)
     return bstr;
-  bstr[(FIO___BSTR_META(bstr)->len = len)] = 0;
+  if (len >= 0xFFFFFFFFULL)
+    return bstr;
+  bstr[(FIO___BSTR_META(bstr)->len = (uint32_t)len)] = 0;
   return bstr;
 }
 
@@ -737,23 +739,23 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len) {
 }
 
 /** Returns information about the fio_bstr. */
-FIO_IFUNC fio_str_info_s fio_bstr_info(char *bstr) {
+FIO_IFUNC fio_str_info_s fio_bstr_info(const char *bstr) {
   fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
-  return FIO_STR_INFO3(bstr, meta->len, meta->capa);
+  return FIO_STR_INFO3((char *)bstr, meta->len, meta->capa);
 }
 
 /** Returns information about the fio_bstr. */
-FIO_IFUNC fio_buf_info_s fio_bstr_buf(char *bstr) {
+FIO_IFUNC fio_buf_info_s fio_bstr_buf(const char *bstr) {
   fio___bstr_meta_s mem[1] = {{0}};
   fio___bstr_meta_s *meta_map[2] = {FIO___BSTR_META(bstr), mem};
   fio___bstr_meta_s *meta = meta_map[!bstr];
-  return FIO_BUF_INFO2(bstr, meta->len);
+  return FIO_BUF_INFO2((char *)bstr, meta->len);
 }
 
 /** Gets the length of the fio_bstr. `bstr` MUST NOT be NULL. */
-FIO_IFUNC size_t fio_bstr_len(char *bstr) {
+FIO_IFUNC size_t fio_bstr_len(const char *bstr) {
   if (!bstr)
     return 0;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
@@ -975,17 +977,17 @@ FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
 }
 
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
-FIO_SFUNC int fio_bstr_is_greater(char *a, char *b) {
+FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b) {
   return fio_string_is_greater_buf(fio_bstr_buf(a), fio_bstr_buf(b));
 }
 
 /** Compares to see if fio_bstr a is equal to another String. */
-FIO_SFUNC int fio_bstr_is_eq2info(char *a_, fio_str_info_s b) {
+FIO_SFUNC int fio_bstr_is_eq2info(const char *a_, fio_str_info_s b) {
   fio_str_info_s a = fio_bstr_info(a_);
   return FIO_STR_INFO_IS_EQ(a, b);
 }
 /** Compares to see if fio_bstr a is equal to another String. */
-FIO_SFUNC int fio_bstr_is_eq2buf(char *a_, fio_buf_info_s b) {
+FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b) {
   fio_buf_info_s a = fio_bstr_buf(a_);
   return FIO_BUF_INFO_IS_EQ(a, b);
 }
