@@ -136,11 +136,13 @@ Compiler detection, GCC / CLang features and OS dependent included files
 Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 ***************************************************************************** */
 
+#ifndef DEPRECATED
 #if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 5))
 /* GCC < 4.5 doesn't support deprecation reason string */
 #define DEPRECATED(reason) __attribute__((deprecated))
 #else
 #define DEPRECATED(reason) __attribute__((deprecated(reason)))
+#endif
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)

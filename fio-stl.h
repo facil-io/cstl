@@ -173,11 +173,13 @@ Compiler detection, GCC / CLang features and OS dependent included files
 Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 ***************************************************************************** */
 
+#ifndef DEPRECATED
 #if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 5))
 /* GCC < 4.5 doesn't support deprecation reason string */
 #define DEPRECATED(reason) __attribute__((deprecated))
 #else
 #define DEPRECATED(reason) __attribute__((deprecated(reason)))
+#endif
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -17354,9 +17356,11 @@ FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
   size_t l = len[0];
   if ((dest->capa > dest->len + l))
     return 0;
-  if (l < (dest->capa >> 2))
+  if (l < (dest->capa >> 2) &&
+      ((dest->capa >> 2) + (dest->capa) < 0x7FFFFFFFULL))
     l = (dest->capa >> 2);
-  if (reallocate && !reallocate(dest, dest->len + l))
+  l += dest->len;
+  if (l < 0x7FFFFFFFULL && reallocate && !reallocate(dest, l))
     return 0;
   if (dest->capa > dest->len + 1)
     len[0] = dest->capa - (dest->len + 1);
@@ -17489,7 +17493,7 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
-  meta->len = len < meta->capa ? len : meta->len;
+  meta->len = len < ((size_t)(meta->capa)) ? (uint32_t)len : meta->len;
   return fio_bstr___len_set(bstr, len);
 }
 
@@ -19527,7 +19531,9 @@ struct fio_mustache_bargs_s {
   /* should return non-zero if the context pointer refers to a valid value. */
   int (*var_is_truthful)(void *ctx);
   /* returns non-zero if `ctx` is a lambda and handles section manually. */
-  int (*is_lambda)(void *ctx, fio_buf_info_s raw_template_section);
+  int (*is_lambda)(void **udata,
+                   void *ctx,
+                   fio_buf_info_s raw_template_section);
   /* the root context for finding named values. */
   void *ctx;
   /* opaque user data (settable as well as readable), the final return value. */
@@ -19822,19 +19828,21 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 7, fio_buf2u16u(p + 1));
   uint32_t skip_pos = fio_buf2u32u(p + 3);
   p = b->root + skip_pos;
+#if FIO_MUSTACHE_LAMBDA_SUPPORT
+  fio_buf_info_s section_raw_txt = FIO_BUF_INFO2(NULL, 0);
+  if (p[0] == FIO___MUSTACHE_I_METADATA) {
+    section_raw_txt = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
+    p = section_raw_txt.buf + section_raw_txt.len;
+  }
+#else
+  const fio_buf_info_s section_raw_txt = FIO_BUF_INFO2(NULL, 0);
+#endif
 
   void *v = fio___mustache_get_var(b, var);
   if (!(b->args->var_is_truthful(v)))
     return p;
-
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
-  fio_buf_info_s section_raw_txt = FIO_BUF_INFO2(NULL, 0);
-  if (p[0] == FIO___MUSTACHE_I_METADATA)
-    section_raw_txt = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
-#endif
-
   size_t index = 0;
-  void *nctx = b->args->get_var_index(v, index++);
+  void *nctx = b->args->get_var_index(v, index);
   if (!nctx)
     nctx = v;
   do {
@@ -19845,16 +19853,11 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
         .padding = FIO_BUF_INFO2(NULL, b->padding.len),
         .args = b->args,
     };
-
-#if FIO_MUSTACHE_LAMBDA_SUPPORT
-    if (!b->args->is_lambda(nctx, section_raw_txt))
-#else
-    if (!b->args->is_lambda(nctx, FIO_BUF_INFO2(NULL, 0)))
-#endif
+    if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
+    }
+  } while ((nctx = b->args->get_var_index(v, ++index)));
 
-    nctx = b->args->get_var_index(v, index++);
-  } while (nctx);
   return p;
 }
 FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
@@ -20135,13 +20138,12 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
   fio___mustache_stand_alone_skip_eol(p);
 
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
-  do
-    --var.buf;
-  while (var.buf[0] != p->delim.in.buf[0] ||
-         !p->delim.in.cmp(p->delim.in.buf, var.buf));
-  old_var_name = FIO_BUF_INFO2(p->prev->forwards.buf,
-                               (size_t)(var.buf - p->prev->forwards.buf));
-  if (old_var_name.len < (1U << 16)) {
+  old_var_name =
+      FIO_BUF_INFO2(p->prev->forwards.buf,
+                    (size_t)(p->backwards.buf - p->prev->forwards.buf));
+  old_var_name.len -= (old_var_name.len && old_var_name.buf[-1] == '\n');
+  old_var_name.len -= (old_var_name.len && old_var_name.buf[-1] == '\r');
+  if (old_var_name.len && old_var_name.len < (1U << 16)) {
     buf.u8[1] = FIO___MUSTACHE_I_METADATA;
     fio_u2buf16u(buf.u8 + 2, old_var_name.len);
     p->root = fio_bstr_write2(
@@ -20443,7 +20445,7 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
                              p->forwards.buf[0] != '\n');
       if (p->dirty && p->backwards.len) { /* not stand-alone, add txt */
         fio___mustache_parse_add_text(p, p->backwards);
-        p->backwards = FIO_BUF_INFO2(NULL, 0);
+        p->backwards = FIO_BUF_INFO2((p->backwards.buf + p->backwards.len), 0);
       }
       if ((r = fio___mustache_parse_consume_tag(p, tag)))
         goto done;
@@ -20548,17 +20550,17 @@ FIO_SFUNC void *fio___mustache_dflt_write_text_escaped(void *u,
 }
 
 /* callback should return a new context pointer with the value of `name`. */
-void *fio___mustache_dflt_get_var(void *ctx, fio_buf_info_s name) {
+FIO_SFUNC void *fio___mustache_dflt_get_var(void *ctx, fio_buf_info_s name) {
   return NULL;
   (void)ctx, (void)name;
 }
 /* if context is an Array, should return a context pointer @ index. */
-void *fio___mustache_dflt_get_var_index(void *ctx, size_t index) {
+FIO_SFUNC void *fio___mustache_dflt_get_var_index(void *ctx, size_t index) {
   return NULL;
   (void)ctx, (void)index;
 }
 /* should return the String value of context `var` as a `fio_buf_info_s`. */
-fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
+FIO_SFUNC fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
   return FIO_BUF_INFO2(NULL, 0);
   (void)var;
 }
@@ -20566,10 +20568,12 @@ fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
 FIO_SFUNC int fio___mustache_dflt_var_is_truthful(void *v) { return !!v; }
 
 /* returns non-zero if `ctx` is a lambda and handles section manually. */
-int fio___mustache_dflt_is_lambda(void *ctx,
-                                  fio_buf_info_s raw_template_section) {
+FIO_SFUNC int fio___mustache_dflt_is_lambda(
+    void **udata,
+    void *ctx,
+    fio_buf_info_s raw_template_section) {
   return 0;
-  (void)raw_template_section, (void)ctx;
+  (void)raw_template_section, (void)ctx, (void)udata;
 }
 
 /* *****************************************************************************

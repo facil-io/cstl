@@ -102,9 +102,12 @@ static void mustache_json_run_test(FIOBJ test) {
     fio_bstr_free(unescaped_expect);
     fio_bstr_free(unescaped_result);
   }
-  printf("* PASSED (%zu/%zu bytes used by mustache object)\n",
-         fio_bstr_len((char *)m),
-         fio_bstr_info((char *)m).capa);
+  printf(
+      "* PASSED (%zu/%zu bytes used by mustache object, %zu/%zu by output)\n",
+      fio_bstr_len((char *)m),
+      fio_bstr_info((char *)m).capa,
+      fio_bstr_len(result),
+      fio_bstr_info(result).capa);
   fio_mustache_free(m);
   fio_bstr_free(result);
 }

@@ -636,9 +636,11 @@ FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
   size_t l = len[0];
   if ((dest->capa > dest->len + l))
     return 0;
-  if (l < (dest->capa >> 2))
+  if (l < (dest->capa >> 2) &&
+      ((dest->capa >> 2) + (dest->capa) < 0x7FFFFFFFULL))
     l = (dest->capa >> 2);
-  if (reallocate && !reallocate(dest, dest->len + l))
+  l += dest->len;
+  if (l < 0x7FFFFFFFULL && reallocate && !reallocate(dest, l))
     return 0;
   if (dest->capa > dest->len + 1)
     len[0] = dest->capa - (dest->len + 1);
@@ -771,7 +773,7 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
   if (!bstr)
     return bstr;
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
-  meta->len = len < meta->capa ? len : meta->len;
+  meta->len = len < ((size_t)(meta->capa)) ? (uint32_t)len : meta->len;
   return fio_bstr___len_set(bstr, len);
 }
 
