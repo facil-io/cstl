@@ -633,9 +633,12 @@ FIO_IFUNC size_t fio_string_capa4len(size_t new_len) {
 FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
                                               fio_string_realloc_fn reallocate,
                                               size_t *restrict len) {
-  if ((dest->capa > dest->len + len[0]))
+  size_t l = len[0];
+  if ((dest->capa > dest->len + l))
     return 0;
-  if (reallocate && !reallocate(dest, dest->len + len[0]))
+  if (l < (dest->capa >> 2))
+    l = (dest->capa >> 2);
+  if (reallocate && !reallocate(dest, dest->len + l))
     return 0;
   if (dest->capa > dest->len + 1)
     len[0] = dest->capa - (dest->len + 1);

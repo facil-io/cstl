@@ -1101,20 +1101,12 @@ FIO_SFUNC void fio___mustache_dflt_on_yaml_front_matter(fio_buf_info_s y,
   (void)y, (void)udata;
 }
 
-FIO_IFUNC void *fio___mustach_reserve_str(void *str, size_t len) {
-  if (fio_bstr_info((char *)str).capa < fio_bstr_len((char *)str) + len)
-    str = fio_bstr_reserve((char *)str, fio_bstr_len((char *)str) + len);
-  return str;
-}
-
 FIO_SFUNC void *fio___mustache_dflt_write_text(void *u, fio_buf_info_s txt) {
-  u = fio___mustach_reserve_str(u, txt.len);
   return (void *)fio_bstr_write((char *)u, txt.buf, txt.len);
 }
 
 FIO_SFUNC void *fio___mustache_dflt_write_text_escaped(void *u,
                                                        fio_buf_info_s raw) {
-  u = fio___mustach_reserve_str(u, raw.len);
   return (void *)fio_bstr_write_html_escape((char *)u, raw.buf, raw.len);
 }
 
