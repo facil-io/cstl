@@ -10,6 +10,12 @@ FIO_SFUNC void *mtest_get_var(void *ctx, fio_buf_info_s name) {
   return fiobj_hash_get3(ctx, name.buf, name.len);
 }
 
+FIO_SFUNC size_t mtest_array_length(void *ctx) {
+  if (!FIOBJ_TYPE_IS(ctx, FIOBJ_T_ARRAY))
+    return 0;
+  return fiobj_array_count((FIOBJ)ctx);
+}
+
 FIO_SFUNC void *mtest_get_var_index(void *ctx, size_t index) {
   if (!FIOBJ_TYPE_IS(ctx, FIOBJ_T_ARRAY))
     return NULL;
@@ -63,6 +69,7 @@ static void mustache_json_run_test(FIOBJ test) {
   fio_mustache_s *m = fio_mustache_load(.data = template_data);
   char *result = fio_mustache_build(m,
                                     .get_var = mtest_get_var,
+                                    .array_length = mtest_array_length,
                                     .get_var_index = mtest_get_var_index,
                                     .var2str = mtest_val2str,
                                     .var_is_truthful = mtest_var_is_truthful,

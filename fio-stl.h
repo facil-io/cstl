@@ -19524,6 +19524,8 @@ struct fio_mustache_bargs_s {
   void *(*write_text_escaped)(void *udata, fio_buf_info_s raw);
   /* callback should return a new context pointer with the value of `name`. */
   void *(*get_var)(void *ctx, fio_buf_info_s name);
+  /* if context is an Array, should return its length. */
+  size_t (*array_length)(void *ctx);
   /* if context is an Array, should return a context pointer @ index. */
   void *(*get_var_index)(void *ctx, size_t index);
   /* should return the String value of context `var` as a `fio_buf_info_s`. */
@@ -19842,10 +19844,12 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
   if (!(b->args->var_is_truthful(v)))
     return p;
   size_t index = 0;
-  void *nctx = b->args->get_var_index(v, index);
-  if (!nctx)
-    nctx = v;
-  do {
+  const size_t ary_len = b->args->array_length(v);
+  void *nctx = v;
+  if (ary_len)
+    nctx = b->args->get_var_index(v, index);
+  for (;;) {
+    ++index;
     fio___mustache_bldr_s builder = {
         .root = b->root,
         .prev = b,
@@ -19856,9 +19860,10 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
     }
-  } while ((nctx = b->args->get_var_index(v, ++index)));
-
-  return p;
+    if (index >= ary_len)
+      return p;
+    nctx = b->args->get_var_index(v, index);
+  }
 }
 FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 7, fio_buf2u16u(p + 1));
@@ -20554,6 +20559,13 @@ FIO_SFUNC void *fio___mustache_dflt_get_var(void *ctx, fio_buf_info_s name) {
   return NULL;
   (void)ctx, (void)name;
 }
+
+/* if context is an Array, should return its length. */
+FIO_SFUNC size_t fio___mustache_dflt_array_length(void *ctx) {
+  return 0;
+  (void)ctx;
+}
+
 /* if context is an Array, should return a context pointer @ index. */
 FIO_SFUNC void *fio___mustache_dflt_get_var_index(void *ctx, size_t index) {
   return NULL;
@@ -20655,6 +20667,8 @@ SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
              "callbacks!\n\t\t(or none, for a fio_bstr_s return)");
   if (!args.get_var)
     args.get_var = fio___mustache_dflt_get_var;
+  if (!args.array_length)
+    args.array_length = fio___mustache_dflt_array_length;
   if (!args.get_var_index)
     args.get_var_index = fio___mustache_dflt_get_var_index;
   if (!args.var2str)
