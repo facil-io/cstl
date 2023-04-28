@@ -409,6 +409,9 @@ SFUNC size_t fio_string_utf8_valid(fio_str_info_s str);
 /** Returns the String's length in UTF-8 characters or 0 if invalid. */
 SFUNC size_t fio_string_utf8_len(fio_str_info_s str);
 
+/** Returns 0 if non-UTF-8 or returns 1-4 (UTF-8 if a valid char). */
+SFUNC size_t fio_string_utf8_valid_code_point(const void *u8c, size_t buf_len);
+
 /**
  * Takes a UTF-8 character selection information (UTF-8 position and length)
  * and updates the same variables so they reference the raw byte slice
@@ -636,7 +639,7 @@ FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
   size_t l = len[0];
   if ((dest->capa > dest->len + l))
     return 0;
-  if (l < (dest->capa >> 2) &&
+  if (reallocate && l < (dest->capa >> 2) &&
       ((dest->capa >> 2) + (dest->capa) < 0x7FFFFFFFULL))
     l = (dest->capa >> 2);
   l += dest->len;
@@ -1292,6 +1295,39 @@ static __attribute__((unused)) uint8_t fio__string_utf8_map[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     5, 5, 5, 5, 5, 5, 5, 5, 2, 2, 2, 2, 3, 3, 4, 0};
 
+/** Returns 0 if non-UTF-8 or returns 1-4 (UTF-8 if a valid char). */
+SFUNC size_t fio_string_utf8_valid_code_point(const void *c, size_t buf_len) {
+  uint8_t l = fio__string_utf8_map[(*(uint8_t *)c) >> 3];
+  if (buf_len < l)
+    return 0;
+  switch (l) {
+  case 4:
+    if (fio__string_utf8_map[(*((uint8_t *)c + 3)) >> 3] != 5)
+      return 0; /* fall through */
+  case 3:
+    if (fio__string_utf8_map[(*((uint8_t *)c + 2)) >> 3] != 5)
+      return 0; /* fall through */
+  case 2:
+    if (fio__string_utf8_map[(*((uint8_t *)c + 1)) >> 3] != 5)
+      return 0; /* fall through */
+  case 1: return l;
+  }
+  return 0;
+}
+
+/** Encodes `u` in UTF-8 format, writing it to `dest`. */
+FIO_IFUNC size_t fio___string_utf8_code_point_len(size_t u) {
+  if (u < 128) {
+    return 1;
+  } else if (u < 2048) {
+    return 2;
+  } else if (u < 65536) {
+    return 3;
+  } else {
+    return 4;
+  }
+}
+
 /** Encodes `u` in UTF-8 format, writing it to `dest`. */
 FIO_IFUNC size_t fio___string_utf8_write(uint8_t *dest, size_t u) {
   size_t at = 0;
@@ -1750,23 +1786,13 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
         src[i] == ' ')
       continue;
     /* skip if valid UTF-8 */
-    switch (fio__string_utf8_map[src[i] >> 3]) {
-    case 4:
-      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
-        break; /* from switch */
+    {
+      size_t utf_8_valid_len =
+          fio_string_utf8_valid_code_point((void *)(src + i), len - i);
+      if (utf_8_valid_len > 1) {
+        i += utf_8_valid_len - 1;
+        continue;
       }
-    /* fall through */
-    case 3:
-      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 2:
-      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
-        break; /* from switch */
-      }
-      i += fio__string_utf8_map[src[i] >> 3] - 1;
-      continue; /* skip valid UTF-8 */
     }
     /* store first instance of character that needs escaping */
     /* constant time (non-branching) alternative to if(`set_at`) */
@@ -1820,29 +1846,14 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
       continue;
     }
     /* skip valid UTF-8 */
-    switch (fio__string_utf8_map[src[i] >> 3]) {
-    case 4:
-      if (fio__string_utf8_map[src[i + 3] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
-    case 3:
-      if (fio__string_utf8_map[src[i + 2] >> 3] != 5) {
-        break; /* from switch */
-      }
-    /* fall through */
+    switch (fio_string_utf8_valid_code_point((void *)(src + i), len - i)) {
+    case 4: writer[at++] = src[i++]; /* fall through */
+    case 3: writer[at++] = src[i++]; /* fall through */
     case 2:
-      if (fio__string_utf8_map[src[i + 1] >> 3] != 5) {
-        break; /* from switch */
-      }
-      switch (fio__string_utf8_map[src[i] >> 3]) {
-      case 4: writer[at++] = src[i++]; /* fall through */
-      case 3: writer[at++] = src[i++]; /* fall through */
-      case 2: writer[at++] = src[i++]; writer[at++] = src[i];
-      }
+      writer[at++] = src[i++];
+      writer[at++] = src[i];
       continue;
     }
-
     /* write escape sequence */
     writer[at++] = '\\';
     switch (src[i]) {
@@ -2256,7 +2267,7 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
       return (r = -1); /* no partial decoding. */
     };
   }
-  /* copy and unencode data */
+  /* copy and un-encode data */
   pr = (uint8_t *)encoded;
   last = pr;
   end = pr + encoded_len;
@@ -2297,33 +2308,29 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
                                        const void *data,
                                        size_t data_len) {
   /* produced using the following Ruby script:
-    a = (0..255).to_a.map {|i| i.chr }
-    100.times {|i| a[i] =  i > 9  ? "&x#{i.to_s(16)};" : "&\##{i.to_s(10)};"}
-    ('a'.ord..'z'.ord).each {|i| a[i] = i.chr }
-    ('A'.ord..'Z'.ord).each {|i| a[i] = i.chr }
-    ('0'.ord..'9'.ord).each {|i| a[i] = i.chr }
-    (32..126).each {|i| a[i] = i.chr }
+    a = (0..255).to_a.map {|i| "&#x#{i.to_s(16)};" }
+    must_escape = ['&', '<', '>', '"', "'", '`', '!', '@', '$', '%',
+                   '(', ')', '=', '+', '{', '}', '[', ']'] # space?
+    (32..123).each {|i| a[i] = i.chr unless must_escape.include?(i.chr) }
     a['<'.ord] = "&lt;"
     a['>'.ord] = "&gt;"
-    a['&'.ord] = "&x#{'&'.ord.to_s(16)};"
-    a['"'.ord] = "&x#{'"'.ord.to_s(16)};"
-    a["\'".ord] ="&x#{"\'".ord.to_s(16)};"
-    a['|'.ord] = "&x#{'|'.ord.to_s(16)};"
+    a['"'.ord] = "&qout;"
+    a['&'.ord] = "&amp;"
     b = a.map {|s| s.length }
     puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
   */
   static uint8_t html_escape_len[] = {
-      4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
-      5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 5, 1, 1, 1, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 1, 6, 6, 1, 6, 6, 5, 6, 6, 6, 1, 6, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 6, 4, 1, 6, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 6, 1, 1,
+      6, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
   int r = 0;
   size_t start = 0;
   size_t pos = 0;
@@ -2341,38 +2348,54 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
   for (;;) { /* copy and encode data */
     while (pos < data_len && html_escape_len[((uint8_t *)data)[pos]] == 1)
       ++pos;
+    /* don't escape valid UTF-8 */
+    if (pos < data_len)
+      switch (
+          fio_string_utf8_valid_code_point((void *)(((uint8_t *)data) + pos),
+                                           data_len - pos)) {
+      case 4: ++pos; /* fall through */
+      case 3: ++pos; /* fall through */
+      case 2: pos += 2; continue;
+      }
+    /* copy valid segment before escaping */
     if (pos != start) {
       const size_t len = pos - start;
       FIO_MEMCPY(dest->buf + dest->len, (uint8_t *)data + start, len);
       dest->len += len;
+      start = pos;
     }
     if (pos == data_len)
       break;
-    {
-      dest->buf[dest->len++] = '&';
-      switch (((uint8_t *)data)[pos]) {
-      case '<':
-        dest->buf[dest->len++] = 'l';
-        dest->buf[dest->len++] = 't';
-        break;
-      case '>':
-        dest->buf[dest->len++] = 'g';
-        dest->buf[dest->len++] = 't';
-        break;
-      default: /* note: &amp; is longer than &38; as are &quot; and friends.  */
-        if (((uint8_t *)data)[pos] < 10) {
-          dest->buf[dest->len++] = '#';
-          dest->buf[dest->len++] = '0' + ((uint8_t *)data)[pos];
-        } else {
-          uint8_t num = ((uint8_t *)data)[pos];
-          dest->buf[dest->len++] = 'x';
-          dest->buf[dest->len] = fio_i2c(num >> 4);
-          dest->len += !!(num >> 4);
-          dest->buf[dest->len++] = fio_i2c(num & 15);
-        }
-      }
-      dest->buf[dest->len++] = ';';
+    /* escape data */
+    dest->buf[dest->len++] = '&';
+    switch (((uint8_t *)data)[pos]) {
+    case '<':
+      dest->buf[dest->len++] = 'l';
+      dest->buf[dest->len++] = 't';
+      break;
+    case '>':
+      dest->buf[dest->len++] = 'g';
+      dest->buf[dest->len++] = 't';
+      break;
+    case '"':
+      dest->buf[dest->len++] = 'q';
+      dest->buf[dest->len++] = 'u';
+      dest->buf[dest->len++] = 'o';
+      dest->buf[dest->len++] = 't';
+      break;
+    case '&':
+      dest->buf[dest->len++] = 'a';
+      dest->buf[dest->len++] = 'm';
+      dest->buf[dest->len++] = 'p';
+      break;
+    default:
+      dest->buf[dest->len++] = '#';
+      dest->buf[dest->len++] = 'x';
+      dest->len += ((dest->buf[dest->len] =
+                         fio_i2c(((uint8_t *)data)[pos] >> 4)) != '0');
+      dest->buf[dest->len++] = fio_i2c(((uint8_t *)data)[pos] & 15);
     }
+    dest->buf[dest->len++] = ';';
     ++pos;
     start = pos;
   }
@@ -2445,33 +2468,37 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
     reduced = data_len;
     uint8_t *del = start;
     while (end > del && (del = (uint8_t *)FIO_MEMCHR(del, '&', end - del))) {
-      uint8_t *tmp = ++del; /* keep at least 1 char for the output */
+      uint8_t *tmp = del++;
       /* note that in some cases the `;` might be dropped (history) */
-      if (del[0] == 'x' || del[0] == '#') {
+      if (del[0] == '#') {
         ++del;
+        del += (del[0] == 'x');
         uint64_t num =
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
-        if (*del != ';' || num > 65535) /* untrusted, don't decode */
+        if (del >= end || num > 65535) /* untrusted result */
           continue;
-        del += (del < end && del[0] == ';');
-        reduced -= del - tmp;
-        reduced += fio__string_utf8_map[num >> 3];
+        del += (*del == ';');
+        reduced -= (del - tmp);
+        reduced += fio___string_utf8_code_point_len(num);
         continue;
       }
+      union {
+        uint64_t u64;
+        uint8_t u8[8];
+      } u;
       for (size_t i = 0;
            i < sizeof(html_named_codes) / sizeof(html_named_codes[0]);
            ++i) {
-        union {
-          uint64_t u64;
-          uint8_t u8[8];
-        } u = {0};
+        u.u64 = 0;
         for (size_t p = 0; p < html_named_codes[i].clen; ++p)
           u.u8[p] = del[p] | 32;
         if (u.u64 != html_named_codes[i].code)
           continue;
         del += html_named_codes[i].clen;
+        if (del > end)
+          break;
         del += (del < end && del[0] == ';');
-        reduced -= del - tmp;
+        reduced -= (del - tmp);
         for (size_t j = 0; html_named_codes[i].r[j]; ++j)
           ++reduced;
         break;
@@ -2479,11 +2506,11 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
     }
     if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
       return (r = -1); /* no partial decoding. */
-    };
+    }
     reduced += dest->len;
   }
   { /* copy and unescape data */
-    uint8_t *del = start;
+    uint8_t *del = start = (uint8_t *)data;
     while (end > (start = del) &&
            (del = (uint8_t *)FIO_MEMCHR(del, '&', end - del))) {
       if (start != del) {
@@ -2495,11 +2522,11 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
       ++del;
       if (del == end)
         break;
-      /* note that in some cases the `;` might be dropped (history) */
-      if (del[0] == 'x' || del[0] == '#') {
+      if (del[0] == '#') {
         ++del;
-        if (del == end)
+        if (del + 2 > end)
           break;
+        del += (del[0] == 'x');
         uint64_t num =
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
@@ -2509,6 +2536,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
         del += (del < end && del[0] == ';');
         continue;
       }
+      /* note that in some cases the `;` might be dropped (history) */
       for (size_t i = 0;
            i < sizeof(html_named_codes) / sizeof(html_named_codes[0]);
            ++i) {

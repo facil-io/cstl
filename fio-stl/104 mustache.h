@@ -210,10 +210,6 @@ FIO_IFUNC void *fio___mustache_get_var_in_context(fio_mustache_bargs_s *a,
                                                   void *ctx,
                                                   fio_buf_info_s *val_name) {
   void *v = ctx;
-  if (val_name->len == 1 && val_name->buf[0] == '.') {
-    val_name->len = 0;
-    return v;
-  }
   v = a->get_var(ctx, *val_name);
   if (v) {
     val_name->len = 0;
@@ -240,7 +236,9 @@ FIO_IFUNC void *fio___mustache_get_var_in_context(fio_mustache_bargs_s *a,
 
 FIO_IFUNC void *fio___mustache_get_var(fio___mustache_bldr_s *b,
                                        fio_buf_info_s val_name) {
-  void *v;
+  void *v = b->ctx;
+  if (val_name.len == 1 && val_name.buf[0] == '.')
+    return v;
   for (;;) {
     if (b->ctx)
       v = fio___mustache_get_var_in_context(b->args, b->ctx, &val_name);

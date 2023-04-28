@@ -323,10 +323,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   { /* testing HTML escaping / un-escaping Support */
     fprintf(stderr, "* Testing HTML escaping / un-escaping (basic support)\n");
     char mem[3072];
-    fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
+    fio_str_info_s original = FIO_STR_INFO3(mem, 127, 256);
     fio_str_info_s escaped = FIO_STR_INFO3(mem + 256, 0, 2048);
     fio_str_info_s unescaped = FIO_STR_INFO3(mem + 2560, 0, 512);
-    for (size_t i = 0; i < 256; ++i)
+    for (size_t i = 0; i < 127; ++i)
       mem[i] = (char)i;
     FIO_ASSERT(!fio_string_write_html_escape(&escaped,
                                              NULL,
