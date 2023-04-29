@@ -19560,6 +19560,8 @@ struct fio_mustache_bargs_s {
   fio_buf_info_s (*var2str)(void *var);
   /* should return non-zero if the context pointer refers to a valid value. */
   int (*var_is_truthful)(void *ctx);
+  /* callback signals that the `ctx` context pointer is no longer in use. */
+  void (*release_var)(void *ctx);
   /* returns non-zero if `ctx` is a lambda and handles section manually. */
   int (*is_lambda)(void **udata,
                    void *ctx,
@@ -19837,6 +19839,7 @@ FIO_IFUNC char *fio___mustache_i_var_internal(
   if (!v)
     return p;
   var = b->args->var2str(v);
+  b->args->release_var(v);
 #if FIO_MUSTACHE_PRESERVE_PADDING
   fio___mustache_writer_route(b, var, writer);
 #else
@@ -19886,8 +19889,10 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
     }
-    if (index >= ary_len)
+    if (index >= ary_len) {
+      b->args->release_var(v);
       return p;
+    }
     nctx = b->args->get_var_index(v, index);
   }
 }
@@ -19935,10 +19940,12 @@ FIO_SFUNC char *fio___mustache_i_var_padded(char *p, fio___mustache_bldr_s *b) {
     return p;
   var = b->args->var2str(v);
   if (!var.len)
-    return p;
+    goto done;
   fio___mustache_bldr_s b2 = *b;
   b2.padding = padding;
   fio___mustache_writer_route(&b2, var, b->args->write_text_escaped);
+done:
+  b->args->release_var(v);
   return p;
 }
 FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
@@ -19951,10 +19958,11 @@ FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
     return p;
   var = b->args->var2str(v);
   if (!var.len)
-    return p;
+    goto done;
   fio___mustache_bldr_s b2 = *b;
   b2.padding = padding;
   fio___mustache_writer_route(&b2, var, b->args->write_text);
+  b->args->release_var(v);
   return p;
 }
 
@@ -20605,6 +20613,8 @@ FIO_SFUNC fio_buf_info_s fio___mustache_dflt_var2str(void *var) {
 
 FIO_SFUNC int fio___mustache_dflt_var_is_truthful(void *v) { return !!v; }
 
+FIO_IFUNC void fio___mustache_dflt_release_var(void *ctx) { (void)ctx; }
+
 /* returns non-zero if `ctx` is a lambda and handles section manually. */
 FIO_SFUNC int fio___mustache_dflt_is_lambda(
     void **udata,
@@ -20701,6 +20711,8 @@ SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
     args.var2str = fio___mustache_dflt_var2str;
   if (!args.var_is_truthful)
     args.var_is_truthful = fio___mustache_dflt_var_is_truthful;
+  if (!args.release_var)
+    args.release_var = fio___mustache_dflt_release_var;
   if (!args.is_lambda)
     args.is_lambda = fio___mustache_dflt_is_lambda;
 
