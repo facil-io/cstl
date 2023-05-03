@@ -94,6 +94,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ integers.\n");
     uint8_t allocation_flags = 0;
+    for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8) - 4; ++bit) {
+      uintptr_t i = ((uintptr_t)1 << bit) + 1;
+      uintptr_t m = (uintptr_t)0 - i;
+      o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)i);
+      FIO_ASSERT(FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER,
+                 "FIOBJ integer allocation wasn't supposed to happen for %zd",
+                 (size_t)i);
+      o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)m);
+      FIO_ASSERT(FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER,
+                 "FIOBJ integer allocation wasn't supposed to happen for %zd",
+                 (size_t)m);
+    }
     for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8); ++bit) {
       uintptr_t i = (uintptr_t)1 << bit;
       o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)i);

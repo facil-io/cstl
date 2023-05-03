@@ -62,7 +62,7 @@ Settings - Behavioral defaults
 #endif
 
 #ifndef FIO_LIMIT_INTRINSIC_BUFFER
-/* limits some pseudo-intrinsic implementations, replacing them with loops */
+/* limits register consumption on some pseudo-intrinsics, using more loops */
 #define FIO_LIMIT_INTRINSIC_BUFFER 1
 #endif
 
@@ -1117,7 +1117,6 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
     FIO___MEMCPY_UNSAFE_STEP(256);
   if (l & 128)
     FIO___MEMCPY_UNSAFE_STEP(128);
-}
 #endif
   if (l & 64)
     FIO___MEMCPY_UNSAFE_STEP(64);

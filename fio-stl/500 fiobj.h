@@ -923,8 +923,9 @@ FIOBJ Integers
 /* Reads a 61 or 29 bit signed integer from the leftmost bits of a word. */
 #define FIO_NUMBER_DECODE(i)                                                   \
   ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
-              ((((uintptr_t)(i) >> ((sizeof(uintptr_t) * 8) - 1)) *            \
-                ((uintptr_t)3 << ((sizeof(uintptr_t) * 8) - 3))))))
+              ((uintptr_t)0 -                                                  \
+               (((uintptr_t)(i) >> 3) &                                        \
+                ((uintptr_t)1 << ((sizeof(uintptr_t) * 8) - 4))))))
 
 /** Creates a new Number object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
@@ -1825,7 +1826,7 @@ static inline void fio_json_on_false(fio_json_parser_s *p) {
   fiobj_json_add2parser((fiobj_json_parser_s *)p,
                         FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
 }
-/** a Numberl was detected (long long). */
+/** a Numeral was detected (long long). */
 static inline void fio_json_on_number(fio_json_parser_s *p, long long i) {
   fiobj_json_add2parser((fiobj_json_parser_s *)p,
                         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i));

@@ -668,7 +668,9 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
-  if (!fio_http_static_file_response(h,
+  if ((fio_http_method(h).len != 4 || (fio_buf2u32u(fio_http_method(h).buf) |
+                                       0x20202020UL) != fio_buf2u32u("post")) &&
+      !fio_http_static_file_response(h,
                                      c->settings->public_folder,
                                      fio_http_path(h),
                                      c->settings->max_age)) {

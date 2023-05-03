@@ -99,7 +99,7 @@ Settings - Behavioral defaults
 #endif
 
 #ifndef FIO_LIMIT_INTRINSIC_BUFFER
-/* limits some pseudo-intrinsic implementations, replacing them with loops */
+/* limits register consumption on some pseudo-intrinsics, using more loops */
 #define FIO_LIMIT_INTRINSIC_BUFFER 1
 #endif
 
@@ -1154,7 +1154,6 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
     FIO___MEMCPY_UNSAFE_STEP(256);
   if (l & 128)
     FIO___MEMCPY_UNSAFE_STEP(128);
-}
 #endif
   if (l & 64)
     FIO___MEMCPY_UNSAFE_STEP(64);
@@ -19889,8 +19888,10 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
     }
+    b->args->release_var(nctx);
     if (index >= ary_len) {
-      b->args->release_var(v);
+      if (nctx != v)
+        b->args->release_var(v);
       return p;
     }
     nctx = b->args->get_var_index(v, index);
@@ -19903,6 +19904,7 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
 
   void *v = fio___mustache_get_var(b, var);
   if (b->args->var_is_truthful(v)) {
+    b->args->release_var(v);
     return p;
   }
 
@@ -23149,6 +23151,7 @@ Inlined functions
 ***************************************************************************** */
 /** Returns the number of elements in the Array. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -23160,6 +23163,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
 
 /** Returns the current, temporary, array capacity (it's dynamic). */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -23173,6 +23177,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
  * Returns a pointer to the C array containing the objects.
  */
 FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, NULL);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -23202,6 +23207,7 @@ FIO_IFUNC int FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(FIO_ARRAY_PTR ary_) {
  */
 FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
                                                        int32_t index) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, FIO_ARRAY_TYPE_INVALID);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   FIO_ARRAY_TYPE *a;
@@ -23233,6 +23239,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
                                    each_next)(FIO_ARRAY_PTR ary_,
                                               FIO_ARRAY_TYPE **first,
                                               FIO_ARRAY_TYPE *pos) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, NULL);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   int32_t count;
@@ -23319,6 +23326,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
 
 /* Destroys any objects stored in the array and frees the internal state. */
 SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   union {
@@ -23769,15 +23777,15 @@ invalid:
  */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
                                                  FIO_ARRAY_TYPE data) {
+  size_t c = 0;
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   size_t count;
   if (!a)
-    return 0;
+    return c;
   count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
 
-  size_t c = 0;
   size_t i = 0;
   while ((i + c) < count) {
     if (!(FIO_ARRAY_TYPE_CMP(a[i + c], data))) {
@@ -23794,10 +23802,10 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
     ary->end = ary->start + i;
-    return c;
+    return (uint32_t)c;
   }
   ary->start = i;
-  return c;
+  return (uint32_t)c;
 }
 
 /** Attempts to lower the array's memory consumption. */
@@ -37446,7 +37454,9 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (fio___http_on_http_test4upgrade(h, c))
     return;
-  if (!fio_http_static_file_response(h,
+  if ((fio_http_method(h).len != 4 || (fio_buf2u32u(fio_http_method(h).buf) |
+                                       0x20202020UL) != fio_buf2u32u("post")) &&
+      !fio_http_static_file_response(h,
                                      c->settings->public_folder,
                                      fio_http_path(h),
                                      c->settings->max_age)) {
@@ -39557,6 +39567,12 @@ FIOBJ Integers
   ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
               ((((uintptr_t)(i) >> ((sizeof(uintptr_t) * 8) - 1)) *            \
                 ((uintptr_t)3 << ((sizeof(uintptr_t) * 8) - 3))))))
+#undef FIO_NUMBER_DECODE
+#define FIO_NUMBER_DECODE(i)                                                   \
+  ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
+              ((uintptr_t)0 -                                                  \
+               (((uintptr_t)(i) >> 3) &                                        \
+                ((uintptr_t)1 << ((sizeof(uintptr_t) * 8) - 4))))))
 
 /** Creates a new Number object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
@@ -40457,7 +40473,7 @@ static inline void fio_json_on_false(fio_json_parser_s *p) {
   fiobj_json_add2parser((fiobj_json_parser_s *)p,
                         FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
 }
-/** a Numberl was detected (long long). */
+/** a Numeral was detected (long long). */
 static inline void fio_json_on_number(fio_json_parser_s *p, long long i) {
   fiobj_json_add2parser((fiobj_json_parser_s *)p,
                         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i));
@@ -42454,6 +42470,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
   {
     fprintf(stderr, "* Testing FIOBJ integers.\n");
     uint8_t allocation_flags = 0;
+    for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8) - 4; ++bit) {
+      uintptr_t i = ((uintptr_t)1 << bit) + 1;
+      uintptr_t m = (uintptr_t)0 - i;
+      o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)i);
+      FIO_ASSERT(FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER,
+                 "FIOBJ integer allocation wasn't supposed to happen for %zd",
+                 (size_t)i);
+      o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)m);
+      FIO_ASSERT(FIOBJ_TYPE_CLASS(o) == FIOBJ_T_NUMBER,
+                 "FIOBJ integer allocation wasn't supposed to happen for %zd",
+                 (size_t)m);
+    }
     for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8); ++bit) {
       uintptr_t i = (uintptr_t)1 << bit;
       o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)((intptr_t)i);

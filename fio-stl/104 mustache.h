@@ -420,8 +420,10 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
     }
+    b->args->release_var(nctx);
     if (index >= ary_len) {
-      b->args->release_var(v);
+      if (nctx != v)
+        b->args->release_var(v);
       return p;
     }
     nctx = b->args->get_var_index(v, index);
@@ -434,6 +436,7 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
 
   void *v = fio___mustache_get_var(b, var);
   if (b->args->var_is_truthful(v)) {
+    b->args->release_var(v);
     return p;
   }
 

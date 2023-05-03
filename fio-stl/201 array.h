@@ -447,6 +447,7 @@ Inlined functions
 ***************************************************************************** */
 /** Returns the number of elements in the Array. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -458,6 +459,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, count)(FIO_ARRAY_PTR ary_) {
 
 /** Returns the current, temporary, array capacity (it's dynamic). */
 FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -471,6 +473,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
  * Returns a pointer to the C array containing the objects.
  */
 FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, NULL);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
@@ -500,6 +503,7 @@ FIO_IFUNC int FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(FIO_ARRAY_PTR ary_) {
  */
 FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
                                                        int32_t index) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, FIO_ARRAY_TYPE_INVALID);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   FIO_ARRAY_TYPE *a;
@@ -531,6 +535,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
                                    each_next)(FIO_ARRAY_PTR ary_,
                                               FIO_ARRAY_TYPE **first,
                                               FIO_ARRAY_TYPE *pos) {
+  FIO_PTR_TAG_VALID_OR_RETURN(ary_, NULL);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   int32_t count;
@@ -617,6 +622,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
 
 /* Destroys any objects stored in the array and frees the internal state. */
 SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   union {
@@ -1067,15 +1073,15 @@ invalid:
  */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
                                                  FIO_ARRAY_TYPE data) {
+  size_t c = 0;
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   size_t count;
   if (!a)
-    return 0;
+    return c;
   count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
 
-  size_t c = 0;
   size_t i = 0;
   while ((i + c) < count) {
     if (!(FIO_ARRAY_TYPE_CMP(a[i + c], data))) {
@@ -1092,10 +1098,10 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
     ary->end = ary->start + i;
-    return c;
+    return (uint32_t)c;
   }
   ary->start = i;
-  return c;
+  return (uint32_t)c;
 }
 
 /** Attempts to lower the array's memory consumption. */
