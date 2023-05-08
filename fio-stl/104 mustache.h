@@ -1228,6 +1228,8 @@ void fio_mustache_build___(void); /* IDE marker */
 /** Builds the template, returning the final value of `udata` (or NULL). */
 SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
                                         fio_mustache_bargs_s args) {
+  if (!m)
+    return args.udata;
   if (!args.write_text && !args.write_text_escaped) {
     args.write_text = fio___mustache_dflt_write_text;
     args.write_text_escaped = fio___mustache_dflt_write_text_escaped;

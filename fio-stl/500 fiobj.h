@@ -181,12 +181,11 @@ typedef enum {
 /** Identifies an invalid object */
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
-#define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
-#define FIOBJ_IS_NULL(o)          (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
-#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
-#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)(o) & (7ULL)))
+#define FIOBJ_IS_INVALID(o)     (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o)        (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
+#define FIOBJ_TYPE_CLASS(o)     ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
+#define FIOBJ_PTR_TAG(o, klass) ((uintptr_t)(((uintptr_t)(o)) | (klass)))
+#define FIOBJ_PTR_UNTAG(o)      ((uintptr_t)(((uintptr_t)(o)) & (~7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
@@ -331,9 +330,10 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -390,7 +390,8 @@ FIOBJ Strings
 #define FIO_REF_CONSTRUCTOR_ONLY  1
 #define FIO_REF_DESTROY(s)                                                     \
   do {                                                                         \
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), destroy)((FIOBJ)&s);        \
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), destroy)                    \
+    ((FIOBJ)FIOBJ_PTR_TAG(&s, FIOBJ_T_STRING));                                \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
 #define FIO_REF_INIT(s_)                                                       \
@@ -402,9 +403,10 @@ FIOBJ Strings
 #if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
 #define FIO_REF_METADATA uint32_t
 #endif
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_STRING)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -509,7 +511,8 @@ FIOBJ Arrays
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(a)                                                     \
   do {                                                                         \
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), destroy)((FIOBJ)&a);         \
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), destroy)                     \
+    ((FIOBJ)FIOBJ_PTR_TAG(&a, FIOBJ_T_ARRAY));                                 \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
 #define FIO_REF_INIT(a)                                                        \
@@ -527,9 +530,10 @@ FIOBJ Arrays
   do {                                                                         \
     dest = fiobj_dup(obj);                                                     \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_ARRAY)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -562,6 +566,7 @@ FIOBJ Hash Maps
 #define FIO_MAP_VALUE_DISCARD(o)  fiobj_free(o)
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p)   (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_HASH)
 #define FIO_PTR_TAG_TYPE          FIOBJ
 #include FIO_INCLUDE_FILE
 /** Calculates an object's hash value for a specific hash map object. */
@@ -682,6 +687,29 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
  */
 #define fiobj_json_find2(object, str, length)                                  \
   fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+
+/* *****************************************************************************
+FIOBJ Mustache support
+***************************************************************************** */
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
+ * if nothing was written.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+ *
+ * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
+ * written and `dest` was empty.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m, FIOBJ dest, FIOBJ ctx);
+
 /* *****************************************************************************
 
 
@@ -913,9 +941,10 @@ FIOBJ Integers
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
@@ -943,7 +972,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
 FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(FIOBJ i) {
   if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_NUMBER)
     return FIO_NUMBER_DECODE(i);
-  return FIO_PTR_MATH_RMASK(intptr_t, i, 3)[0];
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    return FIO_PTR_MATH_RMASK(intptr_t, i, 3)[0];
+  return 0;
 }
 
 /** Reads the number from a FIOBJ number, fitting it in a double. */
@@ -953,10 +984,8 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), f)(FIOBJ i) {
 
 /** Frees a FIOBJ number. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), free)(FIOBJ i) {
-  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_NUMBER)
-    return;
-  fiobj___bignum_free2(i);
-  return;
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    fiobj___bignum_free2(i);
 }
 
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
@@ -987,9 +1016,10 @@ FIOBJ Floats
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /** Creates a new Float object. */
@@ -1029,14 +1059,15 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
     punned.i = ((uint64_t)(uintptr_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
-  return FIO_PTR_MATH_RMASK(double, i, 3)[0];
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    return FIO_PTR_MATH_RMASK(double, i, 3)[0];
+  return 0.0;
 }
 
 /** Frees a FIOBJ number. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), free)(FIOBJ i) {
-  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_FLOAT)
-    return;
-  fiobj___bigfloat_free2(i);
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    fiobj___bigfloat_free2(i);
   return;
 }
 
@@ -1307,6 +1338,125 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
 }
 
 #undef FIO___RECURSIVE_INCLUDE /* from now on, type helpers are internal */
+
+/* *****************************************************************************
+FIOBJ Mustache support - inline implementation
+***************************************************************************** */
+
+/* callback should write `txt` to output and return updated `udata.` */
+FIO_SFUNC void *fiobj___mustache_write_text(void *udata, fio_buf_info_s txt);
+/* same as `write_text`, but should also  HTML escape (sanitize) data. */
+FIO_SFUNC void *fiobj___mustache_write_text_escaped(void *udata,
+                                                    fio_buf_info_s raw);
+/* callback should return a new context pointer with the value of `name`. */
+FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name);
+/* if context is an Array, should return its length. */
+FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx);
+/* if context is an Array, should return a context pointer @ index. */
+FIO_SFUNC void *fiobj___mustache_get_var_index(void *ctx, size_t index);
+/* should return the String value of context `var` as a `fio_buf_info_s`. */
+FIO_SFUNC fio_buf_info_s fiobj___mustache_var2str(void *var);
+/* should return non-zero if the context pointer refers to a valid value. */
+FIO_SFUNC int fiobj___mustache_var_is_truthful(void *ctx);
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
+ * if nothing was written.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx) {
+  return (FIOBJ)fio_mustache_build(
+      m,
+      .write_text = fiobj___mustache_write_text,
+      .write_text_escaped = fiobj___mustache_write_text_escaped,
+      .get_var = fiobj___mustache_get_var,
+      .array_length = fiobj___mustache_array_length,
+      .get_var_index = fiobj___mustache_get_var_index,
+      .var2str = fiobj___mustache_var2str,
+      .var_is_truthful = fiobj___mustache_var_is_truthful,
+      .ctx = ctx,
+      .udata = NULL);
+}
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+ *
+ * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
+ * written and `dest` was empty.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m,
+                                      FIOBJ dest,
+                                      FIOBJ ctx) {
+  dest = (FIOBJ)fio_mustache_build(
+      m,
+      .write_text = fiobj___mustache_write_text,
+      .write_text_escaped = fiobj___mustache_write_text_escaped,
+      .get_var = fiobj___mustache_get_var,
+      .array_length = fiobj___mustache_array_length,
+      .get_var_index = fiobj___mustache_get_var_index,
+      .var2str = fiobj___mustache_var2str,
+      .var_is_truthful = fiobj___mustache_var_is_truthful,
+      .ctx = ctx,
+      .udata = dest);
+  return dest;
+}
+
+/* callback should write `txt` to output and return updated `udata.` */
+FIO_SFUNC void *fiobj___mustache_write_text(void *udata, fio_buf_info_s txt) {
+  FIOBJ d = (FIOBJ)udata;
+  if (!d)
+    d = fiobj_str_new_buf(txt.len + 32);
+  fiobj_str_write(d, txt.buf, txt.len);
+  return (void *)d;
+}
+/* same as `write_text`, but should also  HTML escape (sanitize) data. */
+FIO_SFUNC void *fiobj___mustache_write_text_escaped(void *ud,
+                                                    fio_buf_info_s raw) {
+  FIOBJ d = (FIOBJ)ud;
+  if (!d)
+    d = fiobj_str_new_buf(raw.len + 32);
+  fiobj_str_write_html_escape(d, raw.buf, raw.len);
+  return (void *)d;
+}
+/* callback should return a new context pointer with the value of `name`. */
+FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name) {
+  if (!ctx)
+    return NULL;
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_HASH))
+    return NULL;
+  return fiobj_hash_get3((FIOBJ)ctx, name.buf, name.len);
+}
+/* if context is an Array, should return its length. */
+FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx) {
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return 0;
+  return fiobj_array_count((FIOBJ)ctx);
+}
+/* if context is an Array, should return a context pointer @ index. */
+FIO_SFUNC void *fiobj___mustache_get_var_index(void *ctx, size_t index) {
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return NULL;
+  return fiobj_array_get((FIOBJ)ctx, index);
+}
+/* should return the String value of context `var` as a `fio_buf_info_s`. */
+FIO_SFUNC fio_buf_info_s fiobj___mustache_var2str(void *var) {
+  fio_buf_info_s r = {0};
+  if (!var || var == fiobj_null())
+    return r;
+  fio_str_info_s tmp = fiobj2cstr((FIOBJ)var);
+  r = FIO_STR2BUF_INFO(tmp);
+  return r;
+}
+/* should return non-zero if the context pointer refers to a valid value. */
+FIO_SFUNC int fiobj___mustache_var_is_truthful(void *v) {
+  return v && (FIOBJ)v != fiobj_null() && (FIOBJ)v != fiobj_false() &&
+         (!FIOBJ_TYPE_IS((FIOBJ)v, FIOBJ_T_ARRAY) ||
+          fiobj_array_count((FIOBJ)v));
+}
+
 /* *****************************************************************************
 
 

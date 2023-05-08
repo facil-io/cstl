@@ -293,6 +293,10 @@ FIO_MAP Ordering & Naming Shortcut
 
 ***************************************************************************** */
 
+#if defined(FIO_FIOBJ)
+#define FIO_MUSTACHE
+#endif
+
 #if defined(FIO_HTTP)
 #undef FIO_HTTP1_PARSER
 #define FIO_HTTP1_PARSER

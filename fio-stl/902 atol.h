@@ -173,6 +173,55 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   for (unsigned char i = 0; i < 36; ++i) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.");
   }
+  for (size_t i = 1; i < (1ULL << 10); ++i) {
+    double expct[2] = {(1.0 + i), (1.0 - i)};
+    double result[2] = {fio_i2d(1LL + i, 0), fio_i2d(1LL - i, 0)};
+    FIO_ASSERT(expct[0] == result[0],
+               "fio_i2d failed at (1+%zu) %g != %g\n\t%p != %p",
+               i,
+               expct[0],
+               result[0],
+               ((void **)expct)[0],
+               ((void **)result)[0]);
+    FIO_ASSERT(expct[1] == result[1],
+               "fio_i2d failed at (1-%zu) %g != %g\n\t%p != %p",
+               i,
+               expct[1],
+               result[1],
+               ((void **)expct)[1],
+               ((void **)result)[1]);
+  }
+#if 1 || !(DEBUG - 1 + 1)
+  {
+    uint64_t start, end, rep = (1ULL << 22);
+    int64_t u64[128] = {0};
+    double dbl[128] = {0.0};
+    double rtest;
+    fprintf(stderr, "* Testing fio_i2d conversion overhead.\n");
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += 2.0 * u64[i & 127];
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- C cast:  %zuus\n", (size_t)(end - start));
+    rtest = dbl[127];
+    FIO_MEMSET(u64, 0, sizeof(u64));
+    FIO_MEMSET(dbl, 0, sizeof(dbl));
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += fio_i2d((int64_t)u64[i & 127], 1);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- fio_i2d: %zuus\n", (size_t)(end - start));
+    FIO_ASSERT(rtest == dbl[127], "fio_i2d results not the same as C cast?");
+  }
+#endif
   fprintf(stderr, "* Testing fio_atol samples.\n");
 #define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \

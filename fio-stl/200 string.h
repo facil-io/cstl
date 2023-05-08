@@ -1522,6 +1522,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
 SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
+  FIO_STR_PTR pstr = FIO_PTR_TAG((&str));
   fprintf(
       stderr,
       "* Testing core string features for " FIO_MACRO2STR(FIO_STR_NAME) ".\n");
@@ -1531,135 +1532,135 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   fprintf(stderr,
           "* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
           FIO__STR_SMALL_CAPA);
-  FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(&str), "new string is frozen");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == FIO__STR_SMALL_CAPA,
+  FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(pstr), "new string is frozen");
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == FIO__STR_SMALL_CAPA,
              "small string capacity returned %zu",
-             FIO_NAME(FIO_STR_NAME, capa)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
+             FIO_NAME(FIO_STR_NAME, capa)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 0,
              "small string length reporting error!");
   FIO_ASSERT(
-      FIO_NAME(FIO_STR_NAME, ptr)(&str) == ((char *)(&str) + 1),
+      FIO_NAME(FIO_STR_NAME, ptr)(pstr) == ((char *)(&str) + 1),
       "small string pointer reporting error (%zd offset)!",
-      (ssize_t)(((char *)(&str) + 1) - FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_NAME(FIO_STR_NAME, write)(&str, "World", 4);
+      (ssize_t)(((char *)(&str) + 1) - FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_NAME(FIO_STR_NAME, write)(pstr, "World", 4);
   FIO_ASSERT(FIO_STR_IS_SMALL(&str),
              "small string writing error - not small on small write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == FIO__STR_SMALL_CAPA,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == FIO__STR_SMALL_CAPA,
              "Small string capacity reporting error after write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 4,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 4,
              "small string length reporting error after write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) == (char *)&str + 1,
              "small string pointer reporting error after write!");
-  FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(&str)[4] &&
-                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(pstr)[4] &&
+                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)) == 4,
              "small string NUL missing after write (%zu)!",
-             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Worl"),
              "small string write error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) ==
-                 FIO_NAME(FIO_STR_NAME, info)(&str).buf,
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) ==
+                 FIO_NAME(FIO_STR_NAME, info)(pstr).buf,
              "small string `data` != `info.buf` (%p != %p)",
-             (void *)FIO_NAME(FIO_STR_NAME, ptr)(&str),
-             (void *)FIO_NAME(FIO_STR_NAME, info)(&str).buf);
+             (void *)FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+             (void *)FIO_NAME(FIO_STR_NAME, info)(pstr).buf);
 
   FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)
-  (&str, sizeof(FIO_NAME(FIO_STR_NAME, s)));
+  (pstr, sizeof(FIO_NAME(FIO_STR_NAME, s)));
   FIO_ASSERT(!FIO_STR_IS_SMALL(&str),
              "Long String reporting as small after capacity update!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) >=
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) >=
                  sizeof(FIO_NAME(FIO_STR_NAME, s)) - 1,
              "Long String capacity update error (%zu != %zu)!",
-             FIO_NAME(FIO_STR_NAME, capa)(&str),
+             FIO_NAME(FIO_STR_NAME, capa)(pstr),
              FIO_STR_SMALL_CAPA(&str));
 
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) ==
-                 FIO_NAME(FIO_STR_NAME, info)(&str).buf,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) ==
+                 FIO_NAME(FIO_STR_NAME, info)(pstr).buf,
              "Long String `ptr` !>= "
              "`cstr(s).buf` (%p != %p)",
-             (void *)FIO_NAME(FIO_STR_NAME, ptr)(&str),
-             (void *)FIO_NAME(FIO_STR_NAME, info)(&str).buf);
+             (void *)FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+             (void *)FIO_NAME(FIO_STR_NAME, info)(pstr).buf);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
   /* immutable string length is updated after `reserve` to reflect new capa */
-  FIO_NAME(FIO_STR_NAME, resize)(&str, 4);
+  FIO_NAME(FIO_STR_NAME, resize)(pstr, 4);
 #endif
   FIO_ASSERT(
-      FIO_NAME(FIO_STR_NAME, len)(&str) == 4,
+      FIO_NAME(FIO_STR_NAME, len)(pstr) == 4,
       "Long String length changed during conversion from small string (%zu)!",
-      FIO_NAME(FIO_STR_NAME, len)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == str.buf,
+      FIO_NAME(FIO_STR_NAME, len)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) == str.buf,
              "Long String pointer reporting error after capacity update!");
-  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)) == 4,
              "Long String NUL missing after capacity update (%zu)!",
-             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Worl"),
              "Long String value changed after capacity update (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, write)(&str, "d!", 2);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "World!"),
+  FIO_NAME(FIO_STR_NAME, write)(pstr, "d!", 2);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "World!"),
              "Long String `write` error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, 0, 0, "Hello ", 6);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, 0, 0, "Hello ", 6);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello World!"),
              "Long String `insert` error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, resize)(&str, 6);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello "),
+  FIO_NAME(FIO_STR_NAME, resize)(pstr, 6);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello "),
              "Long String `resize` clipping error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, 6, 0, "My World!", 9);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello My World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, 6, 0, "My World!", 9);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello My World!"),
              "Long String `replace` error when testing overflow (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
   FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)
-  (&str, FIO_NAME(FIO_STR_NAME, len)(&str)); /* may truncate */
+  (pstr, FIO_NAME(FIO_STR_NAME, len)(pstr)); /* may truncate */
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, -10, 2, "Big", 3);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, -10, 2, "Big", 3);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World!"),
              "Long String `replace` error when testing splicing (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) ==
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) ==
                      fio_string_capa4len(FIO_STRLEN("Hello Big World!")) ||
-                 !FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+                 !FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
              "Long String `replace` capacity update error "
              "(%zu >=? %zu)!",
-             FIO_NAME(FIO_STR_NAME, capa)(&str),
+             FIO_NAME(FIO_STR_NAME, capa)(pstr),
              fio_string_capa4len(FIO_STRLEN("Hello Big World!")));
 
-  if (FIO_NAME(FIO_STR_NAME, len)(&str) < (sizeof(str) - 2)) {
-    FIO_NAME(FIO_STR_NAME, compact)(&str);
+  if (FIO_NAME(FIO_STR_NAME, len)(pstr) < (sizeof(str) - 2)) {
+    FIO_NAME(FIO_STR_NAME, compact)(pstr);
     FIO_ASSERT(FIO_STR_IS_SMALL(&str),
                "Compacting didn't change String to small!");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) ==
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) ==
                    FIO_STRLEN("Hello Big World!"),
                "Compacting altered String length! (%zu != %zu)!",
-               FIO_NAME(FIO_STR_NAME, len)(&str),
+               FIO_NAME(FIO_STR_NAME, len)(pstr),
                FIO_STRLEN("Hello Big World!"));
-    FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
+    FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World!"),
                "Compact data error (%s)!",
-               FIO_NAME(FIO_STR_NAME, ptr)(&str));
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
     FIO_LOG_DEBUG2("* Skipped `compact` test (irrelevant for type).");
   }
 
   {
-    FIO_NAME(FIO_STR_NAME, freeze)(&str);
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, frozen)(&str),
+    FIO_NAME(FIO_STR_NAME, freeze)(pstr);
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, frozen)(pstr),
                "Frozen String not flagged as frozen.");
-    fio_str_info_s old_state = FIO_NAME(FIO_STR_NAME, info)(&str);
-    FIO_NAME(FIO_STR_NAME, write)(&str, "more data to be written here", 28);
+    fio_str_info_s old_state = FIO_NAME(FIO_STR_NAME, info)(pstr);
+    FIO_NAME(FIO_STR_NAME, write)(pstr, "more data to be written here", 28);
     FIO_NAME(FIO_STR_NAME, replace)
-    (&str, 2, 1, "more data to be written here", 28);
-    fio_str_info_s new_state = FIO_NAME(FIO_STR_NAME, info)(&str);
+    (pstr, 2, 1, "more data to be written here", 28);
+    fio_str_info_s new_state = FIO_NAME(FIO_STR_NAME, info)(pstr);
     FIO_ASSERT(old_state.len == new_state.len, "Frozen String length changed!");
     FIO_ASSERT(old_state.buf == new_state.buf,
                "Frozen String pointer changed!");
@@ -1668,39 +1669,40 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "Frozen String capacity changed (allowed, but shouldn't happen)!");
     FIO_STR_THAW_(&str);
   }
-  FIO_NAME(FIO_STR_NAME, printf)(&str, " %u", 42);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World! 42"),
+  FIO_NAME(FIO_STR_NAME, printf)(pstr, " %u", 42);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World! 42"),
              "`printf` data error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
   {
     FIO_NAME(FIO_STR_NAME, s) str2 = FIO_STR_INIT;
-    FIO_NAME(FIO_STR_NAME, concat)(&str2, &str);
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, eq)(&str, &str2),
+    FIO_STR_PTR pstr2 = FIO_PTR_TAG(&str2);
+    FIO_NAME(FIO_STR_NAME, concat)(pstr2, pstr);
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, eq)(pstr, pstr2),
                "`concat` error, strings not equal (%s != %s)!",
-               FIO_NAME(FIO_STR_NAME, ptr)(&str),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str2));
-    FIO_NAME(FIO_STR_NAME, write)(&str2, ":extra data", 11);
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, eq)(&str, &str2),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr2));
+    FIO_NAME(FIO_STR_NAME, write)(pstr2, ":extra data", 11);
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, eq)(pstr, pstr2),
                "`write` error after copy, strings equal "
                "((%zu)%s == (%zu)%s)!",
-               FIO_NAME(FIO_STR_NAME, len)(&str),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str),
-               FIO_NAME(FIO_STR_NAME, len)(&str2),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str2));
+               FIO_NAME(FIO_STR_NAME, len)(pstr),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+               FIO_NAME(FIO_STR_NAME, len)(pstr2),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr2));
 
-    FIO_NAME(FIO_STR_NAME, destroy)(&str2);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr2);
   }
 
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
-  FIO_NAME(FIO_STR_NAME, write_i)(&str, -42);
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 3 &&
-                 !memcmp("-42", FIO_NAME(FIO_STR_NAME, ptr)(&str), 3),
+  FIO_NAME(FIO_STR_NAME, write_i)(pstr, -42);
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 3 &&
+                 !memcmp("-42", FIO_NAME(FIO_STR_NAME, ptr)(pstr), 3),
              "write_i output error ((%zu) %s != -42)",
-             FIO_NAME(FIO_STR_NAME, len)(&str),
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+             FIO_NAME(FIO_STR_NAME, len)(pstr),
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -1769,26 +1771,26 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   if (1) {
     /* Testing Static initialization and writing */
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
-    FIO_NAME(FIO_STR_NAME, init_const)(&str, "Welcome", 7);
+    FIO_NAME(FIO_STR_NAME, init_const)(pstr, "Welcome", 7);
 #else
     str = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT_STATIC("Welcome");
 #endif
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == 0 ||
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == 0 ||
                    FIO_STR_IS_SMALL(&str),
                "Static string capacity non-zero.");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) > 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) > 0,
                "Static string length should be automatically calculated.");
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
                "Static strings shouldn't be dynamic.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
     FIO_NAME(FIO_STR_NAME, init_const)
-    (&str,
+    (pstr,
      "Welcome to a very long static string that should not fit within a "
      "containing struct... hopefuly",
      95);
@@ -1797,69 +1799,72 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "Welcome to a very long static string that should not fit within a "
         "containing struct... hopefuly");
 #endif
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == 0 ||
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == 0 ||
                    FIO_STR_IS_SMALL(&str),
                "Static string capacity non-zero.");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) > 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) > 0,
                "Static string length should be automatically calculated.");
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
                "Static strings shouldn't be dynamic.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
-    FIO_NAME(FIO_STR_NAME, init_const)(&str, "Welcome", 7);
+    FIO_NAME(FIO_STR_NAME, init_const)(pstr, "Welcome", 7);
 #else
     str = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT_STATIC("Welcome");
 #endif
-    fio_str_info_s state = FIO_NAME(FIO_STR_NAME, write)(&str, " Home", 5);
+    fio_str_info_s state = FIO_NAME(FIO_STR_NAME, write)(pstr, " Home", 5);
     FIO_ASSERT(state.capa > 0, "Static string not converted to non-static.");
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, allocated)(&str) ||
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr) ||
                    FIO_STR_IS_SMALL(&str),
                "String should be dynamic after `write`.");
 
-    char *cstr = FIO_NAME(FIO_STR_NAME, detach)(&str);
+    char *cstr = FIO_NAME(FIO_STR_NAME, detach)(pstr);
     FIO_ASSERT(cstr, "`detach` returned NULL");
     FIO_ASSERT(!memcmp(cstr, "Welcome Home\0", 13),
                "`detach` string error: %s",
                cstr);
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 0,
                "`detach` data wasn't cleared.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str); /*not really needed... detached... */
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr); /*not really needed... detached... */
     FIO_NAME(FIO_STR_NAME, dealloc)(cstr);
   }
   {
     fprintf(stderr, "* Testing Base64 encoding / decoding.\n");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str); /* does nothing, but why not... */
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr); /* does nothing, but why not... */
 
     FIO_NAME(FIO_STR_NAME, s) b64message = FIO_STR_INIT;
-    fio_str_info_s b64i = FIO_NAME(
-        FIO_STR_NAME,
-        write)(&b64message, "Hello World, this is the voice of peace:)", 41);
+    fio_str_info_s b64i = FIO_NAME(FIO_STR_NAME, write)(
+        FIO_PTR_TAG(&b64message),
+        "Hello World, this is the voice of peace:)",
+        41);
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      b64i = FIO_NAME(FIO_STR_NAME, write)(&b64message, &c, 1);
-      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&b64message) == (size_t)(42 + i),
+      b64i = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&b64message), &c, 1);
+      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)) ==
+                     (size_t)(42 + i),
                  "Base64 message length error (%zu != %zu)",
-                 FIO_NAME(FIO_STR_NAME, len)(&b64message),
+                 FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)),
                  (size_t)(42 + i));
-      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&b64message)[41 + i] == (char)c,
+      FIO_ASSERT(FIO_NAME(FIO_STR_NAME,
+                          ptr)(FIO_PTR_TAG(&b64message))[41 + i] == (char)c,
                  "Base64 message data error");
     }
     fio_str_info_s encoded =
-        FIO_NAME(FIO_STR_NAME, write_base64enc)(&str, b64i.buf, b64i.len, 1);
+        FIO_NAME(FIO_STR_NAME, write_base64enc)(pstr, b64i.buf, b64i.len, 1);
     /* prevent encoded data from being deallocated during unencoding */
     encoded = FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)(
-        &str,
+        pstr,
         encoded.len + ((encoded.len >> 2) * 3) + 8);
     fio_str_info_s decoded;
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
-      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
-      decoded = FIO_NAME(FIO_STR_NAME,
-                         write_base64dec)(&str,
-                                          FIO_NAME(FIO_STR_NAME, ptr)(&tmps),
-                                          FIO_NAME(FIO_STR_NAME, len)(&tmps));
-      FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
+      FIO_NAME(FIO_STR_NAME, init_copy2)(FIO_PTR_TAG(&tmps), pstr);
+      decoded = FIO_NAME(FIO_STR_NAME, write_base64dec)(
+          pstr,
+          FIO_NAME(FIO_STR_NAME, ptr)(FIO_PTR_TAG(&tmps)),
+          FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&tmps)));
+      FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&tmps));
       encoded.buf = decoded.buf;
     }
     FIO_ASSERT(encoded.len, "Base64 encoding failed");
@@ -1877,8 +1882,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(b64i.buf, decoded.buf + encoded.len, b64i.len),
                "Base 64 roundtrip failed:\n %s",
                decoded.buf);
-    FIO_NAME(FIO_STR_NAME, destroy)(&b64message);
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&b64message));
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   }
   {
     fprintf(stderr, "* Testing JSON style character escaping / unescaping.\n");
@@ -1887,20 +1892,20 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_NAME(FIO_STR_NAME, write)
-    (&unescaped, utf8_sample, FIO_STRLEN(utf8_sample));
+    (FIO_PTR_TAG(&unescaped), utf8_sample, FIO_STRLEN(utf8_sample));
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      ue = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
+      ue = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&unescaped), &c, 1);
     }
     fio_str_info_s encoded =
-        FIO_NAME(FIO_STR_NAME, write_escape)(&str, ue.buf, ue.len);
+        FIO_NAME(FIO_STR_NAME, write_escape)(pstr, ue.buf, ue.len);
     // fprintf(stderr, "* %s\n", encoded.buf);
     fio_str_info_s decoded;
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
-      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
+      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, pstr);
       decoded = FIO_NAME(FIO_STR_NAME,
-                         write_unescape)(&str,
+                         write_unescape)(pstr,
                                          FIO_NAME(FIO_STR_NAME, ptr)(&tmps),
                                          FIO_NAME(FIO_STR_NAME, len)(&tmps));
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
@@ -1926,8 +1931,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(ue.buf, decoded.buf + encoded.len, ue.len),
                "JSON roundtrip failed:\n %s",
                decoded.buf);
-    FIO_NAME(FIO_STR_NAME, destroy)(&unescaped);
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&unescaped));
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   }
 }
 #undef FIO__STR_SMALL_CAPA

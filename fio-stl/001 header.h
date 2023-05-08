@@ -233,7 +233,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)                         \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       FIO_LOG_DEBUG("pointer tag (type) mismatch in function call.");          \
       return (value);                                                          \
     }                                                                          \
@@ -241,7 +241,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)                           \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       FIO_LOG_DEBUG("pointer tag (type) mismatch in function call.");          \
       return;                                                                  \
     }                                                                          \
@@ -249,7 +249,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 #define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       /* Log error since GOTO indicates cleanup or other side-effects. */      \
       FIO_LOG_ERROR("(" FIO__FILE__ ":" FIO_MACRO2STR(                         \
           __LINE__) ") pointer tag (type) mismatch in function call.");        \
@@ -258,4 +258,4 @@ Pointer Tagging
   } while (0)
 
 #define FIO_PTR_TAG_GET_UNTAGGED(untagged_type, tagged_ptr)                    \
-  ((untagged_type *)(FIO_PTR_UNTAG(tagged_ptr)))
+  ((untagged_type *)(FIO_PTR_UNTAG((tagged_ptr))))

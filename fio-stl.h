@@ -1760,12 +1760,7 @@ FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
 }
 #endif /* __builtin_ctzll || __builtin_clzll */
 
-/**
- * Returns the index of the least significant (lowest) bit - used in
- * fio_memchr.
- *
- * Placed here (mostly copied from bitmap module).
- */
+/** Returns the index of the least significant (lowest) bit. */
 FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(i);
@@ -1774,12 +1769,7 @@ FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 #endif /* __builtin vs. map */
 }
 
-/**
- * Returns the index of the least significant (lowest) bit - used in
- * write_bin.
- *
- * Placed here (mostly copied from bitmap module).
- */
+/** Returns the index of the most significant (highest) bit. */
 FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_clzll)
   return 63 - __builtin_clzll(i);
@@ -2233,6 +2223,10 @@ FIO_MAP Ordering & Naming Shortcut
 
 ***************************************************************************** */
 
+#if defined(FIO_FIOBJ)
+#define FIO_MUSTACHE
+#endif
+
 #if defined(FIO_HTTP)
 #undef FIO_HTTP1_PARSER
 #define FIO_HTTP1_PARSER
@@ -2592,7 +2586,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_RETURN
 #define FIO_PTR_TAG_VALID_OR_RETURN(tagged_ptr, value)                         \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       FIO_LOG_DEBUG("pointer tag (type) mismatch in function call.");          \
       return (value);                                                          \
     }                                                                          \
@@ -2600,7 +2594,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_RETURN_VOID
 #define FIO_PTR_TAG_VALID_OR_RETURN_VOID(tagged_ptr)                           \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       FIO_LOG_DEBUG("pointer tag (type) mismatch in function call.");          \
       return;                                                                  \
     }                                                                          \
@@ -2608,7 +2602,7 @@ Pointer Tagging
 #undef FIO_PTR_TAG_VALID_OR_GOTO
 #define FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, lable)                           \
   do {                                                                         \
-    if (!(FIO_PTR_TAG_VALIDATE(tagged_ptr))) {                                 \
+    if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       /* Log error since GOTO indicates cleanup or other side-effects. */      \
       FIO_LOG_ERROR("(" FIO__FILE__ ":" FIO_MACRO2STR(                         \
           __LINE__) ") pointer tag (type) mismatch in function call.");        \
@@ -2617,7 +2611,7 @@ Pointer Tagging
   } while (0)
 
 #define FIO_PTR_TAG_GET_UNTAGGED(untagged_type, tagged_ptr)                    \
-  ((untagged_type *)(FIO_PTR_UNTAG(tagged_ptr)))
+  ((untagged_type *)(FIO_PTR_UNTAG((tagged_ptr))))
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -3704,6 +3698,13 @@ SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
 FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
 
 /* *****************************************************************************
+IEEE 754 Floating Points, Building Blocks and Helpers
+***************************************************************************** */
+
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent);
+
+/* *****************************************************************************
 
 
 Implementation - inlined
@@ -3903,6 +3904,53 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
   /* read overflow */
   errno = E2BIG;
   return (int64_t)(val = 0x8000000000000000ULL);
+}
+
+/* *****************************************************************************
+IEEE 754 Floating Points, Building Blocks and Helpers
+***************************************************************************** */
+
+#ifndef FIO_MATH_DBL_MANT_MASK
+#define FIO_MATH_DBL_MANT_MASK (((uint64_t)1ULL << 52) - 1)
+#define FIO_MATH_DBL_EXPO_MASK ((uint64_t)2047ULL << 52)
+#define FIO_MATH_DBL_SIGN_MASK ((uint64_t)1ULL << 63)
+#endif
+
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
+  union {
+    uint64_t u64;
+    double d;
+  } u = {.u64 = ((uint64_t)(mant)&FIO_MATH_DBL_SIGN_MASK)};
+  size_t tmp;
+  if (!mant)
+    goto is_zero;
+  /* convert `mant` to absolute value - constant time */
+  tmp = u.u64 >> 63;
+  mant =
+      (int64_t)(uint64_t)mant ^
+      (((uint64_t)0 - tmp) & ((uint64_t)mant ^ (uint64_t)((int64_t)0 - mant)));
+  // mant = (int64_t)(((uint64_t)mant ^ ((uint64_t)0 - tmp)) + tmp); // slower
+  /* normalize exponent */
+  tmp = fio_msb_index_unsafe(mant);
+  exponent += tmp + 1023;
+  if (FIO_UNLIKELY(exponent < 0))
+    goto is_zero;
+  if (FIO_UNLIKELY(exponent > 2047))
+    goto is_inifinity_or_nan;
+  exponent = (uint64_t)exponent << 52;
+  u.u64 |= exponent;
+  /* reposition mant bits so we "hide" the fist set bit in bit[52] */
+  if (tmp < 52)
+    mant = mant << (52 - tmp);
+  else if (FIO_UNLIKELY(tmp > 52)) /* losing precision */
+    mant = mant >> (tmp - 52);
+  u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
+is_zero:
+  return u.d;
+is_inifinity_or_nan:
+  u.u64 |= FIO_MATH_DBL_EXPO_MASK | (mant & FIO_MATH_DBL_MANT_MASK);
+  return u.d;
 }
 
 /* *****************************************************************************
@@ -20696,6 +20744,8 @@ void fio_mustache_build___(void); /* IDE marker */
 /** Builds the template, returning the final value of `udata` (or NULL). */
 SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
                                         fio_mustache_bargs_s args) {
+  if (!m)
+    return args.udata;
   if (!args.write_text && !args.write_text_escaped) {
     args.write_text = fio___mustache_dflt_write_text;
     args.write_text_escaped = fio___mustache_dflt_write_text_escaped;
@@ -22257,6 +22307,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
 SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
+  FIO_STR_PTR pstr = FIO_PTR_TAG((&str));
   fprintf(
       stderr,
       "* Testing core string features for " FIO_MACRO2STR(FIO_STR_NAME) ".\n");
@@ -22266,135 +22317,135 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   fprintf(stderr,
           "* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
           FIO__STR_SMALL_CAPA);
-  FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(&str), "new string is frozen");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == FIO__STR_SMALL_CAPA,
+  FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(pstr), "new string is frozen");
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == FIO__STR_SMALL_CAPA,
              "small string capacity returned %zu",
-             FIO_NAME(FIO_STR_NAME, capa)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
+             FIO_NAME(FIO_STR_NAME, capa)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 0,
              "small string length reporting error!");
   FIO_ASSERT(
-      FIO_NAME(FIO_STR_NAME, ptr)(&str) == ((char *)(&str) + 1),
+      FIO_NAME(FIO_STR_NAME, ptr)(pstr) == ((char *)(&str) + 1),
       "small string pointer reporting error (%zd offset)!",
-      (ssize_t)(((char *)(&str) + 1) - FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_NAME(FIO_STR_NAME, write)(&str, "World", 4);
+      (ssize_t)(((char *)(&str) + 1) - FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_NAME(FIO_STR_NAME, write)(pstr, "World", 4);
   FIO_ASSERT(FIO_STR_IS_SMALL(&str),
              "small string writing error - not small on small write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == FIO__STR_SMALL_CAPA,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == FIO__STR_SMALL_CAPA,
              "Small string capacity reporting error after write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 4,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 4,
              "small string length reporting error after write!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == (char *)&str + 1,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) == (char *)&str + 1,
              "small string pointer reporting error after write!");
-  FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(&str)[4] &&
-                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(!FIO_NAME(FIO_STR_NAME, ptr)(pstr)[4] &&
+                 FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)) == 4,
              "small string NUL missing after write (%zu)!",
-             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Worl"),
              "small string write error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) ==
-                 FIO_NAME(FIO_STR_NAME, info)(&str).buf,
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) ==
+                 FIO_NAME(FIO_STR_NAME, info)(pstr).buf,
              "small string `data` != `info.buf` (%p != %p)",
-             (void *)FIO_NAME(FIO_STR_NAME, ptr)(&str),
-             (void *)FIO_NAME(FIO_STR_NAME, info)(&str).buf);
+             (void *)FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+             (void *)FIO_NAME(FIO_STR_NAME, info)(pstr).buf);
 
   FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)
-  (&str, sizeof(FIO_NAME(FIO_STR_NAME, s)));
+  (pstr, sizeof(FIO_NAME(FIO_STR_NAME, s)));
   FIO_ASSERT(!FIO_STR_IS_SMALL(&str),
              "Long String reporting as small after capacity update!");
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) >=
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) >=
                  sizeof(FIO_NAME(FIO_STR_NAME, s)) - 1,
              "Long String capacity update error (%zu != %zu)!",
-             FIO_NAME(FIO_STR_NAME, capa)(&str),
+             FIO_NAME(FIO_STR_NAME, capa)(pstr),
              FIO_STR_SMALL_CAPA(&str));
 
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) ==
-                 FIO_NAME(FIO_STR_NAME, info)(&str).buf,
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) ==
+                 FIO_NAME(FIO_STR_NAME, info)(pstr).buf,
              "Long String `ptr` !>= "
              "`cstr(s).buf` (%p != %p)",
-             (void *)FIO_NAME(FIO_STR_NAME, ptr)(&str),
-             (void *)FIO_NAME(FIO_STR_NAME, info)(&str).buf);
+             (void *)FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+             (void *)FIO_NAME(FIO_STR_NAME, info)(pstr).buf);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
   /* immutable string length is updated after `reserve` to reflect new capa */
-  FIO_NAME(FIO_STR_NAME, resize)(&str, 4);
+  FIO_NAME(FIO_STR_NAME, resize)(pstr, 4);
 #endif
   FIO_ASSERT(
-      FIO_NAME(FIO_STR_NAME, len)(&str) == 4,
+      FIO_NAME(FIO_STR_NAME, len)(pstr) == 4,
       "Long String length changed during conversion from small string (%zu)!",
-      FIO_NAME(FIO_STR_NAME, len)(&str));
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&str) == str.buf,
+      FIO_NAME(FIO_STR_NAME, len)(pstr));
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(pstr) == str.buf,
              "Long String pointer reporting error after capacity update!");
-  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)) == 4,
+  FIO_ASSERT(FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)) == 4,
              "Long String NUL missing after capacity update (%zu)!",
-             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(&str)));
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Worl"),
+             FIO_STRLEN(FIO_NAME(FIO_STR_NAME, ptr)(pstr)));
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Worl"),
              "Long String value changed after capacity update (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, write)(&str, "d!", 2);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "World!"),
+  FIO_NAME(FIO_STR_NAME, write)(pstr, "d!", 2);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "World!"),
              "Long String `write` error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, 0, 0, "Hello ", 6);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, 0, 0, "Hello ", 6);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello World!"),
              "Long String `insert` error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, resize)(&str, 6);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello "),
+  FIO_NAME(FIO_STR_NAME, resize)(pstr, 6);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello "),
              "Long String `resize` clipping error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, 6, 0, "My World!", 9);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello My World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, 6, 0, "My World!", 9);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello My World!"),
              "Long String `replace` error when testing overflow (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
   FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)
-  (&str, FIO_NAME(FIO_STR_NAME, len)(&str)); /* may truncate */
+  (pstr, FIO_NAME(FIO_STR_NAME, len)(pstr)); /* may truncate */
 
-  FIO_NAME(FIO_STR_NAME, replace)(&str, -10, 2, "Big", 3);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
+  FIO_NAME(FIO_STR_NAME, replace)(pstr, -10, 2, "Big", 3);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World!"),
              "Long String `replace` error when testing splicing (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) ==
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) ==
                      fio_string_capa4len(FIO_STRLEN("Hello Big World!")) ||
-                 !FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+                 !FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
              "Long String `replace` capacity update error "
              "(%zu >=? %zu)!",
-             FIO_NAME(FIO_STR_NAME, capa)(&str),
+             FIO_NAME(FIO_STR_NAME, capa)(pstr),
              fio_string_capa4len(FIO_STRLEN("Hello Big World!")));
 
-  if (FIO_NAME(FIO_STR_NAME, len)(&str) < (sizeof(str) - 2)) {
-    FIO_NAME(FIO_STR_NAME, compact)(&str);
+  if (FIO_NAME(FIO_STR_NAME, len)(pstr) < (sizeof(str) - 2)) {
+    FIO_NAME(FIO_STR_NAME, compact)(pstr);
     FIO_ASSERT(FIO_STR_IS_SMALL(&str),
                "Compacting didn't change String to small!");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) ==
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) ==
                    FIO_STRLEN("Hello Big World!"),
                "Compacting altered String length! (%zu != %zu)!",
-               FIO_NAME(FIO_STR_NAME, len)(&str),
+               FIO_NAME(FIO_STR_NAME, len)(pstr),
                FIO_STRLEN("Hello Big World!"));
-    FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World!"),
+    FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World!"),
                "Compact data error (%s)!",
-               FIO_NAME(FIO_STR_NAME, ptr)(&str));
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == sizeof(str) - 2,
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
     FIO_LOG_DEBUG2("* Skipped `compact` test (irrelevant for type).");
   }
 
   {
-    FIO_NAME(FIO_STR_NAME, freeze)(&str);
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, frozen)(&str),
+    FIO_NAME(FIO_STR_NAME, freeze)(pstr);
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, frozen)(pstr),
                "Frozen String not flagged as frozen.");
-    fio_str_info_s old_state = FIO_NAME(FIO_STR_NAME, info)(&str);
-    FIO_NAME(FIO_STR_NAME, write)(&str, "more data to be written here", 28);
+    fio_str_info_s old_state = FIO_NAME(FIO_STR_NAME, info)(pstr);
+    FIO_NAME(FIO_STR_NAME, write)(pstr, "more data to be written here", 28);
     FIO_NAME(FIO_STR_NAME, replace)
-    (&str, 2, 1, "more data to be written here", 28);
-    fio_str_info_s new_state = FIO_NAME(FIO_STR_NAME, info)(&str);
+    (pstr, 2, 1, "more data to be written here", 28);
+    fio_str_info_s new_state = FIO_NAME(FIO_STR_NAME, info)(pstr);
     FIO_ASSERT(old_state.len == new_state.len, "Frozen String length changed!");
     FIO_ASSERT(old_state.buf == new_state.buf,
                "Frozen String pointer changed!");
@@ -22403,39 +22454,40 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "Frozen String capacity changed (allowed, but shouldn't happen)!");
     FIO_STR_THAW_(&str);
   }
-  FIO_NAME(FIO_STR_NAME, printf)(&str, " %u", 42);
-  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(&str), "Hello Big World! 42"),
+  FIO_NAME(FIO_STR_NAME, printf)(pstr, " %u", 42);
+  FIO_ASSERT(!strcmp(FIO_NAME(FIO_STR_NAME, ptr)(pstr), "Hello Big World! 42"),
              "`printf` data error (%s)!",
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
 
   {
     FIO_NAME(FIO_STR_NAME, s) str2 = FIO_STR_INIT;
-    FIO_NAME(FIO_STR_NAME, concat)(&str2, &str);
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, eq)(&str, &str2),
+    FIO_STR_PTR pstr2 = FIO_PTR_TAG(&str2);
+    FIO_NAME(FIO_STR_NAME, concat)(pstr2, pstr);
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, eq)(pstr, pstr2),
                "`concat` error, strings not equal (%s != %s)!",
-               FIO_NAME(FIO_STR_NAME, ptr)(&str),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str2));
-    FIO_NAME(FIO_STR_NAME, write)(&str2, ":extra data", 11);
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, eq)(&str, &str2),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr2));
+    FIO_NAME(FIO_STR_NAME, write)(pstr2, ":extra data", 11);
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, eq)(pstr, pstr2),
                "`write` error after copy, strings equal "
                "((%zu)%s == (%zu)%s)!",
-               FIO_NAME(FIO_STR_NAME, len)(&str),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str),
-               FIO_NAME(FIO_STR_NAME, len)(&str2),
-               FIO_NAME(FIO_STR_NAME, ptr)(&str2));
+               FIO_NAME(FIO_STR_NAME, len)(pstr),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr),
+               FIO_NAME(FIO_STR_NAME, len)(pstr2),
+               FIO_NAME(FIO_STR_NAME, ptr)(pstr2));
 
-    FIO_NAME(FIO_STR_NAME, destroy)(&str2);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr2);
   }
 
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
-  FIO_NAME(FIO_STR_NAME, write_i)(&str, -42);
-  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 3 &&
-                 !memcmp("-42", FIO_NAME(FIO_STR_NAME, ptr)(&str), 3),
+  FIO_NAME(FIO_STR_NAME, write_i)(pstr, -42);
+  FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 3 &&
+                 !memcmp("-42", FIO_NAME(FIO_STR_NAME, ptr)(pstr), 3),
              "write_i output error ((%zu) %s != -42)",
-             FIO_NAME(FIO_STR_NAME, len)(&str),
-             FIO_NAME(FIO_STR_NAME, ptr)(&str));
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+             FIO_NAME(FIO_STR_NAME, len)(pstr),
+             FIO_NAME(FIO_STR_NAME, ptr)(pstr));
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   {
     fprintf(stderr, "* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
@@ -22504,26 +22556,26 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     }
     FIO_NAME(FIO_STR_NAME, free)(s);
   }
-  FIO_NAME(FIO_STR_NAME, destroy)(&str);
+  FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   if (1) {
     /* Testing Static initialization and writing */
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
-    FIO_NAME(FIO_STR_NAME, init_const)(&str, "Welcome", 7);
+    FIO_NAME(FIO_STR_NAME, init_const)(pstr, "Welcome", 7);
 #else
     str = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT_STATIC("Welcome");
 #endif
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == 0 ||
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == 0 ||
                    FIO_STR_IS_SMALL(&str),
                "Static string capacity non-zero.");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) > 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) > 0,
                "Static string length should be automatically calculated.");
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
                "Static strings shouldn't be dynamic.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
     FIO_NAME(FIO_STR_NAME, init_const)
-    (&str,
+    (pstr,
      "Welcome to a very long static string that should not fit within a "
      "containing struct... hopefuly",
      95);
@@ -22532,69 +22584,72 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "Welcome to a very long static string that should not fit within a "
         "containing struct... hopefuly");
 #endif
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(&str) == 0 ||
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == 0 ||
                    FIO_STR_IS_SMALL(&str),
                "Static string capacity non-zero.");
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) > 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) > 0,
                "Static string length should be automatically calculated.");
-    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(&str),
+    FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr),
                "Static strings shouldn't be dynamic.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
 
 #if FIO_STR_OPTIMIZE4IMMUTABILITY
-    FIO_NAME(FIO_STR_NAME, init_const)(&str, "Welcome", 7);
+    FIO_NAME(FIO_STR_NAME, init_const)(pstr, "Welcome", 7);
 #else
     str = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT_STATIC("Welcome");
 #endif
-    fio_str_info_s state = FIO_NAME(FIO_STR_NAME, write)(&str, " Home", 5);
+    fio_str_info_s state = FIO_NAME(FIO_STR_NAME, write)(pstr, " Home", 5);
     FIO_ASSERT(state.capa > 0, "Static string not converted to non-static.");
-    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, allocated)(&str) ||
+    FIO_ASSERT(FIO_NAME_BL(FIO_STR_NAME, allocated)(pstr) ||
                    FIO_STR_IS_SMALL(&str),
                "String should be dynamic after `write`.");
 
-    char *cstr = FIO_NAME(FIO_STR_NAME, detach)(&str);
+    char *cstr = FIO_NAME(FIO_STR_NAME, detach)(pstr);
     FIO_ASSERT(cstr, "`detach` returned NULL");
     FIO_ASSERT(!memcmp(cstr, "Welcome Home\0", 13),
                "`detach` string error: %s",
                cstr);
-    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&str) == 0,
+    FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(pstr) == 0,
                "`detach` data wasn't cleared.");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str); /*not really needed... detached... */
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr); /*not really needed... detached... */
     FIO_NAME(FIO_STR_NAME, dealloc)(cstr);
   }
   {
     fprintf(stderr, "* Testing Base64 encoding / decoding.\n");
-    FIO_NAME(FIO_STR_NAME, destroy)(&str); /* does nothing, but why not... */
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr); /* does nothing, but why not... */
 
     FIO_NAME(FIO_STR_NAME, s) b64message = FIO_STR_INIT;
-    fio_str_info_s b64i = FIO_NAME(
-        FIO_STR_NAME,
-        write)(&b64message, "Hello World, this is the voice of peace:)", 41);
+    fio_str_info_s b64i = FIO_NAME(FIO_STR_NAME, write)(
+        FIO_PTR_TAG(&b64message),
+        "Hello World, this is the voice of peace:)",
+        41);
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      b64i = FIO_NAME(FIO_STR_NAME, write)(&b64message, &c, 1);
-      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(&b64message) == (size_t)(42 + i),
+      b64i = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&b64message), &c, 1);
+      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)) ==
+                     (size_t)(42 + i),
                  "Base64 message length error (%zu != %zu)",
-                 FIO_NAME(FIO_STR_NAME, len)(&b64message),
+                 FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)),
                  (size_t)(42 + i));
-      FIO_ASSERT(FIO_NAME(FIO_STR_NAME, ptr)(&b64message)[41 + i] == (char)c,
+      FIO_ASSERT(FIO_NAME(FIO_STR_NAME,
+                          ptr)(FIO_PTR_TAG(&b64message))[41 + i] == (char)c,
                  "Base64 message data error");
     }
     fio_str_info_s encoded =
-        FIO_NAME(FIO_STR_NAME, write_base64enc)(&str, b64i.buf, b64i.len, 1);
+        FIO_NAME(FIO_STR_NAME, write_base64enc)(pstr, b64i.buf, b64i.len, 1);
     /* prevent encoded data from being deallocated during unencoding */
     encoded = FIO_NAME(FIO_STR_NAME, FIO_STR_RESERVE_NAME)(
-        &str,
+        pstr,
         encoded.len + ((encoded.len >> 2) * 3) + 8);
     fio_str_info_s decoded;
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
-      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
-      decoded = FIO_NAME(FIO_STR_NAME,
-                         write_base64dec)(&str,
-                                          FIO_NAME(FIO_STR_NAME, ptr)(&tmps),
-                                          FIO_NAME(FIO_STR_NAME, len)(&tmps));
-      FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
+      FIO_NAME(FIO_STR_NAME, init_copy2)(FIO_PTR_TAG(&tmps), pstr);
+      decoded = FIO_NAME(FIO_STR_NAME, write_base64dec)(
+          pstr,
+          FIO_NAME(FIO_STR_NAME, ptr)(FIO_PTR_TAG(&tmps)),
+          FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&tmps)));
+      FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&tmps));
       encoded.buf = decoded.buf;
     }
     FIO_ASSERT(encoded.len, "Base64 encoding failed");
@@ -22612,8 +22667,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(b64i.buf, decoded.buf + encoded.len, b64i.len),
                "Base 64 roundtrip failed:\n %s",
                decoded.buf);
-    FIO_NAME(FIO_STR_NAME, destroy)(&b64message);
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&b64message));
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   }
   {
     fprintf(stderr, "* Testing JSON style character escaping / unescaping.\n");
@@ -22622,20 +22677,20 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     const char *utf8_sample = /* three hearts, small-big-small*/
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_NAME(FIO_STR_NAME, write)
-    (&unescaped, utf8_sample, FIO_STRLEN(utf8_sample));
+    (FIO_PTR_TAG(&unescaped), utf8_sample, FIO_STRLEN(utf8_sample));
     for (int i = 0; i < 256; ++i) {
       uint8_t c = i;
-      ue = FIO_NAME(FIO_STR_NAME, write)(&unescaped, &c, 1);
+      ue = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&unescaped), &c, 1);
     }
     fio_str_info_s encoded =
-        FIO_NAME(FIO_STR_NAME, write_escape)(&str, ue.buf, ue.len);
+        FIO_NAME(FIO_STR_NAME, write_escape)(pstr, ue.buf, ue.len);
     // fprintf(stderr, "* %s\n", encoded.buf);
     fio_str_info_s decoded;
     {
       FIO_NAME(FIO_STR_NAME, s) tmps;
-      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, &str);
+      FIO_NAME(FIO_STR_NAME, init_copy2)(&tmps, pstr);
       decoded = FIO_NAME(FIO_STR_NAME,
-                         write_unescape)(&str,
+                         write_unescape)(pstr,
                                          FIO_NAME(FIO_STR_NAME, ptr)(&tmps),
                                          FIO_NAME(FIO_STR_NAME, len)(&tmps));
       FIO_NAME(FIO_STR_NAME, destroy)(&tmps);
@@ -22661,8 +22716,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(!memcmp(ue.buf, decoded.buf + encoded.len, ue.len),
                "JSON roundtrip failed:\n %s",
                decoded.buf);
-    FIO_NAME(FIO_STR_NAME, destroy)(&unescaped);
-    FIO_NAME(FIO_STR_NAME, destroy)(&str);
+    FIO_NAME(FIO_STR_NAME, destroy)(FIO_PTR_TAG(&unescaped));
+    FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   }
 }
 #undef FIO__STR_SMALL_CAPA
@@ -38823,12 +38878,11 @@ typedef enum {
 /** Identifies an invalid object */
 #define FIOBJ_INVALID 0
 /** Tests if the object is (probably) a valid FIOBJ */
-#define FIOBJ_IS_INVALID(o)       (((uintptr_t)(o)&7UL) == 0)
-#define FIOBJ_IS_NULL(o)          (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
-#define FIOBJ_TYPE_CLASS(o)       ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
-#define FIOBJ_PTR_TAG(o, klass)   ((uintptr_t)((uintptr_t)(o) | (klass)))
-#define FIOBJ_PTR_UNTAG(o)        ((uintptr_t)((uintptr_t)(o) & (~7ULL)))
-#define FIOBJ_PTR_TAG_VALIDATE(o) ((uintptr_t)((uintptr_t)(o) & (7ULL)))
+#define FIOBJ_IS_INVALID(o)     (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_NULL(o)        (FIOBJ_IS_INVALID(o) || ((o) == FIOBJ_T_NULL))
+#define FIOBJ_TYPE_CLASS(o)     ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
+#define FIOBJ_PTR_TAG(o, klass) ((uintptr_t)(((uintptr_t)(o)) | (klass)))
+#define FIOBJ_PTR_UNTAG(o)      ((uintptr_t)(((uintptr_t)(o)) & (~7ULL)))
 /** Returns an objects type. This isn't limited to known types. */
 FIO_IFUNC size_t fiobj_type(FIOBJ o);
 
@@ -38973,9 +39027,10 @@ FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___OBJECT_CLASS_VTBL;
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -39032,7 +39087,8 @@ FIOBJ Strings
 #define FIO_REF_CONSTRUCTOR_ONLY  1
 #define FIO_REF_DESTROY(s)                                                     \
   do {                                                                         \
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), destroy)((FIOBJ)&s);        \
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), destroy)                    \
+    ((FIOBJ)FIOBJ_PTR_TAG(&s, FIOBJ_T_STRING));                                \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
 #define FIO_REF_INIT(s_)                                                       \
@@ -39044,9 +39100,10 @@ FIOBJ Strings
 #if SIZE_T_MAX == 0xFFFFFFFF /* for 32bit system pointer alignment */
 #define FIO_REF_METADATA uint32_t
 #endif
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_STRING)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_STRING)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* Creates a new FIOBJ string object, copying the data to the new string. */
@@ -39151,7 +39208,8 @@ FIOBJ Arrays
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(a)                                                     \
   do {                                                                         \
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), destroy)((FIOBJ)&a);         \
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), destroy)                     \
+    ((FIOBJ)FIOBJ_PTR_TAG(&a, FIOBJ_T_ARRAY));                                 \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
 #define FIO_REF_INIT(a)                                                        \
@@ -39169,9 +39227,10 @@ FIOBJ Arrays
   do {                                                                         \
     dest = fiobj_dup(obj);                                                     \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_ARRAY)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_ARRAY)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -39204,6 +39263,7 @@ FIOBJ Hash Maps
 #define FIO_MAP_VALUE_DISCARD(o)  fiobj_free(o)
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p)   (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_HASH)
 #define FIO_PTR_TAG_TYPE          FIOBJ
 #include FIO_INCLUDE_FILE
 /** Calculates an object's hash value for a specific hash map object. */
@@ -39324,6 +39384,29 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
  */
 #define fiobj_json_find2(object, str, length)                                  \
   fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+
+/* *****************************************************************************
+FIOBJ Mustache support
+***************************************************************************** */
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
+ * if nothing was written.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+ *
+ * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
+ * written and `dest` was empty.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m, FIOBJ dest, FIOBJ ctx);
+
 /* *****************************************************************************
 
 
@@ -39555,19 +39638,15 @@ FIOBJ Integers
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
 /* Reads a 61 or 29 bit signed integer from the leftmost bits of a word. */
-#define FIO_NUMBER_DECODE(i)                                                   \
-  ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
-              ((((uintptr_t)(i) >> ((sizeof(uintptr_t) * 8) - 1)) *            \
-                ((uintptr_t)3 << ((sizeof(uintptr_t) * 8) - 3))))))
-#undef FIO_NUMBER_DECODE
 #define FIO_NUMBER_DECODE(i)                                                   \
   ((intptr_t)(((uintptr_t)(i) >> 3) |                                          \
               ((uintptr_t)0 -                                                  \
@@ -39590,7 +39669,9 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
 FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(FIOBJ i) {
   if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_NUMBER)
     return FIO_NUMBER_DECODE(i);
-  return FIO_PTR_MATH_RMASK(intptr_t, i, 3)[0];
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    return FIO_PTR_MATH_RMASK(intptr_t, i, 3)[0];
+  return 0;
 }
 
 /** Reads the number from a FIOBJ number, fitting it in a double. */
@@ -39600,10 +39681,8 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), f)(FIOBJ i) {
 
 /** Frees a FIOBJ number. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), free)(FIOBJ i) {
-  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_NUMBER)
-    return;
-  fiobj___bignum_free2(i);
-  return;
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    fiobj___bignum_free2(i);
 }
 
 FIO_IFUNC unsigned char FIO_NAME_BL(fiobj___num, eq)(FIOBJ restrict a,
@@ -39634,9 +39713,10 @@ FIOBJ Floats
   do {                                                                         \
     FIOBJ_MARK_MEMORY_FREE();                                                  \
   } while (0)
-#define FIO_PTR_TAG(p)   FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
-#define FIO_PTR_UNTAG(p) FIOBJ_PTR_UNTAG(p)
-#define FIO_PTR_TAG_TYPE FIOBJ
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
 #include FIO_INCLUDE_FILE
 
 /** Creates a new Float object. */
@@ -39676,14 +39756,15 @@ FIO_IFUNC double FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(FIOBJ i) {
     punned.i = ((uint64_t)(uintptr_t)i & (~(uintptr_t)7ULL));
     return punned.d;
   }
-  return FIO_PTR_MATH_RMASK(double, i, 3)[0];
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    return FIO_PTR_MATH_RMASK(double, i, 3)[0];
+  return 0.0;
 }
 
 /** Frees a FIOBJ number. */
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), free)(FIOBJ i) {
-  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_FLOAT)
-    return;
-  fiobj___bigfloat_free2(i);
+  if (FIOBJ_TYPE_CLASS(i) == FIOBJ_T_OTHER)
+    fiobj___bigfloat_free2(i);
   return;
 }
 
@@ -39954,6 +40035,125 @@ FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
 }
 
 #undef FIO___RECURSIVE_INCLUDE /* from now on, type helpers are internal */
+
+/* *****************************************************************************
+FIOBJ Mustache support - inline implementation
+***************************************************************************** */
+
+/* callback should write `txt` to output and return updated `udata.` */
+FIO_SFUNC void *fiobj___mustache_write_text(void *udata, fio_buf_info_s txt);
+/* same as `write_text`, but should also  HTML escape (sanitize) data. */
+FIO_SFUNC void *fiobj___mustache_write_text_escaped(void *udata,
+                                                    fio_buf_info_s raw);
+/* callback should return a new context pointer with the value of `name`. */
+FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name);
+/* if context is an Array, should return its length. */
+FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx);
+/* if context is an Array, should return a context pointer @ index. */
+FIO_SFUNC void *fiobj___mustache_get_var_index(void *ctx, size_t index);
+/* should return the String value of context `var` as a `fio_buf_info_s`. */
+FIO_SFUNC fio_buf_info_s fiobj___mustache_var2str(void *var);
+/* should return non-zero if the context pointer refers to a valid value. */
+FIO_SFUNC int fiobj___mustache_var_is_truthful(void *ctx);
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
+ * if nothing was written.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx) {
+  return (FIOBJ)fio_mustache_build(
+      m,
+      .write_text = fiobj___mustache_write_text,
+      .write_text_escaped = fiobj___mustache_write_text_escaped,
+      .get_var = fiobj___mustache_get_var,
+      .array_length = fiobj___mustache_array_length,
+      .get_var_index = fiobj___mustache_get_var_index,
+      .var2str = fiobj___mustache_var2str,
+      .var_is_truthful = fiobj___mustache_var_is_truthful,
+      .ctx = ctx,
+      .udata = NULL);
+}
+
+/**
+ * Builds a Mustache template using a FIOBJ context (usually a Hash).
+ *
+ * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+ *
+ * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
+ * written and `dest` was empty.
+ */
+FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m,
+                                      FIOBJ dest,
+                                      FIOBJ ctx) {
+  dest = (FIOBJ)fio_mustache_build(
+      m,
+      .write_text = fiobj___mustache_write_text,
+      .write_text_escaped = fiobj___mustache_write_text_escaped,
+      .get_var = fiobj___mustache_get_var,
+      .array_length = fiobj___mustache_array_length,
+      .get_var_index = fiobj___mustache_get_var_index,
+      .var2str = fiobj___mustache_var2str,
+      .var_is_truthful = fiobj___mustache_var_is_truthful,
+      .ctx = ctx,
+      .udata = dest);
+  return dest;
+}
+
+/* callback should write `txt` to output and return updated `udata.` */
+FIO_SFUNC void *fiobj___mustache_write_text(void *udata, fio_buf_info_s txt) {
+  FIOBJ d = (FIOBJ)udata;
+  if (!d)
+    d = fiobj_str_new_buf(txt.len + 32);
+  fiobj_str_write(d, txt.buf, txt.len);
+  return (void *)d;
+}
+/* same as `write_text`, but should also  HTML escape (sanitize) data. */
+FIO_SFUNC void *fiobj___mustache_write_text_escaped(void *ud,
+                                                    fio_buf_info_s raw) {
+  FIOBJ d = (FIOBJ)ud;
+  if (!d)
+    d = fiobj_str_new_buf(raw.len + 32);
+  fiobj_str_write_html_escape(d, raw.buf, raw.len);
+  return (void *)d;
+}
+/* callback should return a new context pointer with the value of `name`. */
+FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name) {
+  if (!ctx)
+    return NULL;
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_HASH))
+    return NULL;
+  return fiobj_hash_get3((FIOBJ)ctx, name.buf, name.len);
+}
+/* if context is an Array, should return its length. */
+FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx) {
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return 0;
+  return fiobj_array_count((FIOBJ)ctx);
+}
+/* if context is an Array, should return a context pointer @ index. */
+FIO_SFUNC void *fiobj___mustache_get_var_index(void *ctx, size_t index) {
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return NULL;
+  return fiobj_array_get((FIOBJ)ctx, index);
+}
+/* should return the String value of context `var` as a `fio_buf_info_s`. */
+FIO_SFUNC fio_buf_info_s fiobj___mustache_var2str(void *var) {
+  fio_buf_info_s r = {0};
+  if (!var || var == fiobj_null())
+    return r;
+  fio_str_info_s tmp = fiobj2cstr((FIOBJ)var);
+  r = FIO_STR2BUF_INFO(tmp);
+  return r;
+}
+/* should return non-zero if the context pointer refers to a valid value. */
+FIO_SFUNC int fiobj___mustache_var_is_truthful(void *v) {
+  return v && (FIOBJ)v != fiobj_null() && (FIOBJ)v != fiobj_false() &&
+         (!FIOBJ_TYPE_IS((FIOBJ)v, FIOBJ_T_ARRAY) ||
+          fiobj_array_count((FIOBJ)v));
+}
+
 /* *****************************************************************************
 
 
@@ -41304,6 +41504,55 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   for (unsigned char i = 0; i < 36; ++i) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.");
   }
+  for (size_t i = 1; i < (1ULL << 10); ++i) {
+    double expct[2] = {(1.0 + i), (1.0 - i)};
+    double result[2] = {fio_i2d(1LL + i, 0), fio_i2d(1LL - i, 0)};
+    FIO_ASSERT(expct[0] == result[0],
+               "fio_i2d failed at (1+%zu) %g != %g\n\t%p != %p",
+               i,
+               expct[0],
+               result[0],
+               ((void **)expct)[0],
+               ((void **)result)[0]);
+    FIO_ASSERT(expct[1] == result[1],
+               "fio_i2d failed at (1-%zu) %g != %g\n\t%p != %p",
+               i,
+               expct[1],
+               result[1],
+               ((void **)expct)[1],
+               ((void **)result)[1]);
+  }
+#if 1 || !(DEBUG - 1 + 1)
+  {
+    uint64_t start, end, rep = (1ULL << 22);
+    int64_t u64[128] = {0};
+    double dbl[128] = {0.0};
+    double rtest;
+    fprintf(stderr, "* Testing fio_i2d conversion overhead.\n");
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += 2.0 * u64[i & 127];
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- C cast:  %zuus\n", (size_t)(end - start));
+    rtest = dbl[127];
+    FIO_MEMSET(u64, 0, sizeof(u64));
+    FIO_MEMSET(dbl, 0, sizeof(dbl));
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += fio_i2d((int64_t)u64[i & 127], 1);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- fio_i2d: %zuus\n", (size_t)(end - start));
+    FIO_ASSERT(rtest == dbl[127], "fio_i2d results not the same as C cast?");
+  }
+#endif
   fprintf(stderr, "* Testing fio_atol samples.\n");
 #define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \

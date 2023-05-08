@@ -1723,12 +1723,7 @@ FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
 }
 #endif /* __builtin_ctzll || __builtin_clzll */
 
-/**
- * Returns the index of the least significant (lowest) bit - used in
- * fio_memchr.
- *
- * Placed here (mostly copied from bitmap module).
- */
+/** Returns the index of the least significant (lowest) bit. */
 FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(i);
@@ -1737,12 +1732,7 @@ FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 #endif /* __builtin vs. map */
 }
 
-/**
- * Returns the index of the least significant (lowest) bit - used in
- * write_bin.
- *
- * Placed here (mostly copied from bitmap module).
- */
+/** Returns the index of the most significant (highest) bit. */
 FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_clzll)
   return 63 - __builtin_clzll(i);

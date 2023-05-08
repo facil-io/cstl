@@ -2,40 +2,6 @@
 #define FIO_LOG
 #include "fio-stl/include.h"
 
-FIO_SFUNC void *mtest_get_var(void *ctx, fio_buf_info_s name) {
-  if (!ctx)
-    return NULL;
-  if (!FIOBJ_TYPE_IS(ctx, FIOBJ_T_HASH))
-    return NULL;
-  return fiobj_hash_get3(ctx, name.buf, name.len);
-}
-
-FIO_SFUNC size_t mtest_array_length(void *ctx) {
-  if (!FIOBJ_TYPE_IS(ctx, FIOBJ_T_ARRAY))
-    return 0;
-  return fiobj_array_count((FIOBJ)ctx);
-}
-
-FIO_SFUNC void *mtest_get_var_index(void *ctx, size_t index) {
-  if (!FIOBJ_TYPE_IS(ctx, FIOBJ_T_ARRAY))
-    return NULL;
-  return fiobj_array_get(ctx, index);
-}
-
-FIO_SFUNC fio_buf_info_s mtest_val2str(void *var) {
-  fio_buf_info_s r = {0};
-  if (!var || var == fiobj_null())
-    return r;
-  fio_str_info_s tmp = fiobj2cstr(var);
-  r = FIO_STR2BUF_INFO(tmp);
-  return r;
-}
-
-FIO_SFUNC int mtest_var_is_truthful(void *v) {
-  return v && v != fiobj_null() && v != fiobj_false() &&
-         (!FIOBJ_TYPE_IS(v, FIOBJ_T_ARRAY) || fiobj_array_count(v));
-}
-
 static void mustache_json_run_test(FIOBJ test) {
   printf("Test name: %s\n"
          "Test desc: %s\n",
@@ -67,13 +33,14 @@ static void mustache_json_run_test(FIOBJ test) {
     }
   }
   fio_mustache_s *m = fio_mustache_load(.data = template_data);
-  char *result = fio_mustache_build(m,
-                                    .get_var = mtest_get_var,
-                                    .array_length = mtest_array_length,
-                                    .get_var_index = mtest_get_var_index,
-                                    .var2str = mtest_val2str,
-                                    .var_is_truthful = mtest_var_is_truthful,
-                                    .ctx = data);
+  char *result =
+      fio_mustache_build(m,
+                         .get_var = fiobj___mustache_get_var,
+                         .array_length = fiobj___mustache_array_length,
+                         .get_var_index = fiobj___mustache_get_var_index,
+                         .var2str = fiobj___mustache_var2str,
+                         .var_is_truthful = fiobj___mustache_var_is_truthful,
+                         .ctx = data);
 
   if (!FIOBJ_IS_INVALID(fiobj_hash_get3(test, "partials", 8))) {
     FIOBJ list = fiobj_hash_get3(test, "partials", 8);
@@ -125,10 +92,10 @@ static void mustache_json_test(const char *json_file_name) {
   FIOBJ json = fiobj_json_parse(fio_bstr_info(json_txt), NULL);
   FIO_ASSERT(json, "JSON parsing failed for:\n%s", json_txt);
   fio_bstr_free(json_txt);
-  FIO_LOG_INFO(
-      "testing specification file %s.\n===\n%s===\n",
-      json_file_name,
-      fiobj2cstr(fiobj_json_find(json, FIO_STR_INFO1("overview"))).buf);
+  fprintf(stderr,
+          "\n\n===\ntesting specification file:\n\t%s\n\n%s===\n\n",
+          json_file_name,
+          fiobj2cstr(fiobj_json_find(json, FIO_STR_INFO1("overview"))).buf);
   FIOBJ tests = fiobj_hash_get3(json, "tests", 5);
   FIO_ASSERT(FIOBJ_TYPE_IS(tests, FIOBJ_T_ARRAY),
              "JSON tests array type mismatch or missing");

@@ -145,6 +145,13 @@ SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
 FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
 
 /* *****************************************************************************
+IEEE 754 Floating Points, Building Blocks and Helpers
+***************************************************************************** */
+
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent);
+
+/* *****************************************************************************
 
 
 Implementation - inlined
@@ -344,6 +351,53 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
   /* read overflow */
   errno = E2BIG;
   return (int64_t)(val = 0x8000000000000000ULL);
+}
+
+/* *****************************************************************************
+IEEE 754 Floating Points, Building Blocks and Helpers
+***************************************************************************** */
+
+#ifndef FIO_MATH_DBL_MANT_MASK
+#define FIO_MATH_DBL_MANT_MASK (((uint64_t)1ULL << 52) - 1)
+#define FIO_MATH_DBL_EXPO_MASK ((uint64_t)2047ULL << 52)
+#define FIO_MATH_DBL_SIGN_MASK ((uint64_t)1ULL << 63)
+#endif
+
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
+  union {
+    uint64_t u64;
+    double d;
+  } u = {.u64 = ((uint64_t)(mant)&FIO_MATH_DBL_SIGN_MASK)};
+  size_t tmp;
+  if (!mant)
+    goto is_zero;
+  /* convert `mant` to absolute value - constant time */
+  tmp = u.u64 >> 63;
+  mant =
+      (int64_t)(uint64_t)mant ^
+      (((uint64_t)0 - tmp) & ((uint64_t)mant ^ (uint64_t)((int64_t)0 - mant)));
+  // mant = (int64_t)(((uint64_t)mant ^ ((uint64_t)0 - tmp)) + tmp); // slower
+  /* normalize exponent */
+  tmp = fio_msb_index_unsafe(mant);
+  exponent += tmp + 1023;
+  if (FIO_UNLIKELY(exponent < 0))
+    goto is_zero;
+  if (FIO_UNLIKELY(exponent > 2047))
+    goto is_inifinity_or_nan;
+  exponent = (uint64_t)exponent << 52;
+  u.u64 |= exponent;
+  /* reposition mant bits so we "hide" the fist set bit in bit[52] */
+  if (tmp < 52)
+    mant = mant << (52 - tmp);
+  else if (FIO_UNLIKELY(tmp > 52)) /* losing precision */
+    mant = mant >> (tmp - 52);
+  u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
+is_zero:
+  return u.d;
+is_inifinity_or_nan:
+  u.u64 |= FIO_MATH_DBL_EXPO_MASK | (mant & FIO_MATH_DBL_MANT_MASK);
+  return u.d;
 }
 
 /* *****************************************************************************
