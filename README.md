@@ -45,9 +45,11 @@ cls && cl /Ox tests\stl.c /I. && stl.exe
 
 ### Binary-Safe Dynamic Strings
 
-The fecil.io C STL provides a builtin solution similar in approach to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar cons / pros).
+The fecil.io C STL provides a number of solutions for binary-safe dynamic Strings.
 
-I addition, the `fio_bstr` provides reference counted immutable strings with a "copy-on-write" fallback for when a string has to be mutated, making them a perfect choice for cached Strings.
+One approach (`fio_bstr`) is similar to the [Simple Dynamic Strings library](https://github.com/antirez/sds) (and with similar cons / pros), only providing more functionality.
+
+For example, `fio_bstr` provides reference counted immutable strings with a "copy-on-write" fallback for when a string has to be mutated, making these String objects a perfect choice for cached Strings.
 
 
 ```c
@@ -271,7 +273,7 @@ If you're submitting a PR, make sure to update the corresponding code slice (fil
 
 Note that the master branch is unstable as it gets. Commits may get squashed, the branch may be overwritten (force push), etc'.
 
-Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](https://github.com/boazsegev/facil.io/CONTRIBUTING.md). 
+Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](CONTRIBUTING.md). 
 
 ## Documentation
 

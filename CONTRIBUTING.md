@@ -96,7 +96,7 @@ A few pointers about code styling (pun intended).
 
 ## License
 
-The project requires that all the code is licensed under a choose-your-license scheme offering wither ISC or MIT licensing options (though that may change).
+The project requires that all the code is licensed under a choose-your-license scheme offering both ISC and MIT licensing options (though that may change).
 
 Please refrain from using or offering code that requires a change to the licensing scheme or that might prevent future updates to the licensing scheme.
 
@@ -129,8 +129,6 @@ These are the features that have been requested so far. Even if any of them are 
 |       Redis       |                    |  Rewrite.
 |-------------------|--------------------|-----------------------------------------------------|
 |       ED25519     |                    |  
-|-------------------|--------------------|-----------------------------------------------------|
-|      Mustache     |                    |  The parser is unmaintainable... rewrite.
 |-------------------|--------------------|-----------------------------------------------------|
 | Pub/Sub Encryption|                    |  Yes, pub/sub will be going public...
 |-------------------|--------------------|-----------------------------------------------------|

@@ -1973,11 +1973,12 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
     tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
     if (!(adr.buf = getenv("ADDRESS")) ||
         (adr.len = FIO_STRLEN(adr.buf)) > 58) {
-      adr = FIO_STR_INFO2((char *)"0.0.0.0:", 8);
+      adr = FIO_STR_INFO2((char *)"0.0.0.0", 7);
     }
     fio_string_write2(&tmp,
                       NULL,
                       FIO_STRING_WRITE_STR2(adr.buf, adr.len),
+                      FIO_STRING_WRITE_STR2(":", 1),
                       FIO_STRING_WRITE_UNUM(port));
     ++port;
   }

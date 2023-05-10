@@ -547,32 +547,47 @@ Protocol
 
 
 
-The Letter Object & Protocol is the internal
-message exchange protocol and format used by the
-pub/sub service and API. Access is given for
-zero-copy uses.
+The Letter Object & Protocol is the internal message exchange protocol and
+format used by the pub/sub service and API. Access is given for zero-copy uses.
 
-The letter exchange protocol imposes the
-following limitations on message exchange:
+The letter exchange protocol imposes the following limitations on message
+exchange:
 
-* Channel Names are limited to 2^16 bytes (65,536
-bytes).
+* Channel Names are limited to 2^16 bytes (65,536 bytes).
 
-* Message payload is limited to 2^24 bytes
-(16,777,216 bytes == about 16Mb).
+* Message payload is limited to 2^24 bytes (16,777,216 bytes == about 16Mb).
 
 * Totally Empty messages are ignored.
 
-Letter network format in bytes (16 byte header +
-2 NUL bytes): | [ 0-7 ] 8 bytes - Message ID | |
-[ 8-9 ] 2 Bytes - numerical Filter | | [10-11] 2
-bytes - little endian channel length        | |
-[12-14] 3 bytes - little endian message length |
-| [ 15 ]  1 Bytes - flags | | X bytes - (channel
-length + 1 NUL terminator)         | | Y bytes -
-(message length + 1 NUL terminator)         |
-Total overhead: 18 bytes (16 byte header + 2 NUL
-terminators)
+Letter network format in bytes (16 byte header + 2 NUL bytes):
+| [ 0-7 ] 8 bytes - Message ID |
+| [ 8-9 ] 2 Bytes - numerical Filter |
+| [10-11] 2 bytes - little endian channel length |
+| [12-14] 3 bytes - little endian message length |
+| [ 15 ]  1 Bytes - flags |
+| X bytes - (channel length + 1 NUL terminator) |
+| Y bytes - (message length + 1 NUL terminator) |
+
+Total overhead: 18 bytes (16 byte header + 2 NUL terminators)
+
+TODO!: update structure to:
+ - add encryption
+ - add timestamp
+ - message ID should include an origin tag? counter?
+
+New letter network format in bytes (16 byte header + 2 NUL bytes):
+| [  0-7  ] 8 bytes  - Message ID                |
+| [  8-11 ] 4 bytes  - Encrypted Segment Length  |
+| [ 12-28 ] 16 bytes - Message MAC (AHEAD)       |
+| ----- Encryption Starts ----                   |
+| 8 byte header:                                 |
+| [ 0-1 ] 2 Bytes - little endian filter number  |
+| [ 2-3 ] 2 bytes - little endian channel length |
+| [ 4-6 ] 3 bytes - little endian message length |
+| [  7  ] 1 Bytes - flags                        |
+| ----- Message Payload ----                     |
+| X bytes, channel name + 1 NUL terminator byte  |
+| Y bytes, message + 1 NUL terminator byte       |
 
 ***************************************************************************** */
 
@@ -600,14 +615,11 @@ FIO_IFUNC fio_str_info_s fio_letter_channel(fio_letter_s *l);
 FIO_IFUNC fio_str_info_s fio_letter_message(fio_letter_s *l);
 /** Returns a letter's numerical filter. */
 FIO_IFUNC int16_t fio_letter_filter(fio_letter_s *l);
-/** Returns the letter's flags (8 bits allowing
- * for 8 distinct flags). */
+/** Returns the letter's flags (8 bits allowing for 8 distinct flags). */
 FIO_IFUNC uint8_t fio_letter_flags(fio_letter_s *l);
-/** Returns a letter's ID (8 bytes random number)
- */
+/** Returns a letter's ID (8 bytes random number) */
 FIO_IFUNC uint64_t fio_letter_id(fio_letter_s *l);
-/* returns the letter object associated with the
- * public message object. */
+/* returns the letter object associated with the public message object. */
 FIO_IFUNC fio_letter_s *fio_msg2letter(fio_msg_s *msg);
 
 #define FIO___LETTER_HEADER_LENGTH 16 /* without NUL terminators */
@@ -617,14 +629,11 @@ FIO_IFUNC fio_letter_s *fio_msg2letter(fio_msg_s *msg);
 Letter Protocol API & Callbacks
 ***************************************************************************** */
 
-/** Callback called by the letter protocol when a
- * letter arrives @ master. */
+/** Callback called by the letter protocol when a letter arrives @ master. */
 FIO_SFUNC void fio___letter_on_recieved_root(fio_letter_s *letter);
-/** Callback called by the letter protocol when a
- * letter arrives @ child. */
+/** Callback called by the letter protocol when a letter arrives @ child. */
 FIO_SFUNC void fio___letter_on_recieved_child(fio_letter_s *letter);
-/** Starts listening to IPC connections on a
- * local socket. */
+/** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_);
 
 /** Write a letter to a specific IO object */
@@ -632,28 +641,23 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l);
 /** Returns a letter's total network length */
 FIO_IFUNC size_t fio_letter_len(fio_letter_s *l);
 
-/** Listen to remote letter exchange clients
- * (cluster letter exchange). */
+/** Listen to remote letter exchange clients (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_listen(const char *url, uint64_t app_key[2]);
-/** Connect to remote letter exchange server
- * (cluster letter exchange). */
+/** Connect to remote letter exchange server (cluster letter exchange). */
 FIO_IFUNC int fio_letter_remote_connect(const char *url, uint64_t app_key[2]);
 
 /* *****************************************************************************
 Channel Delivery API & Callbacks
 ***************************************************************************** */
 
-/** Distributes letters to the channel's
- * subscribers. */
+/** Distributes letters to the channel's subscribers. */
 FIO_SFUNC void fio___channel_deliver_task(void *ch_, void *l_);
 
-/** Distributes letters to the distribution
- * channels. */
+/** Distributes letters to the distribution channels. */
 FIO_IFUNC void fio___channel_deliver(fio_letter_s *letter);
 
 #ifndef FIO_POSTOFFICE_THREAD_LOCK
-/** Controls if the channel subscribe API is
- * published or not. */
+/** Controls if the channel subscribe API is published or not. */
 #define FIO_POSTOFFICE_THREAD_LOCK 0
 #endif
 
@@ -678,8 +682,7 @@ FIO_IFUNC void fio___unsubscribe_task(void *ch_, void *sub_);
 /** Delivers a letter to a subscription */
 FIO_IFUNC void fio___subscription_on_message_task(void *s, void *l);
 
-/** publishes a letter to the expecting processes
- * by letter flags. */
+/** publishes a letter to the expecting processes by letter flags. */
 FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_);
 
 /* *****************************************************************************
@@ -761,8 +764,7 @@ FIO_SFUNC struct {
   size_t ref;
 } FIO_PUBSUB_METADATA[FIO_PUBSUB_METADATA_LIMIT];
 
-/* Returns zero (0) on success or -1 on failure.
- */
+/* Returns zero (0) on success or -1 on failure. */
 SFUNC int fio_message_metadata_add(fio_msg_metadata_fn metadata_func,
                                    void (*cleanup)(void *)) {
   for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
@@ -800,8 +802,7 @@ SFUNC void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func) {
   }
 }
 
-/** Finds the message's metadata, returning the
- * data or NULL. */
+/** Finds the message's metadata, returning the data or NULL. */
 SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func) {
   for (size_t i = 0; i < FIO_PUBSUB_METADATA_LIMIT; ++i) { /* test existing */
@@ -813,8 +814,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
   return NULL;
 }
 
-/** Callback called when a letter is destroyed
- * (reference counting). */
+/** Callback called when a letter is destroyed (reference counting). */
 FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   if (!l->metadata_is_initialized)
     return;
@@ -827,8 +827,7 @@ FIO_SFUNC void fio_letter_on_destroy(fio_letter_s *l) {
   }
 }
 
-/** Callback called when a letter is destroyed
- * (reference counting). */
+/** Callback called when a letter is destroyed (reference counting). */
 FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
   if (fio_atomic_or(&l->metadata_is_initialized, 1)) {
     return;
@@ -850,15 +849,14 @@ FIO_SFUNC void fio_letter_initialize_metadata(fio_letter_s *l) {
 
 
 
-                    Letter / Message Object
-Implementation
+                                Letter / Message Object
+                                    Implementation
 
 
 
 ***************************************************************************** */
 
-/* allocates a new letter wrapper to be filled
- * from an existing buffer. */
+/* allocates a new letter wrapper to be filled from an existing buffer. */
 FIO_IFUNC fio_letter_s *fio_letter_new_read(const char *head) {
   fio_letter_s *l = NULL;
   uint32_t channel_len = fio_buf2u16_le(head + 10);
@@ -874,6 +872,7 @@ FIO_IFUNC fio_letter_s *fio_letter_new_compose(fio_buf_info_s channel,
                                                fio_buf_info_s message,
                                                int16_t filter,
                                                uint8_t flags) {
+  /* TODO: update to add encryption */
   fio_letter_s *l = NULL;
   if (!(channel.len | message.len | (uint32_t)filter | (uint32_t)flags))
     return l;

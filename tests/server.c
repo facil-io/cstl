@@ -160,13 +160,13 @@ FIO_SFUNC void http_respond(fio_http_s *h) {
   }
   // FIO_LOG_DEBUG2("echoing back:\n%s", str2ptr(&out));
   fio_http_write(h,
-                 .data = out,
+                 .buf = out,
                  .len = fio_bstr_len(out),
                  .dealloc = (void (*)(void *))fio_bstr_free,
                  .copy = 0,
                  .finish = 1);
 #else
-  fio_http_write(h, .data = "Hello World!", .len = 12, .finish = 1);
+  fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
 #endif
 }
 
@@ -226,7 +226,7 @@ static int fio_http1_on_error(void *udata) {
   if (c->h) {
     fio_http_status_set(c->h, 400);
     fio_http_write(c->h,
-                   .data = "Bad Request... be nicer next time!",
+                   .buf = "Bad Request... be nicer next time!",
                    .len = 34,
                    .finish = 1);
   }
@@ -368,7 +368,7 @@ static void fio_http1_write_body(fio_http_s *h, fio_http_write_args_s args) {
     }
   }
   fio_write2(c->io,
-             .buf = (void *)args.data,
+             .buf = (void *)args.buf,
              .len = args.len,
              .fd = args.fd,
              .offset = args.offset,
