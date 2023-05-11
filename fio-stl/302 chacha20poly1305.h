@@ -308,8 +308,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
   }
 }
 
-/*
- * Given a Poly1305 key, writes a MAC into `mac_dest`. */
+/* Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
                              const void *key,
                              void *restrict msg,
