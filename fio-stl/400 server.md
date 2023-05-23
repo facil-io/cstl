@@ -65,7 +65,7 @@ fio_protocol_s TIME_PROTOCOL = {
     .on_timeout = fio_touch, /* never times out */
 };
 static void accept_time_client(int fd, void *udata) {
-  fio_attach_fd(fd, &TIME_PROTOCOL, udata, NULL); /* udata isn't used here */
+  fio_srv_attach_fd(fd, &TIME_PROTOCOL, udata, NULL); /* udata isn't used here */
 }
 ```
 
@@ -123,10 +123,10 @@ struct fio_listen_args {
 };
 ```
 
-#### `fio_attach_fd`
+#### `fio_srv_attach_fd`
 
 ```c
-fio_s *fio_attach_fd(int fd,
+fio_s *fio_srv_attach_fd(int fd,
                      fio_protocol_s *protocol,
                      void *udata,
                      void *tls);

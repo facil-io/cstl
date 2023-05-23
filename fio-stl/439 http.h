@@ -183,7 +183,7 @@ FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 SFUNC fio_s *fio_http_io(fio_http_s *);
 
 /** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
+FIO_IFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
 /** Subscribes the HTTP handle (WebSocket / SSE) to events. */
 #define fio_http_subscribe(h, ...)                                             \
   fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
@@ -358,6 +358,10 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
     s->timeout = FIO_HTTP_DEFAULT_TIMEOUT;
   if (!s->ws_timeout)
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
+
+  if (s->max_header_size < s->max_line_len)
+    s->max_header_size = s->max_line_len;
+
   if (s->public_folder.buf) {
     if (s->public_folder.len > 1 &&
         s->public_folder.buf[s->public_folder.len - 1] == '/' &&
@@ -500,10 +504,10 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
       .capa = capa,
       .log = p->settings.log,
   };
-  c->io = fio_attach_fd(fd,
-                        &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                        (void *)c,
-                        p->tls_ctx);
+  c->io = fio_srv_attach_fd(fd,
+                            &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                            (void *)c,
+                            p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
   FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
                   (int)fio_thread_getpid(),

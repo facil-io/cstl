@@ -324,14 +324,20 @@ typedef SSIZE_T ssize_t;
 Function Attributes
 ***************************************************************************** */
 
-/** Marks a function as `static`, `inline` and possibly unused. */
-#define FIO_IFUNC static inline __attribute__((unused))
-
+#ifndef FIO_SFUNC
 /** Marks a function as `static` and possibly unused. */
 #define FIO_SFUNC static __attribute__((unused))
+#endif
 
+#ifndef FIO_IFUNC
+/** Marks a function as `static`, `inline` and possibly unused. */
+#define FIO_IFUNC FIO_SFUNC inline
+#endif
+
+#ifndef FIO_WEAK
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
+#endif
 
 /* *****************************************************************************
 Constructors and Destructors

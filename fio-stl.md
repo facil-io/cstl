@@ -8100,7 +8100,7 @@ fio_protocol_s TIME_PROTOCOL = {
     .on_timeout = fio_touch, /* never times out */
 };
 static void accept_time_client(int fd, void *udata) {
-  fio_attach_fd(fd, &TIME_PROTOCOL, udata, NULL); /* udata isn't used here */
+  fio_srv_attach_fd(fd, &TIME_PROTOCOL, udata, NULL); /* udata isn't used here */
 }
 ```
 
@@ -8158,10 +8158,10 @@ struct fio_listen_args {
 };
 ```
 
-#### `fio_attach_fd`
+#### `fio_srv_attach_fd`
 
 ```c
-fio_s *fio_attach_fd(int fd,
+fio_s *fio_srv_attach_fd(int fd,
                      fio_protocol_s *protocol,
                      void *udata,
                      void *tls);
@@ -9337,6 +9337,17 @@ const char *fio_pubsub_ipc_url(void);
 ```
 
 Returns the current IPC socket address (shouldn't be changed).
+
+
+#### `fio_pubsub_secret_set`
+
+```c
+void fio_pubsub_secret_set(char *secret, size_t len);
+```
+
+Sets a (possibly shared) secret for securing pub/sub communication.
+
+If `secret` is `NULL`, the environment variable `"SECRET"` will be used or, if not set, a random secret will be generated.
 
 -------------------------------------------------------------------------------
 ## HTTP Server

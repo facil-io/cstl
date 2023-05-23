@@ -88,7 +88,7 @@ typedef struct {
 FIO_SFUNC void on_open(int fd, void *udata) {
   client_s *c = client_new(HTTP_CLIENT_BUFFER);
   FIO_ASSERT_ALLOC(c);
-  c->io = fio_attach_fd(fd, &HTTP_PROTOCOL_1, c, udata);
+  c->io = fio_srv_attach_fd(fd, &HTTP_PROTOCOL_1, c, udata);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */

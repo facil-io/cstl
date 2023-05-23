@@ -350,8 +350,16 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
+#if defined(FIO_PUBSUB)
+#define FIO_CHACHA
+#endif
+
 #if defined(FIO_HTTP_HANDLE)
 #define FIO_SHA1
+#endif
+
+#if defined(FIO_PUBSUB)
+#define FIO_SHA2
 #endif
 
 /* *****************************************************************************

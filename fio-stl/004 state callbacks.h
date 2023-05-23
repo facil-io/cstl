@@ -138,32 +138,6 @@ State Callback Global State and Locks
 FIO_WEAK fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
 FIO_WEAK fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
 
-/** a type-to-string map for callback types */
-FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
-    [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
-    [FIO_CALL_PRE_START] = "PRE_START",
-    [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
-    [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
-    [FIO_CALL_IN_CHILD] = "IN_CHILD",
-    [FIO_CALL_IN_MASTER] = "IN_MASTER",
-    [FIO_CALL_ON_START] = "ON_START",
-    [FIO_CALL_RESERVED1] = "RESERVED1",
-    [FIO_CALL_RESERVED2] = "RESERVED2",
-    [FIO_CALL_ON_USER1] = "ON_USER1",
-    [FIO_CALL_ON_USER2] = "ON_USER2",
-    [FIO_CALL_ON_IDLE] = "ON_IDLE",
-    [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
-    [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
-    [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
-    [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
-    [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
-    [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
-    [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
-    [FIO_CALL_ON_FINISH] = "ON_FINISH",
-    [FIO_CALL_AT_EXIT] = "AT_EXIT",
-    [FIO_CALL_NEVER] = "NEVER",
-};
-
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
@@ -227,6 +201,32 @@ FIO_SFUNC void fio_state_callback_force___task(void *fn_p, void *arg) {
  * remove other callbacks for the same event).
  */
 SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
+  /** a type-to-string map for callback types */
+  static const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
+      [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
+      [FIO_CALL_PRE_START] = "PRE_START",
+      [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
+      [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
+      [FIO_CALL_IN_CHILD] = "IN_CHILD",
+      [FIO_CALL_IN_MASTER] = "IN_MASTER",
+      [FIO_CALL_ON_START] = "ON_START",
+      [FIO_CALL_RESERVED1] = "RESERVED1",
+      [FIO_CALL_RESERVED2] = "RESERVED2",
+      [FIO_CALL_ON_USER1] = "ON_USER1",
+      [FIO_CALL_ON_USER2] = "ON_USER2",
+      [FIO_CALL_ON_IDLE] = "ON_IDLE",
+      [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
+      [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
+      [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
+      [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
+      [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
+      [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
+      [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
+      [FIO_CALL_ON_FINISH] = "ON_FINISH",
+      [FIO_CALL_AT_EXIT] = "AT_EXIT",
+      [FIO_CALL_NEVER] = "NEVER",
+  };
+
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
   if (e == FIO_CALL_AFTER_FORK) {
@@ -278,6 +278,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);
+  (void)fio___state_tasks_names; /* if unused */
 }
 /* *****************************************************************************
 State constructor / destructor

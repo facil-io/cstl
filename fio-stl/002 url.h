@@ -307,10 +307,13 @@ finish:
     fio_memcpy4(&s, r.scheme.buf);
     s |= 0x20202020U; /* downcase */
     if (s == file_str || s == unix_str || s == priv_str) {
-      r.path.len = end - (r.scheme.buf + 7);
       r.path.buf = r.scheme.buf + 7;
-      r.user.len = r.password.len = r.port.len = r.host.len = r.query.len =
-          r.target.len = 0;
+      r.path.len = end - (r.scheme.buf + 7);
+      if (r.query.len)
+        r.path.len = r.query.buf - (r.path.buf + 1);
+      else if (r.target.len)
+        r.path.len = r.target.buf - (r.path.buf + 1);
+      r.user.len = r.password.len = r.port.len = r.host.len = 0;
     }
   } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
     r.path.len = end - r.host.buf;

@@ -1135,7 +1135,7 @@ typedef struct {
   void *udata;
 } fio___http_hmap_each_info_s;
 
-FIO_SFUNC int http___h_each_task_wrapper(fio___http_hmap_each_s *e) {
+FIO_SFUNC int fio___http_h_each_task_wrapper(fio___http_hmap_each_s *e) {
   fio___http_hmap_each_info_s *data = (fio___http_hmap_each_info_s *)(e->udata);
   FIO_ARRAY_EACH(fio___http_sary, &e->value, pos) {
     if (data->callback(data->h, e->key, fio_bstr_info(*pos), data->udata) == -1)
@@ -1179,7 +1179,7 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   (void)h;
 }
 
-FIO_SFUNC fio_http_controller_s FIO___MOCK_CONTROLLER = {
+static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .on_destroyed = fio___mock_controller_cb,
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
@@ -1413,7 +1413,7 @@ size_t fio_http_request_header_each(fio_http_s *h,
                                    .callback = callback,
                                    .udata = udata};
   return fio___http_hmap_each(HTTP_HDR_REQUEST(h),
-                              http___h_each_task_wrapper,
+                              fio___http_h_each_task_wrapper,
                               &d,
                               0);
 }
@@ -1430,7 +1430,7 @@ size_t fio_http_response_header_each(
                                    .callback = callback,
                                    .udata = udata};
   return fio___http_hmap_each(HTTP_HDR_RESPONSE(h),
-                              http___h_each_task_wrapper,
+                              fio___http_h_each_task_wrapper,
                               &d,
                               0);
 }

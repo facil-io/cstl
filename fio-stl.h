@@ -361,14 +361,20 @@ typedef SSIZE_T ssize_t;
 Function Attributes
 ***************************************************************************** */
 
-/** Marks a function as `static`, `inline` and possibly unused. */
-#define FIO_IFUNC static inline __attribute__((unused))
-
+#ifndef FIO_SFUNC
 /** Marks a function as `static` and possibly unused. */
 #define FIO_SFUNC static __attribute__((unused))
+#endif
 
+#ifndef FIO_IFUNC
+/** Marks a function as `static`, `inline` and possibly unused. */
+#define FIO_IFUNC FIO_SFUNC inline
+#endif
+
+#ifndef FIO_WEAK
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
+#endif
 
 /* *****************************************************************************
 Constructors and Destructors
@@ -2280,8 +2286,16 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
+#if defined(FIO_PUBSUB)
+#define FIO_CHACHA
+#endif
+
 #if defined(FIO_HTTP_HANDLE)
 #define FIO_SHA1
+#endif
+
+#if defined(FIO_PUBSUB)
+#define FIO_SHA2
 #endif
 
 /* *****************************************************************************
@@ -2494,8 +2508,8 @@ Recursive inclusion management
 #else /* !FIO_EXTERN */
 #undef SFUNC
 #undef IFUNC
-#define SFUNC_ static __attribute__((unused))
-#define IFUNC_ static inline __attribute__((unused))
+#define SFUNC_ FIO_SFUNC
+#define IFUNC_ FIO_IFUNC
 #endif /* FIO_EXTERN */
 
 #undef SFUNC
@@ -2507,8 +2521,8 @@ Recursive inclusion management
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
-#define SFUNC FIO_SFUNC
-#define IFUNC FIO_IFUNC
+#define SFUNC static __attribute__((unused))
+#define IFUNC static inline __attribute__((unused))
 #endif /* SFUNC_ vs FIO___RECURSIVE_INCLUDE*/
 
 /* *****************************************************************************
@@ -2524,7 +2538,7 @@ Leak Counter Helpers
 #undef FIO___LEAK_COUNTER_ON_ALLOC
 #undef FIO___LEAK_COUNTER_ON_FREE
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
-  FIO_SFUNC void FIO_NAME(fio___leak_counter, name)(int i) {                   \
+  static void FIO_NAME(fio___leak_counter, name)(int i) {                      \
     static volatile int counter;                                               \
     fio_atomic_add(&counter, i);                                               \
     if (i)                                                                     \
@@ -2533,7 +2547,7 @@ Leak Counter Helpers
     if (counter)                                                               \
       FIO_LOG_ERROR("%d leaks detected for " FIO_MACRO2STR(name), counter);    \
   }                                                                            \
-  FIO_SFUNC void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {         \
+  static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
     FIO_NAME(fio___leak_counter, name)((int)(uintptr_t)i);                     \
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
@@ -5196,6 +5210,7 @@ Useful math unions.
 ***************************************************************************** */
 /** An unsigned 128bit union type. */
 typedef union {
+  size_t uz[16 / sizeof(size_t)];
   uint64_t u64[2];
   uint32_t u32[4];
   uint16_t u16[8];
@@ -5207,6 +5222,7 @@ typedef union {
 
 /** An unsigned 256bit union type. */
 typedef union {
+  size_t uz[32 / sizeof(size_t)];
   uint64_t u64[4];
   uint32_t u32[8];
   uint16_t u16[16];
@@ -5222,6 +5238,7 @@ typedef union {
 
 /** An unsigned 512bit union type. */
 typedef union {
+  size_t uz[64 / sizeof(size_t)];
   uint64_t u64[8];
   uint32_t u32[16];
   uint16_t u16[32];
@@ -5232,6 +5249,7 @@ typedef union {
 
 /** An unsigned 1024bit union type. */
 typedef union {
+  size_t uz[128 / sizeof(size_t)];
   uint64_t u64[16];
   uint32_t u32[32];
   uint16_t u16[64];
@@ -5243,6 +5261,7 @@ typedef union {
 
 /** An unsigned 2048bit union type. */
 typedef union {
+  size_t uz[256 / sizeof(size_t)];
   uint64_t u64[32];
   uint32_t u32[64];
   uint16_t u16[128];
@@ -5255,6 +5274,7 @@ typedef union {
 
 /** An unsigned 4096bit union type. */
 typedef union {
+  size_t uz[512 / sizeof(size_t)];
   uint64_t u64[64];
   uint32_t u32[128];
   uint16_t u16[256];
@@ -5271,28 +5291,28 @@ FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 #define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
 #define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
 #define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
-#define fio_u128_init64(...) ((fio_u128){.u164 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
 #define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
 #define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
 #define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u164 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
 #define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
 #define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
 #define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u164 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
 
 #define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
 #define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
 #define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u164 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
 #define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
 #define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
 #define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u164 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
 #define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
 #define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
 #define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u164 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -8344,10 +8364,13 @@ finish:
     fio_memcpy4(&s, r.scheme.buf);
     s |= 0x20202020U; /* downcase */
     if (s == file_str || s == unix_str || s == priv_str) {
-      r.path.len = end - (r.scheme.buf + 7);
       r.path.buf = r.scheme.buf + 7;
-      r.user.len = r.password.len = r.port.len = r.host.len = r.query.len =
-          r.target.len = 0;
+      r.path.len = end - (r.scheme.buf + 7);
+      if (r.query.len)
+        r.path.len = r.query.buf - (r.path.buf + 1);
+      else if (r.target.len)
+        r.path.len = r.target.buf - (r.path.buf + 1);
+      r.user.len = r.password.len = r.port.len = r.host.len = 0;
     }
   } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
     r.path.len = end - r.host.buf;
@@ -10260,32 +10283,6 @@ State Callback Global State and Locks
 FIO_WEAK fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
 FIO_WEAK fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
 
-/** a type-to-string map for callback types */
-FIO_SFUNC const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
-    [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
-    [FIO_CALL_PRE_START] = "PRE_START",
-    [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
-    [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
-    [FIO_CALL_IN_CHILD] = "IN_CHILD",
-    [FIO_CALL_IN_MASTER] = "IN_MASTER",
-    [FIO_CALL_ON_START] = "ON_START",
-    [FIO_CALL_RESERVED1] = "RESERVED1",
-    [FIO_CALL_RESERVED2] = "RESERVED2",
-    [FIO_CALL_ON_USER1] = "ON_USER1",
-    [FIO_CALL_ON_USER2] = "ON_USER2",
-    [FIO_CALL_ON_IDLE] = "ON_IDLE",
-    [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
-    [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
-    [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
-    [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
-    [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
-    [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
-    [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
-    [FIO_CALL_ON_FINISH] = "ON_FINISH",
-    [FIO_CALL_AT_EXIT] = "AT_EXIT",
-    [FIO_CALL_NEVER] = "NEVER",
-};
-
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
@@ -10349,6 +10346,32 @@ FIO_SFUNC void fio_state_callback_force___task(void *fn_p, void *arg) {
  * remove other callbacks for the same event).
  */
 SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
+  /** a type-to-string map for callback types */
+  static const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
+      [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
+      [FIO_CALL_PRE_START] = "PRE_START",
+      [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
+      [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
+      [FIO_CALL_IN_CHILD] = "IN_CHILD",
+      [FIO_CALL_IN_MASTER] = "IN_MASTER",
+      [FIO_CALL_ON_START] = "ON_START",
+      [FIO_CALL_RESERVED1] = "RESERVED1",
+      [FIO_CALL_RESERVED2] = "RESERVED2",
+      [FIO_CALL_ON_USER1] = "ON_USER1",
+      [FIO_CALL_ON_USER2] = "ON_USER2",
+      [FIO_CALL_ON_IDLE] = "ON_IDLE",
+      [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
+      [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
+      [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
+      [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
+      [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
+      [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
+      [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
+      [FIO_CALL_ON_FINISH] = "ON_FINISH",
+      [FIO_CALL_AT_EXIT] = "AT_EXIT",
+      [FIO_CALL_NEVER] = "NEVER",
+  };
+
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
   if (e == FIO_CALL_AFTER_FORK) {
@@ -10400,6 +10423,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);
+  (void)fio___state_tasks_names; /* if unused */
 }
 /* *****************************************************************************
 State constructor / destructor
@@ -26971,8 +26995,7 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
   }
 }
 
-/*
- * Given a Poly1305 key, writes a MAC into `mac_dest`. */
+/* Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
                              const void *key,
                              void *restrict msg,
@@ -28148,14 +28171,67 @@ SFUNC int fio_listen(struct fio_listen_args args);
 #define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
 
 /* *****************************************************************************
+Listening to Incoming Connections (v.2)
+***************************************************************************** */
+
+/** Arguments for the fio_listen function */
+struct fio_srv_listen2_args {
+  /**
+   * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
+   *
+   * Note: `.url` accept an optional query for building a TLS context.
+   *
+   * Possible query values include:
+   *
+   * - `tls` or `ssl` (no value): sets TLS as active, possibly self-signed.
+   * - `tls=` or `ssl=`: value is a prefix for "key.pem" and "cert.pem".
+   * - `key=` and `cert=`: file paths for ".pem" files.
+   *
+   * i.e.:
+   *
+   *     fio_srv_listen2(.url = "0.0.0.0:3000/?tls", ...);
+   *     fio_srv_listen2(.url = "0.0.0.0:3000/?tls=./", ...);
+   *     // same as:
+   *     fio_srv_listen2(.url = "0.0.0.0:3000/"
+   *                            "?key=./key.pem"
+   *                            "&cert=./cert.pem", ...);
+   */
+  const char *url;
+  /** The `fio_protocol_s` that will be assigned to incoming connections. */
+  fio_protocol_s *protocol;
+  /** TLS object used for incoming connections. */
+  fio_tls_s *tls;
+  /**
+   * Selects a queue that will be used to schedule a pre-accept task.
+   * May be used to test user thread stress levels before accepting connections.
+   */
+  fio_queue_s *queue_for_accept;
+  /** If the server is forked - listen on the root process instead of workers */
+  uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
+};
+
+/**
+ * Sets up a network service on a listening socket.
+ *
+ * Returns 0 on success or -1 on error.
+ *
+ * See the `fio_listen` Macro for details.
+ */
+SFUNC int fio_srv_listen2(struct fio_srv_listen2_args args);
+#define fio_srv_listen2(...)                                                   \
+  fio_srv_listen2((struct fio_srv_listen2_args){__VA_ARGS__})
+
+/* *****************************************************************************
 Connecting as a Client
 ***************************************************************************** */
 
 /** Connects to a specific URL, returning 0 on success and -1 on error. */
-FIO_IFUNC int fio_connect(const char *url,
-                          fio_protocol_s *protocol,
-                          void *udata,
-                          void *tls);
+FIO_IFUNC int fio_srv_connect(const char *url,
+                              fio_protocol_s *protocol,
+                              void *udata,
+                              void *tls);
 
 /* *****************************************************************************
 IO Operations
@@ -28176,10 +28252,10 @@ IO Operations
  * Returns NULL on error. the `fio_s` pointer must NOT be used except within
  * proper callbacks.
  */
-SFUNC fio_s *fio_attach_fd(int fd,
-                           fio_protocol_s *protocol,
-                           void *udata,
-                           void *tls);
+SFUNC fio_s *fio_srv_attach_fd(int fd,
+                               fio_protocol_s *protocol,
+                               void *udata,
+                               void *tls);
 
 /** Sets a new protocol object. `NULL` is a valid "only-write" protocol. */
 SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
@@ -28687,14 +28763,14 @@ FIO_SERVER_GETSET_FUNC(udata, 0)
 FIO_SERVER_GETSET_FUNC(tls, 1)
 
 /** Connects to a specific URL, returning 0 on success and -1 on error. */
-FIO_IFUNC int fio_connect(const char *url,
-                          fio_protocol_s *protocol,
-                          void *udata,
-                          void *tls) {
+FIO_IFUNC int fio_srv_connect(const char *url,
+                              fio_protocol_s *protocol,
+                              void *udata,
+                              void *tls) {
   int fd = fio_sock_open2(url, FIO_SOCK_CLIENT);
   if (fd == -1)
     return -1;
-  return (0 - !fio_attach_fd(fd, protocol, udata, tls));
+  return (0 - !fio_srv_attach_fd(fd, protocol, udata, tls));
 }
 
 /* *****************************************************************************
@@ -28756,9 +28832,20 @@ static void fio___io_func_default_free_context(void *context) {
   (void)context;
 }
 
-FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
+FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
   pr->reserved.ios = FIO_LIST_INIT(pr->reserved.ios);
+  fio_io_functions_s io_fn = {
+      .build_context = fio___io_func_default_build_context,
+      .free_context = fio___io_func_default_free_context,
+      .start = fio___srv_on_ev_mock,
+      .read = fio___io_func_default_read,
+      .write = fio___io_func_default_write,
+      .flush = fio___io_func_default_flush,
+      .free = fio___srv_on_close_mock,
+  };
+  if (has_tls)
+    io_fn = fio_tls_default_io_functions(NULL);
   if (!pr->on_attach)
     pr->on_attach = fio___srv_on_ev_mock;
   if (!pr->on_data)
@@ -28772,27 +28859,27 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr) {
   if (!pr->on_timeout)
     pr->on_timeout = fio___srv_on_ev_on_timeout;
   if (!pr->io_functions.build_context)
-    pr->io_functions.build_context = fio___io_func_default_build_context;
+    pr->io_functions.build_context = io_fn.build_context;
   if (!pr->io_functions.free_context)
-    pr->io_functions.free_context = fio___io_func_default_free_context;
+    pr->io_functions.free_context = io_fn.free_context;
   if (!pr->io_functions.start)
-    pr->io_functions.start = fio___srv_on_ev_mock;
+    pr->io_functions.start = io_fn.start;
   if (!pr->io_functions.read)
-    pr->io_functions.read = fio___io_func_default_read;
+    pr->io_functions.read = io_fn.read;
   if (!pr->io_functions.write)
-    pr->io_functions.write = fio___io_func_default_write;
+    pr->io_functions.write = io_fn.write;
   if (!pr->io_functions.flush)
-    pr->io_functions.flush = fio___io_func_default_flush;
+    pr->io_functions.flush = io_fn.flush;
   if (!pr->io_functions.free)
-    pr->io_functions.free = fio___srv_on_close_mock;
+    pr->io_functions.free = io_fn.free;
 }
 
 /* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
 static fio_protocol_s FIO___MOCK_PROTOCOL;
 
-FIO_IFUNC void fio___srv_init_protocol_test(fio_protocol_s *pr) {
+FIO_IFUNC void fio___srv_init_protocol_test(fio_protocol_s *pr, _Bool has_tls) {
   if (!fio_atomic_or(&pr->reserved.flags, 1))
-    fio___srv_init_protocol(pr);
+    fio___srv_init_protocol(pr, has_tls);
 }
 
 /* *****************************************************************************
@@ -28986,10 +29073,10 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
   fio_sock_set_non_block(fds[0]);
   fio_sock_set_non_block(fds[1]);
   fio___srvdata.wakeup_fd = fds[1];
-  fio___srvdata.wakeup = fio_attach_fd(fds[0],
-                                       &FIO___SRV_WAKEUP_PROTOCOL,
-                                       (void *)(uintptr_t)fds[1],
-                                       NULL);
+  fio___srvdata.wakeup = fio_srv_attach_fd(fds[0],
+                                           &FIO___SRV_WAKEUP_PROTOCOL,
+                                           (void *)(uintptr_t)fds[1],
+                                           NULL);
   FIO_LOG_DEBUG2("(%d) fio___srv_wakeup initialized", fio___srvdata.pid);
 }
 
@@ -29183,7 +29270,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
 SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   if (!pr)
     pr = &FIO___MOCK_PROTOCOL;
-  fio___srv_init_protocol_test(pr);
+  fio___srv_init_protocol_test(pr, !!io->tls);
   fio_protocol_s *old = io->pr;
   if (pr == old)
     return NULL;
@@ -29197,15 +29284,15 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
 SFUNC fio_protocol_s *fio_protocol_get(fio_s *io) { return io->pr; }
 
 /* Attaches the socket in `fd` to the facio.io engine (reactor). */
-SFUNC fio_s *fio_attach_fd(int fd,
-                           fio_protocol_s *protocol,
-                           void *udata,
-                           void *tls) {
+SFUNC fio_s *fio_srv_attach_fd(int fd,
+                               fio_protocol_s *protocol,
+                               void *udata,
+                               void *tls) {
   fio_s *io = NULL;
   fio_protocol_s *old = NULL;
   if (!protocol)
     protocol = &FIO___MOCK_PROTOCOL;
-  fio___srv_init_protocol_test(protocol);
+  fio___srv_init_protocol_test(protocol, !!tls);
   if (fd == -1)
     goto error;
   io = fio_new2();
@@ -29946,7 +30033,7 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
                  (int)fio___srvdata.pid,
                  *pfd,
                  fd);
-  fio_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  fio_srv_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
   if (l->hide_from_log)
@@ -30024,6 +30111,156 @@ other_error:
 }
 
 /* *****************************************************************************
+Listening to Incoming Connections (v.2)
+***************************************************************************** */
+
+// struct fio_listen2_args {
+//   /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
+//   const char *url;
+//   /** The `fio_protocol_s` that will be assigned to incoming connections. */
+//   const fio_protocol_s *protocol;
+//   /** TLS object used for incoming connections. */
+//   fio_tls_s *tls;
+//   /**
+//    * Selects a queue that will be used to schedule a pre-accept task.
+//    * May be used to test user thread stress levels before accepting
+//    connections.
+//    */
+//   fio_queue_s *queue_for_accept;
+//   /** If the server is forked - listen on the root process instead of workers
+//   */ uint8_t on_root;
+//   /** Hides "started/stopped listening" messages from log (if set). */
+//   uint8_t hide_from_log;
+// };
+
+typedef struct {
+  fio_protocol_s *protocol;
+  void *tls_ctx;
+  fio_queue_s *queue_for_accept;
+  size_t url_len;
+  uint8_t hide_from_log;
+  char url[];
+} fio___srv_listen2_s;
+
+int fio_srv_listen2___(void); /* IDE marker */
+
+/**
+ * Sets up a network service on a listening socket.
+ *
+ * Returns 0 on success or -1 on error.
+ *
+ * See the `fio_listen` Macro for details.
+ */
+SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
+  fio_tls_s *ntls = NULL;
+  void *built_tls = NULL;
+  FIO_STR_INFO_TMP_VAR(url_alt, 64);
+  if (!args.protocol) {
+    FIO_LOG_ERROR("fio_srv_listen requires a protocol to be assigned.");
+    return -1;
+  }
+  if (args.on_root && !fio_srv_is_master()) {
+    FIO_LOG_ERROR("fio_srv_listen called with `on_root` by a non-root worker.");
+    return -1;
+  }
+
+  if (!args.url) { /* if no URL is given use 0.0.0.0:3000 as default */
+    static size_t port_counter = 3000;
+    size_t port = fio_atomic_add_fetch(&port_counter, 1);
+    fio_string_write2(&url_alt,
+                      NULL,
+                      FIO_STRING_WRITE_STR2("0.0.0.0:", 8),
+                      FIO_STRING_WRITE_NUM(port));
+    args.url = url_alt.buf;
+  } else
+    url_alt.len = strlen(args.url);
+  fio_url_s url = fio_url_parse(args.url, url_alt.len);
+
+  if (url.query.len) { /* test for TLS keywords in URL query */
+    fio_buf_info_s key = {0};
+    fio_buf_info_s cert = {0};
+    fio_buf_info_s q = url.query;
+    do { /* loop every key=value in `query` */
+      char *end = (char *)FIO_MEMCHR(q.buf, '&', q.len);
+      _Bool tls = 0;
+      if (!end)
+        end = q.buf + q.len;
+      if (end - q.buf == 3) { /* tls / ssl standalone? */
+        if (((q.buf[0] | 32) == 't' && (q.buf[1] | 32) == 'l' &&
+             (q.buf[2] | 32) == 's') ||
+            ((q.buf[0] | 32) == 's' && (q.buf[1] | 32) == 's' &&
+             (q.buf[2] | 32) == 'l')) {
+          tls = 1;
+        }
+      } else if (end - q.buf > 4) { /* cert= / key= / tls= / ssl= */
+        if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("cert") &&
+            q.buf[4] == '=')
+          cert = FIO_BUF_INFO2((q.buf + 5), (size_t)(end - (q.buf + 5)));
+        else if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("key="))
+          key = FIO_BUF_INFO2((q.buf + 4), (size_t)(end - (q.buf + 4)));
+        else if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("tls=") ||
+                 (fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("ssl="))
+          key = cert = FIO_BUF_INFO2((q.buf + 4), (size_t)(end - (q.buf + 4)));
+      }
+      if (!args.tls && (tls || key.buf || cert.buf))
+        ntls = args.tls = fio_tls_new();
+      if (key.buf && cert.buf) {
+        if (key.len < 124 && cert.len < 124) {
+          FIO_STR_INFO_TMP_VAR(key_tmp, 128);
+          FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
+          fio_string_write(&key_tmp, NULL, key.buf, key.len);
+          fio_string_write(&cert_tmp, NULL, cert.buf, cert.len);
+          if (key.buf == cert.buf) { /* assume value is prefix / folder */
+            fio_string_write(&key_tmp, NULL, "key.pem", 7);
+            fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
+          } else {
+            if (key.len < 5 || (fio_buf2u32u(key.buf + (key.len - 4)) |
+                                0x20202020UL) != fio_buf2u32u(".pem"))
+              fio_string_write(&key_tmp, NULL, ".pem", 4);
+            if (cert.len < 5 || (fio_buf2u32u(cert.buf + (cert.len - 4)) |
+                                 0x20202020UL) != fio_buf2u32u(".pem"))
+              fio_string_write(&cert_tmp, NULL, ".pem", 4);
+          }
+          fio_tls_cert_add(args.tls, NULL, cert.buf, key.buf, NULL);
+        } else {
+          FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
+                        "construct TLS object separately");
+        }
+        key = cert = FIO_BUF_INFO2(NULL, 0);
+      }
+      end += end < (q.buf + q.len); /* *end == `&`, but without overflow */
+      q.len = (q.buf + q.len) - end;
+      q.buf = end;
+    } while (q.len);
+  }
+  fio___srv_init_protocol_test(args.protocol, !!args.tls);
+  built_tls = args.protocol->io_functions.build_context(args.tls, 0);
+  // url.
+  fio_buf_info_s url_buf = FIO_BUF_INFO2((char *)args.url, url_alt.len);
+  /* remove query details from URL */
+  if (url.query.len)
+    url_buf.len = url.query.buf - (url_buf.buf + 1);
+  else if (url.target.len)
+    url_buf.len = url.target.buf - (url_buf.buf + 1);
+  fio___srv_listen2_s *l = (fio___srv_listen2_s *)
+      FIO_MEM_REALLOC_(NULL, 0, sizeof(*l) + url_buf.len + 1, 0);
+  *l = (fio___srv_listen2_s){
+      .protocol = args.protocol,
+      .tls_ctx = built_tls,
+      .queue_for_accept = args.queue_for_accept,
+      .url_len = url_buf.len,
+      .hide_from_log = args.hide_from_log,
+  };
+  FIO_MEMCPY((l + 1), url_buf.buf, url_buf.len);
+  l->url[l->url_len] = 0;
+
+  args.protocol->io_functions.free_context(built_tls); /* until resolved */
+  FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);       /* until resolved */
+  fio_tls_free(ntls);
+  return -1;
+}
+
+/* *****************************************************************************
 Managing data after a fork
 ***************************************************************************** */
 FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
@@ -30061,8 +30298,8 @@ FIO_CONSTRUCTOR(fio___srv) {
                 .on_data = fio___srv_poll_on_data_schd,
                 .on_ready = fio___srv_poll_on_ready_schd,
                 .on_close = fio___srv_poll_on_close_schd);
-  fio___srv_init_protocol_test(&FIO___MOCK_PROTOCOL);
-  fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL);
+  fio___srv_init_protocol_test(&FIO___MOCK_PROTOCOL, 0);
+  fio___srv_init_protocol_test(&FIO___LISTEN_PROTOCOL, 0);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___srv_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_cleanup_at_exit, NULL);
 }
@@ -30653,7 +30890,7 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
     SSL_CTX_set_default_passwd_cb(s->ctx, NULL);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, NULL);
   } else { /* self signed */
-    if (!server_name)
+    if (!server_name || !strlen(server_name))
       server_name = (const char *)"localhost";
     X509 *cert = fio_tls_create_self_signed(server_name);
     SSL_CTX_use_certificate(s->ctx, cert);
@@ -31270,7 +31507,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func);
 
 /* *****************************************************************************
- * Cluster / Pub/Sub Middleware and Extensions ("Engines")
+ * Pub/Sub Middleware and Extensions ("Engines")
  **************************************************************************** */
 
 /**
@@ -31346,11 +31583,23 @@ SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine);
 /** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 
+/* *****************************************************************************
+ * Pub/Sub Clustering and Security
+ **************************************************************************** */
+
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void);
+
+/**
+ * Sets a (possibly shared) secret for securing pub/sub communication.
+ *
+ * If `secret` is `NULL`, the environment variable `"SECRET"` will be used or,
+ * if not set, a random secret will be generated.
+ */
+SFUNC void fio_pubsub_secret_set(char *secret, size_t len);
 
 /* *****************************************************************************
 
@@ -31679,6 +31928,7 @@ static struct FIO_POSTOFFICE {
   FIO_LIST_NODE engines;
   fio_protocol_s *siblings_protocol;
   fio___postoffice_msmap_s master_subscriptions;
+  size_t secret[32 / sizeof(size_t)];
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
@@ -31694,21 +31944,20 @@ static struct FIO_POSTOFFICE {
     .remote_send_filter = FIO___PUBSUB_REMOTE,
 };
 
-/** Callback called when entering a child
- * processes. */
+/** Callback called when entering a child processes. */
 FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
 /* *****************************************************************************
 
 
 
                           Letter Metadata
-Implementation
+                          Implementation
 
 
 
 ***************************************************************************** */
 
-FIO_SFUNC struct {
+static struct {
   fio_msg_metadata_fn build;
   void (*cleanup)(void *);
   size_t ref;
@@ -32045,7 +32294,7 @@ Remote Letter Processing - validate unique delivery.
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
-FIO_SFUNC struct {
+static struct {
   fio___letter_map_s map;
 } fio___letter_validation = {
     .map = FIO_MAP_INIT,
@@ -32153,7 +32402,7 @@ Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
 FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
-  fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
+  fio_srv_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
 #if defined(DEBUG)
@@ -32660,10 +32909,32 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void) { return FIO_POSTOFFICE.ipc_url; }
 
+/** Sets a (possibly shared) secret for securing pub/sub communication. */
+SFUNC void fio_pubsub_secret_set(char *str, size_t len) {
+  uint64_t fallback_secret = 0;
+  if (!str || !len) {
+    if ((str = getenv("SECRET"))) {
+      len = strlen(str);
+    } else {
+      fallback_secret = fio_rand64();
+      str = (char *)&fallback_secret;
+      len = sizeof(fallback_secret);
+    }
+  }
+  fio_u256 scrt = fio_sha256(str, len);
+  FIO_ASSERT(sizeof(scrt) == sizeof(FIO_POSTOFFICE.secret),
+             "(pubsub) secret length error!");
+  for (size_t i = 0;
+       i < sizeof(FIO_POSTOFFICE.secret) / sizeof(FIO_POSTOFFICE.secret[0]);
+       ++i)
+    FIO_POSTOFFICE.secret[i] = scrt.uz[i];
+}
+
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
   fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
+  fio_pubsub_secret_set(NULL, 0); /* allocate a random secret */
   fio_string_write2(&url,
                     NULL,
                     FIO_STRING_WRITE_STR1((char *)"priv://facil_io_tmp_"),
@@ -32693,10 +32964,10 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
-  if (fio_connect(FIO_POSTOFFICE.ipc_url,
-                  &FIO_LETTER_PROTOCOL_IPC_CHILD,
-                  NULL,
-                  NULL)) {
+  if (fio_srv_connect(FIO_POSTOFFICE.ipc_url,
+                      &FIO_LETTER_PROTOCOL_IPC_CHILD,
+                      NULL,
+                      NULL)) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);
@@ -33966,7 +34237,7 @@ typedef struct {
   void *udata;
 } fio___http_hmap_each_info_s;
 
-FIO_SFUNC int http___h_each_task_wrapper(fio___http_hmap_each_s *e) {
+FIO_SFUNC int fio___http_h_each_task_wrapper(fio___http_hmap_each_s *e) {
   fio___http_hmap_each_info_s *data = (fio___http_hmap_each_info_s *)(e->udata);
   FIO_ARRAY_EACH(fio___http_sary, &e->value, pos) {
     if (data->callback(data->h, e->key, fio_bstr_info(*pos), data->udata) == -1)
@@ -34010,7 +34281,7 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   (void)h;
 }
 
-FIO_SFUNC fio_http_controller_s FIO___MOCK_CONTROLLER = {
+static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .on_destroyed = fio___mock_controller_cb,
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
@@ -34244,7 +34515,7 @@ size_t fio_http_request_header_each(fio_http_s *h,
                                    .callback = callback,
                                    .udata = udata};
   return fio___http_hmap_each(HTTP_HDR_REQUEST(h),
-                              http___h_each_task_wrapper,
+                              fio___http_h_each_task_wrapper,
                               &d,
                               0);
 }
@@ -34261,7 +34532,7 @@ size_t fio_http_response_header_each(
                                    .callback = callback,
                                    .udata = udata};
   return fio___http_hmap_each(HTTP_HDR_RESPONSE(h),
-                              http___h_each_task_wrapper,
+                              fio___http_h_each_task_wrapper,
                               &d,
                               0);
 }
@@ -37024,7 +37295,7 @@ FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 SFUNC fio_s *fio_http_io(fio_http_s *);
 
 /** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-SFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
+FIO_IFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
 /** Subscribes the HTTP handle (WebSocket / SSE) to events. */
 #define fio_http_subscribe(h, ...)                                             \
   fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
@@ -37199,6 +37470,10 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
     s->timeout = FIO_HTTP_DEFAULT_TIMEOUT;
   if (!s->ws_timeout)
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
+
+  if (s->max_header_size < s->max_line_len)
+    s->max_header_size = s->max_line_len;
+
   if (s->public_folder.buf) {
     if (s->public_folder.len > 1 &&
         s->public_folder.buf[s->public_folder.len - 1] == '/' &&
@@ -37341,10 +37616,10 @@ FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
       .capa = capa,
       .log = p->settings.log,
   };
-  c->io = fio_attach_fd(fd,
-                        &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                        (void *)c,
-                        p->tls_ctx);
+  c->io = fio_srv_attach_fd(fd,
+                            &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                            (void *)c,
+                            p->tls_ctx);
   FIO_ASSERT_ALLOC(c->io);
   FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
                   (int)fio_thread_getpid(),
@@ -47118,6 +47393,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
               {
                   .scheme = {.buf = (char *)"unix", .len = 4},
                   .path = {.buf = (char *)"/go/home/", .len = 9},
+              },
+      },
+      {
+          .url = (char *)"unix:///go/home/?query#target",
+          .len = 29,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"unix", .len = 4},
+                  .path = {.buf = (char *)"/go/home/", .len = 9},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
               },
       },
       {

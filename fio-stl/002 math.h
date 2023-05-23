@@ -28,6 +28,7 @@ Useful math unions.
 ***************************************************************************** */
 /** An unsigned 128bit union type. */
 typedef union {
+  size_t uz[16 / sizeof(size_t)];
   uint64_t u64[2];
   uint32_t u32[4];
   uint16_t u16[8];
@@ -39,6 +40,7 @@ typedef union {
 
 /** An unsigned 256bit union type. */
 typedef union {
+  size_t uz[32 / sizeof(size_t)];
   uint64_t u64[4];
   uint32_t u32[8];
   uint16_t u16[16];
@@ -54,6 +56,7 @@ typedef union {
 
 /** An unsigned 512bit union type. */
 typedef union {
+  size_t uz[64 / sizeof(size_t)];
   uint64_t u64[8];
   uint32_t u32[16];
   uint16_t u16[32];
@@ -64,6 +67,7 @@ typedef union {
 
 /** An unsigned 1024bit union type. */
 typedef union {
+  size_t uz[128 / sizeof(size_t)];
   uint64_t u64[16];
   uint32_t u32[32];
   uint16_t u16[64];
@@ -75,6 +79,7 @@ typedef union {
 
 /** An unsigned 2048bit union type. */
 typedef union {
+  size_t uz[256 / sizeof(size_t)];
   uint64_t u64[32];
   uint32_t u32[64];
   uint16_t u16[128];
@@ -87,6 +92,7 @@ typedef union {
 
 /** An unsigned 4096bit union type. */
 typedef union {
+  size_t uz[512 / sizeof(size_t)];
   uint64_t u64[64];
   uint32_t u32[128];
   uint16_t u16[256];
@@ -103,28 +109,28 @@ FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 #define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
 #define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
 #define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
-#define fio_u128_init64(...) ((fio_u128){.u164 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
 #define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
 #define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
 #define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u164 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
 #define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
 #define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
 #define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u164 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
 
 #define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
 #define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
 #define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u164 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
 #define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
 #define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
 #define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u164 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
 #define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
 #define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
 #define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u164 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.

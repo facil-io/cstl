@@ -141,8 +141,8 @@ Recursive inclusion management
 #else /* !FIO_EXTERN */
 #undef SFUNC
 #undef IFUNC
-#define SFUNC_ static __attribute__((unused))
-#define IFUNC_ static inline __attribute__((unused))
+#define SFUNC_ FIO_SFUNC
+#define IFUNC_ FIO_IFUNC
 #endif /* FIO_EXTERN */
 
 #undef SFUNC
@@ -154,8 +154,8 @@ Recursive inclusion management
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
-#define SFUNC FIO_SFUNC
-#define IFUNC FIO_IFUNC
+#define SFUNC static __attribute__((unused))
+#define IFUNC static inline __attribute__((unused))
 #endif /* SFUNC_ vs FIO___RECURSIVE_INCLUDE*/
 
 /* *****************************************************************************
@@ -171,7 +171,7 @@ Leak Counter Helpers
 #undef FIO___LEAK_COUNTER_ON_ALLOC
 #undef FIO___LEAK_COUNTER_ON_FREE
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
-  FIO_SFUNC void FIO_NAME(fio___leak_counter, name)(int i) {                   \
+  static void FIO_NAME(fio___leak_counter, name)(int i) {                      \
     static volatile int counter;                                               \
     fio_atomic_add(&counter, i);                                               \
     if (i)                                                                     \
@@ -180,7 +180,7 @@ Leak Counter Helpers
     if (counter)                                                               \
       FIO_LOG_ERROR("%d leaks detected for " FIO_MACRO2STR(name), counter);    \
   }                                                                            \
-  FIO_SFUNC void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {         \
+  static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
     FIO_NAME(fio___leak_counter, name)((int)(uintptr_t)i);                     \
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \

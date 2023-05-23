@@ -79,6 +79,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
               },
       },
       {
+          .url = (char *)"unix:///go/home/?query#target",
+          .len = 29,
+          .expected =
+              {
+                  .scheme = {.buf = (char *)"unix", .len = 4},
+                  .path = {.buf = (char *)"/go/home/", .len = 9},
+                  .query = {.buf = (char *)"query", .len = 5},
+                  .target = {.buf = (char *)"target", .len = 6},
+              },
+      },
+      {
           .url = (char *)"schema://user:password@host:port/path?query#target",
           .len = 50,
           .expected =

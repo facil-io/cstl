@@ -68,7 +68,7 @@ FIO_IFUNC void client_free(client_s *c) {
 
 /** Called when a new connection is created. */
 FIO_SFUNC void on_open(int fd, void *udata) {
-  fio_s *io = fio_attach_fd(fd, &CHAT_PROTOCOL_LOGIN, client_new(), udata);
+  fio_s *io = fio_srv_attach_fd(fd, &CHAT_PROTOCOL_LOGIN, client_new(), udata);
   if (fio_cli_get_bool("-v"))
     FIO_LOG_INFO("(%d) %p connected", getpid(), (void *)io);
 }

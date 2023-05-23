@@ -320,7 +320,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
                                  fio_msg_metadata_fn metadata_func);
 
 /* *****************************************************************************
- * Cluster / Pub/Sub Middleware and Extensions ("Engines")
+ * Pub/Sub Middleware and Extensions ("Engines")
  **************************************************************************** */
 
 /**
@@ -396,11 +396,23 @@ SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine);
 /** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 
+/* *****************************************************************************
+ * Pub/Sub Clustering and Security
+ **************************************************************************** */
+
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void);
+
+/**
+ * Sets a (possibly shared) secret for securing pub/sub communication.
+ *
+ * If `secret` is `NULL`, the environment variable `"SECRET"` will be used or,
+ * if not set, a random secret will be generated.
+ */
+SFUNC void fio_pubsub_secret_set(char *secret, size_t len);
 
 /* *****************************************************************************
 
@@ -729,6 +741,7 @@ static struct FIO_POSTOFFICE {
   FIO_LIST_NODE engines;
   fio_protocol_s *siblings_protocol;
   fio___postoffice_msmap_s master_subscriptions;
+  size_t secret[32 / sizeof(size_t)];
   uint8_t publish_filter;
   uint8_t local_send_filter;
   uint8_t remote_send_filter;
@@ -744,21 +757,20 @@ static struct FIO_POSTOFFICE {
     .remote_send_filter = FIO___PUBSUB_REMOTE,
 };
 
-/** Callback called when entering a child
- * processes. */
+/** Callback called when entering a child processes. */
 FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_);
 /* *****************************************************************************
 
 
 
                           Letter Metadata
-Implementation
+                          Implementation
 
 
 
 ***************************************************************************** */
 
-FIO_SFUNC struct {
+static struct {
   fio_msg_metadata_fn build;
   void (*cleanup)(void *);
   size_t ref;
@@ -1095,7 +1107,7 @@ Remote Letter Processing - validate unique delivery.
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
-FIO_SFUNC struct {
+static struct {
   fio___letter_map_s map;
 } fio___letter_validation = {
     .map = FIO_MAP_INIT,
@@ -1203,7 +1215,7 @@ Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
 FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
-  fio_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
+  fio_srv_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
 }
 
 #if defined(DEBUG)
@@ -1710,10 +1722,32 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void) { return FIO_POSTOFFICE.ipc_url; }
 
+/** Sets a (possibly shared) secret for securing pub/sub communication. */
+SFUNC void fio_pubsub_secret_set(char *str, size_t len) {
+  uint64_t fallback_secret = 0;
+  if (!str || !len) {
+    if ((str = getenv("SECRET"))) {
+      len = strlen(str);
+    } else {
+      fallback_secret = fio_rand64();
+      str = (char *)&fallback_secret;
+      len = sizeof(fallback_secret);
+    }
+  }
+  fio_u256 scrt = fio_sha256(str, len);
+  FIO_ASSERT(sizeof(scrt) == sizeof(FIO_POSTOFFICE.secret),
+             "(pubsub) secret length error!");
+  for (size_t i = 0;
+       i < sizeof(FIO_POSTOFFICE.secret) / sizeof(FIO_POSTOFFICE.secret[0]);
+       ++i)
+    FIO_POSTOFFICE.secret[i] = scrt.uz[i];
+}
+
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO_POSTOFFICE.engines = FIO_LIST_INIT(FIO_POSTOFFICE.engines);
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER;
   fio_str_info_s url = FIO_STR_INFO3(FIO_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
+  fio_pubsub_secret_set(NULL, 0); /* allocate a random secret */
   fio_string_write2(&url,
                     NULL,
                     FIO_STRING_WRITE_STR1((char *)"priv://facil_io_tmp_"),
@@ -1743,10 +1777,10 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
-  if (fio_connect(FIO_POSTOFFICE.ipc_url,
-                  &FIO_LETTER_PROTOCOL_IPC_CHILD,
-                  NULL,
-                  NULL)) {
+  if (fio_srv_connect(FIO_POSTOFFICE.ipc_url,
+                      &FIO_LETTER_PROTOCOL_IPC_CHILD,
+                      NULL,
+                      NULL)) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);

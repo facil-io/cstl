@@ -210,7 +210,7 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
     SSL_CTX_set_default_passwd_cb(s->ctx, NULL);
     SSL_CTX_set_default_passwd_cb_userdata(s->ctx, NULL);
   } else { /* self signed */
-    if (!server_name)
+    if (!server_name || !strlen(server_name))
       server_name = (const char *)"localhost";
     X509 *cert = fio_tls_create_self_signed(server_name);
     SSL_CTX_use_certificate(s->ctx, cert);
