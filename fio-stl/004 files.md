@@ -76,7 +76,7 @@ Since some systems have a limit on the number of bytes that can be read at a tim
 
 If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
 
-**Note**: may (or may not) change the reading position, depending on the OS.
+**Note**: may (or may not) change the file's pointer (reading/writing position), depending on the OS.
 
 #### `fio_filename_parse`
 

@@ -68,7 +68,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.05"
+#define FIO_VERSION_BUILD "alpha.06"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -8126,6 +8126,49 @@ typedef struct {
  * NOTE: the `unix`, `file` and `priv` schemas are reserved for file paths.
  */
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len);
+
+/** The type used by the `FIO_URL_QUERY_EACH` iterator macro. */
+typedef struct {
+  fio_buf_info_s name;
+  fio_buf_info_s value;
+  fio_buf_info_s private___;
+} fio_url_query_each_s;
+
+/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
+FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
+
+/** Iterates through each of the query elements. */
+#define FIO_URL_QUERY_EACH(query_buf, i)                                       \
+  for (fio_url_query_each_s i = fio_url_query_each_next(                       \
+           (fio_url_query_each_s){.private___ = (query_buf)});                 \
+       i.name.buf;                                                             \
+       i = fio_url_query_each_next(i))
+
+/* *****************************************************************************
+FIO_URL - Implementation (static)
+***************************************************************************** */
+
+/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
+FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
+  i.name = i.private___;
+  char *amp = (char *)FIO_MEMCHR(i.name.buf, '&', i.name.len);
+  if (amp) {
+    i.name.len = amp - i.name.buf;
+    i.private___.len -= i.name.len + 1;
+    i.private___.buf += i.name.len + 1;
+  } else {
+    i.private___ = FIO_BUF_INFO2(NULL, 0);
+  }
+  char *equ = (char *)FIO_MEMCHR(i.name.buf, '=', i.name.len);
+  if (equ) {
+    i.value.buf = equ + 1;
+    i.value.len = (i.name.buf + i.name.len) - i.value.buf;
+    i.name.len = equ - i.name.buf;
+  } else {
+    i.value = FIO_BUF_INFO2(NULL, 0);
+  }
+  return i;
+}
 
 /* *****************************************************************************
 FIO_URL - Implementation
@@ -28130,7 +28173,74 @@ Listening to Incoming Connections
 ***************************************************************************** */
 
 /** Arguments for the fio_listen function */
-struct fio_listen_args {
+struct fio_srv_listen_args {
+  /**
+   * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
+   *
+   * Note: `.url` accept an optional query for building a TLS context.
+   *
+   * Possible query values include:
+   *
+   * - `tls` or `ssl` (no value): sets TLS as active, possibly self-signed.
+   * - `tls=` or `ssl=`: value is a prefix for "key.pem" and "cert.pem".
+   * - `key=` and `cert=`: file paths for ".pem" files.
+   *
+   * i.e.:
+   *
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls", ...);
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls=./", ...);
+   *     // same as:
+   *     fio_srv_listen(.url = "0.0.0.0:3000/"
+   *                            "?key=./key.pem"
+   *                            "&cert=./cert.pem", ...);
+   */
+  const char *url;
+  /** The `fio_protocol_s` that will be assigned to incoming connections. */
+  fio_protocol_s *protocol;
+  /** The default `udata` set for (new) incoming connections. */
+  void *udata;
+  /** TLS object used for incoming connections (ownership moved to listener). */
+  fio_tls_s *tls;
+  /**
+   * Called when the a listening socket starts to listen.
+   *
+   * May be called multiple times (i.e., if the server stops and starts again).
+   */
+  void (*on_start)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Called during listener cleanup.
+   *
+   * This will be called separately for every process before exiting.
+   */
+  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Selects a queue that will be used to schedule a pre-accept task.
+   * May be used to test user thread stress levels before accepting connections.
+   */
+  fio_queue_s *queue_for_accept;
+  /** If the server is forked - listen on the root process instead of workers */
+  uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
+};
+
+/**
+ * Sets up a network service on a listening socket.
+ *
+ * Returns a self-destructible listener handle on success or NULL on error.
+ */
+SFUNC void *fio_srv_listen(struct fio_srv_listen_args args);
+#define fio_srv_listen(...)                                                    \
+  fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
+
+SFUNC void fio_srv_listen_stop(void *listener);
+
+/* *****************************************************************************
+Listening to Incoming Connections
+***************************************************************************** */
+#if 0
+/** Arguments for the fio_listen function */
+struct fio_srv_listen2_args {
   /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
   const char *url;
   /**
@@ -28165,64 +28275,12 @@ struct fio_listen_args {
  *
  * Returns 0 on success or -1 on error.
  *
- * See the `fio_listen` Macro for details.
- */
-SFUNC int fio_listen(struct fio_listen_args args);
-#define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
-
-/* *****************************************************************************
-Listening to Incoming Connections (v.2)
-***************************************************************************** */
-
-/** Arguments for the fio_listen function */
-struct fio_srv_listen2_args {
-  /**
-   * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
-   *
-   * Note: `.url` accept an optional query for building a TLS context.
-   *
-   * Possible query values include:
-   *
-   * - `tls` or `ssl` (no value): sets TLS as active, possibly self-signed.
-   * - `tls=` or `ssl=`: value is a prefix for "key.pem" and "cert.pem".
-   * - `key=` and `cert=`: file paths for ".pem" files.
-   *
-   * i.e.:
-   *
-   *     fio_srv_listen2(.url = "0.0.0.0:3000/?tls", ...);
-   *     fio_srv_listen2(.url = "0.0.0.0:3000/?tls=./", ...);
-   *     // same as:
-   *     fio_srv_listen2(.url = "0.0.0.0:3000/"
-   *                            "?key=./key.pem"
-   *                            "&cert=./cert.pem", ...);
-   */
-  const char *url;
-  /** The `fio_protocol_s` that will be assigned to incoming connections. */
-  fio_protocol_s *protocol;
-  /** TLS object used for incoming connections. */
-  fio_tls_s *tls;
-  /**
-   * Selects a queue that will be used to schedule a pre-accept task.
-   * May be used to test user thread stress levels before accepting connections.
-   */
-  fio_queue_s *queue_for_accept;
-  /** If the server is forked - listen on the root process instead of workers */
-  uint8_t on_root;
-  /** Hides "started/stopped listening" messages from log (if set). */
-  uint8_t hide_from_log;
-};
-
-/**
- * Sets up a network service on a listening socket.
- *
- * Returns 0 on success or -1 on error.
- *
- * See the `fio_listen` Macro for details.
+ * See the `fio_srv_listen2` Macro for details.
  */
 SFUNC int fio_srv_listen2(struct fio_srv_listen2_args args);
 #define fio_srv_listen2(...)                                                   \
   fio_srv_listen2((struct fio_srv_listen2_args){__VA_ARGS__})
-
+#endif
 /* *****************************************************************************
 Connecting as a Client
 ***************************************************************************** */
@@ -28471,13 +28529,13 @@ struct fio_protocol_s {
     /* internal flags - do NOT alter after initial initialization to zero. */
     uintptr_t flags;
   } reserved;
-  /** Called when an IO is attached to a protocol. */
+  /** Called when an IO is attached to the protocol. */
   void (*on_attach)(fio_s *io);
   /** Called when a data is available. */
   void (*on_data)(fio_s *io);
   /** called once all pending `fio_write` calls are finished. */
   void (*on_ready)(fio_s *io);
-  /** Called after the connection was closed, and pending tasks completed. */
+  /** Called after the connection was closed (called once per IO). */
   void (*on_close)(void *udata);
   /**
    * Called when the server is shutting down, immediately before closing the
@@ -28738,8 +28796,8 @@ FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
 /**
  * Initializes an async server queue for multi-threaded (non IO) tasks.
  *
- * This can function can only be called from the server's thread (or the thread
- * that will eventually run the server).
+ * This function can only be called from the server's thread (or the thread that
+ * will eventually run the server).
  */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 
@@ -28818,6 +28876,8 @@ static int fio___io_func_default_flush(int fd, void *tls) {
 /** Builds a local TLS context out of the fio_tls_s object. */
 static void *fio___io_func_default_build_context(fio_tls_s *tls,
                                                  uint8_t is_client) {
+  if (!tls)
+    return NULL;
   FIO_ASSERT(0,
              "SSL/TLS `build_context` was called, but no SSL/TLS "
              "implementation found.");
@@ -28826,6 +28886,8 @@ static void *fio___io_func_default_build_context(fio_tls_s *tls,
 }
 /** Builds a local TLS context out of the fio_tls_s object. */
 static void fio___io_func_default_free_context(void *context) {
+  if (!context)
+    return;
   FIO_ASSERT(0,
              "SSL/TLS `free_context` was called, but no SSL/TLS "
              "implementation found.");
@@ -29960,24 +30022,24 @@ SFUNC int fio_is_open(fio_s *io) {
 /* *****************************************************************************
 Listening
 ***************************************************************************** */
-
-static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
+#if 0
+static void fio___srv_listen2_on_data_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
   int fd;
-  struct fio_listen_args *l = (struct fio_listen_args *)(io->udata);
+  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)(io->udata);
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
     l->on_open(fd, l->udata);
   }
   fio_free2(io);
 }
 static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
-  fio_queue_push(fio___srv_tasks, fio___srv_listen_on_data_task, io_, ignr_);
+  fio_queue_push(fio___srv_tasks, fio___srv_listen2_on_data_task, io_, ignr_);
 }
 
-static void fio___srv_listen_on_data(fio_s *io) {
+static void fio___srv_listen2_on_data(fio_s *io) {
   int fd;
-  struct fio_listen_args *l = (struct fio_listen_args *)(io->udata);
+  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)(io->udata);
   if (l->queue_for_accept) {
     fio_queue_push(l->queue_for_accept,
                    fio___srv_listen_on_data_task_reschd,
@@ -29988,8 +30050,8 @@ static void fio___srv_listen_on_data(fio_s *io) {
     l->on_open(fd, l->udata);
   }
 }
-static void fio___srv_listen_on_close(void *settings_) {
-  struct fio_listen_args *l = (struct fio_listen_args *)settings_;
+static void fio___srv_listen2_on_close(void *settings_) {
+  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)settings_;
   if (((!l->on_root && fio_srv_is_worker()) ||
        (l->on_root && fio_srv_is_master()))) {
     if (l->hide_from_log)
@@ -29999,8 +30061,8 @@ static void fio___srv_listen_on_close(void *settings_) {
   }
 }
 
-FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
-  struct fio_listen_args *l = (struct fio_listen_args *)udata;
+FIO_SFUNC void fio___srv_listen2_cleanup_task(void *udata) {
+  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)udata;
   int *pfd = (int *)(l + 1);
   if (l->on_finish)
     l->on_finish(l->udata);
@@ -30013,19 +30075,19 @@ FIO_SFUNC void fio___srv_listen_cleanup_task(void *udata) {
   }
 #endif
   fio_state_callback_remove(FIO_CALL_AT_EXIT,
-                            fio___srv_listen_cleanup_task,
+                            fio___srv_listen2_cleanup_task,
                             udata);
   FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + FIO_STRLEN(l->url) + 1);
 }
 
-static fio_protocol_s FIO___LISTEN_PROTOCOL = {
-    .on_data = fio___srv_listen_on_data,
-    .on_close = fio___srv_listen_on_close,
+static fio_protocol_s FIO___LISTEN2_PROTOCOL = {
+    .on_data = fio___srv_listen2_on_data,
+    .on_close = fio___srv_listen2_on_close,
     .on_timeout = fio___srv_on_timeout_never,
 };
 
-FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
-  struct fio_listen_args *l = (struct fio_listen_args *)udata;
+FIO_SFUNC void fio___srv_listen2_attach_task(void *udata) {
+  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)udata;
   int *pfd = (int *)(l + 1);
   int fd = fio_sock_dup(*pfd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
@@ -30033,7 +30095,7 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
                  (int)fio___srvdata.pid,
                  *pfd,
                  fd);
-  fio_srv_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  fio_srv_attach_fd(fd, &FIO___LISTEN2_PROTOCOL, l, NULL);
   if (l->on_start)
     l->on_start(l->udata);
   if (l->hide_from_log)
@@ -30044,14 +30106,14 @@ FIO_SFUNC void fio___srv_listen_attach_task(void *udata) {
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
   (void)ignr_;
-  fio___srv_listen_attach_task(udata);
+  fio___srv_listen2_attach_task(udata);
 }
 
-void fio_listen___(void); /* IDE Marker */
-SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
+void fio_srv_listen2___(void); /* IDE Marker */
+SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
   static int64_t port = 0;
   size_t len = args.url ? FIO_STRLEN(args.url) + 1 : 0;
-  struct fio_listen_args *cpy = NULL;
+  struct fio_srv_listen2_args *cpy = NULL;
   fio_str_info_s adr, tmp;
   int *fd_store;
   int fd;
@@ -30060,7 +30122,7 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
     goto other_error;
   }
   len += (!len) << 6;
-  cpy = (struct fio_listen_args *)
+  cpy = (struct fio_srv_listen2_args *)
       FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + sizeof(int) + len), 0);
   FIO_ASSERT_ALLOC(cpy);
   *cpy = args;
@@ -30097,10 +30159,10 @@ SFUNC int fio_listen FIO_NOOP(struct fio_listen_args args) {
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
-        fio___srv_listen_attach_task,
+        fio___srv_listen2_attach_task,
         (void *)cpy);
   }
-  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_cleanup_task, cpy);
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen2_cleanup_task, cpy);
   return 0;
 fd_error:
   FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
@@ -30109,41 +30171,143 @@ other_error:
     args.on_finish(args.udata);
   return -1;
 }
-
+#endif
 /* *****************************************************************************
 Listening to Incoming Connections (v.2)
 ***************************************************************************** */
 
-// struct fio_listen2_args {
-//   /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
-//   const char *url;
-//   /** The `fio_protocol_s` that will be assigned to incoming connections. */
-//   const fio_protocol_s *protocol;
-//   /** TLS object used for incoming connections. */
-//   fio_tls_s *tls;
-//   /**
-//    * Selects a queue that will be used to schedule a pre-accept task.
-//    * May be used to test user thread stress levels before accepting
-//    connections.
-//    */
-//   fio_queue_s *queue_for_accept;
-//   /** If the server is forked - listen on the root process instead of workers
-//   */ uint8_t on_root;
-//   /** Hides "started/stopped listening" messages from log (if set). */
-//   uint8_t hide_from_log;
-// };
-
 typedef struct {
   fio_protocol_s *protocol;
+  void *udata;
   void *tls_ctx;
   fio_queue_s *queue_for_accept;
+  fio_s *io;
+  void (*on_start)(fio_protocol_s *protocol, void *udata);
+  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  int owner;
+  int fd;
+  size_t ref_count;
   size_t url_len;
   uint8_t hide_from_log;
   char url[];
-} fio___srv_listen2_s;
+} fio___srv_listen_s;
 
-int fio_srv_listen2___(void); /* IDE marker */
+FIO___LEAK_COUNTER_DEF(fio_srv_listen)
 
+static fio___srv_listen_s *fio___srv_listen_dup(fio___srv_listen_s *l) {
+  FIO___LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
+  fio_atomic_add(&l->ref_count, 1);
+  return l;
+}
+
+static void fio___srv_listen_free(void *l_) {
+  FIO___LEAK_COUNTER_ON_FREE(fio_srv_listen);
+  fio___srv_listen_s *l = (fio___srv_listen_s *)l_;
+  fio_close(l->io);
+  if (fio_atomic_sub(&l->ref_count, 1))
+    return;
+
+  fio_state_callback_remove(FIO_CALL_AT_EXIT, fio___srv_listen_free, (void *)l);
+  fio_state_callback_remove(FIO_CALL_ON_START,
+                            fio___srv_listen_free,
+                            (void *)l);
+  fio_state_callback_remove(FIO_CALL_PRE_START,
+                            fio___srv_listen_free,
+                            (void *)l);
+  l->protocol->io_functions.free_context(l->tls_ctx);
+  fio_sock_close(l->fd);
+
+#ifdef AF_UNIX
+  /* delete the unix socket file, if any. */
+  fio_url_s u = fio_url_parse(l->url, FIO_STRLEN(l->url));
+  if (fio___srvdata.pid == l->owner && !u.host.buf && !u.port.buf &&
+      u.path.buf) {
+    unlink(u.path.buf);
+  }
+#endif
+
+  if (l->on_finish)
+    l->on_finish(l->protocol, l->udata);
+
+  if (l->hide_from_log)
+    FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
+                   getpid(),
+                   (int)l->url_len,
+                   l->url);
+  else
+    FIO_LOG_INFO("(%d) stopped listening @ %.*s",
+                 getpid(),
+                 (int)l->url_len,
+                 l->url);
+
+  FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
+}
+
+SFUNC void fio_srv_listen_stop(void *listener) {
+  if (listener)
+    fio___srv_listen_free(listener);
+}
+
+static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
+  (void)ignr_;
+  fio_s *io = (fio_s *)io_;
+  int fd;
+  fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
+  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
+    fio_srv_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
+  }
+  fio_free2(io);
+}
+static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
+  fio_defer(fio___srv_listen_on_data_task, io_, ignr_);
+}
+
+static void fio___srv_listen_on_data(fio_s *io) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
+  if (l->queue_for_accept) {
+    fio_queue_push(l->queue_for_accept,
+                   fio___srv_listen_on_data_task_reschd,
+                   fio_dup2(io));
+    return;
+  }
+  fio___srv_listen_on_data_task(fio_dup(io), NULL);
+}
+static void fio___srv_listen_on_close(void *l) {
+  ((fio___srv_listen_s *)l)->io = NULL;
+  fio___srv_listen_free(l);
+}
+
+static fio_protocol_s FIO___LISTEN_PROTOCOL = {
+    .on_data = fio___srv_listen_on_data,
+    .on_close = fio___srv_listen_on_close,
+    .on_timeout = fio___srv_on_timeout_never,
+};
+
+FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)l_;
+  l = fio___srv_listen_dup(l);
+  int fd = fio_sock_dup(l->fd);
+  FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
+  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
+                 (int)fio___srvdata.pid,
+                 l->fd,
+                 fd);
+  l->io = fio_srv_attach_fd(fd, &FIO___LISTEN_PROTOCOL, l, NULL);
+  if (l->on_start)
+    l->on_start(l->protocol, l->udata);
+  if (l->hide_from_log)
+    FIO_LOG_DEBUG2("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  else
+    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+  (void)ignr_;
+}
+
+FIO_SFUNC void fio___srv_listen_attach_task(void *l_) {
+  /* make sure to run in server thread */
+  fio_defer(fio___srv_listen_attach_task_deferred, l_, NULL);
+}
+
+int fio_srv_listen___(void); /* IDE marker */
 /**
  * Sets up a network service on a listening socket.
  *
@@ -30151,26 +30315,43 @@ int fio_srv_listen2___(void); /* IDE marker */
  *
  * See the `fio_listen` Macro for details.
  */
-SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
+SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
+  fio___srv_listen_s *l = NULL;
   fio_tls_s *ntls = NULL;
   void *built_tls = NULL;
   FIO_STR_INFO_TMP_VAR(url_alt, 64);
   if (!args.protocol) {
     FIO_LOG_ERROR("fio_srv_listen requires a protocol to be assigned.");
-    return -1;
+    return l;
   }
   if (args.on_root && !fio_srv_is_master()) {
     FIO_LOG_ERROR("fio_srv_listen called with `on_root` by a non-root worker.");
-    return -1;
+    return l;
   }
 
-  if (!args.url) { /* if no URL is given use 0.0.0.0:3000 as default */
+  if (!args.url ||
+      args.url[0] == '?') { /* if no URL is given use 0.0.0.0:3000 as default */
     static size_t port_counter = 3000;
-    size_t port = fio_atomic_add_fetch(&port_counter, 1);
+    size_t port = fio_atomic_add(&port_counter, 1);
+    if (port == 3000 && getenv("PORT")) {
+      char *port_env = getenv("PORT");
+      port = fio_atol10(&port_env);
+      if (!port | (port > 65535ULL))
+        port = 3000;
+    }
+    fio_buf_info_s root_addr = FIO_BUF_INFO1((char *)"0.0.0.0");
+    if (getenv("ADDRESS")) {
+      fio_buf_info_s tmp = FIO_BUF_INFO1((char *)getenv("ADDRESS"));
+      if (tmp.len < 56)
+        root_addr = tmp;
+    }
     fio_string_write2(&url_alt,
                       NULL,
-                      FIO_STRING_WRITE_STR2("0.0.0.0:", 8),
+                      FIO_STRING_WRITE_STR2(root_addr.buf, root_addr.len),
+                      FIO_STRING_WRITE_STR2(":", 1),
                       FIO_STRING_WRITE_NUM(port));
+    if (args.url)
+      fio_string_write(&url_alt, NULL, args.url, strlen(args.url));
     args.url = url_alt.buf;
   } else
     url_alt.len = strlen(args.url);
@@ -30179,59 +30360,57 @@ SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
   if (url.query.len) { /* test for TLS keywords in URL query */
     fio_buf_info_s key = {0};
     fio_buf_info_s cert = {0};
-    fio_buf_info_s q = url.query;
-    do { /* loop every key=value in `query` */
-      char *end = (char *)FIO_MEMCHR(q.buf, '&', q.len);
-      _Bool tls = 0;
-      if (!end)
-        end = q.buf + q.len;
-      if (end - q.buf == 3) { /* tls / ssl standalone? */
-        if (((q.buf[0] | 32) == 't' && (q.buf[1] | 32) == 'l' &&
-             (q.buf[2] | 32) == 's') ||
-            ((q.buf[0] | 32) == 's' && (q.buf[1] | 32) == 's' &&
-             (q.buf[2] | 32) == 'l')) {
-          tls = 1;
-        }
-      } else if (end - q.buf > 4) { /* cert= / key= / tls= / ssl= */
-        if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("cert") &&
-            q.buf[4] == '=')
-          cert = FIO_BUF_INFO2((q.buf + 5), (size_t)(end - (q.buf + 5)));
-        else if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("key="))
-          key = FIO_BUF_INFO2((q.buf + 4), (size_t)(end - (q.buf + 4)));
-        else if ((fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("tls=") ||
-                 (fio_buf2u32u(q.buf) | 0x20202020UL) == fio_buf2u32u("ssl="))
-          key = cert = FIO_BUF_INFO2((q.buf + 4), (size_t)(end - (q.buf + 4)));
-      }
-      if (!args.tls && (tls || key.buf || cert.buf))
-        ntls = args.tls = fio_tls_new();
-      if (key.buf && cert.buf) {
-        if (key.len < 124 && cert.len < 124) {
-          FIO_STR_INFO_TMP_VAR(key_tmp, 128);
-          FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
-          fio_string_write(&key_tmp, NULL, key.buf, key.len);
-          fio_string_write(&cert_tmp, NULL, cert.buf, cert.len);
-          if (key.buf == cert.buf) { /* assume value is prefix / folder */
-            fio_string_write(&key_tmp, NULL, "key.pem", 7);
-            fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
-          } else {
-            if (key.len < 5 || (fio_buf2u32u(key.buf + (key.len - 4)) |
-                                0x20202020UL) != fio_buf2u32u(".pem"))
-              fio_string_write(&key_tmp, NULL, ".pem", 4);
-            if (cert.len < 5 || (fio_buf2u32u(cert.buf + (cert.len - 4)) |
-                                 0x20202020UL) != fio_buf2u32u(".pem"))
-              fio_string_write(&cert_tmp, NULL, ".pem", 4);
-          }
-          fio_tls_cert_add(args.tls, NULL, cert.buf, key.buf, NULL);
+    const uint32_t wrd_key = fio_buf2u32u("key\xFF"); /* keyword's value */
+    const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
+    const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
+    const uint32_t wrd_cert = fio_buf2u32u("cert");
+    _Bool tls = 0;
+    FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
+      if (i.name.len < 3 || i.name.len > 4)
+        continue; /* not one of the keywords used */
+      uint32_t name = fio_buf2u32u(i.name.buf) | 0x20202020UL;
+      if (i.value.buf) { /* value given (may be empty) */
+        if (name == wrd_cert) {
+          cert = i.value;
         } else {
-          FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
-                        "construct TLS object separately");
+          name |= fio_buf2u32u("\x20\x20\x20\xFF"); /* any endieness */
+          if (name == wrd_key) {
+            key = i.value;
+          } else if (name == wrd_tls || name == wrd_ssl) {
+            cert = key = i.value;
+          }
         }
-        key = cert = FIO_BUF_INFO2(NULL, 0);
+      } else { /* value not given */
+        name |= fio_buf2u32u("\x20\x20\x20\xFF");
+        if (name == wrd_tls || name == wrd_ssl)
+          tls = 1;
       }
-      end += end < (q.buf + q.len); /* *end == `&`, but without overflow */
-      q.len = (q.buf + q.len) - end;
-      q.buf = end;
-    } while (q.len);
+    }
+    if (!args.tls && (tls || key.buf || cert.buf))
+      ntls = args.tls = fio_tls_new();
+    if (key.buf && cert.buf) {
+      if (key.len < 124 && cert.len < 124) {
+        FIO_STR_INFO_TMP_VAR(key_tmp, 128);
+        FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
+        fio_string_write(&key_tmp, NULL, key.buf, key.len);
+        fio_string_write(&cert_tmp, NULL, cert.buf, cert.len);
+        if (key.buf == cert.buf) { /* assume value is prefix / folder */
+          fio_string_write(&key_tmp, NULL, "key.pem", 7);
+          fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
+        } else {
+          if (key.len < 5 || (fio_buf2u32u(key.buf + (key.len - 4)) |
+                              0x20202020UL) != fio_buf2u32u(".pem"))
+            fio_string_write(&key_tmp, NULL, ".pem", 4);
+          if (cert.len < 5 || (fio_buf2u32u(cert.buf + (cert.len - 4)) |
+                               0x20202020UL) != fio_buf2u32u(".pem"))
+            fio_string_write(&cert_tmp, NULL, ".pem", 4);
+        }
+        fio_tls_cert_add(args.tls, NULL, cert_tmp.buf, key_tmp.buf, NULL);
+      } else {
+        FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
+                      "construct TLS object separately");
+      }
+    }
   }
   fio___srv_init_protocol_test(args.protocol, !!args.tls);
   built_tls = args.protocol->io_functions.build_context(args.tls, 0);
@@ -30242,22 +30421,40 @@ SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
     url_buf.len = url.query.buf - (url_buf.buf + 1);
   else if (url.target.len)
     url_buf.len = url.target.buf - (url_buf.buf + 1);
-  fio___srv_listen2_s *l = (fio___srv_listen2_s *)
+  l = (fio___srv_listen_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*l) + url_buf.len + 1, 0);
-  *l = (fio___srv_listen2_s){
+  FIO_ASSERT_ALLOC(l);
+  FIO___LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
+  *l = (fio___srv_listen_s){
       .protocol = args.protocol,
+      .udata = args.udata,
       .tls_ctx = built_tls,
       .queue_for_accept = args.queue_for_accept,
+      .on_start = args.on_start,
+      .on_finish = args.on_finish,
+      .owner = fio___srvdata.pid,
       .url_len = url_buf.len,
       .hide_from_log = args.hide_from_log,
   };
-  FIO_MEMCPY((l + 1), url_buf.buf, url_buf.len);
+  FIO_MEMCPY(l->url, url_buf.buf, url_buf.len);
   l->url[l->url_len] = 0;
-
-  args.protocol->io_functions.free_context(built_tls); /* until resolved */
-  FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);       /* until resolved */
   fio_tls_free(ntls);
-  return -1;
+
+  l->fd = fio_sock_open2(l->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  if (l->fd == -1) {
+    fio___srv_listen_free(l);
+    return (l = NULL);
+  }
+  if (fio_srv_is_running()) {
+    fio_defer(fio___srv_listen_attach_task_deferred, l, NULL);
+  } else {
+    fio_state_callback_add(
+        (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
+        fio___srv_listen_attach_task,
+        (void *)l);
+  }
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen_free, l);
+  return l;
 }
 
 /* *****************************************************************************
@@ -32401,10 +32598,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
-FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
-  fio_srv_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
-}
-
 #if defined(DEBUG)
 #define FIO___PUBSUB_HIDE_FROM_LOG 0
 #else
@@ -32418,11 +32611,10 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
                    "- no workers are spawned.");
     return;
   }
-  FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
-                         .on_open = fio_letter_local_ipc_on_open,
-                         .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
-                         .on_root = 1,
-                         .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
+  FIO_ASSERT(fio_srv_listen(.url = FIO_POSTOFFICE.ipc_url,
+                            .protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER,
+                            .on_root = 1,
+                            .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
              "(pub/sub) "
              "couldn't open a socket for IPC\n\t\t%s",
              FIO_POSTOFFICE.ipc_url);
@@ -37282,7 +37474,7 @@ typedef struct fio_http_settings_s {
 } fio_http_settings_s;
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC int fio_http_listen(const char *url, fio_http_settings_s settings);
+SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
 #define fio_http_listen(url, ...)                                              \
@@ -37515,7 +37707,6 @@ HTTP Protocol Container (vtable + settings storage)
 
 typedef struct {
   fio_http_settings_s settings;
-  void *tls_ctx;
   void (*on_http_callback)(void *, void *);
   fio_queue_s *queue;
   struct {
@@ -37523,10 +37714,10 @@ typedef struct {
     fio_http_controller_s controller;
   } state[FIO___HTTP_PROTOCOL_NONE + 1];
   char public_folder_buf[];
-} fio_http_protocol_s;
+} fio___http_protocol_s;
 #include FIO_INCLUDE_FILE
 
-#define FIO_REF_NAME             fio_http_protocol
+#define FIO_REF_NAME             fio___http_protocol
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
@@ -37535,9 +37726,6 @@ typedef struct {
       fio_tls_free(o.settings.tls);                                            \
     if (o.settings.on_finish)                                                  \
       o.settings.on_finish(&o.settings);                                       \
-    if (o.tls_ctx)                                                             \
-      o.state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.io_functions.free_context(  \
-          o.tls_ctx);                                                          \
   } while (0)
 #include FIO_INCLUDE_FILE
 
@@ -37588,44 +37776,12 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    fio_http_protocol_free(                                                    \
-        FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, o.settings));        \
+    fio___http_protocol_free(                                                  \
+        FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, o.settings));      \
   } while (0)
 #include FIO_INCLUDE_FILE
 
 #undef FIO___RECURSIVE_INCLUDE
-/* *****************************************************************************
-HTTP On Open - Accepting new connections
-***************************************************************************** */
-
-FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
-  fio_http_protocol_s *p = fio_http_protocol_dup((fio_http_protocol_s *)udata);
-  const uint32_t capa = p->settings.max_line_len;
-  fio___http_connection_s *c = fio___http_connection_new(capa);
-  FIO_ASSERT_ALLOC(c);
-  *c = (fio___http_connection_s){
-      .settings = &(p->settings),
-      .queue = p->queue,
-      .udata = p->settings.udata,
-      .state.http =
-          {
-              .on_http_callback = p->on_http_callback,
-              .on_http = p->settings.on_http,
-              .max_header = p->settings.max_header_size,
-          },
-      .capa = capa,
-      .log = p->settings.log,
-  };
-  c->io = fio_srv_attach_fd(fd,
-                            &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                            (void *)c,
-                            p->tls_ctx);
-  FIO_ASSERT_ALLOC(c->io);
-  FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
-                  (int)fio_thread_getpid(),
-                  fd,
-                  c->io);
-}
 
 /* *****************************************************************************
 HTTP Request handling / handling
@@ -37810,7 +37966,7 @@ FIO_SFUNC void fio___http_on_select_h1(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   fio_protocol_set(
       io,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .protocol));
 }
@@ -37823,15 +37979,18 @@ FIO_SFUNC void fio___http_on_select_h2(fio_s *io) {
 HTTP Listen
 ***************************************************************************** */
 
-FIO_SFUNC void fio___http_listen_on_start(void *p_) {
-  fio_http_protocol_s *p = (fio_http_protocol_s *)p_;
-  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+static void fio___http_listen_on_finished(fio_protocol_s *p, void *u) {
+  (void)u;
+  fio___http_protocol_free(
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         p));
 }
 
 void fio_http_listen___(void); /* IDE marker */
-SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
+SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s, 0);
-  fio_http_protocol_s *p = fio_http_protocol_new(s.public_folder.len + 1);
+  fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
   fio_tls_s *auto_tls_detected = NULL;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
@@ -37844,9 +38003,26 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
     p->state[i].protocol.timeout = s.ws_timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
-  if (url) { /* TODO! test URL for extra information, such as `cert` and `key`*/
+  if (!s.tls && url) { /* if `cert` and `key` set by URL we'll need ALPN */
     fio_url_s u = fio_url_parse(url, strlen(url));
     if (u.query.len) {
+      const uint32_t wrd_key = fio_buf2u32u("key\xFF");
+      const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
+      const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
+      const uint32_t wrd_cert = fio_buf2u32u("cert");
+      FIO_URL_QUERY_EACH(u.query, i) {
+        if (i.name.len < 3 || i.name.len > 4)
+          continue;
+        const uint32_t wrd_name3 =
+            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\xFF");
+        const uint32_t wrd_name4 =
+            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\x20");
+        if (wrd_name3 != wrd_key && wrd_name3 != wrd_tls &&
+            wrd_name3 != wrd_ssl && wrd_name4 != wrd_cert)
+          continue;
+        s.tls = auto_tls_detected = fio_tls_new();
+        break;
+      }
       /* TODO! add query parsing logic with callbacks to "431 http handle.h" */
     }
   }
@@ -37859,25 +38035,24 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
       s.tls_io_func = &tmp_fn;
     for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
       p->state[i].protocol.io_functions = *s.tls_io_func;
-    p->tls_ctx =
-        (s.tls_io_func->build_context ? s.tls_io_func->build_context
-                                      : tmp_fn.build_context)(s.tls, 0);
   }
-  fio_tls_free(auto_tls_detected);
-
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
   p->settings.public_folder.buf = p->public_folder_buf;
+  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
   if (s.public_folder.len)
     FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
-  return fio_listen(.url = url,
-                    .on_open = fio___http_on_open,
-                    .on_start = fio___http_listen_on_start,
-                    .on_finish = (void (*)(void *))fio_http_protocol_free,
-                    .udata = (void *)p,
-                    .queue_for_accept = s.queue ? s.queue->q : NULL);
+  void *listener =
+      fio_srv_listen(.url = url,
+                     .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                     .tls = s.tls,
+                     // .on_open = fio___http_on_open,
+                     .on_finish = fio___http_listen_on_finished,
+                     .queue_for_accept = p->queue ? p->queue : NULL);
+  fio_tls_free(auto_tls_detected);
+  return listener;
 }
 
 /* *****************************************************************************
@@ -37904,7 +38079,7 @@ FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
   FIO_ASSERT_ALLOC(c->h);
   fio_http_controller_set(
       c->h,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings))
            ->state[FIO___HTTP_PROTOCOL_HTTP1]
            .controller);
   fio_http_udata_set(c->h, c->udata);
@@ -38014,17 +38189,43 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knowledge)
 ***************************************************************************** */
 
-#if 0 /* skip pre-knowledge test? */
 /** Called when an IO is attached to a protocol. */
-FIO_SFUNC void fio___http1_accept_on_attach_client_tmp(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
+
+  fio___http_protocol_s *p =
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         fio_protocol_get(io));
+  fio___http_protocol_dup(p);
+  const uint32_t capa = p->settings.max_line_len;
+  fio___http_connection_s *c = fio___http_connection_new(capa);
+  FIO_ASSERT_ALLOC(c);
+  *c = (fio___http_connection_s){
+      .settings = &(p->settings),
+      .queue = p->queue,
+      .udata = p->settings.udata,
+      .io = io,
+      .state.http =
+          {
+              .on_http_callback = p->on_http_callback,
+              .on_http = p->settings.on_http,
+              .max_header = p->settings.max_header_size,
+          },
+      .capa = capa,
+      .log = p->settings.log,
+  };
+  fio_udata_set(io, (void *)c);
+  FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection (%p)",
+                  (int)fio_thread_getpid(),
+                  c->io);
+#if 0 /* skip pre-knowledge test? */
   fio_protocol_set(
       io,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .protocol));
-}
 #endif
+}
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
@@ -38044,9 +38245,10 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
           c->buf,
           (c->len > prior_knowledge.len ? prior_knowledge.len : c->len))) {
     /* no prior knowledge, switch to HTTP/1.1 */
-    phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
-                      ->state[FIO___HTTP_PROTOCOL_HTTP1]
-                      .protocol);
+    phttp_new =
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
+              ->state[FIO___HTTP_PROTOCOL_HTTP1]
+              .protocol);
     fio_protocol_set(io, phttp_new);
     return;
   }
@@ -38058,7 +38260,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
                 c->buf + prior_knowledge.len,
                 c->len - prior_knowledge.len);
   c->len -= prior_knowledge.len;
-  phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+  phttp_new = &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
                     ->state[FIO___HTTP_PROTOCOL_HTTP2]
                     .protocol);
 
@@ -38263,12 +38465,12 @@ upgraded:
                                                     : FIO___HTTP_PROTOCOL_SSE;
     fio_protocol_set(
         c->io,
-        &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .protocol));
     fio_http_controller_set(
         c->h,
-        &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .controller));
     if (pr_i == FIO___HTTP_PROTOCOL_SSE) {
@@ -38860,7 +39062,8 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   (void)is_client, (void)s;
   switch (s) {
   case FIO___HTTP_PROTOCOL_ACCEPT:
-    r = (fio_protocol_s){.on_data = fio___http1_accept_on_data,
+    r = (fio_protocol_s){.on_attach = fio___http_on_attach_accept,
+                         .on_data = fio___http1_accept_on_data,
                          .on_close = fio___http_on_close};
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:

@@ -3036,6 +3036,34 @@ Invalid formats might produce unexpected results. No error testing performed.
 
 The `file`, `unix` and `priv` schemas are special in the sense that they produce no `host` (only `path`) and are parsed as if they contain file path information.
 
+
+#### `FIO_URL_QUERY_EACH`
+
+```c
+/** The type used by the `FIO_URL_QUERY_EACH` iterator macro. */
+typedef struct {
+  fio_buf_info_s name;
+  fio_buf_info_s value;
+  fio_buf_info_s private___;
+} fio_url_query_each_s;
+
+/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
+FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
+
+/** Iterates through each of the query elements. */
+#define FIO_URL_QUERY_EACH(query_buf, i)                                       \
+  for (fio_url_query_each_s i = fio_url_query_each_next(                       \
+           (fio_url_query_each_s){.private___ = (query_buf)});                 \
+       i.name.buf;                                                             \
+       i = fio_url_query_each_next(i))
+```
+
+The macro accepts a `fio_buf_info_s` argument (`query_buf`) and iterates over each `name` and `value` pair in the query buffer.
+
+**Note**: both `i.name` and `i.value` may be empty strings, with a valid `.buf` but with `.len` set to zero.
+
+**Note**: the iterator does not unescape URL escaped data. unescaping may be required before either `i.name` or `i.value` can be used.
+
 -------------------------------------------------------------------------------
 ## File Utility Helpers
 
@@ -3114,6 +3142,8 @@ Returns the number of bytes read.
 Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
 
 If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
+**Note**: may (or may not) change the file's pointer (reading/writing position), depending on the OS.
 
 #### `fio_filename_parse`
 
@@ -8121,42 +8151,83 @@ typedef struct fio_tls_s fio_tls_s;
 
 Other (optional) helper types include the `fio_io_functions` and `fio_tls_s` types.
 
-#### `fio_listen`
+#### `fio_srv_listen`
 
 ```c
-int fio_listen(struct fio_listen_args args);
-#define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
+void *fio_srv_listen(struct fio_srv_listen_args args);
+#define fio_srv_listen(...)                                                    \
+  fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
 ```
 
 Sets up a network service / listening socket that will persist until the program exists (even if the server is restarted).
 
-Returns 0 on success or -1 on error.
+Returns a listener handle that can be used with `fio_srv_listen_stop`.
 
 Accepts the following (named) arguments:
 
 ```c
 /* Arguments for the fio_listen function */
 struct fio_listen_args {
-  /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
-  const char *url;
   /**
-   * Called whenever a new connection is accepted (required).
+   * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
-   * Should either call `fio_attach` or close the connection.
+   * Note: `.url` accept an optional query for building a TLS context.
+   *
+   * Possible query values include:
+   *
+   * - `tls` or `ssl` (no value): sets TLS as active, possibly self-signed.
+   * - `tls=` or `ssl=`: value is a prefix for "key.pem" and "cert.pem".
+   * - `key=` and `cert=`: file paths for ".pem" files.
+   *
+   * i.e.:
+   *
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls", ...);
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls=./", ...);
+   *     // same as:
+   *     fio_srv_listen(.url = "0.0.0.0:3000/"
+   *                            "?key=./key.pem"
+   *                            "&cert=./cert.pem", ...);
    */
-  void (*on_open)(int fd, void *udata);
-  /** Called when the a listening socket starts to listen (update state). */
-  void (*on_start)(void *udata);
+  const char *url;
+  /** The `fio_protocol_s` that will be assigned to incoming connections. */
+  fio_protocol_s *protocol;
+  /** The default `udata` set for (new) incoming connections. */
+  void *udata;
+  /** TLS object used for incoming connections (ownership moved to listener). */
+  fio_tls_s *tls;
   /**
-   * Called when the server is done, usable for cleanup.
+   * Called when the a listening socket starts to listen.
+   *
+   * May be called multiple times (i.e., if the server stops and starts again).
+   */
+  void (*on_start)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Called during listener cleanup.
    *
    * This will be called separately for every process before exiting.
    */
-  void (*on_finish)(void *udata);
-  /** Opaque user data. */
-  void *udata;
+  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Selects a queue that will be used to schedule a pre-accept task.
+   * May be used to test user thread stress levels before accepting connections.
+   */
+  fio_queue_s *queue_for_accept;
+  /** If the server is forked - listen on the root process instead of workers */
+  uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
 };
 ```
+
+#### `fio_srv_listen_stop`
+
+```c
+void fio_srv_listen_stop(void *listener);
+```
+
+Accepts a listener handler returned by `fio_srv_listen` and destroys it.
+
+Normally this function isn't called, as the `listener` handle auto-destructs during server cleanup (at exit).
 
 #### `fio_srv_attach_fd`
 
@@ -9433,7 +9504,7 @@ If true, logs longest WebSocket ping-pong round-trips (using `FIO_LOG_INFO`).
 #### `fio_http_listen`
 
 ```c
-int fio_http_listen(const char *url, fio_http_settings_s settings);
+void * fio_http_listen(const char *url, fio_http_settings_s settings);
 
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
@@ -9443,6 +9514,7 @@ Listens to HTTP / WebSockets / SSE connections on `url`.
 
 The MACRO shadowing the function enables the used of named arguments for the `fio_http_settings_s`.
 
+Returns a listener handle (same as `fio_srv_listen`). Listening can be stopped using `fio_srv_listen_stop`.
 
 ```c
 typedef struct fio_http_settings_s {

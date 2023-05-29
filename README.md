@@ -257,10 +257,10 @@ int main(int argc, char const *argv[]) {
              fio_cli_get("-www"));
 
   /* listen for HTTP connections (and test for error) */
-  FIO_ASSERT(!fio_http_listen(NULL,
-                              .public_folder = FIO_STR_INFO1((char *)fio_cli_get("-www")),
-                              .on_http = on_request,
-                              .log = 1),
+  FIO_ASSERT(fio_http_listen(NULL,
+                             .public_folder = FIO_STR_INFO1((char *)fio_cli_get("-www")),
+                             .on_http = on_request,
+                             .log = 1),
              "Couldn't listen for HTTP connections.");
   fio_srv_start(0);
   return 0;

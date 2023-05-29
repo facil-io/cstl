@@ -33,5 +33,15 @@ int main(int argc, char const *argv[]) {
           u.query.buf,
           (int)u.target.len,
           u.target.buf);
+  if (u.query.buf) {
+    printf("Parsed query data:\n");
+    FIO_URL_QUERY_EACH(u.query, i) {
+      printf("\t%.*s = %.*s\n",
+             (int)i.name.len,
+             i.name.buf,
+             (int)i.value.len,
+             i.value.buf);
+    }
+  }
   return 0;
 }

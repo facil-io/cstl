@@ -81,7 +81,7 @@ If true, logs longest WebSocket ping-pong round-trips (using `FIO_LOG_INFO`).
 #### `fio_http_listen`
 
 ```c
-int fio_http_listen(const char *url, fio_http_settings_s settings);
+void * fio_http_listen(const char *url, fio_http_settings_s settings);
 
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
@@ -91,6 +91,7 @@ Listens to HTTP / WebSockets / SSE connections on `url`.
 
 The MACRO shadowing the function enables the used of named arguments for the `fio_http_settings_s`.
 
+Returns a listener handle (same as `fio_srv_listen`). Listening can be stopped using `fio_srv_listen_stop`.
 
 ```c
 typedef struct fio_http_settings_s {

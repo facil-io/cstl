@@ -86,42 +86,83 @@ typedef struct fio_tls_s fio_tls_s;
 
 Other (optional) helper types include the `fio_io_functions` and `fio_tls_s` types.
 
-#### `fio_listen`
+#### `fio_srv_listen`
 
 ```c
-int fio_listen(struct fio_listen_args args);
-#define fio_listen(...) fio_listen((struct fio_listen_args){__VA_ARGS__})
+void *fio_srv_listen(struct fio_srv_listen_args args);
+#define fio_srv_listen(...)                                                    \
+  fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
 ```
 
 Sets up a network service / listening socket that will persist until the program exists (even if the server is restarted).
 
-Returns 0 on success or -1 on error.
+Returns a listener handle that can be used with `fio_srv_listen_stop`.
 
 Accepts the following (named) arguments:
 
 ```c
 /* Arguments for the fio_listen function */
 struct fio_listen_args {
-  /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
-  const char *url;
   /**
-   * Called whenever a new connection is accepted (required).
+   * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
-   * Should either call `fio_attach` or close the connection.
+   * Note: `.url` accept an optional query for building a TLS context.
+   *
+   * Possible query values include:
+   *
+   * - `tls` or `ssl` (no value): sets TLS as active, possibly self-signed.
+   * - `tls=` or `ssl=`: value is a prefix for "key.pem" and "cert.pem".
+   * - `key=` and `cert=`: file paths for ".pem" files.
+   *
+   * i.e.:
+   *
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls", ...);
+   *     fio_srv_listen(.url = "0.0.0.0:3000/?tls=./", ...);
+   *     // same as:
+   *     fio_srv_listen(.url = "0.0.0.0:3000/"
+   *                            "?key=./key.pem"
+   *                            "&cert=./cert.pem", ...);
    */
-  void (*on_open)(int fd, void *udata);
-  /** Called when the a listening socket starts to listen (update state). */
-  void (*on_start)(void *udata);
+  const char *url;
+  /** The `fio_protocol_s` that will be assigned to incoming connections. */
+  fio_protocol_s *protocol;
+  /** The default `udata` set for (new) incoming connections. */
+  void *udata;
+  /** TLS object used for incoming connections (ownership moved to listener). */
+  fio_tls_s *tls;
   /**
-   * Called when the server is done, usable for cleanup.
+   * Called when the a listening socket starts to listen.
+   *
+   * May be called multiple times (i.e., if the server stops and starts again).
+   */
+  void (*on_start)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Called during listener cleanup.
    *
    * This will be called separately for every process before exiting.
    */
-  void (*on_finish)(void *udata);
-  /** Opaque user data. */
-  void *udata;
+  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  /**
+   * Selects a queue that will be used to schedule a pre-accept task.
+   * May be used to test user thread stress levels before accepting connections.
+   */
+  fio_queue_s *queue_for_accept;
+  /** If the server is forked - listen on the root process instead of workers */
+  uint8_t on_root;
+  /** Hides "started/stopped listening" messages from log (if set). */
+  uint8_t hide_from_log;
 };
 ```
+
+#### `fio_srv_listen_stop`
+
+```c
+void fio_srv_listen_stop(void *listener);
+```
+
+Accepts a listener handler returned by `fio_srv_listen` and destroys it.
+
+Normally this function isn't called, as the `listener` handle auto-destructs during server cleanup (at exit).
 
 #### `fio_srv_attach_fd`
 

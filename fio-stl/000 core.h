@@ -31,7 +31,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.05"
+#define FIO_VERSION_BUILD "alpha.06"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */

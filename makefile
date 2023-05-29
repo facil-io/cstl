@@ -55,10 +55,10 @@ MAIN_ROOT?=src
 MAIN_SUBFOLDERS?=
 
 #############################################################################
-# Library Folder Settings
+# Library Folder Settings (library files aren't auto-compiled)
 #############################################################################
 
-# the library .c and .cpp source files root folder
+# the library .c, .cpp and .so (or .dll) source files root folder
 LIB_ROOT?=lib
 
 # publicly used subfolders in the lib root
@@ -755,7 +755,7 @@ $(TMP_ROOT)/%.o: create_tree %.c++ $(TMP_ROOT)/%.d
 
 link.%:
 	@echo "* Linking... ($(DEST)/$*)"
-	@$(CCL) -o $(DEST)/$* $(LIB_OBJS) $(MAIN_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
+	@$(CCL) -o $(DEST)/$* $(MAIN_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
 
 build_start.%: create_tree ;
 
@@ -765,7 +765,7 @@ build_finish.%: link.% documentation.%
 run.%: link.%
 	@$(DEST)/$*
 
-build: build_start.$(NAME) $(LIB_OBJS) $(MAIN_OBJS) build_finish.$(NAME);
+build: build_start.$(NAME) $(MAIN_OBJS) build_finish.$(NAME);
 
 run: build run.$(NAME) ;
 

@@ -1214,10 +1214,6 @@ static fio_protocol_s FIO_LETTER_PROTOCOL_IPC_CHILD = {
 Letter Listening to Local Connections (IPC)
 ***************************************************************************** */
 
-FIO_SFUNC void fio_letter_local_ipc_on_open(int fd, void *udata) {
-  fio_srv_attach_fd(fd, (fio_protocol_s *)udata, NULL, NULL);
-}
-
 #if defined(DEBUG)
 #define FIO___PUBSUB_HIDE_FROM_LOG 0
 #else
@@ -1231,11 +1227,10 @@ FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
                    "- no workers are spawned.");
     return;
   }
-  FIO_ASSERT(!fio_listen(.url = FIO_POSTOFFICE.ipc_url,
-                         .on_open = fio_letter_local_ipc_on_open,
-                         .udata = (void *)&FIO_LETTER_PROTOCOL_IPC_MASTER,
-                         .on_root = 1,
-                         .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
+  FIO_ASSERT(fio_srv_listen(.url = FIO_POSTOFFICE.ipc_url,
+                            .protocol = &FIO_LETTER_PROTOCOL_IPC_MASTER,
+                            .on_root = 1,
+                            .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
              "(pub/sub) "
              "couldn't open a socket for IPC\n\t\t%s",
              FIO_POSTOFFICE.ipc_url);

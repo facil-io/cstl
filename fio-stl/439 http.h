@@ -170,7 +170,7 @@ typedef struct fio_http_settings_s {
 } fio_http_settings_s;
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC int fio_http_listen(const char *url, fio_http_settings_s settings);
+SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
 #define fio_http_listen(url, ...)                                              \
@@ -403,7 +403,6 @@ HTTP Protocol Container (vtable + settings storage)
 
 typedef struct {
   fio_http_settings_s settings;
-  void *tls_ctx;
   void (*on_http_callback)(void *, void *);
   fio_queue_s *queue;
   struct {
@@ -411,10 +410,10 @@ typedef struct {
     fio_http_controller_s controller;
   } state[FIO___HTTP_PROTOCOL_NONE + 1];
   char public_folder_buf[];
-} fio_http_protocol_s;
+} fio___http_protocol_s;
 #include FIO_INCLUDE_FILE
 
-#define FIO_REF_NAME             fio_http_protocol
+#define FIO_REF_NAME             fio___http_protocol
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_DESTROY(o)                                                     \
@@ -423,9 +422,6 @@ typedef struct {
       fio_tls_free(o.settings.tls);                                            \
     if (o.settings.on_finish)                                                  \
       o.settings.on_finish(&o.settings);                                       \
-    if (o.tls_ctx)                                                             \
-      o.state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.io_functions.free_context(  \
-          o.tls_ctx);                                                          \
   } while (0)
 #include FIO_INCLUDE_FILE
 
@@ -476,44 +472,12 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
-    fio_http_protocol_free(                                                    \
-        FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, o.settings));        \
+    fio___http_protocol_free(                                                  \
+        FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, o.settings));      \
   } while (0)
 #include FIO_INCLUDE_FILE
 
 #undef FIO___RECURSIVE_INCLUDE
-/* *****************************************************************************
-HTTP On Open - Accepting new connections
-***************************************************************************** */
-
-FIO_SFUNC void fio___http_on_open(int fd, void *udata) {
-  fio_http_protocol_s *p = fio_http_protocol_dup((fio_http_protocol_s *)udata);
-  const uint32_t capa = p->settings.max_line_len;
-  fio___http_connection_s *c = fio___http_connection_new(capa);
-  FIO_ASSERT_ALLOC(c);
-  *c = (fio___http_connection_s){
-      .settings = &(p->settings),
-      .queue = p->queue,
-      .udata = p->settings.udata,
-      .state.http =
-          {
-              .on_http_callback = p->on_http_callback,
-              .on_http = p->settings.on_http,
-              .max_header = p->settings.max_header_size,
-          },
-      .capa = capa,
-      .log = p->settings.log,
-  };
-  c->io = fio_srv_attach_fd(fd,
-                            &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                            (void *)c,
-                            p->tls_ctx);
-  FIO_ASSERT_ALLOC(c->io);
-  FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection fd %d -> %p",
-                  (int)fio_thread_getpid(),
-                  fd,
-                  c->io);
-}
 
 /* *****************************************************************************
 HTTP Request handling / handling
@@ -698,7 +662,7 @@ FIO_SFUNC void fio___http_on_select_h1(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   fio_protocol_set(
       io,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .protocol));
 }
@@ -711,15 +675,18 @@ FIO_SFUNC void fio___http_on_select_h2(fio_s *io) {
 HTTP Listen
 ***************************************************************************** */
 
-FIO_SFUNC void fio___http_listen_on_start(void *p_) {
-  fio_http_protocol_s *p = (fio_http_protocol_s *)p_;
-  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+static void fio___http_listen_on_finished(fio_protocol_s *p, void *u) {
+  (void)u;
+  fio___http_protocol_free(
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         p));
 }
 
 void fio_http_listen___(void); /* IDE marker */
-SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
+SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s, 0);
-  fio_http_protocol_s *p = fio_http_protocol_new(s.public_folder.len + 1);
+  fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
   fio_tls_s *auto_tls_detected = NULL;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
@@ -732,9 +699,26 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
     p->state[i].protocol.timeout = s.ws_timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
-  if (url) { /* TODO! test URL for extra information, such as `cert` and `key`*/
+  if (!s.tls && url) { /* if `cert` and `key` set by URL we'll need ALPN */
     fio_url_s u = fio_url_parse(url, strlen(url));
     if (u.query.len) {
+      const uint32_t wrd_key = fio_buf2u32u("key\xFF");
+      const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
+      const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
+      const uint32_t wrd_cert = fio_buf2u32u("cert");
+      FIO_URL_QUERY_EACH(u.query, i) {
+        if (i.name.len < 3 || i.name.len > 4)
+          continue;
+        const uint32_t wrd_name3 =
+            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\xFF");
+        const uint32_t wrd_name4 =
+            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\x20");
+        if (wrd_name3 != wrd_key && wrd_name3 != wrd_tls &&
+            wrd_name3 != wrd_ssl && wrd_name4 != wrd_cert)
+          continue;
+        s.tls = auto_tls_detected = fio_tls_new();
+        break;
+      }
       /* TODO! add query parsing logic with callbacks to "431 http handle.h" */
     }
   }
@@ -747,25 +731,24 @@ SFUNC int fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
       s.tls_io_func = &tmp_fn;
     for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
       p->state[i].protocol.io_functions = *s.tls_io_func;
-    p->tls_ctx =
-        (s.tls_io_func->build_context ? s.tls_io_func->build_context
-                                      : tmp_fn.build_context)(s.tls, 0);
   }
-  fio_tls_free(auto_tls_detected);
-
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
   p->settings.public_folder.buf = p->public_folder_buf;
+  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
   if (s.public_folder.len)
     FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
-  return fio_listen(.url = url,
-                    .on_open = fio___http_on_open,
-                    .on_start = fio___http_listen_on_start,
-                    .on_finish = (void (*)(void *))fio_http_protocol_free,
-                    .udata = (void *)p,
-                    .queue_for_accept = s.queue ? s.queue->q : NULL);
+  void *listener =
+      fio_srv_listen(.url = url,
+                     .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                     .tls = s.tls,
+                     // .on_open = fio___http_on_open,
+                     .on_finish = fio___http_listen_on_finished,
+                     .queue_for_accept = p->queue ? p->queue : NULL);
+  fio_tls_free(auto_tls_detected);
+  return listener;
 }
 
 /* *****************************************************************************
@@ -792,7 +775,7 @@ FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
   FIO_ASSERT_ALLOC(c->h);
   fio_http_controller_set(
       c->h,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings))
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings))
            ->state[FIO___HTTP_PROTOCOL_HTTP1]
            .controller);
   fio_http_udata_set(c->h, c->udata);
@@ -902,17 +885,43 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 HTTP/1.1 Accepting new connections (tests for special HTTP/2 pre-knowledge)
 ***************************************************************************** */
 
-#if 0 /* skip pre-knowledge test? */
 /** Called when an IO is attached to a protocol. */
-FIO_SFUNC void fio___http1_accept_on_attach_client_tmp(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
+
+  fio___http_protocol_s *p =
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         fio_protocol_get(io));
+  fio___http_protocol_dup(p);
+  const uint32_t capa = p->settings.max_line_len;
+  fio___http_connection_s *c = fio___http_connection_new(capa);
+  FIO_ASSERT_ALLOC(c);
+  *c = (fio___http_connection_s){
+      .settings = &(p->settings),
+      .queue = p->queue,
+      .udata = p->settings.udata,
+      .io = io,
+      .state.http =
+          {
+              .on_http_callback = p->on_http_callback,
+              .on_http = p->settings.on_http,
+              .max_header = p->settings.max_header_size,
+          },
+      .capa = capa,
+      .log = p->settings.log,
+  };
+  fio_udata_set(io, (void *)c);
+  FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection (%p)",
+                  (int)fio_thread_getpid(),
+                  c->io);
+#if 0 /* skip pre-knowledge test? */
   fio_protocol_set(
       io,
-      &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
             ->state[FIO___HTTP_PROTOCOL_HTTP1]
             .protocol));
-}
 #endif
+}
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
@@ -932,9 +941,10 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
           c->buf,
           (c->len > prior_knowledge.len ? prior_knowledge.len : c->len))) {
     /* no prior knowledge, switch to HTTP/1.1 */
-    phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
-                      ->state[FIO___HTTP_PROTOCOL_HTTP1]
-                      .protocol);
+    phttp_new =
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
+              ->state[FIO___HTTP_PROTOCOL_HTTP1]
+              .protocol);
     fio_protocol_set(io, phttp_new);
     return;
   }
@@ -946,7 +956,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
                 c->buf + prior_knowledge.len,
                 c->len - prior_knowledge.len);
   c->len -= prior_knowledge.len;
-  phttp_new = &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+  phttp_new = &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
                     ->state[FIO___HTTP_PROTOCOL_HTTP2]
                     .protocol);
 
@@ -1151,12 +1161,12 @@ upgraded:
                                                     : FIO___HTTP_PROTOCOL_SSE;
     fio_protocol_set(
         c->io,
-        &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .protocol));
     fio_http_controller_set(
         c->h,
-        &(FIO_PTR_FROM_FIELD(fio_http_protocol_s, settings, c->settings)
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .controller));
     if (pr_i == FIO___HTTP_PROTOCOL_SSE) {
@@ -1748,7 +1758,8 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   (void)is_client, (void)s;
   switch (s) {
   case FIO___HTTP_PROTOCOL_ACCEPT:
-    r = (fio_protocol_s){.on_data = fio___http1_accept_on_data,
+    r = (fio_protocol_s){.on_attach = fio___http_on_attach_accept,
+                         .on_data = fio___http1_accept_on_data,
                          .on_close = fio___http_on_close};
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:

@@ -70,6 +70,49 @@ typedef struct {
  */
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len);
 
+/** The type used by the `FIO_URL_QUERY_EACH` iterator macro. */
+typedef struct {
+  fio_buf_info_s name;
+  fio_buf_info_s value;
+  fio_buf_info_s private___;
+} fio_url_query_each_s;
+
+/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
+FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
+
+/** Iterates through each of the query elements. */
+#define FIO_URL_QUERY_EACH(query_buf, i)                                       \
+  for (fio_url_query_each_s i = fio_url_query_each_next(                       \
+           (fio_url_query_each_s){.private___ = (query_buf)});                 \
+       i.name.buf;                                                             \
+       i = fio_url_query_each_next(i))
+
+/* *****************************************************************************
+FIO_URL - Implementation (static)
+***************************************************************************** */
+
+/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
+FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
+  i.name = i.private___;
+  char *amp = (char *)FIO_MEMCHR(i.name.buf, '&', i.name.len);
+  if (amp) {
+    i.name.len = amp - i.name.buf;
+    i.private___.len -= i.name.len + 1;
+    i.private___.buf += i.name.len + 1;
+  } else {
+    i.private___ = FIO_BUF_INFO2(NULL, 0);
+  }
+  char *equ = (char *)FIO_MEMCHR(i.name.buf, '=', i.name.len);
+  if (equ) {
+    i.value.buf = equ + 1;
+    i.value.len = (i.name.buf + i.name.len) - i.value.buf;
+    i.name.len = equ - i.name.buf;
+  } else {
+    i.value = FIO_BUF_INFO2(NULL, 0);
+  }
+  return i;
+}
+
 /* *****************************************************************************
 FIO_URL - Implementation
 ***************************************************************************** */
