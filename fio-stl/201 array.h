@@ -686,6 +686,8 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
         return ary->capa;
+      if (!ary->ary)
+        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));

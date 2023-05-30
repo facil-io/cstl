@@ -28,16 +28,17 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 FIO_SFUNC void FIO_NAME_TEST(stl, mustache)(void) {
   fprintf(stderr, "* Testing mustache template parser.\n");
-  char *example1 = "This is a {{tag}}, and so is {{ this_one }}.";
-  char *example2 = "{{tag}} and {{ incomplete}";
+  char *example1 = (char *)"This is a {{tag}}, and so is {{ this_one }}.";
+  char *example2 = (char *)"{{tag}} and {{ incomplete}";
   fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1(example1));
   FIO_ASSERT(m, "valid example load failed!");
-  char *result = fio_mustache_build(m, .ctx = NULL);
+  char *result = (char *)fio_mustache_build(m, .ctx = NULL);
   FIO_ASSERT(result, "a valid fio_mustache_build returned NULL");
-  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result),
-                                FIO_BUF_INFO1("This is a , and so is .")),
-             "valid example result failed: %s",
-             result);
+  FIO_ASSERT(
+      FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result),
+                         FIO_BUF_INFO1((char *)"This is a , and so is .")),
+      "valid example result failed: %s",
+      result);
   fio_bstr_free(result);
   fio_mustache_free(m);
   fprintf(stderr, "\terror should print on next line.\n");

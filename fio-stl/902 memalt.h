@@ -83,7 +83,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     membuf[4095] = 0;
     for (size_t i = 0; i < 4095; ++i) {
       membuf[i] = 0;
-      char *result = fio_memchr(membuf, 0, 4096);
+      char *result = (char *)fio_memchr(membuf, 0, 4096);
       size_t len = fio_strlen(membuf);
       membuf[i] = (char)((i & 0xFFU) | 1U);
       FIO_ASSERT(result == membuf + i, "fio_memchr failed.");

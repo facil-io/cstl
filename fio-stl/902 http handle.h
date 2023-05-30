@@ -48,37 +48,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
              "fio_http_status roundtrip error");
 
   FIO_ASSERT(!fio_http_method(h).buf, "fio_http_method should start as empty");
-  fio_http_method_set(h, FIO_STR_INFO1("POST"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
-             "fio_http_method roundtrip error");
+  fio_http_method_set(h, FIO_STR_INFO1((char *)"POST"));
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1((char *)"POST")),
+      "fio_http_method roundtrip error");
 
   FIO_ASSERT(!fio_http_path(h).buf, "fio_http_path should start as empty");
-  fio_http_path_set(h, FIO_STR_INFO1("/path"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_path(h), FIO_STR_INFO1("/path")),
-             "fio_http_path roundtrip error");
+  fio_http_path_set(h, FIO_STR_INFO1((char *)"/path"));
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_path(h), FIO_STR_INFO1((char *)"/path")),
+      "fio_http_path roundtrip error");
 
   FIO_ASSERT(!fio_http_query(h).buf, "fio_http_query should start as empty");
-  fio_http_query_set(h, FIO_STR_INFO1("query=null"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h), FIO_STR_INFO1("query=null")),
+  fio_http_query_set(h, FIO_STR_INFO1((char *)"query=null"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h),
+                                FIO_STR_INFO1((char *)"query=null")),
              "fio_http_query roundtrip error");
 
   FIO_ASSERT(!fio_http_version(h).buf,
              "fio_http_version should start as empty");
-  fio_http_version_set(h, FIO_STR_INFO1("HTTP/1.1"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_version(h), FIO_STR_INFO1("HTTP/1.1")),
+  fio_http_version_set(h, FIO_STR_INFO1((char *)"HTTP/1.1"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_version(h),
+                                FIO_STR_INFO1((char *)"HTTP/1.1")),
              "fio_http_version roundtrip error");
 
   { /* test multiple header support */
     fio_str_info_s test_data[] = {
-        FIO_STR_INFO1("header-name"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 001"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 002"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 003"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 004"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 005"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 006"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 007"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 008"),
+        FIO_STR_INFO1((char *)"header-name"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 001"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 002"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 003"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 004"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 005"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 006"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 007"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 008"),
     };
     size_t count = sizeof(test_data) / sizeof(test_data[0]);
     FIO_ASSERT(!fio_http_request_header(h, test_data[0], 0).buf,
@@ -165,9 +177,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
 
   /* almost done, just make sure reference counting doesn't destroy object */
   fio_http_free(fio_http_dup(h));
-  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 44 &&
-                 FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
-             "fio_http_s reference counting shouldn't object");
+  FIO_ASSERT(
+      (uintptr_t)fio_http_udata2(h) == 44 &&
+          FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1((char *)"POST")),
+      "fio_http_s reference counting shouldn't object");
 
   fio_http_free(h);
 }

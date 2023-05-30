@@ -799,9 +799,9 @@ FIO_IFUNC int64_t fio_http_get_timestump(void) {
 #else
 #define FIO___HTTP_TIME_DIV  1000
 #define FIO___HTTP_TIME_UNIT "ms"
-int64_t fio_last_tick(void);
+int64_t fio_srv_last_tick(void);
 FIO_IFUNC int64_t fio_http_get_timestump(void) {
-  return (int64_t)fio_last_tick();
+  return (int64_t)fio_srv_last_tick();
 }
 #endif
 

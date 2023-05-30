@@ -49,13 +49,14 @@ Callbacks and object used by main()
 ***************************************************************************** */
 
 /** Called when a new connection is created. */
-FIO_SFUNC void on_open(int fd, void *udata);
+FIO_SFUNC void on_attach(fio_s *io);
 /** Called there's incoming data (from STDIN / the client socket. */
 FIO_SFUNC void on_data(fio_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *udata);
 
 static fio_protocol_s HTTP_PROTOCOL_1 = {
+    .on_attach = on_attach,
     .on_data = on_data,
     .on_close = on_close,
     .timeout = HTTP_TIMEOUT,
@@ -85,10 +86,11 @@ typedef struct {
 #include "fio-stl.h"
 
 /** Called when a new connection is created. */
-FIO_SFUNC void on_open(int fd, void *udata) {
+FIO_SFUNC void on_attach(fio_s *io) {
   client_s *c = client_new(HTTP_CLIENT_BUFFER);
   FIO_ASSERT_ALLOC(c);
-  c->io = fio_srv_attach_fd(fd, &HTTP_PROTOCOL_1, c, udata);
+  c->io = io;
+  fio_udata_set(io, c);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
@@ -204,8 +206,9 @@ int main(int argc, char const *argv[]) {
   }
   http_should_log_responses = fio_cli_get_bool("-v");
   /* review CLI connection address (in URL format) */
-  FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
-             "Could not open listening socket as requested.");
+  FIO_ASSERT(
+      fio_srv_listen(.url = fio_cli_unnamed(0), .protocol = &HTTP_PROTOCOL_1),
+      "Could not open listening socket as requested.");
   FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
                "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d"
                "\n\tPress ^C to exit.",

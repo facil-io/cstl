@@ -20,9 +20,7 @@ This is a simple chat server example, exploring pub/sub on plain text protocol.
 Callbacks and object used by main()
 ***************************************************************************** */
 
-/** Called when a new connection is created. */
-FIO_SFUNC void on_open(int fd, void *udata);
-/** Called when a login process should be performed. */
+/** Called when a new connection is created and login process starts. */
 FIO_SFUNC void on_login_start(fio_s *io);
 /** Called there's incoming data (from STDIN / the client socket. */
 FIO_SFUNC void on_data_login(fio_s *io);
@@ -66,16 +64,12 @@ FIO_IFUNC void client_free(client_s *c) {
   fio_free(c);
 }
 
-/** Called when a new connection is created. */
-FIO_SFUNC void on_open(int fd, void *udata) {
-  fio_s *io = fio_srv_attach_fd(fd, &CHAT_PROTOCOL_LOGIN, client_new(), udata);
+/** Called when a new connection is created and login process starts. */
+FIO_SFUNC void on_login_start(fio_s *io) {
+  fio_udata_set(io, client_new());
+  fio_write(io, "Please enter a login handle (up to 30 characters long)\n", 55);
   if (fio_cli_get_bool("-v"))
     FIO_LOG_INFO("(%d) %p connected", getpid(), (void *)io);
-}
-
-/** Called when a login process should be performed. */
-FIO_SFUNC void on_login_start(fio_s *io) {
-  fio_write(io, "Please enter a login handle (up to 30 characters long)\n", 55);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
@@ -230,7 +224,8 @@ int main(int argc, char const *argv[]) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
   /* review CLI connection address (in URL format) */
-  FIO_ASSERT(!fio_listen(.url = fio_cli_unnamed(0), .on_open = on_open),
+  FIO_ASSERT(fio_srv_listen(.url = fio_cli_unnamed(0),
+                            .protocol = &CHAT_PROTOCOL_LOGIN),
              "Could not open listening socket as requested.");
   FIO_LOG_INFO("\n\tStarting plain text Chat server example app."
                "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d"

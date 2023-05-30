@@ -7,9 +7,9 @@
 
 An IO multiplexing server - evented and single-threaded - is included when `FIO_SERVER` is defined.
 
-All server API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for functions specifically noted as thread safe, such as `fio_defer`, `fio_dup` and `fio_undup`.
+All server API calls **must** be performed from the same thread used by the server to call the callbacks... that is, except for functions specifically noted as thread safe, such as `fio_srv_defer`, `fio_dup` and `fio_undup`.
 
-To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any additional information to an external thread (possibly using a queue). Once the external thread has completed its work, call `fio_defer` to schedule a task in which the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_suspend` the `io` object to prevent new `on_data` related events from occurring.
+To handle IO events using other threads, first `fio_dup` the IO handle, then forward the pointer and any additional information to an external thread (possibly using a queue). Once the external thread has completed its work, call `fio_srv_defer` to schedule a task in which the IO and all of the server's API is available. Remember to `fio_undup` when done with the IO handle. You might want to `fio_srv_suspend` the `io` object to prevent new `on_data` related events from occurring.
 
 **Note**: this will automatically include a large amount of the facil.io STL modules, such as once provided by defining `FIO_POLL`, `FIO_QUEUE`, `FIO_SOCK`, `FIO_TIME`, `FIO_STREAM`, `FIO_SIGNAL` and all their dependencies.
 
@@ -32,7 +32,7 @@ static int publish_time(void *ignore1_, void *ignore2_);
 static void accept_time_client(int fd, void *udata);
 
 int main(void) {
-  fio_run_every(.fn = publish_time, .every = 1000, .repetitions = -1);
+  fio_srv_run_every(.fn = publish_time, .every = 1000, .repetitions = -1);
   FIO_ASSERT(!fio_listen(.on_open = accept_time_client), "");
   printf("* Time service starting up.\n");
   printf("  Press ^C to stop server and exit.\n");
@@ -322,7 +322,7 @@ size_t fio_protocol_each(fio_protocol_s *protocol,
 
 Performs a task for each IO in the stated protocol, returning the number of tasks performed.
 
-If the task is more then a short action (such as more than a single `fio_write`), please consider scheduling the task using `fio_defer` while properly wrapping the task with calls to `fio_dup` and `fio_undup`.
+If the task is more then a short action (such as more than a single `fio_write`), please consider scheduling the task using `fio_srv_defer` while properly wrapping the task with calls to `fio_dup` and `fio_undup`.
 
 i.e.:
 
@@ -335,11 +335,11 @@ static my_long_task_wrapper_finish(fio_s *io, void * info) {
 
 static my_long_task(fio_s *io, void * info) {
   // ... perform action in main thread or in a worker thread (CPU heavy?)
-  fio_defer(my_long_task_wrapper_finish, io, info);
+  fio_srv_defer(my_long_task_wrapper_finish, io, info);
 }
 
 static my_long_task_wrapper_start(fio_s *io, void * info) {
-  fio_defer(my_long_task, fio_dup(io), info);
+  fio_srv_defer(my_long_task, fio_dup(io), info);
 }
 
 void some_callback(fio_s *io) {
@@ -365,33 +365,33 @@ void fio_touch(fio_s *io);
 
 Resets a socket's timeout counter.
 
-#### `fio_suspend`
+#### `fio_srv_suspend`
 
 ```c
-void fio_suspend(fio_s *io);
+void fio_srv_suspend(fio_s *io);
 ```
 
 Suspends future "on_data" events for the IO.
 
-#### `fio_unsuspend`
+#### `fio_srv_unsuspend`
 
 ```c
-void fio_unsuspend(fio_s *io);
+void fio_srv_unsuspend(fio_s *io);
 ```
 
 Listens for future "on_data" events related to the IO.
 
-**Note**: this function is thread safe (though `fio_suspend` is **NOT**).
+**Note**: this function is thread safe (though `fio_srv_suspend` is **NOT**).
 
-#### `fio_is_suspended`
+#### `fio_srv_is_suspended`
 
 ```c
-int fio_is_suspended(fio_s *io);
+int fio_srv_is_suspended(fio_s *io);
 ```
 
 Returns non-zero if the IO is suspended (this might not be reliable information).
 
-**Note**: this function is thread safe (though `fio_suspend` is **NOT**).
+**Note**: this function is thread safe (though `fio_srv_suspend` is **NOT**).
 
 #### `fio_dup`
 
@@ -618,22 +618,22 @@ Returns true if the current process is a server's worker process (it may, if not
 
 ### Server Task Scheduling
 
-#### `fio_defer`
+#### `fio_srv_defer`
 
 ```c
-void fio_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
+void fio_srv_defer(void (*task)(void *u1, void *u2), void *udata1, void *udata2);
 ```
 
 Schedules a task for delayed execution. This function schedules the task within the Server's task queue, so the task will execute within the server's thread, allowing all API calls to be made.
 
 **Note**: this function is thread-safe.
 
-#### `fio_run_every`
+#### `fio_srv_run_every`
 
 ```c
-void fio_run_every(fio_timer_schedule_args_s args);
-#define fio_run_every(...)                                                     \
-  fio_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
+void fio_srv_run_every(fio_timer_schedule_args_s args);
+#define fio_srv_run_every(...)                                                     \
+  fio_srv_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
 ```
 
 Schedules a timer bound task, see [`fio_timer_schedule`](#fio_timer_schedule).
@@ -676,10 +676,10 @@ Possible "named arguments" (`fio_timer_schedule_args_s` members) include:
     int32_t repetitions
     ```
 
-#### `fio_last_tick`
+#### `fio_srv_last_tick`
 
 ```c
-int64_t fio_last_tick(void);
+int64_t fio_srv_last_tick(void);
 ```
 Returns the last millisecond when the server reviewed pending IO events.
 

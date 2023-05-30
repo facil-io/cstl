@@ -490,7 +490,7 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (FIO_LIKELY(fio_is_open(c->io)))
+  if (FIO_LIKELY(fio_srv_is_open(c->io)))
     cb.fn(h);
   fio_http_free(h);
 }
@@ -759,7 +759,7 @@ HTTP/1.1 Request / Response Completed
 static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_dup(c->io);
-  fio_suspend(c->io);
+  fio_srv_suspend(c->io);
   fio_http_s *h = c->h;
   c->h = NULL;
   c->suspend = 1;
@@ -1051,7 +1051,7 @@ FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
 /** Informs the controller that request / response headers must be sent. */
 FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io || !fio_is_open(c->io))
+  if (!c->io || !fio_srv_is_open(c->io))
     return;
   fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
   { /* write status string */
@@ -1093,7 +1093,7 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     fio_http_s *h,
     fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io || !fio_is_open(c->io))
+  if (!c->io || !fio_srv_is_open(c->io))
     goto no_write_err;
   if (fio_http_is_streaming(h))
     goto stream_chunk;
@@ -1144,16 +1144,16 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   c->suspend = 0;
   if (upgraded)
     goto upgraded;
-  if (fio_is_open(c->io)) {
+  if (fio_srv_is_open(c->io)) {
     fio___http1_process_data(c->io, c);
   }
   if (!c->suspend)
-    fio_unsuspend(c->io);
+    fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   return;
 
 upgraded:
-  if (c->h || !fio_is_open(c->io))
+  if (c->h || !fio_srv_is_open(c->io))
     goto something_is_wrong;
   c->h = (fio_http_s *)upgraded;
   {
@@ -1178,7 +1178,7 @@ upgraded:
         c->settings->on_eventsource_reconnect(c->h, FIO_STR2BUF_INFO(last_id));
     }
   }
-  fio_unsuspend(c->io);
+  fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   return;
 
@@ -1195,9 +1195,9 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
-  fio_defer(fio___http_controller_http1_on_finish_task,
-            (void *)(c),
-            fio_http_is_upgraded(h) ? (void *)h : NULL);
+  fio_srv_defer(fio___http_controller_http1_on_finish_task,
+                (void *)(c),
+                fio_http_is_upgraded(h) ? (void *)h : NULL);
 }
 
 /* *****************************************************************************
@@ -1243,7 +1243,7 @@ FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   c->suspend = 0;
   fio___websocket_process_data(c->io, c);
   if (!c->suspend)
-    fio_unsuspend(c->io);
+    fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   (void)ignr_;
 }
@@ -1253,7 +1253,7 @@ FIO_SFUNC void fio___websocket_on_message_task(void *c_, void *is_text) {
   c->state.ws.on_message(c->h,
                          fio_bstr_buf(c->state.ws.msg),
                          (uint8_t)(uintptr_t)is_text);
-  fio_defer(fio___websocket_on_message_finalize, c, NULL);
+  fio_srv_defer(fio___websocket_on_message_finalize, c, NULL);
 }
 
 /** Called when a message frame was received. */
@@ -1268,7 +1268,7 @@ FIO_SFUNC void fio_websocket_on_message(void *udata,
   c->state.ws.msg = NULL;
   return;
   fio_dup(c->io);
-  fio_suspend(c->io);
+  fio_srv_suspend(c->io);
   c->suspend = 1;
   fio_queue_push(c->queue,
                  fio___websocket_on_message_task,
@@ -1331,7 +1331,7 @@ FIO_SFUNC void fio_websocket_on_protocol_pong(void *udata, fio_buf_info_s msg) {
   {
     char *pos = msg.buf;
     static uint64_t longest = 0;
-    uint64_t ping_time = fio_last_tick() - fio_atol16u(&pos);
+    uint64_t ping_time = fio_srv_last_tick() - fio_atol16u(&pos);
     if (ping_time < (1 << 16) && longest < ping_time) {
       longest = ping_time;
       FIO_LOG_INFO("WebSocket longest ping round-trip detected as: %zums",
@@ -1406,7 +1406,7 @@ FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
 FIO_SFUNC void fio___websocket_on_timeout(fio_s *io) {
   char buf[32];
   char tm[20] = "0x00000000000000000";
-  fio_ltoa16u(tm + 2, fio_last_tick(), 16);
+  fio_ltoa16u(tm + 2, fio_srv_last_tick(), 16);
   size_t len = fio_websocket_server_wrap(buf, tm, 18, 0x09, 1, 1, 0);
   fio_write(io, buf, len);
 }
@@ -1594,7 +1594,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
              .buf = payload,
              .len = fio_bstr_len(payload),
              .dealloc = (void (*)(void *))fio_bstr_free);
-  return 0 - !fio_is_open(c->io);
+  return 0 - !fio_srv_is_open(c->io);
 }
 
 /* *****************************************************************************
@@ -1611,7 +1611,7 @@ FIO_SFUNC void fio___http_controller_ws_on_finish_task(void *h_, void *ignr_) {
 
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_ws_on_finish(fio_http_s *h) {
-  fio_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
+  fio_srv_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
 }
 
 /* called by the HTTP handle for each body chunk (or to finish a response. */
@@ -1668,7 +1668,7 @@ static void fio___sse_on_attach(fio_s *io) {
 
 FIO_SFUNC void fio___sse_on_timeout(fio_s *io) {
   char buf[32] = ":ping 0x0000000000000000\r\n\r\n";
-  fio_ltoa16u(buf + 8, fio_last_tick(), 16);
+  fio_ltoa16u(buf + 8, fio_srv_last_tick(), 16);
   buf[24] = '\r'; /* overwrite written NUL character */
   fio_write(io, buf, 28);
 }

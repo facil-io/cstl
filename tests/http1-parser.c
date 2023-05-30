@@ -591,9 +591,7 @@ static struct {
 };
 
 /** called when a request was received. */
-static void fio_http1_on_complete(void *udata) {
-  (void)udata;
-}
+static void fio_http1_on_complete(void *udata) { (void)udata; }
 /** called when a request method is parsed. */
 static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
   (void)udata;

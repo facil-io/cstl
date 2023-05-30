@@ -260,14 +260,14 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
       char *c_start = value.buf + value.len - 7;
       if ((fio_buf2u32u(c_start) | 0x20202020UL) == fio_buf2u32u("chun") &&
           (fio_buf2u32u(c_start + 3) | 0x20202020UL) == fio_buf2u32u("nked")) {
-        if (value.len > 7 && value.buf[-8] != ' ' && value.buf[-8] != ',')
-          return -1;
         if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
           return -1;
         p->expected = HTTP1___EXPECTED_CHUNKED;
         /* endpoint does not need to know if the body was chunked or not */
         if (value.len == 7)
           return 0;
+        if (c_start[-1] != ' ' && c_start[-1] != ',' && c_start[-1] != '\t')
+          return -1;
         while (
             (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t') &&
             c_start > value.buf)

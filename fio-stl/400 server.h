@@ -342,26 +342,28 @@ SFUNC fio_s *fio_dup(fio_s *io);
 SFUNC void fio_undup(fio_s *io);
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_suspend(fio_s *io);
+SFUNC void fio_srv_suspend(fio_s *io);
 
 /** Listens for future "on_data" events related to the IO. */
-SFUNC void fio_unsuspend(fio_s *io);
+SFUNC void fio_srv_unsuspend(fio_s *io);
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspended(fio_s *io);
+SFUNC int fio_srv_is_suspended(fio_s *io);
 
 /** Returns 1 if the IO handle is marked as open. */
-SFUNC int fio_is_open(fio_s *io);
+SFUNC int fio_srv_is_open(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
 ***************************************************************************** */
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
-SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
+SFUNC void fio_srv_defer(void (*task)(void *, void *),
+                         void *udata1,
+                         void *udata2);
 
 /** Schedules a timer bound task, see `fio_timer_schedule`. */
-SFUNC void fio_run_every(fio_timer_schedule_args_s args);
+SFUNC void fio_srv_run_every(fio_timer_schedule_args_s args);
 /**
  * Schedules a timer bound task, see `fio_timer_schedule`.
  *
@@ -380,11 +382,11 @@ SFUNC void fio_run_every(fio_timer_schedule_args_s args);
  * * The number of times the timer should be performed. -1 == infinity:
  *        int32_t repetitions
  */
-#define fio_run_every(...)                                                     \
-  fio_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
+#define fio_srv_run_every(...)                                                 \
+  fio_srv_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
-SFUNC int64_t fio_last_tick(void);
+SFUNC int64_t fio_srv_last_tick(void);
 
 /** Returns a pointer for the server's queue. */
 SFUNC fio_queue_s *fio_srv_queue(void);
@@ -761,7 +763,7 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 Protocol validation
 ***************************************************************************** */
 
-static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
+static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_srv_suspend(io); }
 static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
 static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
 static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
@@ -1065,16 +1067,18 @@ static fio_timer_queue_s fio___srv_timer[1] = {FIO_TIMER_QUEUE_INIT};
 static fio_queue_s fio___srv_tasks[1];
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
-SFUNC int64_t fio_last_tick(void) { return fio___srvdata.tick; }
+SFUNC int64_t fio_srv_last_tick(void) { return fio___srvdata.tick; }
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
-SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2) {
+SFUNC void fio_srv_defer(void (*task)(void *, void *),
+                         void *udata1,
+                         void *udata2) {
   fio_queue_push(fio___srv_tasks, task, udata1, udata2);
   fio___srv_wakeup();
 }
 
 /** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
-SFUNC void fio_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
+SFUNC void fio_srv_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
   args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;
   fio_timer_schedule FIO_NOOP(fio___srv_timer, args);
 }
@@ -1876,7 +1880,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
     goto error;
   if (io && (io->state & FIO_STATE_CLOSING))
     goto write_called_after_close;
-  fio_defer(fio_write2___task, fio_dup2(io), packet);
+  fio_srv_defer(fio_write2___task, fio_dup2(io), packet);
   return;
 error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
   FIO_LOG_ERROR("couldn't create %zu bytes long user-packet for IO %p (%d)",
@@ -1914,10 +1918,10 @@ SFUNC void fio_close_now(fio_s *io) {
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
 
 /** Listens for future "on_data" events related to the IO. */
-SFUNC void fio_unsuspend(fio_s *io) {
+SFUNC void fio_srv_unsuspend(fio_s *io) {
   if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) &
        FIO_STATE_SUSPENDED)) {
     fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
@@ -1925,12 +1929,12 @@ SFUNC void fio_unsuspend(fio_s *io) {
 }
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspended(fio_s *io) {
+SFUNC int fio_srv_is_suspended(fio_s *io) {
   return (io->state & FIO_STATE_SUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */
-SFUNC int fio_is_open(fio_s *io) {
+SFUNC int fio_srv_is_open(fio_s *io) {
   return (io->state & FIO_STATE_OPEN) && !(io->state & FIO_STATE_CLOSING);
 }
 
@@ -2070,7 +2074,7 @@ SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
     goto fd_error;
   *fd_store = fd;
   if (fio_srv_is_running()) {
-    fio_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
+    fio_srv_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
@@ -2174,7 +2178,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   fio_free2(io);
 }
 static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
-  fio_defer(fio___srv_listen_on_data_task, io_, ignr_);
+  fio_srv_defer(fio___srv_listen_on_data_task, io_, ignr_);
 }
 
 static void fio___srv_listen_on_data(fio_s *io) {
@@ -2219,7 +2223,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
 
 FIO_SFUNC void fio___srv_listen_attach_task(void *l_) {
   /* make sure to run in server thread */
-  fio_defer(fio___srv_listen_attach_task_deferred, l_, NULL);
+  fio_srv_defer(fio___srv_listen_attach_task_deferred, l_, NULL);
 }
 
 int fio_srv_listen___(void); /* IDE marker */
@@ -2361,7 +2365,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
     return (l = NULL);
   }
   if (fio_srv_is_running()) {
-    fio_defer(fio___srv_listen_attach_task_deferred, l, NULL);
+    fio_srv_defer(fio___srv_listen_attach_task_deferred, l, NULL);
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),

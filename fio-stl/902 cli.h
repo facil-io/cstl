@@ -54,7 +54,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_PRINT_HEADER("Printing stuff"),
         FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
         FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
-        {0},
+        {(fio___cli_line_e)0},
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
   }

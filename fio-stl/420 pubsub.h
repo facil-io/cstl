@@ -344,7 +344,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
  *
  * IMPORTANT: The callbacks will be called by the main IO thread, so they should
  * never block. Long tasks should copy the data and scheduling an external task
- * (i.e., using `fio_defer`).
+ * (i.e., using `fio_srv_defer`).
  */
 struct fio_pubsub_engine_s {
   /** For internal facil.io use - initialize to zero(!) before calling `attach`
@@ -684,7 +684,7 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 Subscription Management Tasks
 ***************************************************************************** */
 
-/* The task to subscribe to a channel (called by `fio_defer`). */
+/* The task to subscribe to a channel (called by `fio_srv_defer`). */
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_);
 
 /** Unsubscribes a node and destroys the channel
@@ -1686,7 +1686,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
       (uint8_t)((uintptr_t)args.engine |
                 ((0x100U - args.is_json) & FIO___PUBSUB_JSON)));
   l->from = args.from;
-  fio_defer(fio___publish_letter_task, l, NULL);
+  fio_srv_defer(fio___publish_letter_task, l, NULL);
   return;
 external_engine:
   args.engine->publish(args.engine,
@@ -1883,7 +1883,7 @@ static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
-  fio_defer(fio_pubsub_attach___task, engine, NULL);
+  fio_srv_defer(fio_pubsub_attach___task, engine, NULL);
 }
 
 FIO_SFUNC void fio_pubsub_detach___task(void *engine, void *ignr_) {

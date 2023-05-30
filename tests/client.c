@@ -41,11 +41,11 @@ static volatile uint8_t stop = 0;
 int client_fd;
 
 /** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(int fd, void *arg);
+FIO_SFUNC void on_ready(void *arg);
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(int fd, void *arg);
+FIO_SFUNC void on_data(void *arg);
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(int fd, void *arg);
+FIO_SFUNC void on_close(void *arg);
 
 /** The IO polling object - it keeps a one-shot list of monitored IOs. */
 static fio_poll_s *monitor;
@@ -143,24 +143,27 @@ int main(int argc, char const *argv[]) {
   fio_signal_monitor(SIGTERM, on_signal, NULL);
   fio_signal_monitor(SIGQUIT, on_signal, NULL);
 
+  fio_poll_s monitor;
+  fio_poll_init(&monitor,
+                .on_data = on_data,
+                .on_ready = on_ready,
+                .on_close = on_close);
+
   /* select IO objects to be monitored */
-  monitor = fio_poll_new(.on_data = on_data,
-                         .on_ready = on_ready,
-                         .on_close = on_close);
-  fio_poll_monitor(monitor, client_fd, NULL, POLLIN | POLLOUT);
-  fio_poll_monitor(monitor, fileno(stdin), (void *)1, POLLIN); /* mark STDIO */
+  fio_poll_monitor(&monitor, client_fd, NULL, POLLIN | POLLOUT);
+  fio_poll_monitor(&monitor, fileno(stdin), (void *)1, POLLIN); /* mark STDIO */
 
   /* loop until the stop flag is raised */
   while (!stop) {
     /* review IO events (calls the registered callbacks) */
-    fio_poll_review(monitor, 1000);
+    fio_poll_review(&monitor, 1000);
     /* review signals (calls the registered callback) */
     fio_signal_review();
   }
 
   /* cleanup */
   fio_sock_close(client_fd);
-  fio_poll_free(monitor);
+  fio_poll_destroy(&monitor);
   return 0;
 }
 
@@ -184,7 +187,7 @@ IO callback(s)
 ***************************************************************************** */
 
 /** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(int fd, void *arg) {
+FIO_SFUNC void on_ready(void *arg) {
   FIO_LOG_DEBUG2("on_ready callback called for %d.", fd);
   char mem[4080];
   size_t len = 4080;
@@ -211,7 +214,7 @@ finish:
 }
 
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(int fd, void *arg) {
+FIO_SFUNC void on_data(void *arg) {
   FIO_LOG_DEBUG2("on_data callback called for %d.", fd);
   char buf[4080];
   /* is this the STDIO file descriptor? (see `main` for details) */
@@ -258,8 +261,8 @@ done:
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(int fd, void *arg) {
+FIO_SFUNC void on_close(void *arg) {
   stop = 1;
-  FIO_LOG_DEBUG2("on_close callback called for %d, stopping.", fd);
+  FIO_LOG_DEBUG2("on_close callback called, stopping.");
   (void)arg;
 }

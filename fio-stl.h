@@ -23512,6 +23512,8 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
         return ary->capa;
+      if (!ary->ary)
+        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
@@ -28427,26 +28429,28 @@ SFUNC fio_s *fio_dup(fio_s *io);
 SFUNC void fio_undup(fio_s *io);
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_suspend(fio_s *io);
+SFUNC void fio_srv_suspend(fio_s *io);
 
 /** Listens for future "on_data" events related to the IO. */
-SFUNC void fio_unsuspend(fio_s *io);
+SFUNC void fio_srv_unsuspend(fio_s *io);
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspended(fio_s *io);
+SFUNC int fio_srv_is_suspended(fio_s *io);
 
 /** Returns 1 if the IO handle is marked as open. */
-SFUNC int fio_is_open(fio_s *io);
+SFUNC int fio_srv_is_open(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
 ***************************************************************************** */
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
-SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2);
+SFUNC void fio_srv_defer(void (*task)(void *, void *),
+                         void *udata1,
+                         void *udata2);
 
 /** Schedules a timer bound task, see `fio_timer_schedule`. */
-SFUNC void fio_run_every(fio_timer_schedule_args_s args);
+SFUNC void fio_srv_run_every(fio_timer_schedule_args_s args);
 /**
  * Schedules a timer bound task, see `fio_timer_schedule`.
  *
@@ -28465,11 +28469,11 @@ SFUNC void fio_run_every(fio_timer_schedule_args_s args);
  * * The number of times the timer should be performed. -1 == infinity:
  *        int32_t repetitions
  */
-#define fio_run_every(...)                                                     \
-  fio_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
+#define fio_srv_run_every(...)                                                 \
+  fio_srv_run_every((fio_timer_schedule_args_s){__VA_ARGS__})
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
-SFUNC int64_t fio_last_tick(void);
+SFUNC int64_t fio_srv_last_tick(void);
 
 /** Returns a pointer for the server's queue. */
 SFUNC fio_queue_s *fio_srv_queue(void);
@@ -28846,7 +28850,7 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 Protocol validation
 ***************************************************************************** */
 
-static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_suspend(io); }
+static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_srv_suspend(io); }
 static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
 static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
 static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
@@ -29150,16 +29154,18 @@ static fio_timer_queue_s fio___srv_timer[1] = {FIO_TIMER_QUEUE_INIT};
 static fio_queue_s fio___srv_tasks[1];
 
 /** Returns the last millisecond when the server reviewed pending IO events. */
-SFUNC int64_t fio_last_tick(void) { return fio___srvdata.tick; }
+SFUNC int64_t fio_srv_last_tick(void) { return fio___srvdata.tick; }
 
 /** Schedules a task for delayed execution. This function is thread-safe. */
-SFUNC void fio_defer(void (*task)(void *, void *), void *udata1, void *udata2) {
+SFUNC void fio_srv_defer(void (*task)(void *, void *),
+                         void *udata1,
+                         void *udata2) {
   fio_queue_push(fio___srv_tasks, task, udata1, udata2);
   fio___srv_wakeup();
 }
 
 /** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
-SFUNC void fio_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
+SFUNC void fio_srv_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
   args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;
   fio_timer_schedule FIO_NOOP(fio___srv_timer, args);
 }
@@ -29961,7 +29967,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
     goto error;
   if (io && (io->state & FIO_STATE_CLOSING))
     goto write_called_after_close;
-  fio_defer(fio_write2___task, fio_dup2(io), packet);
+  fio_srv_defer(fio_write2___task, fio_dup2(io), packet);
   return;
 error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
   FIO_LOG_ERROR("couldn't create %zu bytes long user-packet for IO %p (%d)",
@@ -29999,10 +30005,10 @@ SFUNC void fio_close_now(fio_s *io) {
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
 
 /** Listens for future "on_data" events related to the IO. */
-SFUNC void fio_unsuspend(fio_s *io) {
+SFUNC void fio_srv_unsuspend(fio_s *io) {
   if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) &
        FIO_STATE_SUSPENDED)) {
     fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
@@ -30010,12 +30016,12 @@ SFUNC void fio_unsuspend(fio_s *io) {
 }
 
 /** Returns 1 if the IO handle was suspended. */
-SFUNC int fio_is_suspended(fio_s *io) {
+SFUNC int fio_srv_is_suspended(fio_s *io) {
   return (io->state & FIO_STATE_SUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */
-SFUNC int fio_is_open(fio_s *io) {
+SFUNC int fio_srv_is_open(fio_s *io) {
   return (io->state & FIO_STATE_OPEN) && !(io->state & FIO_STATE_CLOSING);
 }
 
@@ -30155,7 +30161,7 @@ SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
     goto fd_error;
   *fd_store = fd;
   if (fio_srv_is_running()) {
-    fio_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
+    fio_srv_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
@@ -30259,7 +30265,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   fio_free2(io);
 }
 static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
-  fio_defer(fio___srv_listen_on_data_task, io_, ignr_);
+  fio_srv_defer(fio___srv_listen_on_data_task, io_, ignr_);
 }
 
 static void fio___srv_listen_on_data(fio_s *io) {
@@ -30304,7 +30310,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
 
 FIO_SFUNC void fio___srv_listen_attach_task(void *l_) {
   /* make sure to run in server thread */
-  fio_defer(fio___srv_listen_attach_task_deferred, l_, NULL);
+  fio_srv_defer(fio___srv_listen_attach_task_deferred, l_, NULL);
 }
 
 int fio_srv_listen___(void); /* IDE marker */
@@ -30446,7 +30452,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
     return (l = NULL);
   }
   if (fio_srv_is_running()) {
-    fio_defer(fio___srv_listen_attach_task_deferred, l, NULL);
+    fio_srv_defer(fio___srv_listen_attach_task_deferred, l, NULL);
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
@@ -31728,7 +31734,7 @@ SFUNC void *fio_message_metadata(fio_msg_s *msg,
  *
  * IMPORTANT: The callbacks will be called by the main IO thread, so they should
  * never block. Long tasks should copy the data and scheduling an external task
- * (i.e., using `fio_defer`).
+ * (i.e., using `fio_srv_defer`).
  */
 struct fio_pubsub_engine_s {
   /** For internal facil.io use - initialize to zero(!) before calling `attach`
@@ -32068,7 +32074,7 @@ FIO_IFUNC void fio___subscription_unsubscribe(fio_subscription_s *s);
 Subscription Management Tasks
 ***************************************************************************** */
 
-/* The task to subscribe to a channel (called by `fio_defer`). */
+/* The task to subscribe to a channel (called by `fio_srv_defer`). */
 FIO_SFUNC void fio___subscribe_task(void *ch_, void *sub_);
 
 /** Unsubscribes a node and destroys the channel
@@ -33070,7 +33076,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
       (uint8_t)((uintptr_t)args.engine |
                 ((0x100U - args.is_json) & FIO___PUBSUB_JSON)));
   l->from = args.from;
-  fio_defer(fio___publish_letter_task, l, NULL);
+  fio_srv_defer(fio___publish_letter_task, l, NULL);
   return;
 external_engine:
   args.engine->publish(args.engine,
@@ -33267,7 +33273,7 @@ static void fio_pubsub_attach___task(void *engine_, void *ignr_) {
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
-  fio_defer(fio_pubsub_attach___task, engine, NULL);
+  fio_srv_defer(fio_pubsub_attach___task, engine, NULL);
 }
 
 FIO_SFUNC void fio_pubsub_detach___task(void *engine, void *ignr_) {
@@ -34093,9 +34099,9 @@ FIO_IFUNC int64_t fio_http_get_timestump(void) {
 #else
 #define FIO___HTTP_TIME_DIV  1000
 #define FIO___HTTP_TIME_UNIT "ms"
-int64_t fio_last_tick(void);
+int64_t fio_srv_last_tick(void);
 FIO_IFUNC int64_t fio_http_get_timestump(void) {
-  return (int64_t)fio_last_tick();
+  return (int64_t)fio_srv_last_tick();
 }
 #endif
 
@@ -36611,14 +36617,14 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
       char *c_start = value.buf + value.len - 7;
       if ((fio_buf2u32u(c_start) | 0x20202020UL) == fio_buf2u32u("chun") &&
           (fio_buf2u32u(c_start + 3) | 0x20202020UL) == fio_buf2u32u("nked")) {
-        if (value.len > 7 && value.buf[-8] != ' ' && value.buf[-8] != ',')
-          return -1;
         if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
           return -1;
         p->expected = HTTP1___EXPECTED_CHUNKED;
         /* endpoint does not need to know if the body was chunked or not */
         if (value.len == 7)
           return 0;
+        if (c_start[-1] != ' ' && c_start[-1] != ',' && c_start[-1] != '\t')
+          return -1;
         while (
             (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t') &&
             c_start > value.buf)
@@ -37794,7 +37800,7 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (FIO_LIKELY(fio_is_open(c->io)))
+  if (FIO_LIKELY(fio_srv_is_open(c->io)))
     cb.fn(h);
   fio_http_free(h);
 }
@@ -38063,7 +38069,7 @@ HTTP/1.1 Request / Response Completed
 static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_dup(c->io);
-  fio_suspend(c->io);
+  fio_srv_suspend(c->io);
   fio_http_s *h = c->h;
   c->h = NULL;
   c->suspend = 1;
@@ -38355,7 +38361,7 @@ FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
 /** Informs the controller that request / response headers must be sent. */
 FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io || !fio_is_open(c->io))
+  if (!c->io || !fio_srv_is_open(c->io))
     return;
   fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
   { /* write status string */
@@ -38397,7 +38403,7 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     fio_http_s *h,
     fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (!c->io || !fio_is_open(c->io))
+  if (!c->io || !fio_srv_is_open(c->io))
     goto no_write_err;
   if (fio_http_is_streaming(h))
     goto stream_chunk;
@@ -38448,16 +38454,16 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   c->suspend = 0;
   if (upgraded)
     goto upgraded;
-  if (fio_is_open(c->io)) {
+  if (fio_srv_is_open(c->io)) {
     fio___http1_process_data(c->io, c);
   }
   if (!c->suspend)
-    fio_unsuspend(c->io);
+    fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   return;
 
 upgraded:
-  if (c->h || !fio_is_open(c->io))
+  if (c->h || !fio_srv_is_open(c->io))
     goto something_is_wrong;
   c->h = (fio_http_s *)upgraded;
   {
@@ -38482,7 +38488,7 @@ upgraded:
         c->settings->on_eventsource_reconnect(c->h, FIO_STR2BUF_INFO(last_id));
     }
   }
-  fio_unsuspend(c->io);
+  fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   return;
 
@@ -38499,9 +38505,9 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
-  fio_defer(fio___http_controller_http1_on_finish_task,
-            (void *)(c),
-            fio_http_is_upgraded(h) ? (void *)h : NULL);
+  fio_srv_defer(fio___http_controller_http1_on_finish_task,
+                (void *)(c),
+                fio_http_is_upgraded(h) ? (void *)h : NULL);
 }
 
 /* *****************************************************************************
@@ -38547,7 +38553,7 @@ FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   c->suspend = 0;
   fio___websocket_process_data(c->io, c);
   if (!c->suspend)
-    fio_unsuspend(c->io);
+    fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   (void)ignr_;
 }
@@ -38557,7 +38563,7 @@ FIO_SFUNC void fio___websocket_on_message_task(void *c_, void *is_text) {
   c->state.ws.on_message(c->h,
                          fio_bstr_buf(c->state.ws.msg),
                          (uint8_t)(uintptr_t)is_text);
-  fio_defer(fio___websocket_on_message_finalize, c, NULL);
+  fio_srv_defer(fio___websocket_on_message_finalize, c, NULL);
 }
 
 /** Called when a message frame was received. */
@@ -38572,7 +38578,7 @@ FIO_SFUNC void fio_websocket_on_message(void *udata,
   c->state.ws.msg = NULL;
   return;
   fio_dup(c->io);
-  fio_suspend(c->io);
+  fio_srv_suspend(c->io);
   c->suspend = 1;
   fio_queue_push(c->queue,
                  fio___websocket_on_message_task,
@@ -38635,7 +38641,7 @@ FIO_SFUNC void fio_websocket_on_protocol_pong(void *udata, fio_buf_info_s msg) {
   {
     char *pos = msg.buf;
     static uint64_t longest = 0;
-    uint64_t ping_time = fio_last_tick() - fio_atol16u(&pos);
+    uint64_t ping_time = fio_srv_last_tick() - fio_atol16u(&pos);
     if (ping_time < (1 << 16) && longest < ping_time) {
       longest = ping_time;
       FIO_LOG_INFO("WebSocket longest ping round-trip detected as: %zums",
@@ -38710,7 +38716,7 @@ FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
 FIO_SFUNC void fio___websocket_on_timeout(fio_s *io) {
   char buf[32];
   char tm[20] = "0x00000000000000000";
-  fio_ltoa16u(tm + 2, fio_last_tick(), 16);
+  fio_ltoa16u(tm + 2, fio_srv_last_tick(), 16);
   size_t len = fio_websocket_server_wrap(buf, tm, 18, 0x09, 1, 1, 0);
   fio_write(io, buf, len);
 }
@@ -38898,7 +38904,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
              .buf = payload,
              .len = fio_bstr_len(payload),
              .dealloc = (void (*)(void *))fio_bstr_free);
-  return 0 - !fio_is_open(c->io);
+  return 0 - !fio_srv_is_open(c->io);
 }
 
 /* *****************************************************************************
@@ -38915,7 +38921,7 @@ FIO_SFUNC void fio___http_controller_ws_on_finish_task(void *h_, void *ignr_) {
 
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_ws_on_finish(fio_http_s *h) {
-  fio_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
+  fio_srv_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
 }
 
 /* called by the HTTP handle for each body chunk (or to finish a response. */
@@ -38972,7 +38978,7 @@ static void fio___sse_on_attach(fio_s *io) {
 
 FIO_SFUNC void fio___sse_on_timeout(fio_s *io) {
   char buf[32] = ":ping 0x0000000000000000\r\n\r\n";
-  fio_ltoa16u(buf + 8, fio_last_tick(), 16);
+  fio_ltoa16u(buf + 8, fio_srv_last_tick(), 16);
   buf[24] = '\r'; /* overwrite written NUL character */
   fio_write(io, buf, 28);
 }
@@ -42648,7 +42654,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_PRINT_HEADER("Printing stuff"),
         FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
         FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
-        {0},
+        {(fio___cli_line_e)0},
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
   }
@@ -43694,37 +43700,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
              "fio_http_status roundtrip error");
 
   FIO_ASSERT(!fio_http_method(h).buf, "fio_http_method should start as empty");
-  fio_http_method_set(h, FIO_STR_INFO1("POST"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
-             "fio_http_method roundtrip error");
+  fio_http_method_set(h, FIO_STR_INFO1((char *)"POST"));
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1((char *)"POST")),
+      "fio_http_method roundtrip error");
 
   FIO_ASSERT(!fio_http_path(h).buf, "fio_http_path should start as empty");
-  fio_http_path_set(h, FIO_STR_INFO1("/path"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_path(h), FIO_STR_INFO1("/path")),
-             "fio_http_path roundtrip error");
+  fio_http_path_set(h, FIO_STR_INFO1((char *)"/path"));
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_path(h), FIO_STR_INFO1((char *)"/path")),
+      "fio_http_path roundtrip error");
 
   FIO_ASSERT(!fio_http_query(h).buf, "fio_http_query should start as empty");
-  fio_http_query_set(h, FIO_STR_INFO1("query=null"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h), FIO_STR_INFO1("query=null")),
+  fio_http_query_set(h, FIO_STR_INFO1((char *)"query=null"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h),
+                                FIO_STR_INFO1((char *)"query=null")),
              "fio_http_query roundtrip error");
 
   FIO_ASSERT(!fio_http_version(h).buf,
              "fio_http_version should start as empty");
-  fio_http_version_set(h, FIO_STR_INFO1("HTTP/1.1"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_version(h), FIO_STR_INFO1("HTTP/1.1")),
+  fio_http_version_set(h, FIO_STR_INFO1((char *)"HTTP/1.1"));
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_version(h),
+                                FIO_STR_INFO1((char *)"HTTP/1.1")),
              "fio_http_version roundtrip error");
 
   { /* test multiple header support */
     fio_str_info_s test_data[] = {
-        FIO_STR_INFO1("header-name"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 001"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 002"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 003"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 004"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 005"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 006"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 007"),
-        FIO_STR_INFO1("a long enough value to require memory allocation 008"),
+        FIO_STR_INFO1((char *)"header-name"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 001"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 002"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 003"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 004"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 005"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 006"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 007"),
+        FIO_STR_INFO1(
+            (char *)"a long enough value to require memory allocation 008"),
     };
     size_t count = sizeof(test_data) / sizeof(test_data[0]);
     FIO_ASSERT(!fio_http_request_header(h, test_data[0], 0).buf,
@@ -43811,9 +43829,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, http_s)(void) {
 
   /* almost done, just make sure reference counting doesn't destroy object */
   fio_http_free(fio_http_dup(h));
-  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 44 &&
-                 FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1("POST")),
-             "fio_http_s reference counting shouldn't object");
+  FIO_ASSERT(
+      (uintptr_t)fio_http_udata2(h) == 44 &&
+          FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1((char *)"POST")),
+      "fio_http_s reference counting shouldn't object");
 
   fio_http_free(h);
 }
@@ -44259,7 +44278,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     membuf[4095] = 0;
     for (size_t i = 0; i < 4095; ++i) {
       membuf[i] = 0;
-      char *result = fio_memchr(membuf, 0, 4096);
+      char *result = (char *)fio_memchr(membuf, 0, 4096);
       size_t len = fio_strlen(membuf);
       membuf[i] = (char)((i & 0xFFU) | 1U);
       FIO_ASSERT(result == membuf + i, "fio_memchr failed.");
@@ -44706,16 +44725,17 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 FIO_SFUNC void FIO_NAME_TEST(stl, mustache)(void) {
   fprintf(stderr, "* Testing mustache template parser.\n");
-  char *example1 = "This is a {{tag}}, and so is {{ this_one }}.";
-  char *example2 = "{{tag}} and {{ incomplete}";
+  char *example1 = (char *)"This is a {{tag}}, and so is {{ this_one }}.";
+  char *example2 = (char *)"{{tag}} and {{ incomplete}";
   fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1(example1));
   FIO_ASSERT(m, "valid example load failed!");
-  char *result = fio_mustache_build(m, .ctx = NULL);
+  char *result = (char *)fio_mustache_build(m, .ctx = NULL);
   FIO_ASSERT(result, "a valid fio_mustache_build returned NULL");
-  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result),
-                                FIO_BUF_INFO1("This is a , and so is .")),
-             "valid example result failed: %s",
-             result);
+  FIO_ASSERT(
+      FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result),
+                         FIO_BUF_INFO1((char *)"This is a , and so is .")),
+      "valid example result failed: %s",
+      result);
   fio_bstr_free(result);
   fio_mustache_free(m);
   fprintf(stderr, "\terror should print on next line.\n");
