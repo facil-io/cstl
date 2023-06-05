@@ -101,9 +101,11 @@ TEST_DEFAULT=stl
 ifeq ($(OS),Windows_NT)
   # Windows libraries
   LINKER_LIBS=Ws2_32
+  LIB_EXT=dll
 else
   # POSIX libraries
   LINKER_LIBS=pthread m
+  LIB_EXT=so
 endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
 OPTIMIZATION=-O3
@@ -194,7 +196,7 @@ ifeq ($(OS),Darwin) # Run MacOS commands
   # documentation commands
   # DOCUMENTATION=cldoc generate $(INCLUDE_STR) -- --output ./html $(foreach dir, $(LIB_PUBLIC_SUBFOLDERS), $(wildcard $(addsuffix /, $(basename $(dir)))*.h*))
   # rule modifier (can't be indented)
-$(DEST)/$(LIB_NAME).so: LDFLAGS+=-dynamiclib -install_name $(realpath $(DEST))/$(LIB_NAME).so
+$(DEST)/$(LIB_NAME).$(LIB_EXT): LDFLAGS+=-dynamiclib -install_name $(realpath $(DEST))/$(LIB_NAME).$(LIB_EXT)
 else
   # debugger
   DB=gdb
@@ -777,7 +779,7 @@ run: build run.$(NAME) ;
 build_lib_objects: $(LIB_OBJS) ;
 
 link_lib:
-	@$(CCL) -shared -o $(DEST)/$(LIB_NAME).so $(LIB_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
+	@$(CCL) -shared -o $(DEST)/$(LIB_NAME).$(LIB_EXT) $(LIB_OBJS) $(OPTIMIZATION) $(LINKER_FLAGS)
 	@$(DOCUMENTATION)
 
 
@@ -795,7 +797,7 @@ lib: create_tree build_lib_objects link_lib documentation.all;
 # Requires.private: %s\\n\
 # " $(realpath $(DEST)/../libdump/include) $(realpath $(DEST)) $(FIO_VERSION) "$(PKGC_REQ_EVAL)" > $@
 
-# $(DEST)/$(LIB_NAME).so: build_lib_objects | $(DEST)/pkgconfig/$(LIB_NAME).pc
+# $(DEST)/$(LIB_NAME).$(LIB_EXT): build_lib_objects | $(DEST)/pkgconfig/$(LIB_NAME).pc
 
 
 #############################################################################
