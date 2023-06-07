@@ -61,6 +61,9 @@ typedef struct fio_s fio_s;
 /** An opaque type used for the SSL/TLS helper functions. */
 typedef struct fio_tls_s fio_tls_s;
 
+/** Message structure, as received by the `on_message` subscription callback. */
+typedef struct fio_msg_s fio_msg_s;
+
 /* *****************************************************************************
 Starting / Stopping the Server
 ***************************************************************************** */
@@ -467,6 +470,16 @@ struct fio_protocol_s {
   void (*on_shutdown)(fio_s *io);
   /** Called when a connection's timeout was reached */
   void (*on_timeout)(fio_s *io);
+  /** Used as a default `on_message` when an IO object subscribes. */
+  void (*on_pubsub)(struct fio_msg_s *msg);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user1)(fio_s *io, void *user_data);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user2)(fio_s *io, void *user_data);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user3)(fio_s *io, void *user_data);
+  /** Reserved for future protocol agnostic callbacks. */
+  void (*on_reserved)(fio_s *io, void *user_data);
   /**
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls.
@@ -765,6 +778,8 @@ Protocol validation
 
 static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_srv_suspend(io); }
 static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
+static void fio___srv_on_ev_pubsub_mock(struct fio_msg_s *msg) { (void)(msg); }
+static void fio___srv_on_user_mock(fio_s *io, void *i_) { (void)io, (void)i_; }
 static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
 static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
 static void fio___srv_on_timeout_never(fio_s *io) { fio_touch(io); }
@@ -837,6 +852,16 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
     pr->on_shutdown = fio___srv_on_ev_mock;
   if (!pr->on_timeout)
     pr->on_timeout = fio___srv_on_ev_on_timeout;
+  if (!pr->on_pubsub)
+    pr->on_pubsub = fio___srv_on_ev_pubsub_mock;
+  if (!pr->on_user1)
+    pr->on_user1 = fio___srv_on_user_mock;
+  if (!pr->on_user2)
+    pr->on_user2 = fio___srv_on_user_mock;
+  if (!pr->on_user3)
+    pr->on_user3 = fio___srv_on_user_mock;
+  if (!pr->on_reserved)
+    pr->on_reserved = fio___srv_on_user_mock;
   if (!pr->io_functions.build_context)
     pr->io_functions.build_context = io_fn.build_context;
   if (!pr->io_functions.free_context)

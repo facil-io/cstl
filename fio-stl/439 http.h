@@ -182,11 +182,9 @@ FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 /** Returns the IO object associated with the HTTP object (request only). */
 SFUNC fio_s *fio_http_io(fio_http_s *);
 
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-FIO_IFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+/** Macro helper for HTTP handle pub/sub subscriptions. */
 #define fio_http_subscribe(h, ...)                                             \
-  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+  fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
@@ -242,25 +240,6 @@ SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
 /* *****************************************************************************
 Module Implementation - inlined static functions
 ***************************************************************************** */
-
-void fio_http_subscribe___(void); /* IDE Marker */
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-FIO_IFUNC int fio_http_subscribe FIO_NOOP(fio_http_s *h,
-                                          fio_subscribe_args_s args) {
-  if (h) {
-    if (!fio_http_is_upgraded(h))
-      return -1;
-    args.io = fio_http_io(h);
-    if (!args.on_message || !args.udata)
-      args.udata = h;
-    if (!args.on_message && fio_http_is_sse(h))
-      args.on_message = FIO_HTTP_SSE_SUBSCRIBE_DIRECT;
-    if (!args.on_message && fio_http_is_websocket(h))
-      args.on_message = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT;
-  }
-  fio_subscribe FIO_NOOP(args);
-  return 0;
-}
 
 /** Allows all clients to connect (bypasses authentication). */
 FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
@@ -1464,30 +1443,31 @@ SFUNC int fio_http_on_message_set(fio_http_s *h,
 WebSocket Writing / Subscription Helpers
 ***************************************************************************** */
 
-/** Optional WebSocket subscription callback. */
-SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
-  fio_http_websocket_write(
-      (fio_http_s *)msg->udata,
-      (void *)msg->message.buf,
-      msg->message.len,
-      ((msg->message.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) &&
-       (fio_string_utf8_valid(
-           FIO_STR_INFO2((char *)msg->message.buf, msg->message.len)))));
+FIO_IFUNC void fio___http_websocket_subscribe_imp(fio_msg_s *msg,
+                                                  uint8_t is_text) {
+  fio___http_connection_s *c =
+      (fio___http_connection_s *)fio_udata_get(msg->io);
+  if (!c)
+    return;
+  fio_http_websocket_write(c->h, msg->message.buf, msg->message.len, is_text);
 }
 
 /** Optional WebSocket subscription callback - all messages are UTF-8 valid. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT(fio_msg_s *msg) {
-  fio_http_websocket_write((fio_http_s *)msg->udata,
-                           msg->message.buf,
-                           msg->message.len,
-                           1);
+  fio___http_websocket_subscribe_imp(msg, 1);
 }
 /** Optional WebSocket subscription callback - messages may be non-UTF-8. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY(fio_msg_s *msg) {
-  fio_http_websocket_write((fio_http_s *)msg->udata,
-                           msg->message.buf,
-                           msg->message.len,
-                           0);
+  fio___http_websocket_subscribe_imp(msg, 0);
+}
+
+/** Optional WebSocket subscription callback. */
+SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
+  ((msg->message.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) &&
+           (fio_string_utf8_valid(
+               FIO_STR_INFO2((char *)msg->message.buf, msg->message.len)))
+       ? FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT
+       : FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY)(msg);
 }
 
 /* *****************************************************************************
@@ -1549,7 +1529,11 @@ SFUNC int fio_http_sse_write FIO_NOOP(fio_http_s *h,
 
 /** Optional EventSource subscription callback - messages MUST be UTF-8. */
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
-  fio_http_sse_write((fio_http_s *)msg->udata,
+  fio___http_connection_s *c =
+      (fio___http_connection_s *)fio_udata_get(msg->io);
+  if (!c)
+    return;
+  fio_http_sse_write(c->h,
                      .event = FIO_STR2BUF_INFO(msg->channel),
                      .data = FIO_STR2BUF_INFO(msg->message));
 }
@@ -1777,6 +1761,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
         .on_timeout = fio___websocket_on_timeout,
         .on_shutdown = fio___websocket_on_shutdown,
         .on_close = fio___websocket_on_close,
+        .on_pubsub = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -1785,6 +1770,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
         .on_timeout = fio___sse_on_timeout,
         .on_shutdown = fio___sse_on_shutdown,
         .on_close = fio___sse_on_close,
+        .on_pubsub = FIO_HTTP_SSE_SUBSCRIBE_DIRECT,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE: /* fall through*/

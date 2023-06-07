@@ -25,7 +25,7 @@ Pub/Sub - message format
 ***************************************************************************** */
 
 /** Message structure, as received by the `on_message` subscription callback. */
-typedef struct fio_msg_s {
+struct fio_msg_s {
   /** A connection (if any) to which the subscription belongs. */
   fio_s *io;
   /**
@@ -46,7 +46,7 @@ typedef struct fio_msg_s {
   int16_t filter;
   /** flag indicating if the message is JSON data or binary/text. */
   uint8_t is_json;
-} fio_msg_s;
+};
 
 /* *****************************************************************************
 Pub/Sub - Subscribe / Unsubscribe
@@ -147,6 +147,9 @@ SFUNC int fio_unsubscribe(fio_subscribe_args_s args);
  */
 #define fio_unsubscribe(...)                                                   \
   fio_unsubscribe((fio_subscribe_args_s){__VA_ARGS__})
+
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg);
 
 /* *****************************************************************************
 Pub/Sub - Publish
@@ -450,8 +453,6 @@ SFUNC uint8_t (*FIO_PUBSUB_PATTERN_MATCH)(fio_str_info_s,
 
 /* a mock callback for subscriptions */
 FIO_SFUNC void fio_subscription___mock_cb(fio_msg_s *msg) { (void)msg; }
-/* a default callback for IO subscriptions - sends message data. */
-FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg);
 
 /* *****************************************************************************
  * Pub / Sub types, for internal use
@@ -1001,8 +1002,8 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
              .dealloc = (void (*)(void *))fio_letter_free);
 }
 
-/* a default callback for IO subscriptions - sends message data. */
-FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg) {
   if (!msg->message.len)
     return;
   fio_letter_s *l = fio_msg2letter(msg);
@@ -1012,6 +1013,15 @@ FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
              .offset = sizeof(*l) + (FIO___LETTER_HEADER_LENGTH + 1 +
                                      fio_letter_channel_len(l)),
              .dealloc = (void (*)(void *))fio_letter_free);
+}
+
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void fio___subscribed_io_route(fio_msg_s *msg) {
+  if (!msg->io)
+    return;
+  fio_protocol_s *p = fio_protocol_get(msg->io);
+  FIO_ASSERT_DEBUG(p, "every IO object should have a protocol, always");
+  p->on_pubsub(msg);
 }
 
 /* *****************************************************************************
@@ -1545,7 +1555,7 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   *s = (fio_subscription_s){
       .io = args.io,
       .on_message = (args.on_message ? args.on_message
-                                     : (args.io ? fio_subscription___send_cb
+                                     : (args.io ? fio___subscribed_io_route
                                                 : fio_subscription___mock_cb)),
       .on_unsubscribe = args.on_unsubscribe,
       .udata = args.udata,

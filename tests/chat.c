@@ -39,6 +39,7 @@ static fio_protocol_s CHAT_PROTOCOL_CHAT = {
     .on_data = on_data_chat,
     .on_close = on_close,
     .on_shutdown = on_shutdown,
+    .on_pubsub = FIO_ON_MESSAGE_SEND_MESSAGE,
 };
 
 /* *****************************************************************************

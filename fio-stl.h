@@ -28148,6 +28148,9 @@ typedef struct fio_s fio_s;
 /** An opaque type used for the SSL/TLS helper functions. */
 typedef struct fio_tls_s fio_tls_s;
 
+/** Message structure, as received by the `on_message` subscription callback. */
+typedef struct fio_msg_s fio_msg_s;
+
 /* *****************************************************************************
 Starting / Stopping the Server
 ***************************************************************************** */
@@ -28554,6 +28557,16 @@ struct fio_protocol_s {
   void (*on_shutdown)(fio_s *io);
   /** Called when a connection's timeout was reached */
   void (*on_timeout)(fio_s *io);
+  /** Used as a default `on_message` when an IO object subscribes. */
+  void (*on_pubsub)(struct fio_msg_s *msg);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user1)(fio_s *io, void *user_data);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user2)(fio_s *io, void *user_data);
+  /** Allows user specific protocol agnostic callbacks. */
+  void (*on_user3)(fio_s *io, void *user_data);
+  /** Reserved for future protocol agnostic callbacks. */
+  void (*on_reserved)(fio_s *io, void *user_data);
   /**
    * Defines Transport Layer callbacks that facil.io will treat as non-blocking
    * system calls.
@@ -28852,6 +28865,8 @@ Protocol validation
 
 static void fio___srv_on_ev_mock_sus(fio_s *io) { fio_srv_suspend(io); }
 static void fio___srv_on_ev_mock(fio_s *io) { (void)(io); }
+static void fio___srv_on_ev_pubsub_mock(struct fio_msg_s *msg) { (void)(msg); }
+static void fio___srv_on_user_mock(fio_s *io, void *i_) { (void)io, (void)i_; }
 static void fio___srv_on_close_mock(void *ptr) { (void)ptr; }
 static void fio___srv_on_ev_on_timeout(fio_s *io) { fio_close_now(io); }
 static void fio___srv_on_timeout_never(fio_s *io) { fio_touch(io); }
@@ -28924,6 +28939,16 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
     pr->on_shutdown = fio___srv_on_ev_mock;
   if (!pr->on_timeout)
     pr->on_timeout = fio___srv_on_ev_on_timeout;
+  if (!pr->on_pubsub)
+    pr->on_pubsub = fio___srv_on_ev_pubsub_mock;
+  if (!pr->on_user1)
+    pr->on_user1 = fio___srv_on_user_mock;
+  if (!pr->on_user2)
+    pr->on_user2 = fio___srv_on_user_mock;
+  if (!pr->on_user3)
+    pr->on_user3 = fio___srv_on_user_mock;
+  if (!pr->on_reserved)
+    pr->on_reserved = fio___srv_on_user_mock;
   if (!pr->io_functions.build_context)
     pr->io_functions.build_context = io_fn.build_context;
   if (!pr->io_functions.free_context)
@@ -31415,7 +31440,7 @@ Pub/Sub - message format
 ***************************************************************************** */
 
 /** Message structure, as received by the `on_message` subscription callback. */
-typedef struct fio_msg_s {
+struct fio_msg_s {
   /** A connection (if any) to which the subscription belongs. */
   fio_s *io;
   /**
@@ -31436,7 +31461,7 @@ typedef struct fio_msg_s {
   int16_t filter;
   /** flag indicating if the message is JSON data or binary/text. */
   uint8_t is_json;
-} fio_msg_s;
+};
 
 /* *****************************************************************************
 Pub/Sub - Subscribe / Unsubscribe
@@ -31537,6 +31562,9 @@ SFUNC int fio_unsubscribe(fio_subscribe_args_s args);
  */
 #define fio_unsubscribe(...)                                                   \
   fio_unsubscribe((fio_subscribe_args_s){__VA_ARGS__})
+
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg);
 
 /* *****************************************************************************
 Pub/Sub - Publish
@@ -31840,8 +31868,6 @@ SFUNC uint8_t (*FIO_PUBSUB_PATTERN_MATCH)(fio_str_info_s,
 
 /* a mock callback for subscriptions */
 FIO_SFUNC void fio_subscription___mock_cb(fio_msg_s *msg) { (void)msg; }
-/* a default callback for IO subscriptions - sends message data. */
-FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg);
 
 /* *****************************************************************************
  * Pub / Sub types, for internal use
@@ -32391,8 +32417,8 @@ FIO_IFUNC void fio_letter_write(fio_s *io, fio_letter_s *l) {
              .dealloc = (void (*)(void *))fio_letter_free);
 }
 
-/* a default callback for IO subscriptions - sends message data. */
-FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg) {
   if (!msg->message.len)
     return;
   fio_letter_s *l = fio_msg2letter(msg);
@@ -32402,6 +32428,15 @@ FIO_SFUNC void fio_subscription___send_cb(fio_msg_s *msg) {
              .offset = sizeof(*l) + (FIO___LETTER_HEADER_LENGTH + 1 +
                                      fio_letter_channel_len(l)),
              .dealloc = (void (*)(void *))fio_letter_free);
+}
+
+/* A callback for IO subscriptions - sends raw message data. */
+FIO_SFUNC void fio___subscribed_io_route(fio_msg_s *msg) {
+  if (!msg->io)
+    return;
+  fio_protocol_s *p = fio_protocol_get(msg->io);
+  FIO_ASSERT_DEBUG(p, "every IO object should have a protocol, always");
+  p->on_pubsub(msg);
 }
 
 /* *****************************************************************************
@@ -32935,7 +32970,7 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   *s = (fio_subscription_s){
       .io = args.io,
       .on_message = (args.on_message ? args.on_message
-                                     : (args.io ? fio_subscription___send_cb
+                                     : (args.io ? fio___subscribed_io_route
                                                 : fio_subscription___mock_cb)),
       .on_unsubscribe = args.on_unsubscribe,
       .udata = args.udata,
@@ -37492,11 +37527,9 @@ FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 /** Returns the IO object associated with the HTTP object (request only). */
 SFUNC fio_s *fio_http_io(fio_http_s *);
 
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-FIO_IFUNC int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
+/** Macro helper for HTTP handle pub/sub subscriptions. */
 #define fio_http_subscribe(h, ...)                                             \
-  fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+  fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
@@ -37552,25 +37585,6 @@ SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
 /* *****************************************************************************
 Module Implementation - inlined static functions
 ***************************************************************************** */
-
-void fio_http_subscribe___(void); /* IDE Marker */
-/** Subscribes the HTTP handle (WebSocket / SSE) to events. */
-FIO_IFUNC int fio_http_subscribe FIO_NOOP(fio_http_s *h,
-                                          fio_subscribe_args_s args) {
-  if (h) {
-    if (!fio_http_is_upgraded(h))
-      return -1;
-    args.io = fio_http_io(h);
-    if (!args.on_message || !args.udata)
-      args.udata = h;
-    if (!args.on_message && fio_http_is_sse(h))
-      args.on_message = FIO_HTTP_SSE_SUBSCRIBE_DIRECT;
-    if (!args.on_message && fio_http_is_websocket(h))
-      args.on_message = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT;
-  }
-  fio_subscribe FIO_NOOP(args);
-  return 0;
-}
 
 /** Allows all clients to connect (bypasses authentication). */
 FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
@@ -38774,30 +38788,31 @@ SFUNC int fio_http_on_message_set(fio_http_s *h,
 WebSocket Writing / Subscription Helpers
 ***************************************************************************** */
 
-/** Optional WebSocket subscription callback. */
-SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
-  fio_http_websocket_write(
-      (fio_http_s *)msg->udata,
-      (void *)msg->message.buf,
-      msg->message.len,
-      ((msg->message.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) &&
-       (fio_string_utf8_valid(
-           FIO_STR_INFO2((char *)msg->message.buf, msg->message.len)))));
+FIO_IFUNC void fio___http_websocket_subscribe_imp(fio_msg_s *msg,
+                                                  uint8_t is_text) {
+  fio___http_connection_s *c =
+      (fio___http_connection_s *)fio_udata_get(msg->io);
+  if (!c)
+    return;
+  fio_http_websocket_write(c->h, msg->message.buf, msg->message.len, is_text);
 }
 
 /** Optional WebSocket subscription callback - all messages are UTF-8 valid. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT(fio_msg_s *msg) {
-  fio_http_websocket_write((fio_http_s *)msg->udata,
-                           msg->message.buf,
-                           msg->message.len,
-                           1);
+  fio___http_websocket_subscribe_imp(msg, 1);
 }
 /** Optional WebSocket subscription callback - messages may be non-UTF-8. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY(fio_msg_s *msg) {
-  fio_http_websocket_write((fio_http_s *)msg->udata,
-                           msg->message.buf,
-                           msg->message.len,
-                           0);
+  fio___http_websocket_subscribe_imp(msg, 0);
+}
+
+/** Optional WebSocket subscription callback. */
+SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
+  ((msg->message.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) &&
+           (fio_string_utf8_valid(
+               FIO_STR_INFO2((char *)msg->message.buf, msg->message.len)))
+       ? FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT
+       : FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY)(msg);
 }
 
 /* *****************************************************************************
@@ -38859,7 +38874,11 @@ SFUNC int fio_http_sse_write FIO_NOOP(fio_http_s *h,
 
 /** Optional EventSource subscription callback - messages MUST be UTF-8. */
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
-  fio_http_sse_write((fio_http_s *)msg->udata,
+  fio___http_connection_s *c =
+      (fio___http_connection_s *)fio_udata_get(msg->io);
+  if (!c)
+    return;
+  fio_http_sse_write(c->h,
                      .event = FIO_STR2BUF_INFO(msg->channel),
                      .data = FIO_STR2BUF_INFO(msg->message));
 }
@@ -39087,6 +39106,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
         .on_timeout = fio___websocket_on_timeout,
         .on_shutdown = fio___websocket_on_shutdown,
         .on_close = fio___websocket_on_close,
+        .on_pubsub = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -39095,6 +39115,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
         .on_timeout = fio___sse_on_timeout,
         .on_shutdown = fio___sse_on_shutdown,
         .on_close = fio___sse_on_close,
+        .on_pubsub = FIO_HTTP_SSE_SUBSCRIBE_DIRECT,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE: /* fall through*/
