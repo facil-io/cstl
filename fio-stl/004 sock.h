@@ -203,20 +203,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
 #endif
 
   switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP))) {
-  case FIO_SOCK_UDP:
-    addr = fio_sock_address_new(address, port, SOCK_DGRAM);
-    if (!addr) {
-      FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
-      return -1;
-    }
-    if ((flags & FIO_SOCK_CLIENT)) {
-      fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
-    } else {
-      fd = fio_sock_open_local(addr, (flags & FIO_SOCK_NONBLOCK));
-    }
-    fio_sock_address_free(addr);
-    return fd;
-
+  case 0: /* fall through - default to TCP/IP*/
   case FIO_SOCK_TCP:
     addr = fio_sock_address_new(address, port, SOCK_STREAM);
     if (!addr) {
@@ -236,10 +223,23 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     }
     fio_sock_address_free(addr);
     return fd;
+  case FIO_SOCK_UDP:
+    addr = fio_sock_address_new(address, port, SOCK_DGRAM);
+    if (!addr) {
+      FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
+      return -1;
+    }
+    if ((flags & FIO_SOCK_CLIENT)) {
+      fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
+    } else {
+      fd = fio_sock_open_local(addr, (flags & FIO_SOCK_NONBLOCK));
+    }
+    fio_sock_address_free(addr);
+    return fd;
   }
 
-  FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
-                "FIO_SOCK_UNIX flags are exclusive");
+  FIO_LOG_ERROR(
+      "(fio_sock_open) the FIO_SOCK_TCP and FIO_SOCK_UDP flags are exclusive");
   return -1;
 }
 

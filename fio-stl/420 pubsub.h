@@ -1829,7 +1829,7 @@ static void fio_pubsub_mock_publish(const fio_pubsub_engine_s *eng,
 /** Callback for when a channel is created. */
 FIO_IFUNC void fio_channel_on_create(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
-  FIO_LOG_DEBUG2("%d (pubsub) channel created (filter %d, "
+  FIO_LOG_DEBUG2("(%d) (pubsub) channel created (filter %d, "
                  "length %zu bytes): %s",
                  fio___srvdata.pid,
                  (int)ch->filter,

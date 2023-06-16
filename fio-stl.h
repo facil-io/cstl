@@ -9707,20 +9707,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
 #endif
 
   switch ((flags & ((uint16_t)FIO_SOCK_TCP | (uint16_t)FIO_SOCK_UDP))) {
-  case FIO_SOCK_UDP:
-    addr = fio_sock_address_new(address, port, SOCK_DGRAM);
-    if (!addr) {
-      FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
-      return -1;
-    }
-    if ((flags & FIO_SOCK_CLIENT)) {
-      fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
-    } else {
-      fd = fio_sock_open_local(addr, (flags & FIO_SOCK_NONBLOCK));
-    }
-    fio_sock_address_free(addr);
-    return fd;
-
+  case 0: /* fall through - default to TCP/IP*/
   case FIO_SOCK_TCP:
     addr = fio_sock_address_new(address, port, SOCK_STREAM);
     if (!addr) {
@@ -9740,10 +9727,23 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     }
     fio_sock_address_free(addr);
     return fd;
+  case FIO_SOCK_UDP:
+    addr = fio_sock_address_new(address, port, SOCK_DGRAM);
+    if (!addr) {
+      FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
+      return -1;
+    }
+    if ((flags & FIO_SOCK_CLIENT)) {
+      fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
+    } else {
+      fd = fio_sock_open_local(addr, (flags & FIO_SOCK_NONBLOCK));
+    }
+    fio_sock_address_free(addr);
+    return fd;
   }
 
-  FIO_LOG_ERROR("(fio_sock_open) the FIO_SOCK_TCP, FIO_SOCK_UDP, and "
-                "FIO_SOCK_UNIX flags are exclusive");
+  FIO_LOG_ERROR(
+      "(fio_sock_open) the FIO_SOCK_TCP and FIO_SOCK_UDP flags are exclusive");
   return -1;
 }
 
@@ -28818,7 +28818,7 @@ FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
  */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 
-#define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
+#define fio_srv_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
 
 /* *****************************************************************************
 Simple Server Implementation - inlined static functions
@@ -33244,7 +33244,7 @@ static void fio_pubsub_mock_publish(const fio_pubsub_engine_s *eng,
 /** Callback for when a channel is created. */
 FIO_IFUNC void fio_channel_on_create(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
-  FIO_LOG_DEBUG2("%d (pubsub) channel created (filter %d, "
+  FIO_LOG_DEBUG2("(%d) (pubsub) channel created (filter %d, "
                  "length %zu bytes): %s",
                  fio___srvdata.pid,
                  (int)ch->filter,

@@ -269,9 +269,9 @@ int main(int argc, char const *argv[]) {
 
 ## Contribution Notice
 
-If you're submitting a PR, make sure to update the corresponding code slice (file) in the `stl_slices` folder.
+If you're submitting a PR, make sure to update the corresponding code slice (file) in the `fio-stl` folder, the `makefile` will re-produce the `fio-stl.h` file automatically.
 
-Note that the master branch is unstable as it gets. Commits may get squashed, the branch may be overwritten (force push), etc'.
+Note that the master branch is currently as unstable as it gets. Commits may get squashed, the branch may be overwritten (force push), etc'. I will play nicer when the code stabilizes.
 
 Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](CONTRIBUTING.md). 
 

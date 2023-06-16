@@ -19,39 +19,44 @@ Note that this program uses a single thread, which allows it to ignore some
 possible race conditions.
 ***************************************************************************** */
 
-/* include some of the moduls we use... */
+/* include some of the modules we use... */
 #define FIO_CLI
 #define FIO_LOG
-#define FIO_URL
-#define FIO_SOCK
-#define FIO_STREAM
-#define FIO_SIGNAL
-#define FIO_POLL
+#define FIO_SERVER
+#define FIO_HTTP
 #include "fio-stl.h"
 
-/* we use local global variables to make the code easier. */
-
-/** This is used as a user-land buffer in case of partial `write` call. */
-fio_stream_s output_stream = FIO_STREAM_INIT(output_stream);
-
-/** A flag telling us when to stop reviewing IO events. */
-static volatile uint8_t stop = 0;
-
-/** The client / cconnection socket. */
-int client_fd;
-
-/** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(void *arg);
+/** Called When the client socket is attached to the server. */
+FIO_SFUNC void on_attach(fio_s *io);
+/** Called (once) when the client socket's buffer is empty. */
+FIO_SFUNC void on_ready(fio_s *io);
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(void *arg);
+FIO_SFUNC void on_data(fio_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(void *arg);
+FIO_SFUNC void on_close(void *udata);
 
-/** The IO polling object - it keeps a one-shot list of monitored IOs. */
-static fio_poll_s *monitor;
+/** Socket client protocol */
+static fio_protocol_s CLIENT_PROTOCOL_CONNECTING = {
+    .on_attach = on_attach,
+    .on_ready = on_ready,
+    .on_data = on_data,
+    .on_close = on_close,
+    .on_pubsub = FIO_ON_MESSAGE_SEND_MESSAGE,
+};
+/** Socket client protocol */
+static fio_protocol_s CLIENT_PROTOCOL = {
+    .on_data = on_data,
+    .on_close = on_close,
+    .on_pubsub = FIO_ON_MESSAGE_SEND_MESSAGE,
+};
 
-/* facil.io delays signal callbacks so they can safely with no restrictions. */
-FIO_SFUNC void on_signal(int sig, void *udata);
+/** Called there's incoming data (from STDIN / the client socket). */
+FIO_SFUNC void on_input(fio_s *io);
+
+/** STDIN protocol (REPL) */
+static fio_protocol_s STDIN_PROTOCOL = {
+    .on_data = on_input,
+};
 
 /* *****************************************************************************
 The main code.
@@ -81,188 +86,78 @@ int main(int argc, char const *argv[]) {
   if (fio_cli_get_bool("-V")) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
+
   /* review CLI connection address (in URL format) */
+  if (!fio_cli_unnamed(0) && fio_cli_get("-b"))
+    fio_cli_set_unnamed(0, fio_cli_get("-b"));
+  FIO_ASSERT(fio_cli_unnamed(0), "client address missing");
   size_t url_len = strlen(fio_cli_unnamed(0));
+  FIO_ASSERT(url_len, "client address too short");
   FIO_ASSERT(url_len < 1024, "URL address too long");
-  fio_url_s a = fio_url_parse(fio_cli_unnamed(0), url_len);
-  if (!a.host.buf && !a.port.buf) {
-#if FIO_OS_WIN
-    FIO_ASSERT(0, "Unix style sockets are unsupported on Windows.");
-#else
-    /* Unix Socket */
-    client_fd =
-        fio_sock_open(a.path.buf,
-                      NULL,
-                      FIO_SOCK_UNIX | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
-    FIO_LOG_DEBUG("Opened a Unix Socket (%d).", client_fd);
-#endif
-  } else if (!a.scheme.buf || a.scheme.len != 3 ||
-             (a.scheme.buf[0] | 32) != 'u' || (a.scheme.buf[1] | 32) != 'd' ||
-             (a.scheme.buf[2] | 32) != 'p') {
-    /* TCP/IP Socket */
-    char buf[1024];
-    /* copy because we need to add NUL bytes between the address and the port */
-    memcpy(buf, a.host.buf, a.host.len + a.port.len + 2);
-    buf[a.host.len + a.port.len + 1] = 0;
-    buf[a.host.len] = 0;
-    /* open the socket, passing NUL terminated strings for address and port */
-    client_fd =
-        fio_sock_open(buf,
-                      buf + a.host.len + 1,
-                      FIO_SOCK_TCP | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
-    /* log */
-    FIO_LOG_DEBUG("Opened a TCP/IP Socket (%d) to %s port %s.",
-                  client_fd,
-                  buf,
-                  buf + a.host.len + 1);
-  } else {
-    /* UDP Socket */
-    char buf[1024];
-    /* copy because we need to add NUL bytes between the address and the port */
-    memcpy(buf, a.host.buf, a.host.len + a.port.len + 2);
-    buf[a.host.len] = 0;
-    buf[a.host.len + a.port.len + 1] = 0;
-    /* open the socket, passing NUL terminated strings for address and port */
-    client_fd =
-        fio_sock_open(buf,
-                      buf + a.host.len + 1,
-                      FIO_SOCK_UDP | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
-    FIO_LOG_DEBUG("Opened a UDP Socket (%d).", client_fd);
-  }
+
+  /* connect & attach STDIN */
+  FIO_ASSERT(!fio_srv_connect(fio_cli_unnamed(0),
+                              &CLIENT_PROTOCOL_CONNECTING,
+                              NULL,
+                              NULL),
+             "Connection error");
+  fio_srv_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
 
   /* we're dome with the CLI, release resources */
-  fio_cli_end();
-
-  /* test socket / connection sccess */
-  if (client_fd == -1) {
-    FIO_LOG_FATAL("Couldn't open connection");
-  }
-
-  /* select signals to be monitored */
-  fio_signal_monitor(SIGINT, on_signal, NULL);
-  fio_signal_monitor(SIGTERM, on_signal, NULL);
-  fio_signal_monitor(SIGQUIT, on_signal, NULL);
-
-  fio_poll_s monitor;
-  fio_poll_init(&monitor,
-                .on_data = on_data,
-                .on_ready = on_ready,
-                .on_close = on_close);
-
-  /* select IO objects to be monitored */
-  fio_poll_monitor(&monitor, client_fd, NULL, POLLIN | POLLOUT);
-  fio_poll_monitor(&monitor, fileno(stdin), (void *)1, POLLIN); /* mark STDIO */
-
-  /* loop until the stop flag is raised */
-  while (!stop) {
-    /* review IO events (calls the registered callbacks) */
-    fio_poll_review(&monitor, 1000);
-    /* review signals (calls the registered callback) */
-    fio_signal_review();
-  }
-
-  /* cleanup */
-  fio_sock_close(client_fd);
-  fio_poll_destroy(&monitor);
+  fio_srv_start(0);
   return 0;
-}
-
-/* *****************************************************************************
-Signal callback(s)
-***************************************************************************** */
-
-/* facil.io delays signal callbacks so they can safely with no restrictions. */
-FIO_SFUNC void on_signal(int sig, void *udata) {
-  /* since there are no restrictions, we can safely print to the log. */
-  FIO_LOG_INFO("Exit signal %d detected", sig);
-  /* If the signal repeats, crash. */
-  if (fio_atomic_exchange(&stop, 1))
-    exit(-1);
-  (void)sig;
-  (void)udata;
 }
 
 /* *****************************************************************************
 IO callback(s)
 ***************************************************************************** */
 
-/** Called when the socket have available space in the outgoing buffer. */
-FIO_SFUNC void on_ready(void *arg) {
-  FIO_LOG_DEBUG2("on_ready callback called for %d.", fd);
-  char mem[4080];
-  size_t len = 4080;
-  /* send as much data as we can until the system buffer is full */
-  do {
-    /* set buffer to copy to, in case a copy is performed */
-    char *buf = mem;
-    len = 4080;
-    /* read from the stream, copy might not be required. updates buf and len. */
-    fio_stream_read(&output_stream, &buf, &len);
-    /* write to the IO object */
-    if (!len || fio_sock_write(fd, buf, len) <= 0)
-      goto finish;
-    /* advance the stream by the amount actually written to the IO (partial?) */
-    fio_stream_advance(&output_stream, len);
-    /* log */
-    FIO_LOG_DEBUG2("on_ready send %zu bytes to %d.", len, fd);
-  } while (len);
-
-finish:
-  /* if there's data left to write, monitor the outgoing buffer. */
-  if (fio_stream_any(&output_stream))
-    fio_poll_monitor(monitor, fd, arg, POLLOUT);
+/** Called When the client socket is attached to the server. */
+FIO_SFUNC void on_attach(fio_s *io) {
+  fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("client"));
+  FIO_LOG_DEBUG2("Connected client IO to pub/sub");
 }
-
+/** Called When the client socket's buffer is empty. */
+FIO_SFUNC void on_ready(fio_s *io) {
+  printf("\t* connection established.\n");
+  fio_protocol_set(io, &CLIENT_PROTOCOL);
+}
 /** Called there's incoming data (from STDIN / the client socket. */
-FIO_SFUNC void on_data(void *arg) {
-  FIO_LOG_DEBUG2("on_data callback called for %d.", fd);
+FIO_SFUNC void on_data(fio_s *io) {
+  FIO_LOG_DEBUG2("on_data callback called for: %p", io);
+  fio_udata_set(io, (void *)1);
   char buf[4080];
-  /* is this the STDIO file descriptor? (see `main` for details) */
-  if (arg) {
-    /* read from STDIO and add data to outgoing stream */
-    ssize_t l = fio_sock_read(fd, buf, 4080);
-    if (l > 0) {
-      fio_stream_add(&output_stream,
-                     fio_stream_pack_data(buf, (size_t)l, 0, 1, NULL));
-      /* make sure the outgoing buffer is moniitored, so data is written. */
-      fio_poll_monitor(monitor, client_fd, NULL, POLLOUT);
-    }
-    FIO_LOG_DEBUG2("Read %zu bytes from %d", l, fd);
-    goto done;
-  }
-  /* read data until non-blocking read operation fails. */
-  for (;;) {
-    ssize_t l = read(fd, buf, 4080);
-    switch (l + 1) { /* -1 becomes 0 and 0 becomes 1. */
-    case 0:          /* read returned -1, which means there was an error */
-      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ||
-          errno == ENOTCONN) /* desired failures */
-        goto done;
-    /* fallthrough */
-    case 1: /* read returned 0, which means we reached EOF */
-      FIO_LOG_DEBUG("socket (%d) error / EOF, shutting down: %s",
-                    fd,
-                    strerror(errno));
-      stop = 1;
+  for (;;) { /* read until done */
+    size_t l = fio_read(io, buf, 4080);
+    if (!l)
       return;
-    }
-    /* log and print out to STDOUT  */
-    FIO_LOG_DEBUG2("Read %zu bytes from %d", l, fd);
-    fprintf(stdout, "%.*s", (int)l, buf);
-    fflush(stdout);
-    /* if we didn't fill the buffer, the incoming buffer MIGHT be empty. */
-    if (l < 4080)
-      goto done;
+    fwrite(buf, 1, l, stdout); /* test for incomplete `write`? */
   }
-
-done:
-  /* remember to reschedule event monitoring (one-shot by design) */
-  fio_poll_monitor(monitor, fd, arg, POLLIN);
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *arg) {
-  stop = 1;
-  FIO_LOG_DEBUG2("on_close callback called, stopping.");
+  if (!arg)
+    FIO_LOG_ERROR("Connection failed / no data received: %s",
+                  fio_cli_unnamed(0));
+  FIO_LOG_DEBUG2("Connection lost, shutting down client.");
+  fio_srv_stop();
   (void)arg;
+}
+
+/** Called there's incoming data (from STDIN / the client socket). */
+FIO_SFUNC void on_input(fio_s *io) {
+  struct {
+    size_t len;
+    char buf[4080];
+  } info;
+  for (;;) { /* read until done */
+    info.len = fread(info.buf, 1, 4080, stdin);
+    if (!info.len)
+      return;
+    FIO_LOG_DEBUG2("Publishing: %.*s", (int)info.len, info.buf);
+    fio_publish(.from = io,
+                .channel = FIO_BUF_INFO1("client"),
+                .message = FIO_BUF_INFO2(info.buf, info.len));
+  }
 }

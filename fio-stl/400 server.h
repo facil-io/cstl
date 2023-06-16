@@ -731,7 +731,7 @@ FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
  */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
 
-#define fio_srv_async(q, ...) fio_queue_push(q->q, __VA_ARGS__)
+#define fio_srv_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
 
 /* *****************************************************************************
 Simple Server Implementation - inlined static functions
