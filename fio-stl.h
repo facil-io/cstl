@@ -37522,7 +37522,7 @@ SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
 
 /** Allows all clients to connect (bypasses authentication). */
-FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
+SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
 /** Returns the IO object associated with the HTTP object (request only). */
 SFUNC fio_s *fio_http_io(fio_http_s *);
@@ -37581,16 +37581,6 @@ SFUNC int fio_http_sse_write(fio_http_s *h, fio_http_sse_write_args_s args);
 
 /** Optional EventSource subscription callback - messages MUST be UTF-8. */
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
-
-/* *****************************************************************************
-Module Implementation - inlined static functions
-***************************************************************************** */
-
-/** Allows all clients to connect (bypasses authentication). */
-FIO_SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
-  ((void)h);
-  return 0;
-}
 
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
@@ -38554,6 +38544,16 @@ HTTP/2 Controller (TODO!)
 // void (*on_finish)(fio_http_s *h);
 
 /* *****************************************************************************
+Authentication Helper
+***************************************************************************** */
+
+/** Allows all clients to connect (bypasses authentication). */
+SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h) {
+  ((void)h);
+  return 0;
+}
+
+/* *****************************************************************************
 WebSocket Parser Callbacks
 ***************************************************************************** */
 
@@ -39019,14 +39019,6 @@ FIO_SFUNC void fio___sse_on_close(void *udata) {
   fio_http_free(c->h);
   fio___http_connection_free(c);
 }
-
-// /** Called when a data is available. */
-// void (*on_data)(fio_s *io);
-// /** called once all pending `fio_write` calls are finished. */
-// void (*on_ready)(fio_s *io);
-// /** Called after the connection was closed, and pending tasks
-// completed.
-// */ void (*on_close)(void *udata);
 
 /* *****************************************************************************
 EventSource / SSE Controller (TODO!)

@@ -93,6 +93,9 @@ TEST_ROOT=tests
 # The default test file to run when running: make test (without the C extension)
 TEST_DEFAULT=stl
 
+# Examples folder name
+EXAMPLES_ROOT=examples
+
 #############################################################################
 # Compiler / Linker Settings
 #############################################################################
@@ -225,7 +228,7 @@ MAINSRC=$(foreach dir, $(MAINDIR), $(wildcard $(addsuffix /, $(basename $(dir)))
 FOLDERS=$(LIBDIR) $(MAINDIR) $(TEST_ROOT)
 SOURCES=$(LIBSRC) $(MAINSRC)
 
-BUILDTREE=$(TMP_ROOT) $(TMP_ROOT)/$(TEST_ROOT) $(foreach dir, $(FOLDERS), $(addsuffix /, $(basename $(TMP_ROOT)))$(basename $(dir)))
+BUILDTREE=$(TMP_ROOT) $(TMP_ROOT)/$(TEST_ROOT) $(TMP_ROOT)/$(EXAMPLES_ROOT) $(foreach dir, $(FOLDERS), $(addsuffix /, $(basename $(TMP_ROOT)))$(basename $(dir)))
 
 ifeq ($(OS),Windows_NT)
 # Windows libraries
@@ -833,6 +836,20 @@ ifneq ($(TEST_DEFAULT),)
 test: tests/$(TEST_DEFAULT) ;
 
 endif
+
+#############################################################################
+# Tasks - Examples
+#############################################################################
+
+examples_set_env.%: create_tree
+	$(eval MAIN_OBJS=$(TMP_ROOT)/$(EXAMPLES_ROOT)/$*.o)
+	@echo "* Set example flags ($*)"
+
+# examples_build.XXX will compile and link examples/XXX.c
+examples_build.%: examples_set_env.% build_start.% $(TMP_ROOT)/$(EXAMPLES_ROOT)/%.o build_finish.% ;
+
+# examples/build/XXX will compile and run examples/XXX.c
+examples/%: examples_build.% run.% ;
 
 #############################################################################
 # Tasks - library code dumping

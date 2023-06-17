@@ -1,4 +1,6 @@
-# facil.io 0.8.x for C - now with an integrated C STL (Server Toolbox library)
+# facil.io 0.8.x for C - now with an integrated C STL
+
+## The Web microFramework and Server Toolbox library
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
 
@@ -12,7 +14,7 @@ In other words, some of the most common building blocks one would need in any C 
 
 Simply copy the `fio-stl.h` file to your project's folder (using a single header file).  Done.
 
-Or... copy the `fio-stl` folder to your project's folder (using `"fio-stl/include.h"`). Done.
+**Or**... copy the `fio-stl` folder to your project's folder (using `"fio-stl/include.h"`). Done.
 
 Include the file as many times as required and enjoy.
 
