@@ -6,6 +6,7 @@ Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 
 #ifndef HTTP_RESPONSE_ECHO
+/* Set to 0 to replace the echo response with "Hello World". */
 #define HTTP_RESPONSE_ECHO 1
 #endif
 
@@ -14,7 +15,9 @@ Feel free to copy, use and enjoy according to the license provided.
 #include "fio-stl/include.h"
 
 /* *****************************************************************************
-This is a simple HTTP "Hello World" / echo server example using `poll`.
+This is a simple HTTP "Hello World" / echo server example.
+
+WebSocket connections implement a simple chat server in this example.
 
 Benchmark with keep-alive:
 
@@ -203,12 +206,13 @@ FIO_SFUNC int http_write_headers_to_string(fio_http_s *h,
                                            fio_str_info_s value,
                                            void *out_) {
   char **out = (char **)out_;
-  (void)h;
-  *out = fio_bstr_write(*out, name.buf, name.len);
-  *out = fio_bstr_write(*out, ": ", 2);
-  *out = fio_bstr_write(*out, value.buf, value.len);
-  *out = fio_bstr_write(*out, "\r\n", 2);
+  *out = fio_bstr_write2(*out,
+                         FIO_STRING_WRITE_STR2(name.buf, name.len),
+                         FIO_STRING_WRITE_STR2(": ", 2),
+                         FIO_STRING_WRITE_STR2(value.buf, value.len),
+                         FIO_STRING_WRITE_STR2("\r\n", 2));
   return 0;
+  (void)h;
 }
 
 /* *****************************************************************************
@@ -219,7 +223,7 @@ static void http_respond(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO1("server"),
                                FIO_STR_INFO1("facil.io"));
-  if (0) {
+  if (0) { /* setting cookie / header data example */
     FIO_STR_INFO_TMP_VAR(tmp, 64);
     fio_string_write_hex(&tmp, NULL, fio_rand64());
     fio_http_cookie_set(h, .name = FIO_STR_INFO1("fio-rand"), .value = tmp);
@@ -276,7 +280,7 @@ static void http_respond(fio_http_s *h) {
                  .copy = 0,
                  .finish = 1);
 #else
-  fio_http_write(h, .data = "Hello World!", .len = 12, .finish = 1);
+  fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
 #endif
 }
 
