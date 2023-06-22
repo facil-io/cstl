@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2020
+Copyright: Boaz Segev, 2019-2023
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -38,20 +38,6 @@ Connect with Server Sent Events (EventSource / SSE):
     listener.onmessage = (e) => { console.log(e); }
     listener.onevent = (e) => { console.log(e); }
 
-Address Binding:
- -bind <> address to listen to. defaults to any available.
- -b <>    (same as -bind)
- -port ## port number to listen to. defaults port 3000
- -p ##    (same as -port)
-    Note: to bind to a Unix socket, set port to 0.
-
-Connecting Iodine to Redis:
- -redis <>  an optional Redis URL server address. Default: none.
- -r <>      (same as -redis)
- -redis-ping ## websocket ping interval (0..255). Default: 300s
- -rp ##         (same as -redis-ping)
-
-
 ***************************************************************************** */
 
 static void http_respond(fio_http_s *h);
@@ -62,14 +48,16 @@ static void websocket_on_message(fio_http_s *h,
 static void websocket_on_shutdown(fio_http_s *h);
 
 int main(int argc, char const *argv[]) {
-  static fio_srv_async_s http_queue;
+  static fio_srv_async_s http_queue; /* async queue for worker threads. */
+
+  /* setup CLI options */
   fio_cli_start(
       argc,
       argv,
       0, /* allow 1 unnamed argument - the address to connect to */
       1,
       "HTTP echo example, using \x1B[1m" FIO_POLL_ENGINE_STR "\x1B[0m."
-      "\nListens on the specified URL (defaults to localhost:3000). i.e.\n"
+      "\nListens on the specified URL (defaults to 0.0.0.0:3000). i.e.\n"
       "\tNAME <url>\n\n"
       "Unix socket examples:\n"
       "\tNAME ./my.sock\n"
@@ -79,7 +67,13 @@ int main(int argc, char const *argv[]) {
       "\nTCP/IP socket examples:\n"
       "\tNAME tcp://localhost:3000/\n"
       "\tNAME localhost:3000\n",
-      // FIO_CLI_PRINT_HEADER("Address Binding"), /* TODO */
+
+      FIO_CLI_PRINT_HEADER("Address Binding"),
+      FIO_CLI_STRING("-bind -b address to listen to in URL format."),
+      FIO_CLI_INT("-port -p port number to listen to if URL is missing."),
+      FIO_CLI_PRINT(
+          "Note: these are optional and supersede previous instructions."),
+
       FIO_CLI_PRINT_HEADER("Concurrency"),
       FIO_CLI_INT("--threads -t number of worker threads to use."),
       FIO_CLI_INT("--workers -w number of worker processes to use."),
@@ -125,12 +119,12 @@ int main(int argc, char const *argv[]) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
 
-  if (fio_cli_get_bool("-C")) { /* place pub/sub socket in tmp */
+  if (fio_cli_get_bool("-C")) { /* container - place pub/sub socket in tmp */
     char *u = (char *)fio_pubsub_ipc_url();
     memcpy((void *)(u + 7), "/tmp/", 5);
   }
 
-  /* print type sizes */
+  /* Debug data: print type sizes */
   FIO_LOG_DEBUG2("IO overhead: %zu bytes", sizeof(fio_s) + 8);
   FIO_LOG_DEBUG2("HTTP connection overhead: %zu bytes state + %zu bytes buffer",
                  sizeof(fio___http_connection_s) + 8,
@@ -143,6 +137,7 @@ int main(int argc, char const *argv[]) {
 
   /* initialize Async HTTP queue */
   fio_srv_async_init(&http_queue, fio_srv_workers(fio_cli_get_i("-t")));
+
   /* Test for TLS */
   fio_tls_s *tls = (fio_cli_get("--tls-cert") && fio_cli_get("--tls-key"))
                        ? fio_tls_cert_add(fio_tls_new(),
@@ -157,7 +152,36 @@ int main(int argc, char const *argv[]) {
                                           NULL,
                                           NULL)
                        : NULL;
-  /* review CLI connection address (in URL format) */
+  /* support -b and -p for when a URL isn't provided */
+  if (fio_cli_get("-b"))
+    fio_cli_set_unnamed(0, fio_cli_get("-b"));
+  if (fio_cli_get("-p")) {
+    fio_buf_info_s tmp;
+    FIO_STR_INFO_TMP_VAR(url, 2048);
+    tmp.buf = (char *)fio_cli_unnamed(0);
+    if (!tmp.buf)
+      tmp.buf = (char *)"0.0.0.0";
+    tmp.len = strlen(tmp.buf);
+    FIO_ASSERT(tmp.len < 2000, "binding address / url too long.");
+    fio_url_s u = fio_url_parse(tmp.buf, tmp.len);
+    tmp.buf = (char *)fio_cli_get("-p");
+    tmp.len = strlen(tmp.buf);
+    FIO_ASSERT(tmp.len < 6, "port number too long.");
+    fio_string_write2(&url,
+                      NULL,
+                      FIO_STRING_WRITE_STR2(u.scheme.buf, u.scheme.len),
+                      (u.scheme.len ? FIO_STRING_WRITE_STR2("://", 3)
+                                    : FIO_STRING_WRITE_STR2(NULL, 0)),
+                      FIO_STRING_WRITE_STR2(u.host.buf, u.host.len),
+                      FIO_STRING_WRITE_STR2(":", 1),
+                      FIO_STRING_WRITE_STR2(tmp.buf, tmp.len),
+                      (u.query.len ? FIO_STRING_WRITE_STR2("?", 1)
+                                   : FIO_STRING_WRITE_STR2(NULL, 0)),
+                      FIO_STRING_WRITE_STR2(u.query.buf, u.query.len));
+    fio_cli_set_unnamed(0, url.buf);
+  }
+
+  /* listen to incoming HTTP connections */
   FIO_ASSERT(
       fio_http_listen(fio_cli_unnamed(0),
                       .on_http = http_respond,
@@ -182,7 +206,9 @@ int main(int argc, char const *argv[]) {
                       .tls = tls,
                       .log = fio_cli_get_bool("-v")),
       "Could not open listening socket as requested.");
+  /* we don't need the tls object any more. */
   fio_tls_free(tls);
+
   FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
                "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d\t(%s)"
                "\n\tThreads: 1+%d\t(per worker)"
@@ -191,9 +217,11 @@ int main(int argc, char const *argv[]) {
                (fio_srv_workers(fio_cli_get_i("-w")) ? "cluster mode"
                                                      : "single process"),
                (int)http_queue.count);
+  /* start server reactor */
   fio_srv_start(fio_cli_get_i("-w"));
+
+  /* shutdown starts here */
   FIO_LOG_INFO("Shutdown complete.");
-  fio_cli_end();
   return 0;
 }
 
@@ -250,7 +278,7 @@ static void http_respond(fio_http_s *h) {
                           FIO_STRING_WRITE_STR2(body.buf, body.len),
                           FIO_STRING_WRITE_STR2("\r\n", 2));
   }
-  if (0) {
+  if (0) { /* fio_env_set(io, ...) example */
     fio_env_set(fio_http_io(h),
                 .name = FIO_BUF_INFO2("my key", 6),
                 .udata = fio_bstr_write(NULL, "my env data", 11),
