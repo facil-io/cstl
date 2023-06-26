@@ -211,6 +211,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
           .udata = &a,
           .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
       1);
+  FIO_ASSERT(fio___srv_env_safe_get(&env, (char *)"a_key", 5, 1) == &a,
+             "fio___srv_env_safe_set/get round-trip error!");
   fio___srv_env_safe_set(
       &env,
       (char *)"a_key",

@@ -471,13 +471,18 @@ FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
 Context Cleanup
 ***************************************************************************** */
 
-/** Builds a local TLS context out of the fio_tls_s object. */
-static void fio___openssl_free_context(void *tls_ctx) {
+static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
   SSL_CTX_free(ctx->ctx);
   fio_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));
   FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
+  (void)ignr_;
+}
+
+/** Builds a local TLS context out of the fio_tls_s object. */
+static void fio___openssl_free_context(void *tls_ctx) {
+  fio_srv_defer(fio___openssl_free_context_task, tls_ctx, NULL);
 }
 /* *****************************************************************************
 IO Functions Structure

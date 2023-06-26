@@ -9,12 +9,6 @@ Feel free to copy, use and enjoy according to the license provided.
 This is a simple TCP/IP and Unix Socket client example. UDP is also available
 but untested.
 
-This demonstrates simple usage of the facil.io C STL core features for network
-applications.
-
-However, the facil.io IO core library might be a better (easier) choice for this
-task.
-
 Note that this program uses a single thread, which allows it to ignore some
 possible race conditions.
 ***************************************************************************** */
@@ -24,14 +18,15 @@ possible race conditions.
 #define FIO_LOG
 #define FIO_SERVER
 #define FIO_HTTP
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 /** Called When the client socket is attached to the server. */
 FIO_SFUNC void on_attach(fio_s *io);
-/** Called there's incoming data (from STDIN / the client socket. */
+/** Called there's incoming data (from the server). */
 FIO_SFUNC void on_data(fio_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *udata);
+
 /** Socket client protocol */
 static fio_protocol_s CLIENT_PROTOCOL = {
     .on_attach = on_attach,
@@ -43,6 +38,8 @@ static fio_protocol_s CLIENT_PROTOCOL = {
 
 /** Called there's incoming data (from STDIN / the client socket). */
 FIO_SFUNC void on_input(fio_s *io);
+/** Called if connection failed to establish. */
+FIO_SFUNC void on_failed(void *arg);
 
 /** STDIN protocol (REPL) */
 static fio_protocol_s STDIN_PROTOCOL = {
@@ -72,8 +69,7 @@ int main(int argc, char const *argv[]) {
       "\nUDP socket examples:\n"
       "\tNAME udp://localhost:3000/\n",
       FIO_CLI_INT("--timeout -t (50) ongoing connection timeout in seconds."),
-      FIO_CLI_INT("--connection-timeout -ct (5) connection attempt timeout in "
-                  "seconds."),
+      FIO_CLI_INT("--wait -w (5) connection attempt timeout in seconds."),
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."));
 
   /* review CLI for logging */
@@ -106,7 +102,8 @@ int main(int argc, char const *argv[]) {
       } else {
         FIO_ASSERT(fio_srv_connect(fio_cli_unnamed(0),
                                    .protocol = &CLIENT_PROTOCOL,
-                                   .timeout = (fio_cli_get_i("-ct") * 1000)),
+                                   .on_failed = on_failed,
+                                   .timeout = (fio_cli_get_i("-w") * 1000)),
                    "Connection error!");
       }
       /* attach STDIN */
@@ -145,14 +142,16 @@ FIO_SFUNC void on_data(fio_s *io) {
 
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *arg) {
-  if (!arg)
-    FIO_LOG_ERROR("Connection failed / no data received: %s",
-                  fio_cli_unnamed(0));
   FIO_LOG_DEBUG2("Connection lost, shutting down client.");
   fio_srv_stop();
   (void)arg;
 }
 
+/** Called if connection failed to establish. */
+FIO_SFUNC void on_failed(void *arg) {
+  FIO_LOG_ERROR("Connection failed / no data received: %s", fio_cli_unnamed(0));
+  on_close(arg);
+}
 /** Called there's incoming data (from STDIN / the client socket). */
 FIO_SFUNC void on_input(fio_s *io) {
   struct {

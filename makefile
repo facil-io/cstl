@@ -107,8 +107,8 @@ TEST4SENDFILE:=   # HAVE_SENDFILE
 TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
 TEST4CRYPTO:=1    # HAVE_OPENSSL / HAVE_SODIUM
 TEST4ZLIB:=1      # HAVE_ZLIB
-TEST4PG:=1        # HAVE_POSTGRESQL
-TEST4SQLITE3:=1   # HAVE_SQLITE3
+TEST4PG:=         # HAVE_POSTGRESQL
+TEST4SQLITE3:=    # HAVE_SQLITE3
 
 #############################################################################
 # Compiler / Linker Settings

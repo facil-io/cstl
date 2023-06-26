@@ -28296,6 +28296,8 @@ typedef struct {
   const char *url;
   /** Connection protocol (once connection established). */
   fio_protocol_s *protocol;
+  /** Called in case of a failed connection, use for cleanup. */
+  void (*on_failed)(void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
   /** TLS builder object for TLS connections. */
@@ -28625,7 +28627,13 @@ typedef struct {
   intptr_t type;
   /** The name of the object. Should be the same as used with `fio_env_set` */
   fio_buf_info_s name;
-} fio_env_unset_args_s;
+} fio_env_get_args_s;
+
+/** Returns the named `udata` associated with the IO object (or `NULL`). */
+SFUNC void *fio_env_get(fio_s *io, fio_env_get_args_s);
+
+/** Returns the named `udata` associated with the IO object (or `NULL`). */
+#define fio_env_get(io, ...) fio_env_get(io, (fio_env_get_args_s){__VA_ARGS__})
 
 /**
  * Links an object to a connection's lifetime / environment.
@@ -28655,7 +28663,7 @@ SFUNC void fio_env_set(fio_s *io, fio_env_set_args_s);
  *
  * Returns 0 on success and -1 if the object couldn't be found.
  */
-SFUNC int fio_env_unset(fio_s *io, fio_env_unset_args_s);
+SFUNC int fio_env_unset(fio_s *io, fio_env_get_args_s);
 
 /**
  * Un-links an object from the connection's lifetime, so it's `on_close`
@@ -28667,13 +28675,13 @@ SFUNC int fio_env_unset(fio_s *io, fio_env_unset_args_s);
  * arguments.
  */
 #define fio_env_unset(io, ...)                                                 \
-  fio_env_unset(io, (fio_env_unset_args_s){__VA_ARGS__})
+  fio_env_unset(io, (fio_env_get_args_s){__VA_ARGS__})
 
 /**
  * Removes an object from the connection's lifetime / environment, calling it's
  * `on_close` callback as if the connection was closed.
  */
-SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
+SFUNC int fio_env_remove(fio_s *io, fio_env_get_args_s);
 
 /**
  * Removes an object from the connection's lifetime / environment, calling it's
@@ -28683,7 +28691,7 @@ SFUNC int fio_env_remove(fio_s *io, fio_env_unset_args_s);
  * arguments.
  */
 #define fio_env_remove(io, ...)                                                \
-  fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
+  fio_env_remove(io, (fio_env_get_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
 TLS Context Helper Types
@@ -29017,6 +29025,19 @@ typedef struct {
 
 #define FIO___SRV_ENV_SAFE_INIT                                                \
   { .lock = FIO_THREAD_MUTEX_INIT, .env = FIO_MAP_INIT }
+
+FIO_IFUNC void *fio___srv_env_safe_get(fio___srv_env_safe_s *e,
+                                       char *key_,
+                                       size_t len,
+                                       intptr_t type_) {
+  void *r;
+  fio_str_info_s key = FIO_STR_INFO3(key_, len, 0);
+  const uint64_t hash = fio_risky_hash(key_, len, (uint64_t)(type_));
+  fio_thread_mutex_lock(&e->lock);
+  r = fio___srv_env_get(&e->env, hash, key).udata;
+  fio_thread_mutex_unlock(&e->lock);
+  return r;
+}
 
 FIO_IFUNC void fio___srv_env_safe_set(fio___srv_env_safe_s *e,
                                       char *key_,
@@ -29455,6 +29476,15 @@ FIO_SFUNC size_t fio_protocol_each(fio_protocol_s *protocol,
 Connection Object Links / Environment
 ***************************************************************************** */
 
+void fio_env_get___(void); /* IDE marker */
+/** Returns the named `udata` associated with the IO object (or `NULL). */
+SFUNC void *fio_env_get FIO_NOOP(fio_s *io, fio_env_get_args_s args) {
+  return fio___srv_env_safe_get((io ? &io->env : &fio___srvdata.env),
+                                args.name.buf,
+                                args.name.len,
+                                args.type);
+}
+
 void fio_env_set___(void); /* IDE marker */
 /**
  * Links an object to a connection's lifetime / environment.
@@ -29477,7 +29507,7 @@ void fio_env_unset___(void); /* IDE marker */
  * Un-links an object from the connection's lifetime, so it's `on_close`
  * callback will NOT be called.
  */
-SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_get_args_s args) {
   return fio___srv_env_safe_unset((io ? &io->env : &fio___srvdata.env),
                                   args.name.buf,
                                   args.name.len,
@@ -29488,7 +29518,7 @@ SFUNC int fio_env_unset FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
  * Removes an object from the connection's lifetime / environment, calling it's
  * `on_close` callback as if the connection was closed.
  */
-SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_unset_args_s args) {
+SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_get_args_s args) {
   return fio___srv_env_safe_remove((io ? &io->env : &fio___srvdata.env),
                                    args.name.buf,
                                    args.name.len,
@@ -30529,28 +30559,34 @@ Establishing New Connections
 typedef struct {
   fio_protocol_s protocol;
   fio_protocol_s *upr;
+  void (*on_failed)(void *udata);
   void *udata;
   void *tls_ctx;
   size_t url_len;
   char url[];
 } fio___connecting_s;
 
-FIO_SFUNC void fio___connecting_on_close(void *udata) {
-  fio___connecting_s *c = (fio___connecting_s *)udata;
-  if (c->upr)
-    c->upr->on_close(c->udata);
+FIO_SFUNC void fio___connecting_cleanup(fio___connecting_s *c) {
   c->protocol.io_functions.free_context(c->tls_ctx);
   FIO_MEM_FREE_(c, sizeof(*c) + c->url_len + 1);
 }
+
+FIO_SFUNC void fio___connecting_on_close(void *udata) {
+  fio___connecting_s *c = (fio___connecting_s *)udata;
+  if (c->on_failed)
+    c->on_failed(c->udata);
+  fio___connecting_cleanup(c);
+}
 FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
+  if (!fio_srv_is_open(io))
+    return;
   fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
   FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);
   fio_udata_set(io, c->udata);
   fio_protocol_set(io, c->upr);
-  c->upr = NULL;
-  fio___connecting_on_close(c);
+  fio___connecting_cleanup(c);
 }
 
 void fio_srv_connect___(void); /* IDE Marker */
@@ -30586,6 +30622,7 @@ SFUNC fio_s *fio_srv_connect FIO_NOOP(fio_srv_connect_args_s args) {
               .timeout = args.timeout,
           },
       .upr = args.protocol,
+      .on_failed = args.on_failed,
       .udata = args.udata,
       .tls_ctx = args.protocol->io_functions.build_context(args.tls, 1),
   };
@@ -31494,13 +31531,18 @@ FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
 Context Cleanup
 ***************************************************************************** */
 
-/** Builds a local TLS context out of the fio_tls_s object. */
-static void fio___openssl_free_context(void *tls_ctx) {
+static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
   SSL_CTX_free(ctx->ctx);
   fio_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));
   FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
+  (void)ignr_;
+}
+
+/** Builds a local TLS context out of the fio_tls_s object. */
+static void fio___openssl_free_context(void *tls_ctx) {
+  fio_srv_defer(fio___openssl_free_context_task, tls_ctx, NULL);
 }
 /* *****************************************************************************
 IO Functions Structure
@@ -46294,6 +46336,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
           .udata = &a,
           .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
       1);
+  FIO_ASSERT(fio___srv_env_safe_get(&env, (char *)"a_key", 5, 1) == &a,
+             "fio___srv_env_safe_set/get round-trip error!");
   fio___srv_env_safe_set(
       &env,
       (char *)"a_key",

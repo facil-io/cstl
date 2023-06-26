@@ -193,6 +193,8 @@ typedef struct {
   const char *url;
   /** Connection protocol (once connection established). */
   fio_protocol_s *protocol;
+  /** Called in case of a failed connection, use for cleanup. */
+  void (*on_failed)(void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
   /** TLS builder object for TLS connections. */
@@ -205,7 +207,9 @@ typedef struct {
 SFUNC fio_s *fio_srv_connect(fio_srv_connect_args_s args);
 ```
 
-Connects to a remote URL (accepting TLS hints in the URL query and scheme). The protocol is only attached if the connection was established. The protocol's `on_close` callback is always called.
+Connects to a remote URL (accepting TLS hints in the URL query and scheme). The protocol is only attached if the connection was established.
+
+**Note**: use the `on_failed` callback if cleanup is required after a failed connection. The `on_close` callback is only called if connection was successful.
 
 `fio_srv_connect` adds some overhead in parsing the URL for TLS hints and for wrapping the connection protocol for timeout and connection validation before calling the `on_attached`. If these aren't required, it's possible to simply open a socket and attach it like so:
 
@@ -520,7 +524,29 @@ struct fio_protocol_s {
 
 ### `FIO_SERVER` Connection Environment
 
-Each connection object has its own personal environment storage that allows it to store named objects that are linked to the connection's lifetime.
+Each connection object has its own personal environment storage that allows it to get / set named objects that are linked to the connection's lifetime.
+
+#### `fio_env_get`
+
+```c
+void *fio_env_get(fio_s *io, fio_env_get_args_s);
+#define fio_env_get(io, ...) fio_env_get(io, (fio_env_get_args_s){__VA_ARGS__})
+```
+
+Returns the named `udata` associated with the IO object. Returns `NULL` both if no named object is found or it's `udata` was set to `NULL`.
+
+If the `io` is NULL, the global environment will be used (see `fio_env_set`).
+
+The function is shadowed by the helper MACRO that allows the function to be called using named arguments:
+
+```c
+typedef struct {
+  /** A numerical type filter. Should be the same as used with `fio_env_set` */
+  intptr_t type;
+  /** The name of the object. Should be the same as used with `fio_env_set` */
+  fio_buf_info_s name;
+} fio_env_get_args_s;
+```
 
 #### `fio_env_set`
 ```c
@@ -554,8 +580,8 @@ typedef struct {
 #### `fio_env_unset`
 
 ```c
-int fio_env_unset(fio_s *io, fio_env_unset_args_s);
-#define fio_env_unset(io, ...) fio_env_unset(io, (fio_env_unset_args_s){__VA_ARGS__})
+int fio_env_unset(fio_s *io, fio_env_get_args_s);
+#define fio_env_unset(io, ...) fio_env_unset(io, (fio_env_get_args_s){__VA_ARGS__})
 ```
 
 Un-links an object from the connection's lifetime, so it's `on_close` callback will **not** be called.
@@ -564,22 +590,13 @@ Returns 0 on success and -1 if the object couldn't be found.
 
 The function is shadowed by the helper MACRO that allows the function to be called using named arguments.
 
-```c
-typedef struct {
-  /** A numerical type filter. Should be the same as used with `fio_env_set` */
-  intptr_t type;
-  /** The name of the object. Should be the same as used with `fio_env_set` */
-  fio_buf_info_s name;
-} fio_env_unset_args_s;
-```
-
 **Note**: this function is thread-safe.
 
 #### `fio_env_remove`
 
 ```c
-int fio_env_remove(fio_s *io, fio_env_unset_args_s);
-#define fio_env_remove(io, ...) fio_env_remove(io, (fio_env_unset_args_s){__VA_ARGS__})
+int fio_env_remove(fio_s *io, fio_env_get_args_s);
+#define fio_env_remove(io, ...) fio_env_remove(io, (fio_env_get_args_s){__VA_ARGS__})
 ```
 
 Removes an object from the connection's lifetime / environment, calling it's `on_close` callback as if the connection was closed.

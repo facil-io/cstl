@@ -10,21 +10,21 @@ Feel free to copy, use and enjoy according to the license provided.
 #define HTTP_RESPONSE_ECHO 1
 #endif
 
-/* include some of the modules we use... */
+/* Lazy? let the linker drop any unused functions... */
 #define FIO_EVERYTHING
 #include "fio-stl/include.h"
 
 /* *****************************************************************************
 This is a simple HTTP "Hello World" / echo server example.
 
-WebSocket connections implement a simple chat server in this example.
+WebSocket connections join a simple chat server in this example.
 
 Benchmark with keep-alive:
 
     ab -c 200 -t 4 -n 1000000 -k http://127.0.0.1:3000/
     wrk -c200 -d4 -t2 http://localhost:3000/
 
-Connect with WebSockets:
+Connect to chat server with WebSockets:
 
     ws = new WebSocket("ws://localhost:3000");
     ws.onmessage = function(e) {console.log("Got message!");
@@ -32,7 +32,7 @@ Connect with WebSockets:
     ws.onclose = function(e) {console.log("closed")};
     ws.onopen = function(e) {ws.send("hi");};
 
-Connect with Server Sent Events (EventSource / SSE):
+Listen to chat messages with Server Sent Events (EventSource / SSE):
 
     const listener = new EventSource(document.location.href);
     listener.onmessage = (e) => { console.log(e); }
@@ -56,7 +56,7 @@ static void websocket_on_message(fio_http_s *h,
 }
 
 static void websocket_on_shutdown(fio_http_s *h) {
-  /* for both WebSocket and SSE connections */
+  /* works for both WebSocket and SSE connections */
   fio_http_write(h, .buf = "Server going away, goodbye!", .len = 27);
 }
 
