@@ -97,6 +97,20 @@ TEST_DEFAULT=stl
 EXAMPLES_ROOT=examples
 
 #############################################################################
+# Makefile Runtime Tests (sets flags, such as HAVE_OPENSSL)
+#############################################################################
+# Tests are performed unless the value is empty / missing
+TEST4ENDIAN:=     # __BIG_ENDIAN__=?
+TEST4TM_ZONE:=    # HAVE_TM_TM_ZONE
+TEST4SOCKET:=     # --- tests for socket library linker flags
+TEST4SENDFILE:=   # HAVE_SENDFILE
+TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
+TEST4CRYPTO:=1    # HAVE_OPENSSL / HAVE_SODIUM
+TEST4ZLIB:=1      # HAVE_ZLIB
+TEST4PG:=1        # HAVE_POSTGRESQL
+TEST4SQLITE3:=1   # HAVE_SQLITE3
+
+#############################################################################
 # Compiler / Linker Settings
 #############################################################################
 
@@ -157,21 +171,6 @@ ifeq ($(DEBUG), 1)
 else
   FLAGS:=$(FLAGS) NDEBUG NODEBUG
 endif
-
-#############################################################################
-# Makefile Runtime Tests (sets flags, such as HAVE_OPENSSL)
-#############################################################################
-
-# Tests are performed unless the value is empty / missing
-
-TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
-TEST4SOCKET:=     # --- tests for socket library linker flags
-TEST4CRYPTO:=1    # HAVE_OPENSSL / HAVE_SODIUM
-TEST4SENDFILE:=   # HAVE_SENDFILE
-TEST4TM_ZONE:=    # HAVE_TM_TM_ZONE
-TEST4ZLIB:=1      # HAVE_ZLIB
-TEST4PG:=         # HAVE_POSTGRESQL
-TEST4ENDIAN:=     # __BIG_ENDIAN__=?
 
 #############################################################################
 # OS Specific Settings (debugger, disassembler, etc')
@@ -291,11 +290,10 @@ endif # LIB_CONCAT_FOLDER
 #
 # TRY_COMPILE_AND_RUN returns the program's shell code as string.
 #############################################################################
-
 TRY_RUN=$(shell $(1) >> /dev/null 2> /dev/null; echo $$?;)
 TRY_COMPILE=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(2) >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
 TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o ./___fio_tmp_test_ - $(LDFLAGS) $(2) 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___fio_tmp_test_ 2> /dev/null)
-EMPTY:=
+TRY_HEADER_AND_FUNC= $(shell printf "\#include <$(strip $(1))>\\nint main(void) {(void)($(strip $(2)));}" | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(3) >> /dev/null 2> /dev/null; echo $$? 2> /dev/null)
 
 #############################################################################
 # GCC bug handling.
@@ -314,6 +312,138 @@ ifeq ($(shell $(CC) -v 2>&1 | grep -o "^gcc version [0-7]\." | grep -o "^gcc ver
 endif
 endif
 
+#############################################################################
+# Endian  Detection
+# (no need to edit)
+#############################################################################
+ifdef TEST4ENDIAN
+
+ifeq ($(call TRY_COMPILE_AND_RUN, "int main(void) {int i = 1; return (int)(i & ((unsigned char *)&i)[sizeof(i)-1]);}\n",$(EMPTY)), 1)
+  $(info * Detected Big Endian byte order.)
+  FLAGS:=$(FLAGS) __BIG_ENDIAN__
+else ifeq ($(call TRY_COMPILE_AND_RUN, "int main(void) {int i = 1; return (int)(i & ((unsigned char *)&i)[0]);}\n",$(EMPTY)), 1)
+  $(info * Detected Little Endian byte order.)
+  FLAGS:=$(FLAGS) __BIG_ENDIAN__=0
+else
+  $(info * Byte ordering (endianness) detection failed)
+endif
+
+endif # TEST4ENDIAN
+#############################################################################
+# Detecting 'struct tm' fields
+# (no need to edit)
+#############################################################################
+ifdef TEST4TM_ZONE
+
+FIO_TEST_STRUCT_TM_TM_ZONE:="\\n\
+\#define _GNU_SOURCE\\n\
+\#include <time.h>\\n\
+int main(void) {\\n\
+  struct tm tm;\\n\
+  tm.tm_zone = \"UTC\";\\n\
+  return 0;\\n\
+}\\n\
+"
+
+ifeq ($(call TRY_COMPILE, $(FIO_TEST_STRUCT_TM_TM_ZONE), $(EMPTY)), 0)
+  $(info * Detected 'tm_zone' field in 'struct tm')
+  FLAGS:=$(FLAGS) HAVE_TM_TM_ZONE=1
+endif
+
+endif # TEST4TM_ZONE
+#############################################################################
+# Detecting SystemV socket libraries
+# (no need to edit)
+#############################################################################
+ifdef TEST4SOCKET
+
+FIO_TEST_SOCKET_AND_NETWORK_SERVICE:="\\n\
+\#include <sys/types.h>\\n\
+\#include <sys/socket.h>\\n\
+\#include <netinet/in.h>\\n\
+\#include <arpa/inet.h>\\n\
+int main(void) {\\n\
+  struct sockaddr_in addr = { .sin_port = 0 };\\n\
+  int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);\\n\
+  if(fd == -1) return 1;\\n\
+  if(inet_pton(AF_INET, \"127.0.0.1\", &addr.sin_addr) < 1) return 1;\\n\
+  return connect(fd, (struct sockaddr *)&addr, sizeof addr) < 0 ? 1 : 0;\\n\
+}\\n\
+"
+
+ifeq ($(call TRY_COMPILE, $(FIO_TEST_SOCKET_AND_NETWORK_SERVICE), $(EMPTY)), 0)
+  $(info * Detected native socket API, without additional libraries)
+else ifeq ($(call TRY_COMPILE, $(FIO_TEST_SOCKET_AND_NETWORK_SERVICE), "-lsocket" "-lnsl"), 0)
+  $(info * Detected socket API from libsocket and libnsl)
+  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) socket nsl
+else
+  $(warning No socket API detected - won't be able to compile facil.io)
+endif
+
+endif # TEST4SOCKET
+#############################################################################
+# Detecting The `sendfile` System Call
+# (no need to edit)
+#############################################################################
+ifdef TEST4SENDFILE
+
+# Linux variation
+FIO_SENDFILE_TEST_LINUX:="\\n\
+\#define _GNU_SOURCE\\n\
+\#include <stdlib.h>\\n\
+\#include <stdio.h>\\n\
+\#include <sys/sendfile.h>\\n\
+int main(void) {\\n\
+  off_t offset = 0;\\n\
+  ssize_t result = sendfile(2, 1, (off_t *)&offset, 300);\\n\
+}\\n\
+"
+
+# BSD variation
+FIO_SENDFILE_TEST_BSD:="\\n\
+\#define _GNU_SOURCE\\n\
+\#include <stdlib.h>\\n\
+\#include <stdio.h>\\n\
+\#include <sys/types.h>\\n\
+\#include <sys/socket.h>\\n\
+\#include <sys/uio.h>\\n\
+int main(void) {\\n\
+  off_t sent = 0;\\n\
+  off_t offset = 0;\\n\
+  ssize_t result = sendfile(2, 1, offset, (size_t)sent, NULL, &sent, 0);\\n\
+}\\n\
+"
+
+# Apple variation
+FIO_SENDFILE_TEST_APPLE:="\\n\
+\#define _GNU_SOURCE\\n\
+\#include <stdlib.h>\\n\
+\#include <stdio.h>\\n\
+\#include <sys/types.h>\\n\
+\#include <sys/socket.h>\\n\
+\#include <sys/uio.h>\\n\
+int main(void) {\\n\
+  off_t sent = 0;\\n\
+  off_t offset = 0;\\n\
+  ssize_t result = sendfile(2, 1, offset, &sent, NULL, 0);\\n\
+}\\n\
+"
+
+ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_LINUX), $(EMPTY)), 0)
+  $(info * Detected `sendfile` (Linux))
+  FLAGS+=USE_SENDFILE_LINUX HAVE_SENDFILE
+else ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_BSD), $(EMPTY)), 0)
+  $(info * Detected `sendfile` (BSD))
+  FLAGS+=USE_SENDFILE_BSD HAVE_SENDFILE
+else ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_APPLE), $(EMPTY)), 0)
+  $(info * Detected `sendfile` (Apple))
+  FLAGS+=USE_SENDFILE_APPLE HAVE_SENDFILE
+else
+  $(info * No `sendfile` support detected.)
+  FLAGS:=$(FLAGS) USE_SENDFILE=0
+endif
+
+endif # TEST4SENDFILE
 #############################################################################
 # kqueue / epoll / poll Selection / Detection
 # (no need to edit)
@@ -381,121 +511,6 @@ endif
 
 endif # TEST4POLL
 #############################################################################
-# Detecting The `sendfile` System Call
-# (no need to edit)
-#############################################################################
-ifdef TEST4SENDFILE
-
-# Linux variation
-FIO_SENDFILE_TEST_LINUX:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <stdlib.h>\\n\
-\#include <stdio.h>\\n\
-\#include <sys/sendfile.h>\\n\
-int main(void) {\\n\
-  off_t offset = 0;\\n\
-  ssize_t result = sendfile(2, 1, (off_t *)&offset, 300);\\n\
-}\\n\
-"
-
-# BSD variation
-FIO_SENDFILE_TEST_BSD:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <stdlib.h>\\n\
-\#include <stdio.h>\\n\
-\#include <sys/types.h>\\n\
-\#include <sys/socket.h>\\n\
-\#include <sys/uio.h>\\n\
-int main(void) {\\n\
-  off_t sent = 0;\\n\
-  off_t offset = 0;\\n\
-  ssize_t result = sendfile(2, 1, offset, (size_t)sent, NULL, &sent, 0);\\n\
-}\\n\
-"
-
-# Apple variation
-FIO_SENDFILE_TEST_APPLE:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <stdlib.h>\\n\
-\#include <stdio.h>\\n\
-\#include <sys/types.h>\\n\
-\#include <sys/socket.h>\\n\
-\#include <sys/uio.h>\\n\
-int main(void) {\\n\
-  off_t sent = 0;\\n\
-  off_t offset = 0;\\n\
-  ssize_t result = sendfile(2, 1, offset, &sent, NULL, 0);\\n\
-}\\n\
-"
-
-ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_LINUX), $(EMPTY)), 0)
-  $(info * Detected `sendfile` (Linux))
-  FLAGS+=USE_SENDFILE_LINUX HAVE_SENDFILE
-else ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_BSD), $(EMPTY)), 0)
-  $(info * Detected `sendfile` (BSD))
-  FLAGS+=USE_SENDFILE_BSD HAVE_SENDFILE
-else ifeq ($(call TRY_COMPILE, $(FIO_SENDFILE_TEST_APPLE), $(EMPTY)), 0)
-  $(info * Detected `sendfile` (Apple))
-  FLAGS+=USE_SENDFILE_APPLE HAVE_SENDFILE
-else
-  $(info * No `sendfile` support detected.)
-  FLAGS:=$(FLAGS) USE_SENDFILE=0
-endif
-
-endif # TEST4SENDFILE
-#############################################################################
-# Detecting 'struct tm' fields
-# (no need to edit)
-#############################################################################
-ifdef TEST4TM_ZONE
-
-FIO_TEST_STRUCT_TM_TM_ZONE:="\\n\
-\#define _GNU_SOURCE\\n\
-\#include <time.h>\\n\
-int main(void) {\\n\
-  struct tm tm;\\n\
-  tm.tm_zone = \"UTC\";\\n\
-  return 0;\\n\
-}\\n\
-"
-
-ifeq ($(call TRY_COMPILE, $(FIO_TEST_STRUCT_TM_TM_ZONE), $(EMPTY)), 0)
-  $(info * Detected 'tm_zone' field in 'struct tm')
-  FLAGS:=$(FLAGS) HAVE_TM_TM_ZONE=1
-endif
-
-endif # TEST4TM_ZONE
-#############################################################################
-# Detecting SystemV socket libraries
-# (no need to edit)
-#############################################################################
-ifdef TEST4SOCKET
-
-FIO_TEST_SOCKET_AND_NETWORK_SERVICE:="\\n\
-\#include <sys/types.h>\\n\
-\#include <sys/socket.h>\\n\
-\#include <netinet/in.h>\\n\
-\#include <arpa/inet.h>\\n\
-int main(void) {\\n\
-  struct sockaddr_in addr = { .sin_port = 0 };\\n\
-  int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);\\n\
-  if(fd == -1) return 1;\\n\
-  if(inet_pton(AF_INET, \"127.0.0.1\", &addr.sin_addr) < 1) return 1;\\n\
-  return connect(fd, (struct sockaddr *)&addr, sizeof addr) < 0 ? 1 : 0;\\n\
-}\\n\
-"
-
-ifeq ($(call TRY_COMPILE, $(FIO_TEST_SOCKET_AND_NETWORK_SERVICE), $(EMPTY)), 0)
-  $(info * Detected native socket API, without additional libraries)
-else ifeq ($(call TRY_COMPILE, $(FIO_TEST_SOCKET_AND_NETWORK_SERVICE), "-lsocket" "-lnsl"), 0)
-  $(info * Detected socket API from libsocket and libnsl)
-  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) socket nsl
-else
-  $(warning No socket API detected - won't be able to compile facil.io)
-endif
-
-endif # TEST4SOCKET
-#############################################################################
 # SSL/ TLS Library Detection
 # (no need to edit)
 #############################################################################
@@ -551,7 +566,7 @@ else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPEN
   LDFLAGS+=$(OPENSSL_LDFLAGS)
   CFLAGS+=$(OPENSSL_CFLAGS)
   CXXFLAGS+=$(OPENSSL_CFLAGS)
-  PKGC_REQ_OPENSSL=openssl >= 1.1, openssl < 1.2
+  PKGC_REQ_OPENSSL=openssl >= 3.0, openssl < 4.0
   PKGC_REQ+=$$(PKGC_REQ_OPENSSL)
 else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", $(LIBSODIUM_CFLAGS) $(LIBSODIUM_LDFLAGS)) , 0)
   # Sodium Crypto Library: https://doc.libsodium.org/usage
@@ -571,7 +586,7 @@ endif # TEST4CRYPTO
 #############################################################################
 ifdef TEST4ZLIB
 
-ifeq ($(call TRY_COMPILE, "\#include <zlib.h>\\nint main(void) {}", "-lz") , 0)
+ifeq ($(call TRY_HEADER_AND_FUNC, zlib.h, 0, -lz) , 0)
   $(info * Detected the zlib library, setting HAVE_ZLIB)
   FLAGS:=$(FLAGS) HAVE_ZLIB
   LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) z
@@ -586,11 +601,11 @@ endif #TEST4ZLIB
 #############################################################################
 ifdef TEST4PG
 
-ifeq ($(call TRY_COMPILE, "\#include <libpq-fe.h>\\n int main(void) {}", "-lpg") , 0)
+ifeq ($(call TRY_HEADER_AND_FUNC, libpq-fe.h, 0, -lpg) , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
   FLAGS:=$(FLAGS) HAVE_POSTGRESQL
   LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) pg
-else ifeq ($(call TRY_COMPILE, "\#include </usr/include/postgresql/libpq-fe.h>\\nint main(void) {}", "-lpg") , 0)
+else ifeq ($(call TRY_HEADER_AND_FUNC, "/usr/include/postgresql/libpq-fe.h", 0, "-lpg") , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
   FLAGS:=$(FLAGS) HAVE_POSTGRESQL
   INCLUDE_STR:=$(INCLUDE_STR) -I/usr/include/postgresql
@@ -598,23 +613,21 @@ else ifeq ($(call TRY_COMPILE, "\#include </usr/include/postgresql/libpq-fe.h>\\
 endif
 
 endif # TEST4PG
-#############################################################################
-# Endian  Detection
+# #############################################################################
+# SQLite3 Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4ENDIAN
+ifdef TEST4SQLITE3
 
-ifeq ($(call TRY_COMPILE_AND_RUN, "int main(void) {int i = 1; return (int)(i & ((unsigned char *)&i)[sizeof(i)-1]);}\n",$(EMPTY)), 1)
-  $(info * Detected Big Endian byte order.)
-  FLAGS:=$(FLAGS) __BIG_ENDIAN__
-else ifeq ($(call TRY_COMPILE_AND_RUN, "int main(void) {int i = 1; return (int)(i & ((unsigned char *)&i)[0]);}\n",$(EMPTY)), 1)
-  $(info * Detected Little Endian byte order.)
-  FLAGS:=$(FLAGS) __BIG_ENDIAN__=0
-else
-  $(info * Byte ordering (endianness) detection failed)
+ifeq ($(call TRY_HEADER_AND_FUNC, sqlite3.h, sqlite3_open, -lsqlite3) , 0)
+  $(info * Detected the SQLite3 library, setting HAVE_SQLITE3)
+  FLAGS:=$(FLAGS) HAVE_SQLITE3
+  LINKER_LIBS_EXT:=$(LINKER_LIBS_EXT) sqlite3
+  PKGC_REQ_ZLIB=sqlite3
+  PKGC_REQ+=$$(PKGC_REQ_ZLIB)
 endif
 
-endif # TEST4ENDIAN
+endif #TEST4SQLITE3
 #############################################################################
 # Updated flags and final values
 # (don't edit)

@@ -417,16 +417,16 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
       int optval = 1;
       setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
     }
-    if (bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
-      FIO_LOG_DEBUG("Failed attempt to bind socket (%d) to address %s",
+    if (nonblock && fio_sock_set_non_block(fd) == -1) {
+      FIO_LOG_DEBUG("Couldn't set socket (%d) to non-blocking mode %s",
                     fd,
                     strerror(errno));
       fio_sock_close(fd);
       fd = -1;
       continue;
     }
-    if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      FIO_LOG_DEBUG("Couldn't set socket (%d) to non-blocking mode %s",
+    if (bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
+      FIO_LOG_DEBUG("Failed attempt to bind socket (%d) to address %s",
                     fd,
                     strerror(errno));
       fio_sock_close(fd);

@@ -184,6 +184,35 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 
 Returns `NULL` on error. the `fio_s` pointer must NOT be used except within proper callbacks.
 
+#### `fio_srv_connect`
+
+```c
+/** Named arguments for fio_srv_connect */
+typedef struct {
+  /** The URL to connect to (may contain TLS hints in query / `tls` scheme). */
+  const char *url;
+  /** Connection protocol (once connection established). */
+  fio_protocol_s *protocol;
+  /** Opaque user data (set only once connection was established). */
+  void *udata;
+  /** TLS builder object for TLS connections. */
+  fio_tls_s *tls;
+  /** Connection timeout in milliseconds (defaults to 30 seconds). */
+  uint32_t timeout;
+} fio_srv_connect_args_s;
+
+/** Connects to a specific URL, returning the `fio_s` IO object or `NULL`. */
+SFUNC fio_s *fio_srv_connect(fio_srv_connect_args_s args);
+```
+
+Connects to a remote URL (accepting TLS hints in the URL query and scheme). The protocol is only attached if the connection was established. The protocol's `on_close` callback is always called.
+
+`fio_srv_connect` adds some overhead in parsing the URL for TLS hints and for wrapping the connection protocol for timeout and connection validation before calling the `on_attached`. If these aren't required, it's possible to simply open a socket and attach it like so:
+
+```c
+fio_srv_attach_fd(fio_sock_open2(url, FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK), protocol_pointer, udata, tls);
+```
+
 #### `fio_udata_set`
 
 ```c

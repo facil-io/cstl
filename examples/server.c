@@ -40,12 +40,35 @@ Connect with Server Sent Events (EventSource / SSE):
 
 ***************************************************************************** */
 
-static void http_respond(fio_http_s *h);
-static void websocket_on_open(fio_http_s *h);
+/* *****************************************************************************
+WebSocket / SSE Callbacks
+***************************************************************************** */
+
+static void websocket_on_open(fio_http_s *h) { /* also for SSE connections */
+  fio_http_subscribe(h, .filter = 1);
+}
+
 static void websocket_on_message(fio_http_s *h,
                                  fio_buf_info_s msg,
-                                 uint8_t is_text);
-static void websocket_on_shutdown(fio_http_s *h);
+                                 uint8_t is_text) {
+  fio_publish(.filter = 1, .message = msg);
+  (void)h, (void)is_text;
+}
+
+static void websocket_on_shutdown(fio_http_s *h) {
+  /* for both WebSocket and SSE connections */
+  fio_http_write(h, .buf = "Server going away, goodbye!", .len = 27);
+}
+
+/* *****************************************************************************
+HTTP Callbacks (see later)
+***************************************************************************** */
+
+static void http_respond(fio_http_s *h);
+
+/* *****************************************************************************
+Main
+***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
   static fio_srv_async_s http_queue; /* async queue for worker threads. */
@@ -257,7 +280,7 @@ static void http_respond(fio_http_s *h) {
     fio_http_cookie_set(h, .name = FIO_STR_INFO1("fio-rand"), .value = tmp);
     fio_http_response_header_set(h, FIO_STR_INFO1("x-fio-rand"), tmp);
   }
-#if HTTP_RESPONSE_ECHO
+#if HTTP_RESPONSE_ECHO /* write request to string to be sent as response */
   char *out = fio_bstr_write2(
       NULL,
       FIO_STRING_WRITE_STR2(fio_http_method(h).buf, fio_http_method(h).len),
@@ -268,7 +291,9 @@ static void http_respond(fio_http_s *h) {
       FIO_STRING_WRITE_STR2(" ", 1),
       FIO_STRING_WRITE_STR2(fio_http_version(h).buf, fio_http_version(h).len),
       FIO_STRING_WRITE_STR2("\r\n", 2));
+  /* writes each header to `out` */
   fio_http_request_header_each(h, http_write_headers_to_string, &out);
+  /* write body */
   if (fio_http_body_length(h)) {
     fio_http_body_seek(h, 0);
     fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
@@ -278,12 +303,14 @@ static void http_respond(fio_http_s *h) {
                           FIO_STRING_WRITE_STR2(body.buf, body.len),
                           FIO_STRING_WRITE_STR2("\r\n", 2));
   }
-  if (0) { /* fio_env_set(io, ...) example */
+  /* fio_env_set(io, ...) example */
+  if (0) {
     fio_env_set(fio_http_io(h),
                 .name = FIO_BUF_INFO2("my key", 6),
                 .udata = fio_bstr_write(NULL, "my env data", 11),
                 .on_close = (void (*)(void *))fio_bstr_free);
   }
+  /* ETag header example */
   if (1) {
     uint64_t hash =
         fio_risky_hash(fio_http_path(h).buf, fio_http_path(h).len, 0);
@@ -293,14 +320,6 @@ static void http_respond(fio_http_s *h) {
     fio_http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
   }
   FIO_LOG_DDEBUG2("echoing back:\n%s", out);
-  if (1) { /* prevent chunked encoding? */
-    char ibuf[32];
-    fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
-    fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
-    v.len = fio_digits10u(fio_bstr_len(out));
-    fio_ltoa10u(v.buf, fio_bstr_len(out), v.len);
-    fio_http_response_header_set(h, k, v);
-  }
   fio_http_write(h,
                  .buf = out,
                  .len = fio_bstr_len(out),
@@ -310,24 +329,4 @@ static void http_respond(fio_http_s *h) {
 #else
   fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
 #endif
-}
-
-/* *****************************************************************************
-WebSocket / SSE Callbacks
-***************************************************************************** */
-
-static void websocket_on_open(fio_http_s *h) { /* also for SSE connections */
-  fio_http_subscribe(h, .filter = 1);
-}
-
-static void websocket_on_message(fio_http_s *h,
-                                 fio_buf_info_s msg,
-                                 uint8_t is_text) {
-  fio_publish(.filter = 1, .message = msg);
-  (void)h, (void)is_text;
-}
-
-static void websocket_on_shutdown(fio_http_s *h) {
-  /* for both WebSocket and SSE connections */
-  fio_http_write(h, .buf = "Server going away, goodbye!", .len = 27);
 }

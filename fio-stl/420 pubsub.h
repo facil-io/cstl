@@ -1782,10 +1782,11 @@ FIO_SFUNC void fio___postoffice_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO_POSTOFFICE.remote_send_filter = 0;
   FIO_POSTOFFICE.siblings_protocol = &FIO_LETTER_PROTOCOL_IPC_CHILD;
-  if (fio_srv_connect(FIO_POSTOFFICE.ipc_url,
-                      &FIO_LETTER_PROTOCOL_IPC_CHILD,
-                      NULL,
-                      NULL)) {
+  if (!fio_srv_attach_fd(fio_sock_open2(FIO_POSTOFFICE.ipc_url,
+                                        FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
+                         &FIO_LETTER_PROTOCOL_IPC_CHILD,
+                         NULL,
+                         NULL)) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio___srvdata.pid,
                   FIO_POSTOFFICE.ipc_url);

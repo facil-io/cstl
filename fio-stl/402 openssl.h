@@ -445,11 +445,22 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
 }
 
 /* *****************************************************************************
+Closing Connections
+***************************************************************************** */
+
+/** Decreases a fio_tls_s object's reference count, or frees the object. */
+FIO_SFUNC void fio___openssl_finish(int fd, void *tls_ctx) {
+  SSL *ssl = (SSL *)tls_ctx;
+  SSL_shutdown(ssl);
+  (void)fd;
+}
+
+/* *****************************************************************************
 Per-Connection Cleanup
 ***************************************************************************** */
 
 /** Decreases a fio_tls_s object's reference count, or frees the object. */
-FIO_SFUNC void fio___openssl_free(void *tls_ctx) {
+FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
   SSL_free(ssl);
@@ -481,7 +492,7 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
       .read = fio___openssl_read,
       .write = fio___openssl_write,
       .flush = fio___openssl_flush,
-      .free = fio___openssl_free,
+      .cleanup = fio___openssl_cleanup,
   };
 }
 
@@ -494,7 +505,7 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
       .read = fio___openssl_read,
       .write = fio___openssl_write,
       .flush = fio___openssl_flush,
-      .free = fio___openssl_free,
+      .cleanup = fio___openssl_cleanup,
   };
   fio_tls_default_io_functions(&FIO___OPENSSL_IO_FUNCS);
 }

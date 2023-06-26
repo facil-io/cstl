@@ -22,36 +22,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 ChaCha20Poly1305 API
 ***************************************************************************** */
 
-/* *****************************************************************************
-Using ChaCha20 and Poly1305 separately
-***************************************************************************** */
-
-/**
- * Performs an in-place encryption/decryption of `data` using ChaCha20.
- *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
- * * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
- */
-SFUNC void fio_chacha20(void *restrict data,
-                        size_t len,
-                        const void *key,
-                        const void *nounce,
-                        uint32_t counter);
-
-/**
- * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
- * poly message and additional data into `mac_dest`.
- *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- */
-SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             const void *key256bits,
-                             void *restrict message,
-                             size_t len,
-                             void *restrict additional_data,
-                             size_t additional_data_len);
-
 /**
  * Performs an in-place encryption of `data` using ChaCha20 with additional
  * data, producing a 16 byte message authentication code (MAC) using Poly1305.
@@ -89,6 +59,36 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     size_t adlen,
                                     const void *key,
                                     const void *nounce);
+
+/* *****************************************************************************
+Using ChaCha20 and Poly1305 separately
+***************************************************************************** */
+
+/**
+ * Performs an in-place encryption/decryption of `data` using ChaCha20.
+ *
+ * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
+ */
+SFUNC void fio_chacha20(void *restrict data,
+                        size_t len,
+                        const void *key,
+                        const void *nounce,
+                        uint32_t counter);
+
+/**
+ * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
+ * poly message and additional data into `mac_dest`.
+ *
+ * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ */
+SFUNC void fio_poly1305_auth(void *restrict mac_dest,
+                             const void *key256bits,
+                             void *restrict message,
+                             size_t len,
+                             void *restrict additional_data,
+                             size_t additional_data_len);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
