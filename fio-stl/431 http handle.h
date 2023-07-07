@@ -2774,6 +2774,7 @@ SFUNC fio_str_info_s fio_http_status2str(size_t status) {
   case 415: HTTP_RETURN_STATUS("Unsupported Media Type");
   case 416: HTTP_RETURN_STATUS("Range Not Satisfiable");
   case 417: HTTP_RETURN_STATUS("Expectation Failed");
+  case 418: HTTP_RETURN_STATUS("I am a Teapot"); /* April Fool's Day, 1998 */
   case 419: HTTP_RETURN_STATUS("Page Expired (Laravel Framework)"); /* unofficial */
   case 420: HTTP_RETURN_STATUS("Enhance Your Calm (Twitter) - Method Failure (Spring Framework)"); /* unofficial */
   case 421: HTTP_RETURN_STATUS("Misdirected Request");

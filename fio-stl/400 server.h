@@ -843,6 +843,38 @@ static void fio___io_func_default_free_context(void *context) {
   (void)context;
 }
 
+static void fio___io_func_free_context_caller_task(void *fn_ptr,
+                                                   void *context) {
+  union {
+    void (*free_context)(void *context);
+    void *fn_ptr;
+  } u = {.fn_ptr = fn_ptr};
+  u.free_context(context);
+}
+
+static void fio___io_func_free_context_caller(void (*free_context)(void *),
+                                              void *context) {
+  union {
+    void (*free_context)(void *context);
+    void *fn_ptr;
+  } u = {.free_context = free_context};
+  fio_queue_push(fio_srv_queue(),
+                 fio___io_func_free_context_caller_task,
+                 u.fn_ptr,
+                 context);
+}
+/** Builds a local TLS context out of the fio_tls_s object. */
+// static void fio___io_func_default_free_context(void *context) {
+//   if (!context)
+//     return;
+//   FIO_ASSERT(0,
+//              "SSL/TLS `free_context` was called, but no SSL/TLS "
+//              "implementation found.");
+//   (void)context;
+// }
+
+// ;
+
 FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
   pr->reserved.ios = FIO_LIST_INIT(pr->reserved.ios);
@@ -2277,7 +2309,8 @@ static void fio___srv_listen_free(void *l_) {
   fio_state_callback_remove(FIO_CALL_PRE_START,
                             fio___srv_listen_free,
                             (void *)l);
-  l->protocol->io_functions.free_context(l->tls_ctx);
+  fio___io_func_free_context_caller(l->protocol->io_functions.free_context,
+                                    l->tls_ctx);
   fio_sock_close(l->fd);
 
 #ifdef AF_UNIX
@@ -2359,9 +2392,9 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   if (l->on_start)
     l->on_start(l->protocol, l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("(%d) started listening on %s", fio___srvdata.pid, l->url);
+    FIO_LOG_DEBUG2("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   else
-    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+    FIO_LOG_INFO("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   (void)ignr_;
 }
 
@@ -2480,7 +2513,8 @@ typedef struct {
 } fio___connecting_s;
 
 FIO_SFUNC void fio___connecting_cleanup(fio___connecting_s *c) {
-  c->protocol.io_functions.free_context(c->tls_ctx);
+  fio___io_func_free_context_caller(c->protocol.io_functions.free_context,
+                                    c->tls_ctx);
   FIO_MEM_FREE_(c, sizeof(*c) + c->url_len + 1);
 }
 

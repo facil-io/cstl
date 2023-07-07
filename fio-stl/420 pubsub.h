@@ -1675,8 +1675,7 @@ FIO_SFUNC void fio___publish_letter_task(void *l_, void *ignr_) {
   fio_letter_free(l);
 }
 
-/** Publishes a message to the relevant
- * subscribers (if any). */
+/** Publishes a message to the relevant subscribers (if any). */
 void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   fio_letter_s *l;
