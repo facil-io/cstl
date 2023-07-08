@@ -1114,6 +1114,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   if (upgraded)
     goto upgraded;
   if (fio_srv_is_open(c->io)) {
+    /* TODO: test for connection:close header and h->status values */
     fio___http1_process_data(c->io, c);
   }
   if (!c->suspend)
