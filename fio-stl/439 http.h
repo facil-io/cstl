@@ -186,6 +186,18 @@ SFUNC fio_s *fio_http_io(fio_http_s *);
 #define fio_http_subscribe(h, ...)                                             \
   fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 
+/** TODO: Connects to HTTP / WebSockets / SSE connections on `url`. */
+SFUNC void fio_http_connect(const char *url,
+                            fio_http_s *h,
+                            fio_http_settings_s settings);
+
+/** Connects to HTTP / WebSockets / SSE connections on `url`. */
+#define fio_http_connect(url, h, ...)                                          \
+  fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+
+/** TODO: Closes a persistent HTTP connection (if any). */
+SFUNC void fio_http_close(fio_http_s *h);
+
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -296,9 +308,11 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
   if (!s->on_finish)
     s->on_finish = fio___http_default_on_finish;
   if (!s->on_authenticate_sse)
-    s->on_authenticate_sse = fio___http_default_authenticate;
+    s->on_authenticate_sse = is_client ? FIO_HTTP_AUTHENTICATE_ALLOW
+                                       : fio___http_default_authenticate;
   if (!s->on_authenticate_websocket)
-    s->on_authenticate_websocket = fio___http_default_authenticate;
+    s->on_authenticate_websocket = is_client ? FIO_HTTP_AUTHENTICATE_ALLOW
+                                             : fio___http_default_authenticate;
   if (!s->on_open)
     s->on_open = fio___http_default_noop;
   if (!s->on_open)
@@ -408,6 +422,7 @@ struct fio___http_connection_ws_s {
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
   fio_websocket_parser_s parser;
   char *msg;
+  uint16_t code;
 };
 struct fio___http_connection_sse_s {
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
@@ -622,6 +637,19 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   (void)ignr;
 }
 
+FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr) {
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (fio___http_on_http_test4upgrade(h, c))
+    return;
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.fn = c->state.http.on_http};
+  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
+  (void)ignr;
+}
+
 /* *****************************************************************************
 ALPN Helpers
 ***************************************************************************** */
@@ -656,7 +684,7 @@ void fio_http_listen___(void); /* IDE marker */
 SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s, 0);
   fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
-  fio_tls_s *auto_tls_detected = NULL;
+  int should_free_tls = !s.tls;
   FIO_ASSERT_ALLOC(p);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
     p->state[i].protocol =
@@ -666,40 +694,24 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   }
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
     p->state[i].protocol.timeout = s.ws_timeout * 1000;
+  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout = s.timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
   p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
-  if (!s.tls && url) { /* if `cert` and `key` set by URL we'll need ALPN */
+  if (url) {
     fio_url_s u = fio_url_parse(url, strlen(url));
-    if (u.query.len) {
-      const uint32_t wrd_key = fio_buf2u32u("key\xFF");
-      const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
-      const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
-      const uint32_t wrd_cert = fio_buf2u32u("cert");
-      FIO_URL_QUERY_EACH(u.query, i) {
-        if (i.name.len < 3 || i.name.len > 4)
-          continue;
-        const uint32_t wrd_name3 =
-            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\xFF");
-        const uint32_t wrd_name4 =
-            fio_buf2u32u(i.name.buf) | fio_buf2u32u("\x20\x20\x20\x20");
-        if (wrd_name3 != wrd_key && wrd_name3 != wrd_tls &&
-            wrd_name3 != wrd_ssl && wrd_name4 != wrd_cert)
-          continue;
-        s.tls = auto_tls_detected = fio_tls_new();
-        break;
-      }
-      /* TODO! add query parsing logic with callbacks to "431 http handle.h" */
+    s.tls = fio_tls_from_url(s.tls, u);
+    if (s.tls) {
+      s.tls = fio_tls_dup(s.tls);
+      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
+      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+      if (!s.tls_io_func)
+        s.tls_io_func = &tmp_fn;
+      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+        p->state[i].protocol.io_functions = *s.tls_io_func;
     }
-  }
-  if (s.tls) {
-    s.tls = fio_tls_dup(s.tls);
-    /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
-    // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
-    fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
-    if (!s.tls_io_func)
-      s.tls_io_func = &tmp_fn;
-    for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
-      p->state[i].protocol.io_functions = *s.tls_io_func;
+    if (should_free_tls)
+      fio_tls_free(s.tls);
   }
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
@@ -716,8 +728,98 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
                      // .on_open = fio___http_on_open,
                      .on_finish = fio___http_listen_on_finished,
                      .queue_for_accept = p->queue ? p->queue : NULL);
-  fio_tls_free(auto_tls_detected);
   return listener;
+}
+
+/* *****************************************************************************
+HTTP Connect
+***************************************************************************** */
+
+void fio___http_connect_on_failed(void *udata);
+
+void fio_http_connect___(void); /* IDE Marker */
+/** Connects to HTTP / WebSockets / SSE connections on `url`. */
+SFUNC void fio_http_connect FIO_NOOP(const char *url,
+                                     fio_http_s *h,
+                                     fio_http_settings_s s) {
+  http_settings_validate(&s, 1);
+  fio_url_s u = (fio_url_s){0};
+  if (url)
+    u = fio_url_parse(url, strlen(url));
+
+  if (!h)
+    h = fio_http_new();
+  if (!fio_http_path(h).len)
+    fio_http_path_set(h,
+                      u.path.len ? FIO_BUF2STR_INFO(u.path)
+                                 : FIO_STR_INFO2("/", 1));
+  if (!fio_http_query(h).len && u.query.len)
+    fio_http_query_set(h, FIO_BUF2STR_INFO(u.query));
+  if (!fio_http_method(h).len)
+    fio_http_method_set(h, FIO_STR_INFO2("GET", 3));
+  if (u.host.len)
+    fio_http_request_header_set_if_missing(h,
+                                           FIO_STR_INFO2("host", 4),
+                                           FIO_BUF2STR_INFO(u.host));
+
+  fio___http_protocol_s *p = fio___http_protocol_new(1);
+  int should_free_tls = !s.tls;
+  FIO_ASSERT_ALLOC(p);
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
+    p->state[i].protocol =
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, 1);
+    p->state[i].controller =
+        fio___http_controller_get((fio___http_protocol_selector_e)i, 1);
+  }
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
+    p->state[i].protocol.timeout = s.ws_timeout * 1000;
+  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout = s.timeout * 1000;
+  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
+  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
+
+  s.tls = fio_tls_from_url(s.tls, u);
+  if (s.tls) {
+    s.tls = fio_tls_dup(s.tls);
+    /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+    // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
+    fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+    if (!s.tls_io_func)
+      s.tls_io_func = &tmp_fn;
+    for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+      p->state[i].protocol.io_functions = *s.tls_io_func;
+  }
+  if (should_free_tls)
+    fio_tls_free(s.tls);
+  p->settings = s;
+  p->settings.public_folder.buf = p->public_folder_buf;
+  p->settings.public_folder.len = 0;
+  p->settings.public_folder.buf[0] = 0;
+  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+  p->on_http_callback = fio___http_on_http_client;
+  fio___http_connection_s *c =
+      fio___http_connection_new(p->settings.max_line_len);
+  FIO_ASSERT_ALLOC(c);
+  *c = (fio___http_connection_s){
+      .io = NULL,
+      .h = h,
+      .settings = &(p->settings),
+      .queue = p->queue,
+      .udata = p->settings.udata,
+      .state.http =
+          {
+              .on_http_callback = p->on_http_callback,
+              .on_http = p->settings.on_http,
+              .max_header = p->settings.max_header_size,
+          },
+      .capa = p->settings.max_line_len,
+      .log = p->settings.log,
+  };
+  fio_srv_connect(url,
+                  .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                  .on_failed = NULL,
+                  .udata = c,
+                  .tls = s.tls,
+                  .timeout = s.timeout);
 }
 
 /* *****************************************************************************
@@ -1333,11 +1435,13 @@ FIO_SFUNC void fio_websocket_on_protocol_close(void *udata,
   char buf[32];
   size_t len = fio_websocket_server_wrap(buf, NULL, 0, 0x08, 1, 1, 0);
   fio_write(c->io, buf, len);
+  if (msg.len > 1)
+    c->state.ws.code = fio_buf2u16_be(msg.buf);
   fio_close(c->io);
-  if (msg.len)
+  if (msg.len > 2)
     FIO_LOG_DDEBUG2("WebSocket %p closed with error message: %s",
                     c->io,
-                    msg.buf);
+                    msg.buf + 2);
   (void)msg;
 }
 
@@ -1416,6 +1520,8 @@ FIO_SFUNC void fio___websocket_on_close(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_bstr_free(c->state.ws.msg);
+  fio_http_status_set(c->h, (size_t)(c->state.ws.code));
+  c->settings->on_close(c->h);
   fio_http_free(c->h);
   fio___http_connection_free(c);
 }

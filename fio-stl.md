@@ -8824,6 +8824,30 @@ void fio_tls_free(fio_tls_s *);
 
 Performs a `free` operation, reducing the reference count and freeing.
 
+#### `fio_tls_from_url`
+
+```c
+fio_tls_s *fio_tls_from_url(fio_tls_s *existing_tls_or_null, fio_url_s url);
+```
+
+Takes a parsed URL and optional TLS target and returns a TLS if needed.
+
+If the target `fio_tls_s *` is `NULL` and the URL requires TLS, a new TLS object will be returned.
+
+If the target `fio_tls_s *` is not `NULL`, it will be returned after being updated.
+
+The following URL _schemes_ are recognized as TLS schemes:  `tls`, `https` and `wss`.
+
+The following _query parameters_ are recognized for effecting TLS schemes:
+
+* `tls` - without value, indicates that TLS must be used. If no additional information is given, a self signed TLS certificate will be initialized when acting as a server.
+
+* `tls=<file-prefix>` - will treat `<file-prefix>` as a prefix for a file path that ends with both `key.pem` and `cert.pem`. An empty `<file-prefix>` is valid. i.e.: `localhost:3000?tls=./` or `localhost:3000?tls=`
+
+* `key=<file-path>` - a complete private key file path (usually a `.pem` file).
+
+* `cert=<file-path>` - a complete public certificate file path (usually a `.pem` file).
+
 #### `fio_tls_cert_add`
 
 ```c
