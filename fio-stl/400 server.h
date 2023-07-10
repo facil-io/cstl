@@ -2732,8 +2732,10 @@ SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
           btls = 1;
       }
     }
-    if (!(tls) && (btls || key.buf || cert.buf))
+
+    if (!tls && (btls || (key.buf && cert.buf)))
       tls = fio_tls_new();
+
     if (key.buf && cert.buf) {
       FIO_STR_INFO_TMP_VAR(host_tmp, 512);
       FIO_STR_INFO_TMP_VAR(key_tmp, 128);

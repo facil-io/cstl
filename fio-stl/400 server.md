@@ -771,7 +771,7 @@ If the target `fio_tls_s *` is `NULL` and the URL requires TLS, a new TLS object
 
 If the target `fio_tls_s *` is not `NULL`, it will be returned after being updated.
 
-The following URL _schemes_ are recognized as TLS schemes:  `tls`, `https`, `wss` and `sses`.
+The following URL _schemes_ are recognized as TLS schemes:  `tls` `https`, `wss`, `sses`, `tcps`, and `udps`.
 
 The following _query parameters_ are recognized for effecting TLS schemes:
 
@@ -782,6 +782,8 @@ The following _query parameters_ are recognized for effecting TLS schemes:
 * `key=<file-path>` - a complete private key file path (usually a `.pem` file).
 
 * `cert=<file-path>` - a complete public certificate file path (usually a `.pem` file).
+
+**Note**: both scheme and query tests are **case insensitive**. Query values may be case sensitive, depending on file system.
 
 #### `fio_tls_cert_add`
 
