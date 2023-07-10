@@ -761,6 +761,17 @@ SFUNC void fio_http_connect FIO_NOOP(const char *url,
     fio_http_request_header_set_if_missing(h,
                                            FIO_STR_INFO2("host", 4),
                                            FIO_BUF2STR_INFO(u.host));
+  /* test for ws:// or wss:// - WebSocket scheme */
+  if ((u.scheme.len == 2 ||
+       (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
+      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws"))
+    fio_http_websockets_set_request(h);
+  /* test for sse:// or sses:// - Server Sent Events scheme */
+  else if ((u.scheme.len == 3 ||
+            (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
+           (fio_buf2u32u(u.scheme.buf) | fio_buf2u32u("\x20\x20\x20\xFF")) ==
+               fio_buf2u32u("sse\xFF"))
+    fio_http_sse_set_request(h);
 
   fio___http_protocol_s *p = fio___http_protocol_new(1);
   int should_free_tls = !s.tls;

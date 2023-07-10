@@ -155,13 +155,11 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  if (pos[0] == '/') {
-    /* start at path */
+  if (*pos == '/') /* start at path */
     goto start_path;
-  }
 
-  while (pos < end && pos[0] != ':' && pos[0] != '/' && pos[0] != '@' &&
-         pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   if (pos == end) {
@@ -170,7 +168,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '@':
     /* username@[host] */
     r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -207,8 +205,8 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
   /* start_username: */
   url = pos;
-  while (pos < end && pos[0] != ':' && pos[0] != '/' && pos[0] != '@'
-         /* && pos[0] != '#' && pos[0] != '?' */)
+  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   if (pos >= end) { /* scheme://host */
@@ -216,7 +214,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '/':
     /* scheme://host[/path] */
     r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -226,6 +224,16 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_host;
+  case '?':
+    /* scheme://host[?query] (bad)*/
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    ++pos;
+    goto start_query;
+  case '#':
+    /* scheme://host[#target] (bad)*/
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    ++pos;
+    goto start_query;
   case ':':
     /* scheme://username:[password]@[host]... OR */
     /* scheme://host:[port][/...] */
@@ -236,7 +244,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
 start_password:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != '@' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != '@' && *pos != '?')
     ++pos;
 
   if (pos >= end) {
@@ -247,7 +255,7 @@ start_password:
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '?': /* fall through */
   case '/':
     r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -263,15 +271,15 @@ start_password:
 
 start_host:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != ':' && pos[0] != '#' &&
-         pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != ':' && *pos != '#' &&
+         *pos != '?')
     ++pos;
 
   r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
   if (pos >= end) {
     goto finish;
   }
-  switch (pos[0]) {
+  switch (*pos) {
   case '/':
     /* scheme://[...@]host[/path] */
     goto start_path;
@@ -290,7 +298,7 @@ start_host:
 
   // start_port:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != '#' && *pos != '?')
     ++pos;
 
   r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -299,7 +307,7 @@ start_host:
     /* scheme://[...@]host:port */
     goto finish;
   }
-  switch (pos[0]) {
+  switch (*pos) {
   case '?':
     /* scheme://[...@]host:port?[query] (bad)*/
     ++pos;
@@ -314,7 +322,7 @@ start_host:
 
 start_path:
   url = pos;
-  while (pos < end && pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '#' && *pos != '?')
     ++pos;
 
   r.path = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -328,7 +336,7 @@ start_path:
 
 start_query:
   url = pos;
-  while (pos < end && pos[0] != '#')
+  while (pos < end && *pos && *pos != '#')
     ++pos;
 
   r.query = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};

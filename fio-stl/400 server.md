@@ -771,7 +771,7 @@ If the target `fio_tls_s *` is `NULL` and the URL requires TLS, a new TLS object
 
 If the target `fio_tls_s *` is not `NULL`, it will be returned after being updated.
 
-The following URL _schemes_ are recognized as TLS schemes:  `tls`, `https` and `wss`.
+The following URL _schemes_ are recognized as TLS schemes:  `tls`, `https`, `wss` and `sses`.
 
 The following _query parameters_ are recognized for effecting TLS schemes:
 

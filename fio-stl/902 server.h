@@ -81,6 +81,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 }
 
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
+  fprintf(stderr, "   * Testing fio_tls_s helpers.\n");
   struct {
     const char *nm;
     const char *public_cert_file;
@@ -184,6 +185,35 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   fio_tls_alpn_select(t, "tst", 3, (fio_s *)&counter);
   FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
+
+  struct {
+    fio_buf_info_s url;
+    size_t is_tls;
+  } url_tests[] = {
+      {FIO_BUF_INFO1("ws://ex.com"), 0},
+      {FIO_BUF_INFO1("wss://ex.com"), 1},
+      {FIO_BUF_INFO1("sse://ex.com"), 0},
+      {FIO_BUF_INFO1("sses://ex.com"), 1},
+      {FIO_BUF_INFO1("http://ex.com"), 0},
+      {FIO_BUF_INFO1("https://ex.com"), 1},
+      {FIO_BUF_INFO1("tcp://ex.com"), 0},
+      {FIO_BUF_INFO1("tcps://ex.com"), 1},
+      {FIO_BUF_INFO1("udp://ex.com"), 0},
+      {FIO_BUF_INFO1("udps://ex.com"), 1},
+      {FIO_BUF_INFO1("tls://ex.com"), 1},
+      {FIO_BUF_INFO1("ws://ex.com/?TLSN"), 0},
+      {FIO_BUF_INFO1("ws://ex.com/?TLS"), 1},
+      {FIO_BUF_INFO1(NULL), 0},
+  };
+  for (size_t i = 0; url_tests[i].url.buf; ++i) {
+    t = NULL;
+    fio_url_s u = fio_url_parse(url_tests[i].url.buf, url_tests[i].url.len);
+    t = fio_tls_from_url(t, u);
+    FIO_ASSERT((!url_tests[i].is_tls && !t) || (url_tests[i].is_tls && t),
+               "fio_tls_from_url result error @ %s",
+               url_tests[i].url.buf);
+    fio_tls_free(t);
+  }
 }
 
 /* *****************************************************************************

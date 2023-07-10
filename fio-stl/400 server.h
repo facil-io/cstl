@@ -2674,14 +2674,19 @@ SFUNC void fio_tls_free(fio_tls_s *tls) {
 
 /** Takes a parsed URL and optional TLS target and returns a TLS if needed. */
 SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
-  /* test for schemes `tls` / `wss` / `https` */
+  /* test for schemes `tls` / `wss` / `https` / `sses` / `tcps` / `udps` */
   if (!tls &&
-      ((url.scheme.len == 3 &&
+      ((url.scheme.len == 3 && /* tls:// or wss:// */
         (fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020U) ||
          fio_buf2u16u("tl") == (fio_buf2u16u(url.scheme.buf) | 0x2020U)) &&
-        (url.scheme.buf[2] | 0x20) == 's') ||
-       (url.scheme.len == 5 &&
-        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x2020U) &&
+        (url.scheme.buf[2] | 0x20U) == 's') ||
+       (url.scheme.len == 4 && /* server sent events secure scheme sses:// */
+        (fio_buf2u32u("sses") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
+         fio_buf2u32u("tcps") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
+         fio_buf2u32u("udps") ==
+             (fio_buf2u32u(url.scheme.buf) | 0x20202020U))) ||
+       (url.scheme.len == 5 && /* https:// */
+        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) &&
         (url.scheme.buf[4] | 0x20) == 's')))
     tls = fio_tls_new();
   /* test for TLS keywords in URL query */
@@ -2696,6 +2701,10 @@ SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
     const uint64_t wrd_password = fio_buf2u64u("password");
     _Bool btls = 0;
     FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
+      fprintf(stderr,
+              "\t testing URL query name: %.*s",
+              (int)i.name.len,
+              i.name.buf);
       if (i.name.len == 8 && i.value.len &&
           (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
         pass = i.value;

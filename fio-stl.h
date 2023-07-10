@@ -8212,13 +8212,11 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  if (pos[0] == '/') {
-    /* start at path */
+  if (*pos == '/') /* start at path */
     goto start_path;
-  }
 
-  while (pos < end && pos[0] != ':' && pos[0] != '/' && pos[0] != '@' &&
-         pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   if (pos == end) {
@@ -8227,7 +8225,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '@':
     /* username@[host] */
     r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -8264,8 +8262,8 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
   /* start_username: */
   url = pos;
-  while (pos < end && pos[0] != ':' && pos[0] != '/' && pos[0] != '@'
-         /* && pos[0] != '#' && pos[0] != '?' */)
+  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   if (pos >= end) { /* scheme://host */
@@ -8273,7 +8271,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '/':
     /* scheme://host[/path] */
     r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -8283,6 +8281,16 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     r.user = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
     ++pos;
     goto start_host;
+  case '?':
+    /* scheme://host[?query] (bad)*/
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    ++pos;
+    goto start_query;
+  case '#':
+    /* scheme://host[#target] (bad)*/
+    r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
+    ++pos;
+    goto start_query;
   case ':':
     /* scheme://username:[password]@[host]... OR */
     /* scheme://host:[port][/...] */
@@ -8293,7 +8301,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
 start_password:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != '@' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != '@' && *pos != '?')
     ++pos;
 
   if (pos >= end) {
@@ -8304,7 +8312,7 @@ start_password:
     goto finish;
   }
 
-  switch (pos[0]) {
+  switch (*pos) {
   case '?': /* fall through */
   case '/':
     r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -8320,15 +8328,15 @@ start_password:
 
 start_host:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != ':' && pos[0] != '#' &&
-         pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != ':' && *pos != '#' &&
+         *pos != '?')
     ++pos;
 
   r.host = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
   if (pos >= end) {
     goto finish;
   }
-  switch (pos[0]) {
+  switch (*pos) {
   case '/':
     /* scheme://[...@]host[/path] */
     goto start_path;
@@ -8347,7 +8355,7 @@ start_host:
 
   // start_port:
   url = pos;
-  while (pos < end && pos[0] != '/' && pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '/' && *pos != '#' && *pos != '?')
     ++pos;
 
   r.port = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -8356,7 +8364,7 @@ start_host:
     /* scheme://[...@]host:port */
     goto finish;
   }
-  switch (pos[0]) {
+  switch (*pos) {
   case '?':
     /* scheme://[...@]host:port?[query] (bad)*/
     ++pos;
@@ -8371,7 +8379,7 @@ start_host:
 
 start_path:
   url = pos;
-  while (pos < end && pos[0] != '#' && pos[0] != '?')
+  while (pos < end && *pos && *pos != '#' && *pos != '?')
     ++pos;
 
   r.path = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -8385,7 +8393,7 @@ start_path:
 
 start_query:
   url = pos;
-  while (pos < end && pos[0] != '#')
+  while (pos < end && *pos && *pos != '#')
     ++pos;
 
   r.query = (fio_buf_info_s){.buf = (char *)url, .len = (size_t)(pos - url)};
@@ -30761,14 +30769,19 @@ SFUNC void fio_tls_free(fio_tls_s *tls) {
 
 /** Takes a parsed URL and optional TLS target and returns a TLS if needed. */
 SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
-  /* test for schemes `tls` / `wss` / `https` */
+  /* test for schemes `tls` / `wss` / `https` / `sses` / `tcps` / `udps` */
   if (!tls &&
-      ((url.scheme.len == 3 &&
+      ((url.scheme.len == 3 && /* tls:// or wss:// */
         (fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020U) ||
          fio_buf2u16u("tl") == (fio_buf2u16u(url.scheme.buf) | 0x2020U)) &&
-        (url.scheme.buf[2] | 0x20) == 's') ||
-       (url.scheme.len == 5 &&
-        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x2020U) &&
+        (url.scheme.buf[2] | 0x20U) == 's') ||
+       (url.scheme.len == 4 && /* server sent events secure scheme sses:// */
+        (fio_buf2u32u("sses") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
+         fio_buf2u32u("tcps") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
+         fio_buf2u32u("udps") ==
+             (fio_buf2u32u(url.scheme.buf) | 0x20202020U))) ||
+       (url.scheme.len == 5 && /* https:// */
+        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) &&
         (url.scheme.buf[4] | 0x20) == 's')))
     tls = fio_tls_new();
   /* test for TLS keywords in URL query */
@@ -30783,6 +30796,10 @@ SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
     const uint64_t wrd_password = fio_buf2u64u("password");
     _Bool btls = 0;
     FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
+      fprintf(stderr,
+              "\t testing URL query name: %.*s",
+              (int)i.name.len,
+              i.name.buf);
       if (i.name.len == 8 && i.value.len &&
           (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
         pass = i.value;
@@ -38338,6 +38355,17 @@ SFUNC void fio_http_connect FIO_NOOP(const char *url,
     fio_http_request_header_set_if_missing(h,
                                            FIO_STR_INFO2("host", 4),
                                            FIO_BUF2STR_INFO(u.host));
+  /* test for ws:// or wss:// - WebSocket scheme */
+  if ((u.scheme.len == 2 ||
+       (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
+      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws"))
+    fio_http_websockets_set_request(h);
+  /* test for sse:// or sses:// - Server Sent Events scheme */
+  else if ((u.scheme.len == 3 ||
+            (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
+           (fio_buf2u32u(u.scheme.buf) | fio_buf2u32u("\x20\x20\x20\xFF")) ==
+               fio_buf2u32u("sse\xFF"))
+    fio_http_sse_set_request(h);
 
   fio___http_protocol_s *p = fio___http_protocol_new(1);
   int should_free_tls = !s.tls;
@@ -46376,6 +46404,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
 }
 
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
+  fprintf(stderr, "   * Testing fio_tls_s helpers.\n");
   struct {
     const char *nm;
     const char *public_cert_file;
@@ -46479,6 +46508,35 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   fio_tls_alpn_select(t, "tst", 3, (fio_s *)&counter);
   FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
+
+  struct {
+    fio_buf_info_s url;
+    size_t is_tls;
+  } url_tests[] = {
+      {FIO_BUF_INFO1("ws://ex.com"), 0},
+      {FIO_BUF_INFO1("wss://ex.com"), 1},
+      {FIO_BUF_INFO1("sse://ex.com"), 0},
+      {FIO_BUF_INFO1("sses://ex.com"), 1},
+      {FIO_BUF_INFO1("http://ex.com"), 0},
+      {FIO_BUF_INFO1("https://ex.com"), 1},
+      {FIO_BUF_INFO1("tcp://ex.com"), 0},
+      {FIO_BUF_INFO1("tcps://ex.com"), 1},
+      {FIO_BUF_INFO1("udp://ex.com"), 0},
+      {FIO_BUF_INFO1("udps://ex.com"), 1},
+      {FIO_BUF_INFO1("tls://ex.com"), 1},
+      {FIO_BUF_INFO1("ws://ex.com?TLSN"), 0},
+      {FIO_BUF_INFO1("ws://ex.com?TLS"), 1},
+      {FIO_BUF_INFO1(NULL), 0},
+  };
+  for (size_t i = 0; url_tests[i].url.buf; ++i) {
+    t = NULL;
+    fio_url_s u = fio_url_parse(url_tests[i].url.buf, url_tests[i].url.len);
+    t = fio_tls_from_url(t, u);
+    FIO_ASSERT((!url_tests[i].is_tls && !t) || (url_tests[i].is_tls && t),
+               "fio_tls_from_url result error @ %s",
+               url_tests[i].url.buf);
+    fio_tls_free(t);
+  }
 }
 
 /* *****************************************************************************
