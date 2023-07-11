@@ -711,10 +711,7 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   return 0;
 }
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
-  (void)expected, (void)udata;
-  return 0;
-}
+static int fio_http1_on_expect(void *udata) { return (void)udata, 0; }
 
 #define HTTP1_TEST_STRING_FIELD(field, i)                                      \
   FIO_ASSERT((!fio_http1_test_data[i].expect.field &&                          \

@@ -47,6 +47,11 @@ FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p);
 /** The error return value for fio_http1_parse. */
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
 
+/** Returns the number of bytes of payload still expected to be received. */
+FIO_IFUNC size_t fio_http1_expected(fio_http1_parser_s *p);
+/** A return value for `fio_http1_expected` when chunked data is expected. */
+#define FIO_HTTP1_EXPECTED_CHUNKED ((size_t)(-1))
+
 /* *****************************************************************************
 HTTP/1.x callbacks (to be implemented by parser user)
 ***************************************************************************** */
@@ -74,7 +79,7 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               size_t content_length,
                                               void *udata);
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int fio_http1_on_expect(fio_buf_info_s expected, void *udata);
+static int fio_http1_on_expect(void *udata);
 /** called when a body chunk is parsed. */
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
 
@@ -122,6 +127,11 @@ FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p) {
   return !p->fn || p->fn == fio_http1___start;
 }
 
+/** Returns the number of bytes of payload still expected to be received. */
+FIO_IFUNC size_t fio_http1_expected(fio_http1_parser_s *p) {
+  return p->expected;
+}
+
 /* *****************************************************************************
 Main Parsing Loop
 ***************************************************************************** */
@@ -141,7 +151,6 @@ FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
     return FIO_HTTP1_PARSER_ERROR;
   return buf.buf - buf_start;
 }
-#define HTTP1___EXPECTED_CHUNKED ((size_t)(-1))
 
 /* completed parsing. */
 static int fio_http1___finish(fio_http1_parser_s *p,
@@ -225,6 +234,11 @@ parse_response_line:
 Reading Headers
 ***************************************************************************** */
 
+/* parsing stage 1 - read headers (after `expect` header). */
+static int fio_http1___read_header_post_expect(fio_http1_parser_s *p,
+                                               fio_buf_info_s *buf,
+                                               void *udata);
+
 /* handle headers before calling callback. */
 static inline int fio_http1___on_header(fio_http1_parser_s *p,
                                         fio_buf_info_s name,
@@ -233,9 +247,12 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
   /* test for special headers */
   switch (name.len) {
   case 6: /* test for "expect" */
-    if (fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
-        fio_buf2u32u(name.buf + 2) == fio_buf2u32u("pect")) { /* Expect */
-      return 0 - fio_http1_on_expect(value, udata);
+    if (value.len == 12 && fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
+        fio_buf2u32u(name.buf + 2) == fio_buf2u32u("pect") &&
+        fio_buf2u64u(value.buf) == fio_buf2u64u("100-cont") &&
+        fio_buf2u32u(value.buf + 8) == fio_buf2u32u("inue")) { /* Expect */
+      p->fn = fio_http1___read_header_post_expect;
+      return 0;
     }
     break;
   case 14: /* test for "content-length" */
@@ -260,9 +277,9 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
       char *c_start = value.buf + value.len - 7;
       if ((fio_buf2u32u(c_start) | 0x20202020UL) == fio_buf2u32u("chun") &&
           (fio_buf2u32u(c_start + 3) | 0x20202020UL) == fio_buf2u32u("nked")) {
-        if (p->expected && p->expected != HTTP1___EXPECTED_CHUNKED)
+        if (p->expected && p->expected != FIO_HTTP1_EXPECTED_CHUNKED)
           return -1;
-        p->expected = HTTP1___EXPECTED_CHUNKED;
+        p->expected = FIO_HTTP1_EXPECTED_CHUNKED;
         /* endpoint does not need to know if the body was chunked or not */
         if (value.len == 7)
           return 0;
@@ -384,16 +401,29 @@ static inline int fio_http1___read_header_line(
   }
 
 headers_finished:
+  if (p->fn == fio_http1___read_header_post_expect &&
+      fio_http1_on_expect(udata))
+    goto expect_failed;
   p->fn = (!p->expected)         ? fio_http1___finish
           : (!(p->expected + 1)) ? fio_http1___read_body_chunked
                                  : fio_http1___read_body;
   return p->fn(p, buf, udata);
+expect_failed:
+  *p = (fio_http1_parser_s){0};
+  return 1;
 }
 
 /* parsing stage 1 - read headers. */
 static int fio_http1___read_header(fio_http1_parser_s *p,
                                    fio_buf_info_s *buf,
                                    void *udata) {
+  return fio_http1___read_header_line(p, buf, udata, fio_http1___on_header);
+}
+
+/* parsing stage 1 - read headers (after `expect` header). */
+static int fio_http1___read_header_post_expect(fio_http1_parser_s *p,
+                                               fio_buf_info_s *buf,
+                                               void *udata) {
   return fio_http1___read_header_line(p, buf, udata, fio_http1___on_header);
 }
 

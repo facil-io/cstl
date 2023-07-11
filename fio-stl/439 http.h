@@ -913,6 +913,8 @@ static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  if (!c->h)
+    return 0; /* ignore possible post-error response headers */
   (!fio_http_status(c->h)
        ? fio_http_request_header_add
        : fio_http_response_header_add)(c->h,
@@ -939,19 +941,26 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
 #endif
   return 0;
 too_big:
-  c->h = NULL;
   fio_dup(c->io);
+  fio_srv_suspend(c->io);
+  c->h = NULL;
+  c->suspend = 1;
   fio_http_send_error_response(h, 413);
   fio_http_free(h);
-  return -1;
+  return 0; /* should we disconnect (return -1), or not? */
   (void)name, (void)value;
 }
 /** called when `Expect` arrives and may require a 100 continue response. */
-static int fio_http1_on_expect(fio_buf_info_s expected, void *udata) {
+static int fio_http1_on_expect(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  fio_write2(c->io, .buf = (char *)"100 Continue\r\n", .len = 14, .copy = 0);
+  if (fio_http1_expected(&c->state.http.parser) &&
+      fio_http1_expected(&c->state.http.parser) != FIO_HTTP1_EXPECTED_CHUNKED &&
+      fio_http1_expected(&c->state.http.parser) > c->settings->max_body_size)
+    return -1;
+  const fio_buf_info_s response =
+      FIO_BUF_INFO1("HTTP/1.1 100 Continue\r\n\r\n");
+  fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
-  (void)expected;
 }
 
 /** called when a body chunk is parsed. */
@@ -1359,7 +1368,7 @@ FIO_SFUNC void fio_websocket_on_message(void *udata,
                          (uint8_t)(uintptr_t)is_text);
   fio_bstr_free(c->state.ws.msg);
   c->state.ws.msg = NULL;
-  return;
+  return; /* TODO: FIXME! */
   fio_dup(c->io);
   fio_srv_suspend(c->io);
   c->suspend = 1;
