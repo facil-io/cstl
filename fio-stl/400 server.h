@@ -2475,8 +2475,8 @@ SFUNC fio_s *fio_srv_connect FIO_NOOP(fio_srv_connect_args_s args) {
   if (!args.protocol)
     return NULL;
   if (!args.url) {
-    if (args.protocol->on_close)
-      args.protocol->on_close(args.udata);
+    if (args.on_failed)
+      args.on_failed(args.udata);
     return NULL;
   }
   if (!args.timeout)

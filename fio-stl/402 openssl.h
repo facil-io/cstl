@@ -513,6 +513,9 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
       .cleanup = fio___openssl_cleanup,
   };
   fio_tls_default_io_functions(&FIO___OPENSSL_IO_FUNCS);
+#ifdef SIGPIPE
+  fio_signal_monitor(SIGPIPE, NULL, NULL); /* avoid OpenSSL issue... */
+#endif
 }
 
 /* *****************************************************************************

@@ -61,6 +61,8 @@ HTTP Setting Defaults
 HTTP Listen
 ***************************************************************************** */
 typedef struct fio_http_settings_s {
+  /** Called before body uploads, when a client sends an `Expect` header. */
+  void (*pre_http_body)(fio_http_s *h);
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
@@ -187,9 +189,9 @@ SFUNC fio_s *fio_http_io(fio_http_s *);
   fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 
 /** TODO: Connects to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC void fio_http_connect(const char *url,
-                            fio_http_s *h,
-                            fio_http_settings_s settings);
+SFUNC fio_s *fio_http_connect(const char *url,
+                              fio_http_s *h,
+                              fio_http_settings_s settings);
 
 /** Connects to HTTP / WebSockets / SSE connections on `url`. */
 #define fio_http_connect(url, h, ...)                                          \
@@ -302,6 +304,9 @@ static void fio___http_default_on_eventsource_reconnect(fio_http_s *h,
 }
 
 static void http_settings_validate(fio_http_settings_s *s, int is_client) {
+  if (!s->pre_http_body)
+    s->pre_http_body = fio___http_default_noop;
+
   if (!s->on_http)
     s->on_http = is_client ? fio___http_default_noop
                            : fio___http_default_on_http_request;
@@ -739,9 +744,9 @@ void fio___http_connect_on_failed(void *udata);
 
 void fio_http_connect___(void); /* IDE Marker */
 /** Connects to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC void fio_http_connect FIO_NOOP(const char *url,
-                                     fio_http_s *h,
-                                     fio_http_settings_s s) {
+SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
+                                       fio_http_s *h,
+                                       fio_http_settings_s s) {
   http_settings_validate(&s, 1);
   fio_url_s u = (fio_url_s){0};
   if (url)
@@ -825,12 +830,13 @@ SFUNC void fio_http_connect FIO_NOOP(const char *url,
       .capa = p->settings.max_line_len,
       .log = p->settings.log,
   };
-  fio_srv_connect(url,
-                  .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                  .on_failed = NULL,
-                  .udata = c,
-                  .tls = s.tls,
-                  .timeout = s.timeout);
+  return fio_srv_connect(url,
+                         .protocol =
+                             &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         .on_failed = NULL,
+                         .udata = c,
+                         .tls = s.tls,
+                         .timeout = s.timeout);
 }
 
 /* *****************************************************************************
@@ -851,6 +857,16 @@ static void fio_http1_on_complete(void *udata) {
 /* *****************************************************************************
 HTTP/1.1 Parser callbacks
 ***************************************************************************** */
+
+FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
+  fio_http_s *h = c->h;
+  fio_dup(c->io);
+  fio_srv_suspend(c->io);
+  c->h = NULL;
+  c->suspend = 1;
+  fio_http_send_error_response(h, 413);
+  fio_http_free(h);
+}
 
 FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
   c->h = fio_http_new();
@@ -929,6 +945,8 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_http_s *h = c->h;
+  if (!h)
+    return 0;
   if (content_length > c->settings->max_body_size)
     goto too_big;
   if (content_length)
@@ -941,34 +959,43 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
 #endif
   return 0;
 too_big:
-  fio_dup(c->io);
-  fio_srv_suspend(c->io);
-  c->h = NULL;
-  c->suspend = 1;
-  fio_http_send_error_response(h, 413);
-  fio_http_free(h);
+  fio___http_request_too_big(c);
   return 0; /* should we disconnect (return -1), or not? */
   (void)name, (void)value;
 }
 /** called when `Expect` arrives and may require a 100 continue response. */
 static int fio_http1_on_expect(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  if (fio_http1_expected(&c->state.http.parser) &&
-      fio_http1_expected(&c->state.http.parser) != FIO_HTTP1_EXPECTED_CHUNKED &&
-      fio_http1_expected(&c->state.http.parser) > c->settings->max_body_size)
-    return -1;
+  fio_http_s *h = c->h;
+  if (!h)
+    return 1;
+  fio_dup(c->io);
+  c->h = NULL;
+  c->settings->pre_http_body(h);
+  if (fio_http_status(h))
+    goto response_sent;
+  c->h = h;
+  fio_undup(c->io);
   const fio_buf_info_s response =
       FIO_BUF_INFO1("HTTP/1.1 100 Continue\r\n\r\n");
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
+response_sent:
+  fio_http_free(h);
+  return 1;
 }
 
 /** called when a body chunk is parsed. */
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  if (!c->h)
+    return -1; /* close connection if a large payload is unstoppable */
   if (chunk.len + fio_http_body_length(c->h) > c->settings->max_body_size)
-    return -1;
+    goto too_big;
   fio_http_body_write(c->h, chunk.buf, chunk.len);
+  return 0;
+too_big:
+  fio___http_request_too_big(c);
   return 0;
 }
 

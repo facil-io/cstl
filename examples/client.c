@@ -46,6 +46,9 @@ static fio_protocol_s STDIN_PROTOCOL = {
     .on_data = on_input,
 };
 
+/* Opens the client connection after the server starts (avoid SIGPIPE) */
+FIO_SFUNC void open_client_connection(void *is_http);
+
 /* *****************************************************************************
 The main code.
 ***************************************************************************** */
@@ -79,6 +82,8 @@ int main(int argc, char const *argv[]) {
   if (fio_cli_get_i("-t") > 0)
     CLIENT_PROTOCOL.timeout = (uint32_t)fio_cli_get_i("-t") * 1000;
 
+  void *is_http = NULL;
+
   /* review CLI connection address (in URL format) */
   if (!fio_cli_unnamed(0) && fio_cli_get("-b"))
     fio_cli_set_unnamed(0, fio_cli_get("-b"));
@@ -88,33 +93,47 @@ int main(int argc, char const *argv[]) {
   FIO_ASSERT(url_len < 1024, "URL address too long");
   { /* select connection client style / protocol */
     fio_url_s url = fio_url_parse(fio_cli_unnamed(0), url_len);
-    if ((url.scheme.len == 4 ||
-         (url.scheme.len == 5 && ((url.scheme.buf[4] | 0x20) == 's'))) &&
-        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x20202020UL)) {
-      /* TODO! HTTP client */
-      FIO_ASSERT(0, "HTTP client isn't supported yet");
-    } else {
-      if ((url.scheme.len == 2 ||
-           (url.scheme.len == 3 && ((url.scheme.buf[2] | 0x20) == 's'))) &&
-          fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020UL)) {
-        /* TODO! WebSocket client */
-        FIO_ASSERT(0, "WebSocket client isn't supported yet");
-      } else {
-        FIO_ASSERT(fio_srv_connect(fio_cli_unnamed(0),
-                                   .protocol = &CLIENT_PROTOCOL,
-                                   .on_failed = on_failed,
-                                   .timeout = (fio_cli_get_i("-w") * 1000)),
-                   "Connection error!");
-      }
-      /* attach STDIN */
-      fio_srv_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
+    if (((url.scheme.len == 4 ||
+          (url.scheme.len == 5 && ((url.scheme.buf[4] | 0x20) == 's'))) &&
+         fio_buf2u32u("http") ==
+             (fio_buf2u32u(url.scheme.buf) | 0x20202020UL)) ||
+        ((url.scheme.len == 2 ||
+          (url.scheme.len == 3 && ((url.scheme.buf[2] | 0x20) == 's'))) &&
+         fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020UL)) ||
+        ((url.scheme.len == 3 ||
+          (url.scheme.len == 4 && ((url.scheme.buf[3] | 0x20) == 's'))) &&
+         fio_buf2u32u("sse\xFF") == (fio_buf2u32u(url.scheme.buf) |
+                                     fio_buf2u32u("\x20\x20\x20\xFF")))) {
+      is_http = (void *)1;
     }
   }
-  FIO_LOG_DEBUG2("listening to user input on STDIN.");
+  /* set connection task in master process. */
+  fio_state_callback_add(FIO_CALL_ON_START, open_client_connection, is_http);
   /* start server, connection termination will stop it. */
   fio_srv_start(0);
-  printf("\n\t* connection terminated.\n");
+  FIO_LOG_INFO("* connection terminated.\n");
   return 0;
+}
+
+/* *****************************************************************************
+Opening the client connection.
+***************************************************************************** */
+
+FIO_SFUNC void open_client_connection(void *is_http) {
+
+  if (is_http) {
+    /* TODO! HTTP / WebSocket / SSE client */
+    FIO_LOG_FATAL("HTTP, WebSocket and SSE clients aren't supported yet"
+                  "\n\t\tfor URL: %s",
+                  fio_cli_unnamed(0));
+    fio_srv_stop();
+  } else {
+    FIO_ASSERT(fio_srv_connect(fio_cli_unnamed(0),
+                               .protocol = &CLIENT_PROTOCOL,
+                               .on_failed = on_failed,
+                               .timeout = (fio_cli_get_i("-w") * 1000)),
+               "Connection error!");
+  }
 }
 
 /* *****************************************************************************
@@ -125,8 +144,11 @@ IO callback(s)
 FIO_SFUNC void on_attach(fio_s *io) {
   fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("client"));
   fio_udata_set(io, (void *)1);
-  printf("\t* connection established.\n");
+  FIO_LOG_INFO("* connection established.\n");
   FIO_LOG_DEBUG2("Connected client IO to pub/sub");
+  /* attach STDIN */
+  FIO_LOG_DEBUG2("listening to user input on STDIN.");
+  fio_srv_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
 }
 /** Called there's incoming data (from STDIN / the client socket. */
 FIO_SFUNC void on_data(fio_s *io) {
