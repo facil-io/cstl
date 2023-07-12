@@ -1798,8 +1798,9 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
 static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   fio_thread_t t;
+  fio_signal_review();
 
-  if (fio___srvdata.root_pid != fio___srvdata.pid)
+  if (fio___srvdata.stop || fio___srvdata.root_pid != fio___srvdata.pid)
     return;
   if (fio_atomic_or_fetch(&fio___srvdata.stop, 2) != 2)
     return;
