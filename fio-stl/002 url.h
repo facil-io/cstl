@@ -94,13 +94,15 @@ FIO_URL - Implementation (static)
 /** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
 FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
   i.name = i.private___;
+  if (!i.name.buf)
+    return i;
   char *amp = (char *)FIO_MEMCHR(i.name.buf, '&', i.name.len);
   if (amp) {
     i.name.len = amp - i.name.buf;
     i.private___.len -= i.name.len + 1;
     i.private___.buf += i.name.len + 1;
   } else {
-    i.private___ = FIO_BUF_INFO2(NULL, 0);
+    i.private___ = FIO_BUF_INFO0;
   }
   char *equ = (char *)FIO_MEMCHR(i.name.buf, '=', i.name.len);
   if (equ) {
@@ -108,7 +110,7 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
     i.value.len = (i.name.buf + i.name.len) - i.value.buf;
     i.name.len = equ - i.name.buf;
   } else {
-    i.value = FIO_BUF_INFO2(NULL, 0);
+    i.value = FIO_BUF_INFO0;
   }
   return i;
 }

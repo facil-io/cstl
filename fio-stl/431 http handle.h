@@ -464,6 +464,9 @@ SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
 
+/** Closes a persistent HTTP connection (i.s., if upgraded). */
+SFUNC void fio_http_close(fio_http_s *h);
+
 /* *****************************************************************************
 WebSocket / SSE Helpers
 ***************************************************************************** */
@@ -647,6 +650,8 @@ struct fio_http_controller_s {
   void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
   /** called once a request / response had finished */
   void (*on_finish)(fio_http_s *h);
+  /** called to close an HTTP connection */
+  void (*close)(fio_http_s *h);
 };
 
 /* *****************************************************************************
@@ -1184,6 +1189,7 @@ static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
     .on_finish = fio___mock_controller_cb,
+    .close = fio___mock_controller_cb,
 };
 
 SFUNC fio_http_controller_s *fio___http_controller_validate(
@@ -1200,6 +1206,8 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
     c->on_finish = fio___mock_controller_cb;
+  if (!c->close)
+    c->close = fio___mock_controller_cb;
   return c;
 }
 
@@ -1285,6 +1293,9 @@ SFUNC fio_http_s *fio_http_dup(fio_http_s *h) { return fio_http_dup2(h); }
 SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
+
+/** Closes a persistent HTTP connection (i.s., if upgraded). */
+SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
 
 #undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************

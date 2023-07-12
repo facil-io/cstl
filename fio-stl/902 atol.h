@@ -174,22 +174,28 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.");
   }
   for (size_t i = 1; i < (1ULL << 10); ++i) {
-    double expct[2] = {(1.0 + i), (1.0 - i)};
-    double result[2] = {fio_i2d(1LL + i, 0), fio_i2d(1LL - i, 0)};
-    FIO_ASSERT(expct[0] == result[0],
+    union {
+      double d;
+      void *p;
+    } e[2], r[2];
+    e[0].d = (1.0 + i);
+    e[1].d = (1.0 - i);
+    r[0].d = fio_i2d(1LL + i, 0);
+    r[1].d = fio_i2d(1LL - i, 0);
+    FIO_ASSERT(e[0].d == r[0].d,
                "fio_i2d failed at (1+%zu) %g != %g\n\t%p != %p",
                i,
-               expct[0],
-               result[0],
-               ((void **)expct)[0],
-               ((void **)result)[0]);
-    FIO_ASSERT(expct[1] == result[1],
+               e[0].d,
+               r[0].d,
+               e[0].p,
+               r[0].p);
+    FIO_ASSERT(e[1].d == r[1].d,
                "fio_i2d failed at (1-%zu) %g != %g\n\t%p != %p",
                i,
-               expct[1],
-               result[1],
-               ((void **)expct)[1],
-               ((void **)result)[1]);
+               e[1].d,
+               r[1].d,
+               e[1].p,
+               r[1].p);
   }
 #if 1 || !(DEBUG - 1 + 1)
   {

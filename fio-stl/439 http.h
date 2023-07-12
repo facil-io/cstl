@@ -197,9 +197,6 @@ SFUNC fio_s *fio_http_connect(const char *url,
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
 
-/** TODO: Closes a persistent HTTP connection (if any). */
-SFUNC void fio_http_close(fio_http_s *h);
-
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -282,6 +279,10 @@ static int fio___http_default_authenticate(fio_http_s *h) {
 // on_queue
 static void fio___http_default_on_finish(struct fio_http_settings_s *settings) {
   ((void)settings);
+}
+
+static void fio___http_default_close(fio_http_s *h) {
+  fio_close(fio_http_io(h));
 }
 
 /** Called when a WebSocket message is received. */
@@ -1941,6 +1942,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
@@ -1949,11 +1951,13 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_WS:
@@ -1961,6 +1965,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_finish = fio___http_controller_ws_on_finish,
         .write_body = fio___http_controller_ws_write_body,
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -1968,11 +1973,13 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   default:

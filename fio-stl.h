@@ -8157,13 +8157,15 @@ FIO_URL - Implementation (static)
 /** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
 FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
   i.name = i.private___;
+  if (!i.name.buf)
+    return i;
   char *amp = (char *)FIO_MEMCHR(i.name.buf, '&', i.name.len);
   if (amp) {
     i.name.len = amp - i.name.buf;
     i.private___.len -= i.name.len + 1;
     i.private___.buf += i.name.len + 1;
   } else {
-    i.private___ = FIO_BUF_INFO2(NULL, 0);
+    i.private___ = FIO_BUF_INFO0;
   }
   char *equ = (char *)FIO_MEMCHR(i.name.buf, '=', i.name.len);
   if (equ) {
@@ -8171,7 +8173,7 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
     i.value.len = (i.name.buf + i.name.len) - i.value.buf;
     i.name.len = equ - i.name.buf;
   } else {
-    i.value = FIO_BUF_INFO2(NULL, 0);
+    i.value = FIO_BUF_INFO0;
   }
   return i;
 }
@@ -34055,6 +34057,9 @@ SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
 
+/** Closes a persistent HTTP connection (i.s., if upgraded). */
+SFUNC void fio_http_close(fio_http_s *h);
+
 /* *****************************************************************************
 WebSocket / SSE Helpers
 ***************************************************************************** */
@@ -34238,6 +34243,8 @@ struct fio_http_controller_s {
   void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
   /** called once a request / response had finished */
   void (*on_finish)(fio_http_s *h);
+  /** called to close an HTTP connection */
+  void (*close)(fio_http_s *h);
 };
 
 /* *****************************************************************************
@@ -34775,6 +34782,7 @@ static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
     .on_finish = fio___mock_controller_cb,
+    .close = fio___mock_controller_cb,
 };
 
 SFUNC fio_http_controller_s *fio___http_controller_validate(
@@ -34791,6 +34799,8 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
     c->on_finish = fio___mock_controller_cb;
+  if (!c->close)
+    c->close = fio___mock_controller_cb;
   return c;
 }
 
@@ -34876,6 +34886,9 @@ SFUNC fio_http_s *fio_http_dup(fio_http_s *h) { return fio_http_dup2(h); }
 SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
+
+/** Closes a persistent HTTP connection (i.s., if upgraded). */
+SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
 
 #undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
@@ -37829,9 +37842,6 @@ SFUNC fio_s *fio_http_connect(const char *url,
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
 
-/** TODO: Closes a persistent HTTP connection (if any). */
-SFUNC void fio_http_close(fio_http_s *h);
-
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -37914,6 +37924,10 @@ static int fio___http_default_authenticate(fio_http_s *h) {
 // on_queue
 static void fio___http_default_on_finish(struct fio_http_settings_s *settings) {
   ((void)settings);
+}
+
+static void fio___http_default_close(fio_http_s *h) {
+  fio_close(fio_http_io(h));
 }
 
 /** Called when a WebSocket message is received. */
@@ -39573,6 +39587,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
@@ -39581,11 +39596,13 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_WS:
@@ -39593,6 +39610,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_finish = fio___http_controller_ws_on_finish,
         .write_body = fio___http_controller_ws_write_body,
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -39600,11 +39618,13 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .close = fio___http_default_close,
     };
     return r;
   default:
@@ -42443,22 +42463,28 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(i == fio_c2i(fio_i2c(i)), "fio_c2i / fio_i2c roundtrip error.");
   }
   for (size_t i = 1; i < (1ULL << 10); ++i) {
-    double expct[2] = {(1.0 + i), (1.0 - i)};
-    double result[2] = {fio_i2d(1LL + i, 0), fio_i2d(1LL - i, 0)};
-    FIO_ASSERT(expct[0] == result[0],
+    union {
+      double d;
+      void *p;
+    } e[2], r[2];
+    e[0].d = (1.0 + i);
+    e[1].d = (1.0 - i);
+    r[0].d = fio_i2d(1LL + i, 0);
+    r[1].d = fio_i2d(1LL - i, 0);
+    FIO_ASSERT(e[0].d == r[0].d,
                "fio_i2d failed at (1+%zu) %g != %g\n\t%p != %p",
                i,
-               expct[0],
-               result[0],
-               ((void **)expct)[0],
-               ((void **)result)[0]);
-    FIO_ASSERT(expct[1] == result[1],
+               e[0].d,
+               r[0].d,
+               e[0].p,
+               r[0].p);
+    FIO_ASSERT(e[1].d == r[1].d,
                "fio_i2d failed at (1-%zu) %g != %g\n\t%p != %p",
                i,
-               expct[1],
-               result[1],
-               ((void **)expct)[1],
-               ((void **)result)[1]);
+               e[1].d,
+               r[1].d,
+               e[1].p,
+               r[1].p);
   }
 #if 1 || !(DEBUG - 1 + 1)
   {
@@ -46583,7 +46609,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
 
-  struct {
+  const struct {
     fio_buf_info_s url;
     size_t is_tls;
   } url_tests[] = {

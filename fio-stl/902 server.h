@@ -186,7 +186,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
   fio_tls_free(t);
 
-  struct {
+  const struct {
     fio_buf_info_s url;
     size_t is_tls;
   } url_tests[] = {
