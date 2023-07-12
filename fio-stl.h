@@ -738,6 +738,9 @@ typedef struct fio_buf_info_s {
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
 
+/** A NULL fio_str_info_s. */
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
   ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
@@ -749,6 +752,9 @@ typedef struct fio_buf_info_s {
 /** Converts a String with a known length and capacity into a fio_str_info_s. */
 #define FIO_STR_INFO3(str, length, capacity)                                   \
   ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** A NULL fio_buf_info_s. */
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
@@ -30797,10 +30803,6 @@ SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
     const uint64_t wrd_password = fio_buf2u64u("password");
     _Bool btls = 0;
     FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
-      fprintf(stderr,
-              "\t testing URL query name: %.*s",
-              (int)i.name.len,
-              i.name.buf);
       if (i.name.len == 8 && i.value.len &&
           (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
         pass = i.value;
@@ -46598,7 +46600,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
       {FIO_BUF_INFO1("tls://ex.com"), 1},
       {FIO_BUF_INFO1("ws://ex.com/?TLSN"), 0},
       {FIO_BUF_INFO1("ws://ex.com/?TLS"), 1},
-      {FIO_BUF_INFO1(NULL), 0},
+      {FIO_BUF_INFO0, 0},
   };
   for (size_t i = 0; url_tests[i].url.buf; ++i) {
     t = NULL;

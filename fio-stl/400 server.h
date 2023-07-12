@@ -2702,10 +2702,6 @@ SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
     const uint64_t wrd_password = fio_buf2u64u("password");
     _Bool btls = 0;
     FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
-      fprintf(stderr,
-              "\t testing URL query name: %.*s",
-              (int)i.name.len,
-              i.name.buf);
       if (i.name.len == 8 && i.value.len &&
           (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
         pass = i.value;

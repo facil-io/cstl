@@ -203,7 +203,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
       {FIO_BUF_INFO1("tls://ex.com"), 1},
       {FIO_BUF_INFO1("ws://ex.com/?TLSN"), 0},
       {FIO_BUF_INFO1("ws://ex.com/?TLS"), 1},
-      {FIO_BUF_INFO1(NULL), 0},
+      {FIO_BUF_INFO0, 0},
   };
   for (size_t i = 0; url_tests[i].url.buf; ++i) {
     t = NULL;

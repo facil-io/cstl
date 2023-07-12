@@ -701,6 +701,9 @@ typedef struct fio_buf_info_s {
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
 
+/** A NULL fio_str_info_s. */
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
   ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
@@ -712,6 +715,9 @@ typedef struct fio_buf_info_s {
 /** Converts a String with a known length and capacity into a fio_str_info_s. */
 #define FIO_STR_INFO3(str, length, capacity)                                   \
   ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** A NULL fio_buf_info_s. */
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
