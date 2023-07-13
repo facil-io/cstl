@@ -1324,14 +1324,16 @@ HTTP___MAKE_GET_SET(version)
 #undef HTTP___MAKE_GET_SET
 
 /** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status(fio_http_s *h) { return h->status; }
+SFUNC size_t fio_http_status(fio_http_s *h) { return (size_t)(h->status); }
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  if (status > 1023)
+    status = 500;
   if (!status)
     status = 200;
-  return (h->status = status);
+  return (h->status = (uint32_t)status);
 }
 /* *****************************************************************************
 Handler State
