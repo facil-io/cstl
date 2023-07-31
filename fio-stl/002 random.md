@@ -101,6 +101,8 @@ This function will produce a 64 bit hash for X bytes of data.
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
 
+**Note**: if `FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH` is defined and true, `fio_stable_hash` will be called instead.
+
 #### `fio_risky_ptr`
 
 ```c

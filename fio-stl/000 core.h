@@ -492,11 +492,11 @@ Logging Defaults (no-op)
 #endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
-/** Defines a point at which logging truncates (limited by stack memory) */
+/** Defines a point at which logging truncates (limits stack memory use) */
 #define FIO_LOG_LENGTH_LIMIT 1024
 #endif
 
-/** Returns the Logging Level */
+/** Prints to STDERR, attempting to use only stack allocated memory. */
 #define FIO_LOG2STDERR(...)
 
 /* *****************************************************************************
@@ -565,8 +565,7 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Static Endian Test
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
     (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
@@ -605,8 +604,7 @@ Static Endian Test
 
 /* *****************************************************************************
 Dynamic Endian Testing
-*****************************************************************************
-*/
+***************************************************************************** */
 
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
@@ -631,14 +629,11 @@ Security Related macros
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
-/**
- * Calls NtDelayExecution with the requested nano-second count.
- */
+/** Calls NtDelayExecution with the requested nano-second count. */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
     Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
@@ -646,9 +641,7 @@ Sleep / Thread Scheduling Macros
 // https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
 
 #elif FIO_OS_POSIX
-/**
- * Calls nanonsleep with the requested nano-second count.
- */
+/** Calls nanonsleep with the requested nano-second count. */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
     const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
@@ -670,8 +663,7 @@ Sleep / Thread Scheduling Macros
 
 /* *****************************************************************************
 String and Buffer Information Containers + Helper Macros
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -745,8 +737,7 @@ typedef struct fio_buf_info_s {
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1226,8 +1217,7 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1310,8 +1300,7 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1416,8 +1405,7 @@ FIO_IFUNC uintptr_t fio_ct_if_bool(uint8_t cond, uintptr_t a, uintptr_t b) {
   return (b ^ ((0 - (cond & 1)) & (a ^ b)));
 }
 
-/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise.
- */
+/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
 FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
@@ -1562,8 +1550,7 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1638,8 +1625,7 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1762,8 +1748,7 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Detects a byte where all the bits are set (255) within a 4 byte vector.
@@ -1868,8 +1853,7 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {

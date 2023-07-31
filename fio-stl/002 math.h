@@ -693,6 +693,7 @@ FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
 FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
                                    uint64_t b,
                                    uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_mulc64 requires a carry pointer");
 #if defined(__SIZEOF_INT128__)
   __uint128_t r = (__uint128_t)a * b;
   *carry_out = (uint64_t)(r >> 64U);

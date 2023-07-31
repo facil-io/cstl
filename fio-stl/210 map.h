@@ -64,11 +64,11 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #endif
 
 #ifndef FIO_MAP_KEY_COPY
-#define FIO_MAP_KEY_COPY(dest, src) (dest) = (src)
+#define FIO_MAP_KEY_COPY(dest, src) ((dest) = (src))
 #endif
 
 #ifndef FIO_MAP_KEY_CMP
-#define FIO_MAP_KEY_CMP(a, b) (a) == (b)
+#define FIO_MAP_KEY_CMP(a, b) ((a) == (b))
 #endif
 
 #ifndef FIO_MAP_KEY_DESTROY

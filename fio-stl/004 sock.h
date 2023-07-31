@@ -75,6 +75,7 @@ FIO_IFUNC int fio_sock_dup(int original) {
 }
 
 #elif FIO_HAVE_UNIX_TOOLS
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>

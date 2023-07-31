@@ -86,6 +86,12 @@ SFUNC int fio_srv_is_worker(void);
 /** Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
 
+/** Returns current process id. */
+SFUNC int fio_srv_pid(void);
+
+/** Returns the root / master process id. */
+SFUNC int fio_srv_root_pid(void);
+
 /* *****************************************************************************
 Listening to Incoming Connections
 ***************************************************************************** */
@@ -788,6 +794,7 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#define FIO___SRV_GET_TIME_MILLI() fio_time2milli(fio_time_real())
 /* *****************************************************************************
 Protocol validation
 ***************************************************************************** */
@@ -1095,6 +1102,12 @@ static struct {
     .wakeup_fd = -1,
     .stop = 1,
 };
+
+/** Returns current process id. */
+SFUNC int fio_srv_pid(void) { return fio___srvdata.pid; }
+
+/** Returns the root / master process id. */
+SFUNC int fio_srv_root_pid(void) { return fio___srvdata.root_pid; }
 
 /* *****************************************************************************
 Wakeup Protocol
@@ -1657,11 +1670,14 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
       fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_timer_push2queue(fio___srv_tasks, fio___srv_timer, fio___srvdata.tick);
-  fio_queue_perform_all(fio___srv_tasks);
-  if (fio___srv_review_timeouts())
-    fio_queue_perform_all(fio___srv_tasks);
+  for (size_t i = 0; i < 2048; ++i)
+    if (fio_queue_perform(fio___srv_tasks))
+      break;
+  // fio_queue_perform_all(fio___srv_tasks);
+  fio___srv_review_timeouts();
+  // fio_queue_perform_all(fio___srv_tasks);
   fio_signal_review();
 }
 
@@ -1691,7 +1707,7 @@ FIO_SFUNC void fio___srv_shutdown_task(void *shutdown_start_, void *a2) {
 
 FIO_SFUNC void fio___srv_shutdown(void) {
   /* collect tick for shutdown start, to monitor for possible timeout */
-  int64_t shutdown_start = fio___srvdata.tick = fio_time_milli();
+  int64_t shutdown_start = fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   size_t connected = 0;
   /* first notify that shutdown is starting */
   fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
@@ -1746,6 +1762,7 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   fio_queue_push(fio___srv_tasks, fio___srv_work_task);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srv_shutdown();
+  fio_queue_perform_all(fio___srv_tasks);
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srvdata.workers = 0;
@@ -1893,7 +1910,7 @@ SFUNC void fio_srv_start(int workers) {
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   if (workers) {
     FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
     for (int i = 0; i < workers; ++i) {
@@ -2550,7 +2567,7 @@ Initializing Server State
 FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio___srvdata.root_pid = fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.async);
   fio_poll_init(&fio___srvdata.poll_data,

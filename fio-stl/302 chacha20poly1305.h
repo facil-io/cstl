@@ -115,6 +115,9 @@ typedef struct {
 } FIO_ALIGN(16) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
+  static const uint64_t defkey[4] = {0};
+  if (!key256b)
+    key256b = (const void *)defkey;
   uint64_t t0, t1;
   /* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
   t0 = fio_buf2u64_le((uint8_t *)key256b + 0);

@@ -57,11 +57,12 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               size_t len,
                               uint64_t seed);
 
+#define FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH 0
 /* *****************************************************************************
 Risky Hash - Implementation
 
 Note: I don't remember what information I used when designing this, but Risky
-Hash is probably NOT cryptographically safe (though I wanted it to be).
+Hash is probably NOT cryptographically safe (though I wish it was).
 
 Here's a few resources about hashes that might explain more:
 - https://komodoplatform.com/cryptographic-hash-function/
@@ -139,6 +140,9 @@ Possibly `extern` Implementation
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
+#if (FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH - 1 + 1)
+  return fio_stable_hash(data_, len, seed);
+#else
   uint64_t v[4] FIO_ALIGN(
       32) = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
   uint64_t w[4] FIO_ALIGN(32);
@@ -216,6 +220,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   r ^= (r >> 29) * FIO_U64_HASH_PRIME4;
   r ^= fio_lrot64(r, 29);
   return r;
+#endif /* FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH */
 }
 
 #undef FIO_RISKY3_IV0
