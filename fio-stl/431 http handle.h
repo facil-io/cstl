@@ -72,17 +72,18 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_USES_MUTEX 1
 #endif
 
-#ifndef FIO_HTTP_CACHE_STATIC
+#ifndef FIO_HTTP_CACHE_STATIC_HEADERS
 /** Adds a static cache for common HTTP header names. */
-#define FIO_HTTP_CACHE_STATIC 1
+#define FIO_HTTP_CACHE_STATIC_HEADERS 1
 #endif
 
 #ifndef FIO_HTTP_DEFAULT_INDEX_FILENAME
 /** The default file name when a static file response points to a folder. */
-#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index.html"
+#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index"
 #endif
 
 #ifndef FIO_HTTP_STATIC_FILE_COMPLETION
+/** Attempts to auto-complete static file paths with missing extensions. */
 #define FIO_HTTP_STATIC_FILE_COMPLETION 1
 #endif
 
@@ -114,6 +115,9 @@ Constructor / Destructor
 
 /** Create a new fio_http_s handle. */
 SFUNC fio_http_s *fio_http_new(void);
+
+/** Creates a copy of an existing handle, copying only its request data. */
+SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *old);
 
 /** Reduces an fio_http_s handle's reference count or frees it. */
 SFUNC void fio_http_free(fio_http_s *);
@@ -840,7 +844,7 @@ static struct {
 #define FIO___HTTP_STR_CACHE_COOKIE 0
 #define FIO___HTTP_STR_CACHE_VALUE  1
 
-#if FIO_HTTP_CACHE_STATIC
+#if FIO_HTTP_CACHE_STATIC_HEADERS
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
 #define FIO___HTTP_STATIC_CACHE_FOLD       22
@@ -987,7 +991,7 @@ static char *fio___http_str_cached_static(char *str, size_t len) {
 #undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
 #else
 #define fio___http_str_cached_init() (void)0
-#endif /* FIO_HTTP_CACHE_STATIC */
+#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
 
 FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
                                             uint64_t hash,
@@ -1023,7 +1027,7 @@ avoid_caching:
 }
 
 FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
-#if FIO_HTTP_CACHE_STATIC
+#if FIO_HTTP_CACHE_STATIC_HEADERS
   char *tmp;
   if (!s.len)
     return NULL;
@@ -1033,7 +1037,7 @@ FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
   if (tmp)
     return fio_bstr_copy(tmp);
 skip_cache_test:
-#endif /* FIO_HTTP_CACHE_STATIC */
+#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
@@ -1297,6 +1301,33 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
 /** Closes a persistent HTTP connection (i.s., if upgraded). */
 SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
 
+/** Creates a copy of an existing handle, copying only its request data. */
+SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT_ALLOC(h);
+  fio_http_path_set(h, fio_http_path(o));
+  fio_http_method_set(h, fio_http_method(o));
+  fio_http_query_set(h, fio_http_query(o));
+  fio_http_version_set(h, fio_http_version(o));
+  /* copy headers */
+  fio___http_hmap_reserve(h->headers, fio___http_hmap_count(o->headers));
+  FIO_MAP_EACH(fio___http_hmap, o->headers, i) {
+    fio___http_sary_s *a = fio___http_hmap_node2val_ptr(
+        fio___http_hmap_set_ptr(h->headers,
+                                i.key,
+                                (fio___http_sary_s){0},
+                                NULL,
+                                0));
+    FIO_ARRAY_EACH(fio___http_sary, &i.value, v) {
+      fio___http_sary_push(a, fio_bstr_copy(*v));
+    }
+  }
+  /* copy cookies */
+  FIO_MAP_EACH(fio___http_cmap, o->cookies, i) {
+    fio___http_cmap_set(h->cookies, i.key, i.value, NULL);
+  }
+}
+
 #undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 Simple Property Set / Get
@@ -1554,7 +1585,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
   char tmp_buf[5120];
   fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
-#define copy_cookie_ch(ch_var)                                                 \
+#define fio___http_h_copy_cookie_ch(ch_var)                                    \
   if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
     t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
   } else {                                                                     \
@@ -1574,11 +1605,11 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     size_t tmp = 0;
     if (cookie.name.len) {
       while (tmp < cookie.name.len) {
-        copy_cookie_ch(name);
+        fio___http_h_copy_cookie_ch(name);
       }
     } else {
       while (cookie.name.buf[tmp]) {
-        copy_cookie_ch(name);
+        fio___http_h_copy_cookie_ch(name);
       }
     }
     if (need2warn && !warn_illegal) {
@@ -1594,11 +1625,11 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     size_t tmp = 0;
     if (cookie.value.len) {
       while (tmp < cookie.value.len) {
-        copy_cookie_ch(value);
+        fio___http_h_copy_cookie_ch(value);
       }
     } else {
       while (cookie.value.buf[tmp]) {
-        copy_cookie_ch(value);
+        fio___http_h_copy_cookie_ch(value);
       }
     }
     if (need2warn && !warn_illegal) {
@@ -1610,7 +1641,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     }
   } else
     cookie.max_age = -1;
-#undef copy_cookie_ch
+#undef fio___http_h_copy_cookie_ch
 
   /* server cookie data */
   t.buf[t.len++] = ';';
@@ -2492,52 +2523,63 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       goto file_not_found;
   }
   rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
-             (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\'));
+             (rt.buf[rt.len - 1] == '/' ||
+              rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
   fio_string_write(&filename, NULL, rt.buf, rt.len);
   fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
   if (fio_filename_is_unsafe_url(filename.buf))
     goto file_not_found;
 
-  if (filename.buf[filename.len - 1] == '/')
-    fio_string_write(&filename,
-                     NULL,
-                     "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
-                     sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
-
   { /* Test for incomplete file name */
     size_t file_type = fio_filename_type(filename.buf);
+#if defined(S_IFDIR) && defined(FIO_HTTP_DEFAULT_INDEX_FILENAME)
+    if (file_type == S_IFDIR) {
+      filename.len -= (filename.buf[filename.len - 1] == '/' ||
+                       filename.buf[filename.len - 1] == FIO_FOLDER_SEPARATOR);
 #if FIO_HTTP_STATIC_FILE_COMPLETION
-    if (!file_type) {
-      char *ext = filename.buf + filename.len;
-      do {
-        --ext;
-      } while (ext[0] != '.' && ext[0] != '/');
-      if (ext[0] == '.')
-        goto file_not_found;
-      fio_string_write(&filename, NULL, ".html", 5);
-      file_type = fio_filename_type(filename.buf);
-    }
-    switch (file_type) {
-#ifdef S_IFDIR
-    case S_IFDIR:
       fio_string_write(&filename,
                        NULL,
                        "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
                        sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
-      if (!fio_filename_type(filename.buf))
+      file_type = 0;
+#else
+      fio_string_write(
+          &filename,
+          NULL, /* note that sizeof will count NUL, so we skip 1 char: */
+          "/" FIO_HTTP_DEFAULT_INDEX_FILENAME ".html",
+          sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME ".html"));
+      file_type = fio_filename_type(filename.buf);
+#endif /* FIO_HTTP_STATIC_FILE_COMPLETION */
+    }
+#endif /* S_IFDIR */
+#if FIO_HTTP_STATIC_FILE_COMPLETION
+    const fio_buf_info_s extensions[] = {FIO_BUF_INFO1((char *)".html"),
+                                         FIO_BUF_INFO1((char *)".htm"),
+                                         FIO_BUF_INFO1((char *)".txt"),
+                                         FIO_BUF_INFO1((char *)".md"),
+                                         FIO_BUF_INFO0};
+    const fio_buf_info_s *pext = extensions;
+    while (!file_type) {
+      fio_string_write(&filename, NULL, pext->buf, pext->len);
+      file_type = fio_filename_type(filename.buf);
+      if (file_type)
+        break;
+      filename.len -= pext->len;
+      ++pext;
+      if (!pext->buf)
         goto file_not_found;
-      break;
-#endif
+    }
+    switch (file_type) {
     case S_IFREG: break;
 #ifdef S_IFLNK
     case S_IFLNK: break;
 #endif
     default: goto file_not_found;
     }
-#else
+#else  /* FIO_HTTP_STATIC_FILE_COMPLETION */
     if (!file_type)
       goto file_not_found;
-#endif
+#endif /* FIO_HTTP_STATIC_FILE_COMPLETION */
   }
   {
     /* find mime type if registered */
