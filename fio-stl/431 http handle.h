@@ -1326,6 +1326,7 @@ SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
   FIO_MAP_EACH(fio___http_cmap, o->cookies, i) {
     fio___http_cmap_set(h->cookies, i.key, i.value, NULL);
   }
+  return h;
 }
 
 #undef FIO___RECURSIVE_INCLUDE
