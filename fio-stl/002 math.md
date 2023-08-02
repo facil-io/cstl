@@ -9,39 +9,6 @@ If `FIO_MATH` is defined, some building blocks for multi-precision math will be 
 
 Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
 
-### Multi-Precision Math Building Blocks
-
-The following simple operations can be used to build your own multi-precision implementation.
-
-#### `fio_math_addc64`
-
-```c
-uint64_t fio_math_addc64(uint64_t a,
-                         uint64_t b,
-                         uint64_t carry_in,
-                         uint64_t *carry_out);
-```
-
-Add with carry.
-
-#### `fio_math_subc64`
-
-```c
-uint64_t fio_math_subc64(uint64_t a,
-                         uint64_t b,
-                         uint64_t carry_in,
-                         uint64_t *carry_out);
-```
-
-Subtract with carry.
-
-#### `fio_math_mulc64`
-```c
-uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
-```
-
-Multiply with carry out.
-
 ### Multi-Precision Helper Types
 
 The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types.

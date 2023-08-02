@@ -133,25 +133,6 @@ FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 #define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
 
 /* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-
-/** Add with carry. */
-FIO_MIFN uint64_t fio_math_addc64(uint64_t a,
-                                  uint64_t b,
-                                  uint64_t carry_in,
-                                  uint64_t *carry_out);
-
-/** Subtract with carry. */
-FIO_MIFN uint64_t fio_math_subc64(uint64_t a,
-                                  uint64_t b,
-                                  uint64_t carry_in,
-                                  uint64_t *carry_out);
-
-/** Multiply with carry out. */
-FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
-
-/* *****************************************************************************
 Multi-precision, little endian helpers.
 
 Works with little endian uint64_t arrays or 64 bit numbers.
@@ -641,111 +622,6 @@ Vector Helpers - Shuffle Macros
 #define fio_u1024_shuffle256(v, ...) fio_u1024_shuffle256(v, (char[4]){__VA_ARGS__})
 #define fio_u1024_shuffle512(v, ...) fio_u1024_shuffle512(v, (char[2]){__VA_ARGS__})
 // clang-format on
-/* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-
-/** Add with carry. */
-FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
-#if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
-  return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
-#elif defined(__SIZEOF_INT128__) && 0
-  /* This is actually slower as it occupies more CPU registers */
-  __uint128_t u = (__uint128_t)a + b + carry_in;
-  *carry_out = (uint64_t)(u >> 64U);
-  return (uint64_t)u;
-#else
-  uint64_t u = a + (b += carry_in);
-  *carry_out = (b < carry_in) + (u < a);
-  return u;
-#endif
-}
-
-/** Subtract with carry. */
-FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
-#if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
-  uint64_t u =
-      __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
-#elif defined(__SIZEOF_INT128__)
-  __uint128_t u = (__uint128_t)a - b - carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 127U);
-#else
-  uint64_t u = a - b;
-  a = u > a;
-  b = u < carry_in;
-  u -= carry_in;
-  if (carry_out)
-    *carry_out = a + b;
-#endif
-  return (uint64_t)u;
-}
-
-/** Multiply with carry out. */
-FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_mulc64 requires a carry pointer");
-#if defined(__SIZEOF_INT128__)
-  __uint128_t r = (__uint128_t)a * b;
-  *carry_out = (uint64_t)(r >> 64U);
-#elif 1 /* At this point long multiplication makes sense... */
-  uint64_t r, midc = 0, lowc = 0;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
-  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
-  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
-#elif 1 /* Using Karatsuba Multiplication will degrade performance */
-  uint64_t r, c;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t asum = al + ah;
-  const uint64_t bsum = bl + bh;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  /* asum * bsum might overflow, but we know each value is <= 0x100000000 */
-  uint64_t midlo = (asum & 0xFFFFFFFF) * (bsum & 0xFFFFFFFF);
-  uint64_t midhi = (asum & bsum) >> 32;
-  uint64_t midmid = (bsum & (((uint64_t)0ULL - (asum >> 32)) >> 32)) +
-                    (asum & (((uint64_t)0ULL - (bsum >> 32)) >> 32));
-  midlo = fio_math_addc64(midlo, (midmid << 32), 0, &c);
-  midhi += c + (midmid >> 32);
-  midlo = fio_math_subc64(midlo, lo, 0, &c);
-  midhi -= c;
-  midlo = fio_math_subc64(midlo, hi, 0, &c);
-  midhi -= c;
-  r = fio_math_addc64(lo, midlo << 32, 0, &c);
-  *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
-#else   /* never use binary for MUL... so slow... */
-  uint64_t r, c = 0;
-  r = a & ((uint64_t)0ULL - (b & 1));
-  for (uint_fast8_t i = 1; i < 64; ++i) {
-    uint64_t mask = ((uint64_t)0ULL - ((b >> i) & 1));
-    uint64_t tmp = a & mask;
-    uint64_t al = (tmp << i);
-    uint64_t ah = (tmp >> (64 - i));
-    r = fio_math_addc64(r, al, 0, &tmp);
-    c += ah + tmp;
-  }
-  *carry_out = c;
-#endif
-  return (uint64_t)r;
-}
 
 /* *****************************************************************************
 Multi-precision, little endian helpers. Works with full

@@ -1876,6 +1876,77 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 }
 
 /* *****************************************************************************
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
+#if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
+  return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
+  /* This is actually slower as it occupies more CPU registers */
+  __uint128_t u = (__uint128_t)a + b + carry_in;
+  *carry_out = (uint64_t)(u >> 64U);
+  return (uint64_t)u;
+#else
+  uint64_t u = a + (b += carry_in);
+  *carry_out = (b < carry_in) + (u < a);
+  return u;
+#endif
+}
+
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
+#if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
+  uint64_t u =
+      __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
+#elif defined(__SIZEOF_INT128__)
+  __uint128_t u = (__uint128_t)a - b - carry_in;
+  if (carry_out)
+    *carry_out = (uint64_t)(u >> 127U);
+#else
+  uint64_t u = a - b;
+  a = u > a;
+  b = u < carry_in;
+  u -= carry_in;
+  if (carry_out)
+    *carry_out = a + b;
+#endif
+  return (uint64_t)u;
+}
+
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_mulc64 requires a carry pointer");
+#if defined(__SIZEOF_INT128__)
+  __uint128_t r = (__uint128_t)a * b;
+  *carry_out = (uint64_t)(r >> 64U);
+#else /* At this point long multiplication makes sense... */
+  uint64_t r, midc = 0, lowc = 0;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
+#endif
+  return (uint64_t)r;
+}
+
+/* *****************************************************************************
 C++ extern end
 ***************************************************************************** */
 /* support C++ */

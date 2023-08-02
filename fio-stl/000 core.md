@@ -1068,3 +1068,38 @@ __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
     Detects if `byte` exists within an 8 byte vector.
 
 -------------------------------------------------------------------------------
+
+## Multi-Precision Math Building Blocks
+
+The following simple operations can be used to build your own multi-precision implementation.
+
+#### `fio_math_addc64`
+
+```c
+uint64_t fio_math_addc64(uint64_t a,
+                         uint64_t b,
+                         uint64_t carry_in,
+                         uint64_t *carry_out);
+```
+
+Add with carry.
+
+#### `fio_math_subc64`
+
+```c
+uint64_t fio_math_subc64(uint64_t a,
+                         uint64_t b,
+                         uint64_t carry_in,
+                         uint64_t *carry_out);
+```
+
+Subtract with carry.
+
+#### `fio_math_mulc64`
+```c
+uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
+```
+
+Multiply with carry out.
+
+-------------------------------------------------------------------------------
