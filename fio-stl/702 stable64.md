@@ -61,12 +61,17 @@ Average                                    21.953 cycles/hash
 [[[ 'Hashmap' Speed Tests ]]]
 
 std::unordered_map
-Init std HashMapTest:     155.970 cycles/op (466569 inserts, 1% deletions)
-Running std HashMapTest:  99.425 cycles/op (1.2 stdv)
+Init std HashMapTest:     155.249 cycles/op (466569 inserts, 1% deletions)
+Running std HashMapTest:  93.391 cycles/op (1.6 stdv, found 461903)
 
 greg7mdp/parallel-hashmap
-Init fast HashMapTest:    181.680 cycles/op (466569 inserts, 1% deletions)
-Running fast HashMapTest: 97.842 cycles/op (1.6 stdv)  ....... PASS
+Init fast HashMapTest:    143.332 cycles/op (466569 inserts, 1% deletions)
+Running fast HashMapTest: 93.590 cycles/op (1.3 stdv, found 461903)
+
+facil.io HashMap
+Init fast fio_map_s Test:    87.173 cycles/op (466569 inserts, 1% deletions)
+Running fast fio_map_s Test: 49.115 cycles/op (0.5 stdv, found 461903)
+ ....... PASS
 
 [[[ Avalanche Tests ]]]
 
