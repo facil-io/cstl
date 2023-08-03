@@ -779,9 +779,14 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
                fio_buf2u32u("sse\xFF"))
     fio_http_sse_set_request(h);
 
-  fio___http_protocol_s *p = fio___http_protocol_new(1);
+  /* TODO: test for and attempt to re-use connection */
+  if (fio_http_cdata(h)) {
+  }
+
+  fio___http_protocol_s *p = fio___http_protocol_new(u.host.len);
   int should_free_tls = !s.tls;
   FIO_ASSERT_ALLOC(p);
+  FIO_MEMCPY(p->public_folder_buf, url, (u.host.buf + u.host.len) - url);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
     p->state[i].protocol =
         fio___http_protocol_get((fio___http_protocol_selector_e)i, 1);
