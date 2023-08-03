@@ -657,7 +657,10 @@ FIO_SFUNC int fio_string_write(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                const void *restrict src,
                                size_t len) {
-  int r = fio_string___write_validate_len(dest, reallocate, &len);
+  int r = 0;
+  if (!len)
+    return r;
+  r = fio_string___write_validate_len(dest, reallocate, &len);
   if (FIO_LIKELY(len && src))
     FIO_MEMCPY(dest->buf + dest->len, src, len);
   dest->len += len;
@@ -1699,6 +1702,8 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     }
     ++pos;
   }
+  if (!len)
+    return r;
   pos = srcs;
   if (fio_string___write_validate_len(dest, reallocate, &len))
     goto truncate;
