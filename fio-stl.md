@@ -7396,15 +7396,17 @@ However, when using safe input or a secure enough hashing function, it makes sen
 
 We can add a lower level of security to this approach by salting the hash with a runtime constant that changes every time we restart the program, such as the memory address of one of the function in the program.
 
-This can be done using the `FIO_MAP_HASH_FN(key)` macro i.e.:
+This can be done using the `FIO_MAP_HASH_FN(external_key)` macro i.e.:
 
 ```c
 /* Set the properties for the key-value Hash Map type called `dict_s` */
 #define FIO_MAP_NAME                 dict
 #define FIO_MAP_VALUE_BSTR /* a special macro helper to define binary Strings as values. */
 #define FIO_RAND           /* to provide us with a hash function. */
+
 /* use any non-inlined function's address as a hash salt. Here `dict_destroy` is used. */
-#define FIO_MAP_HASH_FN(key) fio_risky_hash(key.buf, key.len, (uint64_t)(dict_destroy))
+#define FIO_MAP_HASH_FN(ex_key) fio_risky_hash(ex_key.buf, ex_key.len, (uint64_t)(dict_destroy))
+
 #include "fio-stl.h"
 ```
 
@@ -7692,6 +7694,8 @@ The core set function.
 This function returns `NULL` on error (errors are logged).
 
 If the map is a hash map, overwriting the value (while keeping the key) is possible. In this case the `old` pointer is optional, and if set than the old data will be copied to over during an overwrite.
+
+If the Map is a Set (no value is defined), data is never overwritten and a new entry will be created only if missing.
 
 **Note**: the function returns the pointer to the map's internal storage, where objects are stored using the internal types.
 

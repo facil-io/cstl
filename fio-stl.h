@@ -529,11 +529,11 @@ Logging Defaults (no-op)
 #endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
-/** Defines a point at which logging truncates (limited by stack memory) */
+/** Defines a point at which logging truncates (limits stack memory use) */
 #define FIO_LOG_LENGTH_LIMIT 1024
 #endif
 
-/** Returns the Logging Level */
+/** Prints to STDERR, attempting to use only stack allocated memory. */
 #define FIO_LOG2STDERR(...)
 
 /* *****************************************************************************
@@ -602,8 +602,7 @@ FIO_ASSERT_STATIC(sizeof(fio___padding_char_struct_test_s) == 2,
 
 /* *****************************************************************************
 Static Endian Test
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if (defined(__LITTLE_ENDIAN__) && __LITTLE_ENDIAN__) ||                       \
     (defined(__BIG_ENDIAN__) && !__BIG_ENDIAN__) ||                            \
@@ -642,8 +641,7 @@ Static Endian Test
 
 /* *****************************************************************************
 Dynamic Endian Testing
-*****************************************************************************
-*/
+***************************************************************************** */
 
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
@@ -668,14 +666,11 @@ Security Related macros
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
-/**
- * Calls NtDelayExecution with the requested nano-second count.
- */
+/** Calls NtDelayExecution with the requested nano-second count. */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
     Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
@@ -683,9 +678,7 @@ Sleep / Thread Scheduling Macros
 // https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
 
 #elif FIO_OS_POSIX
-/**
- * Calls nanonsleep with the requested nano-second count.
- */
+/** Calls nanonsleep with the requested nano-second count. */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
     const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
@@ -707,8 +700,7 @@ Sleep / Thread Scheduling Macros
 
 /* *****************************************************************************
 String and Buffer Information Containers + Helper Macros
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** An information type for reporting the string's state. */
 typedef struct fio_str_info_s {
@@ -782,8 +774,7 @@ typedef struct fio_buf_info_s {
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1263,8 +1254,7 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1347,8 +1337,7 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1453,8 +1442,7 @@ FIO_IFUNC uintptr_t fio_ct_if_bool(uint8_t cond, uintptr_t a, uintptr_t b) {
   return (b ^ ((0 - (cond & 1)) & (a ^ b)));
 }
 
-/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise.
- */
+/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
 FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
@@ -1599,8 +1587,7 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1675,8 +1662,7 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1799,8 +1785,7 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Detects a byte where all the bits are set (255) within a 4 byte vector.
@@ -1905,8 +1890,7 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {
@@ -1926,6 +1910,77 @@ FIO_IFUNC void fio_bit_unset(void *map, size_t bit) {
 /** Flips the a bit in a bitmap (sets to 0 if 1, sets to 1 if 0). */
 FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
   ((uint8_t *)map)[bit >> 3] ^= (uint8_t)((1UL << (bit & 7)));
+}
+
+/* *****************************************************************************
+64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
+***************************************************************************** */
+
+/** Add with carry. */
+FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
+#if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
+  return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
+#elif defined(__SIZEOF_INT128__) && 0
+  /* This is actually slower as it occupies more CPU registers */
+  __uint128_t u = (__uint128_t)a + b + carry_in;
+  *carry_out = (uint64_t)(u >> 64U);
+  return (uint64_t)u;
+#else
+  uint64_t u = a + (b += carry_in);
+  *carry_out = (b < carry_in) + (u < a);
+  return u;
+#endif
+}
+
+/** Subtract with carry. */
+FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t carry_in,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
+#if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
+  uint64_t u =
+      __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
+#elif defined(__SIZEOF_INT128__)
+  __uint128_t u = (__uint128_t)a - b - carry_in;
+  if (carry_out)
+    *carry_out = (uint64_t)(u >> 127U);
+#else
+  uint64_t u = a - b;
+  a = u > a;
+  b = u < carry_in;
+  u -= carry_in;
+  if (carry_out)
+    *carry_out = a + b;
+#endif
+  return (uint64_t)u;
+}
+
+/** Multiply with carry out. */
+FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
+                                   uint64_t b,
+                                   uint64_t *carry_out) {
+  FIO_ASSERT_DEBUG(carry_out, "fio_math_mulc64 requires a carry pointer");
+#if defined(__SIZEOF_INT128__)
+  __uint128_t r = (__uint128_t)a * b;
+  *carry_out = (uint64_t)(r >> 64U);
+#else /* At this point long multiplication makes sense... */
+  uint64_t r, midc = 0, lowc = 0;
+  const uint64_t al = a & 0xFFFFFFFF;
+  const uint64_t ah = a >> 32;
+  const uint64_t bl = b & 0xFFFFFFFF;
+  const uint64_t bh = b >> 32;
+  const uint64_t lo = al * bl;
+  const uint64_t hi = ah * bh;
+  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
+  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
+  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
+#endif
+  return (uint64_t)r;
 }
 
 /* *****************************************************************************
@@ -5321,25 +5376,6 @@ FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 #define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
 
 /* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-
-/** Add with carry. */
-FIO_MIFN uint64_t fio_math_addc64(uint64_t a,
-                                  uint64_t b,
-                                  uint64_t carry_in,
-                                  uint64_t *carry_out);
-
-/** Subtract with carry. */
-FIO_MIFN uint64_t fio_math_subc64(uint64_t a,
-                                  uint64_t b,
-                                  uint64_t carry_in,
-                                  uint64_t *carry_out);
-
-/** Multiply with carry out. */
-FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
-
-/* *****************************************************************************
 Multi-precision, little endian helpers.
 
 Works with little endian uint64_t arrays or 64 bit numbers.
@@ -5829,110 +5865,6 @@ Vector Helpers - Shuffle Macros
 #define fio_u1024_shuffle256(v, ...) fio_u1024_shuffle256(v, (char[4]){__VA_ARGS__})
 #define fio_u1024_shuffle512(v, ...) fio_u1024_shuffle512(v, (char[2]){__VA_ARGS__})
 // clang-format on
-/* *****************************************************************************
-64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
-
-/** Add with carry. */
-FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
-#if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
-  return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
-#elif defined(__SIZEOF_INT128__) && 0
-  /* This is actually slower as it occupies more CPU registers */
-  __uint128_t u = (__uint128_t)a + b + carry_in;
-  *carry_out = (uint64_t)(u >> 64U);
-  return (uint64_t)u;
-#else
-  uint64_t u = a + (b += carry_in);
-  *carry_out = (b < carry_in) + (u < a);
-  return u;
-#endif
-}
-
-/** Subtract with carry. */
-FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
-#if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
-  uint64_t u =
-      __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
-#elif defined(__SIZEOF_INT128__)
-  __uint128_t u = (__uint128_t)a - b - carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 127U);
-#else
-  uint64_t u = a - b;
-  a = u > a;
-  b = u < carry_in;
-  u -= carry_in;
-  if (carry_out)
-    *carry_out = a + b;
-#endif
-  return (uint64_t)u;
-}
-
-/** Multiply with carry out. */
-FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t *carry_out) {
-#if defined(__SIZEOF_INT128__)
-  __uint128_t r = (__uint128_t)a * b;
-  *carry_out = (uint64_t)(r >> 64U);
-#elif 1 /* At this point long multiplication makes sense... */
-  uint64_t r, midc = 0, lowc = 0;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  const uint64_t mid = fio_math_addc64(al * bh, ah * bl, 0, &midc);
-  r = fio_math_addc64(lo, (mid << 32), 0, &lowc);
-  *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
-#elif 1 /* Using Karatsuba Multiplication will degrade performance */
-  uint64_t r, c;
-  const uint64_t al = a & 0xFFFFFFFF;
-  const uint64_t ah = a >> 32;
-  const uint64_t bl = b & 0xFFFFFFFF;
-  const uint64_t bh = b >> 32;
-  const uint64_t asum = al + ah;
-  const uint64_t bsum = bl + bh;
-  const uint64_t lo = al * bl;
-  const uint64_t hi = ah * bh;
-  /* asum * bsum might overflow, but we know each value is <= 0x100000000 */
-  uint64_t midlo = (asum & 0xFFFFFFFF) * (bsum & 0xFFFFFFFF);
-  uint64_t midhi = (asum & bsum) >> 32;
-  uint64_t midmid = (bsum & (((uint64_t)0ULL - (asum >> 32)) >> 32)) +
-                    (asum & (((uint64_t)0ULL - (bsum >> 32)) >> 32));
-  midlo = fio_math_addc64(midlo, (midmid << 32), 0, &c);
-  midhi += c + (midmid >> 32);
-  midlo = fio_math_subc64(midlo, lo, 0, &c);
-  midhi -= c;
-  midlo = fio_math_subc64(midlo, hi, 0, &c);
-  midhi -= c;
-  r = fio_math_addc64(lo, midlo << 32, 0, &c);
-  *carry_out = c + hi + (midlo >> 32) + (midhi << 32);
-#else   /* never use binary for MUL... so slow... */
-  uint64_t r, c = 0;
-  r = a & ((uint64_t)0ULL - (b & 1));
-  for (uint_fast8_t i = 1; i < 64; ++i) {
-    uint64_t mask = ((uint64_t)0ULL - ((b >> i) & 1));
-    uint64_t tmp = a & mask;
-    uint64_t al = (tmp << i);
-    uint64_t ah = (tmp >> (64 - i));
-    r = fio_math_addc64(r, al, 0, &tmp);
-    c += ah + tmp;
-  }
-  *carry_out = c;
-#endif
-  return (uint64_t)r;
-}
 
 /* *****************************************************************************
 Multi-precision, little endian helpers. Works with full
@@ -6291,11 +6223,12 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               size_t len,
                               uint64_t seed);
 
+#define FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH 0
 /* *****************************************************************************
 Risky Hash - Implementation
 
 Note: I don't remember what information I used when designing this, but Risky
-Hash is probably NOT cryptographically safe (though I wanted it to be).
+Hash is probably NOT cryptographically safe (though I wish it was).
 
 Here's a few resources about hashes that might explain more:
 - https://komodoplatform.com/cryptographic-hash-function/
@@ -6363,102 +6296,70 @@ Possibly `extern` Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/* Risky Hash initialization constants */
-#define FIO_RISKY3_IV0 0x0000001000000001ULL
-#define FIO_RISKY3_IV1 0x0000010000000010ULL
-#define FIO_RISKY3_IV2 0x0000100000000100ULL
-#define FIO_RISKY3_IV3 0x0001000000001000ULL
-/* read u64 in local endian */
-#define FIO_RISKY_BUF2U64 fio_buf2u64u
-
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
-  uint64_t v[4] FIO_ALIGN(
-      32) = {FIO_RISKY3_IV0, FIO_RISKY3_IV1, FIO_RISKY3_IV2, FIO_RISKY3_IV3};
-  uint64_t w[4] FIO_ALIGN(32);
+#if FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH
+  return fio_stable_hash(data_, len, seed);
+#endif
+#define FIO___RISKY_HASH_ROUND64()                                             \
+  do {                                                                         \
+    for (size_t i = 0; i < 8; ++i) /* use little endian? */                    \
+      w[i] = fio_ltole64(w[i]);                                                \
+    for (size_t i = 0; i < 8; ++i) { /* xor vector with input (words) */       \
+      v[i] ^= w[i];                                                            \
+    }                                                                          \
+    for (size_t i = 0; i < 4; ++i) { /* MUL folding, adding high bits */       \
+      v[i] += fio_math_mulc64(v[i], v[i + 4], w + i);                          \
+      v[i + 4] += w[i];                                                        \
+    }                                                                          \
+  } while (0)
+
+  /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
-
-#define FIO_RISKY3_ROUND64(vi, w_)                                             \
-  w[vi] = w_;                                                                  \
-  v[vi] += w[vi];                                                              \
-  v[vi] = fio_lrot64(v[vi], 29);                                               \
-  v[vi] += w[vi];                                                              \
-  v[vi] *= FIO_U64_HASH_PRIME##vi;
-
-#define FIO_RISKY3_ROUND256(w0, w1, w2, w3)                                    \
-  FIO_RISKY3_ROUND64(0, w0);                                                   \
-  FIO_RISKY3_ROUND64(1, w1);                                                   \
-  FIO_RISKY3_ROUND64(2, w2);                                                   \
-  FIO_RISKY3_ROUND64(3, w3);
-
-  if (seed) {
-    /* process the seed as if it was a prepended 8 Byte string. */
-    v[0] *= seed;
-    v[1] *= seed;
-    v[2] *= seed;
-    v[3] *= seed;
-    v[1] ^= seed;
-    v[2] ^= seed;
-    v[3] ^= seed;
+  uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
+  uint64_t const prime[8] FIO_ALIGN(16) = {
+      FIO_U64_HASH_PRIME1,
+      FIO_U64_HASH_PRIME2,
+      FIO_U64_HASH_PRIME3,
+      FIO_U64_HASH_PRIME4,
+      FIO_U64_HASH_PRIME5,
+      FIO_U64_HASH_PRIME6,
+      FIO_U64_HASH_PRIME7,
+      FIO_U64_HASH_PRIME0,
+  };
+  /* seed mixing is constant time to avoid leaking seed data */
+  seed += len;
+  seed ^= fio_lrot64(seed, 47);
+  /* initialize vector with mixed secret */
+  for (size_t i = 0; i < 8; ++i)
+    v[i] = seed + prime[i];
+  /* pad uneven head with zeros and consume (if any) */
+  if ((len & 63)) {
+    for (size_t i = 0; i < 8; ++i)
+      w[i] = 0;
+    fio_memcpy63x(w, data, len);
+    data += (len & 63);
+    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
+    FIO___RISKY_HASH_ROUND64();
+  }
+  /* consumes remaining 64 bytes (512 bits) blocks */
+  for (size_t j = 63; j < len; j += 64) {
+    for (size_t i = 0; i < 4; ++i)
+      v[i] += prime[i]; /* mark each round, may double mark if(!(len & 63)) */
+    fio_memcpy64(w, data);
+    data += 64;
+    FIO___RISKY_HASH_ROUND64();
   }
 
-  for (size_t i = 31; i < len; i += 32) {
-    /* 32 bytes / 256 bit access */
-    FIO_RISKY3_ROUND256(FIO_RISKY_BUF2U64(data),
-                        FIO_RISKY_BUF2U64(data + 8),
-                        FIO_RISKY_BUF2U64(data + 16),
-                        FIO_RISKY_BUF2U64(data + 24));
-    data += 32;
-  }
-  switch (len & 24) {
-  case 24: FIO_RISKY3_ROUND64(2, FIO_RISKY_BUF2U64(data + 16)); /*fall through*/
-  case 16: FIO_RISKY3_ROUND64(1, FIO_RISKY_BUF2U64(data + 8));  /*fall through*/
-  case 8: FIO_RISKY3_ROUND64(0, FIO_RISKY_BUF2U64(data + 0)); data += len & 24;
-  }
+  w[4] = (v[0] ^ v[1]) + (v[1] ^ v[2]) + (v[2] ^ v[3]);
+  w[5] = (v[4] + v[5]) ^ (v[5] + v[6]) ^ (v[6] + v[7]);
+  w[6] = (w[0] + w[1]) ^ (w[1] + w[2]) ^ (w[2] + w[3]);
+  v[0] = w[5] + fio_math_mulc64(w[4], w[6], v + 1);
+  v[0] += v[1];
+  return v[0];
 
-  /* add offset information to padding */
-  uint64_t tmp = ((uint64_t)len & 0xFF) << 56;
-  /* leftover bytes */
-  switch ((len & 7)) {
-  case 7: tmp |= ((uint64_t)data[6]) << 48; /* fall through */
-  case 6: tmp |= ((uint64_t)data[5]) << 40; /* fall through */
-  case 5: tmp |= ((uint64_t)data[4]) << 32; /* fall through */
-  case 4: tmp |= ((uint64_t)data[3]) << 24; /* fall through */
-  case 3: tmp |= ((uint64_t)data[2]) << 16; /* fall through */
-  case 2: tmp |= ((uint64_t)data[1]) << 8;  /* fall through */
-  case 1:
-    tmp |= ((uint64_t)data[0]);
-    switch ((len & 24)) { /* the last (now padded) byte's position */
-    case 24: FIO_RISKY3_ROUND64(3, tmp); break; /*offset 24 in 32 byte segment*/
-    case 16: FIO_RISKY3_ROUND64(2, tmp); break; /*offset 16 in 32 byte segment*/
-    case 8: FIO_RISKY3_ROUND64(1, tmp); break;  /*offset  8 in 32 byte segment*/
-    case 0: FIO_RISKY3_ROUND64(0, tmp); break;  /*offset  0 in 32 byte segment*/
-    }
-  }
-
-  /* irreversible avalanche... I think */
-  uint64_t r = (len) ^ ((uint64_t)len << 36);
-  r += fio_lrot64(v[0], 17) + fio_lrot64(v[1], 13) + fio_lrot64(v[2], 47) +
-       fio_lrot64(v[3], 57);
-  r += v[0] ^ v[1];
-  r ^= fio_lrot64(r, 13);
-  r += v[1] ^ v[2];
-  r ^= fio_lrot64(r, 29);
-  r += v[2] ^ v[3];
-  r += fio_lrot64(r, 33);
-  r += v[3] ^ v[0];
-  r ^= (r >> 29) * FIO_U64_HASH_PRIME4;
-  r ^= fio_lrot64(r, 29);
-  return r;
+#undef FIO___RISKY_HASH_ROUND64
 }
-
-#undef FIO_RISKY3_IV0
-#undef FIO_RISKY3_IV1
-#undef FIO_RISKY3_IV2
-#undef FIO_RISKY3_IV3
-#undef FIO_RISKY_BUF2U64
-#undef FIO_RISKY3_ROUND64
-#undef FIO_RISKY3_ROUND256
 
 /* *****************************************************************************
 Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)
@@ -6584,17 +6485,10 @@ IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
     fio___rand_buffer[(offset++ & 3)] ^= tmp;
     buf += 8;
   }
-  switch (len & 7) {
-  case 7: tmp <<= 8; tmp |= buf[6]; /* fall through */
-  case 6: tmp <<= 8; tmp |= buf[5]; /* fall through */
-  case 5: tmp <<= 8; tmp |= buf[4]; /* fall through */
-  case 4: tmp <<= 8; tmp |= buf[3]; /* fall through */
-  case 3: tmp <<= 8; tmp |= buf[2]; /* fall through */
-  case 2: tmp <<= 8; tmp |= buf[1]; /* fall through */
-  case 1:
-    tmp <<= 8;
-    tmp |= buf[1];
-    fio___rand_buffer[(offset & 3)] ^= tmp;
+  if ((len & 7)) {
+    tmp = 0;
+    fio_memcpy7x(&tmp, buf, len);
+    fio___rand_buffer[(offset++ & 3)] ^= tmp;
   }
 }
 
@@ -9595,6 +9489,7 @@ FIO_IFUNC int fio_sock_dup(int original) {
 }
 
 #elif FIO_HAVE_UNIX_TOOLS
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
@@ -10637,19 +10532,19 @@ FIO_IFUNC struct timespec fio_time_mono(void) {
 
 /** Returns monotonic time in nano-seconds (now in 1 micro of a second). */
 FIO_IFUNC int64_t fio_time_nano(void) {
-  struct timespec t = fio_time_real();
+  struct timespec t = fio_time_mono();
   return ((int64_t)t.tv_sec * 1000000000) + (int64_t)t.tv_nsec;
 }
 
 /** Returns monotonic time in micro-seconds (now in 1 millionth of a second). */
 FIO_IFUNC int64_t fio_time_micro(void) {
-  struct timespec t = fio_time_real();
+  struct timespec t = fio_time_mono();
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
 /** Returns monotonic time in milliseconds. */
 FIO_IFUNC int64_t fio_time_milli(void) {
-  return fio_time2milli(fio_time_real());
+  return fio_time2milli(fio_time_mono());
 }
 
 /** Converts a `struct timespec` to milliseconds. */
@@ -17507,7 +17402,10 @@ FIO_SFUNC int fio_string_write(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                const void *restrict src,
                                size_t len) {
-  int r = fio_string___write_validate_len(dest, reallocate, &len);
+  int r = 0;
+  if (!len)
+    return r;
+  r = fio_string___write_validate_len(dest, reallocate, &len);
   if (FIO_LIKELY(len && src))
     FIO_MEMCPY(dest->buf + dest->len, src, len);
   dest->len += len;
@@ -18549,6 +18447,8 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     }
     ++pos;
   }
+  if (!len)
+    return r;
   pos = srcs;
   if (fio_string___write_validate_len(dest, reallocate, &len))
     goto truncate;
@@ -24729,11 +24629,11 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME, __key_free)(void *ptr, size_t len) {
 #endif
 
 #ifndef FIO_MAP_KEY_COPY
-#define FIO_MAP_KEY_COPY(dest, src) (dest) = (src)
+#define FIO_MAP_KEY_COPY(dest, src) ((dest) = (src))
 #endif
 
 #ifndef FIO_MAP_KEY_CMP
-#define FIO_MAP_KEY_CMP(a, b) (a) == (b)
+#define FIO_MAP_KEY_CMP(a, b) ((a) == (b))
 #endif
 
 #ifndef FIO_MAP_KEY_DESTROY
@@ -26029,7 +25929,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_next)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_ = {.pos = 0}};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -26158,7 +26058,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_ = {.pos = 0}});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 
@@ -26167,7 +26067,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
     FIO_NAME(FIO_MAP_NAME,
              get_prev)(FIO_MAP_PTR map,
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
-  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_.pos = 0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) r = {.private_ = {.pos = 0}};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!o->count)
@@ -26280,7 +26180,7 @@ find_pos:
 #endif /* FIO_MAP_ORDERED */
 
 not_found:
-  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_.pos = 0});
+  return (r = (FIO_NAME(FIO_MAP_NAME, iterator_s)){.private_ = {.pos = 0}});
   FIO_ASSERT_DEBUG(0, "should this happen? ever?");
 }
 #undef FIO_MAP___EACH_COPY_HASH
@@ -26316,7 +26216,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       start_at = 0;
   } else if (start_at > o->count)
     return o->count;
-  FIO_NAME(FIO_MAP_NAME, iterator_s) i = {.private_.pos = 0};
+  FIO_NAME(FIO_MAP_NAME, iterator_s) i = {.private_ = {.pos = 0}};
   for (;;) {
     i = FIO_NAME(FIO_MAP_NAME, get_next)(map, &i);
     if (!FIO_NAME(FIO_MAP_NAME, iterator_is_valid)(&i))
@@ -26863,6 +26763,9 @@ typedef struct {
 } FIO_ALIGN(16) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
+  static const uint64_t defkey[4] = {0};
+  if (!key256b)
+    key256b = (const void *)defkey;
   uint64_t t0, t1;
   /* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
   t0 = fio_buf2u64_le((uint8_t *)key256b + 0);
@@ -28189,6 +28092,12 @@ SFUNC int fio_srv_is_worker(void);
 /** Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers_requested);
 
+/** Returns current process id. */
+SFUNC int fio_srv_pid(void);
+
+/** Returns the root / master process id. */
+SFUNC int fio_srv_root_pid(void);
+
 /* *****************************************************************************
 Listening to Incoming Connections
 ***************************************************************************** */
@@ -28891,6 +28800,7 @@ REMEMBER: memory allocations: FIO_MEM_REALLOC_ / FIO_MEM_FREE_
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#define FIO___SRV_GET_TIME_MILLI() fio_time2milli(fio_time_real())
 /* *****************************************************************************
 Protocol validation
 ***************************************************************************** */
@@ -29198,6 +29108,12 @@ static struct {
     .wakeup_fd = -1,
     .stop = 1,
 };
+
+/** Returns current process id. */
+SFUNC int fio_srv_pid(void) { return fio___srvdata.pid; }
+
+/** Returns the root / master process id. */
+SFUNC int fio_srv_root_pid(void) { return fio___srvdata.root_pid; }
 
 /* *****************************************************************************
 Wakeup Protocol
@@ -29760,11 +29676,14 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
       fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_timer_push2queue(fio___srv_tasks, fio___srv_timer, fio___srvdata.tick);
-  fio_queue_perform_all(fio___srv_tasks);
-  if (fio___srv_review_timeouts())
-    fio_queue_perform_all(fio___srv_tasks);
+  for (size_t i = 0; i < 2048; ++i)
+    if (fio_queue_perform(fio___srv_tasks))
+      break;
+  // fio_queue_perform_all(fio___srv_tasks);
+  fio___srv_review_timeouts();
+  // fio_queue_perform_all(fio___srv_tasks);
   fio_signal_review();
 }
 
@@ -29794,7 +29713,7 @@ FIO_SFUNC void fio___srv_shutdown_task(void *shutdown_start_, void *a2) {
 
 FIO_SFUNC void fio___srv_shutdown(void) {
   /* collect tick for shutdown start, to monitor for possible timeout */
-  int64_t shutdown_start = fio___srvdata.tick = fio_time_milli();
+  int64_t shutdown_start = fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   size_t connected = 0;
   /* first notify that shutdown is starting */
   fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
@@ -29849,6 +29768,7 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   fio_queue_push(fio___srv_tasks, fio___srv_work_task);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srv_shutdown();
+  fio_queue_perform_all(fio___srv_tasks);
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srvdata.workers = 0;
@@ -29996,7 +29916,7 @@ SFUNC void fio_srv_start(int workers) {
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   if (workers) {
     FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
     for (int i = 0; i < workers; ++i) {
@@ -30653,7 +30573,7 @@ Initializing Server State
 FIO_CONSTRUCTOR(fio___srv) {
   fio_queue_init(fio___srv_tasks);
   fio___srvdata.protocols = FIO_LIST_INIT(fio___srvdata.protocols);
-  fio___srvdata.tick = fio_time_milli();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio___srvdata.root_pid = fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.async = FIO_LIST_INIT(fio___srvdata.async);
   fio_poll_init(&fio___srvdata.poll_data,
@@ -33665,17 +33585,18 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_USES_MUTEX 1
 #endif
 
-#ifndef FIO_HTTP_CACHE_STATIC
+#ifndef FIO_HTTP_CACHE_STATIC_HEADERS
 /** Adds a static cache for common HTTP header names. */
-#define FIO_HTTP_CACHE_STATIC 1
+#define FIO_HTTP_CACHE_STATIC_HEADERS 1
 #endif
 
 #ifndef FIO_HTTP_DEFAULT_INDEX_FILENAME
 /** The default file name when a static file response points to a folder. */
-#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index.html"
+#define FIO_HTTP_DEFAULT_INDEX_FILENAME "index"
 #endif
 
 #ifndef FIO_HTTP_STATIC_FILE_COMPLETION
+/** Attempts to auto-complete static file paths with missing extensions. */
 #define FIO_HTTP_STATIC_FILE_COMPLETION 1
 #endif
 
@@ -33707,6 +33628,9 @@ Constructor / Destructor
 
 /** Create a new fio_http_s handle. */
 SFUNC fio_http_s *fio_http_new(void);
+
+/** Creates a copy of an existing handle, copying only its request data. */
+SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *old);
 
 /** Reduces an fio_http_s handle's reference count or frees it. */
 SFUNC void fio_http_free(fio_http_s *);
@@ -34433,7 +34357,7 @@ static struct {
 #define FIO___HTTP_STR_CACHE_COOKIE 0
 #define FIO___HTTP_STR_CACHE_VALUE  1
 
-#if FIO_HTTP_CACHE_STATIC
+#if FIO_HTTP_CACHE_STATIC_HEADERS
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
 #define FIO___HTTP_STATIC_CACHE_FOLD       22
@@ -34580,7 +34504,7 @@ static char *fio___http_str_cached_static(char *str, size_t len) {
 #undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
 #else
 #define fio___http_str_cached_init() (void)0
-#endif /* FIO_HTTP_CACHE_STATIC */
+#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
 
 FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
                                             uint64_t hash,
@@ -34616,7 +34540,7 @@ avoid_caching:
 }
 
 FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
-#if FIO_HTTP_CACHE_STATIC
+#if FIO_HTTP_CACHE_STATIC_HEADERS
   char *tmp;
   if (!s.len)
     return NULL;
@@ -34626,7 +34550,7 @@ FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
   if (tmp)
     return fio_bstr_copy(tmp);
 skip_cache_test:
-#endif /* FIO_HTTP_CACHE_STATIC */
+#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 
@@ -34890,6 +34814,34 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
 /** Closes a persistent HTTP connection (i.s., if upgraded). */
 SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
 
+/** Creates a copy of an existing handle, copying only its request data. */
+SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT_ALLOC(h);
+  fio_http_path_set(h, fio_http_path(o));
+  fio_http_method_set(h, fio_http_method(o));
+  fio_http_query_set(h, fio_http_query(o));
+  fio_http_version_set(h, fio_http_version(o));
+  /* copy headers */
+  fio___http_hmap_reserve(h->headers, fio___http_hmap_count(o->headers));
+  FIO_MAP_EACH(fio___http_hmap, o->headers, i) {
+    fio___http_sary_s *a = fio___http_hmap_node2val_ptr(
+        fio___http_hmap_set_ptr(h->headers,
+                                i.key,
+                                (fio___http_sary_s){0},
+                                NULL,
+                                0));
+    FIO_ARRAY_EACH(fio___http_sary, &i.value, v) {
+      fio___http_sary_push(a, fio_bstr_copy(*v));
+    }
+  }
+  /* copy cookies */
+  FIO_MAP_EACH(fio___http_cmap, o->cookies, i) {
+    fio___http_cmap_set(h->cookies, i.key, i.value, NULL);
+  }
+  return h;
+}
+
 #undef FIO___RECURSIVE_INCLUDE
 /* *****************************************************************************
 Simple Property Set / Get
@@ -35147,7 +35099,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
   char tmp_buf[5120];
   fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
-#define copy_cookie_ch(ch_var)                                                 \
+#define fio___http_h_copy_cookie_ch(ch_var)                                    \
   if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
     t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
   } else {                                                                     \
@@ -35167,11 +35119,11 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     size_t tmp = 0;
     if (cookie.name.len) {
       while (tmp < cookie.name.len) {
-        copy_cookie_ch(name);
+        fio___http_h_copy_cookie_ch(name);
       }
     } else {
       while (cookie.name.buf[tmp]) {
-        copy_cookie_ch(name);
+        fio___http_h_copy_cookie_ch(name);
       }
     }
     if (need2warn && !warn_illegal) {
@@ -35187,11 +35139,11 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     size_t tmp = 0;
     if (cookie.value.len) {
       while (tmp < cookie.value.len) {
-        copy_cookie_ch(value);
+        fio___http_h_copy_cookie_ch(value);
       }
     } else {
       while (cookie.value.buf[tmp]) {
-        copy_cookie_ch(value);
+        fio___http_h_copy_cookie_ch(value);
       }
     }
     if (need2warn && !warn_illegal) {
@@ -35203,7 +35155,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     }
   } else
     cookie.max_age = -1;
-#undef copy_cookie_ch
+#undef fio___http_h_copy_cookie_ch
 
   /* server cookie data */
   t.buf[t.len++] = ';';
@@ -36085,52 +36037,63 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       goto file_not_found;
   }
   rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
-             (rt.buf[rt.len - 1] == '/' || rt.buf[rt.len - 1] == '\\'));
+             (rt.buf[rt.len - 1] == '/' ||
+              rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
   fio_string_write(&filename, NULL, rt.buf, rt.len);
   fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
   if (fio_filename_is_unsafe_url(filename.buf))
     goto file_not_found;
 
-  if (filename.buf[filename.len - 1] == '/')
-    fio_string_write(&filename,
-                     NULL,
-                     "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
-                     sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
-
   { /* Test for incomplete file name */
     size_t file_type = fio_filename_type(filename.buf);
+#if defined(S_IFDIR) && defined(FIO_HTTP_DEFAULT_INDEX_FILENAME)
+    if (file_type == S_IFDIR) {
+      filename.len -= (filename.buf[filename.len - 1] == '/' ||
+                       filename.buf[filename.len - 1] == FIO_FOLDER_SEPARATOR);
 #if FIO_HTTP_STATIC_FILE_COMPLETION
-    if (!file_type) {
-      char *ext = filename.buf + filename.len;
-      do {
-        --ext;
-      } while (ext[0] != '.' && ext[0] != '/');
-      if (ext[0] == '.')
-        goto file_not_found;
-      fio_string_write(&filename, NULL, ".html", 5);
-      file_type = fio_filename_type(filename.buf);
-    }
-    switch (file_type) {
-#ifdef S_IFDIR
-    case S_IFDIR:
       fio_string_write(&filename,
                        NULL,
                        "/" FIO_HTTP_DEFAULT_INDEX_FILENAME,
                        sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME));
-      if (!fio_filename_type(filename.buf))
+      file_type = 0;
+#else
+      fio_string_write(
+          &filename,
+          NULL, /* note that sizeof will count NUL, so we skip 1 char: */
+          "/" FIO_HTTP_DEFAULT_INDEX_FILENAME ".html",
+          sizeof(FIO_HTTP_DEFAULT_INDEX_FILENAME ".html"));
+      file_type = fio_filename_type(filename.buf);
+#endif /* FIO_HTTP_STATIC_FILE_COMPLETION */
+    }
+#endif /* S_IFDIR */
+#if FIO_HTTP_STATIC_FILE_COMPLETION
+    const fio_buf_info_s extensions[] = {FIO_BUF_INFO1((char *)".html"),
+                                         FIO_BUF_INFO1((char *)".htm"),
+                                         FIO_BUF_INFO1((char *)".txt"),
+                                         FIO_BUF_INFO1((char *)".md"),
+                                         FIO_BUF_INFO0};
+    const fio_buf_info_s *pext = extensions;
+    while (!file_type) {
+      fio_string_write(&filename, NULL, pext->buf, pext->len);
+      file_type = fio_filename_type(filename.buf);
+      if (file_type)
+        break;
+      filename.len -= pext->len;
+      ++pext;
+      if (!pext->buf)
         goto file_not_found;
-      break;
-#endif
+    }
+    switch (file_type) {
     case S_IFREG: break;
 #ifdef S_IFLNK
     case S_IFLNK: break;
 #endif
     default: goto file_not_found;
     }
-#else
+#else  /* FIO_HTTP_STATIC_FILE_COMPLETION */
     if (!file_type)
       goto file_not_found;
-#endif
+#endif /* FIO_HTTP_STATIC_FILE_COMPLETION */
   }
   {
     /* find mime type if registered */
@@ -38426,9 +38389,14 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
                fio_buf2u32u("sse\xFF"))
     fio_http_sse_set_request(h);
 
-  fio___http_protocol_s *p = fio___http_protocol_new(1);
+  /* TODO: test for and attempt to re-use connection */
+  if (fio_http_cdata(h)) {
+  }
+
+  fio___http_protocol_s *p = fio___http_protocol_new(u.host.len);
   int should_free_tls = !s.tls;
   FIO_ASSERT_ALLOC(p);
+  FIO_MEMCPY(p->public_folder_buf, url, (u.host.buf + u.host.len) - url);
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
     p->state[i].protocol =
         fio___http_protocol_get((fio___http_protocol_selector_e)i, 1);
