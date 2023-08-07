@@ -194,6 +194,8 @@ struct FIO_NAME(FIO_MAP_NAME, node_s) {
 
 /** Map iterator type */
 typedef struct {
+  /** the node in the internal map */
+  FIO_NAME(FIO_MAP_NAME, node_s) * node;
   /** the key in the current position */
   FIO_MAP_KEY key;
 #ifdef FIO_MAP_VALUE
@@ -547,7 +549,7 @@ FIO_IFUNC FIO_MAP_KEY_INTERNAL *FIO_NAME(FIO_MAP_NAME, node2key_ptr)(
     FIO_NAME(FIO_MAP_NAME, node_s) * node) {
   if (!node)
     return NULL;
-  return &node->key;
+  return &(node->key);
 }
 
 #ifdef FIO_MAP_VALUE
@@ -556,7 +558,7 @@ FIO_IFUNC FIO_MAP_VALUE_INTERNAL *FIO_NAME(FIO_MAP_NAME, node2val_ptr)(
     FIO_NAME(FIO_MAP_NAME, node_s) * node) {
   if (!node)
     return NULL;
-  return &node->value;
+  return &(node->value);
 }
 #else
 /* If called for a node without a value, returns the key (simplifies stuff). */
@@ -1393,12 +1395,14 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
 #define FIO_MAP___EACH_COPY_DATA()                                             \
   FIO_MAP___EACH_COPY_HASH();                                                  \
   r.private_.map_validator = (uintptr_t)o;                                     \
+  r.node = o->map + r.private_.index;                                          \
   r.key = FIO_MAP_KEY_FROM_INTERNAL(o->map[r.private_.index].key);             \
   r.value = FIO_MAP_VALUE_FROM_INTERNAL(o->map[r.private_.index].value)
 #else
 #define FIO_MAP___EACH_COPY_DATA()                                             \
   FIO_MAP___EACH_COPY_HASH();                                                  \
   r.private_.map_validator = (uintptr_t)o;                                     \
+  r.node = o->map + r.private_.index;                                          \
   r.key = FIO_MAP_KEY_FROM_INTERNAL(o->map[r.private_.index].key)
 #endif
 

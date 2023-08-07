@@ -35,7 +35,7 @@ ChaCha20Poly1305 API
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *restrict ad, /* additional data */
+                                     const void *ad, /* additional data */
                                      size_t adlen,
                                      const void *key,
                                      const void *nounce);
@@ -55,7 +55,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
 SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *restrict ad, /* additional data */
+                                    const void *ad, /* additional data */
                                     size_t adlen,
                                     const void *key,
                                     const void *nounce);
@@ -87,7 +87,7 @@ SFUNC void fio_poly1305_auth(void *restrict mac_dest,
                              const void *key256bits,
                              void *restrict message,
                              size_t len,
-                             void *restrict additional_data,
+                             const void *additional_data,
                              size_t additional_data_len);
 
 /* *****************************************************************************
@@ -316,7 +316,7 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
                              const void *key,
                              void *restrict msg,
                              size_t len,
-                             void *restrict ad,
+                             const void *ad,
                              size_t ad_len) {
   fio___poly_s pl = fio___poly_init(key);
   fio___poly_consume_msg(&pl, (uint8_t *)ad, ad_len);
@@ -499,7 +499,7 @@ FIO_IFUNC fio_u512 fio___chacha20_mixround(fio_u512 c) {
 SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      void *restrict data,
                                      size_t len,
-                                     void *restrict ad, /* additional data */
+                                     const void *ad, /* additional data */
                                      size_t adlen,
                                      const void *key,
                                      const void *nounce) {
@@ -580,7 +580,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
 SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       void *restrict data,
                                       size_t len,
-                                      void *restrict ad, /* additional data */
+                                      const void *ad, /* additional data */
                                       size_t adlen,
                                       const void *key,
                                       const void *nounce) {
@@ -622,7 +622,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
 SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
                                     size_t len,
-                                    void *restrict ad, /* additional data */
+                                    const void *ad, /* additional data */
                                     size_t adlen,
                                     const void *key,
                                     const void *nounce) {

@@ -1119,7 +1119,7 @@ FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   (void)r;
   fio___srvdata.wakeup_wait = 0;
 #if DEBUG
-  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("%d fio___srv_wakeup called", fio___srvdata.pid);
 #endif
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
@@ -1127,7 +1127,7 @@ FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   fio_sock_close(fio___srvdata.wakeup_fd);
   fio___srvdata.wakeup = NULL;
   fio___srvdata.wakeup_fd = -1;
-  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup destroyed", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("%d fio___srv_wakeup destroyed", fio___srvdata.pid);
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
@@ -1151,7 +1151,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
     return;
   int fds[2];
   if (pipe(fds)) {
-    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___srv_wakeup disabled.",
+    FIO_LOG_ERROR("%d couldn't open wakeup pipes, fio___srv_wakeup disabled.",
                   fio___srvdata.pid);
     return;
   }
@@ -1162,7 +1162,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
                                            &FIO___SRV_WAKEUP_PROTOCOL,
                                            (void *)(uintptr_t)fds[1],
                                            NULL);
-  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup initialized", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("%d fio___srv_wakeup initialized", fio___srvdata.pid);
 }
 
 /* *****************************************************************************
@@ -1220,26 +1220,26 @@ FIO_IFUNC void fio_set_valid(fio_s *io) {
   fio_validity_map_set(&fio___srvdata.valid, fio_risky_ptr(io), io, NULL);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(fio_is_valid(io),
-                   "(%d) IO validity set, but map reported as invalid!",
+                   "%d IO validity set, but map reported as invalid!",
                    (int)fio___srvdata.pid);
-  FIO_LOG_DEBUG2("(%d) IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
+  FIO_LOG_DEBUG2("%d IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
 }
 
 FIO_IFUNC void fio_set_invalid(fio_s *io) {
   fio_s *old = NULL;
-  FIO_LOG_DEBUG2("(%d) IO %p is no longer valid",
+  FIO_LOG_DEBUG2("%d IO %p is no longer valid",
                  (int)fio___srvdata.pid,
                  (void *)io);
   FIO_VALIDATE_LOCK();
   fio_validity_map_remove(&fio___srvdata.valid, fio_risky_ptr(io), io, &old);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(!old || old == io,
-                   "(%d) invalidity map corruption (%p != %p)!",
+                   "%d invalidity map corruption (%p != %p)!",
                    (int)fio___srvdata.pid,
                    io,
                    old);
   FIO_ASSERT_DEBUG(!fio_is_valid(io),
-                   "(%d) IO validity removed, but map reported as valid!",
+                   "%d IO validity removed, but map reported as valid!",
                    (int)fio___srvdata.pid);
 }
 
@@ -1347,11 +1347,11 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
   if (io->node.next == io->node.prev) /* list was empty before IO was added */
     FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
+  io->pr->on_attach(io);
   fio_poll_monitor(&fio___srvdata.poll_data,
                    io->fd,
                    (void *)io,
                    POLLIN | POLLOUT);
-  io->pr->on_attach(io);
   if (old == &FIO___MOCK_PROTOCOL) /* avoid calling `start` more than once */
     io->pr->io_functions.start(io);
 }
@@ -1387,7 +1387,10 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
     goto error;
   io = fio_new2();
   FIO_ASSERT_ALLOC(io);
-  FIO_LOG_DDEBUG2("attaching fd %d to IO object %p", fd, (void *)io);
+  FIO_LOG_DDEBUG2("%d attaching fd %d to IO object %p",
+                  fio___srvdata.pid,
+                  fd,
+                  (void *)io);
   fio_sock_set_non_block(fd);
   old = io->pr;
   io->fd = fd;
@@ -1846,12 +1849,12 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
 is_worker_process:
   fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.is_worker = 1;
-  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("%d worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
   if (!fio_atomic_xor_fetch(&fio___srvdata.stop, 2))
     fio___srv_work(1);
-  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("%d worker exiting.", (int)fio___srvdata.pid);
   exit(0);
 }
 
@@ -1912,12 +1915,12 @@ SFUNC void fio_srv_start(int workers) {
 #endif
   fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   if (workers) {
-    FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
+    FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
     for (int i = 0; i < workers; ++i) {
       fio___srv_spawn_worker(NULL, NULL);
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) starting facil.io server in single process mode.",
+    FIO_LOG_DEBUG2("%d starting facil.io server in single process mode.",
                    fio___srvdata.root_pid);
   }
   fio___srv_work(!workers);
@@ -2018,7 +2021,7 @@ write_called_after_close:
   fio_stream_pack_free(packet);
   return;
 io_error_null:
-  FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)",
+  FIO_LOG_ERROR("%d `fio_write2` called for invalid IO (NULL)",
                 fio___srvdata.pid);
   if (args.dealloc)
     args.dealloc(args.buf);
@@ -2100,9 +2103,9 @@ static void fio___srv_listen2_on_close(void *settings_) {
   if (((!l->on_root && fio_srv_is_worker()) ||
        (l->on_root && fio_srv_is_master()))) {
     if (l->hide_from_log)
-      FIO_LOG_DEBUG2("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+      FIO_LOG_DEBUG2("%d stopped listening on %s", fio___srvdata.pid, l->url);
     else
-      FIO_LOG_INFO("(%d) stopped listening on %s", fio___srvdata.pid, l->url);
+      FIO_LOG_INFO("%d stopped listening on %s", fio___srvdata.pid, l->url);
   }
 }
 
@@ -2136,7 +2139,7 @@ FIO_SFUNC void fio___srv_listen2_attach_task(void *udata) {
   int *pfd = (int *)(l + 1);
   int fd = fio_sock_dup(*pfd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
+  FIO_LOG_DEBUG2("%d Called dup(%d) to attach %d as a listening socket.",
                  (int)fio___srvdata.pid,
                  *pfd,
                  fd);
@@ -2144,9 +2147,9 @@ FIO_SFUNC void fio___srv_listen2_attach_task(void *udata) {
   if (l->on_start)
     l->on_start(l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("(%d) started listening on %s", fio___srvdata.pid, l->url);
+    FIO_LOG_DEBUG2("%d started listening on %s", fio___srvdata.pid, l->url);
   else
-    FIO_LOG_INFO("(%d) started listening on %s", fio___srvdata.pid, l->url);
+    FIO_LOG_INFO("%d started listening on %s", fio___srvdata.pid, l->url);
 }
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
@@ -2277,12 +2280,12 @@ static void fio___srv_listen_free(void *l_) {
     l->on_finish(l->protocol, l->udata);
 
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
+    FIO_LOG_DEBUG2("%d stopped listening @ %.*s",
                    getpid(),
                    (int)l->url_len,
                    l->url);
   else
-    FIO_LOG_INFO("(%d) stopped listening @ %.*s",
+    FIO_LOG_INFO("%d stopped listening @ %.*s",
                  getpid(),
                  (int)l->url_len,
                  l->url);
@@ -2335,7 +2338,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   l = fio___srv_listen_dup(l);
   int fd = fio_sock_dup(l->fd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
+  FIO_LOG_DEBUG2("%d Called dup(%d) to attach %d as a listening socket.",
                  (int)fio___srvdata.pid,
                  l->fd,
                  fd);
@@ -2343,9 +2346,9 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   if (l->on_start)
     l->on_start(l->protocol, l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("(%d) started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_DEBUG2("%d started listening @ %s", fio___srvdata.pid, l->url);
   else
-    FIO_LOG_INFO("(%d) started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_INFO("%d started listening @ %s", fio___srvdata.pid, l->url);
   (void)ignr_;
 }
 
@@ -2479,7 +2482,7 @@ FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
   if (!fio_srv_is_open(io))
     return;
   fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
-  FIO_LOG_DEBUG2("(%d) established client connection to %s",
+  FIO_LOG_DEBUG2("%d established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);
   fio_udata_set(io, c->udata);

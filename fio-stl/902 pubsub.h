@@ -27,77 +27,42 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 /* *****************************************************************************
-Letter Testing
+Encryption Testing
 ***************************************************************************** */
-FIO_SFUNC void FIO_NAME_TEST(stl, letter)(void) {
-  fprintf(stderr,
-          "* Testing letter format (pub/sub "
-          "message exchange)\n");
-  struct test_info {
-    char *channel;
-    char *msg;
-    int16_t filter;
-    uint8_t flags;
-  } test_info[] = {
-      {(char *)"My Channel", (char *)"My channel Message", 0, 0},
-      {NULL, (char *)"My filter Message", 1, 255},
-      {(char *)"My Channel and Filter",
-       (char *)"My channel -filter Message",
-       257,
-       4},
-      {(char *)"My Channel and negative Filter",
-       (char *)"My channel - filter Message",
-       -3,
-       8},
-      {0},
-  };
-  for (int i = 0;
-       test_info[i].msg || test_info[i].channel || test_info[i].filter;
-       ++i) {
-    fio_letter_s *l = fio_letter_new_compose(
-        FIO_BUF_INFO2(
-            test_info[i].channel,
-            (test_info[i].channel ? FIO_STRLEN(test_info[i].channel) : 0)),
-        FIO_BUF_INFO2(test_info[i].msg,
-                      (test_info[i].msg ? FIO_STRLEN(test_info[i].msg) : 0)),
-        test_info[i].filter,
-        test_info[i].flags);
-    FIO_ASSERT(fio_letter_filter(l) == test_info[i].filter,
-               "letter filter identity error");
-    FIO_ASSERT(fio_letter_flags(l) == test_info[i].flags,
-               "letter flag identity error");
-    if (test_info[i].msg) {
-      FIO_ASSERT(fio_letter_message_len(l) == FIO_STRLEN(test_info[i].msg),
-                 "letter message length error");
-      FIO_ASSERT(!memcmp(fio_letter_message(l).buf,
-                         test_info[i].msg,
-                         fio_letter_message_len(l)),
-                 "message identity error (%s != %.*s)",
-                 test_info[i].msg,
-                 (int)fio_letter_message_len(l),
-                 fio_letter_message(l).buf);
-    } else {
-      FIO_ASSERT(!fio_letter_message_len(l),
-                 "letter message length error %d != 0",
-                 fio_letter_message_len(l));
-    }
-    if (test_info[i].channel) {
-      FIO_ASSERT(fio_letter_channel_len(l) == FIO_STRLEN(test_info[i].channel),
-                 "letter channel length error");
-      FIO_ASSERT(fio_letter_channel(l).buf &&
-                     !memcmp(fio_letter_channel(l).buf,
-                             test_info[i].channel,
-                             fio_letter_channel_len(l)),
-                 "channel identity error (%s != %.*s)",
-                 test_info[i].channel,
-                 (int)fio_letter_channel_len(l),
-                 fio_letter_channel(l).buf);
-    } else {
-      FIO_ASSERT(!fio_letter_channel_len(l), "letter channel length error");
-    }
 
-    fio_letter_free(l);
-  }
+FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_encryption)(void) {
+  fprintf(stderr, "* Testing pub/sub encryption / decryption.\n");
+  fio_publish_args_s origin = {.channel = FIO_BUF_INFO1("my channel"),
+                               .message = FIO_BUF_INFO1("my message"),
+                               .filter = 0xAA,
+                               .is_json =
+                                   FIO___PUBSUB_JSON | FIO___PUBSUB_CLUSTER};
+  fio___pubsub_message_s *enc = fio___pubsub_message_author(origin);
+  fio___pubsub_message_encrypt(enc);
+  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(enc->data.channel, origin.channel),
+             "channel info error");
+  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(enc->data.message, origin.message),
+             "message info error");
+  FIO_ASSERT(enc->data.filter == origin.filter, "filter info error");
+  FIO_ASSERT(enc->data.is_json == origin.is_json, "flags info error");
+  FIO_MEM_STACK_WIPE(2);
+
+  fio___pubsub_message_s *dec = fio___pubsub_message_alloc(enc->data.udata);
+  dec->data.udata = enc->data.udata;
+  FIO_ASSERT(!fio___pubsub_message_decrypt(dec), "decryption failed");
+  FIO_ASSERT(enc->data.filter == dec->data.filter,
+             "(pubsub) filter enc/dec error");
+  FIO_ASSERT(enc->data.is_json == dec->data.is_json,
+             "(pubsub) is_json enc/dec error");
+  FIO_ASSERT(enc->data.id == dec->data.id, "(pubsub) id enc/dec error");
+  FIO_ASSERT(enc->data.published == dec->data.published,
+             "(pubsub) published enc/dec error");
+  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(enc->data.channel, dec->data.channel),
+             "(pubsub) channel enc/dec error");
+  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(enc->data.message, dec->data.message),
+             "(pubsub) message enc/dec error");
+  fio___pubsub_message_free(enc);
+  fio___pubsub_message_free(dec);
 }
 
 /* *****************************************************************************
@@ -142,12 +107,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
       },
   };
   const int sub_count = (sizeof(sub) / sizeof(sub[0]));
+
 #define FIO___PUBLISH2TEST()                                                   \
   fio_publish(.channel = test_channel,                                         \
               .filter = -127,                                                  \
               .engine = FIO_PUBSUB_CLUSTER);                                   \
   expected += delta;                                                           \
-  fio_queue_perform_all(fio___srv_tasks);
+  fio_queue_perform_all(fio_srv_queue());
+
   for (int i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
     ++delta;
@@ -178,7 +145,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
-  FIO_NAME_TEST(stl, letter)();
+  FIO_NAME_TEST(stl, pubsub_encryption)();
   FIO_NAME_TEST(stl, pubsub_roundtrip)();
   fio___srv_cleanup_at_exit(NULL);
 }

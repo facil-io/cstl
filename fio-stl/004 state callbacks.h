@@ -244,7 +244,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER);
   }
 
-  FIO_LOG_DDEBUG2("(%d) Scheduling %s callbacks.",
+  FIO_LOG_DDEBUG2("%d scheduling %s callbacks.",
                   (int)(fio_thread_getpid()),
                   fio___state_tasks_names[e]);
 

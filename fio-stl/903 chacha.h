@@ -164,7 +164,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                                  "\xaf\x0c\x01\x27\xa9",
                  },
                  {.expected = NULL}};
-    char auth[16] = {0};
+    char auth[24] = {0};
     char buf1[33] = {0};
     char buf2[33] = {0};
     for (size_t t = 0; tests[t].expected; ++t) {
@@ -184,6 +184,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                  "Poly1305 example authentication failed:\n\t%s != %s",
                  buf1,
                  buf2);
+      FIO_ASSERT(!fio_buf2u64u(auth + 16),
+                 "Poly1305 authentication code overflow!");
     }
   }
   { /* test ChaCha20Poly1305 */
@@ -195,7 +197,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
       size_t ad_len;
       char *msg;
       char *expected;
-      char mac[17];
+      char mac[16];
     } tests[] = {
         {
             .key = "\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d"
@@ -285,7 +287,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
     for (size_t i = 0; tests[i].expected; ++i) {
       size_t len = strlen(tests[i].msg);
       char buffer[1024];
-      char mac[16], mac2[16];
+      char mac[24] = {0}, mac2[24] = {0};
       FIO_MEMCPY(buffer, tests[i].msg, len);
       fio_chacha20_poly1305_enc(mac,
                                 buffer,
@@ -316,6 +318,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                                             tests[i].nounce),
                  "fio_chacha20_poly1305_dec returned error for %s",
                  tests[i].msg);
+      FIO_ASSERT(!fio_buf2u64u(mac + 16),
+                 "ChaCha20Poly1305 authentication code overflow!");
+      FIO_ASSERT(!fio_buf2u64u(mac2 + 16),
+                 "ChaCha20Poly1305 authentication code (2) overflow!");
       FIO_ASSERT(
           !memcmp(buffer, tests[i].msg, len),
           "ChaCha20Poly1305 decoding failed for %s\nshould have been %.*s",
