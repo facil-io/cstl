@@ -255,7 +255,8 @@ typedef enum {
   FIO___PUBSUB_SUB = (128 | 1),
   FIO___PUBSUB_UNSUB = (128 | 2),
   FIO___PUBSUB_IDENTIFY = (128 | 4),
-  FIO___PUBSUB_PING = (128 | 8),
+  FIO___PUBSUB_FORWARDER = (128 | 8),
+  FIO___PUBSUB_PING = (128 | 16),
 
   FIO___PUBSUB_HISTORY_START = (128 | 16),
   FIO___PUBSUB_HISTORY_END = (128 | 32),
@@ -403,10 +404,11 @@ struct fio_pubsub_engine_s {
  * This can be called multiple times resulting in re-running the `(p)subscribe`
  * callbacks.
  *
- * NOTE: the root (master) process will call `subscribe` for any channel in any
- * process, while all the other processes will call `subscribe` only for their
- * own channels. This allows engines to use the root (master) process as an
- * exclusive subscription process and publish to `FIO_PUBSUB_LOCAL`.
+ * NOTE: engines are automatically detached from child processes but can be
+ * safely used even so - messages are always forwarded to the engine attached to
+ * the root (master) process.
+ *
+ * NOTE: engines should publish events to `FIO_PUBSUB_LOCAL`.
  */
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine);
 
@@ -987,6 +989,7 @@ FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
       &FIO___PUBSUB_POSTOFFICE.remote_uuids);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.remote_messages);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
+  fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -1000,6 +1003,7 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
       (FIO___PUBSUB_SIBLINGS | FIO___PUBSUB_ROOT);
   FIO___PUBSUB_POSTOFFICE.filter.remote = 0;
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
+  fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
   if (!fio_srv_attach_fd(fio_sock_open2(FIO___PUBSUB_POSTOFFICE.ipc_url,
                                         FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
                          &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
@@ -1425,7 +1429,7 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_author(
   if (args.channel.len)
     FIO_MEMCPY(m->data.channel.buf, args.channel.buf, args.channel.len);
   m->data.channel.buf[args.channel.len] = 0;
-  if (args.message.len)
+  if (args.message.buf)
     FIO_MEMCPY(m->data.message.buf, args.message.buf, args.message.len);
   m->data.message.buf[args.message.len] = 0;
   return m;
@@ -1589,6 +1593,23 @@ is_special_message:
       p->uuid[0] = m->data.published;
     }
     return;
+  case FIO___PUBSUB_FORWARDER: /* fall through */
+  case (FIO___PUBSUB_FORWARDER | FIO___PUBSUB_JSON):
+    if (FIO___PUBSUB_POSTOFFICE.filter.remote) { /* root process */
+      fio___pubsub_message_is_dirty(m);
+      m->data.message.len -= 8;
+      m->data.is_json &= FIO___PUBSUB_JSON;
+      fio_pubsub_engine_s *e = (fio_pubsub_engine_s *)(uintptr_t)fio_buf2u64u(
+          m->data.message.buf + m->data.message.len);
+      m->data.message.buf[m->data.message.len] = 0;
+      e->publish(e, &m->data);
+    } else { /* child process */
+      fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                        fio___pubsub_message_write2io,
+                        m);
+    }
+    return;
+
   case FIO___PUBSUB_HISTORY_START:
     FIO_LOG_DDEBUG2("%d (pubsub) internal history start message received",
                     fio_srv_pid());
@@ -1649,17 +1670,16 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
   return;
 
 external_engine:
-  msg = (fio_msg_s){
-      .io = args.from,
-      .id = args.id ? args.id : fio_rand64(),
-      .published = args.published ? args.published
-                                  : (uint64_t)fio_time2milli(fio_time_real()),
-      .channel = args.channel,
-      .message = args.message,
-      .filter = args.filter,
-      .is_json = args.is_json,
-  };
-  args.engine->publish(args.engine, &msg);
+
+  msg.message = args.message;
+  args.message.buf = NULL;
+  args.message.len += 8;
+
+  m = fio___pubsub_message_author(args);
+  m->data.is_json = ((!!args.is_json) | ((uint8_t)FIO___PUBSUB_FORWARDER));
+  FIO_MEMCPY(m->data.message.buf, msg.message.buf, msg.message.len);
+  fio_u2buf64u(m->data.message.buf + msg.message.len, (uintptr_t)args.engine);
+  fio_srv_defer(fio___publish_message_task, m, NULL);
 }
 
 /* *****************************************************************************
