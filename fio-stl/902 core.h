@@ -52,6 +52,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                    "%s failed @ %zu\n",
                    tests[ifn].name,
                    i);
+        FIO_ASSERT(fio_ct_is_eq(buf + i, buf + (4096 + 32), len),
+                   "fio_ct_is_eq claims that %s failed @ %zu\n",
+                   tests[ifn].name,
+                   i);
         FIO_ASSERT(buf[i + len] == '\xFF', "%s overflow?", tests[ifn].name);
       }
     }

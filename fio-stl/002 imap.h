@@ -153,7 +153,7 @@ iMap Creation Macro
     imap_type *imap = (imap_type *)(a->ary + capa);                            \
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
-    const imap_type hash = hash_fn(pobj);                                      \
+    const imap_type hash = (imap_type)hash_fn(pobj);                           \
     imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */ \
     imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */ \
     tester += (!tester) << a->capa_bits;                                       \

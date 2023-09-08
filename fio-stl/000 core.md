@@ -1,17 +1,17 @@
 ---
-title: facil.io - C micro-framework for web applications
+title: facil.io - C real-time web application framework
 sidebar: 0.8.x/_sidebar.md
 ---
-# facil.io - C micro-framework for web applications
+# facil.io - C Real-Time Web Application Framework
 
-[facil.io](http://facil.io) is a C micro-framework for web applications. facil.io includes:
+[facil.io](http://facil.io) focuses on providing solutions for real-time web applications. facil.io includes:
 
-* A fast HTTP/1.1 and Websocket static file + application server.
-* Support for custom network protocols for both server and client connections.
-* Dynamic types designed with web applications in mind (Strings, Hashes, Arrays etc').
+* A fast HTTP/1.1, Websocket and SSE application server.
+* A zero-dependency Pub/Sub cluster-enabled message bus API.
 * Performant JSON parsing and formatting for easy network communication.
+* Dynamic types designed with web applications in mind (Strings, Hashes, Arrays etc').
+* Support for custom network protocols for both server and client connections.
 * An easy solution to [the C10K problem](http://www.kegel.com/c10k.html).
-* A pub/sub process cluster engine for local and Websocket pub/sub.
 * Optional connectivity with Redis.
 
 This header library is the **C Server Toolbox Library** that makes it all happen.
@@ -65,15 +65,17 @@ In addition, the core Server Toolbox lIbrary (STL) includes helpers for common t
 
 * And much more...
 
+-------------------------------------------------------------------------------
+
+## Compilation Modes
+
+The Server Toolbox lIbrary types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
+
 ### Static Functions by Default
 
 By default, facil.io will generate static functions where possible.
 
 To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to generate externally visible code.
-
-### Compilation Modes
-
-The Server Toolbox lIbrary types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
 
 #### `FIO_EXTERN`
 
@@ -109,15 +111,25 @@ When defined, this macro will force full code generation.
 
 **Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Server Toolbox lIbrary header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
 
-#### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
+-------------------------------------------------------------------------------
 
-Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation.
+## Thread Safety
+
+Some modules require thread safety locks, such as the timer module, queue module, memory allocator and socket polling. The facil.io library will default to it's own spin-lock based implementation unless `FIO_USE_THREAD_MUTEX` or `FIO_USE_THREAD_MUTEX_TMP` are defined.
+
+#### `FIO_USE_THREAD_MUTEX` and `FIO_USE_THREAD_MUTEX_TMP`
 
 This default choice can be changed so facil.io uses the OS's native `mutex` type (`pthread_mutex_t` on POSIX systems) by setting the `FIO_USE_THREAD_MUTEX` or `FIO_USE_THREAD_MUTEX_TMP` to true (`1`).
 
-The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a single include statement.
+The `FIO_USE_THREAD_MUTEX_TMP` macro will alter the default behavior for only a single `include` statement.
 
-The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future include statements.
+The `FIO_USE_THREAD_MUTEX` macro will alter the default behavior for all future `include` statements.
+
+-------------------------------------------------------------------------------
+
+## Unaligned Memory Access
+
+By default facil.io attempts to automatically detect systems that allow for unaligned memory access and use optimizations that require this feature. This can be changed by setting `FIO_UNALIGNED_ACCESS` to `0`.
 
 #### `FIO_UNALIGNED_ACCESS`
 
@@ -127,7 +139,9 @@ If set to true (`1`) this MACRO will attempt to detect support of unaligned memo
 
 If set to true (`1`) this MACRO will indicate that the facil.io library should allow for unaligned memory access, skipping memory alignment requirements in some cases (such as the in the `fio_buf2uXX` function implementation).
 
-### Multi-Module Inclusion Helpers
+-------------------------------------------------------------------------------
+
+## Multi-Module Inclusion Helpers
 
 #### `FIO_CORE`
 
@@ -959,6 +973,10 @@ Performs the operation indicated in constant time.
 
     Returns `a` if a >= `b` (performs a **signed** comparison).
 
+
+- `fio_ct_is_eq(const void * a, const void * b, len)`
+
+    Returns 1 if memory regions are equal. Should be resistant to timing attacks.
 
 -------------------------------------------------------------------------------
 

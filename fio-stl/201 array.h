@@ -136,7 +136,7 @@ Dynamic Arrays - type
 /** an Array type. */
 typedef struct FIO_NAME(FIO_ARRAY_NAME, s) {
   /* start common header (with embedded array type) */
-  /** the offser to the first item. */
+  /** the offset to the first item. */
   uint32_t start;
   /** The offset to the first empty location the array. */
   uint32_t end;
@@ -463,7 +463,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0: return ary->capa;
+  case 0: return (uint32_t)ary->capa;
   case 1: return FIO_ARRAY_EMBEDDED_CAPA;
   }
   return 0;
@@ -667,7 +667,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     abs_capa += ary->end - ary->start;
     capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= ary->capa)
-      return ary->capa;
+      return (uint32_t)ary->capa;
     /* objects don't move, use only realloc */
     if ((capa_ >= 0) || (capa_ < 0 && ary->start > 0)) {
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(ary->ary,
@@ -675,7 +675,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                sizeof(*tmp) * capa,
                                                sizeof(*tmp) * ary->end);
       if (!tmp)
-        return ary->capa;
+        return (uint32_t)ary->capa;
       if (!ary->ary)
         FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
@@ -685,7 +685,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
-        return ary->capa;
+        return (uint32_t)ary->capa;
       if (!ary->ary)
         FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
@@ -976,7 +976,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
   if (start_at >= 0) {
     /* seek forwards */
     if ((uint32_t)start_at >= count)
-      start_at = count;
+      start_at = (int32_t)count;
     while ((uint32_t)start_at < count) {
       if (FIO_ARRAY_TYPE_CMP(a[start_at], data))
         return start_at;
@@ -1081,7 +1081,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   size_t count;
   if (!a)
-    return c;
+    return (uint32_t)c;
   count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
 
   size_t i = 0;
@@ -1099,10 +1099,10 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
     FIO_MEMSET(a + i, 0, sizeof(*a) * c);
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
-    ary->end = ary->start + i;
+    ary->end = (uint32_t)(ary->start + i);
     return (uint32_t)c;
   }
-  ary->start = i;
+  ary->start = (uint32_t)i;
   return (uint32_t)c;
 }
 
@@ -1164,7 +1164,8 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
     if (ary->end == ary->capa) {
       if (!ary->start) {
         if (FIO_NAME(FIO_ARRAY_NAME,
-                     reserve)(ary_, FIO_ARRAY_ADD2CAPA(ary->capa)) == ary->end)
+                     reserve)(ary_, (uint32_t)FIO_ARRAY_ADD2CAPA(ary->capa)) ==
+            ary->end)
           goto invalid;
       } else {
         const uint32_t new_start = (ary->start >> 2);
@@ -1265,9 +1266,10 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
         if (!ary->start)
           goto invalid;
       } else {
-        const uint32_t new_end = ary->capa - ((ary->capa - ary->end) >> 2);
-        const uint32_t count = ary->end - ary->start;
-        const uint32_t new_start = new_end - count;
+        const uint32_t new_end =
+            (uint32_t)(ary->capa - ((ary->capa - ary->end) >> 2));
+        const uint32_t count = (uint32_t)(ary->end - ary->start);
+        const uint32_t new_start = (uint32_t)(new_end - count);
         if (count)
           FIO_MEMMOVE(ary->ary + new_start,
                       ary->ary + ary->start,
@@ -1393,7 +1395,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
     return (uint32_t)-1;
 
   if ((uint32_t)start_at >= count)
-    return count;
+    return (uint32_t)count;
 
   FIO_NAME(FIO_ARRAY_NAME, each_s)
   e = {
@@ -1412,7 +1414,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
       return (uint32_t)(e.index);
     }
   }
-  return e.index;
+  return (uint32_t)e.index;
 }
 
 /* *****************************************************************************

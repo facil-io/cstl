@@ -565,6 +565,7 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   return fio___memcmp256(a, b, len);
 #endif /* FIO_LIMIT_INTRINSIC_BUFFER */
 }
+
 /* *****************************************************************************
 Alternatives - cleanup
 ***************************************************************************** */

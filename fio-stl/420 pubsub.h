@@ -2106,11 +2106,12 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
       fio_sock_open(NULL,
                     url.buf + 1,
                     FIO_SOCK_UDP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
+  FIO_ASSERT(fd_udp != -1, "couldn't open broadcast socket!");
   int fd_tcp =
       fio_sock_open(NULL,
                     url.buf + 1,
                     FIO_SOCK_TCP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
-  FIO_ASSERT(fd_udp != -1 && fd_tcp != -1, "couldn't open broadcast socket!");
+  FIO_ASSERT(fd_tcp != -1, "couldn't open cluster-peer listening socket!");
   {
     int enabled = 1;
     setsockopt(fd_udp, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));

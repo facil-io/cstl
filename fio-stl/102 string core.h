@@ -2263,7 +2263,7 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
                fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
                fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
         last += 5;
-        act_len += 1;
+        act_len += 3; /* uXXXX length maxes out at 4 ... I think */
       }
       pr = last;
     }
@@ -2278,8 +2278,17 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
   end = pr + encoded_len;
   while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
     const size_t slice_len = pr - last;
-    if (slice_len)
+    if (slice_len) {
       FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+      /* test for '+' in the slice that has no % characters */
+      uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+      uint8_t *end_plus = start_plus + slice_len;
+      while (
+          start_plus && start_plus < end_plus &&
+          (start_plus =
+               (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+        *(start_plus++) = ' ';
+    }
     dest->len += slice_len;
     last = pr + 1;
     if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
@@ -2288,15 +2297,38 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
     } else if (end - last > 4 && (last[0] | 32) == 'u' &&
                fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
                fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
-      dest->buf[dest->len++] = (fio_c2i(last[1]) << 4) | fio_c2i(last[2]);
-      dest->buf[dest->len++] = (fio_c2i(last[3]) << 4) | fio_c2i(last[4]);
+      uint32_t u = (((fio_c2i(last[1]) << 4) | fio_c2i(last[2])) << 8) |
+                   ((fio_c2i(last[3]) << 4) | fio_c2i(last[4]));
+      if (end - last > 9 &&
+          ((fio_c2i(last[1]) << 4) | fio_c2i(last[2])) == 0xD8U &&
+          last[5] == '%' && last[6] == 'u' && fio_c2i(last[7]) < 16 &&
+          fio_c2i(last[8]) < 16 && fio_c2i(last[9]) < 16 &&
+          fio_c2i(last[10]) < 16) {
+        /* surrogate-pair (high/low code points) */
+        u = (u & 0x03FF) << 10;
+        u |= (((((fio_c2i(last[7]) << 4) | fio_c2i(last[8])) << 8) |
+               ((fio_c2i(last[9]) << 4) | fio_c2i(last[10]))) &
+              0x03FF);
+        u += 0x10000;
+        last += 6;
+      }
+      dest->len += fio___string_utf8_write((uint8_t *)dest->buf + dest->len, u);
       last += 5;
+    } else {
+      dest->buf[dest->len++] = '%';
     }
     pr = last;
   }
   if (end > last) {
     const size_t slice_len = end - last;
     FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    /* test for '+' in the slice that has no % characters */
+    uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+    uint8_t *end_plus = start_plus + slice_len;
+    while (start_plus && start_plus < end_plus &&
+           (start_plus =
+                (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+      *(start_plus++) = ' ';
     dest->len += slice_len;
   }
   dest->buf[dest->len] = 0;

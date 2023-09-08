@@ -1457,6 +1457,68 @@ FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
 }
 
 /* *****************************************************************************
+Constant-Time Comparison Test
+***************************************************************************** */
+
+/** A timing attack resistant memory comparison function. */
+FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
+  uint64_t flag = 0;
+  const char *a = (const char *)a_;
+  const char *b = (const char *)b_;
+  if (bytes & 63) {
+    for (size_t i = 0; i < 8; ++i)
+      ua[i] = ub[i] = 0;
+    if (bytes & 32) {
+      fio_memcpy32(ua, a);
+      fio_memcpy32(ub, b);
+      a += 32;
+      b += 32;
+    }
+    if (bytes & 16) {
+      fio_memcpy16(ua + 4, a);
+      fio_memcpy16(ub + 4, b);
+      a += 16;
+      b += 16;
+    }
+    if (bytes & 8) {
+      fio_memcpy8(ua + 6, a);
+      fio_memcpy8(ub + 6, b);
+      a += 8;
+      b += 8;
+    }
+    if (bytes & 4) {
+      fio_memcpy4((uint32_t *)ua + 14, a);
+      fio_memcpy4((uint32_t *)ub + 14, b);
+      a += 4;
+      b += 4;
+    }
+    if (bytes & 2) {
+      fio_memcpy2((uint16_t *)ua + 30, a);
+      fio_memcpy2((uint16_t *)ub + 30, b);
+      a += 2;
+      b += 2;
+    }
+    if (bytes & 1) {
+      ((char *)ua)[62] = *(a++);
+      ((char *)ub)[62] = *(b++);
+    }
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+  }
+  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+    fio_memcpy64(ua, a);
+    fio_memcpy64(ub, b);
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    a += 64;
+    b += 64;
+  }
+  return !flag;
+}
+
+/* *****************************************************************************
 Bit rotation
 ***************************************************************************** */
 
@@ -2304,7 +2366,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_WEBSOCKET_PARSER
 #endif
 
-#if defined(FIO_POLL) || defined(FIO_SERVER)
+#if defined(FIO_POLL) || defined(FIO_SERVER) || defined(FIO_PUBSUB)
 #undef FIO_SOCK
 #define FIO_SOCK
 #endif
@@ -3348,6 +3410,7 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   return fio___memcmp256(a, b, len);
 #endif /* FIO_LIMIT_INTRINSIC_BUFFER */
 }
+
 /* *****************************************************************************
 Alternatives - cleanup
 ***************************************************************************** */
@@ -5058,7 +5121,7 @@ iMap Creation Macro
     imap_type *imap = (imap_type *)(a->ary + capa);                            \
     const imap_type pos_mask = (imap_type)(capa - (imap_type)1);               \
     const imap_type hash_mask = (imap_type)~pos_mask;                          \
-    const imap_type hash = hash_fn(pobj);                                      \
+    const imap_type hash = (imap_type)hash_fn(pobj);                           \
     imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */ \
     imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */ \
     tester += (!tester) << a->capa_bits;                                       \
@@ -19008,7 +19071,7 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
                fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
                fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
         last += 5;
-        act_len += 1;
+        act_len += 3; /* uXXXX length maxes out at 4 ... I think */
       }
       pr = last;
     }
@@ -19023,8 +19086,17 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
   end = pr + encoded_len;
   while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
     const size_t slice_len = pr - last;
-    if (slice_len)
+    if (slice_len) {
       FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+      /* test for '+' in the slice that has no % characters */
+      uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+      uint8_t *end_plus = start_plus + slice_len;
+      while (
+          start_plus && start_plus < end_plus &&
+          (start_plus =
+               (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+        *(start_plus++) = ' ';
+    }
     dest->len += slice_len;
     last = pr + 1;
     if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
@@ -19033,15 +19105,38 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
     } else if (end - last > 4 && (last[0] | 32) == 'u' &&
                fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
                fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
-      dest->buf[dest->len++] = (fio_c2i(last[1]) << 4) | fio_c2i(last[2]);
-      dest->buf[dest->len++] = (fio_c2i(last[3]) << 4) | fio_c2i(last[4]);
+      uint32_t u = (((fio_c2i(last[1]) << 4) | fio_c2i(last[2])) << 8) |
+                   ((fio_c2i(last[3]) << 4) | fio_c2i(last[4]));
+      if (end - last > 9 &&
+          ((fio_c2i(last[1]) << 4) | fio_c2i(last[2])) == 0xD8U &&
+          last[5] == '%' && last[6] == 'u' && fio_c2i(last[7]) < 16 &&
+          fio_c2i(last[8]) < 16 && fio_c2i(last[9]) < 16 &&
+          fio_c2i(last[10]) < 16) {
+        /* surrogate-pair (high/low code points) */
+        u = (u & 0x03FF) << 10;
+        u |= (((((fio_c2i(last[7]) << 4) | fio_c2i(last[8])) << 8) |
+               ((fio_c2i(last[9]) << 4) | fio_c2i(last[10]))) &
+              0x03FF);
+        u += 0x10000;
+        last += 6;
+      }
+      dest->len += fio___string_utf8_write((uint8_t *)dest->buf + dest->len, u);
       last += 5;
+    } else {
+      dest->buf[dest->len++] = '%';
     }
     pr = last;
   }
   if (end > last) {
     const size_t slice_len = end - last;
     FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
+    /* test for '+' in the slice that has no % characters */
+    uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+    uint8_t *end_plus = start_plus + slice_len;
+    while (start_plus && start_plus < end_plus &&
+           (start_plus =
+                (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+      *(start_plus++) = ' ';
     dest->len += slice_len;
   }
   dest->buf[dest->len] = 0;
@@ -22878,7 +22973,7 @@ Dynamic Arrays - type
 /** an Array type. */
 typedef struct FIO_NAME(FIO_ARRAY_NAME, s) {
   /* start common header (with embedded array type) */
-  /** the offser to the first item. */
+  /** the offset to the first item. */
   uint32_t start;
   /** The offset to the first empty location the array. */
   uint32_t end;
@@ -23205,7 +23300,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, capa)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
-  case 0: return ary->capa;
+  case 0: return (uint32_t)ary->capa;
   case 1: return FIO_ARRAY_EMBEDDED_CAPA;
   }
   return 0;
@@ -23409,7 +23504,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     abs_capa += ary->end - ary->start;
     capa = FIO_ARRAY_SIZE2WORDS((abs_capa));
     if (abs_capa <= ary->capa)
-      return ary->capa;
+      return (uint32_t)ary->capa;
     /* objects don't move, use only realloc */
     if ((capa_ >= 0) || (capa_ < 0 && ary->start > 0)) {
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(ary->ary,
@@ -23417,7 +23512,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
                                                sizeof(*tmp) * capa,
                                                sizeof(*tmp) * ary->end);
       if (!tmp)
-        return ary->capa;
+        return (uint32_t)ary->capa;
       if (!ary->ary)
         FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
@@ -23427,7 +23522,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
       const uint32_t count = ary->end - ary->start;
       if (!tmp)
-        return ary->capa;
+        return (uint32_t)ary->capa;
       if (!ary->ary)
         FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
@@ -23718,7 +23813,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
   if (start_at >= 0) {
     /* seek forwards */
     if ((uint32_t)start_at >= count)
-      start_at = count;
+      start_at = (int32_t)count;
     while ((uint32_t)start_at < count) {
       if (FIO_ARRAY_TYPE_CMP(a[start_at], data))
         return start_at;
@@ -23823,7 +23918,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   size_t count;
   if (!a)
-    return c;
+    return (uint32_t)c;
   count = FIO_NAME(FIO_ARRAY_NAME, count)(ary_);
 
   size_t i = 0;
@@ -23841,10 +23936,10 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, remove2)(FIO_ARRAY_PTR ary_,
     FIO_MEMSET(a + i, 0, sizeof(*a) * c);
   }
   if (!FIO_ARRAY_IS_EMBEDDED_PTR(ary, a)) {
-    ary->end = ary->start + i;
+    ary->end = (uint32_t)(ary->start + i);
     return (uint32_t)c;
   }
-  ary->start = i;
+  ary->start = (uint32_t)i;
   return (uint32_t)c;
 }
 
@@ -23906,7 +24001,8 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, push)(FIO_ARRAY_PTR ary_,
     if (ary->end == ary->capa) {
       if (!ary->start) {
         if (FIO_NAME(FIO_ARRAY_NAME,
-                     reserve)(ary_, FIO_ARRAY_ADD2CAPA(ary->capa)) == ary->end)
+                     reserve)(ary_, (uint32_t)FIO_ARRAY_ADD2CAPA(ary->capa)) ==
+            ary->end)
           goto invalid;
       } else {
         const uint32_t new_start = (ary->start >> 2);
@@ -24007,9 +24103,10 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, unshift)(FIO_ARRAY_PTR ary_,
         if (!ary->start)
           goto invalid;
       } else {
-        const uint32_t new_end = ary->capa - ((ary->capa - ary->end) >> 2);
-        const uint32_t count = ary->end - ary->start;
-        const uint32_t new_start = new_end - count;
+        const uint32_t new_end =
+            (uint32_t)(ary->capa - ((ary->capa - ary->end) >> 2));
+        const uint32_t count = (uint32_t)(ary->end - ary->start);
+        const uint32_t new_start = (uint32_t)(new_end - count);
         if (count)
           FIO_MEMMOVE(ary->ary + new_start,
                       ary->ary + ary->start,
@@ -24135,7 +24232,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
     return (uint32_t)-1;
 
   if ((uint32_t)start_at >= count)
-    return count;
+    return (uint32_t)count;
 
   FIO_NAME(FIO_ARRAY_NAME, each_s)
   e = {
@@ -24154,7 +24251,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
       return (uint32_t)(e.index);
     }
   }
-  return e.index;
+  return (uint32_t)e.index;
 }
 
 /* *****************************************************************************
@@ -25042,6 +25139,11 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 Map Implementation - inlined static functions
 ***************************************************************************** */
 
+#ifndef FIO_MAP_CAPA_BITS_LIMIT
+/* Note: cannot be more than 31 bits unless some of the code is rewritten. */
+#define FIO_MAP_CAPA_BITS_LIMIT 31
+#endif
+
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
@@ -25336,7 +25438,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       if (has_possible_match) {
         /* there was a 7 bit match in one of the bytes in this 8 byte group */
         for (size_t i = 0; i < 8; ++i) {
-          const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+          const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
           if (imap[tmp] != bhash)
             continue;
           /* test key and hash equality */
@@ -25365,7 +25467,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
         continue;
       /* there was a 7 bit match for a possible free space in this group */
       for (int i = 0; i < 8; ++i) {
-        const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+        const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
         if (!imap[tmp])
           return (r = tmp); /* empty slot always ends search */
         if (r > pos_mask && imap[tmp] == 255)
@@ -25376,25 +25478,25 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
   } /* treat as array */
   for (size_t i = 0; i < capa; ++i) {
     if (!imap[i])
-      return (r = i);
+      return (r = (uint32_t)i);
     if (imap[i] == bhash) {
       /* test key and hash equality */
       if (FIO_NAME(FIO_MAP_NAME, __is_eq_hash)(o->map + i, hash)) {
         if (FIO_MAP_KEY_CMP(o->map[i].key, key)) {
           guard_print = 0;
-          return (r = i);
+          return (r = (uint32_t)i);
         }
         if (!(--guard)) {
           if (!guard_print)
             FIO_LOG_SECURITY("hash map " FIO_MACRO2STR(
                 FIO_NAME(FIO_MAP_NAME, s)) " under attack?");
           guard_print = 1;
-          return (r = i);
+          return (r = (uint32_t)i);
         }
       }
     }
     if (imap[i] == 0xFF)
-      r = i; /* a free spot is available*/
+      r = (uint32_t)i; /* a free spot is available*/
   }
   return r;
 }
@@ -25463,7 +25565,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, s)
                                         uint32_t bits,
                                         uint32_t internal) {
   FIO_NAME(FIO_MAP_NAME, s) cpy = {0};
-  if (bits > 31)
+  if (bits > FIO_MAP_CAPA_BITS_LIMIT)
     return cpy;
   size_t capa = FIO_MAP_CAPA(bits);
   cpy.map = (FIO_NAME(FIO_MAP_NAME, node_s) *)
@@ -25555,7 +25657,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   capa += o->count;
-  if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> 31))
+  if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> FIO_MAP_CAPA_BITS_LIMIT))
     return;
   uint_fast8_t bits = o->bits + 1;
   while (FIO_MAP_CAPA(bits) < capa)
@@ -26231,7 +26333,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
     e.value = i.value;
 #endif
     if (e.task(&e))
-      return e.index + 1;
+      return (uint32_t)(e.index + 1);
   }
   return o->count;
 }
@@ -26386,11 +26488,12 @@ Map Cleanup
 
 #endif /* FIO_EXTERN_COMPLETE */
 
-#undef FIO_MAP_GET_T
 #undef FIO_MAP_ARRAY_LOG_LIMIT
 #undef FIO_MAP_ATTACK_LIMIT
 #undef FIO_MAP_CAPA
+#undef FIO_MAP_CAPA_BITS_LIMIT
 #undef FIO_MAP_CUCKOO_STEPS
+#undef FIO_MAP_GET_T
 #undef FIO_MAP_HASH_FN
 #undef FIO_MAP_IS_SPARSE
 #undef FIO_MAP_KEY
@@ -26409,6 +26512,7 @@ Map Cleanup
 #undef FIO_MAP_RECALC_HASH
 #undef FIO_MAP_SEEK_LIMIT
 #undef FIO_MAP_T
+#undef FIO_MAP_TEST
 #undef FIO_MAP_VALUE
 #undef FIO_MAP_VALUE_BSTR
 #undef FIO_MAP_VALUE_COPY
@@ -26419,7 +26523,6 @@ Map Cleanup
 #undef FIO_MAP_VALUE_INTERNAL
 #undef FIO_OMAP_NAME
 #undef FIO_UMAP_NAME
-#undef FIO_MAP_TEST
 
 #endif /* FIO_MAP_NAME */
 /* ************************************************************************* */
@@ -27280,8 +27383,8 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *nounce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
-  if (((auth[0] != fio_buf2u64_le(mac)) ||
-       (auth[1] != fio_buf2u64_le(((char *)mac + 8)))))
+  if (((auth[0] ^ fio_buf2u64u(mac)) |
+       (auth[1] ^ fio_buf2u64u(((char *)mac + 8)))))
     return -1;
   fio_chacha20(data, len, key, nounce, 1);
   return 0;
@@ -33706,11 +33809,12 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
       fio_sock_open(NULL,
                     url.buf + 1,
                     FIO_SOCK_UDP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
+  FIO_ASSERT(fd_udp != -1, "couldn't open broadcast socket!");
   int fd_tcp =
       fio_sock_open(NULL,
                     url.buf + 1,
                     FIO_SOCK_TCP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
-  FIO_ASSERT(fd_udp != -1 && fd_tcp != -1, "couldn't open broadcast socket!");
+  FIO_ASSERT(fd_tcp != -1, "couldn't open cluster-peer listening socket!");
   {
     int enabled = 1;
     setsockopt(fd_udp, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
@@ -35173,13 +35277,13 @@ fio_str_info_s fio_http_request_header(fio_http_s *h,
                                        fio_str_info_s name,
                                        size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, index);
+  return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, (int32_t)index);
 }
 fio_str_info_s fio_http_response_header(fio_http_s *h,
                                         fio_str_info_s name,
                                         size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, index);
+  return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, (int32_t)index);
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -36075,7 +36179,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     return;
   if (!status || status > 1000)
     status = 404;
-  h->status = status;
+  h->status = (uint32_t)status;
   FIO_STR_INFO_TMP_VAR(filename, 127);
   /* read static error code file */
   fio_string_write2(&filename,
@@ -38818,7 +38922,7 @@ static int fio_http1_on_expect(void *udata) {
   c->h = h;
   fio_undup(c->io);
   const fio_buf_info_s response =
-      FIO_BUF_INFO1("HTTP/1.1 100 Continue\r\n\r\n");
+      FIO_BUF_INFO1((char *)"HTTP/1.1 100 Continue\r\n\r\n");
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
 response_sent:
@@ -38893,7 +38997,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
   size_t r = fio_read(io, c->buf + c->len, c->capa - c->len);
   if (!r) /* nothing happened */
     return;
-  c->len = r;
+  c->len = (uint32_t)r;
   if (prior_knowledge.buf[0] != c->buf[0] ||
       FIO_MEMCMP(
           prior_knowledge.buf,
@@ -39892,8 +39996,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 FIOBJ compilation settings (type names and JSON nesting limits).
 
 Type Naming Macros for FIOBJ types. By default, results in:
-- fiobj_true()
-- fiobj_false()
+- fiobj_true()     (constant, cannot be changed except manually)
+- fiobj_false()    (constant, cannot be changed except manually)
 - fiobj_null()
 - fiobj_num_new() ... (etc')
 - fiobj_float_new() ... (etc')
@@ -39902,12 +40006,6 @@ Type Naming Macros for FIOBJ types. By default, results in:
 - fiobj_hash_new() ... (etc')
 ***************************************************************************** */
 
-#ifndef FIOBJ___NAME_TRUE
-#define FIOBJ___NAME_TRUE true
-#endif
-#ifndef FIOBJ___NAME_FALSE
-#define FIOBJ___NAME_FALSE false
-#endif
 #ifndef FIOBJ___NAME_NULL
 #define FIOBJ___NAME_NULL null
 #endif
@@ -40117,14 +40215,10 @@ FIOBJ Primitives (NULL, True, False)
 ***************************************************************************** */
 
 /** Returns the `true` primitive. */
-FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(void) {
-  return (FIOBJ)(FIOBJ_T_TRUE);
-}
+FIO_IFUNC FIOBJ fiobj_true(void) { return (FIOBJ)(FIOBJ_T_TRUE); }
 
 /** Returns the `false` primitive. */
-FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(void) {
-  return (FIOBJ)(FIOBJ_T_FALSE);
-}
+FIO_IFUNC FIOBJ fiobj_false(void) { return (FIOBJ)(FIOBJ_T_FALSE); }
 
 /** Returns the `nil` / `null` primitive. */
 FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_NULL)(void) {
@@ -41818,13 +41912,11 @@ static inline void fio_json_on_null(fio_json_parser_s *p) {
 }
 /** a TRUE object was detected */
 static inline void fio_json_on_true(fio_json_parser_s *p) {
-  fiobj_json_add2parser((fiobj_json_parser_s *)p,
-                        FIO_NAME(fiobj, FIOBJ___NAME_TRUE)());
+  fiobj_json_add2parser((fiobj_json_parser_s *)p, fiobj_true());
 }
 /** a FALSE object was detected */
 static inline void fio_json_on_false(fio_json_parser_s *p) {
-  fiobj_json_add2parser((fiobj_json_parser_s *)p,
-                        FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
+  fiobj_json_add2parser((fiobj_json_parser_s *)p, fiobj_false());
 }
 /** a Numeral was detected (long long). */
 static inline void fio_json_on_number(fio_json_parser_s *p, long long i) {
@@ -43417,6 +43509,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                    "%s failed @ %zu\n",
                    tests[ifn].name,
                    i);
+        FIO_ASSERT(fio_ct_is_eq(buf + i, buf + (4096 + 32), len),
+                   "fio_ct_is_eq claims that %s failed @ %zu\n",
+                   tests[ifn].name,
+                   i);
         FIO_ASSERT(buf[i + len] == '\xFF', "%s overflow?", tests[ifn].name);
       }
     }
@@ -43849,30 +43945,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                "invalid FIOBJ type should be FIOBJ_T_NULL.");
     FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(o, FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "invalid FIOBJ is NOT a fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_true(),
                                        FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_true() is NOT fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_false(),
                                        FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_false() is NOT fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
-                                       FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_false(), fiobj_true()),
                "fiobj_false() is NOT fiobj_true().");
     FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_NULL)()) == FIOBJ_T_NULL,
                "fiobj_null() type should be FIOBJ_T_NULL.");
-    FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()) == FIOBJ_T_TRUE,
+    FIO_ASSERT(FIOBJ_TYPE(fiobj_true()) == FIOBJ_T_TRUE,
                "fiobj_true() type should be FIOBJ_T_TRUE.");
-    FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)()) ==
-                   FIOBJ_T_FALSE,
+    FIO_ASSERT(FIOBJ_TYPE(fiobj_false()) == FIOBJ_T_FALSE,
                "fiobj_false() type should be FIOBJ_T_FALSE.");
     FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_NULL)(),
                                       FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_null() should be equal to self.");
-    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(),
-                                      FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()),
+    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(fiobj_true(), fiobj_true()),
                "fiobj_true() should be equal to self.");
-    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
-                                      FIO_NAME(fiobj, FIOBJ___NAME_FALSE)()),
+    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(fiobj_false(), fiobj_false()),
                "fiobj_false() should be equal to self.");
   }
   {
@@ -44041,7 +44133,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), shift)(a, &shifted);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), pop)(a, &popped);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), set)
-    (a, 1, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(), &set);
+    (a, 1, fiobj_true(), &set);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), remove)(a, 2, &removed);
     fiobj_free(a);
     if (1) {
@@ -44138,7 +44230,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     fiobj_free(k);
     k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(2);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
-    (o, fiobj2hash(o, k), k, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(), &set);
+    (o, fiobj2hash(o, k), k, fiobj_true(), &set);
     fiobj_free(k);
     FIO_ASSERT(set, "fiobj_hash_set2 didn't copy information to old pointer?");
     FIO_ASSERT(removed,
@@ -44188,9 +44280,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
       (a, FIO_NAME(fiobj, FIOBJ___NAME_NULL)());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
-      (a, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)());
+      (a, fiobj_true());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
-      (a, FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
+      (a, fiobj_false());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
       (a, FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(0.42));
 
@@ -44945,6 +45037,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
       int f = fio_memcmp(&a, &b, sizeof(a));
       FIO_ASSERT((s < 0 && f < 0) || (s > 0 && f > 0) || (!s && !f),
                  "fio_memcmp != memcmp (result meaning, not value).");
+      FIO_ASSERT(fio_ct_is_eq(&a, &b, sizeof(a)) == (!s),
+                 "fio_ct_is_eq differs from memcmp result");
     }
   }
   { /* test fio_memchr and fio_strlen */
@@ -45239,12 +45333,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
                "fio_memcmp sanity test FAILED (%zu eq)",
                mem_len);
+    FIO_ASSERT(fio_ct_is_eq(mem + mem_len, mem, mem_len),
+               "fio_ct_is_eq sanity test FAILED (%zu eq)",
+               mem_len);
     {
       mem[mem_len - 2]--;
       int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
       int r2 = memcmp(mem + mem_len, mem, mem_len);
       FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
                  "fio_memcmp sanity test FAILED (%zu !eq)",
+                 mem_len);
+      FIO_ASSERT(!fio_ct_is_eq(mem + mem_len, mem, mem_len),
+                 "fio_ct_is_eq sanity test FAILED (%zu !eq)",
                  mem_len);
       mem[mem_len - 2]++;
     }
@@ -45290,6 +45390,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
             mem_len,
             (size_t)(end - start),
             repetitions);
+
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = fio_ct_is_eq(mem + mem_len, mem, mem_len);
+      FIO_COMPILER_GUARD;
+      if (!cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tfio_ct_is_eq\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
     free(mem);
   }
 

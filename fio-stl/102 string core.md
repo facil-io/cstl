@@ -434,6 +434,31 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 
 Writes decoded base64 data to String.
 
+### Core String URL escaping support
+
+#### `fio_string_write_url_enc`
+
+```c
+int fio_string_write_url_enc(fio_str_info_s *restrict dest,
+                             fio_string_realloc_fn reallocate,
+                             const void *raw,
+                             size_t len);
+```
+
+Writes data to String using URL encoding (a.k.a., percent encoding). Always encodes spaces as `%20` rather than `+`.
+
+#### `fio_string_write_url_dec`
+
+```c
+int fio_string_write_url_dec(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             const void *encoded,
+                             size_t len);
+```
+
+Writes decoded URL data to String. Decodes "percent encoding" as well as spaces encoded using `+`.
+
+**Note**: the decoding function reads the non-standard `"%uXXXX"` as UTF-8 encoded data.
 
 ### Core String HTML escaping support
 

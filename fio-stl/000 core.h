@@ -1420,6 +1420,68 @@ FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
 }
 
 /* *****************************************************************************
+Constant-Time Comparison Test
+***************************************************************************** */
+
+/** A timing attack resistant memory comparison function. */
+FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
+  uint64_t flag = 0;
+  const char *a = (const char *)a_;
+  const char *b = (const char *)b_;
+  if (bytes & 63) {
+    for (size_t i = 0; i < 8; ++i)
+      ua[i] = ub[i] = 0;
+    if (bytes & 32) {
+      fio_memcpy32(ua, a);
+      fio_memcpy32(ub, b);
+      a += 32;
+      b += 32;
+    }
+    if (bytes & 16) {
+      fio_memcpy16(ua + 4, a);
+      fio_memcpy16(ub + 4, b);
+      a += 16;
+      b += 16;
+    }
+    if (bytes & 8) {
+      fio_memcpy8(ua + 6, a);
+      fio_memcpy8(ub + 6, b);
+      a += 8;
+      b += 8;
+    }
+    if (bytes & 4) {
+      fio_memcpy4((uint32_t *)ua + 14, a);
+      fio_memcpy4((uint32_t *)ub + 14, b);
+      a += 4;
+      b += 4;
+    }
+    if (bytes & 2) {
+      fio_memcpy2((uint16_t *)ua + 30, a);
+      fio_memcpy2((uint16_t *)ub + 30, b);
+      a += 2;
+      b += 2;
+    }
+    if (bytes & 1) {
+      ((char *)ua)[62] = *(a++);
+      ((char *)ub)[62] = *(b++);
+    }
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+  }
+  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+    fio_memcpy64(ua, a);
+    fio_memcpy64(ub, b);
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    a += 64;
+    b += 64;
+  }
+  return !flag;
+}
+
+/* *****************************************************************************
 Bit rotation
 ***************************************************************************** */
 

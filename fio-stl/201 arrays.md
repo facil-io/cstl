@@ -15,6 +15,8 @@ Items are accessed using a numerical `index` indicating the element's position w
 
 Indexes are zero based (first element == 0).
 
+**Note:** The dynamic array implementation provided limits the array's capacity to 31bits ((1<<31) - 1).
+
 ### Dynamic Array Performance
 
 Seeking time is an extremely fast O(1). Arrays are also very fast to iterate since they enjoy high memory locality.

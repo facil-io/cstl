@@ -983,7 +983,7 @@ static int fio_http1_on_expect(void *udata) {
   c->h = h;
   fio_undup(c->io);
   const fio_buf_info_s response =
-      FIO_BUF_INFO1("HTTP/1.1 100 Continue\r\n\r\n");
+      FIO_BUF_INFO1((char *)"HTTP/1.1 100 Continue\r\n\r\n");
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
 response_sent:
@@ -1058,7 +1058,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
   size_t r = fio_read(io, c->buf + c->len, c->capa - c->len);
   if (!r) /* nothing happened */
     return;
-  c->len = r;
+  c->len = (uint32_t)r;
   if (prior_knowledge.buf[0] != c->buf[0] ||
       FIO_MEMCMP(
           prior_knowledge.buf,

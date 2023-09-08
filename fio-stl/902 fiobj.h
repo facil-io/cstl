@@ -65,30 +65,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                "invalid FIOBJ type should be FIOBJ_T_NULL.");
     FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(o, FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "invalid FIOBJ is NOT a fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_true(),
                                        FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_true() is NOT fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_false(),
                                        FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_false() is NOT fiobj_null().");
-    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
-                                       FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()),
+    FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(fiobj_false(), fiobj_true()),
                "fiobj_false() is NOT fiobj_true().");
     FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_NULL)()) == FIOBJ_T_NULL,
                "fiobj_null() type should be FIOBJ_T_NULL.");
-    FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()) == FIOBJ_T_TRUE,
+    FIO_ASSERT(FIOBJ_TYPE(fiobj_true()) == FIOBJ_T_TRUE,
                "fiobj_true() type should be FIOBJ_T_TRUE.");
-    FIO_ASSERT(FIOBJ_TYPE(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)()) ==
-                   FIOBJ_T_FALSE,
+    FIO_ASSERT(FIOBJ_TYPE(fiobj_false()) == FIOBJ_T_FALSE,
                "fiobj_false() type should be FIOBJ_T_FALSE.");
     FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_NULL)(),
                                       FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
                "fiobj_null() should be equal to self.");
-    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(),
-                                      FIO_NAME(fiobj, FIOBJ___NAME_TRUE)()),
+    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(fiobj_true(), fiobj_true()),
                "fiobj_true() should be equal to self.");
-    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(),
-                                      FIO_NAME(fiobj, FIOBJ___NAME_FALSE)()),
+    FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(fiobj_false(), fiobj_false()),
                "fiobj_false() should be equal to self.");
   }
   {
@@ -257,7 +253,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), shift)(a, &shifted);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), pop)(a, &popped);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), set)
-    (a, 1, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(), &set);
+    (a, 1, fiobj_true(), &set);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), remove)(a, 2, &removed);
     fiobj_free(a);
     if (1) {
@@ -354,7 +350,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     fiobj_free(k);
     k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(2);
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
-    (o, fiobj2hash(o, k), k, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(), &set);
+    (o, fiobj2hash(o, k), k, fiobj_true(), &set);
     fiobj_free(k);
     FIO_ASSERT(set, "fiobj_hash_set2 didn't copy information to old pointer?");
     FIO_ASSERT(removed,
@@ -404,9 +400,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
       (a, FIO_NAME(fiobj, FIOBJ___NAME_NULL)());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
-      (a, FIO_NAME(fiobj, FIOBJ___NAME_TRUE)());
+      (a, fiobj_true());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
-      (a, FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
+      (a, fiobj_false());
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)
       (a, FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(0.42));
 

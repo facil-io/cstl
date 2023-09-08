@@ -1435,13 +1435,13 @@ fio_str_info_s fio_http_request_header(fio_http_s *h,
                                        fio_str_info_s name,
                                        size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, index);
+  return fio___http_hmap_get2(HTTP_HDR_REQUEST(h), name, (int32_t)index);
 }
 fio_str_info_s fio_http_response_header(fio_http_s *h,
                                         fio_str_info_s name,
                                         size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
-  return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, index);
+  return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, (int32_t)index);
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -2337,7 +2337,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     return;
   if (!status || status > 1000)
     status = 404;
-  h->status = status;
+  h->status = (uint32_t)status;
   FIO_STR_INFO_TMP_VAR(filename, 127);
   /* read static error code file */
   fio_string_write2(&filename,

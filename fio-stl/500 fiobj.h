@@ -42,8 +42,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 FIOBJ compilation settings (type names and JSON nesting limits).
 
 Type Naming Macros for FIOBJ types. By default, results in:
-- fiobj_true()
-- fiobj_false()
+- fiobj_true()     (constant, cannot be changed except manually)
+- fiobj_false()    (constant, cannot be changed except manually)
 - fiobj_null()
 - fiobj_num_new() ... (etc')
 - fiobj_float_new() ... (etc')
@@ -52,12 +52,6 @@ Type Naming Macros for FIOBJ types. By default, results in:
 - fiobj_hash_new() ... (etc')
 ***************************************************************************** */
 
-#ifndef FIOBJ___NAME_TRUE
-#define FIOBJ___NAME_TRUE true
-#endif
-#ifndef FIOBJ___NAME_FALSE
-#define FIOBJ___NAME_FALSE false
-#endif
 #ifndef FIOBJ___NAME_NULL
 #define FIOBJ___NAME_NULL null
 #endif
@@ -267,14 +261,10 @@ FIOBJ Primitives (NULL, True, False)
 ***************************************************************************** */
 
 /** Returns the `true` primitive. */
-FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_TRUE)(void) {
-  return (FIOBJ)(FIOBJ_T_TRUE);
-}
+FIO_IFUNC FIOBJ fiobj_true(void) { return (FIOBJ)(FIOBJ_T_TRUE); }
 
 /** Returns the `false` primitive. */
-FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_FALSE)(void) {
-  return (FIOBJ)(FIOBJ_T_FALSE);
-}
+FIO_IFUNC FIOBJ fiobj_false(void) { return (FIOBJ)(FIOBJ_T_FALSE); }
 
 /** Returns the `nil` / `null` primitive. */
 FIO_IFUNC FIOBJ FIO_NAME(fiobj, FIOBJ___NAME_NULL)(void) {
@@ -1968,13 +1958,11 @@ static inline void fio_json_on_null(fio_json_parser_s *p) {
 }
 /** a TRUE object was detected */
 static inline void fio_json_on_true(fio_json_parser_s *p) {
-  fiobj_json_add2parser((fiobj_json_parser_s *)p,
-                        FIO_NAME(fiobj, FIOBJ___NAME_TRUE)());
+  fiobj_json_add2parser((fiobj_json_parser_s *)p, fiobj_true());
 }
 /** a FALSE object was detected */
 static inline void fio_json_on_false(fio_json_parser_s *p) {
-  fiobj_json_add2parser((fiobj_json_parser_s *)p,
-                        FIO_NAME(fiobj, FIOBJ___NAME_FALSE)());
+  fiobj_json_add2parser((fiobj_json_parser_s *)p, fiobj_false());
 }
 /** a Numeral was detected (long long). */
 static inline void fio_json_on_number(fio_json_parser_s *p, long long i) {

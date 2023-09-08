@@ -477,6 +477,11 @@ Optional Sorting Support - TODO? (convert to array, sort, rehash)
 Map Implementation - inlined static functions
 ***************************************************************************** */
 
+#ifndef FIO_MAP_CAPA_BITS_LIMIT
+/* Note: cannot be more than 31 bits unless some of the code is rewritten. */
+#define FIO_MAP_CAPA_BITS_LIMIT 31
+#endif
+
 /* Theoretical map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
@@ -771,7 +776,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
       if (has_possible_match) {
         /* there was a 7 bit match in one of the bytes in this 8 byte group */
         for (size_t i = 0; i < 8; ++i) {
-          const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+          const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
           if (imap[tmp] != bhash)
             continue;
           /* test key and hash equality */
@@ -800,7 +805,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
         continue;
       /* there was a 7 bit match for a possible free space in this group */
       for (int i = 0; i < 8; ++i) {
-        const uint32_t tmp = (pos + offsets[i]) & pos_mask;
+        const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
         if (!imap[tmp])
           return (r = tmp); /* empty slot always ends search */
         if (r > pos_mask && imap[tmp] == 255)
@@ -811,25 +816,25 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
   } /* treat as array */
   for (size_t i = 0; i < capa; ++i) {
     if (!imap[i])
-      return (r = i);
+      return (r = (uint32_t)i);
     if (imap[i] == bhash) {
       /* test key and hash equality */
       if (FIO_NAME(FIO_MAP_NAME, __is_eq_hash)(o->map + i, hash)) {
         if (FIO_MAP_KEY_CMP(o->map[i].key, key)) {
           guard_print = 0;
-          return (r = i);
+          return (r = (uint32_t)i);
         }
         if (!(--guard)) {
           if (!guard_print)
             FIO_LOG_SECURITY("hash map " FIO_MACRO2STR(
                 FIO_NAME(FIO_MAP_NAME, s)) " under attack?");
           guard_print = 1;
-          return (r = i);
+          return (r = (uint32_t)i);
         }
       }
     }
     if (imap[i] == 0xFF)
-      r = i; /* a free spot is available*/
+      r = (uint32_t)i; /* a free spot is available*/
   }
   return r;
 }
@@ -898,7 +903,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, s)
                                         uint32_t bits,
                                         uint32_t internal) {
   FIO_NAME(FIO_MAP_NAME, s) cpy = {0};
-  if (bits > 31)
+  if (bits > FIO_MAP_CAPA_BITS_LIMIT)
     return cpy;
   size_t capa = FIO_MAP_CAPA(bits);
   cpy.map = (FIO_NAME(FIO_MAP_NAME, node_s) *)
@@ -990,7 +995,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   capa += o->count;
-  if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> 31))
+  if (FIO_MAP_CAPA(o->bits) >= capa || (capa >> FIO_MAP_CAPA_BITS_LIMIT))
     return;
   uint_fast8_t bits = o->bits + 1;
   while (FIO_MAP_CAPA(bits) < capa)
@@ -1666,7 +1671,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
     e.value = i.value;
 #endif
     if (e.task(&e))
-      return e.index + 1;
+      return (uint32_t)(e.index + 1);
   }
   return o->count;
 }
@@ -1821,11 +1826,12 @@ Map Cleanup
 
 #endif /* FIO_EXTERN_COMPLETE */
 
-#undef FIO_MAP_GET_T
 #undef FIO_MAP_ARRAY_LOG_LIMIT
 #undef FIO_MAP_ATTACK_LIMIT
 #undef FIO_MAP_CAPA
+#undef FIO_MAP_CAPA_BITS_LIMIT
 #undef FIO_MAP_CUCKOO_STEPS
+#undef FIO_MAP_GET_T
 #undef FIO_MAP_HASH_FN
 #undef FIO_MAP_IS_SPARSE
 #undef FIO_MAP_KEY
@@ -1844,6 +1850,7 @@ Map Cleanup
 #undef FIO_MAP_RECALC_HASH
 #undef FIO_MAP_SEEK_LIMIT
 #undef FIO_MAP_T
+#undef FIO_MAP_TEST
 #undef FIO_MAP_VALUE
 #undef FIO_MAP_VALUE_BSTR
 #undef FIO_MAP_VALUE_COPY
@@ -1854,6 +1861,5 @@ Map Cleanup
 #undef FIO_MAP_VALUE_INTERNAL
 #undef FIO_OMAP_NAME
 #undef FIO_UMAP_NAME
-#undef FIO_MAP_TEST
 
 #endif /* FIO_MAP_NAME */
