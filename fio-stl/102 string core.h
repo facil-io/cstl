@@ -270,11 +270,17 @@ SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
                                    const void *raw,
                                    size_t raw_len);
 
-/** Writes decoded URL data to String. */
+/** Writes decoded URL data to String, decoding + to spaces. */
 SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
                                    fio_string_realloc_fn reallocate,
                                    const void *encoded,
                                    size_t encoded_len);
+
+/** Writes decoded URL data to String, without decoding + to spaces. */
+SFUNC int fio_string_write_path_dec(fio_str_info_s *dest,
+                                    fio_string_realloc_fn reallocate,
+                                    const void *encoded,
+                                    size_t encoded_len);
 
 /* *****************************************************************************
 String HTML escaping support
@@ -2242,10 +2248,12 @@ SFUNC int fio_string_write_url_enc(fio_str_info_s *dest,
 }
 
 /** Writes decoded URL data to String. */
-SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
-                                   fio_string_realloc_fn reallocate,
-                                   const void *encoded,
-                                   size_t encoded_len) {
+FIO_IFUNC int fio_string_write_url_dec_internal(
+    fio_str_info_s *dest,
+    fio_string_realloc_fn reallocate,
+    const void *encoded,
+    size_t encoded_len,
+    _Bool plus_is_included) {
   int r = 0;
   if (!dest || !encoded || !encoded_len)
     return r;
@@ -2281,13 +2289,15 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
     if (slice_len) {
       FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
       /* test for '+' in the slice that has no % characters */
-      uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
-      uint8_t *end_plus = start_plus + slice_len;
-      while (
-          start_plus && start_plus < end_plus &&
-          (start_plus =
-               (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
-        *(start_plus++) = ' ';
+      if (plus_is_included) {
+        uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+        uint8_t *end_plus = start_plus + slice_len;
+        while (
+            start_plus && start_plus < end_plus &&
+            (start_plus =
+                 (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+          *(start_plus++) = ' ';
+      }
     }
     dest->len += slice_len;
     last = pr + 1;
@@ -2323,16 +2333,43 @@ SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
     const size_t slice_len = end - last;
     FIO_MEMCPY(dest->buf + dest->len, last, slice_len);
     /* test for '+' in the slice that has no % characters */
-    uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
-    uint8_t *end_plus = start_plus + slice_len;
-    while (start_plus && start_plus < end_plus &&
-           (start_plus =
-                (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
-      *(start_plus++) = ' ';
+    if (plus_is_included) {
+      uint8_t *start_plus = (uint8_t *)dest->buf + dest->len;
+      uint8_t *end_plus = start_plus + slice_len;
+      while (
+          start_plus && start_plus < end_plus &&
+          (start_plus =
+               (uint8_t *)FIO_MEMCHR(start_plus, '+', end_plus - start_plus)))
+        *(start_plus++) = ' ';
+    }
     dest->len += slice_len;
   }
   dest->buf[dest->len] = 0;
   return r;
+}
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_url_dec(fio_str_info_s *dest,
+                                   fio_string_realloc_fn reallocate,
+                                   const void *encoded,
+                                   size_t encoded_len) {
+  return fio_string_write_url_dec_internal(dest,
+                                           reallocate,
+                                           encoded,
+                                           encoded_len,
+                                           1);
+}
+
+/** Writes decoded URL data to String. */
+SFUNC int fio_string_write_path_dec(fio_str_info_s *dest,
+                                    fio_string_realloc_fn reallocate,
+                                    const void *encoded,
+                                    size_t encoded_len) {
+  return fio_string_write_url_dec_internal(dest,
+                                           reallocate,
+                                           encoded,
+                                           encoded_len,
+                                           0);
 }
 
 /* *****************************************************************************

@@ -5766,6 +5766,19 @@ Writes decoded URL data to String. Decodes "percent encoding" as well as spaces 
 
 **Note**: the decoding function reads the non-standard `"%uXXXX"` as UTF-8 encoded data.
 
+#### `fio_string_write_path_dec`
+
+```c
+int fio_string_write_url_dec(fio_str_info_s *dest,
+                             fio_string_realloc_fn reallocate,
+                             const void *encoded,
+                             size_t len);
+```
+
+Writes decoded URL data to String. Decodes "percent encoding" without converting `+` to spaces.
+
+**Note**: the decoding function reads the non-standard `"%uXXXX"` as UTF-8 encoded data.
+
 ### Core String HTML escaping support
 
 #### `fio_string_write_html_escape`
