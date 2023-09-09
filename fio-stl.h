@@ -26126,7 +26126,7 @@ find_pos:
       ++pos_counter;
       continue;
     }
-    r.private_.index = i;
+    r.private_.index = (uint32_t)i;
     FIO_MAP___EACH_COPY_DATA();
     return r;
   }
@@ -26249,13 +26249,13 @@ find_pos:
       --pos_counter;
       continue;
     }
-    r.private_.index = i;
+    r.private_.index = (uint32_t)i;
     FIO_MAP___EACH_COPY_DATA();
     return r;
   }
   goto not_found;
 #else
-  r.private_.index = capa;
+  r.private_.index = (uint32_t)capa;
   if (FIO_MAP_IS_SPARSE(o)) { /* sparsely populated */
     while (r.private_.index) {
       uint64_t simd = *(uint64_t *)(imap + r.private_.index);
