@@ -75,6 +75,35 @@ For example, to compile and run the server example, use:
 make examples/server
 ```
 
+### CMake Build
+
+```bash
+# default config (tests and examples build OFF, static library)
+cmake -B path/to/build_directory
+# or add examples and test build
+cmake -B path/to/build_directory -DTESTS_BUILD=ON -DEXAMPLES_BUILD=ON -DCMAKE_BUILD_TYPE=Release
+# build
+cmake --build path/to/build_directory
+# install
+cmake --install path/to/build_directory --prefix path/to/directory
+```
+
+Add this on your cmake project
+
+```cmake
+include(FetchContent)
+
+find_package(facil-io 0.8.0)
+if (NOT facil-io_FOUND)
+    FetchContent_Declare(facil-io GIT_REPOSITORY https://github.com/facil-io/cstl.git
+        GIT_TAG master)
+    FetchContent_GetProperties(facil-io)
+    FetchContent_MakeAvailable(facil-io)
+endif()
+    
+target_link_libraries(${PROJECT_NAME} PRIVATE facil-io::facil-io)
+```
+
 ## Contribution Notice
 
 If you're submitting a PR, make sure to update the corresponding code slice (file) in the `fio-stl` folder, the `makefile` will re-produce the `fio-stl.h` file automatically.
