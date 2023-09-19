@@ -23,7 +23,7 @@ Include the file as many times as required and enjoy.
 To test the STL locally you need to first fork the project or download the whole project source code. Then, from the project's root folder run:
 
 ```bash
-make test/stl
+make tests/stl
 ```
 
 The GNU `make` command will compile and run any file in the `tests` folder if it is explicitly listed. i.e.,
