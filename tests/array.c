@@ -1,4 +1,6 @@
 #define FIO_LOG
+#define FIO_THREADS
+#define FIO_STATE
 #define FIO_TIME
 #include "fio-stl.h"
 
@@ -79,10 +81,10 @@ int main(int argc, char const *argv[]) {
 
   fprintf(stderr,
           "This is a performance test to test the cost of pointer tagging and "
-          "the embedded array optimizatiion on performance\n");
+          "the embedded array optimization on performance\n");
 
   for (size_t items = 1; items < 64000; items <<= 1) {
-    fprintf(stderr, "Running push/pop test fo %zu items\n", items);
+    fprintf(stderr, "Running push/pop test for %zu items\n", items);
     for (int i = 0; t[i].name; ++i) {
       uint64_t start;
       uint64_t end;
