@@ -720,7 +720,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
     if (key.buf[0] != '-')
       goto process_unnamed;
     /* --help / -h / -? */
-    if ((key.len == 2 && (key.buf[1] == 'h' || key.buf[1] == '?')) ||
+    if ((key.len == 2 && ((key.buf[1] | 32) == 'h' || key.buf[1] == '?')) ||
         (key.len == 5 &&
          (fio_buf2u32u(key.buf + 1) | 0x20202020UL) == help_value32) ||
         (key.len == 6 && key.buf[1] == '-' &&

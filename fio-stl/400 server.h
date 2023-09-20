@@ -1972,6 +1972,14 @@ SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
   return 0;
 }
 
+FIO_SFUNC void fio_write2___dealloc_task(void *fn, void *data) {
+  union {
+    void *ptr;
+    void (*fn)(void *);
+  } u = {.ptr = fn};
+  u.fn(data);
+}
+
 FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   fio_s *io = (fio_s *)io_;
   fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
@@ -2006,7 +2014,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   }
   if (!packet)
     goto error;
-  if (io && (io->state & FIO_STATE_CLOSING))
+  if ((io->state & FIO_STATE_CLOSING))
     goto write_called_after_close;
   fio_srv_defer(fio_write2___task, fio_dup2(io), packet);
   return;
@@ -2018,13 +2026,24 @@ error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
   return;
 write_called_after_close:
   FIO_LOG_WARNING("`write` called after `close` was called for IO.");
-  fio_stream_pack_free(packet);
+  {
+    union {
+      void *ptr;
+      void (*fn)(fio_stream_packet_s *);
+    } u = {.fn = fio_stream_pack_free};
+    fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, packet);
+  }
   return;
 io_error_null:
   FIO_LOG_ERROR("%d `fio_write2` called for invalid IO (NULL)",
                 fio___srvdata.pid);
-  if (args.dealloc)
-    args.dealloc(args.buf);
+  if (args.dealloc) {
+    union {
+      void *ptr;
+      void (*fn)(void *);
+    } u = {.fn = args.dealloc};
+    fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
+  }
 }
 
 /** Marks the IO for closure as soon as scheduled data was sent. */

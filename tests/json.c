@@ -50,16 +50,18 @@ int main(int argc, char const *argv[]) {
 
   // Parsing the JSON
   size_t consumed = 0;
-  FIOBJ obj1 = fiobj_json_parse2(
-      (char *)fiobj_str2cstr(json).buf, fiobj_str2cstr(json).len, &consumed);
+  FIOBJ obj1 = fiobj_json_parse2((char *)fiobj_str2cstr(json).buf,
+                                 fiobj_str2cstr(json).len,
+                                 &consumed);
   // test for errors
   FIO_ASSERT(obj1, "couldn't parse data.");
 
   // formatting the JSON
   size_t consumed2 = 0;
   FIOBJ json2 = fiobj2json(FIOBJ_INVALID, obj1, fio_cli_get_bool("-b"));
-  FIOBJ obj2 = fiobj_json_parse2(
-      (char *)fiobj_str2cstr(json2).buf, fiobj_str2cstr(json2).len, &consumed2);
+  FIOBJ obj2 = fiobj_json_parse2((char *)fiobj_str2cstr(json2).buf,
+                                 fiobj_str2cstr(json2).len,
+                                 &consumed2);
   FIO_LOG_DEBUG2("JSON reprtinted:\n%s", fiobj_str2cstr(json2).buf);
   FIO_ASSERT(obj2, "JSON roundtrip parsing failed");
   FIO_LOG_DEBUG2("JSON re-parsed:\n%s", fiobj2cstr(obj2).buf);

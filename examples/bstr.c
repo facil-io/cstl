@@ -14,8 +14,8 @@ Simple Dynamic Strings library (https://github.com/antirez/sds)...
 #include "fio-stl/include.h" /* or "fio-stl.h" */
 
 int main(void) {
-  /* note that the `bstr` pointer might be updated!
-   * not updating the pointer after a `write` is a bug. */
+  /* note that the `bstr` pointer must always be updated!
+   * not updating the pointer after a `write` operation is a bug. */
   char *org = fio_bstr_write(NULL, "Hello World", 11);
   char *copy = fio_bstr_copy(org);
   printf("Since we use copy on write: %p == %p\n", (void *)copy, (void *)org);

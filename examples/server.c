@@ -77,8 +77,8 @@ int main(int argc, char const *argv[]) {
   fio_cli_start(
       argc,
       argv,
-      0, /* allow 1 unnamed argument - the address to connect to */
-      1,
+      0, /* don't require any unnamed arguments */
+      1, /* allow up to 1 unnamed argument - the address to bind to */
       "HTTP echo example, using \x1B[1m" FIO_POLL_ENGINE_STR "\x1B[0m."
       "\nListens on the specified URL (defaults to 0.0.0.0:3000). i.e.\n"
       "\tNAME <url>\n\n"
@@ -92,6 +92,8 @@ int main(int argc, char const *argv[]) {
       "\tNAME localhost:3000\n",
 
       FIO_CLI_PRINT_HEADER("Address Binding"),
+      FIO_CLI_PRINT_LINE(
+          "NOTE: also controlled the ADDRESS or PORT environment vars."),
       FIO_CLI_STRING("-bind -b address to listen to in URL format."),
       FIO_CLI_INT("-port -p port number to listen to if URL is missing."),
       FIO_CLI_PRINT(
@@ -330,3 +332,36 @@ static void http_respond(fio_http_s *h) {
   fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
 #endif
 }
+
+/* *****************************************************************************
+Pub/Sub Logger / Recorder
+***************************************************************************** */
+#if 0
+FIO_SFUNC void logger_detached(const fio_pubsub_engine_s *eng) {
+  FIO_LOG_INFO("%d (logger) detached", fio_srv_pid());
+  (void)eng;
+}
+FIO_SFUNC void logger_publish(const fio_pubsub_engine_s *eng, fio_msg_s *msg) {
+  FIO_LOG_INFO("%d (logger) pub/sub message for %s (%d):\n%s",
+               fio_srv_pid(),
+               (msg->channel.len ? msg->channel.buf : "<null>"),
+               (int)msg->filter,
+               (msg->message.len ? msg->message.buf : "<null>"));
+  fio_publish(.engine = FIO_PUBSUB_LOCAL,
+              .channel = msg->channel,
+              .message = msg->message,
+              .filter = msg->filter,
+              .is_json = msg->is_json);
+              (void)eng;
+}
+
+fio_pubsub_engine_s FIO_PUBSUB_LOGGER = {
+    .detached = logger_detached,
+    .publish = logger_publish,
+};
+
+FIO_CONSTRUCTOR(pubsub_logger) {
+  FIO_PUBSUB_DEFAULT = &FIO_PUBSUB_LOGGER;
+  fio_pubsub_attach(&FIO_PUBSUB_LOGGER);
+}
+#endif
