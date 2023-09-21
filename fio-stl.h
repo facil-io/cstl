@@ -2470,7 +2470,8 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SIGNAL
 #endif
 
-#if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE) ||                          \
+    (defined(DEBUG) && defined(FIO_STATE))
 #undef FIO_THREADS
 #define FIO_THREADS
 #endif
@@ -30172,6 +30173,7 @@ write_called_after_close:
       void *ptr;
       void (*fn)(fio_stream_packet_s *);
     } u = {.fn = fio_stream_pack_free};
+    // u.fn(packet);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, packet);
   }
   return;
@@ -30183,6 +30185,7 @@ io_error_null:
       void *ptr;
       void (*fn)(void *);
     } u = {.fn = args.dealloc};
+    // u.fn(args.buf);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
   }
 }

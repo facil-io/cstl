@@ -420,7 +420,8 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SIGNAL
 #endif
 
-#if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE)
+#if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE) ||                          \
+    (defined(DEBUG) && defined(FIO_STATE))
 #undef FIO_THREADS
 #define FIO_THREADS
 #endif
