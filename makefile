@@ -125,7 +125,7 @@ else
   LIB_EXT=so
 endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
-OPTIMIZATION=-O3
+OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 # optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined
 OPTIMIZATION_DEBUG=-O0 -g -coverage -fsanitize=address -fno-omit-frame-pointer -fno-builtin
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
@@ -168,8 +168,6 @@ ifeq ($(DEBUG), 1)
   OPTIMIZATION:=$(OPTIMIZATION_DEBUG)
   # possibly useful:  -Wconversion -Wcomma -fsanitize=undefined -Wshadow
   # go crazy with clang: -Weverything -Wno-cast-qual -Wno-used-but-marked-unused -Wno-reserved-id-macro -Wno-padded -Wno-disabled-macro-expansion -Wno-documentation-unknown-command -Wno-bad-function-cast -Wno-missing-prototypes
-else
-  FLAGS:=$(FLAGS) NDEBUG NODEBUG
 endif
 
 #############################################################################
