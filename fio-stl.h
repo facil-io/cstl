@@ -39211,16 +39211,16 @@ upgraded:
   {
     const size_t pr_i = fio_http_is_websocket(c->h) ? FIO___HTTP_PROTOCOL_WS
                                                     : FIO___HTTP_PROTOCOL_SSE;
-    fio_protocol_set(
-        c->io,
-        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
-              ->state[pr_i]
-              .protocol));
     fio_http_controller_set(
         c->h,
         &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
               ->state[pr_i]
               .controller));
+    fio_protocol_set(
+        c->io,
+        &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
+              ->state[pr_i]
+              .protocol));
     if (pr_i == FIO___HTTP_PROTOCOL_SSE) {
       fio_str_info_s last_id =
           fio_http_request_header(c->h,

@@ -46,6 +46,12 @@ WebSocket / SSE Callbacks
 
 static void websocket_on_open(fio_http_s *h) { /* also for SSE connections */
   fio_http_subscribe(h, .filter = 1);
+  FIO_STR_INFO_TMP_VAR(welcome, 256);
+  fio_string_write2(&welcome,
+                    NULL,
+                    FIO_STRING_WRITE_STR1("Welcome to the chat room @"),
+                    FIO_STRING_WRITE_HEX(fio_thread_getpid()));
+  fio_http_write(h, .buf = welcome.buf, .len = welcome.len, .copy = 1);
 }
 
 static void websocket_on_message(fio_http_s *h,
