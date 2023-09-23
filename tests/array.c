@@ -1,6 +1,4 @@
 #define FIO_LOG
-#define FIO_THREADS
-#define FIO_STATE
 #define FIO_TIME
 #include "fio-stl.h"
 
