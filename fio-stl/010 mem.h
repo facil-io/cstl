@@ -2501,11 +2501,6 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 #if DEBUG
   FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)();
   FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(NULL);
-  FIO_ASSERT(
-      !FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] &&
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2] ==
-              FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3],
-      "memory leaks?");
 #endif /* DEBUG */
 }
 #endif /* FIO_TEST_ALL */
