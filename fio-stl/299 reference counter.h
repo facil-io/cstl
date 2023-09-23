@@ -180,8 +180,8 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
     return;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
-  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
   FIO___LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
+  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
 }
 
 #ifdef FIO_REF_METADATA

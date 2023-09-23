@@ -786,27 +786,19 @@ Allocator debugging helpers
 ***************************************************************************** */
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-/* maximum block allocation count. */
-static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
-
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk))
+FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, malloc))
+static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)                                         \
   do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY SYS-ALLOC - retrieved %p from system", ptr);        \
-    fio_atomic_add(                                                            \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter)),        \
-        1);                                                                    \
-    if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] >    \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[1])     \
-      FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))           \
-    [1] = FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0];   \
-  } while (0)
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));    \
+    FIO_LOG_DEBUG2("MEMORY CACHE-ALLOC allocated %p", ptr);                    \
+  } while (0);
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY SYS-DEALLOC- returned %p to system", ptr);          \
-    fio_atomic_sub_fetch(                                                      \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter)),        \
-        1);                                                                    \
-  } while (0)
+    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));     \
+    FIO_LOG_DEBUG2("MEMORY CACHE-DEALLOC de-allocated %p", ptr);               \
+  } while (0);
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
   do {                                                                         \
     FIO_LOG_DEBUG2("MEMORY CACHE-DEALLOC placed %p in cache", ptr);            \
@@ -815,95 +807,48 @@ static size_t FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[4];
   do {                                                                         \
     FIO_LOG_DEBUG2("MEMORY CACHE-ALLOC retrieved %p from cache", ptr);         \
   } while (0);
-#define FIO_MEMORY_ON_CHUNK_DIRTY(ptr)                                         \
-  do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY MARK-DIRTY placed %p in dirty list", ptr);          \
-  } while (0);
-#define FIO_MEMORY_ON_CHUNK_UNDIRTY(ptr)                                       \
-  do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY UNMARK-DIRTY retrieved %p from dirty list", ptr);   \
-  } while (0);
+
 #define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk)                            \
-  if (0)                                                                       \
-    do {                                                                       \
+  do {                                                                         \
+    if (0)                                                                     \
       FIO_LOG_DEBUG2("MEMORY chunk %p block %zu reset in lock",                \
                      ptr,                                                      \
                      (size_t)blk);                                             \
-    } while (0);
+  } while (0);
 
 #define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)                                       \
-  if (1)                                                                       \
-    do {                                                                       \
+  do {                                                                         \
+    if (1)                                                                     \
       FIO_LOG_DEBUG2("MEMORY chunk %p used as big-block", ptr);                \
-    } while (0);
+  } while (0);
 
 #define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)                                     \
-  if (1)                                                                       \
-    do {                                                                       \
+  do {                                                                         \
+    if (1)                                                                     \
       FIO_LOG_DEBUG2("MEMORY chunk %p no longer used as big-block", ptr);      \
-    } while (0);
-
-#define FIO_MEMORY_PRINT_STATS()                                               \
-  FIO_LOG_DEBUG2(                                                              \
-      "(" FIO_MACRO2STR(FIO_NAME(                                              \
-          FIO_MEMORY_NAME,                                                     \
-          malloc)) "):\n          "                                            \
-                   "Total memory chunks allocated before cleanup %zu\n"        \
-                   "          Maximum memory blocks allocated at a single "    \
-                   "time %zu",                                                 \
-      FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0],       \
-      FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[1])
+  } while (0);
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
   do {                                                                         \
-    if (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0] ||   \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2] !=   \
-            FIO_NAME(fio___,                                                   \
-                     FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]) {       \
-      FIO_LOG_ERROR(                                                           \
-          "(" FIO_MACRO2STR(                                                   \
-              FIO_NAME(FIO_MEMORY_NAME,                                        \
-                       malloc)) "):\n          "                               \
-                                "Total memory chunks allocated "               \
-                                "after cleanup (POSSIBLE LEAKS): %zd",         \
-          FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[0]);  \
-    }                                                                          \
     FIO_LOG_DEBUG2(                                                            \
         "(" FIO_MACRO2STR(                                                     \
-            FIO_NAME(FIO_MEMORY_NAME,                                          \
-                     malloc)) ") usage:"                                       \
-                              "\n          malloc / calloc : %zu"              \
-                              "\n          free            : %zu",             \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2],     \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3]);    \
+            FIO_NAME(FIO_MEMORY_NAME, malloc)) ") total allocations: %zu",     \
+        FIO_NAME(FIO_MEMORY_NAME, __malloc_total));                            \
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
-  fio_atomic_add(                                                              \
-      (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter)) + 2),    \
-      1)
-#define FIO_MEMORY_ON_FREE_FUNC()                                               \
-  do {                                                                          \
-    fio_atomic_add(                                                             \
-        (FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter)) + 3),   \
-        1);                                                                     \
-    FIO_ASSERT(                                                                 \
-        FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[2] >=    \
-            FIO_NAME(fio___, FIO_NAME(FIO_MEMORY_NAME, state_dbg_counter))[3],  \
-        FIO_MACRO2STR(FIO_NAME(                                                 \
-            FIO_MEMORY_NAME,                                                    \
-            free)) " called more than " FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME, \
-                                                               malloc)));       \
+  do {                                                                         \
+    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, malloc));            \
+    fio_atomic_add(&FIO_NAME(FIO_MEMORY_NAME, __malloc_total), 1);             \
   } while (0)
+#define FIO_MEMORY_ON_FREE_FUNC()                                              \
+  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, malloc))
 #else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)            ((void)0)
-#define FIO_MEMORY_ON_CHUNK_DIRTY(ptr)              ((void)0)
-#define FIO_MEMORY_ON_CHUNK_UNDIRTY(ptr)            ((void)0)
 #define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk) ((void)0)
 #define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)            ((void)0)
 #define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)          ((void)0)
-#define FIO_MEMORY_PRINT_STATS()                    ((void)0)
 #define FIO_MEMORY_PRINT_STATS_END()                ((void)0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                  ((void)0)
 #define FIO_MEMORY_ON_FREE_FUNC()                   ((void)0)
@@ -1171,11 +1116,9 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
     return;
   }
   (void)ignr_;
-#if DEBUG
-  FIO_LOG_INFO("starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
-      FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
-#endif /* DEBUG */
-  FIO_MEMORY_PRINT_STATS();
+  FIO_LOG_DDEBUG2(
+      "starting facil.io memory allocator cleanup for " FIO_MACRO2STR(
+          FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
   /* free arena blocks */
   for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
        ++i) {
@@ -1255,11 +1198,9 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
       (FIO_NAME(FIO_MEMORY_NAME, __mem_state_s *))NULL;
 
   FIO_MEMORY_PRINT_STATS_END();
-#if DEBUG && defined(FIO_LOG_INFO)
-  FIO_LOG_DEBUG2(
+  FIO_LOG_DDEBUG2(
       "finished facil.io memory allocator cleanup for " FIO_MACRO2STR(
           FIO_NAME(FIO_MEMORY_NAME, malloc)) ".");
-#endif /* DEBUG */
 }
 
 FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME,
@@ -1292,7 +1233,8 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
       arean_count = (arean_count << 1) + 2;
 #else
 #if _MSC_VER || __MINGW32__
-    /* https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
+    /* https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
+     */
     SYSTEM_INFO win_system_info;
     GetSystemInfo(&win_system_info);
     arean_count = (size_t)win_system_info.dwNumberOfProcessors;
@@ -1447,8 +1389,8 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c) {
   if (!c)
     return;
-  FIO_MEM_SYS_FREE(((void *)c), FIO_MEMORY_SYS_ALLOCATION_SIZE);
   FIO_MEMORY_ON_CHUNK_FREE(c);
+  FIO_MEM_SYS_FREE(((void *)c), FIO_MEMORY_SYS_ALLOCATION_SIZE);
 }
 
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_cache_or_dealloc)(
@@ -1990,7 +1932,6 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
   void *p = NULL;
   if (!size)
     goto malloc_zero;
-  FIO_MEMORY_ON_ALLOC_FUNC();
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   if ((is_realloc && size > (FIO_MEMORY_BIG_BLOCK_SIZE -
@@ -2006,7 +1947,6 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
             FIO_NAME(FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu bytes",
         FIO_MEM_BYTES2PAGES(size));
 #endif
-    FIO_MEMORY_ON_FREE_FUNC(); /* offset allocation counted by mmap */
     p = FIO_NAME(FIO_MEMORY_NAME, mmap)(size);
     return p;
   }
@@ -2018,15 +1958,17 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
        size > FIO_MEMORY_BLOCK_SIZE - (2 << FIO_MEMORY_ALIGN_LOG)) ||
       (!is_realloc && size > FIO_MEMORY_BLOCK_ALLOC_LIMIT)) {
     p = FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size, is_realloc);
-    if (!p || p == is_realloc)
-      FIO_MEMORY_ON_FREE_FUNC(); /* no allocation performed */
+    if (p && p != is_realloc) {
+      FIO_MEMORY_ON_ALLOC_FUNC();
+    }
     return p;
   }
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
 
   p = FIO_NAME(FIO_MEMORY_NAME, __mem_slice_new)(size, is_realloc);
-  if (!p || p == is_realloc)
-    FIO_MEMORY_ON_FREE_FUNC(); /* no allocation performed */
+  if (p && p != is_realloc) {
+    FIO_MEMORY_ON_ALLOC_FUNC();
+  }
   return p;
 malloc_zero:
   p = FIO_MEMORY_MALLOC_ZERO_POINTER;
@@ -2120,8 +2062,8 @@ mmap_free:
              0,
              ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) -
                  FIO_MEMORY_ALIGN_SIZE);
-  FIO_MEM_SYS_FREE(c, (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG);
   FIO_MEMORY_ON_CHUNK_FREE(c);
+  FIO_MEM_SYS_FREE(c, (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG);
 }
 
 /* SublimeText marker */
@@ -2583,14 +2525,11 @@ Memory pool cleanup
 #undef FIO_MEMORY_ON_CHUNK_FREE
 #undef FIO_MEMORY_ON_CHUNK_CACHE
 #undef FIO_MEMORY_ON_CHUNK_UNCACHE
-#undef FIO_MEMORY_ON_CHUNK_DIRTY
-#undef FIO_MEMORY_ON_CHUNK_UNDIRTY
 #undef FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK
 #undef FIO_MEMORY_ON_BIG_BLOCK_SET
 #undef FIO_MEMORY_ON_BIG_BLOCK_UNSET
 #undef FIO_MEMORY_ON_ALLOC_FUNC
 #undef FIO_MEMORY_ON_FREE_FUNC
-#undef FIO_MEMORY_PRINT_STATS
 #undef FIO_MEMORY_PRINT_STATS_END
 
 #undef FIO_MEMORY_ARENA_COUNT

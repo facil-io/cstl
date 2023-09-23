@@ -714,8 +714,8 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
     return;
-  FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
   FIO___LEAK_COUNTER_ON_FREE(fio_bstr_s);
+  FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
 /** internal helper - sets the length of the fio_bstr. */
@@ -1094,8 +1094,8 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
                                   void (*free_func)(void *, size_t)) {
   if (key->info || !key->buf)
     return;
-  free_func((void *)key->buf, key->len);
   FIO___LEAK_COUNTER_ON_FREE(fio_keystr_s);
+  free_func((void *)key->buf, key->len);
 }
 
 /** Compares two Key Strings. */

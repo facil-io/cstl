@@ -171,17 +171,20 @@ Leak Counter Helpers
 #undef FIO___LEAK_COUNTER_ON_ALLOC
 #undef FIO___LEAK_COUNTER_ON_FREE
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
-  static void FIO_NAME(fio___leak_counter, name)(int i) {                      \
-    static volatile int counter;                                               \
-    fio_atomic_add(&counter, i);                                               \
-    if (i)                                                                     \
-      return;                                                                  \
-    FIO_LOG_DDEBUG2("testing leaks for " FIO_MACRO2STR(name), counter);        \
-    if (counter)                                                               \
-      FIO_LOG_ERROR("%d leaks detected for " FIO_MACRO2STR(name), counter);    \
+  FIO_IFUNC size_t FIO_NAME(fio___leak_counter, name)(size_t i) {              \
+    static volatile size_t counter;                                            \
+    size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
+    if (tmp == ((size_t)-1))                                                   \
+      goto error_double_free;                                                  \
+    return tmp;                                                                \
+  error_double_free:                                                           \
+    FIO_ASSERT(0, FIO_MACRO2STR(name) " `free` after `free` detected!");       \
   }                                                                            \
   static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
-    FIO_NAME(fio___leak_counter, name)((int)(uintptr_t)i);                     \
+    size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
+    FIO_LOG_DDEBUG2("testing leaks for " FIO_MACRO2STR(name));                 \
+    if (counter)                                                               \
+      FIO_LOG_ERROR("%zu leaks detected for " FIO_MACRO2STR(name), counter);   \
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
     fio_state_callback_add(FIO_CALL_AT_EXIT,                                   \
@@ -189,7 +192,8 @@ Leak Counter Helpers
                            NULL);                                              \
   }
 #define FIO___LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
-#define FIO___LEAK_COUNTER_ON_FREE(name)  FIO_NAME(fio___leak_counter, name)(-1)
+#define FIO___LEAK_COUNTER_ON_FREE(name)                                       \
+  FIO_NAME(fio___leak_counter, name)(((size_t)-1))
 #endif
 
 /* *****************************************************************************

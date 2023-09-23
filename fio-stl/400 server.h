@@ -2031,6 +2031,7 @@ write_called_after_close:
       void *ptr;
       void (*fn)(fio_stream_packet_s *);
     } u = {.fn = fio_stream_pack_free};
+    // u.fn(packet);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, packet);
   }
   return;
@@ -2042,6 +2043,7 @@ io_error_null:
       void *ptr;
       void (*fn)(void *);
     } u = {.fn = args.dealloc};
+    // u.fn(args.buf);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
   }
 }
@@ -2263,13 +2265,11 @@ typedef struct {
 FIO___LEAK_COUNTER_DEF(fio_srv_listen)
 
 static fio___srv_listen_s *fio___srv_listen_dup(fio___srv_listen_s *l) {
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
   fio_atomic_add(&l->ref_count, 1);
   return l;
 }
 
 static void fio___srv_listen_free(void *l_) {
-  FIO___LEAK_COUNTER_ON_FREE(fio_srv_listen);
   fio___srv_listen_s *l = (fio___srv_listen_s *)l_;
   fio_close(l->io);
   if (fio_atomic_sub(&l->ref_count, 1))
@@ -2309,6 +2309,7 @@ static void fio___srv_listen_free(void *l_) {
                  (int)l->url_len,
                  l->url);
   fio_queue_perform_all(fio___srv_tasks);
+  FIO___LEAK_COUNTER_ON_FREE(fio_srv_listen);
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 

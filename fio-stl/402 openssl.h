@@ -463,8 +463,8 @@ Per-Connection Cleanup
 FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
-  SSL_free(ssl);
   FIO___LEAK_COUNTER_ON_FREE(fio___SSL);
+  SSL_free(ssl);
 }
 
 /* *****************************************************************************
@@ -473,10 +473,10 @@ Context Cleanup
 
 static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
+  FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
   SSL_CTX_free(ctx->ctx);
   fio_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));
-  FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
   (void)ignr_;
 }
 

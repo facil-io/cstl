@@ -789,9 +789,10 @@ Helpers - memory allocation & logging time collection
 FIO___LEAK_COUNTER_DEF(http___keystr_allocator)
 
 FIO_SFUNC void fio___http_keystr_free(void *ptr, size_t len) {
+  if (!ptr)
+    return;
+  FIO___LEAK_COUNTER_ON_FREE(http___keystr_allocator);
   FIO_MEM_FREE_(ptr, len);
-  if (ptr)
-    FIO___LEAK_COUNTER_ON_FREE(http___keystr_allocator);
   (void)len; /* if unused */
 }
 FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {

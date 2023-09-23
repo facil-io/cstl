@@ -482,8 +482,8 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
     if (to_free && to_free != &q->mem) { // edge case
-      FIO_MEM_FREE_(to_free, sizeof(*to_free));
       FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+      FIO_MEM_FREE_(to_free, sizeof(*to_free));
     }
     to_free = q->r;
     q->r = q->w = &q->mem;
@@ -492,8 +492,8 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
 finish:
   FIO___LOCK_UNLOCK(q->lock);
   if (to_free && to_free != &q->mem) {
-    FIO_MEM_FREE_(to_free, sizeof(*to_free));
     FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+    FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
   return t;
 }
@@ -665,8 +665,8 @@ FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
   }
   if (t->on_finish)
     t->on_finish(t->udata1, t->udata2);
-  FIO_MEM_FREE_(t, sizeof(*t));
   FIO___LEAK_COUNTER_ON_FREE(fio___timer_event_s);
+  FIO_MEM_FREE_(t, sizeof(*t));
 }
 
 FIO_SFUNC void fio___timer_perform(void *timer_, void *t_) {

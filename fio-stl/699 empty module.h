@@ -122,8 +122,8 @@ SFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
   FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
-  FIO_MEM_FREE_(o, sizeof(*o));
   FIO___LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
+  FIO_MEM_FREE_(o, sizeof(*o));
   return 0;
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */

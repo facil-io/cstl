@@ -615,8 +615,8 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
-  FIO_MEM_FREE_(ary, sizeof(*ary));
   FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
+  FIO_MEM_FREE_(ary, sizeof(*ary));
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 
@@ -639,8 +639,8 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
       FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
     }
 #endif
-    FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
     FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+    FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
     return;
   case 1:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
@@ -1145,8 +1145,8 @@ re_embed:
                  count * sizeof(*tmp));
     }
     if (tmp) {
-      FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
       FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+      FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
       (void)old_capa; /* if unused */
     }
   }

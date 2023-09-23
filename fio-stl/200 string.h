@@ -1062,8 +1062,8 @@ SFUNC void FIO_NAME(FIO_STR_NAME,
                     __object_free)(FIO_NAME(FIO_STR_NAME, s) * s) {
   if (!s)
     return;
-  FIO_MEM_FREE_(s, sizeof(*s));
   FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
+  FIO_MEM_FREE_(s, sizeof(*s));
 }
 
 SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,

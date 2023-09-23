@@ -681,8 +681,8 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
   FIO_NAME(FIO_MAP_NAME, destroy)(map);
   FIO_NAME(FIO_MAP_NAME, s) *o =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
-  FIO_MEM_FREE_(o, sizeof(*o));
   FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, s));
+  FIO_MEM_FREE_(o, sizeof(*o));
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
 

@@ -607,8 +607,8 @@ FIO_SFUNC void fio___pubsub_message_parser_free(
   if (!p)
     return;
   fio___pubsub_message_free(p->msg);
-  FIO_MEM_FREE_(p, sizeof(*p));
   FIO___LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
+  FIO_MEM_FREE_(p, sizeof(*p));
 }
 
 /* *****************************************************************************
