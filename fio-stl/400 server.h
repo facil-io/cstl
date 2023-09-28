@@ -1135,7 +1135,7 @@ FIO_SFUNC void fio___srv_wakeup(void) {
       fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
   fio___srvdata.wakeup_wait = 1;
-  char buf[1] = {~0};
+  char buf[1] = {(char)~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
   (void)ignr;
 }
@@ -1458,8 +1458,8 @@ void fio_env_set___(void); /* IDE marker */
  */
 SFUNC void fio_env_set FIO_NOOP(fio_s *io, fio_env_set_args_s args) {
   fio___srv_env_obj_s val = {
-      .udata = args.udata,
       .on_close = args.on_close,
+      .udata = args.udata,
   };
   fio___srv_env_safe_set((io ? &io->env : &fio___srvdata.env),
                          args.name.buf,
@@ -3064,9 +3064,9 @@ FIO_SFUNC void fio___srv_async_finish(void *q_) {
 /** Initializes an async server queue for multo-threaded (non IO) tasks. */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
   *q = (fio_srv_async_s){
-      .queue = FIO_QUEUE_STATIC_INIT(q->queue),
-      .count = threads,
       .q = fio_srv_queue(),
+      .count = threads,
+      .queue = FIO_QUEUE_STATIC_INIT(q->queue),
       .node = FIO_LIST_INIT(q->node),
   };
   if (!threads || threads > 4095)

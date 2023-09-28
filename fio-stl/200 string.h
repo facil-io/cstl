@@ -637,17 +637,13 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, info)(const FIO_STR_PTR s_) {
   FIO_NAME(FIO_STR_NAME, s) *s =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s))
-    r = (fio_str_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = FIO_STR_SMALL_LEN(s),
-        .capa = FIO_STR_SMALL_CAPA(s),
-    };
+    r = FIO_STR_INFO3(FIO_STR_SMALL_DATA(s),
+                      FIO_STR_SMALL_LEN(s),
+                      FIO_STR_SMALL_CAPA(s));
   else
-    r = (fio_str_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
-        .capa = FIO_STR_BIG_CAPA(s),
-    };
+    r = FIO_STR_INFO3(FIO_STR_BIG_DATA(s),
+                      FIO_STR_BIG_LEN(s),
+                      FIO_STR_BIG_CAPA(s));
   r.capa &= ((size_t)0ULL - (!FIO_STR_IS_FROZEN(s)));
   return r;
 }
@@ -659,15 +655,9 @@ FIO_IFUNC fio_buf_info_s FIO_NAME(FIO_STR_NAME, buf)(const FIO_STR_PTR s_) {
   FIO_NAME(FIO_STR_NAME, s) *s =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   if (FIO_STR_IS_SMALL(s))
-    r = (fio_buf_info_s){
-        .buf = FIO_STR_SMALL_DATA(s),
-        .len = FIO_STR_SMALL_LEN(s),
-    };
+    r = FIO_BUF_INFO2(FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_LEN(s));
   else
-    r = (fio_buf_info_s){
-        .buf = FIO_STR_BIG_DATA(s),
-        .len = FIO_STR_BIG_LEN(s),
-    };
+    r = FIO_BUF_INFO2(FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s));
   return r;
 }
 
@@ -768,8 +758,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
 
   if (FIO_STR_IS_SMALL(s)) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
-      fio_str_info_s cpy = {.buf = FIO_STR_SMALL_DATA(s),
-                            .len = FIO_STR_SMALL_LEN(s)};
+      fio_str_info_s cpy =
+          FIO_STR_INFO2(FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_LEN(s));
       FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
       data = cpy.buf;
     }
@@ -777,8 +767,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
     if (FIO_STR_BIG_IS_DYNAMIC(s)) {
       data = FIO_STR_BIG_DATA(s);
     } else if (FIO_STR_BIG_LEN(s)) {
-      fio_str_info_s cpy = {.buf = FIO_STR_BIG_DATA(s),
-                            .len = FIO_STR_BIG_LEN(s)};
+      fio_str_info_s cpy =
+          FIO_STR_INFO2(FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s));
       FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
       data = cpy.buf;
     }
@@ -840,16 +830,14 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_const)(FIO_STR_PTR s_,
       FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
-    i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
-                         .len = len,
-                         .capa = FIO_STR_SMALL_CAPA(s)};
+    i = FIO_STR_INFO3(FIO_STR_SMALL_DATA(s), len, FIO_STR_SMALL_CAPA(s));
     return i;
   }
   FIO_STR_BIG_DATA(s) = (char *)str;
   FIO_STR_BIG_LEN_SET(s, len);
   FIO_STR_BIG_CAPA_SET(s, len);
   FIO_STR_BIG_SET_STATIC(s);
-  i = (fio_str_info_s){.buf = FIO_STR_BIG_DATA(s), .len = len, .capa = 0};
+  i = FIO_STR_INFO3(FIO_STR_BIG_DATA(s), len, 0);
   return i;
 }
 
@@ -873,12 +861,10 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
       FIO_MEMCPY(FIO_STR_SMALL_DATA(s), str, len);
     FIO_STR_SMALL_DATA(s)[len] = 0;
 
-    i = (fio_str_info_s){.buf = FIO_STR_SMALL_DATA(s),
-                         .len = len,
-                         .capa = FIO_STR_SMALL_CAPA(s)};
+    i = FIO_STR_INFO3(FIO_STR_SMALL_DATA(s), len, FIO_STR_SMALL_CAPA(s));
     return i;
   }
-  i = (fio_str_info_s){.buf = (char *)str, .len = len};
+  i = FIO_STR_INFO2((char *)str, len);
   FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, len);
   FIO_STR_BIG_CAPA_SET(s, i.capa);
   FIO_STR_BIG_DATA(s) = i.buf;

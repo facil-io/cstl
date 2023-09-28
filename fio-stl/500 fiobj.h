@@ -652,7 +652,7 @@ SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
 
 /** Helper macro, calls `fiobj_json_parse` with string information */
 #define fiobj_json_parse2(data_, len_, consumed)                               \
-  fiobj_json_parse((fio_str_info_s){.buf = data_, .len = len_}, consumed)
+  fiobj_json_parse(FIO_STR_INFO2(data_, len_), consumed)
 
 /**
  * Uses JavaScript style notation to find data in an object structure.
@@ -676,7 +676,7 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ object, fio_str_info_s notation);
  * Use `fiobj_dup` to collect an actual reference to the returned object.
  */
 #define fiobj_json_find2(object, str, length)                                  \
-  fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+  fiobj_json_find(object, FIO_STR_INFO2(str, length))
 
 /* *****************************************************************************
 FIOBJ Mustache support
@@ -830,10 +830,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
     switch ((uintptr_t)(o)) {
-    case FIOBJ_T_NULL: return (fio_str_info_s){.buf = (char *)"null", .len = 4};
-    case FIOBJ_T_TRUE: return (fio_str_info_s){.buf = (char *)"true", .len = 4};
-    case FIOBJ_T_FALSE:
-      return (fio_str_info_s){.buf = (char *)"false", .len = 5};
+    case FIOBJ_T_NULL: return FIO_STR_INFO2((char *)"null", 4);
+    case FIOBJ_T_TRUE: return FIO_STR_INFO2((char *)"true", 4);
+    case FIOBJ_T_FALSE: return FIO_STR_INFO2((char *)"false", 5);
     };
     return (fio_str_info_s){.buf = (char *)""};
   case FIOBJ_T_NUMBER:
@@ -843,9 +842,9 @@ FIO_IFUNC fio_str_info_s FIO_NAME2(fiobj, cstr)(FIOBJ o) {
   case FIOBJ_T_STRING:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(o);
   case FIOBJ_T_ARRAY: /* fall through */
-    return (fio_str_info_s){.buf = (char *)"[...]", .len = 5};
+    return FIO_STR_INFO2((char *)"[...]", 5);
   case FIOBJ_T_HASH: {
-    return (fio_str_info_s){.buf = (char *)"{...}", .len = 5};
+    return FIO_STR_INFO2((char *)"{...}", 5);
   }
   case FIOBJ_T_OTHER: return (*fiobj_object_metadata(o))->to_s(o);
   }
@@ -1309,7 +1308,7 @@ SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *,
 FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                           update_json2)(FIOBJ hash, char *ptr, size_t len) {
   return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                  update_json)(hash, (fio_str_info_s){.buf = ptr, .len = len});
+                  update_json)(hash, FIO_STR_INFO2(ptr, len));
 }
 
 /**
@@ -1739,7 +1738,7 @@ SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
   size_t len =
       fio_ftoa(tmp, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i), 10);
   tmp[len] = 0;
-  return (fio_str_info_s){.buf = tmp, .len = len};
+  return FIO_STR_INFO2(tmp, len);
 }
 
 FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL = {

@@ -65,8 +65,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 15,
           .expected =
               {
-                  .scheme = {.buf = (char *)"file", .len = 4},
-                  .path = {.buf = (char *)"go/home/", .len = 8},
+                  .scheme = FIO_BUF_INFO2((char *)"file", 4),
+                  .path = FIO_BUF_INFO2((char *)"go/home/", 8),
               },
       },
       {
@@ -74,8 +74,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 16,
           .expected =
               {
-                  .scheme = {.buf = (char *)"unix", .len = 4},
-                  .path = {.buf = (char *)"/go/home/", .len = 9},
+                  .scheme = FIO_BUF_INFO2((char *)"unix", 4),
+                  .path = FIO_BUF_INFO2((char *)"/go/home/", 9),
               },
       },
       {
@@ -83,10 +83,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 29,
           .expected =
               {
-                  .scheme = {.buf = (char *)"unix", .len = 4},
-                  .path = {.buf = (char *)"/go/home/", .len = 9},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
+                  .scheme = FIO_BUF_INFO2((char *)"unix", 4),
+                  .path = FIO_BUF_INFO2((char *)"/go/home/", 9),
+                  .query = FIO_BUF_INFO2((char *)"query", 5),
+                  .target = FIO_BUF_INFO2((char *)"target", 6),
               },
       },
       {
@@ -94,14 +94,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 50,
           .expected =
               {
-                  .scheme = {.buf = (char *)"schema", .len = 6},
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .password = {.buf = (char *)"password", .len = 8},
-                  .host = {.buf = (char *)"host", .len = 4},
-                  .port = {.buf = (char *)"port", .len = 4},
-                  .path = {.buf = (char *)"/path", .len = 5},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
+                  .scheme = FIO_BUF_INFO2((char *)"schema", 6),
+                  .user = FIO_BUF_INFO2((char *)"user", 4),
+                  .password = FIO_BUF_INFO2((char *)"password", 8),
+                  .host = FIO_BUF_INFO2((char *)"host", 4),
+                  .port = FIO_BUF_INFO2((char *)"port", 4),
+                  .path = FIO_BUF_INFO2((char *)"/path", 5),
+                  .query = FIO_BUF_INFO2((char *)"query", 5),
+                  .target = FIO_BUF_INFO2((char *)"target", 6),
               },
       },
       {
@@ -109,13 +109,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 41,
           .expected =
               {
-                  .scheme = {.buf = (char *)"schema", .len = 6},
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .host = {.buf = (char *)"host", .len = 4},
-                  .port = {.buf = (char *)"port", .len = 4},
-                  .path = {.buf = (char *)"/path", .len = 5},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
+                  .scheme = FIO_BUF_INFO2((char *)"schema", 6),
+                  .user = FIO_BUF_INFO2((char *)"user", 4),
+                  .host = FIO_BUF_INFO2((char *)"host", 4),
+                  .port = FIO_BUF_INFO2((char *)"port", 4),
+                  .path = FIO_BUF_INFO2((char *)"/path", 5),
+                  .query = FIO_BUF_INFO2((char *)"query", 5),
+                  .target = FIO_BUF_INFO2((char *)"target", 6),
               },
       },
       {
@@ -123,11 +123,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 35,
           .expected =
               {
-                  .scheme = {.buf = (char *)"http", .len = 4},
-                  .host = {.buf = (char *)"localhost.com", .len = 13},
-                  .port = {.buf = (char *)"3000", .len = 4},
-                  .path = {.buf = (char *)"/home", .len = 5},
-                  .query = {.buf = (char *)"is=1", .len = 4},
+                  .scheme = FIO_BUF_INFO2((char *)"http", 4),
+                  .host = FIO_BUF_INFO2((char *)"localhost.com", 13),
+                  .port = FIO_BUF_INFO2((char *)"3000", 4),
+                  .path = FIO_BUF_INFO2((char *)"/home", 5),
+                  .query = FIO_BUF_INFO2((char *)"is=1", 4),
               },
       },
       {
@@ -135,9 +135,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 27,
           .expected =
               {
-                  .path = {.buf = (char *)"/complete_path", .len = 14},
-                  .query = {.buf = (char *)"query", .len = 5},
-                  .target = {.buf = (char *)"target", .len = 6},
+                  .path = FIO_BUF_INFO2((char *)"/complete_path", 14),
+                  .query = FIO_BUF_INFO2((char *)"query", 5),
+                  .target = FIO_BUF_INFO2((char *)"target", 6),
               },
       },
       {
@@ -145,9 +145,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 23,
           .expected =
               {
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-                  .query = {.buf = (char *)"page=1", .len = 6},
-                  .target = {.buf = (char *)"list", .len = 4},
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .query = FIO_BUF_INFO2((char *)"page=1", 6),
+                  .target = FIO_BUF_INFO2((char *)"list", 4),
               },
       },
       {
@@ -155,7 +155,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 11,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
               },
       },
 
@@ -164,8 +164,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 16,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
               },
       },
       {
@@ -173,9 +173,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 23,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .query = {.buf = (char *)"q=true", .len = 6},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .query = FIO_BUF_INFO2((char *)"q=true", 6),
               },
       },
       {
@@ -183,8 +183,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 22,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
               },
       },
       {
@@ -192,9 +192,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 27,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
               },
       },
       {
@@ -202,11 +202,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 42,
           .expected =
               {
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
-                  .query = {.buf = (char *)"key=val", .len = 7},
-                  .target = {.buf = (char *)"target", .len = 6},
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .query = FIO_BUF_INFO2((char *)"key=val", 7),
+                  .target = FIO_BUF_INFO2((char *)"target", 6),
               },
       },
       {
@@ -214,11 +214,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 37,
           .expected =
               {
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .password = {.buf = (char *)"1234", .len = 4},
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .user = FIO_BUF_INFO2((char *)"user", 4),
+                  .password = FIO_BUF_INFO2((char *)"1234", 4),
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
               },
       },
       {
@@ -226,10 +226,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
           .len = 32,
           .expected =
               {
-                  .user = {.buf = (char *)"user", .len = 4},
-                  .host = {.buf = (char *)"example.com", .len = 11},
-                  .port = {.buf = (char *)"8080", .len = 4},
-                  .path = {.buf = (char *)"/index.html", .len = 11},
+                  .user = FIO_BUF_INFO2((char *)"user", 4),
+                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
               },
       },
       {.url = NULL},

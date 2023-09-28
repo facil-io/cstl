@@ -32,8 +32,8 @@ Encryption Testing
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_encryption)(void) {
   fprintf(stderr, "* Testing pub/sub encryption / decryption.\n");
-  fio_publish_args_s origin = {.channel = FIO_BUF_INFO1("my channel"),
-                               .message = FIO_BUF_INFO1("my message"),
+  fio_publish_args_s origin = {.channel = FIO_BUF_INFO1((char *)"my channel"),
+                               .message = FIO_BUF_INFO1((char *)"my message"),
                                .filter = 0xAA,
                                .is_json =
                                    FIO___PUBSUB_JSON | FIO___PUBSUB_CLUSTER};
@@ -86,32 +86,32 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
           .channel = test_channel,
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
           .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .filter = -127,
           .udata = &state,
+          .filter = -127,
       },
       {
           .channel = test_channel,
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
           .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .subscription_handle_ptr = &sub_handle,
           .udata = &state,
+          .subscription_handle_ptr = &sub_handle,
           .filter = -127,
       },
       {
           .channel = FIO_BUF_INFO1((char *)"pubsub_*"),
           .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
           .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
-          .filter = -127,
           .udata = &state,
+          .filter = -127,
           .is_pattern = 1,
       },
   };
   const int sub_count = (sizeof(sub) / sizeof(sub[0]));
 
 #define FIO___PUBLISH2TEST()                                                   \
-  fio_publish(.channel = test_channel,                                         \
-              .filter = -127,                                                  \
-              .engine = FIO_PUBSUB_CLUSTER);                                   \
+  fio_publish(.engine = FIO_PUBSUB_CLUSTER,                                    \
+              .channel = test_channel,                                         \
+              .filter = -127);                                                 \
   expected += delta;                                                           \
   fio_queue_perform_all(fio_srv_queue());
 

@@ -327,10 +327,12 @@ FIO_SFUNC char *fio___mustache_i_stack_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+    .ctx = b->ctx,
+#endif
     .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
 #if FIO_MUSTACHE_ISOLATE_PARTIALS
-    .ctx = b->ctx,
     .stop = 1,
 #endif
   };
@@ -342,10 +344,12 @@ FIO_SFUNC char *fio___mustache_i_goto_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
+#if FIO_MUSTACHE_ISOLATE_PARTIALS
+    .ctx = b->ctx,
+#endif
     .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
 #if FIO_MUSTACHE_ISOLATE_PARTIALS
-    .ctx = b->ctx,
     .stop = 1,
 #endif
   };
@@ -756,9 +760,9 @@ FIO_IFUNC int fio___mustache_parse_section_start(fio___mustache_parser_s *p,
   fio___mustache_parser_s new_section = {
       .root = p->root,
       .prev = p,
+      .args = p->args,
       .delim = p->delim,
       .forwards = p->forwards,
-      .args = p->args,
       .starts_at = (uint32_t)fio_bstr_len(p->root),
       .depth = p->depth + 1,
       .dirty = p->dirty,
@@ -821,11 +825,11 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
   fio___mustache_parser_s new_section = {
       .root = p->root,
       .prev = p,
-      .delim = fio___mustache_delimiter_init(),
-      .path = fio_filename_parse2(filename.buf, filename.len).folder,
-      .fname = filename,
-      .forwards = file_content,
       .args = p->args,
+      .delim = fio___mustache_delimiter_init(),
+      .fname = filename,
+      .path = fio_filename_parse2(filename.buf, filename.len).folder,
+      .forwards = file_content,
       .starts_at = (uint32_t)fio_bstr_len(p->root),
       .depth = p->depth + 1,
       .dirty = 0,
@@ -1252,9 +1256,11 @@ SFUNC void *fio_mustache_build FIO_NOOP(fio_mustache_s *m,
   if (!args.is_lambda)
     args.is_lambda = fio___mustache_dflt_is_lambda;
 
-  fio___mustache_bldr_s builder = {.root = (char *)m,
-                                   .args = &args,
-                                   .ctx = args.ctx};
+  fio___mustache_bldr_s builder = {
+      .root = (char *)m,
+      .ctx = args.ctx,
+      .args = &args,
+  };
   return fio___mustache_build_section((char *)m, builder);
 }
 

@@ -758,14 +758,14 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
   if (!fio_http_path(h).len)
     fio_http_path_set(h,
                       u.path.len ? FIO_BUF2STR_INFO(u.path)
-                                 : FIO_STR_INFO2("/", 1));
+                                 : FIO_STR_INFO2((char *)"/", 1));
   if (!fio_http_query(h).len && u.query.len)
     fio_http_query_set(h, FIO_BUF2STR_INFO(u.query));
   if (!fio_http_method(h).len)
-    fio_http_method_set(h, FIO_STR_INFO2("GET", 3));
+    fio_http_method_set(h, FIO_STR_INFO2((char *)"GET", 3));
   if (u.host.len)
     fio_http_request_header_set_if_missing(h,
-                                           FIO_STR_INFO2("host", 4),
+                                           FIO_STR_INFO2((char *)"host", 4),
                                            FIO_BUF2STR_INFO(u.host));
   /* test for ws:// or wss:// - WebSocket scheme */
   if ((u.scheme.len == 2 ||
@@ -972,6 +972,8 @@ too_big:
 /** called when `Expect` arrives and may require a 100 continue response. */
 static int fio_http1_on_expect(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  const fio_buf_info_s response =
+      FIO_BUF_INFO1((char *)"HTTP/1.1 100 Continue\r\n\r\n");
   fio_http_s *h = c->h;
   if (!h)
     return 1;
@@ -982,8 +984,6 @@ static int fio_http1_on_expect(void *udata) {
     goto response_sent;
   c->h = h;
   fio_undup(c->io);
-  const fio_buf_info_s response =
-      FIO_BUF_INFO1((char *)"HTTP/1.1 100 Continue\r\n\r\n");
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
 response_sent:
@@ -1021,10 +1021,10 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
   fio___http_connection_s *c = fio___http_connection_new(capa);
   FIO_ASSERT_ALLOC(c);
   *c = (fio___http_connection_s){
+      .io = io,
       .settings = &(p->settings),
       .queue = p->queue,
       .udata = p->settings.udata,
-      .io = io,
       .state.http =
           {
               .on_http_callback = p->on_http_callback,
@@ -1209,8 +1209,8 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   fio_write2(c->io,
              .buf = buf.buf,
              .len = buf.len,
-             .copy = 0,
-             .dealloc = FIO_STRING_FREE);
+             .dealloc = FIO_STRING_FREE,
+             .copy = 0);
 }
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 FIO_SFUNC void fio___http_controller_http1_write_body(
@@ -1223,8 +1223,8 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     goto stream_chunk;
   fio_write2(c->io,
              .buf = (void *)args.buf,
-             .len = args.len,
              .fd = args.fd,
+             .len = args.len,
              .offset = args.offset,
              .dealloc = args.dealloc,
              .copy = (uint8_t)args.copy);
@@ -1242,8 +1242,8 @@ stream_chunk:
   }
   fio_write2(c->io,
              .buf = (void *)args.buf,
-             .len = args.len,
              .fd = args.fd,
+             .len = args.len,
              .offset = args.offset,
              .dealloc = args.dealloc,
              .copy = (uint8_t)args.copy);
@@ -1910,18 +1910,18 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
     r = (fio_protocol_s){
         .on_attach = fio___websocket_on_attach,
         .on_data = fio___websocket_on_data,
-        .on_timeout = fio___websocket_on_timeout,
-        .on_shutdown = fio___websocket_on_shutdown,
         .on_close = fio___websocket_on_close,
+        .on_shutdown = fio___websocket_on_shutdown,
+        .on_timeout = fio___websocket_on_timeout,
         .on_pubsub = FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
     r = (fio_protocol_s){
         .on_attach = fio___sse_on_attach,
-        .on_timeout = fio___sse_on_timeout,
-        .on_shutdown = fio___sse_on_shutdown,
         .on_close = fio___sse_on_close,
+        .on_shutdown = fio___sse_on_shutdown,
+        .on_timeout = fio___sse_on_timeout,
         .on_pubsub = FIO_HTTP_SSE_SUBSCRIBE_DIRECT,
     };
     return r;
@@ -1943,19 +1943,19 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   switch (s) {
   case FIO___HTTP_PROTOCOL_ACCEPT:
     r = (fio_http_controller_s){
+        .on_destroyed = fio__http_controller_on_destroyed,
         .send_headers = fio___http_controller_http1_send_headers,
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
-        .on_destroyed = fio__http_controller_on_destroyed,
         .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
     r = (fio_http_controller_s){
+        .on_destroyed = fio__http_controller_on_destroyed,
         .send_headers = fio___http_controller_http1_send_headers,
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
-        .on_destroyed = fio__http_controller_on_destroyed,
         .close = fio___http_default_close,
     };
     return r;
@@ -1967,17 +1967,17 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     return r;
   case FIO___HTTP_PROTOCOL_WS:
     r = (fio_http_controller_s){
-        .on_finish = fio___http_controller_ws_on_finish,
-        .write_body = fio___http_controller_ws_write_body,
         .on_destroyed = fio__http_controller_on_destroyed2,
+        .write_body = fio___http_controller_ws_write_body,
+        .on_finish = fio___http_controller_ws_on_finish,
         .close = fio___http_default_close,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
     r = (fio_http_controller_s){
+        .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .on_destroyed = fio__http_controller_on_destroyed2,
         .close = fio___http_default_close,
     };
     return r;

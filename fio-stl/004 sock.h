@@ -413,8 +413,7 @@ SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
       continue;
     }
 #endif
-    {
-      // avoid the "address taken"
+    { // avoid the "address taken"
       int optval = 1;
       setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
     }

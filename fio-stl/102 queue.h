@@ -88,15 +88,15 @@ Queue API
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
   {                                                                            \
     .r = &(queue).mem, .w = &(queue).mem,                                      \
+    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT,                         \
     .consumers = FIO_LIST_INIT((queue).consumers),                             \
-    .lock = (fio_thread_mutex_t)FIO_THREAD_MUTEX_INIT                          \
   }
 #else
 /** May be used to initialize global, static memory, queues. */
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
   {                                                                            \
-    .r = &(queue).mem, .w = &(queue).mem,                                      \
-    .consumers = FIO_LIST_INIT((queue).consumers), .lock = FIO_LOCK_INIT       \
+    .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT,               \
+    .consumers = FIO_LIST_INIT((queue).consumers),                             \
   }
 #endif
 
@@ -311,7 +311,7 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
       break;
     }
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      pos->stop = 1;
+      fio_atomic_or(&pos->stop, 1);
       for (size_t i = 0; i < pos->workers; ++i)
         fio_thread_cond_signal(&pos->cond);
     }
@@ -520,6 +520,7 @@ Queue Consumer Threads
 
 FIO_SFUNC void *fio___queue_worker_task(void *g_) {
   fio___thread_group_s *grp = (fio___thread_group_s *)g_;
+  fio_state_callback_force(FIO_CALL_ON_WORKER_THREAD_START);
   while (!grp->stop) {
     fio_queue_perform_all(grp->queue);
     fio_thread_mutex_lock(&grp->mutex);
@@ -528,6 +529,7 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
     fio_thread_mutex_unlock(&grp->mutex);
     fio_queue_perform_all(grp->queue);
   }
+  fio_state_callback_force(FIO_CALL_ON_WORKER_THREAD_END);
   return NULL;
 }
 FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
@@ -545,7 +547,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   for (size_t i = 0; i < grp.workers; ++i) {
     fio_thread_create(threads + i, fio___queue_worker_task, (void *)&grp);
   }
-  ((fio___thread_group_s *)g_)->stop = 0;
+  fio_atomic_and(&((fio___thread_group_s *)g_)->stop, 0);
   /* from this point on, g_ is invalid! */
   for (size_t i = 0; i < grp.workers; ++i) {
     fio_thread_join(threads + i);
@@ -578,7 +580,7 @@ SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
     return;
   FIO___LOCK_LOCK(q->lock);
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    pos->stop = 1;
+    fio_atomic_or(&pos->stop, 1);
     for (size_t i = 0; i < pos->workers * 2; ++i)
       fio_thread_cond_signal(&pos->cond);
   }

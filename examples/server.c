@@ -14,6 +14,7 @@ Feel free to copy, use and enjoy according to the license provided.
 #define FIO_EVERYTHING
 #include "fio-stl/include.h"
 
+// clang-format off
 /* *****************************************************************************
 This is a simple HTTP "Hello World" / echo server example.
 
@@ -26,9 +27,8 @@ Benchmark with keep-alive:
 
 Connect to chat server with WebSockets:
 
-    ws = new WebSocket("ws://localhost:3000");
-    ws.onmessage = function(e) {console.log("Got message!");
-                                console.log(e.data);};
+    ws = new WebSocket("ws://" + document.location.host + document.location.pathname);
+    ws.onmessage = function(e) {console.log("Got message!"); console.log(e.data);};
     ws.onclose = function(e) {console.log("closed")};
     ws.onopen = function(e) {ws.send("hi");};
 
@@ -39,7 +39,7 @@ Listen to chat messages with Server Sent Events (EventSource / SSE):
     listener.onevent = (e) => { console.log(e); }
 
 ***************************************************************************** */
-
+// clang-format on
 /* *****************************************************************************
 WebSocket / SSE Callbacks
 ***************************************************************************** */
@@ -99,7 +99,7 @@ int main(int argc, char const *argv[]) {
 
       FIO_CLI_PRINT_HEADER("Address Binding"),
       FIO_CLI_PRINT_LINE(
-          "NOTE: also controlled the ADDRESS or PORT environment vars."),
+          "NOTE: also controlled by the ADDRESS or PORT environment vars."),
       FIO_CLI_STRING("-bind -b address to listen to in URL format."),
       FIO_CLI_INT("-port -p port number to listen to if URL is missing."),
       FIO_CLI_PRINT(
@@ -137,6 +137,12 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_STRING(
           "--tls-password -tls-pass The SSL/TLS password for the private key."),
 
+      FIO_CLI_PRINT_HEADER("Clustering Pub/Sub"),
+      FIO_CLI_INT("--broadcast -bp Cluster Broadcast Port."),
+      FIO_CLI_STRING("--secret -scrt Cluster Secret."),
+      FIO_CLI_PRINT("NOTE: also controlled by the SECRET and SECRET_LENGTH "
+                    "environment vars."),
+
       FIO_CLI_PRINT_HEADER("Misc"),
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
       FIO_CLI_BOOL(
@@ -168,6 +174,13 @@ int main(int argc, char const *argv[]) {
 
   /* initialize Async HTTP queue */
   fio_srv_async_init(&http_queue, fio_srv_workers(fio_cli_get_i("-t")));
+
+  /* Clustering */
+  if (fio_cli_get_i("-bp") > 0) {
+    fio_buf_info_s scrt = FIO_BUF_INFO1((char *)fio_cli_get("-scrt"));
+    fio_pubsub_secret_set(scrt.buf, scrt.len);
+    fio_pubsub_broadcast_on_port(fio_cli_get_i("-bp"));
+  }
 
   /* Test for TLS */
   fio_tls_s *tls = (fio_cli_get("--tls-cert") && fio_cli_get("--tls-key"))
@@ -248,6 +261,7 @@ int main(int argc, char const *argv[]) {
                (fio_srv_workers(fio_cli_get_i("-w")) ? "cluster mode"
                                                      : "single process"),
                (int)http_queue.count);
+
   /* start server reactor */
   fio_srv_start(fio_cli_get_i("-w"));
 
@@ -342,23 +356,26 @@ static void http_respond(fio_http_s *h) {
 /* *****************************************************************************
 Pub/Sub Logger / Recorder
 ***************************************************************************** */
-#if 0
+#if 1
 FIO_SFUNC void logger_detached(const fio_pubsub_engine_s *eng) {
   FIO_LOG_INFO("%d (logger) detached", fio_srv_pid());
   (void)eng;
 }
-FIO_SFUNC void logger_publish(const fio_pubsub_engine_s *eng, fio_msg_s *msg) {
+FIO_SFUNC void logger_on_msg(fio_msg_s *msg) {
   FIO_LOG_INFO("%d (logger) pub/sub message for %s (%d):\n%s",
                fio_srv_pid(),
                (msg->channel.len ? msg->channel.buf : "<null>"),
                (int)msg->filter,
                (msg->message.len ? msg->message.buf : "<null>"));
-  fio_publish(.engine = FIO_PUBSUB_LOCAL,
+}
+FIO_SFUNC void logger_publish(const fio_pubsub_engine_s *eng, fio_msg_s *msg) {
+  logger_on_msg(msg);
+  fio_publish(.engine = FIO_PUBSUB_CLUSTER,
               .channel = msg->channel,
               .message = msg->message,
               .filter = msg->filter,
               .is_json = msg->is_json);
-              (void)eng;
+  (void)eng;
 }
 
 fio_pubsub_engine_s FIO_PUBSUB_LOGGER = {
@@ -369,5 +386,6 @@ fio_pubsub_engine_s FIO_PUBSUB_LOGGER = {
 FIO_CONSTRUCTOR(pubsub_logger) {
   FIO_PUBSUB_DEFAULT = &FIO_PUBSUB_LOGGER;
   fio_pubsub_attach(&FIO_PUBSUB_LOGGER);
+  // fio_subscribe(.filter = 1, .on_message = logger_on_msg);
 }
 #endif

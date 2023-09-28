@@ -623,23 +623,23 @@ PostOffice Distribution types - The Distribution Channel Map
                 ch->name_len,                                                  \
                 FIO___PUBSUB_CHANNEL_ENCODE_CAPA(ch->filter, ch->is_pattern))
 
-FIO_IFUNC int fio___channel_cmp(fio_channel_s *ch, fio_str_info_s *s) {
+FIO_IFUNC int fio___channel_cmp(fio_channel_s *ch, fio_str_info_s s) {
   fio_str_info_s c = FIO___PUBSUB_CHANNEL2STR(ch);
-  return FIO_STR_INFO_IS_EQ(c, s[0]);
+  return FIO_STR_INFO_IS_EQ(c, s);
 }
 
-FIO_SFUNC fio_channel_s *fio___channel_new_for_map(fio_str_info_s *s) {
-  fio_channel_s *ch = fio_channel_new(s->len + 1);
+FIO_IFUNC fio_channel_s *fio___channel_new_for_map(fio_str_info_s s) {
+  fio_channel_s *ch = fio_channel_new(s.len + 1);
   FIO_ASSERT_ALLOC(ch);
   *ch = (fio_channel_s){
       .subscriptions = FIO_LIST_INIT(ch->subscriptions),
       .history = FIO_LIST_INIT(ch->history),
-      .name_len = (uint32_t)s->len,
-      .filter = (int16_t)(s->capa & 0xFFFFUL),
-      .is_pattern = (uint8_t)(s->capa >> 16),
+      .name_len = (uint32_t)s.len,
+      .filter = (int16_t)(s.capa & 0xFFFFUL),
+      .is_pattern = (uint8_t)(s.capa >> 16),
   };
-  FIO_MEMCPY(ch->name, s->buf, s->len);
-  ch->name[s->len] = 0;
+  FIO_MEMCPY(ch->name, s.buf, s.len);
+  ch->name[s.len] = 0;
   fio___channel_on_create(ch);
   return ch;
 }
@@ -648,8 +648,8 @@ FIO_SFUNC fio_channel_s *fio___channel_new_for_map(fio_str_info_s *s) {
 #define FIO_MAP_KEY                   fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL          fio_channel_s *
 #define FIO_MAP_KEY_FROM_INTERNAL(k_) FIO___PUBSUB_CHANNEL2STR(k_)
-#define FIO_MAP_KEY_COPY(dest, src)   ((dest) = fio___channel_new_for_map(&(src)))
-#define FIO_MAP_KEY_CMP(a, b)         fio___channel_cmp((a), &(b))
+#define FIO_MAP_KEY_COPY(dest, src)   ((dest) = fio___channel_new_for_map((src)))
+#define FIO_MAP_KEY_CMP(a, b)         fio___channel_cmp((a), (b))
 #define FIO_MAP_HASH_FN(str)          fio_risky_hash(str.buf, str.len, str.capa)
 #define FIO_MAP_KEY_DESTROY(key)      fio_channel_free((key))
 #define FIO_MAP_KEY_DISCARD(key)
@@ -737,10 +737,12 @@ Message Uniqueness Map for filtering remote connection broadcasts
 #define FIO_MAP_NAME             fio___pubsub_message_map
 #define FIO_MAP_KEY              fio___pubsub_message_s *
 #define FIO_MAP_KEY_COPY(d_, e_) (d_ = fio___pubsub_message_dup(e_))
-#define FIO_MAP_KEY_DESTROY(e)   fio___pubsub_message_free(e)
-#define FIO_MAP_HASH_FN(m)       fio_risky_num(m->data.id, m->data.published)
-#define FIO_MAP_RECALC_HASH      1
-#define FIO_MAP_LRU              FIO___PUBSUB_CLUSTER_BACKLOG
+#define FIO_MAP_KEY_CMP(a, b)                                                  \
+  (a->data.id == b->data.id && a->data.published == b->data.published)
+#define FIO_MAP_KEY_DESTROY(e) fio___pubsub_message_free(e)
+#define FIO_MAP_HASH_FN(m)     fio_risky_num(m->data.id, m->data.published)
+#define FIO_MAP_RECALC_HASH    1
+#define FIO_MAP_LRU            FIO___PUBSUB_CLUSTER_BACKLOG
 #define FIO_MAP_KEY_DISCARD(e)
 #define FIO___RECURSIVE_INCLUDE
 #include FIO_INCLUDE_FILE
@@ -839,8 +841,8 @@ SFUNC const char *fio_pubsub_ipc_url(void) {
 
 /** Sets a (possibly shared) secret for securing pub/sub communication. */
 SFUNC void fio_pubsub_secret_set(char *str, size_t len) {
-  uint64_t fallback_secret = 0;
   FIO___PUBSUB_POSTOFFICE.secret_is_random = 0;
+  uint64_t fallback_secret = 0;
   if (!str || !len) {
     if ((str = getenv("SECRET"))) {
       const char *secret_length = getenv("SECRET_LENGTH");
@@ -1059,16 +1061,15 @@ FIO_IFUNC void fio___pubsub_subscribe_task(void *sub_, void *ignr_) {
     FIO_LIST_HEAD *ls;
     fio_str_info_s *str;
   } uptr = {.ls = &sub->node};
-  fio_str_info_s ch_name = *uptr.str;
-  sub->node = FIO_LIST_INIT(sub->node);
-  sub->history = FIO_LIST_INIT(sub->history);
-  sub->history_active = FIO_LIST_INIT(sub->history_active);
-
+  const fio_str_info_s ch_name = *uptr.str;
   fio_channel_s **ch_ptr =
       fio___channel_map_node2key_ptr(fio___channel_map_set_ptr(
           &FIO___PUBSUB_POSTOFFICE.channels + (ch_name.capa >> 16),
           ch_name));
   fio_bstr_free(ch_name.buf);
+  sub->node = FIO_LIST_INIT(sub->node);
+  sub->history = FIO_LIST_INIT(sub->history);
+  sub->history_active = FIO_LIST_INIT(sub->history_active);
   if (FIO_UNLIKELY(!ch_ptr))
     goto no_channel;
   sub->channel = ch_ptr[0];
@@ -1134,6 +1135,7 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
     goto sub_error;
 
   *s = (fio_subscription_s){
+      .replay_since = args.replay_since,
       .io = args.io,
       .on_message =
           (args.on_message ? args.on_message
@@ -1141,7 +1143,6 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
                                       : fio___subscription_mock_cb)),
       .on_unsubscribe = args.on_unsubscribe,
       .udata = args.udata,
-      .replay_since = args.replay_since,
   };
   args.is_pattern = !!args.is_pattern; /* make sure this is either 1 or zero */
   uptr.ls = &s->node;
@@ -1161,9 +1162,9 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
                 .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
                                           (uint16_t)args.filter)),
                 .name = args.channel,
+                .udata = s,
                 .on_close =
-                    (void (*)(void *))fio___pubsub_subscription_unsubscribe,
-                .udata = s);
+                    (void (*)(void *))fio___pubsub_subscription_unsubscribe);
     return;
   }
   *args.subscription_handle_ptr = (uintptr_t)s;
@@ -1403,9 +1404,9 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_alloc(void *header) {
                                FIO___PUBSUB_MESSAGE_OVERHEAD);
   FIO_ASSERT_ALLOC(m);
   m->data = (fio_msg_s){
+      .udata = m->buf + channel_len + message_len + 2,
       .channel = FIO_BUF_INFO2(m->buf, channel_len),
       .message = FIO_BUF_INFO2(m->buf + channel_len + 1, message_len),
-      .udata = m->buf + channel_len + message_len + 2,
   };
   return m;
 }
@@ -1574,24 +1575,31 @@ is_special_message:
   case FIO___PUBSUB_SUB:
     fio_subscribe(.io = m->data.io,
                   .channel = m->data.channel,
+                  .on_message = fio___subscription_mock_cb,
                   .filter = m->data.filter,
-                  .is_pattern = (uint8_t)(m->data.id - 1),
-                  .on_message = fio___subscription_mock_cb);
+                  .is_pattern = (uint8_t)(m->data.id - 1));
     return;
   case FIO___PUBSUB_UNSUB:
     fio_unsubscribe(.io = m->data.io,
                     .channel = m->data.channel,
+                    .on_message = fio___subscription_mock_cb,
                     .filter = m->data.filter,
-                    .is_pattern = (uint8_t)(m->data.id - 1),
-                    .on_message = fio___subscription_mock_cb);
+                    .is_pattern = (uint8_t)(m->data.id - 1));
     return;
 
   case FIO___PUBSUB_IDENTIFY:
     p = (fio___pubsub_message_parser_s *)fio_udata_get(m->data.io);
     if (p) {
       p->uuid[0] = m->data.id;
-      p->uuid[0] = m->data.published;
+      p->uuid[1] = m->data.published;
+      fio___pubsub_broadcast_connected_set(
+          &FIO___PUBSUB_POSTOFFICE.remote_uuids,
+          p->uuid[0],
+          p->uuid[1]);
     }
+    FIO_LOG_INFO("(cluster) identified new peer (%zu connections)",
+                 fio___pubsub_broadcast_connected_count(
+                     &FIO___PUBSUB_POSTOFFICE.remote_uuids));
     return;
   case FIO___PUBSUB_FORWARDER: /* fall through */
   case (FIO___PUBSUB_FORWARDER | FIO___PUBSUB_JSON):
@@ -1756,7 +1764,8 @@ FIO_SFUNC void fio___pubsub_on_message_remote(fio_s *io,
                                               fio___pubsub_message_s *msg) {
   fio___pubsub_message_map_s *map = &FIO___PUBSUB_POSTOFFICE.remote_messages;
   map += !!(msg->data.is_json & FIO___PUBSUB_REPLAY);
-  if (fio___pubsub_message_map_set(map, msg) != msg)
+  fio___pubsub_message_s *existing = fio___pubsub_message_map_set(map, msg);
+  if (existing != msg)
     return; /* already received */
   fio___pubsub_message_route(msg);
   (void)io;
@@ -1775,13 +1784,20 @@ FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_s *io) {
 }
 FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata) {
   fio___pubsub_message_parser_s *p = (fio___pubsub_message_parser_s *)udata;
+  if (!fio_srv_is_master())
+    fio_srv_stop();
+  if (!p)
+    return;
   if (p->uuid[0] || p->uuid[1]) {
-    // TODO!: fio___pubsub_broadcast_hello(fio_s *io)
+    // TODO!: fio___pubsub_broadcast_hello(fio_s *io) ?
     fio___pubsub_broadcast_connected_remove(
         &FIO___PUBSUB_POSTOFFICE.remote_uuids,
         p->uuid[0],
         p->uuid[1],
         NULL);
+    FIO_LOG_INFO("(cluster) lost peer connection (%zu connections)",
+                 fio___pubsub_broadcast_connected_count(
+                     &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
   fio___pubsub_message_parser_free(p);
 }
@@ -1876,8 +1892,8 @@ FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
     fio___pubsub_message_s *m =
         fio___pubsub_message_author((fio_publish_args_s){
             .id = (uint64_t)(ch->is_pattern + 1),
-            .filter = ch->filter,
             .channel = FIO_BUF_INFO2(ch->name, ch->name_len),
+            .filter = ch->filter,
             .is_json = FIO___PUBSUB_SUB,
         });
     if (m) {
@@ -1900,8 +1916,8 @@ FIO_IFUNC void fio___channel_on_destroy(fio_channel_s *ch) {
     fio___pubsub_message_s *m =
         fio___pubsub_message_author((fio_publish_args_s){
             .id = (uint64_t)(ch->is_pattern + 1),
-            .filter = ch->filter,
             .channel = FIO_BUF_INFO2(ch->name, ch->name_len),
+            .filter = ch->filter,
             .is_json = FIO___PUBSUB_UNSUB,
         });
     if (m) {
@@ -1924,13 +1940,11 @@ FIO_IFUNC void fio___channel_on_destroy(fio_channel_s *ch) {
 Broadcasting for remote connections
 ***************************************************************************** */
 
-FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick,
-                                                  uint64_t *ext) {
+FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick) {
   /* [0-1]  Sender's 128 bit UUID
    * [2]    Random nonce
    * [3]    Timestamp in milliseconds
    * [4-5]  MAC
-   * [6-7]  Receiver's 128 bit UUID (optional)
    */
   fio_u512 u = {0};
   uint64_t hello_rand = fio_rand64();
@@ -1940,10 +1954,6 @@ FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick,
   u.u64[2] = fio_ltole64(hello_rand); /* persistent endienes required for k */
   u.u64[3] = fio_ltole64(tick);
   fio_poly1305_auth(u.u64 + 4, k, NULL, 0, u.u64, 32);
-  if (!ext)
-    return u;
-  u.u64[6] = ext[0];
-  u.u64[7] = ext[1];
   return u;
 }
 
@@ -1955,14 +1965,27 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
   int64_t this_hello = fio_srv_last_tick();
   if (last_hello == this_hello)
     return;
-  fio_u512 u = fio___pubsub_broadcast_compose((last_hello = this_hello), NULL);
+  fio_u512 u = fio___pubsub_broadcast_compose((last_hello = this_hello));
   struct sockaddr_in addr = (struct sockaddr_in){
       .sin_family = AF_INET,
       .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata_get(io)),
       .sin_addr.s_addr = INADDR_BROADCAST, // inet_addr("255.255.255.255"),
   };
   FIO_LOG_DEBUG2("(pub/sub) sending broadcast.");
-  sendto(fio_fd_get(io), u.u8, 48, 0, (struct sockaddr *)&addr, sizeof(addr));
+  sendto(fio_fd_get(io),
+         (const char *)u.u8,
+         48,
+         0,
+         (struct sockaddr *)&addr,
+         sizeof(addr));
+}
+
+FIO_SFUNC int fio___pubsub_broadcast_hello_task(void *io_, void *ignr_) {
+  (void)ignr_;
+  fio_s *io = (fio_s *)io_;
+  fio___pubsub_broadcast_hello(io);
+  fio_undup(io);
+  return 0;
 }
 
 FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
@@ -2002,6 +2025,12 @@ Letter Listening to Remote Connections - TODO!
 */
 FIO_SFUNC void fio___pubsub_broadcast_on_attach(fio_s *io) {
   fio___pubsub_broadcast_hello((FIO___PUBSUB_POSTOFFICE.broadcaster = io));
+  fio_srv_run_every(.fn = fio___pubsub_broadcast_hello_task,
+                    .udata1 = fio_dup(io),
+                    .every = (uint32_t)(1024 |
+                                        (1023 &
+                                         FIO___PUBSUB_POSTOFFICE.uuid.u64[0])),
+                    .repetitions = 2);
 }
 FIO_SFUNC void fio___pubsub_broadcast_on_close(void *ignr_) {
   FIO___PUBSUB_POSTOFFICE.broadcaster = NULL;
@@ -2014,8 +2043,15 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
   socklen_t from_len = sizeof(from);
   ssize_t len;
   int should_say_hello = 0;
-  while ((len = recvfrom(fio_fd_get(io), buf, 128, 0, from, &from_len)) > 0) {
-    if (len != 48 && len != 64) {
+  fio___pubsub_message_s *m = fio___pubsub_message_author(
+      (fio_publish_args_s){.id = FIO___PUBSUB_POSTOFFICE.uuid.u64[0],
+                           .published = FIO___PUBSUB_POSTOFFICE.uuid.u64[1],
+                           .is_json = FIO___PUBSUB_IDENTIFY});
+
+  while (
+      (len = recvfrom(fio_fd_get(io), (char *)buf, 128, 0, from, &from_len)) >
+      0) {
+    if (len != 48) {
       FIO_LOG_WARNING(
           "pub/sub peer detection received invalid packet (%zu bytes)!",
           len);
@@ -2024,57 +2060,68 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
     if (fio___pubsub_broadcast_hello_validate(buf)) {
       FIO_LOG_WARNING(
           "pub/sub peer detection received invalid packet payload!");
-      return;
-    }
-    if (len == 48) {
-      FIO_LOG_DDEBUG2("detected peer (1st trip), sending UUID");
-      fio_u512 u = fio___pubsub_broadcast_compose(fio_srv_last_tick(), buf);
-      sendto(fio_fd_get(io), u.u8, 64, 0, (struct sockaddr *)from, from_len);
-      /* new peer in system? maybe there's more... */
-      should_say_hello |= (fio___pubsub_broadcast_connected_get(
-                               &FIO___PUBSUB_POSTOFFICE.remote_uuids,
-                               buf[0],
-                               buf[1]) == 0);
       continue;
     }
-    FIO_LOG_DDEBUG2("detected peer (roundtrip), should now connect");
-
     if (fio___pubsub_broadcast_connected_get(
             &FIO___PUBSUB_POSTOFFICE.remote_uuids,
             buf[0],
-            buf[1]) == buf[1])
+            buf[1]) == buf[1]) {
+      FIO_LOG_DDEBUG2("skipping peer connection - already exists");
       continue; /* skip connection, already exists. */
+    }
+    should_say_hello |= 1;
+    FIO_LOG_DDEBUG2("detected peer, should now connect");
+
     /* TODO: fixme! */
-    from->sa_family = AF_INET;
-    int fd = fio_sock_open_remote((struct addrinfo *)from, 1);
-    if (fd == 1) {
+    char addr_buf[128];
+    if (getnameinfo(from,
+                    from_len,
+                    addr_buf,
+                    64,
+                    addr_buf + 64,
+                    64,
+                    (NI_NUMERICHOST | NI_NUMERICHOST))) {
+      FIO_LOG_ERROR("couldn't resolve peer address");
+      continue;
+    }
+    int fd = fio_sock_open(addr_buf,
+                           addr_buf + 64,
+                           FIO_SOCK_NONBLOCK | FIO_SOCK_CLIENT | FIO_SOCK_TCP);
+    if (fd == -1) {
       FIO_LOG_ERROR("couldn't connect to cluster peer: %s", strerror(errno));
       continue;
     }
     fio___pubsub_broadcast_connected_set(&FIO___PUBSUB_POSTOFFICE.remote_uuids,
-                                         buf[0],
-                                         buf[1]);
-    fio_srv_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
+                                         addr_buf[0],
+                                         addr_buf[1]);
+    fio_s *peer = fio_srv_attach_fd(fd,
+                                    &FIO___PUBSUB_POSTOFFICE.protocol.remote,
+                                    NULL,
+                                    NULL);
+    fio___pubsub_message_write2io(peer, m);
+    FIO_LOG_INFO("(cluster) connecting to peer (%zu connections).",
+                 fio___pubsub_broadcast_connected_count(
+                     &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
+  fio___pubsub_message_free(m);
   if (should_say_hello)
-    fio___pubsub_broadcast_hello(io);
+    fio_srv_run_every(.fn = fio___pubsub_broadcast_hello_task,
+                      .udata1 = fio_dup(io),
+                      .every =
+                          (uint32_t)(1024 |
+                                     (1023 &
+                                      FIO___PUBSUB_POSTOFFICE.uuid.u64[0])));
 }
 
 FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_s *io) {
   int fd;
-  fio___pubsub_message_s *m = fio___pubsub_message_author(
-      (fio_publish_args_s){.id = FIO___PUBSUB_POSTOFFICE.uuid.u64[0],
-                           .published = FIO___PUBSUB_POSTOFFICE.uuid.u64[1],
-                           .is_json = FIO___PUBSUB_IDENTIFY});
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
     FIO_LOG_DDEBUG2("accepting a cluster peer connection");
-    fio_s *client = fio_srv_attach_fd(fd,
-                                      &FIO___PUBSUB_POSTOFFICE.protocol.remote,
-                                      NULL,
-                                      NULL);
-    fio___pubsub_message_write2io(client, m);
+    fio_srv_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
   }
-  fio___pubsub_message_free(m);
+  FIO_LOG_INFO("(cluster) accepted new peer(s) (%zu connections).",
+               fio___pubsub_broadcast_connected_count(
+                   &FIO___PUBSUB_POSTOFFICE.remote_uuids));
 }
 
 SFUNC void fio___pubsub_broadcast_on_port(void *port_) {

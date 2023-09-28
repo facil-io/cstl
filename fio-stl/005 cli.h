@@ -216,9 +216,8 @@ FIO_SFUNC void fio___cli_str_destroy(fio___cli_str_s *s) {
 FIO_IFUNC fio_str_info_s fio___cli_str_info(fio___cli_str_s *s) {
   fio_str_info_s r = {0};
   if (s && (s->em || s->len))
-    r = ((s->em) & 127)
-            ? ((fio_str_info_s){.buf = (char *)s->pad, .len = (size_t)s->em})
-            : ((fio_str_info_s){.buf = s->str, .len = (size_t)s->len});
+    r = ((s->em) & 127) ? (FIO_STR_INFO2((char *)s->pad, (size_t)s->em))
+                        : (FIO_STR_INFO2(s->str, (size_t)s->len));
   return r;
 }
 
@@ -869,10 +868,9 @@ FIO_SFUNC void fio___cli_print_help(void) {
   char const *description = fio___cli_data.description;
   fio___cli_line_s *args = fio___cli_data.args;
 
-  fio_buf_info_s app_name = {
-      .buf = (char *)fio___cli_data.app_name,
-      .len =
-          (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0)};
+  fio_buf_info_s app_name = FIO_BUF_INFO2(
+      (char *)fio___cli_data.app_name,
+      (fio___cli_data.app_name ? FIO_STRLEN(fio___cli_data.app_name) : 0));
   FIO_STR_INFO_TMP_VAR(help, 8191);
   fio_str_info_s help_org_state = help;
 

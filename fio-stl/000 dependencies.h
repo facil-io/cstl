@@ -312,7 +312,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SOCK
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_FIOBJ) ||                          \
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_FIOBJ) ||    \
     defined(FIO_LEAK_COUNTER) || defined(FIO_MEMORY_NAME) || defined(FIO_POLL)
 #undef FIO_STATE
 #define FIO_STATE

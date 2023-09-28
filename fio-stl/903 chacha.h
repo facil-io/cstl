@@ -197,7 +197,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
       size_t ad_len;
       char *msg;
       char *expected;
-      char mac[16];
+      char mac[17];
     } tests[] = {
         {
             .key = "\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d"

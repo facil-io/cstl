@@ -40,6 +40,10 @@ typedef enum {
   FIO_CALL_IN_CHILD,
   /** Called by the master process after spawning a worker (after forking). */
   FIO_CALL_IN_MASTER,
+  /** Called by each worker thread in a Server Async queue as it starts. */
+  FIO_CALL_ON_WORKER_THREAD_START,
+  /** Called by each worker thread in a Server Async queue as it ends. */
+  FIO_CALL_ON_WORKER_THREAD_END,
   /** Called every time a *Worker* process starts. */
   FIO_CALL_ON_START,
   /** Reserved for internal use. */

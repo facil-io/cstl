@@ -857,7 +857,7 @@ static struct {
   char str[32];
 } FIO___HTTP_STATIC_CACHE[] = {
 #define FIO___HTTP_STATIC_CACHE_SET(s)                                         \
-  { .meta = {.ref = 3, .len = (uint32_t)(sizeof(s) - 1)}, .str = s }
+  { .meta = {.len = (uint32_t)(sizeof(s) - 1), .ref = 3}, .str = s }
     FIO___HTTP_STATIC_CACHE_SET("a-im"),
     FIO___HTTP_STATIC_CACHE_SET("accept"),
     FIO___HTTP_STATIC_CACHE_SET("accept-charset"),
@@ -2744,9 +2744,9 @@ range_request_review_finished:
                                  mime_type);
   { /* send response (avoid macro for C++ compatibility) */
     fio_http_write_args_s args = {
-        .fd = fd,
         .len = filename.len,     /* now holds body length */
         .offset = filename.capa, /* now holds starting offset */
+        .fd = fd,
         .finish = 1};
     fio_http_write FIO_NOOP(h, args);
   }

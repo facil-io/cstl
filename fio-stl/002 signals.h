@@ -69,7 +69,7 @@ POSIX implementation
 
 static struct {
   int32_t sig;
-  volatile int32_t flag;
+  volatile unsigned flag;
   void (*callback)(int sig, void *);
   void *udata;
   struct sigaction old;
@@ -161,7 +161,7 @@ Windows Implementation
 
 static struct {
   int32_t sig;
-  volatile int32_t flag;
+  volatile unsigned flag;
   void (*callback)(int sig, void *);
   void *udata;
   void (*old)(int sig);

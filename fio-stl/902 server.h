@@ -190,19 +190,19 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
     fio_buf_info_s url;
     size_t is_tls;
   } url_tests[] = {
-      {FIO_BUF_INFO1("ws://ex.com"), 0},
-      {FIO_BUF_INFO1("wss://ex.com"), 1},
-      {FIO_BUF_INFO1("sse://ex.com"), 0},
-      {FIO_BUF_INFO1("sses://ex.com"), 1},
-      {FIO_BUF_INFO1("http://ex.com"), 0},
-      {FIO_BUF_INFO1("https://ex.com"), 1},
-      {FIO_BUF_INFO1("tcp://ex.com"), 0},
-      {FIO_BUF_INFO1("tcps://ex.com"), 1},
-      {FIO_BUF_INFO1("udp://ex.com"), 0},
-      {FIO_BUF_INFO1("udps://ex.com"), 1},
-      {FIO_BUF_INFO1("tls://ex.com"), 1},
-      {FIO_BUF_INFO1("ws://ex.com/?TLSN"), 0},
-      {FIO_BUF_INFO1("ws://ex.com/?TLS"), 1},
+      {FIO_BUF_INFO1((char *)"ws://ex.com"), 0},
+      {FIO_BUF_INFO1((char *)"wss://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"sse://ex.com"), 0},
+      {FIO_BUF_INFO1((char *)"sses://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"http://ex.com"), 0},
+      {FIO_BUF_INFO1((char *)"https://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"tcp://ex.com"), 0},
+      {FIO_BUF_INFO1((char *)"tcps://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"udp://ex.com"), 0},
+      {FIO_BUF_INFO1((char *)"udps://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"tls://ex.com"), 1},
+      {FIO_BUF_INFO1((char *)"ws://ex.com/?TLSN"), 0},
+      {FIO_BUF_INFO1((char *)"ws://ex.com/?TLS"), 1},
       {FIO_BUF_INFO0, 0},
   };
   for (size_t i = 0; url_tests[i].url.buf; ++i) {
@@ -238,8 +238,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       5,
       1,
       (fio___srv_env_obj_s){
-          .udata = &a,
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+          .udata = &a},
       1);
   FIO_ASSERT(fio___srv_env_safe_get(&env, (char *)"a_key", 5, 1) == &a,
              "fio___srv_env_safe_set/get round-trip error!");
@@ -249,8 +249,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       5,
       2,
       (fio___srv_env_obj_s){
-          .udata = &a,
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+          .udata = &a},
       2);
   fio___srv_env_safe_set(
       &env,
@@ -258,8 +258,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       5,
       3,
       (fio___srv_env_obj_s){
-          .udata = &a,
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+          .udata = &a},
       1);
   fio___srv_env_safe_set(
       &env,
@@ -267,8 +267,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       5,
       1,
       (fio___srv_env_obj_s){
-          .udata = &b,
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+          .udata = &b},
       1);
   fio___srv_env_safe_set(
       &env,
@@ -276,8 +276,8 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
       5,
       1,
       (fio___srv_env_obj_s){
-          .udata = &c,
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close)},
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+          .udata = &c},
       1);
   fio___srv_env_safe_unset(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a,
