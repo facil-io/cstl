@@ -567,8 +567,10 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
     q->consumers = FIO_LIST_INIT(q->consumers);
   }
   fio___thread_group_s grp = {.queue = q, .workers = workers, .stop = 1};
-  if (fio_thread_create(&grp.thread, fio___queue_worker_manager, &grp))
+  if (fio_thread_create(&grp.thread, fio___queue_worker_manager, &grp)) {
+    FIO___LOCK_UNLOCK(q->lock);
     return -1;
+  }
   while (grp.stop)
     FIO_THREAD_RESCHEDULE();
   FIO___LOCK_UNLOCK(q->lock);
