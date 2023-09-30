@@ -18,6 +18,8 @@ jobs:
       run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/test
     - name: Test STL
       run: make test
+    - name: Test Mustache Compliance
+      run: make tests/mustache
     - name: Test fio_malloc speed
       run: make tests/malloc
     - name: clean

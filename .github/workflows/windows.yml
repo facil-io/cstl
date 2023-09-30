@@ -19,6 +19,8 @@ jobs:
       run: cl /Od /RTCsu /TC tests\noop.c /I. /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./noop.exe && ./noop.exe
     - name: Test STL (debug) - no allocators
       run: cl /Od /RTCsu /TC tests\stl.c /I. /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stld.exe && ./stld.exe
+    - name: Test Mustache Compliance (debug) - no allocators
+      run: cl /Od /RTCsu /TC tests\mustache.c /I. /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stld.exe && ./stld.exe
     - name: Test fio_malloc speed
       run: cl /O2 /Oi /TC tests\malloc.c /I. /Fe./malloc.exe && ./malloc.exe
     - name: Test STL
