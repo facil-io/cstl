@@ -469,6 +469,7 @@ no_mem:
 SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   fio_queue_task_s t = {.fn = NULL};
   fio___task_ring_s *to_free = NULL;
+  fio___task_ring_s *to_free_tst = NULL;
   if (!q->count)
     return t;
   FIO___LOCK_LOCK(q->lock);
@@ -489,9 +490,10 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     q->r = q->w = &q->mem;
     q->mem.w = q->mem.r = q->mem.dir = 0;
   }
+  to_free_tst = &q->mem;
 finish:
   FIO___LOCK_UNLOCK(q->lock);
-  if (to_free && to_free != &q->mem) {
+  if (to_free && to_free != to_free_tst) {
     FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
     FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
