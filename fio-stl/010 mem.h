@@ -786,17 +786,17 @@ Allocator debugging helpers
 ***************************************************************************** */
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, malloc))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, malloc))
 static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)                                         \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));    \
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));      \
     FIO_LOG_DEBUG2("MEMORY CACHE-ALLOC allocated %p", ptr);                    \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));     \
+    FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));       \
     FIO_LOG_DEBUG2("MEMORY CACHE-DEALLOC de-allocated %p", ptr);               \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
@@ -836,11 +836,11 @@ static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, malloc));            \
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, malloc));              \
     fio_atomic_add(&FIO_NAME(FIO_MEMORY_NAME, __malloc_total), 1);             \
   } while (0)
 #define FIO_MEMORY_ON_FREE_FUNC()                                              \
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, malloc))
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, malloc))
 #else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)

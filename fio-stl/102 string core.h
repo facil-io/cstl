@@ -686,7 +686,7 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 /* *****************************************************************************
 Binary String Type - Embedded Strings
 ***************************************************************************** */
-FIO___LEAK_COUNTER_DEF(fio_bstr_s)
+FIO_LEAK_COUNTER_DEF(fio_bstr_s)
 
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
@@ -714,7 +714,7 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_bstr_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_bstr_s);
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
@@ -1013,7 +1013,7 @@ FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b) {
 Key String Type - binary String container for Hash Maps and Arrays
 ***************************************************************************** */
 
-FIO___LEAK_COUNTER_DEF(fio_keystr_s)
+FIO_LEAK_COUNTER_DEF(fio_keystr_s)
 
 /* key string type implementation */
 struct fio_keystr_s {
@@ -1081,7 +1081,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
   r.buf = buf = (char *)alloc_func(str.len + 1);
   if (!buf)
     goto no_mem;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_keystr_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_keystr_s);
   FIO_MEMCPY(buf, str.buf, str.len);
   buf[str.len] = 0;
   return r;
@@ -1094,7 +1094,7 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
                                   void (*free_func)(void *, size_t)) {
   if (key->info || !key->buf)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_keystr_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_keystr_s);
   free_func((void *)key->buf, key->len);
 }
 
@@ -1122,8 +1122,8 @@ Extern-ed functions
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(fio_string_default_allocations)
-FIO___LEAK_COUNTER_DEF(fio_string_default_key_allocations)
+FIO_LEAK_COUNTER_DEF(fio_string_default_allocations)
+FIO_LEAK_COUNTER_DEF(fio_string_default_key_allocations)
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
@@ -1133,7 +1133,7 @@ SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
   if (!tmp)
     return -1;
   if (!dest->buf)
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
   dest->capa = len;
   dest->buf = (char *)tmp;
   return 0;
@@ -1145,7 +1145,7 @@ SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, len, 0);
   if (!tmp)
     return -1;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
   dest->capa = len;
   dest->buf = (char *)tmp;
   if (dest->len)
@@ -1159,13 +1159,13 @@ SFUNC void *fio_string_default_key_alloc(size_t len) {
 
 SFUNC void fio_string_default_free(void *ptr) {
   if (ptr) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
     FIO_MEM_FREE_(ptr, 0);
   }
 }
 SFUNC void fio_string_default_free2(fio_str_info_s str) {
   if (str.buf) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
     FIO_MEM_FREE_(str.buf, str.capa);
   }
 }
@@ -2807,7 +2807,7 @@ copy_the_string:
     return -1;
   if (!FIO_MEM_REALLOC_IS_SAFE_)
     *bstr_m = (fio___bstr_meta_s){0};
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_bstr_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_bstr_s);
   if (dest->len) {
     FIO_MEMCPY((bstr_m + 1), dest->buf, dest->len + 1);
     bstr_m->len = dest->len;

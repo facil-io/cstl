@@ -136,7 +136,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_REF_NAME)
+FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -156,7 +156,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -180,7 +180,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
     return;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
-  FIO___LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
+  FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
 }
 

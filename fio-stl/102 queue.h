@@ -294,8 +294,8 @@ Queue Implementation
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* task queue leak detection */
-FIO___LEAK_COUNTER_DEF(fio_queue)
-FIO___LEAK_COUNTER_DEF(fio_queue_task_rings)
+FIO_LEAK_COUNTER_DEF(fio_queue)
+FIO_LEAK_COUNTER_DEF(fio_queue_task_rings)
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   for (;;) {
@@ -335,7 +335,7 @@ SFUNC fio_queue_s *fio_queue_new(void) {
   if (!q)
     return NULL;
   fio_queue_init(q);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_queue);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_queue);
   return q;
 }
 
@@ -343,7 +343,7 @@ SFUNC fio_queue_s *fio_queue_new(void) {
 SFUNC void fio_queue_free(fio_queue_s *q) {
   fio_queue_destroy(q);
   if (q) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_queue);
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue);
     FIO_MEM_FREE_(q, sizeof(*q));
   }
 }
@@ -404,7 +404,7 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
           FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
       if (!tmp)
         goto no_mem;
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
       q->w->next = (fio___task_ring_s *)tmp;
       if (!FIO_MEM_REALLOC_IS_SAFE_) {
         q->w->next->r = q->w->next->w = q->w->next->dir = 0;
@@ -443,7 +443,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
         (fio___task_ring_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
     if (!tmp)
       goto no_mem;
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
     tmp->next = q->r;
     q->r = tmp;
     tmp->w = 1;
@@ -483,7 +483,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
     if (to_free && to_free != &q->mem) { // edge case
-      FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+      FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
       FIO_MEM_FREE_(to_free, sizeof(*to_free));
     }
     to_free = q->r;
@@ -494,7 +494,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
 finish:
   FIO___LOCK_UNLOCK(q->lock);
   if (to_free && to_free != to_free_tst) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
     FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
   return t;
@@ -617,7 +617,7 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
 /* *****************************************************************************
 Timer Queue Implementation
 ***************************************************************************** */
-FIO___LEAK_COUNTER_DEF(fio___timer_event_s)
+FIO_LEAK_COUNTER_DEF(fio___timer_event_s)
 
 FIO_IFUNC void fio___timer_insert(fio___timer_event_s **pos,
                                   fio___timer_event_s *e) {
@@ -642,7 +642,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_event_new(
   t = (fio___timer_event_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*t), 0);
   if (!t)
     goto init_error;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___timer_event_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___timer_event_s);
   if (!args.repetitions)
     args.repetitions = 1;
   *t = (fio___timer_event_s){
@@ -671,7 +671,7 @@ FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
   }
   if (t->on_finish)
     t->on_finish(t->udata1, t->udata2);
-  FIO___LEAK_COUNTER_ON_FREE(fio___timer_event_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___timer_event_s);
   FIO_MEM_FREE_(t, sizeof(*t));
 }
 

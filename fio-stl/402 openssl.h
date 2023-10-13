@@ -121,7 +121,7 @@ typedef struct {
   fio_tls_s *tls;
 } fio___openssl_context_s;
 
-FIO___LEAK_COUNTER_DEF(fio___openssl_context_s)
+FIO_LEAK_COUNTER_DEF(fio___openssl_context_s)
 
 /* *****************************************************************************
 OpenSSL Callbacks
@@ -255,7 +255,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
   fio___openssl_context_s *ctx =
       (fio___openssl_context_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*ctx), 0);
   FIO_ASSERT_ALLOC(ctx);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___openssl_context_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___openssl_context_s);
   *ctx = (fio___openssl_context_s){
       .ctx = SSL_CTX_new((is_client ? TLS_client_method : TLS_server_method)()),
       .tls = fio_tls_dup(tls),
@@ -419,7 +419,7 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
 Per-Connection Builder
 ***************************************************************************** */
 
-FIO___LEAK_COUNTER_DEF(fio___SSL)
+FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_s *io) {
@@ -428,7 +428,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___SSL);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___SSL);
   fio_tls_set(io, (void *)ssl);
 
   /* attach socket */
@@ -463,7 +463,7 @@ Per-Connection Cleanup
 FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
-  FIO___LEAK_COUNTER_ON_FREE(fio___SSL);
+  FIO_LEAK_COUNTER_ON_FREE(fio___SSL);
   SSL_free(ssl);
 }
 
@@ -473,7 +473,7 @@ Context Cleanup
 
 static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
-  FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
   SSL_CTX_free(ctx->ctx);
   fio_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));

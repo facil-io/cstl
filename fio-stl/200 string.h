@@ -1031,8 +1031,8 @@ External functions
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
 
 /* *****************************************************************************
 String Core Callbacks - Memory management
@@ -1041,14 +1041,14 @@ SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void) {
   FIO_NAME(FIO_STR_NAME, s) *r =
       (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, (sizeof(*r)), 0);
   if (r)
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
   return r;
 }
 SFUNC void FIO_NAME(FIO_STR_NAME,
                     __object_free)(FIO_NAME(FIO_STR_NAME, s) * s) {
   if (!s)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
   FIO_MEM_FREE_(s, sizeof(*s));
 }
 
@@ -1059,7 +1059,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
   if (!tmp)
     return -1;
   if (!dest->buf)
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
@@ -1073,7 +1073,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
     return -1;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
   ((char *)tmp)[dest->len] = 0;
@@ -1084,7 +1084,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
 SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa) {
   if (!ptr)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, capa);
   (void)capa; /* if unused */
 }
@@ -1101,7 +1101,7 @@ String Implementation - Memory management
 SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
   if (!ptr)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, -1);
 }
 

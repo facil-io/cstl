@@ -178,14 +178,6 @@ To test the library, define the `FIO_TEST_ALL` macro and include the header. A t
 
 Defined the `fio_test_dynamic_types` and enables as many testing features as possible, such as the `FIO_LEAK_COUNTER`.
 
-#### `FIO_LEAK_COUNTER`
-
-If defined, facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with certainty.
-
-This also prints out some minimal usage information about each allocator when exiting the program. 
-
-**Note**: enabling leak detection automatically adds the `FIO_LOG` module (to print errors), the `FIO_ATOMIC` module (for atomic counters) and the `FIO_STATE` module (for more predictable `at_exit` callbacks).
-
 -------------------------------------------------------------------------------
 
 ## Version and Common Helper Macros
@@ -227,6 +219,88 @@ Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 #### `FIO_INCLUDE_FILE`
 
 The facil.io C STL can be used as either a single header library (`fio-stl.h`) or a multi-header library (`fio-stl/include.h`). The `FIO_INCLUDE_FILE` macro will remember which approach was first used and will use the same approach for subsequent inclusions.
+
+-------------------------------------------------------------------------------
+
+### Default Memory Allocation
+
+By setting these macros, the memory allocator used by facil.io could be changed from the default allocator (either the custom allocator or, if missing, the system's allocator).
+
+When facil.io's memory allocator is defined (using `FIO_MALLOC`), **these macros will be automatically overwritten to use the custom memory allocator**. To use a different allocator, you may redefine the macros.
+
+#### `FIO_MEM_REALLOC`
+
+```c
+#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len) realloc((ptr), (new_size))
+```
+
+Reallocates memory, copying (at least) `copy_len` if necessary.
+
+If `ptr` is `NULL`, behaves like `malloc`.
+
+If `new_size` is 0, behaves like `free`.
+
+#### `FIO_MEM_FREE`
+
+```c
+#define FIO_MEM_FREE(ptr, size) free((ptr))
+```
+
+Frees allocated memory.
+
+#### `FIO_MALLOC_TMP_USE_SYSTEM`
+
+When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions for newly created types.
+
+#### `FIO_MEMORY_DISABLE`
+
+When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will route to the system's `malloc`. Set this when compiling to test the effects of all custom memory allocators working together.
+
+-------------------------------------------------------------------------------
+
+## Memory Leak Detection
+
+#### `FIO_LEAK_COUNTER`
+
+If defined, facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with a high degree of certainty.
+
+This also prints out some minimal usage information about each allocator when exiting the program. 
+
+**Note**: enabling leak detection automatically adds the `FIO_LOG` module (to print errors), the `FIO_ATOMIC` module (for atomic counters) and the `FIO_STATE` module (for more predictable `at_exit` callbacks).
+
+When this MACRO is defined and truthful, the following macros have an effect:
+
+- `FIO_LEAK_COUNTER_DEF(name)` - defines the named memory leak counter / detection functions.
+
+- `FIO_LEAK_COUNTER_ON_ALLOC(name)` - adds an allocation to the named memory leak counter.
+
+- `FIO_LEAK_COUNTER_ON_FREE(name)` - subtracts an allocation from the named memory leak counter and tests if `free` was called more than `malloc` for this named allocation counter.
+
+For example:
+
+```c
+typedef struct { int i; } my_type_s;
+/* define the allocation counter */
+FIO_LEAK_COUNTER_DEF(my_type_s)
+/* allocation function */
+my_type_s * my_type_new() {
+  my_type_s *t = malloc(sizeof(*t));
+  if(!t)
+    return t;
+  /* count allocation */
+  FIO_LEAK_COUNTER_ON_ALLOC(my_type_s);
+  *t = (my_type_s){0};
+  return t;
+}
+/* deallocation function */
+void my_type_free(my_type_s * t) {
+  if(!t)
+    return;
+  /* count deallocation before freeing object - tests excessive calls to free) */
+  FIO_LEAK_COUNTER_ON_FREE(my_type_s);
+  free(t);
+}
+```
 
 -------------------------------------------------------------------------------
 
@@ -279,42 +353,6 @@ Find the root object (of a `struct`) from a pointer to its field's (the field's 
 
 -------------------------------------------------------------------------------
 
-### Default Memory Allocation
-
-By setting these macros, the memory allocator used by facil.io could be changed from the default allocator (either the custom allocator or, if missing, the system's allocator).
-
-When facil.io's memory allocator is defined (using `FIO_MALLOC`), **these macros will be automatically overwritten to use the custom memory allocator**. To use a different allocator, you may redefine the macros.
-
-#### `FIO_MEM_REALLOC`
-
-```c
-#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len) realloc((ptr), (new_size))
-```
-
-Reallocates memory, copying (at least) `copy_len` if necessary.
-
-If `ptr` is `NULL`, behaves like `malloc`.
-
-If `new_size` is 0, behaves like `free`.
-
-#### `FIO_MEM_FREE`
-
-```c
-#define FIO_MEM_FREE(ptr, size) free((ptr))
-```
-
-Frees allocated memory.
-
-#### `FIO_MALLOC_TMP_USE_SYSTEM`
-
-When defined, temporarily bypasses the `FIO_MEM_REALLOC` macros and uses the system's `realloc` and `free` functions for newly created types.
-
-#### `FIO_MEMORY_DISABLE`
-
-When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will route to the system's `malloc`. Set this when compiling to test the effects of all custom memory allocators working together.
-
--------------------------------------------------------------------------------
-
 ## Pointer Tagging Support:
 
 Pointer tagging allows types created using this library to have their pointers "tagged".
@@ -363,7 +401,7 @@ any code.
 
 -------------------------------------------------------------------------------
 
-## Binary Data Informational Types and Helper Macros
+## Core Binary Strings and Buffer Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
 

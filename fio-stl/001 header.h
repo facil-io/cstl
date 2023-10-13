@@ -161,16 +161,17 @@ Recursive inclusion management
 /* *****************************************************************************
 Leak Counter Helpers
 ***************************************************************************** */
+#undef FIO_LEAK_COUNTER_DEF
+#undef FIO_LEAK_COUNTER_ON_ALLOC
+#undef FIO_LEAK_COUNTER_ON_FREE
+
 #if (FIO_LEAK_COUNTER + 1) == 1
 /* No leak counting defined */
-#define FIO___LEAK_COUNTER_DEF(name)
-#define FIO___LEAK_COUNTER_ON_ALLOC(name)
-#define FIO___LEAK_COUNTER_ON_FREE(name)
+#define FIO_LEAK_COUNTER_DEF(name)
+#define FIO_LEAK_COUNTER_ON_ALLOC(name)
+#define FIO_LEAK_COUNTER_ON_FREE(name)
 #else
-#undef FIO___LEAK_COUNTER_DEF
-#undef FIO___LEAK_COUNTER_ON_ALLOC
-#undef FIO___LEAK_COUNTER_ON_FREE
-#define FIO___LEAK_COUNTER_DEF(name)                                           \
+#define FIO_LEAK_COUNTER_DEF(name)                                             \
   FIO_IFUNC size_t FIO_NAME(fio___leak_counter, name)(size_t i) {              \
     static volatile size_t counter;                                            \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
@@ -191,8 +192,8 @@ Leak Counter Helpers
                            FIO_NAME(fio___leak_counter_cleanup, name),         \
                            NULL);                                              \
   }
-#define FIO___LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
-#define FIO___LEAK_COUNTER_ON_FREE(name)                                       \
+#define FIO_LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
+#define FIO_LEAK_COUNTER_ON_FREE(name)                                         \
   FIO_NAME(fio___leak_counter, name)(((size_t)-1))
 #endif
 

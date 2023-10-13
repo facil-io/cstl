@@ -102,7 +102,7 @@ Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_MODULE_NAME)
+FIO_LEAK_COUNTER_DEF(FIO_MODULE_NAME)
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -112,7 +112,7 @@ SFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_MODULE_PTR)NULL;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_MODULE_NAME);
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_MODULE_NAME);
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
   return (FIO_MODULE_PTR)FIO_PTR_TAG(o);
 }
@@ -122,7 +122,7 @@ SFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
   FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
+  FIO_LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
   FIO_MEM_FREE_(o, sizeof(*o));
   return 0;
 }

@@ -1582,7 +1582,7 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       d.next = FIOBJ_INVALID;
       end = d.end;
     } else {
-      /* re-collect end position to acommodate for changes */
+      /* re-collect end position to accommodate for changes */
       end = fiobj____each2_element_count(i.obj);
     }
     while (i.pos >= end && fiobj___stack_count(&d.stack)) {

@@ -2262,7 +2262,7 @@ typedef struct {
   char url[];
 } fio___srv_listen_s;
 
-FIO___LEAK_COUNTER_DEF(fio_srv_listen)
+FIO_LEAK_COUNTER_DEF(fio_srv_listen)
 
 static fio___srv_listen_s *fio___srv_listen_dup(fio___srv_listen_s *l) {
   fio_atomic_add(&l->ref_count, 1);
@@ -2309,7 +2309,7 @@ static void fio___srv_listen_free(void *l_) {
                  (int)l->url_len,
                  l->url);
   fio_queue_perform_all(fio___srv_tasks);
-  FIO___LEAK_COUNTER_ON_FREE(fio_srv_listen);
+  FIO_LEAK_COUNTER_ON_FREE(fio_srv_listen);
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 
@@ -2438,7 +2438,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
   l = (fio___srv_listen_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*l) + url_buf.len + 1, 0);
   FIO_ASSERT_ALLOC(l);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
   *l = (fio___srv_listen_s){
       .protocol = args.protocol,
       .udata = args.udata,
@@ -2582,6 +2582,13 @@ FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
   fio___srv_after_fork(ignr_);
   fio_poll_destroy(&fio___srvdata.poll_data);
   fio___srv_env_safe_destroy(&fio___srvdata.env);
+#if FIO_VALIDITY_MAP_USE
+  fio_validity_map_destroy(&fio___srvdata.valid);
+#if FIO_VALIDATE_IO_MUTEX
+  fio_thread_mutex_destroy(&fio___srvdata.valid_lock);
+#endif
+#endif /* FIO_VALIDATE_IO_MUTEX / FIO_VALIDITY_MAP_USE */
+  fio_queue_perform_all(fio___srv_tasks);
 }
 
 /* *****************************************************************************

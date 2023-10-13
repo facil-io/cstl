@@ -74,7 +74,7 @@ iMap Creation Macro
                                hash_fn,                                        \
                                cmp_fn,                                         \
                                is_valid_fn)                                    \
-  FIO___LEAK_COUNTER_DEF(FIO_NAME(array_name, s))                              \
+  FIO_LEAK_COUNTER_DEF(FIO_NAME(array_name, s))                                \
   typedef struct {                                                             \
     array_type *ary;                                                           \
     imap_type count;                                                           \
@@ -105,7 +105,7 @@ iMap Creation Macro
   FIO_IFUNC void FIO_NAME(array_name, destroy)(FIO_NAME(array_name, s) * a) {  \
     size_t capa = FIO_NAME(array_name, capa)(a);                               \
     if (a->ary) {                                                              \
-      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(array_name, s));                     \
+      FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(array_name, s));                       \
       FIO_TYPEDEF_IMAP_FREE(                                                   \
           a->ary,                                                              \
           (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))));          \
@@ -131,7 +131,7 @@ iMap Creation Macro
     if (!tmp)                                                                  \
       return -1;                                                               \
     if (!a->ary)                                                               \
-      FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                    \
+      FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                      \
     a->capa_bits = (uint32_t)bits;                                             \
     a->ary = tmp;                                                              \
     if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE) {                                   \

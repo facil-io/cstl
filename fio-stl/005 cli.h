@@ -189,9 +189,9 @@ CLI Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(fio_cli_str)
-FIO___LEAK_COUNTER_DEF(fio_cli_ary)
-FIO___LEAK_COUNTER_DEF(fio_cli_help_writer)
+FIO_LEAK_COUNTER_DEF(fio_cli_str)
+FIO_LEAK_COUNTER_DEF(fio_cli_ary)
+FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
 
 /* *****************************************************************************
 String for CLI
@@ -207,7 +207,7 @@ typedef struct {
 FIO_SFUNC void fio___cli_str_destroy(fio___cli_str_s *s) {
   if (!s || s->em || !s->str)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_cli_str);
+  FIO_LEAK_COUNTER_ON_FREE(fio_cli_str);
   FIO_MEM_FREE_(s->str, s->len);
   *s = (fio___cli_str_s){0};
 }
@@ -232,7 +232,7 @@ FIO_SFUNC fio___cli_str_s fio___cli_str_copy(fio_str_info_s s) {
   r.len = (uint32_t)s.len;
   r.str = (char *)FIO_MEM_REALLOC_(NULL, 0, s.len + 1, 0);
   FIO_ASSERT_ALLOC(r.str);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_str);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_str);
   FIO_MEMCPY(r.str, s.buf, s.len);
   r.str[r.len] = 0;
   return r;
@@ -267,7 +267,7 @@ FIO_SFUNC void fio___cli_ary_destroy(fio___cli_ary_s *a) {
     return;
   for (size_t i = 0; i < a->w; ++i)
     fio___cli_str_destroy(a->ary + i);
-  FIO___LEAK_COUNTER_ON_FREE(fio_cli_ary);
+  FIO_LEAK_COUNTER_ON_FREE(fio_cli_ary);
   FIO_MEM_FREE_(a->ary, sizeof(*a->ary) * a->capa);
   *a = (fio___cli_ary_s){0};
 }
@@ -276,7 +276,7 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
   if (a->w == a->capa) {
     /* increase capacity */
     if (!a->ary)
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
     size_t new_capa = a->capa + 8;
     fio___cli_str_s *tmp =
         (fio___cli_str_s *)FIO_MEM_REALLOC_(a->ary,
@@ -811,10 +811,10 @@ FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
     size_t new_capa = (d.len + s.len) << 1;
     char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
     FIO_ASSERT_ALLOC(tmp);
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
     FIO_MEMCPY(tmp, d.buf, d.len);
     if (!static_memory) {
-      FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+      FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
       FIO_MEM_FREE_(d.buf, d.capa);
     }
     d.capa = new_capa;
@@ -843,10 +843,10 @@ FIO_SFUNC fio_str_info_s fio___cli_write2line_finalize(fio_str_info_s d,
       size_t new_capa = d.len + ((additional_bytes + 2) << 2);
       char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
       FIO_ASSERT_ALLOC(tmp);
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
       FIO_MEMCPY(tmp, d.buf, d.len);
       if (!static_memory) {
-        FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+        FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
         FIO_MEM_FREE_(d.buf, d.capa);
       }
       static_memory = 0;
@@ -988,7 +988,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                        help_org_state.buf == help.buf);
   fwrite(help.buf, 1, help.len, stdout);
   if (help_org_state.buf != help.buf) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+    FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
     FIO_MEM_FREE_(help.buf, help.capa);
   }
   fio_cli_end();

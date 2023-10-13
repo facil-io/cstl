@@ -112,7 +112,7 @@ SFUNC void *fio_mustache_build(fio_mustache_s *m, fio_mustache_bargs_s);
 Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-FIO___LEAK_COUNTER_DEF(fio_mustache_s)
+FIO_LEAK_COUNTER_DEF(fio_mustache_s)
 
 /* *****************************************************************************
 Instructions (relative state)
@@ -1212,19 +1212,19 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
     a.free_file_data(a.data, a.udata);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
 
 /* Frees the mustache template object (or reduces it's reference count). */
 SFUNC void fio_mustache_free(fio_mustache_s *m) {
-  FIO___LEAK_COUNTER_ON_FREE(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_mustache_s);
   fio_bstr_free((char *)m);
 }
 
 /** Increases the mustache template's reference count. */
 SFUNC fio_mustache_s *fio_mustache_dup(fio_mustache_s *m) {
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)fio_bstr_copy((char *)m);
 }
 

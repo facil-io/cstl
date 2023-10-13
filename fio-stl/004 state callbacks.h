@@ -271,14 +271,12 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
       ary[i].func(ary[i].arg);
   } else if (e <= FIO_CALL_ON_IDLE) {
     /* perform tasks in order */
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
       ary[i].func(ary[i].arg);
-    }
   } else {
     /* perform tasks in reverse */
-    while (len--) {
+    while (len--)
       ary[len].func(ary[len].arg);
-    }
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);

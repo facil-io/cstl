@@ -591,8 +591,8 @@ Dynamic Arrays - internal helpers
 
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */
@@ -605,7 +605,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
   if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
     *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
   }
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
   return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
 }
 
@@ -615,7 +615,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
   FIO_MEM_FREE_(ary, sizeof(*ary));
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
@@ -639,7 +639,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
       FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
     }
 #endif
-    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
     FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
     return;
   case 1:
@@ -677,7 +677,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (!tmp)
         return (uint32_t)ary->capa;
       if (!ary->ary)
-        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+        FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
       ary->ary = tmp;
       return capa;
@@ -687,7 +687,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (!tmp)
         return (uint32_t)ary->capa;
       if (!ary->ary)
-        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+        FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
@@ -724,7 +724,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
     if (!tmp)
       return FIO_ARRAY_EMBEDDED_CAPA;
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
     if (capa_ >= 0) {
       /* copy items at beginning of memory stack */
       if (ary->start) {
@@ -1145,7 +1145,7 @@ re_embed:
                  count * sizeof(*tmp));
     }
     if (tmp) {
-      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+      FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
       (void)old_capa; /* if unused */
     }

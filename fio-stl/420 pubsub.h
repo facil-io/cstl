@@ -591,13 +591,13 @@ typedef struct {
   char buf[FIO___PUBSUB_MESSAGE_OVERHEAD_NET];
 } fio___pubsub_message_parser_s;
 
-FIO___LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
+FIO_LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
 
 FIO_SFUNC fio___pubsub_message_parser_s *fio___pubsub_message_parser_new(void) {
   fio___pubsub_message_parser_s *p =
       (fio___pubsub_message_parser_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   FIO_ASSERT_ALLOC(p);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
   *p = (fio___pubsub_message_parser_s){0};
   return p;
 }
@@ -607,7 +607,7 @@ FIO_SFUNC void fio___pubsub_message_parser_free(
   if (!p)
     return;
   fio___pubsub_message_free(p->msg);
-  FIO___LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
   FIO_MEM_FREE_(p, sizeof(*p));
 }
 
@@ -776,6 +776,7 @@ static struct FIO___PUBSUB_POSTOFFICE {
   FIO_LIST_NODE history_active;
   FIO_LIST_NODE history_waiting;
   fio___postoffice_msmap_s master_subscriptions;
+  fio___postoffice_msmap_s global_subscriptions;
   fio___pubsub_broadcast_connected_s remote_uuids;
   fio___pubsub_message_map_s remote_messages;
   fio___pubsub_message_map_s history_messages;
@@ -986,12 +987,15 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata);
 
 FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
   (void)ignr_;
+  fio_queue_perform_all(fio_srv_queue());
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
+  fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.global_subscriptions);
   fio___pubsub_broadcast_connected_destroy(
       &FIO___PUBSUB_POSTOFFICE.remote_uuids);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.remote_messages);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
+  fio_queue_perform_all(fio_srv_queue());
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -1153,40 +1157,53 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
       args.channel.len,
       FIO___PUBSUB_CHANNEL_ENCODE_CAPA(args.filter, args.is_pattern));
 
-  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
-
-  if (args.master_only && !args.io)
+  if (args.subscription_handle_ptr)
+    goto has_handle;
+  if (args.master_only)
     goto is_master_only;
-  if (!args.subscription_handle_ptr) {
-    fio_env_set(args.io,
-                .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
-                                          (uint16_t)args.filter)),
-                .name = args.channel,
-                .udata = s,
-                .on_close =
-                    (void (*)(void *))fio___pubsub_subscription_unsubscribe);
-    return;
-  }
+  if (!args.io)
+    goto is_global;
+
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio_env_set(args.io,
+              .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
+                                        (uint16_t)args.filter)),
+              .name = args.channel,
+              .udata = s,
+              .on_close =
+                  (void (*)(void *))fio___pubsub_subscription_unsubscribe);
+  return;
+
+has_handle:
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
   *args.subscription_handle_ptr = (uintptr_t)s;
   return;
 
 is_master_only:
-  if (fio_srv_is_master()) {
-    fio___postoffice_msmap_set(
-        &FIO___PUBSUB_POSTOFFICE.master_subscriptions,
-        fio_risky_hash(args.channel.buf, args.channel.len, args.filter),
-        FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
-        s,
-        NULL);
-  } else {
-    fio_channel_free(s->channel);
-    fio_subscription_free(s);
-    FIO_LOG_WARNING(
-        "%d master-only subscription attempt on a non-master process: %.*s",
-        fio_srv_pid(),
-        (int)args.channel.len,
-        args.channel.buf);
-  }
+  if (fio_srv_is_master())
+    goto error_not_on_master;
+is_global:
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio___postoffice_msmap_set(
+      &FIO___PUBSUB_POSTOFFICE.master_subscriptions + (!args.master_only),
+      fio_risky_hash(args.channel.buf,
+                     args.channel.len,
+                     args.filter | ((size_t)args.is_pattern << 20)),
+      FIO_STR_INFO2(args.channel.buf, args.channel.len),
+      s,
+      NULL);
+  return;
+
+error_not_on_master:
+  fio_bstr_free(uptr.str->buf);
+  s->node = FIO_LIST_INIT(s->node);
+  s->history = FIO_LIST_INIT(s->history);
+  fio_subscription_free(s);
+  FIO_LOG_WARNING(
+      "%d master-only subscription attempt on a non-master process: %.*s",
+      fio_srv_pid(),
+      (int)args.channel.len,
+      args.channel.buf);
   return;
 
 sub_error:
@@ -1213,23 +1230,28 @@ sub_error:
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
 int fio_unsubscribe FIO_NOOP(fio_subscribe_args_s args) {
-  if (args.master_only && !args.io)
-    goto is_master_only;
-  if (!args.subscription_handle_ptr) {
-    return fio_env_remove(
-        args.io,
-        .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
-                                  (uint16_t)args.filter)),
-        .name = args.channel);
-  }
+  if (args.subscription_handle_ptr)
+    goto has_handle;
+  if (args.master_only || !args.io)
+    goto is_global;
+
+  return fio_env_remove(
+      args.io,
+      .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
+                                (uint16_t)args.filter)),
+      .name = args.channel);
+
+has_handle:
   fio___pubsub_subscription_unsubscribe(
       *(fio_subscription_s **)args.subscription_handle_ptr);
   return 0;
 
-is_master_only:
+is_global:
   return fio___postoffice_msmap_remove(
-      &FIO___PUBSUB_POSTOFFICE.master_subscriptions,
-      fio_risky_hash(args.channel.buf, args.channel.len, args.filter),
+      &FIO___PUBSUB_POSTOFFICE.master_subscriptions + (!args.master_only),
+      fio_risky_hash(args.channel.buf,
+                     args.channel.len,
+                     args.filter | ((size_t)args.is_pattern << 20)),
       FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
       NULL);
 }

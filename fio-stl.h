@@ -2643,16 +2643,17 @@ Recursive inclusion management
 /* *****************************************************************************
 Leak Counter Helpers
 ***************************************************************************** */
+#undef FIO_LEAK_COUNTER_DEF
+#undef FIO_LEAK_COUNTER_ON_ALLOC
+#undef FIO_LEAK_COUNTER_ON_FREE
+
 #if (FIO_LEAK_COUNTER + 1) == 1
 /* No leak counting defined */
-#define FIO___LEAK_COUNTER_DEF(name)
-#define FIO___LEAK_COUNTER_ON_ALLOC(name)
-#define FIO___LEAK_COUNTER_ON_FREE(name)
+#define FIO_LEAK_COUNTER_DEF(name)
+#define FIO_LEAK_COUNTER_ON_ALLOC(name)
+#define FIO_LEAK_COUNTER_ON_FREE(name)
 #else
-#undef FIO___LEAK_COUNTER_DEF
-#undef FIO___LEAK_COUNTER_ON_ALLOC
-#undef FIO___LEAK_COUNTER_ON_FREE
-#define FIO___LEAK_COUNTER_DEF(name)                                           \
+#define FIO_LEAK_COUNTER_DEF(name)                                             \
   FIO_IFUNC size_t FIO_NAME(fio___leak_counter, name)(size_t i) {              \
     static volatile size_t counter;                                            \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
@@ -2673,8 +2674,8 @@ Leak Counter Helpers
                            FIO_NAME(fio___leak_counter_cleanup, name),         \
                            NULL);                                              \
   }
-#define FIO___LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
-#define FIO___LEAK_COUNTER_ON_FREE(name)                                       \
+#define FIO_LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
+#define FIO_LEAK_COUNTER_ON_FREE(name)                                         \
   FIO_NAME(fio___leak_counter, name)(((size_t)-1))
 #endif
 
@@ -5038,7 +5039,7 @@ iMap Creation Macro
                                hash_fn,                                        \
                                cmp_fn,                                         \
                                is_valid_fn)                                    \
-  FIO___LEAK_COUNTER_DEF(FIO_NAME(array_name, s))                              \
+  FIO_LEAK_COUNTER_DEF(FIO_NAME(array_name, s))                                \
   typedef struct {                                                             \
     array_type *ary;                                                           \
     imap_type count;                                                           \
@@ -5069,7 +5070,7 @@ iMap Creation Macro
   FIO_IFUNC void FIO_NAME(array_name, destroy)(FIO_NAME(array_name, s) * a) {  \
     size_t capa = FIO_NAME(array_name, capa)(a);                               \
     if (a->ary) {                                                              \
-      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(array_name, s));                     \
+      FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(array_name, s));                       \
       FIO_TYPEDEF_IMAP_FREE(                                                   \
           a->ary,                                                              \
           (capa * (sizeof(*a->ary)) + (capa * (sizeof(imap_type)))));          \
@@ -5095,7 +5096,7 @@ iMap Creation Macro
     if (!tmp)                                                                  \
       return -1;                                                               \
     if (!a->ary)                                                               \
-      FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                    \
+      FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));                      \
     a->capa_bits = (uint32_t)bits;                                             \
     a->ary = tmp;                                                              \
     if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE) {                                   \
@@ -10427,14 +10428,12 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
       ary[i].func(ary[i].arg);
   } else if (e <= FIO_CALL_ON_IDLE) {
     /* perform tasks in order */
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
       ary[i].func(ary[i].arg);
-    }
   } else {
     /* perform tasks in reverse */
-    while (len--) {
+    while (len--)
       ary[len].func(ary[len].arg);
-    }
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);
@@ -11206,9 +11205,9 @@ CLI Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(fio_cli_str)
-FIO___LEAK_COUNTER_DEF(fio_cli_ary)
-FIO___LEAK_COUNTER_DEF(fio_cli_help_writer)
+FIO_LEAK_COUNTER_DEF(fio_cli_str)
+FIO_LEAK_COUNTER_DEF(fio_cli_ary)
+FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
 
 /* *****************************************************************************
 String for CLI
@@ -11224,7 +11223,7 @@ typedef struct {
 FIO_SFUNC void fio___cli_str_destroy(fio___cli_str_s *s) {
   if (!s || s->em || !s->str)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_cli_str);
+  FIO_LEAK_COUNTER_ON_FREE(fio_cli_str);
   FIO_MEM_FREE_(s->str, s->len);
   *s = (fio___cli_str_s){0};
 }
@@ -11249,7 +11248,7 @@ FIO_SFUNC fio___cli_str_s fio___cli_str_copy(fio_str_info_s s) {
   r.len = (uint32_t)s.len;
   r.str = (char *)FIO_MEM_REALLOC_(NULL, 0, s.len + 1, 0);
   FIO_ASSERT_ALLOC(r.str);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_str);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_str);
   FIO_MEMCPY(r.str, s.buf, s.len);
   r.str[r.len] = 0;
   return r;
@@ -11284,7 +11283,7 @@ FIO_SFUNC void fio___cli_ary_destroy(fio___cli_ary_s *a) {
     return;
   for (size_t i = 0; i < a->w; ++i)
     fio___cli_str_destroy(a->ary + i);
-  FIO___LEAK_COUNTER_ON_FREE(fio_cli_ary);
+  FIO_LEAK_COUNTER_ON_FREE(fio_cli_ary);
   FIO_MEM_FREE_(a->ary, sizeof(*a->ary) * a->capa);
   *a = (fio___cli_ary_s){0};
 }
@@ -11293,7 +11292,7 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
   if (a->w == a->capa) {
     /* increase capacity */
     if (!a->ary)
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
     size_t new_capa = a->capa + 8;
     fio___cli_str_s *tmp =
         (fio___cli_str_s *)FIO_MEM_REALLOC_(a->ary,
@@ -11828,10 +11827,10 @@ FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
     size_t new_capa = (d.len + s.len) << 1;
     char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
     FIO_ASSERT_ALLOC(tmp);
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
     FIO_MEMCPY(tmp, d.buf, d.len);
     if (!static_memory) {
-      FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+      FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
       FIO_MEM_FREE_(d.buf, d.capa);
     }
     d.capa = new_capa;
@@ -11860,10 +11859,10 @@ FIO_SFUNC fio_str_info_s fio___cli_write2line_finalize(fio_str_info_s d,
       size_t new_capa = d.len + ((additional_bytes + 2) << 2);
       char *tmp = (char *)FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
       FIO_ASSERT_ALLOC(tmp);
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_help_writer);
       FIO_MEMCPY(tmp, d.buf, d.len);
       if (!static_memory) {
-        FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+        FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
         FIO_MEM_FREE_(d.buf, d.capa);
       }
       static_memory = 0;
@@ -12005,7 +12004,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                        help_org_state.buf == help.buf);
   fwrite(help.buf, 1, help.len, stdout);
   if (help_org_state.buf != help.buf) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
+    FIO_LEAK_COUNTER_ON_FREE(fio_cli_help_writer);
     FIO_MEM_FREE_(help.buf, help.capa);
   }
   fio_cli_end();
@@ -12807,17 +12806,17 @@ Allocator debugging helpers
 ***************************************************************************** */
 
 #if defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, malloc))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MEMORY_NAME, malloc))
 static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)                                         \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));    \
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));      \
     FIO_LOG_DEBUG2("MEMORY CACHE-ALLOC allocated %p", ptr);                    \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));     \
+    FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));       \
     FIO_LOG_DEBUG2("MEMORY CACHE-DEALLOC de-allocated %p", ptr);               \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
@@ -12857,11 +12856,11 @@ static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
   do {                                                                         \
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, malloc));            \
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, malloc));              \
     fio_atomic_add(&FIO_NAME(FIO_MEMORY_NAME, __malloc_total), 1);             \
   } while (0)
 #define FIO_MEMORY_ON_FREE_FUNC()                                              \
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, malloc))
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, malloc))
 #else /* defined(DEBUG) || defined(FIO_LEAK_COUNTER) */
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)              ((void)0)
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)               ((void)0)
@@ -15676,8 +15675,8 @@ Queue Implementation
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* task queue leak detection */
-FIO___LEAK_COUNTER_DEF(fio_queue)
-FIO___LEAK_COUNTER_DEF(fio_queue_task_rings)
+FIO_LEAK_COUNTER_DEF(fio_queue)
+FIO_LEAK_COUNTER_DEF(fio_queue_task_rings)
 /** Destroys a queue and re-initializes it, after freeing any used resources. */
 SFUNC void fio_queue_destroy(fio_queue_s *q) {
   for (;;) {
@@ -15717,7 +15716,7 @@ SFUNC fio_queue_s *fio_queue_new(void) {
   if (!q)
     return NULL;
   fio_queue_init(q);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_queue);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_queue);
   return q;
 }
 
@@ -15725,7 +15724,7 @@ SFUNC fio_queue_s *fio_queue_new(void) {
 SFUNC void fio_queue_free(fio_queue_s *q) {
   fio_queue_destroy(q);
   if (q) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_queue);
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue);
     FIO_MEM_FREE_(q, sizeof(*q));
   }
 }
@@ -15786,7 +15785,7 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
           FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
       if (!tmp)
         goto no_mem;
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
       q->w->next = (fio___task_ring_s *)tmp;
       if (!FIO_MEM_REALLOC_IS_SAFE_) {
         q->w->next->r = q->w->next->w = q->w->next->dir = 0;
@@ -15825,7 +15824,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
         (fio___task_ring_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*q->w->next), 0);
     if (!tmp)
       goto no_mem;
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_queue_task_rings);
     tmp->next = q->r;
     q->r = tmp;
     tmp->w = 1;
@@ -15865,7 +15864,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   }
   if (t.fn && !(--q->count) && q->r != &q->mem) {
     if (to_free && to_free != &q->mem) { // edge case
-      FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+      FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
       FIO_MEM_FREE_(to_free, sizeof(*to_free));
     }
     to_free = q->r;
@@ -15876,7 +15875,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
 finish:
   FIO___LOCK_UNLOCK(q->lock);
   if (to_free && to_free != to_free_tst) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
     FIO_MEM_FREE_(to_free, sizeof(*to_free));
   }
   return t;
@@ -15999,7 +15998,7 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
 /* *****************************************************************************
 Timer Queue Implementation
 ***************************************************************************** */
-FIO___LEAK_COUNTER_DEF(fio___timer_event_s)
+FIO_LEAK_COUNTER_DEF(fio___timer_event_s)
 
 FIO_IFUNC void fio___timer_insert(fio___timer_event_s **pos,
                                   fio___timer_event_s *e) {
@@ -16024,7 +16023,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_event_new(
   t = (fio___timer_event_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*t), 0);
   if (!t)
     goto init_error;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___timer_event_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___timer_event_s);
   if (!args.repetitions)
     args.repetitions = 1;
   *t = (fio___timer_event_s){
@@ -16053,7 +16052,7 @@ FIO_IFUNC void fio___timer_event_free(fio_timer_queue_s *tq,
   }
   if (t->on_finish)
     t->on_finish(t->udata1, t->udata2);
-  FIO___LEAK_COUNTER_ON_FREE(fio___timer_event_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___timer_event_s);
   FIO_MEM_FREE_(t, sizeof(*t));
 }
 
@@ -16341,7 +16340,7 @@ SFUNC void fio_stream_destroy(fio_stream_s *s) {
   return;
 }
 
-FIO___LEAK_COUNTER_DEF(fio_stream_packet_s)
+FIO_LEAK_COUNTER_DEF(fio_stream_packet_s)
 
 /* *****************************************************************************
 Stream API - packing data into packets and adding it to the stream
@@ -16384,7 +16383,7 @@ typedef struct {
 FIO_SFUNC void fio_stream_packet_free(fio_stream_packet_s *p) {
   if (!p)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_stream_packet_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_stream_packet_s);
   union {
     fio_stream_packet_embd_s *em;
     fio_stream_packet_extrn_s *ext;
@@ -16460,7 +16459,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
           0);
       if (!tmp)
         goto error;
-      FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = FIO_PACKET_TYPE_EMBEDDED;
@@ -16477,7 +16476,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
         FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*ext), 0);
     if (!p)
       goto error;
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
     p->next = NULL;
     ext = (fio_stream_packet_extrn_s *)(p + 1);
     *ext = (fio_stream_packet_extrn_s){
@@ -16519,7 +16518,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*p) + sizeof(*f), 0);
   if (!p)
     goto error;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_stream_packet_s);
   p->next = NULL;
   f = (fio_stream_packet_fd_s *)(p + 1);
   *f = (fio_stream_packet_fd_s){
@@ -17430,7 +17429,7 @@ FIO_IFUNC int fio_string_is_greater(fio_str_info_s a, fio_str_info_s b) {
 /* *****************************************************************************
 Binary String Type - Embedded Strings
 ***************************************************************************** */
-FIO___LEAK_COUNTER_DEF(fio_bstr_s)
+FIO_LEAK_COUNTER_DEF(fio_bstr_s)
 
 #ifndef FIO___BSTR_META
 #define FIO___BSTR_META(bstr)                                                  \
@@ -17458,7 +17457,7 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (fio_atomic_sub(&meta->ref, 1))
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_bstr_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_bstr_s);
   FIO_MEM_FREE_(meta, (meta->capa + sizeof(*meta)));
 }
 
@@ -17757,7 +17756,7 @@ FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b) {
 Key String Type - binary String container for Hash Maps and Arrays
 ***************************************************************************** */
 
-FIO___LEAK_COUNTER_DEF(fio_keystr_s)
+FIO_LEAK_COUNTER_DEF(fio_keystr_s)
 
 /* key string type implementation */
 struct fio_keystr_s {
@@ -17825,7 +17824,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
   r.buf = buf = (char *)alloc_func(str.len + 1);
   if (!buf)
     goto no_mem;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_keystr_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_keystr_s);
   FIO_MEMCPY(buf, str.buf, str.len);
   buf[str.len] = 0;
   return r;
@@ -17838,7 +17837,7 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
                                   void (*free_func)(void *, size_t)) {
   if (key->info || !key->buf)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(fio_keystr_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_keystr_s);
   free_func((void *)key->buf, key->len);
 }
 
@@ -17866,8 +17865,8 @@ Extern-ed functions
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(fio_string_default_allocations)
-FIO___LEAK_COUNTER_DEF(fio_string_default_key_allocations)
+FIO_LEAK_COUNTER_DEF(fio_string_default_allocations)
+FIO_LEAK_COUNTER_DEF(fio_string_default_key_allocations)
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
@@ -17877,7 +17876,7 @@ SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
   if (!tmp)
     return -1;
   if (!dest->buf)
-    FIO___LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
   dest->capa = len;
   dest->buf = (char *)tmp;
   return 0;
@@ -17889,7 +17888,7 @@ SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, len, 0);
   if (!tmp)
     return -1;
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
   dest->capa = len;
   dest->buf = (char *)tmp;
   if (dest->len)
@@ -17903,13 +17902,13 @@ SFUNC void *fio_string_default_key_alloc(size_t len) {
 
 SFUNC void fio_string_default_free(void *ptr) {
   if (ptr) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
     FIO_MEM_FREE_(ptr, 0);
   }
 }
 SFUNC void fio_string_default_free2(fio_str_info_s str) {
   if (str.buf) {
-    FIO___LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
+    FIO_LEAK_COUNTER_ON_FREE(fio_string_default_allocations);
     FIO_MEM_FREE_(str.buf, str.capa);
   }
 }
@@ -19551,7 +19550,7 @@ copy_the_string:
     return -1;
   if (!FIO_MEM_REALLOC_IS_SAFE_)
     *bstr_m = (fio___bstr_meta_s){0};
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_bstr_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_bstr_s);
   if (dest->len) {
     FIO_MEMCPY((bstr_m + 1), dest->buf, dest->len + 1);
     bstr_m->len = dest->len;
@@ -19679,7 +19678,7 @@ SFUNC void *fio_mustache_build(fio_mustache_s *m, fio_mustache_bargs_s);
 Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-FIO___LEAK_COUNTER_DEF(fio_mustache_s)
+FIO_LEAK_COUNTER_DEF(fio_mustache_s)
 
 /* *****************************************************************************
 Instructions (relative state)
@@ -20779,19 +20778,19 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
     a.free_file_data(a.data, a.udata);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
 
 /* Frees the mustache template object (or reduces it's reference count). */
 SFUNC void fio_mustache_free(fio_mustache_s *m) {
-  FIO___LEAK_COUNTER_ON_FREE(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio_mustache_s);
   fio_bstr_free((char *)m);
 }
 
 /** Increases the mustache template's reference count. */
 SFUNC fio_mustache_s *fio_mustache_dup(fio_mustache_s *m) {
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)fio_bstr_copy((char *)m);
 }
 
@@ -21873,8 +21872,8 @@ External functions
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, s))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_STR_NAME, destroy))
 
 /* *****************************************************************************
 String Core Callbacks - Memory management
@@ -21883,14 +21882,14 @@ SFUNC FIO_NAME(FIO_STR_NAME, s) * FIO_NAME(FIO_STR_NAME, __object_new)(void) {
   FIO_NAME(FIO_STR_NAME, s) *r =
       (FIO_NAME(FIO_STR_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, (sizeof(*r)), 0);
   if (r)
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, s));
   return r;
 }
 SFUNC void FIO_NAME(FIO_STR_NAME,
                     __object_free)(FIO_NAME(FIO_STR_NAME, s) * s) {
   if (!s)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, s));
   FIO_MEM_FREE_(s, sizeof(*s));
 }
 
@@ -21901,7 +21900,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME, __default_reallocate)(fio_str_info_s *dest,
   if (!tmp)
     return -1;
   if (!dest->buf)
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   dest->capa = new_capa;
   dest->buf = (char *)tmp;
   return 0;
@@ -21915,7 +21914,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, new_capa, 0);
   if (!tmp)
     return -1;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_STR_NAME, destroy));
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
   ((char *)tmp)[dest->len] = 0;
@@ -21926,7 +21925,7 @@ SFUNC int FIO_NAME(FIO_STR_NAME,
 SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa) {
   if (!ptr)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, capa);
   (void)capa; /* if unused */
 }
@@ -21943,7 +21942,7 @@ String Implementation - Memory management
 SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr) {
   if (!ptr)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_STR_NAME, destroy));
   FIO_MEM_FREE_(ptr, -1);
 }
 
@@ -23393,8 +23392,8 @@ Dynamic Arrays - internal helpers
 
 #define FIO_ARRAY_AB_CT(cond, a, b) ((b) ^ ((0 - ((cond)&1)) & ((a) ^ (b))))
 
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, s))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_ARRAY_NAME, destroy))
 /* *****************************************************************************
 Dynamic Arrays - implementation
 ***************************************************************************** */
@@ -23407,7 +23406,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, new)(void) {
   if (!FIO_MEM_REALLOC_IS_SAFE_ && a) {
     *a = (FIO_NAME(FIO_ARRAY_NAME, s))FIO_ARRAY_INIT;
   }
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, s));
   return (FIO_ARRAY_PTR)FIO_PTR_TAG(a);
 }
 
@@ -23417,7 +23416,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, free)(FIO_ARRAY_PTR ary_) {
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
   FIO_NAME(FIO_ARRAY_NAME, destroy)(ary_);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, s));
   FIO_MEM_FREE_(ary, sizeof(*ary));
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
@@ -23441,7 +23440,7 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
       FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
     }
 #endif
-    FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
     FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
     return;
   case 1:
@@ -23479,7 +23478,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (!tmp)
         return (uint32_t)ary->capa;
       if (!ary->ary)
-        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+        FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       ary->capa = capa;
       ary->ary = tmp;
       return capa;
@@ -23489,7 +23488,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
       if (!tmp)
         return (uint32_t)ary->capa;
       if (!ary->ary)
-        FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+        FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
       if (capa_ >= 0) { /* copy items at beginning of memory stack */
         if (count) {
           FIO_MEMCPY(tmp, ary->ary + ary->start, count * sizeof(*tmp));
@@ -23526,7 +23525,7 @@ SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
     tmp = (FIO_ARRAY_TYPE *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*tmp) * capa, 0);
     if (!tmp)
       return FIO_ARRAY_EMBEDDED_CAPA;
-    FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
+    FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_ARRAY_NAME, destroy));
     if (capa_ >= 0) {
       /* copy items at beginning of memory stack */
       if (ary->start) {
@@ -23947,7 +23946,7 @@ re_embed:
                  count * sizeof(*tmp));
     }
     if (tmp) {
-      FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+      FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
       FIO_MEM_FREE_(tmp, sizeof(*tmp) * old_capa);
       (void)old_capa; /* if unused */
     }
@@ -25284,8 +25283,8 @@ Map Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, s))
-FIO___LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, destroy))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, s))
+FIO_LEAK_COUNTER_DEF(FIO_NAME(FIO_MAP_NAME, destroy))
 /* *****************************************************************************
 Constructors
 ***************************************************************************** */
@@ -25298,7 +25297,7 @@ FIO_IFUNC FIO_MAP_PTR FIO_NAME(FIO_MAP_NAME, new)(void) {
       (FIO_NAME(FIO_MAP_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_MAP_PTR)NULL;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, s));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, s));
   *o = (FIO_NAME(FIO_MAP_NAME, s))FIO_MAP_INIT;
   return (FIO_MAP_PTR)FIO_PTR_TAG(o);
 }
@@ -25308,7 +25307,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME, free)(FIO_MAP_PTR map) {
   FIO_NAME(FIO_MAP_NAME, destroy)(map);
   FIO_NAME(FIO_MAP_NAME, s) *o =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_MAP_NAME, s), map);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, s));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, s));
   FIO_MEM_FREE_(o, sizeof(*o));
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */
@@ -25471,7 +25470,7 @@ FIO_SFUNC void FIO_NAME(FIO_MAP_NAME,
   if (!o->map)
     return;
   const size_t capa = FIO_MAP_CAPA(o->bits);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MAP_NAME, destroy));
   FIO_MEM_FREE_(o->map, (capa * sizeof(*o->map)) + capa);
   (void)capa;
 }
@@ -25537,7 +25536,7 @@ FIO_IFUNC FIO_NAME(FIO_MAP_NAME, s)
       FIO_MEM_REALLOC_(NULL, 0, ((capa * sizeof(*cpy.map)) + capa), 0);
   if (!cpy.map)
     return cpy;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, destroy));
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MAP_NAME, destroy));
   if (!FIO_MEM_REALLOC_IS_SAFE_) {
     /* set only the imap, the rest can be junk data */
     FIO_MEMSET((cpy.map + capa), 0, capa);
@@ -26628,7 +26627,7 @@ Reference Counter (Wrapper) Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_REF_NAME)
+FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
@@ -26648,7 +26647,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -26672,7 +26671,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
     return;
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
-  FIO___LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
+  FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
   FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
 }
 
@@ -30340,7 +30339,7 @@ typedef struct {
   char url[];
 } fio___srv_listen_s;
 
-FIO___LEAK_COUNTER_DEF(fio_srv_listen)
+FIO_LEAK_COUNTER_DEF(fio_srv_listen)
 
 static fio___srv_listen_s *fio___srv_listen_dup(fio___srv_listen_s *l) {
   fio_atomic_add(&l->ref_count, 1);
@@ -30387,7 +30386,7 @@ static void fio___srv_listen_free(void *l_) {
                  (int)l->url_len,
                  l->url);
   fio_queue_perform_all(fio___srv_tasks);
-  FIO___LEAK_COUNTER_ON_FREE(fio_srv_listen);
+  FIO_LEAK_COUNTER_ON_FREE(fio_srv_listen);
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 
@@ -30516,7 +30515,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
   l = (fio___srv_listen_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*l) + url_buf.len + 1, 0);
   FIO_ASSERT_ALLOC(l);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_srv_listen);
   *l = (fio___srv_listen_s){
       .protocol = args.protocol,
       .udata = args.udata,
@@ -30660,6 +30659,13 @@ FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
   fio___srv_after_fork(ignr_);
   fio_poll_destroy(&fio___srvdata.poll_data);
   fio___srv_env_safe_destroy(&fio___srvdata.env);
+#if FIO_VALIDITY_MAP_USE
+  fio_validity_map_destroy(&fio___srvdata.valid);
+#if FIO_VALIDATE_IO_MUTEX
+  fio_thread_mutex_destroy(&fio___srvdata.valid_lock);
+#endif
+#endif /* FIO_VALIDATE_IO_MUTEX / FIO_VALIDITY_MAP_USE */
+  fio_queue_perform_all(fio___srv_tasks);
 }
 
 /* *****************************************************************************
@@ -31283,7 +31289,7 @@ typedef struct {
   fio_tls_s *tls;
 } fio___openssl_context_s;
 
-FIO___LEAK_COUNTER_DEF(fio___openssl_context_s)
+FIO_LEAK_COUNTER_DEF(fio___openssl_context_s)
 
 /* *****************************************************************************
 OpenSSL Callbacks
@@ -31417,7 +31423,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
   fio___openssl_context_s *ctx =
       (fio___openssl_context_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*ctx), 0);
   FIO_ASSERT_ALLOC(ctx);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___openssl_context_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___openssl_context_s);
   *ctx = (fio___openssl_context_s){
       .ctx = SSL_CTX_new((is_client ? TLS_client_method : TLS_server_method)()),
       .tls = fio_tls_dup(tls),
@@ -31581,7 +31587,7 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
 Per-Connection Builder
 ***************************************************************************** */
 
-FIO___LEAK_COUNTER_DEF(fio___SSL)
+FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_s *io) {
@@ -31590,7 +31596,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___SSL);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___SSL);
   fio_tls_set(io, (void *)ssl);
 
   /* attach socket */
@@ -31625,7 +31631,7 @@ Per-Connection Cleanup
 FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
-  FIO___LEAK_COUNTER_ON_FREE(fio___SSL);
+  FIO_LEAK_COUNTER_ON_FREE(fio___SSL);
   SSL_free(ssl);
 }
 
@@ -31635,7 +31641,7 @@ Context Cleanup
 
 static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
-  FIO___LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
   SSL_CTX_free(ctx->ctx);
   fio_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));
@@ -32279,13 +32285,13 @@ typedef struct {
   char buf[FIO___PUBSUB_MESSAGE_OVERHEAD_NET];
 } fio___pubsub_message_parser_s;
 
-FIO___LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
+FIO_LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
 
 FIO_SFUNC fio___pubsub_message_parser_s *fio___pubsub_message_parser_new(void) {
   fio___pubsub_message_parser_s *p =
       (fio___pubsub_message_parser_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
   FIO_ASSERT_ALLOC(p);
-  FIO___LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
   *p = (fio___pubsub_message_parser_s){0};
   return p;
 }
@@ -32295,7 +32301,7 @@ FIO_SFUNC void fio___pubsub_message_parser_free(
   if (!p)
     return;
   fio___pubsub_message_free(p->msg);
-  FIO___LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
+  FIO_LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
   FIO_MEM_FREE_(p, sizeof(*p));
 }
 
@@ -32464,6 +32470,7 @@ static struct FIO___PUBSUB_POSTOFFICE {
   FIO_LIST_NODE history_active;
   FIO_LIST_NODE history_waiting;
   fio___postoffice_msmap_s master_subscriptions;
+  fio___postoffice_msmap_s global_subscriptions;
   fio___pubsub_broadcast_connected_s remote_uuids;
   fio___pubsub_message_map_s remote_messages;
   fio___pubsub_message_map_s history_messages;
@@ -32674,12 +32681,15 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata);
 
 FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
   (void)ignr_;
+  fio_queue_perform_all(fio_srv_queue());
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
+  fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.global_subscriptions);
   fio___pubsub_broadcast_connected_destroy(
       &FIO___PUBSUB_POSTOFFICE.remote_uuids);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.remote_messages);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
+  fio_queue_perform_all(fio_srv_queue());
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -32841,40 +32851,53 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
       args.channel.len,
       FIO___PUBSUB_CHANNEL_ENCODE_CAPA(args.filter, args.is_pattern));
 
-  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
-
-  if (args.master_only && !args.io)
+  if (args.subscription_handle_ptr)
+    goto has_handle;
+  if (args.master_only)
     goto is_master_only;
-  if (!args.subscription_handle_ptr) {
-    fio_env_set(args.io,
-                .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
-                                          (uint16_t)args.filter)),
-                .name = args.channel,
-                .udata = s,
-                .on_close =
-                    (void (*)(void *))fio___pubsub_subscription_unsubscribe);
-    return;
-  }
+  if (!args.io)
+    goto is_global;
+
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio_env_set(args.io,
+              .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
+                                        (uint16_t)args.filter)),
+              .name = args.channel,
+              .udata = s,
+              .on_close =
+                  (void (*)(void *))fio___pubsub_subscription_unsubscribe);
+  return;
+
+has_handle:
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
   *args.subscription_handle_ptr = (uintptr_t)s;
   return;
 
 is_master_only:
-  if (fio_srv_is_master()) {
-    fio___postoffice_msmap_set(
-        &FIO___PUBSUB_POSTOFFICE.master_subscriptions,
-        fio_risky_hash(args.channel.buf, args.channel.len, args.filter),
-        FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
-        s,
-        NULL);
-  } else {
-    fio_channel_free(s->channel);
-    fio_subscription_free(s);
-    FIO_LOG_WARNING(
-        "%d master-only subscription attempt on a non-master process: %.*s",
-        fio_srv_pid(),
-        (int)args.channel.len,
-        args.channel.buf);
-  }
+  if (fio_srv_is_master())
+    goto error_not_on_master;
+is_global:
+  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio___postoffice_msmap_set(
+      &FIO___PUBSUB_POSTOFFICE.master_subscriptions + (!args.master_only),
+      fio_risky_hash(args.channel.buf,
+                     args.channel.len,
+                     args.filter | ((size_t)args.is_pattern << 20)),
+      FIO_STR_INFO2(args.channel.buf, args.channel.len),
+      s,
+      NULL);
+  return;
+
+error_not_on_master:
+  fio_bstr_free(uptr.str->buf);
+  s->node = FIO_LIST_INIT(s->node);
+  s->history = FIO_LIST_INIT(s->history);
+  fio_subscription_free(s);
+  FIO_LOG_WARNING(
+      "%d master-only subscription attempt on a non-master process: %.*s",
+      fio_srv_pid(),
+      (int)args.channel.len,
+      args.channel.buf);
   return;
 
 sub_error:
@@ -32901,23 +32924,28 @@ sub_error:
 /** Cancels an existing subscriptions. */
 void fio_unsubscribe___(void); /* sublimetext marker */
 int fio_unsubscribe FIO_NOOP(fio_subscribe_args_s args) {
-  if (args.master_only && !args.io)
-    goto is_master_only;
-  if (!args.subscription_handle_ptr) {
-    return fio_env_remove(
-        args.io,
-        .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
-                                  (uint16_t)args.filter)),
-        .name = args.channel);
-  }
+  if (args.subscription_handle_ptr)
+    goto has_handle;
+  if (args.master_only || !args.io)
+    goto is_global;
+
+  return fio_env_remove(
+      args.io,
+      .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
+                                (uint16_t)args.filter)),
+      .name = args.channel);
+
+has_handle:
   fio___pubsub_subscription_unsubscribe(
       *(fio_subscription_s **)args.subscription_handle_ptr);
   return 0;
 
-is_master_only:
+is_global:
   return fio___postoffice_msmap_remove(
-      &FIO___PUBSUB_POSTOFFICE.master_subscriptions,
-      fio_risky_hash(args.channel.buf, args.channel.len, args.filter),
+      &FIO___PUBSUB_POSTOFFICE.master_subscriptions + (!args.master_only),
+      fio_risky_hash(args.channel.buf,
+                     args.channel.len,
+                     args.filter | ((size_t)args.is_pattern << 20)),
       FIO_STR_INFO3(args.channel.buf, args.channel.len, (size_t)-1),
       NULL);
 }
@@ -34660,17 +34688,17 @@ HTTP Handle Implementation - possibly externed functions.
 Helpers - memory allocation & logging time collection
 ***************************************************************************** */
 
-FIO___LEAK_COUNTER_DEF(http___keystr_allocator)
+FIO_LEAK_COUNTER_DEF(http___keystr_allocator)
 
 FIO_SFUNC void fio___http_keystr_free(void *ptr, size_t len) {
   if (!ptr)
     return;
-  FIO___LEAK_COUNTER_ON_FREE(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_FREE(http___keystr_allocator);
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
 FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
-  FIO___LEAK_COUNTER_ON_ALLOC(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_ALLOC(http___keystr_allocator);
   return FIO_MEM_REALLOC_(NULL, 0, capa, 0);
 }
 
@@ -41569,7 +41597,7 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       d.next = FIOBJ_INVALID;
       end = d.end;
     } else {
-      /* re-collect end position to acommodate for changes */
+      /* re-collect end position to accommodate for changes */
       end = fiobj____each2_element_count(i.obj);
     }
     while (i.pos >= end && fiobj___stack_count(&d.stack)) {
@@ -42286,7 +42314,7 @@ Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO___LEAK_COUNTER_DEF(FIO_MODULE_NAME)
+FIO_LEAK_COUNTER_DEF(FIO_MODULE_NAME)
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
@@ -42296,7 +42324,7 @@ SFUNC FIO_MODULE_PTR FIO_NAME(FIO_MODULE_NAME, new)(void) {
       (FIO_NAME(FIO_MODULE_NAME, s) *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*o), 0);
   if (!o)
     return (FIO_MODULE_PTR)NULL;
-  FIO___LEAK_COUNTER_ON_ALLOC(FIO_MODULE_NAME);
+  FIO_LEAK_COUNTER_ON_ALLOC(FIO_MODULE_NAME);
   *o = (FIO_NAME(FIO_MODULE_NAME, s))FIO_MODULE_INIT;
   return (FIO_MODULE_PTR)FIO_PTR_TAG(o);
 }
@@ -42306,7 +42334,7 @@ SFUNC int FIO_NAME(FIO_MODULE_NAME, free)(FIO_MODULE_PTR obj) {
   FIO_NAME(FIO_MODULE_NAME, destroy)(obj);
   FIO_NAME(FIO_MODULE_NAME, s) *o =
       FIO_PTR_TAG_GET_UNTAGGED(FIO___UNTAG_T, obj);
-  FIO___LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
+  FIO_LEAK_COUNTER_ON_FREE(FIO_MODULE_NAME);
   FIO_MEM_FREE_(o, sizeof(*o));
   return 0;
 }
@@ -45764,20 +45792,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   for (int i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
     ++delta;
-    FIO_ASSERT(state == expected,
-               "subscribe shouldn't have "
-               "affected state");
+    FIO_ASSERT(state == expected, "subscribe shouldn't affect state (%d)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (1-%d)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (2-%d)", i);
   }
   for (int i = 0; i < sub_count; ++i) {
-    fio_unsubscribe FIO_NOOP(sub[i]);
+    if (fio_unsubscribe FIO_NOOP(sub[i]))
+      FIO_LOG_WARNING("fio_unsubscribe returned an error value");
     --delta;
     --expected;
     fio_queue_perform_all(fio___srv_tasks);
-    FIO_ASSERT(state == expected, "unsubscribe should call callback");
+    FIO_ASSERT(state == expected, "unsubscribe should call callback (%i)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (3-%d)", i);
     FIO___PUBLISH2TEST();

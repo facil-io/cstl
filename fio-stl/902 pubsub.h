@@ -118,20 +118,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   for (int i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
     ++delta;
-    FIO_ASSERT(state == expected,
-               "subscribe shouldn't have "
-               "affected state");
+    FIO_ASSERT(state == expected, "subscribe shouldn't affect state (%d)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (1-%d)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (2-%d)", i);
   }
   for (int i = 0; i < sub_count; ++i) {
-    fio_unsubscribe FIO_NOOP(sub[i]);
+    if (fio_unsubscribe FIO_NOOP(sub[i]))
+      FIO_LOG_WARNING("fio_unsubscribe returned an error value");
     --delta;
     --expected;
     fio_queue_perform_all(fio___srv_tasks);
-    FIO_ASSERT(state == expected, "unsubscribe should call callback");
+    FIO_ASSERT(state == expected, "unsubscribe should call callback (%i)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (3-%d)", i);
     FIO___PUBLISH2TEST();
