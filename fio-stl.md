@@ -401,6 +401,133 @@ any code.
 
 -------------------------------------------------------------------------------
 
+## Naming and Misc. Macros
+
+#### `FIO_IFUNC`
+
+```c
+#define FIO_IFUNC static inline __attribute__((unused))
+```
+
+Marks a function as `static`, `inline` and possibly unused.
+
+#### `FIO_SFUNC`
+
+```c
+#define FIO_SFUNC static __attribute__((unused))
+```
+
+Marks a function as `static` and possibly unused.
+
+#### `FIO_WEAK`
+
+```c
+#define FIO_WEAK __attribute__((weak))
+```
+
+Marks a function as weak
+
+#### `FIO_CONSTRUCTOR(fname)`
+
+```c
+#define FIO_CONSTRUCTOR(fname) FIO_SFUNC __attribute__((constructor)) void fname (void)
+```
+
+Marks a function as a _constructor_ - **if supported**.
+
+When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, before `main` is called.
+
+#### `FIO_DESTRUCTOR(fname)`
+
+```c
+#define FIO_DESTRUCTOR(fname) FIO_SFUNC __attribute__((destructor)) void fname (void)
+```
+
+Marks a function as a _destructor_ - **if supported**.
+
+When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
+
+#### `FIO_MACRO2STR`
+
+```c
+#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
+```
+
+Converts a macro's content to a string literal.
+
+#### `FIO_NAME`
+
+```c
+#define FIO_NAME(prefix, postfix)
+```
+
+Used for naming functions and variables resulting in: `prefix_postfix`
+
+This allows macros to be used for naming types and functions.
+
+i.e.:
+
+```c
+// the type's name
+#define NUM number
+// typedef struct { long l; } number_s
+typedef struct { long l; } FIO_NAME(NUM, s)
+
+// number_s number_add(number_s a, number_s b)
+FIO_NAME(NUM, s) FIO_NAME(NUM, add)(FIO_NAME(NUM, s) a, FIO_NAME(NUM, s) b) {
+  a.l += b.l;
+  return a;
+}
+#undef NUM
+```
+
+#### `FIO_NAME2`
+
+```c
+#define FIO_NAME2(prefix, postfix)
+```
+
+Sets naming convention for conversion functions, i.e.: foo2bar
+
+i.e.:
+
+```c
+// int64_t a2l(const char * buf)
+int64_t FIO_NAME2(a, l)(const char * buf) {
+  return fio_atol(&buf);
+}
+```
+
+#### `FIO_NAME_BL`
+
+```c
+#define FIO_NAME_BL(prefix, postfix) 
+```
+
+Sets naming convention for boolean functions, i.e.: foo_is_true
+
+i.e.:
+
+```c
+// typedef struct { long l; } number_s
+typedef struct { long l; } FIO_NAME(number, s)
+
+// int number_is_zero(number_s n)
+int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
+  return (!n.l);
+}
+```
+
+#### `FIO_NAME_TEST`
+
+```c
+#define FIO_NAME_TEST(prefix, postfix) FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
+```
+
+Used internally to name test functions.
+
+-------------------------------------------------------------------------------
+
 ## Core Binary Strings and Buffer Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
@@ -727,133 +854,6 @@ Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `
 #endif
 #endif /* FIO_MEMALT */
 ```
-
--------------------------------------------------------------------------------
-
-## Naming and Misc. Macros
-
-#### `FIO_IFUNC`
-
-```c
-#define FIO_IFUNC static inline __attribute__((unused))
-```
-
-Marks a function as `static`, `inline` and possibly unused.
-
-#### `FIO_SFUNC`
-
-```c
-#define FIO_SFUNC static __attribute__((unused))
-```
-
-Marks a function as `static` and possibly unused.
-
-#### `FIO_WEAK`
-
-```c
-#define FIO_WEAK __attribute__((weak))
-```
-
-Marks a function as weak
-
-#### `FIO_CONSTRUCTOR(fname)`
-
-```c
-#define FIO_CONSTRUCTOR(fname) FIO_SFUNC __attribute__((constructor)) void fname (void)
-```
-
-Marks a function as a _constructor_ - **if supported**.
-
-When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, before `main` is called.
-
-#### `FIO_DESTRUCTOR(fname)`
-
-```c
-#define FIO_DESTRUCTOR(fname) FIO_SFUNC __attribute__((destructor)) void fname (void)
-```
-
-Marks a function as a _destructor_ - **if supported**.
-
-When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
-
-#### `FIO_MACRO2STR`
-
-```c
-#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
-```
-
-Converts a macro's content to a string literal.
-
-#### `FIO_NAME`
-
-```c
-#define FIO_NAME(prefix, postfix)
-```
-
-Used for naming functions and variables resulting in: `prefix_postfix`
-
-This allows macros to be used for naming types and functions.
-
-i.e.:
-
-```c
-// the type's name
-#define NUM number
-// typedef struct { long l; } number_s
-typedef struct { long l; } FIO_NAME(NUM, s)
-
-// number_s number_add(number_s a, number_s b)
-FIO_NAME(NUM, s) FIO_NAME(NUM, add)(FIO_NAME(NUM, s) a, FIO_NAME(NUM, s) b) {
-  a.l += b.l;
-  return a;
-}
-#undef NUM
-```
-
-#### `FIO_NAME2`
-
-```c
-#define FIO_NAME2(prefix, postfix)
-```
-
-Sets naming convention for conversion functions, i.e.: foo2bar
-
-i.e.:
-
-```c
-// int64_t a2l(const char * buf)
-int64_t FIO_NAME2(a, l)(const char * buf) {
-  return fio_atol(&buf);
-}
-```
-
-#### `FIO_NAME_BL`
-
-```c
-#define FIO_NAME_BL(prefix, postfix) 
-```
-
-Sets naming convention for boolean functions, i.e.: foo_is_true
-
-i.e.:
-
-```c
-// typedef struct { long l; } number_s
-typedef struct { long l; } FIO_NAME(number, s)
-
-// int number_is_zero(number_s n)
-int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
-  return (!n.l);
-}
-```
-
-#### `FIO_NAME_TEST`
-
-```c
-#define FIO_NAME_TEST(prefix, postfix) FIO_NAME(fio___test, FIO_NAME(prefix, postfix))
-```
-
-Used internally to name test functions.
 
 -------------------------------------------------------------------------------
 
@@ -4249,6 +4249,22 @@ Sets a numeral value for the named argument (but **not** it's aliases).
 
 **Note**: this basically writes a string with a base 10 representation.
 
+
+#### `fio_cli_each`
+
+```c
+size_t fio_cli_each(int (*task)(fio_buf_info_s name,
+                                fio_buf_info_s value,
+                                fio_cli_arg_e arg_type,
+                                void *udata),
+                          void *udata);
+```
+
+Calls `task` for every argument received, returning the number of times `task` was called.
+
+If `task` returns a non-zero value, iteration is stopped and `fio_cli_each` returns.
+
+The `udata` pointer is an opaque user pointer passed along.
 
 -------------------------------------------------------------------------------
 ## Local Memory Allocation

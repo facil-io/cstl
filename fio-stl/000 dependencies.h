@@ -59,13 +59,17 @@ Everything Inclusion
 #define H___FIO_EVERYTHING_FINISHED___H
 #undef FIO_MEMALT
 #define FIO_MEMALT
+#define FIO_FIOBJ
+#define FIO_MUSTACHE
+#define FIOBJ_MALLOC
+#define FIO_HTTP
 #define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_BASIC_FINISHED___H)
+#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_EVERYTHING1___H)
 /* Inclusion cycle two - import server modules. */
 #define H___FIO_EVERYTHING2___H
+#define FIO_MALLOC
 #define FIO_SERVER
 #define FIO_PUBSUB
-#define FIO_HTTP
 #define FIO___INCLUDE_AGAIN
 #elif !defined(H___FIO_EVERYTHING_FINISHED___H)
 /* Inclusion cycle one - import FIO_BASIC. */
@@ -75,9 +79,15 @@ Everything Inclusion
 #undef FIO_BASIC
 #undef FIO_SIGNAL
 #undef FIO_SOCK
-#define FIO_BASIC
+#define H___FIO_EVERYTHING1___H
+#define FIO_CLI
+#define FIO_CORE
+#define FIO_CRYPT
 #define FIO_SIGNAL
 #define FIO_SOCK
+#define FIO_STATE
+#define FIO_THREADS
+#define FIO___INCLUDE_AGAIN
 #else
 #undef FIO_EVERYTHING /* final cycle, allows extension  */
 

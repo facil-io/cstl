@@ -126,8 +126,8 @@ else
 endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
-# optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined
-OPTIMIZATION_DEBUG=-O0 -g -coverage -fsanitize=address -fno-omit-frame-pointer -fno-builtin
+# optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined -fsanitize=address
+OPTIMIZATION_DEBUG=-O0 -g -coverage -fno-omit-frame-pointer -fno-builtin
 # Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
@@ -750,13 +750,11 @@ $(TMP_ROOT)/%.o: create_tree %.cpp $(TMP_ROOT)/%.d
 	@echo "* Compiling $*.cpp (C++ source file)"
 	@$(CC) -c $*.cpp -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
-	$(eval LINKER_FLAGS+= -lc++)
 
 $(TMP_ROOT)/%.o: create_tree %.cxx $(TMP_ROOT)/%.d
 	@echo "* Compiling $*.cxx (C++ source file)"
 	@$(CC) -c $*.cxx -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
-	$(eval LINKER_FLAGS+= -lc++)
 
 $(TMP_ROOT)/%.o: create_tree %.c++ $(TMP_ROOT)/%.d
 	@echo "* Compiling $*.c++ (C++ source file)"

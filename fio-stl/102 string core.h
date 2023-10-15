@@ -370,7 +370,9 @@ Memory Helpers (for Authorship)
 /* calculates a 16 bytes boundary aligned capacity for `new_len`. */
 FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 
-/** Default reallocation callback implementation */
+/** Default reallocation callback implementation using libc `realloc`. */
+#define FIO_STRING_SYS_REALLOC fio_string_sys_reallocate
+/** Default reallocation callback implementation using the default allocator */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
 #define FIO_STRING_ALLOC_COPY fio_string_default_copy_and_reallocate
@@ -1127,6 +1129,17 @@ FIO_LEAK_COUNTER_DEF(fio_string_default_key_allocations)
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
+
+SFUNC int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len) {
+  len = fio_string_capa4len(len);
+  void *tmp = realloc(dest->buf, dest->capa);
+  if (!tmp)
+    return -1;
+  dest->capa = len;
+  dest->buf = (char *)tmp;
+  return 0;
+}
+
 SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
   len = fio_string_capa4len(len);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, len, dest->len);

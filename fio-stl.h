@@ -2109,13 +2109,17 @@ Everything Inclusion
 #define H___FIO_EVERYTHING_FINISHED___H
 #undef FIO_MEMALT
 #define FIO_MEMALT
+#define FIO_FIOBJ
+#define FIO_MUSTACHE
+#define FIOBJ_MALLOC
+#define FIO_HTTP
 #define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_BASIC_FINISHED___H)
+#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_EVERYTHING1___H)
 /* Inclusion cycle two - import server modules. */
 #define H___FIO_EVERYTHING2___H
+#define FIO_MALLOC
 #define FIO_SERVER
 #define FIO_PUBSUB
-#define FIO_HTTP
 #define FIO___INCLUDE_AGAIN
 #elif !defined(H___FIO_EVERYTHING_FINISHED___H)
 /* Inclusion cycle one - import FIO_BASIC. */
@@ -2125,9 +2129,15 @@ Everything Inclusion
 #undef FIO_BASIC
 #undef FIO_SIGNAL
 #undef FIO_SOCK
-#define FIO_BASIC
+#define H___FIO_EVERYTHING1___H
+#define FIO_CLI
+#define FIO_CORE
+#define FIO_CRYPT
 #define FIO_SIGNAL
 #define FIO_SOCK
+#define FIO_STATE
+#define FIO_THREADS
+#define FIO___INCLUDE_AGAIN
 #else
 #undef FIO_EVERYTHING /* final cycle, allows extension  */
 
@@ -11040,35 +11050,39 @@ Internal Macro Implementation
 
 /** Used internally. */
 typedef enum {
-  FIO___CLI_STRING,
-  FIO___CLI_BOOL,
-  FIO___CLI_INT,
-  FIO___CLI_PRINT,
-  FIO___CLI_PRINT_LINE,
-  FIO___CLI_PRINT_HEADER,
-} fio___cli_line_e;
+  /** A String CLI argument */
+  FIO_CLI_ARG_STRING,
+  /** A Boolean CLI argument */
+  FIO_CLI_ARG_BOOL,
+  /** An integer CLI argument */
+  FIO_CLI_ARG_INT,
+  FIO_CLI_ARG_PRINT,
+  FIO_CLI_ARG_PRINT_LINE,
+  FIO_CLI_ARG_PRINT_HEADER,
+} fio_cli_arg_e;
 
 typedef struct {
-  fio___cli_line_e t;
+  fio_cli_arg_e t;
   const char *l;
 } fio___cli_line_s;
 
 /** Indicates the CLI argument should be a String (default). */
 #define FIO_CLI_STRING(line)                                                   \
-  ((fio___cli_line_s){.t = FIO___CLI_STRING, .l = line})
+  ((fio___cli_line_s){.t = FIO_CLI_ARG_STRING, .l = line})
 /** Indicates the CLI argument is a Boolean value. */
-#define FIO_CLI_BOOL(line) ((fio___cli_line_s){.t = FIO___CLI_BOOL, .l = line})
+#define FIO_CLI_BOOL(line)                                                     \
+  ((fio___cli_line_s){.t = FIO_CLI_ARG_BOOL, .l = line})
 /** Indicates the CLI argument should be an Integer (numerical). */
-#define FIO_CLI_INT(line) ((fio___cli_line_s){.t = FIO___CLI_INT, .l = line})
+#define FIO_CLI_INT(line) ((fio___cli_line_s){.t = FIO_CLI_ARG_INT, .l = line})
 /** Indicates the CLI string should be printed as is with proper offset. */
 #define FIO_CLI_PRINT(line)                                                    \
-  ((fio___cli_line_s){.t = FIO___CLI_PRINT, .l = line})
+  ((fio___cli_line_s){.t = FIO_CLI_ARG_PRINT, .l = line})
 /** Indicates the CLI string should be printed as is with no offset. */
 #define FIO_CLI_PRINT_LINE(line)                                               \
-  ((fio___cli_line_s){.t = FIO___CLI_PRINT_LINE, .l = line})
+  ((fio___cli_line_s){.t = FIO_CLI_ARG_PRINT_LINE, .l = line})
 /** Indicates the CLI string should be printed as a header. */
 #define FIO_CLI_PRINT_HEADER(line)                                             \
-  ((fio___cli_line_s){.t = FIO___CLI_PRINT_HEADER, .l = line})
+  ((fio___cli_line_s){.t = FIO_CLI_ARG_PRINT_HEADER, .l = line})
 
 /* *****************************************************************************
 CLI API
@@ -11200,6 +11214,12 @@ SFUNC void fio_cli_set_i(char const *name, int64_t i);
 /** Sets / adds an unnamed argument to the 0 based array of unnamed elements. */
 SFUNC unsigned int fio_cli_set_unnamed(unsigned int index, const char *);
 
+/** Calls `task` for every argument received. */
+SFUNC size_t fio_cli_each(int (*task)(fio_buf_info_s name,
+                                      fio_buf_info_s value,
+                                      fio_cli_arg_e arg_type,
+                                      void *udata),
+                          void *udata);
 /* *****************************************************************************
 CLI Implementation
 ***************************************************************************** */
@@ -11214,33 +11234,34 @@ String for CLI
 ***************************************************************************** */
 
 typedef struct {
-  uint8_t em;
-  uint8_t pad[3];
-  uint32_t len;
-  char *str;
-} fio___cli_str_s;
+  uint8_t em;     /* embedded? const? how long? */
+  uint8_t pad[3]; /* padding - embedded buffer starts here */
+  uint32_t len;   /* if not embedded, otherwise see `em` */
+  char *str;      /* if not embedded, otherwise see `pad` */
+} fio_cli_str_s;
 
-FIO_SFUNC void fio___cli_str_destroy(fio___cli_str_s *s) {
+/** CLI String free / destroy by context */
+FIO_SFUNC void fio_cli_str_destroy(fio_cli_str_s *s) {
   if (!s || s->em || !s->str)
     return;
   FIO_LEAK_COUNTER_ON_FREE(fio_cli_str);
   FIO_MEM_FREE_(s->str, s->len);
-  *s = (fio___cli_str_s){0};
+  *s = (fio_cli_str_s){0};
 }
 
-/* tmp copy */
-FIO_IFUNC fio_str_info_s fio___cli_str_info(fio___cli_str_s *s) {
-  fio_str_info_s r = {0};
+/** CLI String info */
+FIO_IFUNC fio_buf_info_s fio_cli_str_buf(fio_cli_str_s *s) {
+  fio_buf_info_s r = {0};
   if (s && (s->em || s->len))
-    r = ((s->em) & 127) ? (FIO_STR_INFO2((char *)s->pad, (size_t)s->em))
-                        : (FIO_STR_INFO2(s->str, (size_t)s->len));
+    r = ((s->em) & 127) ? (FIO_BUF_INFO2((char *)s->pad, (size_t)s->em))
+                        : (FIO_BUF_INFO2(s->str, (size_t)s->len));
   return r;
 }
 
-/* copy */
-FIO_SFUNC fio___cli_str_s fio___cli_str_copy(fio_str_info_s s) {
-  fio___cli_str_s r = {0};
-  if (s.len < sizeof(r) - 1) {
+/** CLI String copy */
+FIO_SFUNC fio_cli_str_s fio_cli_str_copy(fio_buf_info_s s) {
+  fio_cli_str_s r = {0};
+  if (s.len < sizeof(r) - 2) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
@@ -11254,15 +11275,15 @@ FIO_SFUNC fio___cli_str_s fio___cli_str_copy(fio_str_info_s s) {
   return r;
 }
 
-/* tmp copy */
-FIO_SFUNC fio___cli_str_s fio___cli_str(fio_str_info_s s) {
-  fio___cli_str_s r = {0};
+/** CLI String tmp copy */
+FIO_SFUNC fio_cli_str_s fio_cli_str(fio_buf_info_s s) {
+  fio_cli_str_s r = {0};
   if (s.len < sizeof(r) - 2) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
   }
-  r.em = 128;
+  r.em = 128; /* mark as const, memory shouldn't be freed */
   r.len = (uint32_t)s.len;
   r.str = s.buf;
   return r;
@@ -11273,7 +11294,7 @@ String array for CLI
 ***************************************************************************** */
 
 typedef struct {
-  fio___cli_str_s *ary;
+  fio_cli_str_s *ary;
   uint32_t capa;
   uint32_t w;
 } fio___cli_ary_s;
@@ -11282,7 +11303,7 @@ FIO_SFUNC void fio___cli_ary_destroy(fio___cli_ary_s *a) {
   if (!a || !a->ary)
     return;
   for (size_t i = 0; i < a->w; ++i)
-    fio___cli_str_destroy(a->ary + i);
+    fio_cli_str_destroy(a->ary + i);
   FIO_LEAK_COUNTER_ON_FREE(fio_cli_ary);
   FIO_MEM_FREE_(a->ary, sizeof(*a->ary) * a->capa);
   *a = (fio___cli_ary_s){0};
@@ -11294,11 +11315,11 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
     if (!a->ary)
       FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
     size_t new_capa = a->capa + 8;
-    fio___cli_str_s *tmp =
-        (fio___cli_str_s *)FIO_MEM_REALLOC_(a->ary,
-                                            sizeof(*a->ary) * a->capa,
-                                            sizeof(*a->ary) * new_capa,
-                                            a->capa);
+    fio_cli_str_s *tmp =
+        (fio_cli_str_s *)FIO_MEM_REALLOC_(a->ary,
+                                          sizeof(*a->ary) * a->capa,
+                                          sizeof(*a->ary) * new_capa,
+                                          a->capa);
     FIO_ASSERT_ALLOC(tmp);
     a->ary = tmp;
     a->capa = new_capa;
@@ -11309,20 +11330,20 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
   return a->w++;
 }
 
-FIO_IFUNC fio_str_info_s fio___cli_ary_get(fio___cli_ary_s *a, uint32_t index) {
-  fio_str_info_s r = {0};
+FIO_IFUNC fio_buf_info_s fio___cli_ary_get(fio___cli_ary_s *a, uint32_t index) {
+  fio_buf_info_s r = {0};
   if (index >= a->w)
     return r;
-  return fio___cli_str_info(a->ary + index);
+  return fio_cli_str_buf(a->ary + index);
 }
 FIO_IFUNC void fio___cli_ary_set(fio___cli_ary_s *a,
                                  uint32_t index,
-                                 fio_str_info_s str) {
+                                 fio_buf_info_s str) {
   FIO_ASSERT(a, "Internal CLI Error - no CLI array given!");
   if (index >= a->w)
     return;
-  fio___cli_str_destroy(a->ary + index);
-  a->ary[index] = fio___cli_str_copy(str);
+  fio_cli_str_destroy(a->ary + index);
+  a->ary[index] = fio_cli_str_copy(str);
 }
 
 /* *****************************************************************************
@@ -11330,17 +11351,17 @@ CLI Alias Index Map
 ***************************************************************************** */
 
 typedef struct {
-  fio___cli_str_s name;
-  fio___cli_line_e t;
+  fio_cli_str_s name;
+  fio_cli_arg_e t;
   uint32_t index;
 } fio___cli_aliases_s;
 
 #define FIO___CLI_ALIAS_HASH(o)                                                \
-  fio_risky_hash(fio___cli_str_info(&o->name).buf,                             \
-                 fio___cli_str_info(&o->name).len,                             \
-                 (uint64_t)(uintptr_t)fio___cli_str)
+  fio_risky_hash(fio_cli_str_buf(&o->name).buf,                                \
+                 fio_cli_str_buf(&o->name).len,                                \
+                 (uint64_t)(uintptr_t)fio_cli_str)
 #define FIO___CLI_ALIAS_IS_EQ(a, b)                                            \
-  FIO_STR_INFO_IS_EQ(fio___cli_str_info(&a->name), fio___cli_str_info(&b->name))
+  FIO_BUF_INFO_IS_EQ(fio_cli_str_buf(&a->name), fio_cli_str_buf(&b->name))
 FIO_TYPEDEF_IMAP_ARRAY(fio___cli_amap,
                        fio___cli_aliases_s,
                        uint32_t,
@@ -11367,33 +11388,33 @@ FIO_SFUNC void fio___cli_data_destroy(void) {
   fio___cli_ary_destroy(&fio___cli_data.indexed);
   fio___cli_ary_destroy(&fio___cli_data.unnamed);
   FIO_IMAP_EACH(fio___cli_amap, &fio___cli_data.aliases, i) {
-    fio___cli_str_destroy(&fio___cli_data.aliases.ary[i].name);
+    fio_cli_str_destroy(&fio___cli_data.aliases.ary[i].name);
   }
   fio___cli_amap_destroy(&fio___cli_data.aliases);
   fio___cli_data = (struct fio___cli_data_s){{0}};
 }
 
-FIO_SFUNC void fio___cli_data_alias(fio_str_info_s key,
-                                    fio_str_info_s alias,
-                                    fio___cli_line_e t) {
-  fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
+                                    fio_buf_info_s alias,
+                                    fio_cli_arg_e t) {
+  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    o.name = fio___cli_str_copy(key);
+    o.name = fio_cli_str_copy(key);
     o.index = fio___cli_ary_new_index(&fio___cli_data.indexed);
     o.t = t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
   }
   if (!alias.len)
     return;
-  o.name = fio___cli_str(alias);
+  o.name = fio_cli_str(alias);
   fio___cli_aliases_s *old = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (old) {
     FIO_LOG_WARNING("(fio_cli) CLI alias %s already exists! overwriting...",
-                    fio___cli_str_info(&o.name).buf);
+                    fio_cli_str_buf(&o.name).buf);
     old->index = a->index;
   } else {
-    o.name = fio___cli_str_copy(alias);
+    o.name = fio_cli_str_copy(alias);
     o.index = a->index;
     o.t = a->t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -11402,16 +11423,16 @@ FIO_SFUNC void fio___cli_data_alias(fio_str_info_s key,
 
 FIO_SFUNC void fio___cli_print_help(void);
 
-FIO_SFUNC void fio___cli_data_set(fio_str_info_s key, fio_str_info_s value) {
-  fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+FIO_SFUNC void fio___cli_data_set(fio_buf_info_s key, fio_buf_info_s value) {
+  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    fio___cli_data_alias(key, (fio_str_info_s){0}, FIO___CLI_STRING);
+    fio___cli_data_alias(key, (fio_buf_info_s){0}, FIO_CLI_ARG_STRING);
     a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   }
   FIO_ASSERT(a && a->index < fio___cli_data.indexed.w,
              "(fio_cli) CLI alias initialization error!");
-  if (a->t == FIO___CLI_INT) {
+  if (a->t == FIO_CLI_ARG_INT) {
     char *start = value.buf;
     fio_atol(&start);
     if (start != value.buf + value.len) {
@@ -11424,18 +11445,18 @@ FIO_SFUNC void fio___cli_data_set(fio_str_info_s key, fio_str_info_s value) {
   fio___cli_ary_set(&fio___cli_data.indexed, a->index, value);
 }
 
-FIO_SFUNC fio_str_info_s fio___cli_data_get(fio_str_info_s key) {
-  fio_str_info_s r = {0};
-  fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
+  fio_buf_info_s r = {0};
+  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = fio___cli_ary_get(&fio___cli_data.indexed, a->index);
   return r;
 }
 
-FIO_SFUNC uint32_t fio___cli_data_get_index(fio_str_info_s key) {
+FIO_SFUNC uint32_t fio___cli_data_get_index(fio_buf_info_s key) {
   uint32_t r = (uint32_t)-1;
-  fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = a->index;
@@ -11458,7 +11479,7 @@ CLI Public Get/Set API
 SFUNC char const *fio_cli_get(char const *name) {
   if (!name)
     return fio_cli_unnamed(0);
-  fio_str_info_s key = FIO_STR_INFO1((char *)name);
+  fio_buf_info_s key = FIO_BUF_INFO1((char *)name);
   return fio___cli_data_get(key).buf;
 }
 
@@ -11490,8 +11511,8 @@ SFUNC char const *fio_cli_unnamed(unsigned int index) {
  * This function is NOT thread safe.
  */
 SFUNC void fio_cli_set(char const *name, char const *value) {
-  fio_str_info_s key = FIO_STR_INFO1((char *)name);
-  fio_str_info_s val = FIO_STR_INFO1((char *)value);
+  fio_buf_info_s key = FIO_BUF_INFO1((char *)name);
+  fio_buf_info_s val = FIO_BUF_INFO1((char *)value);
   if (!name) {
     if (!value)
       return;
@@ -11525,7 +11546,7 @@ SFUNC void fio_cli_set_i(char const *name, int64_t i) {
 SFUNC unsigned int fio_cli_set_unnamed(unsigned int index, const char *value) {
   if (!value)
     return (uint32_t)-1;
-  fio_str_info_s val = FIO_STR_INFO1((char *)value);
+  fio_buf_info_s val = FIO_BUF_INFO1((char *)value);
   if (!val.len)
     return (uint32_t)-1;
   if (index >= fio___cli_data.unnamed.w)
@@ -11534,51 +11555,86 @@ SFUNC unsigned int fio_cli_set_unnamed(unsigned int index, const char *value) {
   return index;
 }
 
+/** Calls `task` for every argument received. */
+SFUNC size_t fio_cli_each(int (*task)(fio_buf_info_s name,
+                                      fio_buf_info_s value,
+                                      fio_cli_arg_e arg_type,
+                                      void *udata),
+                          void *udata) {
+  size_t r = 0;
+  if (!task)
+    return r;
+  FIO_IMAP_EACH(fio___cli_amap, &(fio___cli_data.aliases), i) {
+    fio_buf_info_s value = fio_cli_str_buf(fio___cli_data.indexed.ary +
+                                           fio___cli_data.aliases.ary[i].index);
+    if (!value.len)
+      continue;
+    ++r;
+    if (task(fio_cli_str_buf(&fio___cli_data.aliases.ary[i].name),
+             value,
+             fio___cli_data.aliases.ary[i].t,
+             udata))
+      break;
+  }
+  for (size_t i = 0; i < fio___cli_data.unnamed.w; ++i) {
+    fio_buf_info_s value = fio_cli_str_buf(fio___cli_data.unnamed.ary + i);
+    if (!value.len)
+      continue;
+    ++r;
+    if (task(FIO_BUF_INFO2(NULL, 0),
+             value,
+             fio___cli_data.aliases.ary[i].t,
+             udata))
+      break;
+  }
+  return r;
+}
+
 /* *****************************************************************************
 CLI Name Iterator
 ***************************************************************************** */
 
 typedef struct {
   fio___cli_line_s *args;
-  fio_str_info_s line;
-  fio_str_info_s desc;
+  fio_buf_info_s line;
+  fio_buf_info_s desc;
   size_t index;
-  fio___cli_line_e line_type;
+  fio_cli_arg_e line_type;
 } fio___cli_iterator_args_s;
 
 #define FIO___CLI_EACH_ARG(args_, i)                                           \
   for (fio___cli_iterator_args_s i =                                           \
            {                                                                   \
                .args = args_,                                                  \
-              .line = FIO_STR_INFO1((char *)((args_)[0].l)),                   \
+              .line = FIO_BUF_INFO1((char *)((args_)[0].l)),                   \
               .line_type = (args_)[0].t,                                       \
            };                                                                  \
        i.line.buf;                                                             \
        (++i.index,                                                             \
-        i.line = FIO_STR_INFO1((char *)i.args[i.index].l),                     \
+        i.line = FIO_BUF_INFO1((char *)i.args[i.index].l),                     \
         i.line_type = i.args[i.index].t))
 
 typedef struct {
-  fio_str_info_s line;
-  fio_str_info_s alias;
+  fio_buf_info_s line;
+  fio_buf_info_s alias;
 } fio___cli_iterator_alias_s;
 
-FIO_IFUNC fio_str_info_s fio___cli_iterator_alias_first(fio___cli_line_s *arg,
-                                                        fio_str_info_s line) {
-  fio_str_info_s a = {0};
-  if (arg->t > FIO___CLI_INT)
+FIO_IFUNC fio_buf_info_s fio___cli_iterator_alias_first(fio___cli_line_s *arg,
+                                                        fio_buf_info_s line) {
+  fio_buf_info_s a = {0};
+  if (arg->t > FIO_CLI_ARG_INT)
     return a;
   if (!line.buf || line.buf[0] != '-')
     return a;
   char *pos = (char *)FIO_MEMCHR(line.buf, ' ', line.len);
   if (!pos)
     pos = line.buf + line.len;
-  a = FIO_STR_INFO2(line.buf, (size_t)(pos - line.buf));
+  a = FIO_BUF_INFO2(line.buf, (size_t)(pos - line.buf));
   return a;
 }
-FIO_IFUNC fio_str_info_s fio___cli_iterator_alias_next(fio_str_info_s line,
-                                                       fio_str_info_s prev) {
-  fio_str_info_s a = {0};
+FIO_IFUNC fio_buf_info_s fio___cli_iterator_alias_next(fio_buf_info_s line,
+                                                       fio_buf_info_s prev) {
+  fio_buf_info_s a = {0};
   if (!prev.buf[prev.len])
     return a; /* eol */
   prev.buf += prev.len + 1;
@@ -11588,20 +11644,20 @@ FIO_IFUNC fio_str_info_s fio___cli_iterator_alias_next(fio_str_info_s line,
       (char *)FIO_MEMCHR(prev.buf, ' ', ((line.buf + line.len) - prev.buf));
   if (!pos)
     pos = line.buf + line.len;
-  a = FIO_STR_INFO2(prev.buf, (size_t)(pos - prev.buf));
+  a = FIO_BUF_INFO2(prev.buf, (size_t)(pos - prev.buf));
   return a;
 }
 
 #define FIO___CLI_EACH_ALIAS(i, alias)                                         \
-  for (fio_str_info_s alias =                                                  \
+  for (fio_buf_info_s alias =                                                  \
            fio___cli_iterator_alias_first(i.args + i.index, i.line);           \
        alias.buf;                                                              \
        alias = fio___cli_iterator_alias_next(i.line, alias))
 
-FIO_IFUNC fio_str_info_s
+FIO_IFUNC fio_buf_info_s
 fio___cli_iterator_default_val(fio___cli_iterator_args_s *i) {
-  fio_str_info_s a = {0};
-  fio_str_info_s line = i->line;
+  fio_buf_info_s a = {0};
+  fio_buf_info_s line = i->line;
   if (!line.buf || line.buf[0] != '-') {
     i->desc = line;
     return a;
@@ -11630,7 +11686,7 @@ fio___cli_iterator_default_val(fio___cli_iterator_args_s *i) {
         /* no default value? */
         i->desc.len = (line.buf + line.len) - a.buf;
         i->desc.buf = a.buf;
-        a = (fio_str_info_s){0};
+        a = (fio_buf_info_s){0};
         return a;
       }
       a.len = pos - a.buf;
@@ -11644,7 +11700,7 @@ fio___cli_iterator_default_val(fio___cli_iterator_args_s *i) {
         /* no default value? */
         i->desc.len = (line.buf + line.len) - a.buf;
         i->desc.buf = a.buf;
-        a = (fio_str_info_s){0};
+        a = (fio_buf_info_s){0};
         return a;
       }
       a.len = pos - a.buf;
@@ -11659,11 +11715,11 @@ fio___cli_iterator_default_val(fio___cli_iterator_args_s *i) {
 }
 
 #define FIO___CLI_EACH_DESC(i, desc_)                                          \
-  for (fio_str_info_s desc_ = i.desc;                                          \
-       desc_.len || i.args[i.index + 1].t == FIO___CLI_PRINT;                  \
-       desc_ = (i.args[i.index + 1].t == FIO___CLI_PRINT                       \
-                    ? (++i.index, FIO_STR_INFO1((char *)i.args[i.index].l))    \
-                    : FIO_STR_INFO2(0, 0)))
+  for (fio_buf_info_s desc_ = i.desc;                                          \
+       desc_.len || i.args[i.index + 1].t == FIO_CLI_ARG_PRINT;                \
+       desc_ = (i.args[i.index + 1].t == FIO_CLI_ARG_PRINT                     \
+                    ? (++i.index, FIO_BUF_INFO1((char *)i.args[i.index].l))    \
+                    : FIO_BUF_INFO2(0, 0)))
 
 /* *****************************************************************************
 CLI Build + Parsing Arguments
@@ -11677,12 +11733,12 @@ FIO_SFUNC void fio___cli_build_argument_aliases(char const *argv[],
   fio___cli_data.args = args;
   fio___cli_data.app_name = argv[0];
   FIO___CLI_EACH_ARG(args, i) {
-    fio_str_info_s first_alias = {0};
-    fio_str_info_s def = fio___cli_iterator_default_val(&i);
+    fio_buf_info_s first_alias = {0};
+    fio_buf_info_s def = fio___cli_iterator_default_val(&i);
     switch (i.line_type) {
-    case FIO___CLI_STRING: /* fall through */
-    case FIO___CLI_BOOL:   /* fall through */
-    case FIO___CLI_INT:    /* fall through */
+    case FIO_CLI_ARG_STRING: /* fall through */
+    case FIO_CLI_ARG_BOOL:   /* fall through */
+    case FIO_CLI_ARG_INT:    /* fall through */
       FIO_ASSERT(
           i.line.buf[0] == '-',
           "(CLI) argument lines MUST start with an '-argument-name':\n\t%s",
@@ -11697,15 +11753,15 @@ FIO_SFUNC void fio___cli_build_argument_aliases(char const *argv[],
       }
       if (def.len) {
         FIO_ASSERT(
-            i.line_type != FIO___CLI_BOOL,
+            i.line_type != FIO_CLI_ARG_BOOL,
             "(CLI) boolean CLI arguments cannot have a default value:\n\t%s",
             i.line.buf);
         fio___cli_data_set(first_alias, def);
       }
       continue;
-    case FIO___CLI_PRINT:      /* fall through */
-    case FIO___CLI_PRINT_LINE: /* fall through */
-    case FIO___CLI_PRINT_HEADER: continue;
+    case FIO_CLI_ARG_PRINT:      /* fall through */
+    case FIO_CLI_ARG_PRINT_LINE: /* fall through */
+    case FIO_CLI_ARG_PRINT_HEADER: continue;
     }
   }
 }
@@ -11727,8 +11783,8 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
 
   /**   Consume Arguments   **/
   for (size_t i = 1; i < (size_t)argc; ++i) {
-    fio_str_info_s key = FIO_STR_INFO1((char *)argv[i]);
-    fio_str_info_s value = {0};
+    fio_buf_info_s key = FIO_BUF_INFO1((char *)argv[i]);
+    fio_buf_info_s value = {0};
     fio___cli_aliases_s *a = NULL;
     if (!key.buf || !key.len)
       continue;
@@ -11743,7 +11799,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       fio___cli_print_help();
     /* look for longest argument match for argument (find, i.e. -arg=val) */
     for (;;) {
-      fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+      fio___cli_aliases_s o = {.name = fio_cli_str(key)};
       a = fio___cli_amap_get(&fio___cli_data.aliases, o);
       if (a)
         break;
@@ -11756,8 +11812,8 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       }
     }
     /* boolean values can be chained, but cannot have an actual value. */
-    if (a->t == FIO___CLI_BOOL) {
-      fio_str_info_s bool_value = FIO_STR_INFO2((char *)"1", 1);
+    if (a->t == FIO_CLI_ARG_BOOL) {
+      fio_buf_info_s bool_value = FIO_BUF_INFO2((char *)"1", 1);
       char bool_buf[3] = {'-', 0, 0};
       for (;;) {
         fio___cli_ary_set(&fio___cli_data.indexed, a->index, bool_value);
@@ -11768,10 +11824,10 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
         bool_buf[1] = value.buf[0];
         --value.len;
         ++value.buf;
-        key = FIO_STR_INFO2(bool_buf, 2);
-        fio___cli_aliases_s o = {.name = fio___cli_str(key)};
+        key = FIO_BUF_INFO2(bool_buf, 2);
+        fio___cli_aliases_s o = {.name = fio_cli_str(key)};
         a = fio___cli_amap_get(&fio___cli_data.aliases, o);
-        if (!a || a->t != FIO___CLI_BOOL) {
+        if (!a || a->t != FIO_CLI_ARG_BOOL) {
           FIO_LOG_FATAL(
               "(CLI) unrecognized boolean value (%s) embedded in argument %s",
               bool_buf,
@@ -11793,7 +11849,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
         fio___cli_print_help();
       }
       ++i;
-      value = FIO_STR_INFO1((char *)argv[i]);
+      value = FIO_BUF_INFO1((char *)argv[i]);
     }
     fio___cli_data_set(key, value); /* use this for type validation */
     continue;
@@ -11901,21 +11957,21 @@ FIO_SFUNC void fio___cli_print_help(void) {
                               help_org_state.buf == help.buf);
 
   FIO___CLI_EACH_ARG(args, i) {
-    fio_str_info_s first_alias = {0};
-    fio_str_info_s def = fio___cli_iterator_default_val(&i);
+    fio_buf_info_s first_alias = {0};
+    fio_buf_info_s def = fio___cli_iterator_default_val(&i);
     fio_buf_info_s argument_type_txt = {0};
     switch (i.line_type) {
-    case FIO___CLI_STRING:
+    case FIO_CLI_ARG_STRING:
       argument_type_txt = FIO_BUF_INFO1(
           (char *)"\x1B[0m \x1B[2m<string value>"); /* fall through */
-    case FIO___CLI_BOOL:
-      FIO_ASSERT(i.line_type != FIO___CLI_BOOL || !def.len,
+    case FIO_CLI_ARG_BOOL:
+      FIO_ASSERT(i.line_type != FIO_CLI_ARG_BOOL || !def.len,
                  "(CLI) boolean values cannot have a default value:\n\t%s",
                  i.line.buf);
       if (!argument_type_txt.buf)
         argument_type_txt = FIO_BUF_INFO1(
             (char *)"\x1B[0m \x1B[2m(boolean flag)"); /* fall through */
-    case FIO___CLI_INT:
+    case FIO_CLI_ARG_INT:
       if (!argument_type_txt.buf)
         argument_type_txt =
             FIO_BUF_INFO1((char *)"\x1B[0m \x1B[2m<integer value>");
@@ -11963,12 +12019,12 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                     help_org_state.buf == help.buf);
       }
       continue;
-    case FIO___CLI_PRINT:
+    case FIO_CLI_ARG_PRINT:
       help = fio___cli_write2line(help,
                                   FIO_BUF_INFO1((char *)"\t"),
                                   help_org_state.buf ==
                                       help.buf); /* fall through */
-    case FIO___CLI_PRINT_LINE:
+    case FIO_CLI_ARG_PRINT_LINE:
       help = fio___cli_write2line(help,
                                   FIO_STR2BUF_INFO(i.line),
                                   help_org_state.buf == help.buf);
@@ -11976,7 +12032,7 @@ FIO_SFUNC void fio___cli_print_help(void) {
                                   FIO_BUF_INFO1((char *)"\n"),
                                   help_org_state.buf == help.buf);
       continue;
-    case FIO___CLI_PRINT_HEADER:
+    case FIO_CLI_ARG_PRINT_HEADER:
       help = fio___cli_write2line(help,
                                   FIO_BUF_INFO1((char *)"\n\x1B[4m"),
                                   help_org_state.buf == help.buf);
@@ -17113,7 +17169,9 @@ Memory Helpers (for Authorship)
 /* calculates a 16 bytes boundary aligned capacity for `new_len`. */
 FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 
-/** Default reallocation callback implementation */
+/** Default reallocation callback implementation using libc `realloc`. */
+#define FIO_STRING_SYS_REALLOC fio_string_sys_reallocate
+/** Default reallocation callback implementation using the default allocator */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
 #define FIO_STRING_ALLOC_COPY fio_string_default_copy_and_reallocate
@@ -17870,6 +17928,17 @@ FIO_LEAK_COUNTER_DEF(fio_string_default_key_allocations)
 /* *****************************************************************************
 Allocation Helpers
 ***************************************************************************** */
+
+SFUNC int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len) {
+  len = fio_string_capa4len(len);
+  void *tmp = realloc(dest->buf, dest->capa);
+  if (!tmp)
+    return -1;
+  dest->capa = len;
+  dest->buf = (char *)tmp;
+  return 0;
+}
+
 SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
   len = fio_string_capa4len(len);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, len, dest->len);
@@ -43481,7 +43550,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, cli)(void) {
         FIO_CLI_PRINT_HEADER("Printing stuff"),
         FIO_CLI_PRINT_LINE("does nothing, but shouldn't crash either"),
         FIO_CLI_PRINT("does nothing, but shouldn't crash either"),
-        {(fio___cli_line_e)0},
+        {(fio_cli_arg_e)0},
     };
     fio_cli_start FIO_NOOP(argc, argv, 0, -1, NULL, arguments);
   }
