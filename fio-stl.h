@@ -2133,21 +2133,19 @@ Everything Inclusion
 #define FIO_SOCK
 #define FIO_STATE
 #define FIO_THREADS
-#elif !defined(H___FIO_EVERYTHING2___H)
-#define H___FIO_EVERYTHING2___H
+
+#else
+#undef H___FIO_EVERYTHING1___H
+#undef FIO_EVERYTHING
+#define H___FIO_EVERYTHING___H
 #define FIO_FIOBJ
 #define FIO_HTTP
 #define FIO_MALLOC
 #define FIO_MUSTACHE
 #define FIO_PUBSUB
 #define FIO_SERVER
-#else
-#define H___FIO_EVERYTHING___H
-#undef H___FIO_EVERYTHING1___H
-#undef H___FIO_EVERYTHING2___H
-#undef FIO_EVERYTHING
-#undef FIO_MEMALT
 #define FIO_MEMALT
+
 #endif
 
 #define FIO___INCLUDE_AGAIN
@@ -2174,11 +2172,13 @@ Basics Inclusion
 #define FIO_CRYPT
 #define FIO_STATE
 #define FIO_THREADS
+
 #elif !defined(H___FIO_BASIC_ROUND2___H)
 #define H___FIO_BASIC_ROUND2___H
 #define FIO_FIOBJ
 #define FIO_MUSTACHE
 #define FIOBJ_MALLOC
+
 #else
 #define H___FIO_BASIC___H
 #undef H___FIO_BASIC_ROUND1___H
@@ -41575,7 +41575,7 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj___stack
 #define FIO_ARRAY_TYPE           fiobj___stack_element_s
-#define FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
@@ -42007,7 +42007,7 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
-#define FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
@@ -42282,8 +42282,8 @@ FIOBJ cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
+#endif /* FIO_FIOBJ */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */

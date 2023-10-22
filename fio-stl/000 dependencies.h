@@ -69,21 +69,19 @@ Everything Inclusion
 #define FIO_SOCK
 #define FIO_STATE
 #define FIO_THREADS
-#elif !defined(H___FIO_EVERYTHING2___H)
-#define H___FIO_EVERYTHING2___H
+
+#else
+#undef H___FIO_EVERYTHING1___H
+#undef FIO_EVERYTHING
+#define H___FIO_EVERYTHING___H
 #define FIO_FIOBJ
 #define FIO_HTTP
 #define FIO_MALLOC
 #define FIO_MUSTACHE
 #define FIO_PUBSUB
 #define FIO_SERVER
-#else
-#define H___FIO_EVERYTHING___H
-#undef H___FIO_EVERYTHING1___H
-#undef H___FIO_EVERYTHING2___H
-#undef FIO_EVERYTHING
-#undef FIO_MEMALT
 #define FIO_MEMALT
+
 #endif
 
 #define FIO___INCLUDE_AGAIN
@@ -110,11 +108,13 @@ Basics Inclusion
 #define FIO_CRYPT
 #define FIO_STATE
 #define FIO_THREADS
+
 #elif !defined(H___FIO_BASIC_ROUND2___H)
 #define H___FIO_BASIC_ROUND2___H
 #define FIO_FIOBJ
 #define FIO_MUSTACHE
 #define FIOBJ_MALLOC
+
 #else
 #define H___FIO_BASIC___H
 #undef H___FIO_BASIC_ROUND1___H

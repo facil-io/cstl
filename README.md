@@ -1,8 +1,10 @@
-# facil.io 0.8.x for C - now with an integrated C STL
-
-## The Web microFramework and Server Toolbox library for C
+# facil.io 0.8.x for C - The C Server Toolbox Library (C STL)
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
+
+> **The [facil.io](http://facil.io) C STL aims to provide C developers with easy-to-use tools to write memory safe and performant programs**.
+
+## The C Server Toolbox Library Powers a Web microFramework
 
 The [facil.io library](https://facil.io) is much more than a Web Application Framework and includes core tools and type templates that any C (and C++) project will find useful.
 
@@ -49,7 +51,7 @@ There are a number of examples in the [./examples](examples) folder, including:
 
 ### Examples for authoring network applications:
 
-* [An HTTP Echo and WebSockets/SSE Chat Server with static file service](examples/server.c).
+* [Mix an HTTP/1.1 Server to serve data with a WebSockets/SSE Chat Server](examples/server.c).
 * [A simple network client example](examples/client.c).
 * [Pub/Sub based text Chat server](examples/chat.c).
 

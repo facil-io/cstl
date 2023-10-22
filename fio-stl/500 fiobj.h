@@ -1486,7 +1486,7 @@ typedef struct {
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj___stack
 #define FIO_ARRAY_TYPE           fiobj___stack_element_s
-#define FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
@@ -1918,7 +1918,7 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 
 #define FIO_JSON
-#define FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
@@ -2193,5 +2193,5 @@ FIOBJ cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#endif /* FIO_FIOBJ */
 #undef FIO_FIOBJ
+#endif /* FIO_FIOBJ */
