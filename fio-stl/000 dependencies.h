@@ -58,7 +58,6 @@ Everything Inclusion
 #undef FIO_FIOBJ
 #undef FIO_HTTP
 #undef FIO_MALLOC
-#undef FIO_MEMALT
 #undef FIO_MUSTACHE
 #undef FIO_PUBSUB
 #undef FIO_SERVER
