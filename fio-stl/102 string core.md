@@ -741,17 +741,17 @@ Returns the Key String.
 #### `fio_keystr`
 
 ```c
-fio_keystr_s fio_keystr(const char *buf, uint32_t len);
+fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len);
 ```
 
 Returns a **temporary** `fio_keystr_s` to be used as a key for a hash map.
 
 Do **not** `fio_keystr_destroy` this key.
 
-#### `fio_keystr_copy`
+#### `fio_keystr_init`
 
 ```c
-fio_keystr_s fio_keystr_copy(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
+fio_keystr_s fio_keystr_init(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
 ```
 
 Returns a copy of `fio_keystr_s` - used internally by the hash map.

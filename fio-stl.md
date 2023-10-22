@@ -14,7 +14,11 @@ sidebar: 0.8.x/_sidebar.md
 * An easy solution to [the C10K problem](http://www.kegel.com/c10k.html).
 * Optional connectivity with Redis.
 
-This header library is the **C Server Toolbox Library** that makes it all happen.
+This header library is the **C Server Toolbox Library** (C STL) that makes it all happen.
+
+## The C STL Design Goal
+
+> The [facil.io](http://facil.io) C STL aims to provide C developers with easy-to-use tools to write memory safe and performant programs.
 
 ## OS Support
 
@@ -6107,17 +6111,17 @@ Returns the Key String.
 #### `fio_keystr`
 
 ```c
-fio_keystr_s fio_keystr(const char *buf, uint32_t len);
+fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len);
 ```
 
 Returns a **temporary** `fio_keystr_s` to be used as a key for a hash map.
 
 Do **not** `fio_keystr_destroy` this key.
 
-#### `fio_keystr_copy`
+#### `fio_keystr_init`
 
 ```c
-fio_keystr_s fio_keystr_copy(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
+fio_keystr_s fio_keystr_init(fio_str_info_s str, void *(*alloc_func)(size_t len)) 
 ```
 
 Returns a copy of `fio_keystr_s` - used internally by the hash map.
@@ -7392,7 +7396,7 @@ This is useful in when the key was pre-allocated, if it's reference was increase
 #define FIO_MAP_KEY                  fio_str_info_s
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
-#define FIO_MAP_KEY_COPY(dest, src)  (dest) = fio_keystr_copy((src), ...)
+#define FIO_MAP_KEY_COPY(dest, src)  (dest) = fio_keystr_init((src), ...)
 #define FIO_MAP_KEY_CMP(a, b)        fio_keystr_is_eq2((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)      fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))
 #define FIO_MAP_KEY_DISCARD(key)

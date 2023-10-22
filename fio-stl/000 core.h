@@ -344,6 +344,20 @@ Constructors and Destructors
 ***************************************************************************** */
 
 #if _MSC_VER
+
+#define FIO___COUNTER_RUNNER()                                                 \
+  __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ +        \
+      __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__
+/* counter is used for ordering, so we need a consistent number of digits */
+FIO_SFUNC void fio___msv_run_counter_macro_to_3_digits(void) {
+  int i = __COUNTER__;
+  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
+  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
+}
+#undef FIO___COUNTER_RUNNER
+
 #pragma section(".CRT$XCU", read)
 /** Marks a function as a constructor - if supported. */
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */

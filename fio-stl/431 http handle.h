@@ -1345,7 +1345,7 @@ Simple Property Set / Get
                                            fio_str_info_s value) {             \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
-    h->property = fio_keystr_copy(value, fio___http_keystr_alloc);             \
+    h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
     return fio_keystr_info(&h->property);                                      \
   }
 

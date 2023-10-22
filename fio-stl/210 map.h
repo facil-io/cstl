@@ -28,7 +28,7 @@ Map Settings - Sets have only keys (value == key) - Hash Maps have values
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, __key_alloc))
+  (dest) = fio_keystr_init((src), FIO_NAME(FIO_MAP_NAME, __key_alloc))
 #define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq2((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)                                               \
   fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))

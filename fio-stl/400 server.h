@@ -2831,15 +2831,15 @@ SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *t,
   if (!t)
     return t;
   fio___tls_cert_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)server_name),
+      .nm = fio_keystr_init(FIO_STR_INFO1((char *)server_name),
                             FIO_STRING_ALLOC_KEY),
       .public_cert_file =
-          fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+          fio_keystr_init(FIO_STR_INFO1((char *)public_cert_file),
                           FIO_STRING_ALLOC_KEY),
       .private_key_file =
-          fio_keystr_copy(FIO_STR_INFO1((char *)private_key_file),
+          fio_keystr_init(FIO_STR_INFO1((char *)private_key_file),
                           FIO_STRING_ALLOC_KEY),
-      .pk_password = fio_keystr_copy(FIO_STR_INFO1((char *)pk_password),
+      .pk_password = fio_keystr_init(FIO_STR_INFO1((char *)pk_password),
                                      FIO_STRING_ALLOC_KEY),
   };
   fio___tls_cert_s *old = fio___tls_cert_map_get(&t->cert, o);
@@ -2877,7 +2877,7 @@ SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *t,
     return t;
   }
   fio___tls_alpn_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO2((char *)protocol_name, pr_name_len),
+      .nm = fio_keystr_init(FIO_STR_INFO2((char *)protocol_name, pr_name_len),
                             FIO_STRING_ALLOC_KEY),
       .fn = on_selected,
   };
@@ -2900,7 +2900,7 @@ SFUNC int fio_tls_alpn_select(fio_tls_s *t,
   if (!t || !protocol_name)
     return -1;
   fio___tls_alpn_s seeking = {
-      .nm = fio_keystr(protocol_name, (uint32_t)name_length)};
+      .nm = fio_keystr_tmp(protocol_name, (uint32_t)name_length)};
   fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
   if (!alpn) {
     FIO_LOG_DDEBUG2("TLS ALPN %.*s not found in %zu long list",
@@ -2932,7 +2932,7 @@ SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *t, const char *public_cert_file) {
     return t;
   }
   fio___tls_trust_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+      .nm = fio_keystr_init(FIO_STR_INFO1((char *)public_cert_file),
                             FIO_STRING_ALLOC_KEY),
   };
   fio___tls_trust_s *old = fio___tls_trust_map_get(&t->trust, o);

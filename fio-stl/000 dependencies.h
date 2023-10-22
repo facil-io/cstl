@@ -11,22 +11,21 @@
 /* *****************************************************************************
 Tests Inclusion (everything + MEMALT)
 ***************************************************************************** */
-#if (defined(FIO_TEST_ALL) || defined(FIO___TEST_MACRO_SUSPENDED)) &&          \
-    !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
-    !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) &&                                       \
+    (defined(FIO_TEST_ALL) || defined(FIO___TEST_MACRO_SUSPENDED)) &&          \
+    !defined(H___FIO_TESTS_INC_FINISHED___H)
 
 /* Inclusion cycle three - facil.io memory allocator for all else. */
-#if !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
-    defined(H___FIO_EVERYTHING_FINISHED___H)
-#define H___FIO_TESTS_INC_FINISHED___H
-#undef FIO___TEST_MACRO_SUSPENDED
-#define FIO_TEST_ALL
-#elif !defined(H___FIO_BASIC1___H)
+#if !defined(H___FIO_EVERYTHING___H) /* include everything first, then test */
 #undef FIO_TEST_ALL
 #define FIO___TEST_MACRO_SUSPENDED
 #undef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
 #define FIO_EVERYTHING
+#else /* define test inclusion */
+#define H___FIO_TESTS_INC_FINISHED___H
+#undef FIO___TEST_MACRO_SUSPENDED
+#define FIO_TEST_ALL
 #endif
 
 #endif /* FIO_TEST_ALL */
@@ -34,7 +33,7 @@ Tests Inclusion (everything + MEMALT)
 /* *****************************************************************************
 Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 ***************************************************************************** */
-#if defined(FIO_EXTERN) && !defined(FIO___RECURSIVE_INCLUDE) &&                \
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_EXTERN) &&                \
     (defined(FIO_TEST_ALL) || defined(FIO_EVERYTHING) || defined(FIO_BASIC))
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
@@ -51,35 +50,19 @@ Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 /* *****************************************************************************
 Everything Inclusion
 ***************************************************************************** */
-#if defined(FIO_EVERYTHING) && !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_EVERYTHING) &&            \
+    !defined(H___FIO_EVERYTHING___H)
 
-#if !defined(H___FIO_EVERYTHING_FINISHED___H) &&                               \
-    defined(H___FIO_EVERYTHING2___H)
-/* Inclusion cycle three - facil.io memory allocator for all else. */
-#define H___FIO_EVERYTHING_FINISHED___H
-#undef FIO_MEMALT
-#define FIO_MEMALT
-#define FIO_FIOBJ
-#define FIO_MUSTACHE
-#define FIOBJ_MALLOC
-#define FIO_HTTP
-#define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_EVERYTHING1___H)
-/* Inclusion cycle two - import server modules. */
-#define H___FIO_EVERYTHING2___H
-#define FIO_MALLOC
-#define FIO_SERVER
-#define FIO_PUBSUB
-#define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING_FINISHED___H)
-/* Inclusion cycle one - import FIO_BASIC. */
-#undef FIO_SERVER
-#undef FIO_PUBSUB
-#undef FIO_HTTP
-#undef FIO_BASIC
-#undef FIO_SIGNAL
-#undef FIO_SOCK
+#if !defined(H___FIO_EVERYTHING1___H)
 #define H___FIO_EVERYTHING1___H
+#undef FIO_FIOBJ
+#undef FIO_HTTP
+#undef FIO_MALLOC
+#undef FIO_MEMALT
+#undef FIO_MUSTACHE
+#undef FIO_PUBSUB
+#undef FIO_SERVER
+#undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
 #define FIO_CRYPT
@@ -87,34 +70,33 @@ Everything Inclusion
 #define FIO_SOCK
 #define FIO_STATE
 #define FIO_THREADS
-#define FIO___INCLUDE_AGAIN
+#elif !defined(H___FIO_EVERYTHING2___H)
+#define H___FIO_EVERYTHING2___H
+#define FIO_FIOBJ
+#define FIO_HTTP
+#define FIO_MALLOC
+#define FIO_MUSTACHE
+#define FIO_PUBSUB
+#define FIO_SERVER
 #else
-#undef FIO_EVERYTHING /* final cycle, allows extension  */
+#define H___FIO_EVERYTHING___H
+#undef H___FIO_EVERYTHING1___H
+#undef H___FIO_EVERYTHING2___H
+#undef FIO_EVERYTHING
+#undef FIO_MEMALT
+#define FIO_MEMALT
+#endif
 
-#endif /* H___FIO_EVERYTHING___H */
+#define FIO___INCLUDE_AGAIN
 #endif /* FIO_EVERYTHING */
 /* *****************************************************************************
 Basics Inclusion
 ***************************************************************************** */
-#if defined(FIO_BASIC) && !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_BASIC) &&                 \
+    !defined(H___FIO_BASIC___H)
 
-#if !defined(H___FIO_BASIC_FINISHED___H) && defined(H___FIO_BASIC2___H)
-/* Inclusion cycle three - facil.io memory allocator for all else. */
-#define H___FIO_BASIC_FINISHED___H
-#define FIO_MALLOC
-#define FIO___INCLUDE_AGAIN
-
-#elif !defined(H___FIO_BASIC_FINISHED___H) && defined(H___FIO_BASIC1___H)
-/* Inclusion cycle two - FIOBJ & its dedicated memory allocator. */
-#define H___FIO_BASIC2___H
-#define FIO_FIOBJ
-#define FIO_MUSTACHE
-#define FIOBJ_MALLOC
-#define FIO___INCLUDE_AGAIN
-
-#elif !defined(H___FIO_BASIC_FINISHED___H)
-/* Inclusion cycle one - default (system) memory allocator. */
-#define H___FIO_BASIC1___H
+#if !defined(H___FIO_BASIC_ROUND1___H)
+#define H___FIO_BASIC_ROUND1___H
 #undef FIO_CLI
 #undef FIO_CORE
 #undef FIO_CRYPT
@@ -129,13 +111,20 @@ Basics Inclusion
 #define FIO_CRYPT
 #define FIO_STATE
 #define FIO_THREADS
-#define FIO___INCLUDE_AGAIN
-
+#elif !defined(H___FIO_BASIC_ROUND2___H)
+#define H___FIO_BASIC_ROUND2___H
+#define FIO_FIOBJ
+#define FIO_MUSTACHE
+#define FIOBJ_MALLOC
 #else
-/* Final cycle, does nothing but allows extension from basic to everything. */
+#define H___FIO_BASIC___H
+#undef H___FIO_BASIC_ROUND1___H
+#undef H___FIO_BASIC_ROUND2___H
 #undef FIO_BASIC
+#define FIO_MALLOC
+#endif
 
-#endif /* H___FIO_BASIC___H */
+#define FIO___INCLUDE_AGAIN
 #endif /* FIO_BASIC */
 /* *****************************************************************************
 Poor-man's Cryptographic Elements

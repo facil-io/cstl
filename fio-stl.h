@@ -381,6 +381,20 @@ Constructors and Destructors
 ***************************************************************************** */
 
 #if _MSC_VER
+
+#define FIO___COUNTER_RUNNER()                                                 \
+  __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ +        \
+      __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__
+/* counter is used for ordering, so we need a consistent number of digits */
+FIO_SFUNC void fio___msv_run_counter_macro_to_3_digits(void) {
+  int i = __COUNTER__;
+  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
+  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
+}
+#undef FIO___COUNTER_RUNNER
+
 #pragma section(".CRT$XCU", read)
 /** Marks a function as a constructor - if supported. */
 #if _WIN64 /* MSVC linker uses different name mangling on 32bit systems */
@@ -2061,22 +2075,21 @@ End persistent segment (end include-once guard)
 /* *****************************************************************************
 Tests Inclusion (everything + MEMALT)
 ***************************************************************************** */
-#if (defined(FIO_TEST_ALL) || defined(FIO___TEST_MACRO_SUSPENDED)) &&          \
-    !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
-    !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) &&                                       \
+    (defined(FIO_TEST_ALL) || defined(FIO___TEST_MACRO_SUSPENDED)) &&          \
+    !defined(H___FIO_TESTS_INC_FINISHED___H)
 
 /* Inclusion cycle three - facil.io memory allocator for all else. */
-#if !defined(H___FIO_TESTS_INC_FINISHED___H) &&                                \
-    defined(H___FIO_EVERYTHING_FINISHED___H)
-#define H___FIO_TESTS_INC_FINISHED___H
-#undef FIO___TEST_MACRO_SUSPENDED
-#define FIO_TEST_ALL
-#elif !defined(H___FIO_BASIC1___H)
+#if !defined(H___FIO_EVERYTHING___H) /* include everything first, then test */
 #undef FIO_TEST_ALL
 #define FIO___TEST_MACRO_SUSPENDED
 #undef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
 #define FIO_EVERYTHING
+#else /* define test inclusion */
+#define H___FIO_TESTS_INC_FINISHED___H
+#undef FIO___TEST_MACRO_SUSPENDED
+#define FIO_TEST_ALL
 #endif
 
 #endif /* FIO_TEST_ALL */
@@ -2084,7 +2097,7 @@ Tests Inclusion (everything + MEMALT)
 /* *****************************************************************************
 Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 ***************************************************************************** */
-#if defined(FIO_EXTERN) && !defined(FIO___RECURSIVE_INCLUDE) &&                \
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_EXTERN) &&                \
     (defined(FIO_TEST_ALL) || defined(FIO_EVERYTHING) || defined(FIO_BASIC))
 #if defined(FIO_EXTERN) && ((FIO_EXTERN + 1) < 3)
 #undef FIO_EXTERN
@@ -2101,35 +2114,19 @@ Special `extern` support FIO_BASIC, FIO_EVERYTHING, etc'
 /* *****************************************************************************
 Everything Inclusion
 ***************************************************************************** */
-#if defined(FIO_EVERYTHING) && !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_EVERYTHING) &&            \
+    !defined(H___FIO_EVERYTHING___H)
 
-#if !defined(H___FIO_EVERYTHING_FINISHED___H) &&                               \
-    defined(H___FIO_EVERYTHING2___H)
-/* Inclusion cycle three - facil.io memory allocator for all else. */
-#define H___FIO_EVERYTHING_FINISHED___H
-#undef FIO_MEMALT
-#define FIO_MEMALT
-#define FIO_FIOBJ
-#define FIO_MUSTACHE
-#define FIOBJ_MALLOC
-#define FIO_HTTP
-#define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING2___H) && defined(H___FIO_EVERYTHING1___H)
-/* Inclusion cycle two - import server modules. */
-#define H___FIO_EVERYTHING2___H
-#define FIO_MALLOC
-#define FIO_SERVER
-#define FIO_PUBSUB
-#define FIO___INCLUDE_AGAIN
-#elif !defined(H___FIO_EVERYTHING_FINISHED___H)
-/* Inclusion cycle one - import FIO_BASIC. */
-#undef FIO_SERVER
-#undef FIO_PUBSUB
-#undef FIO_HTTP
-#undef FIO_BASIC
-#undef FIO_SIGNAL
-#undef FIO_SOCK
+#if !defined(H___FIO_EVERYTHING1___H)
 #define H___FIO_EVERYTHING1___H
+#undef FIO_FIOBJ
+#undef FIO_HTTP
+#undef FIO_MALLOC
+#undef FIO_MEMALT
+#undef FIO_MUSTACHE
+#undef FIO_PUBSUB
+#undef FIO_SERVER
+#undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
 #define FIO_CRYPT
@@ -2137,34 +2134,33 @@ Everything Inclusion
 #define FIO_SOCK
 #define FIO_STATE
 #define FIO_THREADS
-#define FIO___INCLUDE_AGAIN
+#elif !defined(H___FIO_EVERYTHING2___H)
+#define H___FIO_EVERYTHING2___H
+#define FIO_FIOBJ
+#define FIO_HTTP
+#define FIO_MALLOC
+#define FIO_MUSTACHE
+#define FIO_PUBSUB
+#define FIO_SERVER
 #else
-#undef FIO_EVERYTHING /* final cycle, allows extension  */
+#define H___FIO_EVERYTHING___H
+#undef H___FIO_EVERYTHING1___H
+#undef H___FIO_EVERYTHING2___H
+#undef FIO_EVERYTHING
+#undef FIO_MEMALT
+#define FIO_MEMALT
+#endif
 
-#endif /* H___FIO_EVERYTHING___H */
+#define FIO___INCLUDE_AGAIN
 #endif /* FIO_EVERYTHING */
 /* *****************************************************************************
 Basics Inclusion
 ***************************************************************************** */
-#if defined(FIO_BASIC) && !defined(FIO___RECURSIVE_INCLUDE)
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_BASIC) &&                 \
+    !defined(H___FIO_BASIC___H)
 
-#if !defined(H___FIO_BASIC_FINISHED___H) && defined(H___FIO_BASIC2___H)
-/* Inclusion cycle three - facil.io memory allocator for all else. */
-#define H___FIO_BASIC_FINISHED___H
-#define FIO_MALLOC
-#define FIO___INCLUDE_AGAIN
-
-#elif !defined(H___FIO_BASIC_FINISHED___H) && defined(H___FIO_BASIC1___H)
-/* Inclusion cycle two - FIOBJ & its dedicated memory allocator. */
-#define H___FIO_BASIC2___H
-#define FIO_FIOBJ
-#define FIO_MUSTACHE
-#define FIOBJ_MALLOC
-#define FIO___INCLUDE_AGAIN
-
-#elif !defined(H___FIO_BASIC_FINISHED___H)
-/* Inclusion cycle one - default (system) memory allocator. */
-#define H___FIO_BASIC1___H
+#if !defined(H___FIO_BASIC_ROUND1___H)
+#define H___FIO_BASIC_ROUND1___H
 #undef FIO_CLI
 #undef FIO_CORE
 #undef FIO_CRYPT
@@ -2179,13 +2175,20 @@ Basics Inclusion
 #define FIO_CRYPT
 #define FIO_STATE
 #define FIO_THREADS
-#define FIO___INCLUDE_AGAIN
-
+#elif !defined(H___FIO_BASIC_ROUND2___H)
+#define H___FIO_BASIC_ROUND2___H
+#define FIO_FIOBJ
+#define FIO_MUSTACHE
+#define FIOBJ_MALLOC
 #else
-/* Final cycle, does nothing but allows extension from basic to everything. */
+#define H___FIO_BASIC___H
+#undef H___FIO_BASIC_ROUND1___H
+#undef H___FIO_BASIC_ROUND2___H
 #undef FIO_BASIC
+#define FIO_MALLOC
+#endif
 
-#endif /* H___FIO_BASIC___H */
+#define FIO___INCLUDE_AGAIN
 #endif /* FIO_BASIC */
 /* *****************************************************************************
 Poor-man's Cryptographic Elements
@@ -7224,98 +7227,102 @@ At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
-#if FIO_OS_POSIX
+#if FIO_OS_POSIX /* POSIX Systems */
 #include <pthread.h>
 #include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-typedef pid_t fio_thread_pid_t;
+
+#ifndef FIO_THREADS_BYO
 typedef pthread_t fio_thread_t;
+#endif
+
+#ifndef FIO_THREADS_FORK_BYO
+typedef pid_t fio_thread_pid_t;
+#endif
+
+#ifndef FIO_THREADS_MUTEX_BYO
 typedef pthread_mutex_t fio_thread_mutex_t;
-typedef pthread_cond_t fio_thread_cond_t;
 /** Used this macro for static initialization. */
 #define FIO_THREAD_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#endif
 
-#elif FIO_OS_WIN
+#ifndef FIO_THREADS_COND_BYO
+typedef pthread_cond_t fio_thread_cond_t;
+#endif
+
+#elif FIO_OS_WIN /* Windows Systems */
 #include <synchapi.h>
-typedef DWORD fio_thread_pid_t;
+
+#ifndef FIO_THREADS_BYO
 typedef HANDLE fio_thread_t;
+#endif
+
+#ifndef FIO_THREADS_FORK_BYO
+typedef DWORD fio_thread_pid_t;
+#endif
+
+#ifndef FIO_THREADS_MUTEX_BYO
 typedef CRITICAL_SECTION fio_thread_mutex_t;
-typedef CONDITION_VARIABLE fio_thread_cond_t;
 /** Used this macro for static initialization. */
 #define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t){0})
-#else
+#endif
+
+#ifndef FIO_THREADS_COND_BYO
+typedef CONDITION_VARIABLE fio_thread_cond_t;
+#endif
+
+#else /* No Known System */
+#if !defined(FIO_THREADS_BYO) || !defined(FIO_THREADS_FORK_BYO) ||             \
+    !defined(FIO_THREADS_MUTEX_BYO) || !defined(FIO_THREADS_COND_BYO)
 #error facil.io Simple Portable Threads require a POSIX system or Windows
 #endif
-
-#ifdef FIO_THREADS_BYO
-#define FIO_IFUNC_T
-#else
-#define FIO_IFUNC_T FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_FORK_BYO
-#define FIO_IFUNC_F
-#else
-#define FIO_IFUNC_F FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_MUTEX_BYO
-#define FIO_IFUNC_M
-#else
-#define FIO_IFUNC_M FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_COND_BYO
-#define FIO_IFUNC_C
-#else
-#define FIO_IFUNC_C FIO_IFUNC
-#endif
+#endif /* system detection */
 
 /* *****************************************************************************
 API for forking processes
 ***************************************************************************** */
 
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void);
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void);
 
 /** Should behave the same as the POSIX system call `getpid`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void);
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void);
 
 /** Should behave the same as the POSIX system call `kill`. */
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig);
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig);
 
 /** Should behave the same as the POSIX system call `waitpid`. */
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid,
-                                   int *stat_loc,
-                                   int options);
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid,
+                                 int *stat_loc,
+                                 int options);
 
 /* *****************************************************************************
 API for spawning threads
 ***************************************************************************** */
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
-                                  void *(*fn)(void *),
-                                  void *arg);
+FIO_IFUNC int fio_thread_create(fio_thread_t *t,
+                                void *(*fn)(void *),
+                                void *arg);
 
 /** Waits for the thread to finish. */
-FIO_IFUNC_T int fio_thread_join(fio_thread_t *t);
+FIO_IFUNC int fio_thread_join(fio_thread_t *t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC_T int fio_thread_detach(fio_thread_t *t);
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t);
 
 /** Ends the current running thread. */
-FIO_IFUNC_T void fio_thread_exit(void);
+FIO_IFUNC void fio_thread_exit(void);
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC_T int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 
 /** Returns the current thread. */
-FIO_IFUNC_T fio_thread_t fio_thread_current(void);
+FIO_IFUNC fio_thread_t fio_thread_current(void);
 
 /** Yields thread execution. */
-FIO_IFUNC_T void fio_thread_yield(void);
+FIO_IFUNC void fio_thread_yield(void);
 
 /** Possible thread priority values. */
 typedef enum {
@@ -7342,41 +7349,40 @@ API for mutexes
  *
  * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
  */
-FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m);
 
 /** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m);
 
 /** Attempts to lock a simple Mutex, returning zero on success. */
-FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 
 /* *****************************************************************************
 API for conditional variables
 ***************************************************************************** */
 
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c);
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c, fio_thread_mutex_t *m);
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds);
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds);
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c);
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
 /* *****************************************************************************
 
@@ -7389,24 +7395,24 @@ POSIX Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 /** Should behave the same as the POSIX system call `getpid`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)getpid();
 }
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
 
 /** Should behave the same as the POSIX system call `kill`. */
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t i, int s) {
   return kill((pid_t)i, s);
 }
 
 /** Should behave the same as the POSIX system call `waitpid`. */
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);
 }
-#endif
+#endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
 // clang-format off
@@ -7535,20 +7541,20 @@ FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_d
 
 #ifndef FIO_THREADS_COND_BYO
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c) {
   return pthread_cond_init(c, NULL);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m) {
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                   fio_thread_mutex_t *m) {
   return pthread_cond_wait(c, m);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds) {
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds) {
   struct timespec t;
   clock_gettime(CLOCK_REALTIME, &t);
   milliseconds += t.tv_nsec / 1000000;
@@ -7558,12 +7564,12 @@ FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
 }
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return pthread_cond_signal(c);
 }
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) {
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) {
   pthread_cond_destroy(c);
 }
 #endif /* FIO_THREADS_COND_BYO */
@@ -7582,29 +7588,29 @@ Windows Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
 #if defined(fork) && defined(WEXITSTATUS) /* unix features pre-patched */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t i, int s) {
   return kill((pid_t)i, s);
 }
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);
 }
 
-#else
+#else /* defined(fork) && defined(WEXITSTATUS) */
 
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
   return (fio_thread_pid_t)-1;
 }
 
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   HANDLE handle;
   DWORD status;
@@ -7720,7 +7726,7 @@ static int fio___thread_waitpid_pid(PROCESSENTRY32W *pe, DWORD pid) {
   return pe->th32ProcessID == pid;
 }
 
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
   /* adopted from:
    * https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h Copyright
    * Copyright (c) 2019 win32ports, MIT license
@@ -7909,32 +7915,32 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
 
 #ifndef FIO_THREADS_COND_BYO
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c) {
   InitializeConditionVariable(c);
   return 0;
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m) {
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                   fio_thread_mutex_t *m) {
   return 0 - !SleepConditionVariableCS(c, m, INFINITE);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds) {
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds) {
   return 0 - !SleepConditionVariableCS(c, m, milliseconds);
 }
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   WakeConditionVariable(c);
   return 0;
 }
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
 #endif /* FIO_THREADS_COND_BYO */
 
 #endif /* FIO_OS_WIN */
@@ -11259,9 +11265,9 @@ FIO_IFUNC fio_buf_info_s fio_cli_str_buf(fio_cli_str_s *s) {
 }
 
 /** CLI String copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str_copy(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_init(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
-  if (s.len < sizeof(r) - 2) {
+  if (s.len < sizeof(r) - 1) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
@@ -11276,9 +11282,9 @@ FIO_SFUNC fio_cli_str_s fio_cli_str_copy(fio_buf_info_s s) {
 }
 
 /** CLI String tmp copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_tmp(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
-  if (s.len < sizeof(r) - 2) {
+  if (s.len < sizeof(r) - 1) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
@@ -11343,7 +11349,7 @@ FIO_IFUNC void fio___cli_ary_set(fio___cli_ary_s *a,
   if (index >= a->w)
     return;
   fio_cli_str_destroy(a->ary + index);
-  a->ary[index] = fio_cli_str_copy(str);
+  a->ary[index] = fio_cli_str_init(str);
 }
 
 /* *****************************************************************************
@@ -11359,7 +11365,7 @@ typedef struct {
 #define FIO___CLI_ALIAS_HASH(o)                                                \
   fio_risky_hash(fio_cli_str_buf(&o->name).buf,                                \
                  fio_cli_str_buf(&o->name).len,                                \
-                 (uint64_t)(uintptr_t)fio_cli_str)
+                 (uint64_t)(uintptr_t)fio_cli_str_destroy)
 #define FIO___CLI_ALIAS_IS_EQ(a, b)                                            \
   FIO_BUF_INFO_IS_EQ(fio_cli_str_buf(&a->name), fio_cli_str_buf(&b->name))
 FIO_TYPEDEF_IMAP_ARRAY(fio___cli_amap,
@@ -11397,24 +11403,24 @@ FIO_SFUNC void fio___cli_data_destroy(void) {
 FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
                                     fio_buf_info_s alias,
                                     fio_cli_arg_e t) {
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    o.name = fio_cli_str_copy(key);
+    o.name = fio_cli_str_init(key);
     o.index = fio___cli_ary_new_index(&fio___cli_data.indexed);
     o.t = t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
   }
   if (!alias.len)
     return;
-  o.name = fio_cli_str(alias);
+  o.name = fio_cli_str_tmp(alias);
   fio___cli_aliases_s *old = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (old) {
     FIO_LOG_WARNING("(fio_cli) CLI alias %s already exists! overwriting...",
                     fio_cli_str_buf(&o.name).buf);
     old->index = a->index;
   } else {
-    o.name = fio_cli_str_copy(alias);
+    o.name = fio_cli_str_init(alias);
     o.index = a->index;
     o.t = a->t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -11424,7 +11430,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
 FIO_SFUNC void fio___cli_print_help(void);
 
 FIO_SFUNC void fio___cli_data_set(fio_buf_info_s key, fio_buf_info_s value) {
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
     fio___cli_data_alias(key, (fio_buf_info_s){0}, FIO_CLI_ARG_STRING);
@@ -11447,7 +11453,7 @@ FIO_SFUNC void fio___cli_data_set(fio_buf_info_s key, fio_buf_info_s value) {
 
 FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
   fio_buf_info_s r = {0};
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = fio___cli_ary_get(&fio___cli_data.indexed, a->index);
@@ -11456,7 +11462,7 @@ FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
 
 FIO_SFUNC uint32_t fio___cli_data_get_index(fio_buf_info_s key) {
   uint32_t r = (uint32_t)-1;
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = a->index;
@@ -11799,7 +11805,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       fio___cli_print_help();
     /* look for longest argument match for argument (find, i.e. -arg=val) */
     for (;;) {
-      fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+      fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
       a = fio___cli_amap_get(&fio___cli_data.aliases, o);
       if (a)
         break;
@@ -11825,7 +11831,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
         --value.len;
         ++value.buf;
         key = FIO_BUF_INFO2(bool_buf, 2);
-        fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+        fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
         a = fio___cli_amap_get(&fio___cli_data.aliases, o);
         if (!a || a->t != FIO_CLI_ARG_BOOL) {
           FIO_LOG_FATAL(
@@ -17399,12 +17405,12 @@ FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
 /** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str);
 
-/** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
-FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len);
-/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
-FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
+/** Returns a TEMPORARY `fio_keystr_s`. */
+FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len);
+/** Returns an initialized `fio_keystr_s` containing a copy of `str`. */
+FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len));
-/** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
+/** Destroys an initialized `fio_keystr_s`. */
 FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
                                   void (*free_func)(void *, size_t));
 /** Compares two Key Strings. */
@@ -17846,7 +17852,7 @@ FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
 }
 
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
-FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
+FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   fio_keystr_s r = {0};
   if (len + 1 < sizeof(r)) { /* always embed small strings in container! */
     r.info = (uint8_t)len;
@@ -17860,18 +17866,17 @@ FIO_IFUNC fio_keystr_s fio_keystr(const char *buf, uint32_t len) {
 }
 
 /** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
-FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
+FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
   if (!str.buf || !str.len)
     return r;
-  if (str.len + 2 < sizeof(r)) {
+  if (str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY(r.embd, str.buf, str.len);
     return r;
   }
   if (str.capa == FIO_KEYSTR_CONST) {
-  no_mem2:
     r.info = 0xFF;
     r.len = str.len;
     r.buf = str.buf;
@@ -17887,8 +17892,9 @@ FIO_SFUNC fio_keystr_s fio_keystr_copy(fio_str_info_s str,
   buf[str.len] = 0;
   return r;
 no_mem:
-  FIO_LOG_FATAL("fio_keystr_copy allocation failed - results undefined!!!");
-  goto no_mem2;
+  FIO_LOG_FATAL("fio_keystr_init allocation failed - results undefined!!!");
+  r = fio_keystr_tmp(str.buf, str.len);
+  return r;
 }
 /** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
 FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
@@ -22893,7 +22899,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_ARRAY_TYPE fio_keystr_s
 #endif
 #ifndef FIO_ARRAY_TYPE_COPY
-#define FIO_ARRAY_TYPE_COPY(dest, src) ((dest) = fio_keystr_copy((src)))
+#define FIO_ARRAY_TYPE_COPY(dest, src) ((dest) = fio_keystr_init((src)))
 #endif
 #ifndef FIO_ARRAY_TYPE_DESTROY
 #define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj));
@@ -24723,7 +24729,7 @@ Map Settings - Sets have only keys (value == key) - Hash Maps have values
 #define FIO_MAP_KEY_INTERNAL         fio_keystr_s
 #define FIO_MAP_KEY_FROM_INTERNAL(k) fio_keystr_info(&(k))
 #define FIO_MAP_KEY_COPY(dest, src)                                            \
-  (dest) = fio_keystr_copy((src), FIO_NAME(FIO_MAP_NAME, __key_alloc))
+  (dest) = fio_keystr_init((src), FIO_NAME(FIO_MAP_NAME, __key_alloc))
 #define FIO_MAP_KEY_CMP(a, b) fio_keystr_is_eq2((a), (b))
 #define FIO_MAP_KEY_DESTROY(key)                                               \
   fio_keystr_destroy(&(key), FIO_NAME(FIO_MAP_NAME, __key_free))
@@ -30977,15 +30983,15 @@ SFUNC fio_tls_s *fio_tls_cert_add(fio_tls_s *t,
   if (!t)
     return t;
   fio___tls_cert_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)server_name),
+      .nm = fio_keystr_init(FIO_STR_INFO1((char *)server_name),
                             FIO_STRING_ALLOC_KEY),
       .public_cert_file =
-          fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+          fio_keystr_init(FIO_STR_INFO1((char *)public_cert_file),
                           FIO_STRING_ALLOC_KEY),
       .private_key_file =
-          fio_keystr_copy(FIO_STR_INFO1((char *)private_key_file),
+          fio_keystr_init(FIO_STR_INFO1((char *)private_key_file),
                           FIO_STRING_ALLOC_KEY),
-      .pk_password = fio_keystr_copy(FIO_STR_INFO1((char *)pk_password),
+      .pk_password = fio_keystr_init(FIO_STR_INFO1((char *)pk_password),
                                      FIO_STRING_ALLOC_KEY),
   };
   fio___tls_cert_s *old = fio___tls_cert_map_get(&t->cert, o);
@@ -31023,7 +31029,7 @@ SFUNC fio_tls_s *fio_tls_alpn_add(fio_tls_s *t,
     return t;
   }
   fio___tls_alpn_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO2((char *)protocol_name, pr_name_len),
+      .nm = fio_keystr_init(FIO_STR_INFO2((char *)protocol_name, pr_name_len),
                             FIO_STRING_ALLOC_KEY),
       .fn = on_selected,
   };
@@ -31046,7 +31052,7 @@ SFUNC int fio_tls_alpn_select(fio_tls_s *t,
   if (!t || !protocol_name)
     return -1;
   fio___tls_alpn_s seeking = {
-      .nm = fio_keystr(protocol_name, (uint32_t)name_length)};
+      .nm = fio_keystr_tmp(protocol_name, (uint32_t)name_length)};
   fio___tls_alpn_s *alpn = fio___tls_alpn_map_get(&t->alpn, seeking);
   if (!alpn) {
     FIO_LOG_DDEBUG2("TLS ALPN %.*s not found in %zu long list",
@@ -31078,7 +31084,7 @@ SFUNC fio_tls_s *fio_tls_trust_add(fio_tls_s *t, const char *public_cert_file) {
     return t;
   }
   fio___tls_trust_s o = {
-      .nm = fio_keystr_copy(FIO_STR_INFO1((char *)public_cert_file),
+      .nm = fio_keystr_init(FIO_STR_INFO1((char *)public_cert_file),
                             FIO_STRING_ALLOC_KEY),
   };
   fio___tls_trust_s *old = fio___tls_trust_map_get(&t->trust, o);
@@ -35316,7 +35322,7 @@ Simple Property Set / Get
                                            fio_str_info_s value) {             \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
-    h->property = fio_keystr_copy(value, fio___http_keystr_alloc);             \
+    h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
     return fio_keystr_info(&h->property);                                      \
   }
 

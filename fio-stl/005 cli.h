@@ -233,9 +233,9 @@ FIO_IFUNC fio_buf_info_s fio_cli_str_buf(fio_cli_str_s *s) {
 }
 
 /** CLI String copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str_copy(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_init(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
-  if (s.len < sizeof(r) - 2) {
+  if (s.len < sizeof(r) - 1) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
@@ -250,9 +250,9 @@ FIO_SFUNC fio_cli_str_s fio_cli_str_copy(fio_buf_info_s s) {
 }
 
 /** CLI String tmp copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_tmp(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
-  if (s.len < sizeof(r) - 2) {
+  if (s.len < sizeof(r) - 1) {
     r.em = s.len;
     FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
@@ -317,7 +317,7 @@ FIO_IFUNC void fio___cli_ary_set(fio___cli_ary_s *a,
   if (index >= a->w)
     return;
   fio_cli_str_destroy(a->ary + index);
-  a->ary[index] = fio_cli_str_copy(str);
+  a->ary[index] = fio_cli_str_init(str);
 }
 
 /* *****************************************************************************
@@ -333,7 +333,7 @@ typedef struct {
 #define FIO___CLI_ALIAS_HASH(o)                                                \
   fio_risky_hash(fio_cli_str_buf(&o->name).buf,                                \
                  fio_cli_str_buf(&o->name).len,                                \
-                 (uint64_t)(uintptr_t)fio_cli_str)
+                 (uint64_t)(uintptr_t)fio_cli_str_destroy)
 #define FIO___CLI_ALIAS_IS_EQ(a, b)                                            \
   FIO_BUF_INFO_IS_EQ(fio_cli_str_buf(&a->name), fio_cli_str_buf(&b->name))
 FIO_TYPEDEF_IMAP_ARRAY(fio___cli_amap,
@@ -371,24 +371,24 @@ FIO_SFUNC void fio___cli_data_destroy(void) {
 FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
                                     fio_buf_info_s alias,
                                     fio_cli_arg_e t) {
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    o.name = fio_cli_str_copy(key);
+    o.name = fio_cli_str_init(key);
     o.index = fio___cli_ary_new_index(&fio___cli_data.indexed);
     o.t = t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
   }
   if (!alias.len)
     return;
-  o.name = fio_cli_str(alias);
+  o.name = fio_cli_str_tmp(alias);
   fio___cli_aliases_s *old = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (old) {
     FIO_LOG_WARNING("(fio_cli) CLI alias %s already exists! overwriting...",
                     fio_cli_str_buf(&o.name).buf);
     old->index = a->index;
   } else {
-    o.name = fio_cli_str_copy(alias);
+    o.name = fio_cli_str_init(alias);
     o.index = a->index;
     o.t = a->t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -398,7 +398,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
 FIO_SFUNC void fio___cli_print_help(void);
 
 FIO_SFUNC void fio___cli_data_set(fio_buf_info_s key, fio_buf_info_s value) {
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
     fio___cli_data_alias(key, (fio_buf_info_s){0}, FIO_CLI_ARG_STRING);
@@ -421,7 +421,7 @@ FIO_SFUNC void fio___cli_data_set(fio_buf_info_s key, fio_buf_info_s value) {
 
 FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
   fio_buf_info_s r = {0};
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = fio___cli_ary_get(&fio___cli_data.indexed, a->index);
@@ -430,7 +430,7 @@ FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
 
 FIO_SFUNC uint32_t fio___cli_data_get_index(fio_buf_info_s key) {
   uint32_t r = (uint32_t)-1;
-  fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+  fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = a->index;
@@ -773,7 +773,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
       fio___cli_print_help();
     /* look for longest argument match for argument (find, i.e. -arg=val) */
     for (;;) {
-      fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+      fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
       a = fio___cli_amap_get(&fio___cli_data.aliases, o);
       if (a)
         break;
@@ -799,7 +799,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
         --value.len;
         ++value.buf;
         key = FIO_BUF_INFO2(bool_buf, 2);
-        fio___cli_aliases_s o = {.name = fio_cli_str(key)};
+        fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
         a = fio___cli_amap_get(&fio___cli_data.aliases, o);
         if (!a || a->t != FIO_CLI_ARG_BOOL) {
           FIO_LOG_FATAL(

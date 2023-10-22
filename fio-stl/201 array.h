@@ -23,7 +23,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_ARRAY_TYPE fio_keystr_s
 #endif
 #ifndef FIO_ARRAY_TYPE_COPY
-#define FIO_ARRAY_TYPE_COPY(dest, src) ((dest) = fio_keystr_copy((src)))
+#define FIO_ARRAY_TYPE_COPY(dest, src) ((dest) = fio_keystr_init((src)))
 #endif
 #ifndef FIO_ARRAY_TYPE_DESTROY
 #define FIO_ARRAY_TYPE_DESTROY(obj) fio_keystr_destroy(&(obj));

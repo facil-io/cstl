@@ -25,98 +25,102 @@ At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
-#if FIO_OS_POSIX
+#if FIO_OS_POSIX /* POSIX Systems */
 #include <pthread.h>
 #include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-typedef pid_t fio_thread_pid_t;
+
+#ifndef FIO_THREADS_BYO
 typedef pthread_t fio_thread_t;
+#endif
+
+#ifndef FIO_THREADS_FORK_BYO
+typedef pid_t fio_thread_pid_t;
+#endif
+
+#ifndef FIO_THREADS_MUTEX_BYO
 typedef pthread_mutex_t fio_thread_mutex_t;
-typedef pthread_cond_t fio_thread_cond_t;
 /** Used this macro for static initialization. */
 #define FIO_THREAD_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#endif
 
-#elif FIO_OS_WIN
+#ifndef FIO_THREADS_COND_BYO
+typedef pthread_cond_t fio_thread_cond_t;
+#endif
+
+#elif FIO_OS_WIN /* Windows Systems */
 #include <synchapi.h>
-typedef DWORD fio_thread_pid_t;
+
+#ifndef FIO_THREADS_BYO
 typedef HANDLE fio_thread_t;
+#endif
+
+#ifndef FIO_THREADS_FORK_BYO
+typedef DWORD fio_thread_pid_t;
+#endif
+
+#ifndef FIO_THREADS_MUTEX_BYO
 typedef CRITICAL_SECTION fio_thread_mutex_t;
-typedef CONDITION_VARIABLE fio_thread_cond_t;
 /** Used this macro for static initialization. */
 #define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t){0})
-#else
+#endif
+
+#ifndef FIO_THREADS_COND_BYO
+typedef CONDITION_VARIABLE fio_thread_cond_t;
+#endif
+
+#else /* No Known System */
+#if !defined(FIO_THREADS_BYO) || !defined(FIO_THREADS_FORK_BYO) ||             \
+    !defined(FIO_THREADS_MUTEX_BYO) || !defined(FIO_THREADS_COND_BYO)
 #error facil.io Simple Portable Threads require a POSIX system or Windows
 #endif
-
-#ifdef FIO_THREADS_BYO
-#define FIO_IFUNC_T
-#else
-#define FIO_IFUNC_T FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_FORK_BYO
-#define FIO_IFUNC_F
-#else
-#define FIO_IFUNC_F FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_MUTEX_BYO
-#define FIO_IFUNC_M
-#else
-#define FIO_IFUNC_M FIO_IFUNC
-#endif
-
-#ifdef FIO_THREADS_COND_BYO
-#define FIO_IFUNC_C
-#else
-#define FIO_IFUNC_C FIO_IFUNC
-#endif
+#endif /* system detection */
 
 /* *****************************************************************************
 API for forking processes
 ***************************************************************************** */
 
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void);
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void);
 
 /** Should behave the same as the POSIX system call `getpid`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void);
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void);
 
 /** Should behave the same as the POSIX system call `kill`. */
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig);
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig);
 
 /** Should behave the same as the POSIX system call `waitpid`. */
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid,
-                                   int *stat_loc,
-                                   int options);
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid,
+                                 int *stat_loc,
+                                 int options);
 
 /* *****************************************************************************
 API for spawning threads
 ***************************************************************************** */
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC_T int fio_thread_create(fio_thread_t *t,
-                                  void *(*fn)(void *),
-                                  void *arg);
+FIO_IFUNC int fio_thread_create(fio_thread_t *t,
+                                void *(*fn)(void *),
+                                void *arg);
 
 /** Waits for the thread to finish. */
-FIO_IFUNC_T int fio_thread_join(fio_thread_t *t);
+FIO_IFUNC int fio_thread_join(fio_thread_t *t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC_T int fio_thread_detach(fio_thread_t *t);
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t);
 
 /** Ends the current running thread. */
-FIO_IFUNC_T void fio_thread_exit(void);
+FIO_IFUNC void fio_thread_exit(void);
 
 /* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC_T int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 
 /** Returns the current thread. */
-FIO_IFUNC_T fio_thread_t fio_thread_current(void);
+FIO_IFUNC fio_thread_t fio_thread_current(void);
 
 /** Yields thread execution. */
-FIO_IFUNC_T void fio_thread_yield(void);
+FIO_IFUNC void fio_thread_yield(void);
 
 /** Possible thread priority values. */
 typedef enum {
@@ -143,41 +147,40 @@ API for mutexes
  *
  * Or use the static initialization value: FIO_THREAD_MUTEX_INIT
  */
-FIO_IFUNC_M int fio_thread_mutex_init(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m);
 
 /** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_lock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m);
 
 /** Attempts to lock a simple Mutex, returning zero on success. */
-FIO_IFUNC_M int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC_M int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 
 /** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC_M void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 
 /* *****************************************************************************
 API for conditional variables
 ***************************************************************************** */
 
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c);
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c);
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m);
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c, fio_thread_mutex_t *m);
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds);
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds);
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c);
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c);
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c);
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
 /* *****************************************************************************
 
@@ -190,24 +193,24 @@ POSIX Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 /** Should behave the same as the POSIX system call `getpid`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)getpid();
 }
 /** Should behave the same as the POSIX system call `fork`. */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
 
 /** Should behave the same as the POSIX system call `kill`. */
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t i, int s) {
   return kill((pid_t)i, s);
 }
 
 /** Should behave the same as the POSIX system call `waitpid`. */
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);
 }
-#endif
+#endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
 // clang-format off
@@ -336,20 +339,20 @@ FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_d
 
 #ifndef FIO_THREADS_COND_BYO
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c) {
   return pthread_cond_init(c, NULL);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m) {
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                   fio_thread_mutex_t *m) {
   return pthread_cond_wait(c, m);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds) {
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds) {
   struct timespec t;
   clock_gettime(CLOCK_REALTIME, &t);
   milliseconds += t.tv_nsec / 1000000;
@@ -359,12 +362,12 @@ FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
 }
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return pthread_cond_signal(c);
 }
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) {
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) {
   pthread_cond_destroy(c);
 }
 #endif /* FIO_THREADS_COND_BYO */
@@ -383,29 +386,29 @@ Windows Implementation - inlined static functions
 
 #ifndef FIO_THREADS_FORK_BYO
 
-FIO_IFUNC_F fio_thread_pid_t fio_thread_getpid(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
 #if defined(fork) && defined(WEXITSTATUS) /* unix features pre-patched */
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t i, int s) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t i, int s) {
   return kill((pid_t)i, s);
 }
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
   return waitpid((pid_t)i, s, o);
 }
 
-#else
+#else /* defined(fork) && defined(WEXITSTATUS) */
 
-FIO_IFUNC_F fio_thread_pid_t fio_thread_fork(void) {
+FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
   return (fio_thread_pid_t)-1;
 }
 
-FIO_IFUNC_F int fio_thread_kill(fio_thread_pid_t pid, int sig) {
+FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig) {
   /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
   HANDLE handle;
   DWORD status;
@@ -521,7 +524,7 @@ static int fio___thread_waitpid_pid(PROCESSENTRY32W *pe, DWORD pid) {
   return pe->th32ProcessID == pid;
 }
 
-FIO_IFUNC_F int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
+FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
   /* adopted from:
    * https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h Copyright
    * Copyright (c) 2019 win32ports, MIT license
@@ -710,32 +713,32 @@ FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
 
 #ifndef FIO_THREADS_COND_BYO
 /** Initializes a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_init(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c) {
   InitializeConditionVariable(c);
   return 0;
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_wait(fio_thread_cond_t *c,
-                                     fio_thread_mutex_t *m) {
+FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
+                                   fio_thread_mutex_t *m) {
   return 0 - !SleepConditionVariableCS(c, m, INFINITE);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
-FIO_IFUNC_C int fio_thread_cond_timedwait(fio_thread_cond_t *c,
-                                          fio_thread_mutex_t *m,
-                                          size_t milliseconds) {
+FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                                        fio_thread_mutex_t *m,
+                                        size_t milliseconds) {
   return 0 - !SleepConditionVariableCS(c, m, milliseconds);
 }
 
 /** Signals a simple conditional variable. */
-FIO_IFUNC_C int fio_thread_cond_signal(fio_thread_cond_t *c) {
+FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   WakeConditionVariable(c);
   return 0;
 }
 
 /** Destroys a simple conditional variable. */
-FIO_IFUNC_C void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
 #endif /* FIO_THREADS_COND_BYO */
 
 #endif /* FIO_OS_WIN */

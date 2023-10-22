@@ -14,7 +14,11 @@ sidebar: 0.8.x/_sidebar.md
 * An easy solution to [the C10K problem](http://www.kegel.com/c10k.html).
 * Optional connectivity with Redis.
 
-This header library is the **C Server Toolbox Library** that makes it all happen.
+This header library is the **C Server Toolbox Library** (C STL) that makes it all happen.
+
+## The C STL Design Goal
+
+> The [facil.io](http://facil.io) C STL aims to provide C developers with easy-to-use tools to write memory safe and performant programs.
 
 ## OS Support
 
