@@ -34824,9 +34824,11 @@ static struct {
 #if FIO_HTTP_CACHE_STATIC_HEADERS
 
 #define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       22
+#define FIO___HTTP_STATIC_CACHE_FOLD       56
 #define FIO___HTTP_STATIC_CACHE_STEP       1
-#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 3
+#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 2
+#define FIO___HTTP_STATIC_CACHE_MASK_INV                                       \
+  (~(uint16_t)FIO___HTTP_STATIC_CACHE_MASK)
 
 static struct {
   fio___bstr_meta_s meta;
@@ -34926,7 +34928,8 @@ static void fio___http_str_cached_init(void) {
     while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
       FIO_ASSERT(
           (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-           0xFF80) != (hash & 0xFF80),
+           FIO___HTTP_STATIC_CACHE_MASK_INV) !=
+              (hash & FIO___HTTP_STATIC_CACHE_MASK_INV),
           "full collision for HTTP static hash (%zu == %zu!",
           (size_t)(hash & FIO___HTTP_STATIC_CACHE_MASK),
           i);
@@ -34937,7 +34940,7 @@ static void fio___http_str_cached_init(void) {
                  FIO___HTTP_STATIC_CACHE[i].str);
     }
     FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] =
-        (hash & 0xFF80) | i;
+        (hash & FIO___HTTP_STATIC_CACHE_MASK_INV) | i;
   }
 }
 
@@ -34948,13 +34951,14 @@ static char *fio___http_str_cached_static(char *str, size_t len) {
   for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
        ++attempts) {
     if ((FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-         0xFF80) == (hash & 0xFF80))
+         FIO___HTTP_STATIC_CACHE_MASK_INV) ==
+        (hash & FIO___HTTP_STATIC_CACHE_MASK_INV))
       break;
     hash += hash >> FIO___HTTP_STATIC_CACHE_STEP;
   }
   size_t pos =
       FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-      0x007F;
+      FIO___HTTP_STATIC_CACHE_MASK;
   if (FIO___HTTP_STATIC_CACHE[pos].meta.len == len &&
       !FIO_MEMCMP(str, FIO___HTTP_STATIC_CACHE[pos].str, len)) {
     return FIO___HTTP_STATIC_CACHE[pos].str;
@@ -34962,8 +34966,9 @@ static char *fio___http_str_cached_static(char *str, size_t len) {
   return NULL;
 }
 
-#undef FIO___HTTP_STATIC_CACHE_MASK
 #undef FIO___HTTP_STATIC_CACHE_FOLD
+#undef FIO___HTTP_STATIC_CACHE_MASK
+#undef FIO___HTTP_STATIC_CACHE_MASK_INV
 #undef FIO___HTTP_STATIC_CACHE_STEP
 #undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
 #else

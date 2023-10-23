@@ -386,6 +386,6 @@ fio_pubsub_engine_s FIO_PUBSUB_LOGGER = {
 FIO_CONSTRUCTOR(pubsub_logger) {
   FIO_PUBSUB_DEFAULT = &FIO_PUBSUB_LOGGER;
   fio_pubsub_attach(&FIO_PUBSUB_LOGGER);
-  // fio_subscribe(.filter = 1, .on_message = logger_on_msg);
+  fio_subscribe(.filter = 1, .on_message = logger_on_msg);
 }
 #endif
