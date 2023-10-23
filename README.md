@@ -1,4 +1,4 @@
-# facil.io 0.8.x for C - The C Server Toolbox Library (C STL)
+# facil.io 0.8.x - The C Server Toolbox Library (C STL)
 
 [![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml)
 
