@@ -30740,6 +30740,8 @@ FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
 #endif
 #endif /* FIO_VALIDATE_IO_MUTEX / FIO_VALIDITY_MAP_USE */
   fio_queue_perform_all(fio___srv_tasks);
+  fio_timer_destroy(fio___srv_timer);
+  fio_queue_perform_all(fio___srv_tasks);
 }
 
 /* *****************************************************************************
