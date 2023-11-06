@@ -157,7 +157,11 @@ SFUNC void *fio_srv_listen(struct fio_srv_listen_args args);
 #define fio_srv_listen(...)                                                    \
   fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
 
+/** Notifies a listener to stop listening. */
 SFUNC void fio_srv_listen_stop(void *listener);
+
+/** Returns the URL on which the listener is listening. */
+SFUNC fio_buf_info_s fio_srv_listener_url(void *listener);
 
 /* *****************************************************************************
 Listening to Incoming Connections
@@ -1825,6 +1829,7 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
   if (fio_atomic_or_fetch(&fio___srvdata.stop, 2) != 2)
     return;
 
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
   fio_queue_perform_all(fio___srv_tasks);
@@ -2318,6 +2323,12 @@ SFUNC void fio_srv_listen_stop(void *listener) {
     fio___srv_listen_free(listener);
 }
 
+/** Returns the URL on which the listener is listening. */
+SFUNC fio_buf_info_s fio_srv_listener_url(void *listener) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)listener;
+  return FIO_BUF_INFO2(l->url, l->url_len);
+}
+
 static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
@@ -2565,6 +2576,7 @@ Managing data after a fork
 FIO_SFUNC void fio___srv_after_fork(void *ignr_) {
   (void)ignr_;
   fio___srvdata.pid = fio_thread_getpid();
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_queue_perform_all(fio___srv_tasks);
   FIO_LIST_EACH(fio_protocol_s,
                 reserved.protocols,
@@ -2588,6 +2600,7 @@ FIO_SFUNC void fio___srv_cleanup_at_exit(void *ignr_) {
   fio_thread_mutex_destroy(&fio___srvdata.valid_lock);
 #endif
 #endif /* FIO_VALIDATE_IO_MUTEX / FIO_VALIDITY_MAP_USE */
+  fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_queue_perform_all(fio___srv_tasks);
   fio_timer_destroy(fio___srv_timer);
   fio_queue_perform_all(fio___srv_tasks);

@@ -35,6 +35,8 @@ typedef enum {
   FIO_CLI_ARG_PRINT_HEADER,
 } fio_cli_arg_e;
 
+#define FIO_CLI_ARG_NONE FIO_CLI_ARG_PRINT_HEADER
+
 typedef struct {
   fio_cli_arg_e t;
   const char *l;
@@ -194,6 +196,10 @@ SFUNC size_t fio_cli_each(int (*task)(fio_buf_info_s name,
                                       fio_cli_arg_e arg_type,
                                       void *udata),
                           void *udata);
+
+/** Returns the argument's expected content type. */
+SFUNC fio_cli_arg_e fio_cli_type(char const *name);
+
 /* *****************************************************************************
 CLI Implementation
 ***************************************************************************** */
@@ -448,6 +454,17 @@ SFUNC void __attribute__((destructor)) fio_cli_end(void) {
 /* *****************************************************************************
 CLI Public Get/Set API
 ***************************************************************************** */
+
+/** Returns the argument's expected content type. */
+SFUNC fio_cli_arg_e fio_cli_type(char const *name) {
+  fio_cli_arg_e r = FIO_CLI_ARG_NONE;
+  fio___cli_aliases_s o = {.name =
+                               fio_cli_str_tmp(FIO_BUF_INFO1((char *)name))};
+  fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
+  if (a)
+    r = a->t;
+  return r;
+}
 
 /** Returns the argument's value as a NUL terminated C String. */
 SFUNC char const *fio_cli_get(char const *name) {

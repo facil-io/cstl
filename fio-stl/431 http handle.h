@@ -312,6 +312,11 @@ typedef struct fio_http_cookie_args_s {
   unsigned secure : 1;
   /** Limit cookie to HTTP (intended to prevent JavaScript access/hijacking).*/
   unsigned http_only : 1;
+  /**
+   * Set the Partitioned (third party) cookie flag:
+   * https://developer.mozilla.org/en-US/docs/Web/Privacy/Partitioned_cookies
+   */
+  unsigned partitioned : 1;
 } fio_http_cookie_args_s;
 
 /**
@@ -1692,6 +1697,13 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         "secure; ",
         8);
+  }
+  if (cookie.partitioned) {
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "partitioned; ",
+        13);
   }
   switch (cookie.same_site) {
   case FIO_HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT: /* fall through */
