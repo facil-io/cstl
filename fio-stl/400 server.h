@@ -1187,6 +1187,7 @@ SFUNC void fio_srv_defer(void (*task)(void *, void *),
   fio___srv_wakeup();
 }
 
+void fio_srv_run_every___(void); /* IDE marker */
 /** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
 SFUNC void fio_srv_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
   args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;

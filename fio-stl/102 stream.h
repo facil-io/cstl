@@ -134,7 +134,7 @@ FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
  *
  * Note: this isn't truly thread safe.
  */
-FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
+FIO_IFUNC size_t fio_stream_length(fio_stream_s *stream);
 
 /* *****************************************************************************
 
@@ -182,7 +182,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && s->next; }
 
 /* Returns the number of bytes waiting in the stream */
-FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
+FIO_IFUNC size_t fio_stream_length(fio_stream_s *s) { return s->length; }
 
 /* *****************************************************************************
 Stream Implementation - possibly externed functions.

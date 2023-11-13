@@ -1064,7 +1064,7 @@ FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
 FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
-  if (!str.buf || !str.len)
+  if (!str.buf || !str.len || (str.len & (~(size_t)0xFFFFFFFF)))
     return r;
   if (str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
@@ -1073,12 +1073,12 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
   }
   if (str.capa == FIO_KEYSTR_CONST) {
     r.info = 0xFF;
-    r.len = str.len;
+    r.len = (uint32_t)str.len;
     r.buf = str.buf;
     return r;
   }
   char *buf;
-  r.len = str.len;
+  r.len = (uint32_t)str.len;
   r.buf = buf = (char *)alloc_func(str.len + 1);
   if (!buf)
     goto no_mem;

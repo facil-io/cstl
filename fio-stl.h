@@ -386,12 +386,12 @@ Constructors and Destructors
   __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ +        \
       __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__
 /* counter is used for ordering, so we need a consistent number of digits */
-FIO_SFUNC void fio___msv_run_counter_macro_to_3_digits(void) {
-  int i = __COUNTER__;
-  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
-       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
-  i += FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
-       FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
+FIO_SFUNC int fio___msv_run_counter_macro_to_3_digits(void) {
+  return FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+         FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+         FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+         FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER() +
+         FIO___COUNTER_RUNNER() + FIO___COUNTER_RUNNER();
 }
 #undef FIO___COUNTER_RUNNER
 
@@ -1481,37 +1481,6 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
-  if (bytes & 63) {
-    for (size_t i = 0; i < 8; ++i)
-      ua[i] = ub[i] = 0;
-    /* all these if statements can run in parallel */
-    if (bytes & 32) {
-      fio_memcpy32(ua, a);
-      fio_memcpy32(ub, b);
-    }
-    if (bytes & 16) {
-      fio_memcpy16(ua + 4, a + (bytes & 32));
-      fio_memcpy16(ub + 4, b + (bytes & 32));
-    }
-    if (bytes & 8) {
-      fio_memcpy8(ua + 6, a + (bytes & 48));
-      fio_memcpy8(ub + 6, b + (bytes & 48));
-    }
-    if (bytes & 4) {
-      fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
-      fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
-    }
-    if (bytes & 2) {
-      fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
-      fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
-    }
-    if (bytes & 1) {
-      ((char *)ua)[62] = *(a + (bytes & 62));
-      ((char *)ub)[62] = *(b + (bytes & 62));
-    }
-    for (size_t i = 0; i < 8; ++i)
-      flag |= ua[i] ^ ub[i];
-  }
   for (size_t consumes = 63; consumes < bytes; consumes += 64) {
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
@@ -1520,6 +1489,39 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += 64;
     b += 64;
   }
+  /* any uneven bytes? */
+  if (bytes & (~(size_t)63))
+    return !flag;
+  /* consume uneven byte tail */
+  for (size_t i = 0; i < 8; ++i)
+    ua[i] = ub[i] = 0;
+  /* all these if statements can run in parallel */
+  if (bytes & 32) {
+    fio_memcpy32(ua, a);
+    fio_memcpy32(ub, b);
+  }
+  if (bytes & 16) {
+    fio_memcpy16(ua + 4, a + (bytes & 32));
+    fio_memcpy16(ub + 4, b + (bytes & 32));
+  }
+  if (bytes & 8) {
+    fio_memcpy8(ua + 6, a + (bytes & 48));
+    fio_memcpy8(ub + 6, b + (bytes & 48));
+  }
+  if (bytes & 4) {
+    fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
+    fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
+  }
+  if (bytes & 2) {
+    fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
+    fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
+  }
+  if (bytes & 1) {
+    ((char *)ua)[62] = *(a + (bytes & 62));
+    ((char *)ub)[62] = *(b + (bytes & 62));
+  }
+  for (size_t i = 0; i < 8; ++i)
+    flag |= ua[i] ^ ub[i];
   return !flag;
 }
 
@@ -1855,16 +1857,6 @@ Byte Value helpers
 ***************************************************************************** */
 
 /**
- * Detects a byte where all the bits are set (255) within a 4 byte vector.
- *
- * The full byte will be be set to 0x80, all other bytes will be 0x0.
- */
-FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
-  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
-         (row & UINT32_C(0x80808080));
-}
-
-/**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
@@ -1883,13 +1875,14 @@ FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
 }
 
 /**
- * Detects a byte where all the bits are set (255) within an 8 byte vector.
+ * Detects a byte where all the bits are set (255) within a 4 byte vector.
  *
  * The full byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
-  return ((row & UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &
-         (row & UINT64_C(0x8080808080808080));
+FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
+  return fio_has_zero_byte32(row);
+  // return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
+  //        (row & UINT32_C(0x80808080));
 }
 
 /**
@@ -1909,6 +1902,15 @@ FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
  */
 FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_zero_byte64((row ^ (UINT64_C(0x0101010101010101) * byte)));
+}
+
+/**
+ * Detects a byte where all the bits are set (255) within an 8 byte vector.
+ *
+ * The full byte will be be set to 0x80, all other bytes will be 0x0.
+ */
+FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
+  return fio_has_zero_byte64(~row);
 }
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
@@ -16353,7 +16355,7 @@ FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *stream);
  *
  * Note: this isn't truly thread safe.
  */
-FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *stream);
+FIO_IFUNC size_t fio_stream_length(fio_stream_s *stream);
 
 /* *****************************************************************************
 
@@ -16401,7 +16403,7 @@ FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
 FIO_IFUNC uint8_t fio_stream_any(fio_stream_s *s) { return s && s->next; }
 
 /* Returns the number of bytes waiting in the stream */
-FIO_IFUNC uint32_t fio_stream_length(fio_stream_s *s) { return s->length; }
+FIO_IFUNC size_t fio_stream_length(fio_stream_s *s) { return s->length; }
 
 /* *****************************************************************************
 Stream Implementation - possibly externed functions.
@@ -17885,7 +17887,7 @@ FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
 FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
-  if (!str.buf || !str.len)
+  if (!str.buf || !str.len || (str.len & (~(size_t)0xFFFFFFFF)))
     return r;
   if (str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
@@ -17894,12 +17896,12 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
   }
   if (str.capa == FIO_KEYSTR_CONST) {
     r.info = 0xFF;
-    r.len = str.len;
+    r.len = (uint32_t)str.len;
     r.buf = str.buf;
     return r;
   }
   char *buf;
-  r.len = str.len;
+  r.len = (uint32_t)str.len;
   r.buf = buf = (char *)alloc_func(str.len + 1);
   if (!buf)
     goto no_mem;
@@ -29355,6 +29357,7 @@ SFUNC void fio_srv_defer(void (*task)(void *, void *),
   fio___srv_wakeup();
 }
 
+void fio_srv_run_every___(void); /* IDE marker */
 /** Schedules a timer bound task, see `fio_timer_schedule` in the CSTL. */
 SFUNC void fio_srv_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
   args.start_at += ((uint64_t)0 - !args.start_at) & fio___srvdata.tick;
@@ -34320,6 +34323,11 @@ typedef struct fio_http_cookie_args_s {
   unsigned secure : 1;
   /** Limit cookie to HTTP (intended to prevent JavaScript access/hijacking).*/
   unsigned http_only : 1;
+  /**
+   * Set the Partitioned (third party) cookie flag:
+   * https://developer.mozilla.org/en-US/docs/Web/Privacy/Partitioned_cookies
+   */
+  unsigned partitioned : 1;
 } fio_http_cookie_args_s;
 
 /**
@@ -35700,6 +35708,13 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
         ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
         "secure; ",
         8);
+  }
+  if (cookie.partitioned) {
+    fio_string_write(
+        &t,
+        ((t.buf == tmp_buf) ? FIO_STRING_ALLOC_COPY : FIO_STRING_REALLOC),
+        "partitioned; ",
+        13);
   }
   switch (cookie.same_site) {
   case FIO_HTTP_COOKIE_SAME_SITE_BROWSER_DEFAULT: /* fall through */
