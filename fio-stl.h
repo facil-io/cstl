@@ -1481,6 +1481,39 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
+  /* any uneven bytes? */
+  if (bytes & 63) {
+    /* consume uneven byte head */
+    for (size_t i = 0; i < 8; ++i)
+      ua[i] = ub[i] = 0;
+    /* all these if statements can run in parallel */
+    if (bytes & 32) {
+      fio_memcpy32(ua, a);
+      fio_memcpy32(ub, b);
+    }
+    if (bytes & 16) {
+      fio_memcpy16(ua + 4, a + (bytes & 32));
+      fio_memcpy16(ub + 4, b + (bytes & 32));
+    }
+    if (bytes & 8) {
+      fio_memcpy8(ua + 6, a + (bytes & 48));
+      fio_memcpy8(ub + 6, b + (bytes & 48));
+    }
+    if (bytes & 4) {
+      fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
+      fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
+    }
+    if (bytes & 2) {
+      fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
+      fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
+    }
+    if (bytes & 1) {
+      ((char *)ua)[62] = *(a + (bytes & 62));
+      ((char *)ub)[62] = *(b + (bytes & 62));
+    }
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+  }
   for (size_t consumes = 63; consumes < bytes; consumes += 64) {
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
@@ -1489,39 +1522,6 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += 64;
     b += 64;
   }
-  /* any uneven bytes? */
-  if (bytes & (~(size_t)63))
-    return !flag;
-  /* consume uneven byte tail */
-  for (size_t i = 0; i < 8; ++i)
-    ua[i] = ub[i] = 0;
-  /* all these if statements can run in parallel */
-  if (bytes & 32) {
-    fio_memcpy32(ua, a);
-    fio_memcpy32(ub, b);
-  }
-  if (bytes & 16) {
-    fio_memcpy16(ua + 4, a + (bytes & 32));
-    fio_memcpy16(ub + 4, b + (bytes & 32));
-  }
-  if (bytes & 8) {
-    fio_memcpy8(ua + 6, a + (bytes & 48));
-    fio_memcpy8(ub + 6, b + (bytes & 48));
-  }
-  if (bytes & 4) {
-    fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
-    fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
-  }
-  if (bytes & 2) {
-    fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
-    fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
-  }
-  if (bytes & 1) {
-    ((char *)ua)[62] = *(a + (bytes & 62));
-    ((char *)ub)[62] = *(b + (bytes & 62));
-  }
-  for (size_t i = 0; i < 8; ++i)
-    flag |= ua[i] ^ ub[i];
   return !flag;
 }
 
