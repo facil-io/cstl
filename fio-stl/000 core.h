@@ -1452,16 +1452,14 @@ Constant-Time Comparison Test
 
 /** A timing attack resistant memory comparison function. */
 FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
-  uint64_t ua[8] FIO_ALIGN(16);
-  uint64_t ub[8] FIO_ALIGN(16);
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    for (size_t i = 0; i < 8; ++i)
-      ua[i] = ub[i] = 0;
+    uint64_t ua[8] FIO_ALIGN(16) = {0};
+    uint64_t ub[8] FIO_ALIGN(16) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -1493,6 +1491,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+    uint64_t ua[8] FIO_ALIGN(16);
+    uint64_t ub[8] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -1510,6 +1510,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
+  const char *e = a + bytes;
   if (*a != *b)
     return 1;
   /* any uneven bytes? */
@@ -1549,7 +1550,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += bytes & 63;
     b += bytes & 63;
   }
-  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+  while (a < e) {
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)

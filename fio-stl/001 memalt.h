@@ -412,47 +412,30 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
     return 0;
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
-  switch ((start & 7)) {
-#define FIO___MEMCHR_UNSAFE_STEP()                                             \
-  if (!str[0])                                                                 \
-    return (uintptr_t)str - start;                                             \
-  ++str
-  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-#undef FIO___MEMCHR_UNSAFE_STEP
-  }
-
-  /* 8 byte aligned */
   uint64_t flag = 0;
-  uint64_t map[8] FIO_ALIGN(16) = {0};
-  uint64_t tmp[8] FIO_ALIGN(16) = {0};
-
-#define FIO___STRLEN_CYCLE(i)                                                  \
-  do {                                                                         \
-    map[i] = (*(const uint64_t *)(str + (i << 3)));                            \
-    tmp[i] =                                                                   \
-        map[i] - UINT64_C(0x0101010101010101); /* is 0 or >= 0x80 --> 0x8X */  \
-    map[i] = ~map[i];                          /* is < 0x80) --> 0x8X */       \
-    map[i] &= UINT64_C(0x8080808080808080);                                    \
-    map[i] &= tmp[i]; /* only 0x00 will now be 0x80  */                        \
-    flag |= map[i];                                                            \
-  } while (0)
-
-  for (size_t aligner = 0; aligner < 8; ++aligner) {
-    FIO___STRLEN_CYCLE(0);
-    if (flag)
+  uint64_t map[8] FIO_ALIGN(16);
+  /* align to 4 bytes */
+  switch (start & 7) { // clang-format off
+  case 1: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 2: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 3: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 4: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 5: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 6: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 7: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  } // clang-format on
+  /* align to 64 bytes */
+  for (size_t i = 0; i < 9; ++i) {
+    if ((flag = fio_has_zero_byte64(*(uint64_t *)str)))
       goto found_nul_byte0;
     str += 8;
   }
-  str = FIO_PTR_MATH_RMASK(const char, str, 6); /* new loop alignment */
-  for (;;) { /* loop while aligned on 64 byte boundary */
-    for (size_t i = 0; i < 8; ++i)
-      FIO___STRLEN_CYCLE(i);
+  str = FIO_PTR_MATH_RMASK(const char, str, 6);
+  /* loop endlessly */
+  for (;;) {
+    for (size_t i = 0; i < 8; ++i) {
+      flag |= (map[i] = fio_has_zero_byte64(((uint64_t *)str)[i]));
+    }
     if (flag)
       goto found_nul_byte8;
     str += 64;
@@ -468,8 +451,7 @@ found_nul_byte8:
   return (uintptr_t)str - start;
 
 found_nul_byte0:
-  flag = fio_has_byte2bitmap(map[0]);
-  str += fio_lsb_index_unsafe(flag);
+  str += fio_lsb_index_unsafe(fio_has_byte2bitmap(flag));
   return (uintptr_t)str - start;
 }
 

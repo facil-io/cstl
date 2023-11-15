@@ -89,7 +89,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
       size_t len = fio_strlen(membuf);
       membuf[i] = (char)((i & 0xFFU) | 1U);
       FIO_ASSERT(result == membuf + i, "fio_memchr failed.");
-      FIO_ASSERT(len == i, "fio_strlen failed.");
+      FIO_ASSERT(len == i, "fio_strlen failed (%zu != %zu).", len, i);
     }
   }
 #ifndef DEBUG
@@ -427,6 +427,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
       mem[mem_len - 2]++;
     }
 
+    FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = memcmp(a, b, mem_len);
+      FIO_COMPILER_GUARD;
+      if (cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
@@ -447,26 +468,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
             repetitions);
 
     FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
-
-    twister = mem_len - 3;
-    start = fio_time_micro();
-    for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = memcmp(a, b, mem_len);
-      FIO_COMPILER_GUARD;
-      if (cmp) {
-        ++mem[twister--];
-        twister &= ((1ULL << (len_i - 1)) - 1);
-      } else {
-        --mem[twister];
-      }
-    }
-    end = fio_time_micro();
-    fprintf(stderr,
-            "\tsystem memcmp\t(up to %zu bytes):\t%zuus\t/ %zu\n",
-            mem_len,
-            (size_t)(end - start),
-            repetitions);
-
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
@@ -486,6 +487,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
             (size_t)(end - start),
             repetitions);
 
+    FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
