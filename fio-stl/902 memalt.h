@@ -357,40 +357,80 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     const size_t repetitions = base_repetitions
                                << (len_i < 13 ? (15 - (len_i & 15)) : 2);
     const size_t mem_len = (1ULL << len_i);
-    char *mem = (char *)malloc(mem_len << 1);
+    char *mem = (char *)malloc((mem_len << 1) + 128);
     FIO_ASSERT_ALLOC(mem);
     uint64_t sig = (uintptr_t)mem;
     sig ^= sig >> 13;
     sig ^= sig << 17;
     sig ^= sig << 29;
     sig ^= sig << 31;
-    fio_memset(mem, sig, mem_len);
-    fio_memset(mem + mem_len, sig, mem_len);
+    char *a = mem;
+    char *b = mem + mem_len + 32;
+    fio_memset(a, sig, mem_len);
+    a[mem_len] = 'A';
+    fio_memset(b, sig, mem_len);
+    b[mem_len] = 'B';
     size_t twister = 0;
 
-    FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
-               "fio_memcmp sanity test FAILED (%zu eq)",
-               mem_len);
-    FIO_ASSERT(fio_ct_is_eq(mem + mem_len, mem, mem_len),
-               "fio_ct_is_eq sanity test FAILED (%zu eq)",
-               mem_len);
+    if (mem_len > 64) {
+      for (size_t i = 0; i < 64; ++i) {
+        FIO_ASSERT(!fio_memcmp(a + i, b + i, mem_len - i),
+                   "fio_memcmp sanity test FAILED (%zu eq)",
+                   mem_len);
+        FIO_ASSERT(fio_ct_is_eq(a + i, b + i, mem_len - i),
+                   "fio_ct_is_eq sanity test FAILED (%zu eq)",
+                   mem_len);
+        FIO_ASSERT(fio_mem_is_eq(a + i, b + i, mem_len - i),
+                   "fio_mem_is_eq sanity test FAILED (%zu eq)",
+                   mem_len);
+      }
+    } else {
+      FIO_ASSERT(!fio_memcmp(a, b, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu eq)",
+                 mem_len);
+      FIO_ASSERT(fio_ct_is_eq(a, b, mem_len),
+                 "fio_ct_is_eq sanity test FAILED (%zu eq)",
+                 mem_len);
+      FIO_ASSERT(fio_mem_is_eq(a, b, mem_len),
+                 "fio_mem_is_eq sanity test FAILED (%zu eq)",
+                 mem_len);
+    }
     {
       mem[mem_len - 2]--;
-      int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
-      int r2 = memcmp(mem + mem_len, mem, mem_len);
-      FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
-                 "fio_memcmp sanity test FAILED (%zu !eq)",
-                 mem_len);
-      FIO_ASSERT(!fio_ct_is_eq(mem + mem_len, mem, mem_len),
-                 "fio_ct_is_eq sanity test FAILED (%zu !eq)",
-                 mem_len);
+      if (mem_len > 64) {
+        for (size_t i = 0; i < 64; ++i) {
+          int r1 = fio_memcmp(a + i, b + i, mem_len - i);
+          int r2 = memcmp(a + i, b + i, mem_len - i);
+          FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                     "fio_memcmp sanity test FAILED (%zu !eq)",
+                     mem_len);
+          FIO_ASSERT(!fio_ct_is_eq(a, b, mem_len),
+                     "fio_ct_is_eq sanity test FAILED (%zu !eq)",
+                     mem_len);
+          FIO_ASSERT(!fio_mem_is_eq(a, b, mem_len),
+                     "fio_mem_is_eq sanity test FAILED (%zu !eq)",
+                     mem_len);
+        }
+      } else {
+        int r1 = fio_memcmp(a, b, mem_len);
+        int r2 = memcmp(a, b, mem_len);
+        FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                   "fio_memcmp sanity test FAILED (%zu !eq)",
+                   mem_len);
+        FIO_ASSERT(!fio_ct_is_eq(a, b, mem_len),
+                   "fio_ct_is_eq sanity test FAILED (%zu !eq)",
+                   mem_len);
+        FIO_ASSERT(!fio_mem_is_eq(a, b, mem_len),
+                   "fio_mem_is_eq sanity test FAILED (%zu !eq)",
+                   mem_len);
+      }
       mem[mem_len - 2]++;
     }
 
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
+      int cmp = fio_memcmp(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (cmp) {
         ++mem[twister--];
@@ -406,14 +446,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
             (size_t)(end - start),
             repetitions);
 
-    FIO_MEMCPY(mem,
-               mem + mem_len,
-               mem_len); /* shouldn't be needed, but anyway */
+    FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
 
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = memcmp(mem + mem_len, mem, mem_len);
+      int cmp = memcmp(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (cmp) {
         ++mem[twister--];
@@ -432,7 +470,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = fio_ct_is_eq(mem + mem_len, mem, mem_len);
+      int cmp = fio_mem_is_eq(a, b, mem_len);
+      FIO_COMPILER_GUARD;
+      if (!cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tfio_mem_is_eq\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = fio_ct_is_eq(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (!cmp) {
         ++mem[twister--];

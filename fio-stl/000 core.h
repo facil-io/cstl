@@ -702,7 +702,7 @@ typedef struct fio_buf_info_s {
   ((s1).len == (s2).len &&                                                     \
    (!(s1).len || (s1).buf == (s2).buf ||                                       \
     ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
-     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+     FIO_MEM_IS_EQ((s1).buf, (s2).buf, (s1).len))))
 
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
@@ -948,6 +948,9 @@ Settings - Memory Function Selectors
 #ifndef FIO_STRLEN
 #define FIO_STRLEN fio_strlen
 #endif
+#ifndef FIO_MEM_IS_EQ
+#define FIO_MEM_IS_EQ fio_mem_is_eq
+#endif
 #endif /* FIO_MEMALT */
 
 /* memcpy selectors / overriding */
@@ -1015,6 +1018,16 @@ Settings - Memory Function Selectors
 #define FIO_MEMCMP memcmp
 #endif
 #endif /* FIO_MEMCMP */
+
+/* no need for ordering, just compare */
+#ifndef FIO_MEM_IS_EQ
+FIO_SFUNC _Bool fio___mem_is_eq(const void *restrict a,
+                                const void *restrict b,
+                                size_t l) {
+  return !FIO_MEMCMP(a, b, l);
+}
+#define FIO_MEM_IS_EQ fio___mem_is_eq
+#endif /* FIO_MEM_IS_EQ */
 
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
@@ -1476,6 +1489,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     }
     for (size_t i = 0; i < 8; ++i)
       flag |= ua[i] ^ ub[i];
+    a += bytes & 63;
+    b += bytes & 63;
   }
   for (size_t consumes = 63; consumes < bytes; consumes += 64) {
     fio_memcpy64(ua, a);
@@ -1488,6 +1503,64 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   return !flag;
 }
 
+/** An `is equal` alternative that is sensitive to timing attacks. */
+FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
+  uint64_t flag = 0;
+  const char *a = (const char *)a_;
+  const char *b = (const char *)b_;
+  if (*a != *b)
+    return 1;
+  /* any uneven bytes? */
+  if (bytes & 63) {
+    /* consume uneven byte head */
+    for (size_t i = 0; i < 8; ++i)
+      ua[i] = ub[i] = 0;
+    /* all these if statements can run in parallel */
+    if (bytes & 32) {
+      fio_memcpy32(ua, a);
+      fio_memcpy32(ub, b);
+    }
+    if (bytes & 16) {
+      fio_memcpy16(ua + 4, a + (bytes & 32));
+      fio_memcpy16(ub + 4, b + (bytes & 32));
+    }
+    if (bytes & 8) {
+      fio_memcpy8(ua + 6, a + (bytes & 48));
+      fio_memcpy8(ub + 6, b + (bytes & 48));
+    }
+    if (bytes & 4) {
+      fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
+      fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
+    }
+    if (bytes & 2) {
+      fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
+      fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
+    }
+    if (bytes & 1) {
+      ((char *)ua)[62] = *(a + (bytes & 62));
+      ((char *)ub)[62] = *(b + (bytes & 62));
+    }
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += bytes & 63;
+    b += bytes & 63;
+  }
+  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+    fio_memcpy64(ua, a);
+    fio_memcpy64(ub, b);
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += 64;
+    b += 64;
+  }
+  return !flag;
+}
 /* *****************************************************************************
 Bit rotation
 ***************************************************************************** */

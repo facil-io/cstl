@@ -482,11 +482,11 @@ FIO_SFUNC int fio___memcmp_mini(char *restrict a,
   uint64_t ua = 0, ub = 0;
   fio_memcpy7x(&ua, a, len);
   fio_memcpy7x(&ub, b, len);
+  if (ua == ub)
+    return 0;
   ua = fio_lton64(ua); /* fix cmp order */
   ub = fio_lton64(ub);
-  if (ua != ub)
-    return (int)1 - (int)((ub > ua) << 1);
-  return 0;
+  return (int)1 - (int)((ub > ua) << 1);
 }
 
 #define FIO___MEMCMP_BYTES(bytes, test_for_non_even)                           \
@@ -531,6 +531,9 @@ FIO_SFUNC int fio___memcmp_mini(char *restrict a,
     }                                                                          \
     ua[(bytes / 8) - 1] = fio_lton64(ua[(bytes / 8) - 1]); /* fix cmp order */ \
     ub[(bytes / 8) - 1] = fio_lton64(ub[(bytes / 8) - 1]);                     \
+    if (ub[(bytes / 8) - 1] > ua[(bytes / 8) - 1])                             \
+      return -1;                                                               \
+    return 1;                                                                  \
     return (int)1 - (int)((ub[(bytes / 8) - 1] > ua[(bytes / 8) - 1]) << 1);   \
   }
 
@@ -547,6 +550,8 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return 0;
   char *a = (char *)a_;
   char *b = (char *)b_;
+  if (*a != *b)
+    return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
   if (len < 8)
     return fio___memcmp_mini(a, b, len);
   if (len < 16)

@@ -739,7 +739,7 @@ typedef struct fio_buf_info_s {
   ((s1).len == (s2).len &&                                                     \
    (!(s1).len || (s1).buf == (s2).buf ||                                       \
     ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
-     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+     FIO_MEM_IS_EQ((s1).buf, (s2).buf, (s1).len))))
 
 /** Compares two `fio_buf_info_s` objects for content equality. */
 #define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
@@ -985,6 +985,9 @@ Settings - Memory Function Selectors
 #ifndef FIO_STRLEN
 #define FIO_STRLEN fio_strlen
 #endif
+#ifndef FIO_MEM_IS_EQ
+#define FIO_MEM_IS_EQ fio_mem_is_eq
+#endif
 #endif /* FIO_MEMALT */
 
 /* memcpy selectors / overriding */
@@ -1052,6 +1055,16 @@ Settings - Memory Function Selectors
 #define FIO_MEMCMP memcmp
 #endif
 #endif /* FIO_MEMCMP */
+
+/* no need for ordering, just compare */
+#ifndef FIO_MEM_IS_EQ
+FIO_SFUNC _Bool fio___mem_is_eq(const void *restrict a,
+                                const void *restrict b,
+                                size_t l) {
+  return !FIO_MEMCMP(a, b, l);
+}
+#define FIO_MEM_IS_EQ fio___mem_is_eq
+#endif /* FIO_MEM_IS_EQ */
 
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
@@ -1513,6 +1526,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     }
     for (size_t i = 0; i < 8; ++i)
       flag |= ua[i] ^ ub[i];
+    a += bytes & 63;
+    b += bytes & 63;
   }
   for (size_t consumes = 63; consumes < bytes; consumes += 64) {
     fio_memcpy64(ua, a);
@@ -1525,6 +1540,64 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   return !flag;
 }
 
+/** An `is equal` alternative that is sensitive to timing attacks. */
+FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
+  uint64_t flag = 0;
+  const char *a = (const char *)a_;
+  const char *b = (const char *)b_;
+  if (*a != *b)
+    return 1;
+  /* any uneven bytes? */
+  if (bytes & 63) {
+    /* consume uneven byte head */
+    for (size_t i = 0; i < 8; ++i)
+      ua[i] = ub[i] = 0;
+    /* all these if statements can run in parallel */
+    if (bytes & 32) {
+      fio_memcpy32(ua, a);
+      fio_memcpy32(ub, b);
+    }
+    if (bytes & 16) {
+      fio_memcpy16(ua + 4, a + (bytes & 32));
+      fio_memcpy16(ub + 4, b + (bytes & 32));
+    }
+    if (bytes & 8) {
+      fio_memcpy8(ua + 6, a + (bytes & 48));
+      fio_memcpy8(ub + 6, b + (bytes & 48));
+    }
+    if (bytes & 4) {
+      fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
+      fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
+    }
+    if (bytes & 2) {
+      fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
+      fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
+    }
+    if (bytes & 1) {
+      ((char *)ua)[62] = *(a + (bytes & 62));
+      ((char *)ub)[62] = *(b + (bytes & 62));
+    }
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += bytes & 63;
+    b += bytes & 63;
+  }
+  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+    fio_memcpy64(ua, a);
+    fio_memcpy64(ub, b);
+    for (size_t i = 0; i < 8; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += 64;
+    b += 64;
+  }
+  return !flag;
+}
 /* *****************************************************************************
 Bit rotation
 ***************************************************************************** */
@@ -3338,11 +3411,11 @@ FIO_SFUNC int fio___memcmp_mini(char *restrict a,
   uint64_t ua = 0, ub = 0;
   fio_memcpy7x(&ua, a, len);
   fio_memcpy7x(&ub, b, len);
+  if (ua == ub)
+    return 0;
   ua = fio_lton64(ua); /* fix cmp order */
   ub = fio_lton64(ub);
-  if (ua != ub)
-    return (int)1 - (int)((ub > ua) << 1);
-  return 0;
+  return (int)1 - (int)((ub > ua) << 1);
 }
 
 #define FIO___MEMCMP_BYTES(bytes, test_for_non_even)                           \
@@ -3387,6 +3460,9 @@ FIO_SFUNC int fio___memcmp_mini(char *restrict a,
     }                                                                          \
     ua[(bytes / 8) - 1] = fio_lton64(ua[(bytes / 8) - 1]); /* fix cmp order */ \
     ub[(bytes / 8) - 1] = fio_lton64(ub[(bytes / 8) - 1]);                     \
+    if (ub[(bytes / 8) - 1] > ua[(bytes / 8) - 1])                             \
+      return -1;                                                               \
+    return 1;                                                                  \
     return (int)1 - (int)((ub[(bytes / 8) - 1] > ua[(bytes / 8) - 1]) << 1);   \
   }
 
@@ -3403,6 +3479,8 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return 0;
   char *a = (char *)a_;
   char *b = (char *)b_;
+  if (*a != *b)
+    return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
   if (len < 8)
     return fio___memcmp_mini(a, b, len);
   if (len < 16)
@@ -45522,40 +45600,80 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     const size_t repetitions = base_repetitions
                                << (len_i < 13 ? (15 - (len_i & 15)) : 2);
     const size_t mem_len = (1ULL << len_i);
-    char *mem = (char *)malloc(mem_len << 1);
+    char *mem = (char *)malloc((mem_len << 1) + 128);
     FIO_ASSERT_ALLOC(mem);
     uint64_t sig = (uintptr_t)mem;
     sig ^= sig >> 13;
     sig ^= sig << 17;
     sig ^= sig << 29;
     sig ^= sig << 31;
-    fio_memset(mem, sig, mem_len);
-    fio_memset(mem + mem_len, sig, mem_len);
+    char *a = mem;
+    char *b = mem + mem_len + 32;
+    fio_memset(a, sig, mem_len);
+    a[mem_len] = 'A';
+    fio_memset(b, sig, mem_len);
+    b[mem_len] = 'B';
     size_t twister = 0;
 
-    FIO_ASSERT(!fio_memcmp(mem + mem_len, mem, mem_len),
-               "fio_memcmp sanity test FAILED (%zu eq)",
-               mem_len);
-    FIO_ASSERT(fio_ct_is_eq(mem + mem_len, mem, mem_len),
-               "fio_ct_is_eq sanity test FAILED (%zu eq)",
-               mem_len);
+    if (mem_len > 64) {
+      for (size_t i = 0; i < 64; ++i) {
+        FIO_ASSERT(!fio_memcmp(a + i, b + i, mem_len - i),
+                   "fio_memcmp sanity test FAILED (%zu eq)",
+                   mem_len);
+        FIO_ASSERT(fio_ct_is_eq(a + i, b + i, mem_len - i),
+                   "fio_ct_is_eq sanity test FAILED (%zu eq)",
+                   mem_len);
+        FIO_ASSERT(fio_mem_is_eq(a + i, b + i, mem_len - i),
+                   "fio_mem_is_eq sanity test FAILED (%zu eq)",
+                   mem_len);
+      }
+    } else {
+      FIO_ASSERT(!fio_memcmp(a, b, mem_len),
+                 "fio_memcmp sanity test FAILED (%zu eq)",
+                 mem_len);
+      FIO_ASSERT(fio_ct_is_eq(a, b, mem_len),
+                 "fio_ct_is_eq sanity test FAILED (%zu eq)",
+                 mem_len);
+      FIO_ASSERT(fio_mem_is_eq(a, b, mem_len),
+                 "fio_mem_is_eq sanity test FAILED (%zu eq)",
+                 mem_len);
+    }
     {
       mem[mem_len - 2]--;
-      int r1 = fio_memcmp(mem + mem_len, mem, mem_len);
-      int r2 = memcmp(mem + mem_len, mem, mem_len);
-      FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
-                 "fio_memcmp sanity test FAILED (%zu !eq)",
-                 mem_len);
-      FIO_ASSERT(!fio_ct_is_eq(mem + mem_len, mem, mem_len),
-                 "fio_ct_is_eq sanity test FAILED (%zu !eq)",
-                 mem_len);
+      if (mem_len > 64) {
+        for (size_t i = 0; i < 64; ++i) {
+          int r1 = fio_memcmp(a + i, b + i, mem_len - i);
+          int r2 = memcmp(a + i, b + i, mem_len - i);
+          FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                     "fio_memcmp sanity test FAILED (%zu !eq)",
+                     mem_len);
+          FIO_ASSERT(!fio_ct_is_eq(a, b, mem_len),
+                     "fio_ct_is_eq sanity test FAILED (%zu !eq)",
+                     mem_len);
+          FIO_ASSERT(!fio_mem_is_eq(a, b, mem_len),
+                     "fio_mem_is_eq sanity test FAILED (%zu !eq)",
+                     mem_len);
+        }
+      } else {
+        int r1 = fio_memcmp(a, b, mem_len);
+        int r2 = memcmp(a, b, mem_len);
+        FIO_ASSERT((r1 > 0 && r2 > 0) | (r1 < 0 && r2 < 0),
+                   "fio_memcmp sanity test FAILED (%zu !eq)",
+                   mem_len);
+        FIO_ASSERT(!fio_ct_is_eq(a, b, mem_len),
+                   "fio_ct_is_eq sanity test FAILED (%zu !eq)",
+                   mem_len);
+        FIO_ASSERT(!fio_mem_is_eq(a, b, mem_len),
+                   "fio_mem_is_eq sanity test FAILED (%zu !eq)",
+                   mem_len);
+      }
       mem[mem_len - 2]++;
     }
 
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = fio_memcmp(mem + mem_len, mem, mem_len);
+      int cmp = fio_memcmp(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (cmp) {
         ++mem[twister--];
@@ -45571,14 +45689,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
             (size_t)(end - start),
             repetitions);
 
-    FIO_MEMCPY(mem,
-               mem + mem_len,
-               mem_len); /* shouldn't be needed, but anyway */
+    FIO_MEMCPY(b, a, mem_len); /* shouldn't be needed, but anyway */
 
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = memcmp(mem + mem_len, mem, mem_len);
+      int cmp = memcmp(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (cmp) {
         ++mem[twister--];
@@ -45597,7 +45713,26 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
     twister = mem_len - 3;
     start = fio_time_micro();
     for (size_t i = 0; i < repetitions; ++i) {
-      int cmp = fio_ct_is_eq(mem + mem_len, mem, mem_len);
+      int cmp = fio_mem_is_eq(a, b, mem_len);
+      FIO_COMPILER_GUARD;
+      if (!cmp) {
+        ++mem[twister--];
+        twister &= ((1ULL << (len_i - 1)) - 1);
+      } else {
+        --mem[twister];
+      }
+    }
+    end = fio_time_micro();
+    fprintf(stderr,
+            "\tfio_mem_is_eq\t(up to %zu bytes):\t%zuus\t/ %zu\n",
+            mem_len,
+            (size_t)(end - start),
+            repetitions);
+
+    twister = mem_len - 3;
+    start = fio_time_micro();
+    for (size_t i = 0; i < repetitions; ++i) {
+      int cmp = fio_ct_is_eq(a, b, mem_len);
       FIO_COMPILER_GUARD;
       if (!cmp) {
         ++mem[twister--];
