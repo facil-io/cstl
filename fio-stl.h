@@ -3346,12 +3346,12 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   uint64_t map[8] FIO_ALIGN(16);
   /* align to 4 bytes */
   switch (start & 7) { // clang-format off
-  case 1: if(*str++ == 0) return (uintptr_t)(str-1) - start;
-  case 2: if(*str++ == 0) return (uintptr_t)(str-1) - start;
-  case 3: if(*str++ == 0) return (uintptr_t)(str-1) - start;
-  case 4: if(*str++ == 0) return (uintptr_t)(str-1) - start;
-  case 5: if(*str++ == 0) return (uintptr_t)(str-1) - start;
-  case 6: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 1: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
+  case 2: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
+  case 3: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
+  case 4: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
+  case 5: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
+  case 6: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
   case 7: if(*str++ == 0) return (uintptr_t)(str-1) - start;
   } // clang-format on
   /* align to 64 bytes */
