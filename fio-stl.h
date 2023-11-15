@@ -1492,6 +1492,7 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
+  const char *e = a + bytes;
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
@@ -1527,7 +1528,7 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += bytes & 63;
     b += bytes & 63;
   }
-  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+  while (a < e) {
     uint64_t ua[8] FIO_ALIGN(16);
     uint64_t ub[8] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
@@ -1542,8 +1543,6 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
 
 /** An `is equal` alternative that is sensitive to timing attacks. */
 FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
-  uint64_t ua[8] FIO_ALIGN(16);
-  uint64_t ub[8] FIO_ALIGN(16);
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
@@ -1552,6 +1551,8 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     return 1;
   /* any uneven bytes? */
   if (bytes & 63) {
+    uint64_t ua[8] FIO_ALIGN(16);
+    uint64_t ub[8] FIO_ALIGN(16);
     /* consume uneven byte head */
     for (size_t i = 0; i < 8; ++i)
       ua[i] = ub[i] = 0;
@@ -1587,15 +1588,29 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += bytes & 63;
     b += bytes & 63;
   }
-  while (a < e) {
+  if (bytes & 64) {
+    uint64_t ua[16] FIO_ALIGN(16);
+    uint64_t ub[16] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 8; ++i)
+    for (size_t i = 0; i < 16; ++i)
       flag |= ua[i] ^ ub[i];
     if (flag)
       return !flag;
     a += 64;
     b += 64;
+  }
+  while (a < e) {
+    uint64_t ua[16] FIO_ALIGN(16);
+    uint64_t ub[16] FIO_ALIGN(16);
+    fio_memcpy128(ua, a);
+    fio_memcpy128(ub, b);
+    for (size_t i = 0; i < 16; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += 128;
+    b += 128;
   }
   return !flag;
 }
@@ -3299,20 +3314,16 @@ FIO_SFUNC FIO___ASAN_AVOID void *fio_rawmemchr(const void *buffer,
   } uptr = {.i8 = (const char *)buffer};
 
   /* we must align memory, to avoid crushing when nearing last page boundary */
-  switch (((uintptr_t)uptr.i8 & 7)) {
-#define FIO___MEMCHR_UNSAFE_STEP()                                             \
-  if (*uptr.i8 == token)                                                       \
-    return (void *)uptr.i8;                                                    \
-  ++uptr.i8
-  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-#undef FIO___MEMCHR_UNSAFE_STEP
-  }
+  switch (((uintptr_t)uptr.i8 & 7)) { // clang-format off
+  case 1: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 2: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 3: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 4: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 5: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 6: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 7: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8;
+  } // clang-format on
+
   uint64_t umsk = ((uint64_t)((uint8_t)token));
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
@@ -3344,15 +3355,15 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   /* we must align memory, to avoid crushing when nearing last page boundary */
   uint64_t flag = 0;
   uint64_t map[8] FIO_ALIGN(16);
-  /* align to 4 bytes */
+  /* align to 8 bytes - most likely skipped */
   switch (start & 7) { // clang-format off
-  case 1: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 2: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 3: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 4: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 5: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 6: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 7: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 1: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 2: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 3: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 4: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 5: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 6: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 7: if(*str == 0) return (uintptr_t)str - start; ++str;
   } // clang-format on
   /* align to 64 bytes */
   for (size_t i = 0; i < 9; ++i) {

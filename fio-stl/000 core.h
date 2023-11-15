@@ -1455,6 +1455,7 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
+  const char *e = a + bytes;
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
@@ -1490,7 +1491,7 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += bytes & 63;
     b += bytes & 63;
   }
-  for (size_t consumes = 63; consumes < bytes; consumes += 64) {
+  while (a < e) {
     uint64_t ua[8] FIO_ALIGN(16);
     uint64_t ub[8] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
@@ -1505,8 +1506,6 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
 
 /** An `is equal` alternative that is sensitive to timing attacks. */
 FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
-  uint64_t ua[8] FIO_ALIGN(16);
-  uint64_t ub[8] FIO_ALIGN(16);
   uint64_t flag = 0;
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
@@ -1515,6 +1514,8 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     return 1;
   /* any uneven bytes? */
   if (bytes & 63) {
+    uint64_t ua[8] FIO_ALIGN(16);
+    uint64_t ub[8] FIO_ALIGN(16);
     /* consume uneven byte head */
     for (size_t i = 0; i < 8; ++i)
       ua[i] = ub[i] = 0;
@@ -1550,15 +1551,29 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += bytes & 63;
     b += bytes & 63;
   }
-  while (a < e) {
+  if (bytes & 64) {
+    uint64_t ua[16] FIO_ALIGN(16);
+    uint64_t ub[16] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 8; ++i)
+    for (size_t i = 0; i < 16; ++i)
       flag |= ua[i] ^ ub[i];
     if (flag)
       return !flag;
     a += 64;
     b += 64;
+  }
+  while (a < e) {
+    uint64_t ua[16] FIO_ALIGN(16);
+    uint64_t ub[16] FIO_ALIGN(16);
+    fio_memcpy128(ua, a);
+    fio_memcpy128(ub, b);
+    for (size_t i = 0; i < 16; ++i)
+      flag |= ua[i] ^ ub[i];
+    if (flag)
+      return !flag;
+    a += 128;
+    b += 128;
   }
   return !flag;
 }

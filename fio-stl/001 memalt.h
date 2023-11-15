@@ -369,20 +369,16 @@ FIO_SFUNC FIO___ASAN_AVOID void *fio_rawmemchr(const void *buffer,
   } uptr = {.i8 = (const char *)buffer};
 
   /* we must align memory, to avoid crushing when nearing last page boundary */
-  switch (((uintptr_t)uptr.i8 & 7)) {
-#define FIO___MEMCHR_UNSAFE_STEP()                                             \
-  if (*uptr.i8 == token)                                                       \
-    return (void *)uptr.i8;                                                    \
-  ++uptr.i8
-  case 1: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 2: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 3: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 4: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 5: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 6: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-  case 7: FIO___MEMCHR_UNSAFE_STEP(); /* fall through */
-#undef FIO___MEMCHR_UNSAFE_STEP
-  }
+  switch (((uintptr_t)uptr.i8 & 7)) { // clang-format off
+  case 1: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 2: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 3: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 4: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 5: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 6: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8; /* fall through */
+  case 7: if(*uptr.i8 == token) return (void*)uptr.i8; ++uptr.i8;
+  } // clang-format on
+
   uint64_t umsk = ((uint64_t)((uint8_t)token));
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
@@ -406,23 +402,23 @@ fio_strlen
 ***************************************************************************** */
 
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  // const char *nul = (const char *)fio_rawmemchr(str, 0);
-  // return (size_t)(nul - str);
+  const char *nul = (const char *)fio_rawmemchr(str, 0);
+  return (size_t)(nul - str);
   if (!str)
     return 0;
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
   uint64_t flag = 0;
   uint64_t map[8] FIO_ALIGN(16);
-  /* align to 4 bytes */
+  /* align to 8 bytes - most likely skipped */
   switch (start & 7) { // clang-format off
-  case 1: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 2: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 3: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 4: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 5: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 6: if(*str++ == 0) return (uintptr_t)(str-1) - start; /* fall through */
-  case 7: if(*str++ == 0) return (uintptr_t)(str-1) - start;
+  case 1: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 2: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 3: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 4: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 5: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 6: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
+  case 7: if(*str == 0) return (uintptr_t)str - start; ++str;
   } // clang-format on
   /* align to 64 bytes */
   for (size_t i = 0; i < 9; ++i) {
