@@ -1511,7 +1511,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
   const char *b = (const char *)b_;
   const char *e = a + bytes;
   if (*a != *b)
-    return 1;
+    return 0;
   /* any uneven bytes? */
   if (bytes & 63) {
     uint64_t ua[8] FIO_ALIGN(16);
@@ -1556,7 +1556,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     uint64_t ub[16] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 16; ++i)
+    for (size_t i = 0; i < 8; ++i)
       flag |= ua[i] ^ ub[i];
     if (flag)
       return !flag;

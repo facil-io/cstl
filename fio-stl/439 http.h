@@ -152,16 +152,20 @@ typedef struct fio_http_settings_s {
    */
   uint8_t timeout;
   /**
-   * Timeout for the WebSocket connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for the WebSocket connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails). Pongs are ignored.
    */
   uint8_t ws_timeout;
   /**
-   * Timeout for EventSource (SSE) connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for EventSource (SSE) connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails).

@@ -394,9 +394,8 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   fprintf(stderr,
           "\nThe facil.io library was originally coded by \x1B[1mBoaz "
           "Segev\x1B[0m.\n"
-          "Please give credit where credit is due.\n"
-          "\x1B[1mYour support is only fair\x1B[0m - give value for value.\n"
-          "(code contributions / donations)\n\n");
+          "\x1B[1mValue deserves to be valued.\x1B[0m\n"
+          "(please consider code contributions / donations)\n\n");
 }
 
 /* *****************************************************************************

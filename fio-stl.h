@@ -1548,7 +1548,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
   const char *b = (const char *)b_;
   const char *e = a + bytes;
   if (*a != *b)
-    return 1;
+    return 0;
   /* any uneven bytes? */
   if (bytes & 63) {
     uint64_t ua[8] FIO_ALIGN(16);
@@ -1593,7 +1593,7 @@ FIO_SFUNC _Bool fio_mem_is_eq(const void *a_, const void *b_, size_t bytes) {
     uint64_t ub[16] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 16; ++i)
+    for (size_t i = 0; i < 8; ++i)
       flag |= ua[i] ^ ub[i];
     if (flag)
       return !flag;
@@ -3347,8 +3347,8 @@ fio_strlen
 ***************************************************************************** */
 
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  // const char *nul = (const char *)fio_rawmemchr(str, 0);
-  // return (size_t)(nul - str);
+  const char *nul = (const char *)fio_rawmemchr(str, 0);
+  return (size_t)(nul - str);
   if (!str)
     return 0;
   uintptr_t start = (uintptr_t)str;
@@ -38367,16 +38367,20 @@ typedef struct fio_http_settings_s {
    */
   uint8_t timeout;
   /**
-   * Timeout for the WebSocket connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for the WebSocket connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails). Pongs are ignored.
    */
   uint8_t ws_timeout;
   /**
-   * Timeout for EventSource (SSE) connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for EventSource (SSE) connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails).
@@ -50151,9 +50155,8 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   fprintf(stderr,
           "\nThe facil.io library was originally coded by \x1B[1mBoaz "
           "Segev\x1B[0m.\n"
-          "Please give credit where credit is due.\n"
-          "\x1B[1mYour support is only fair\x1B[0m - give value for value.\n"
-          "(code contributions / donations)\n\n");
+          "\x1B[1mValue deserves to be valued.\x1B[0m\n"
+          "(please consider code contributions / donations)\n\n");
 }
 
 /* *****************************************************************************
