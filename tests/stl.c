@@ -4,6 +4,9 @@
 #ifndef FIO_LEAK_COUNTER
 #define FIO_LEAK_COUNTER 1
 #endif
+#ifdef DEBUG
+#define FIO_MEMALT 1
+#endif
 
 #ifdef FIO_UNIFIED
 #include "fio-stl.h"

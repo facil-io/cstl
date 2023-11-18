@@ -516,6 +516,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       fprintf(stderr,
               "\t* strcmp libc test cycles:            %zu\n",
               (size_t)(end - start));
+      start = clock();
+      for (size_t i = 0; i < test_repetitions; ++i) {
+        FIO_COMPILER_GUARD;
+        int r =
+            !fio_ct_is_eq(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
+        if (!r)
+          r = sa.len > sb.len;
+        FIO_ASSERT(r, "fio_ct_is_eq error?!");
+      }
+      end = clock();
+      fprintf(stderr,
+              "\t* fio_ct_is_eq test cycles:             %zu (only equality)\n",
+              (size_t)(end - start));
     }
 
     fprintf(stderr, "* Testing fio_string_write_(i|u|hex|bin) speeds:\n");

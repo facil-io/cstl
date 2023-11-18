@@ -74,6 +74,7 @@ Everything Inclusion
 #undef H___FIO_EVERYTHING1___H
 #undef FIO_EVERYTHING
 #define H___FIO_EVERYTHING___H
+#undef FIO_MEMALT
 #define FIO_FIOBJ
 #define FIO_HTTP
 #define FIO_MALLOC

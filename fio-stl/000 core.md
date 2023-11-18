@@ -766,24 +766,6 @@ On most of `libc` implementations the library call will be faster. Test before d
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
 
-#### `fio_rawmemchr`
-
-```c
-static void *fio_rawmemchr(const void *buffer, const char token);
-```
-
-A fallback for `rawmemchr` (GNU), seeking a `token` that **must** (for certain) be in the memory starting at address `mem`.
-
-If `token` is found, returns the address of the token's first appearance. Otherwise anything could happen, including the computer becoming sentient and trying to save humanity.
-
-A fallback for `memchr_unsafe`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
-
-If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
-
-On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
-
 #### `FIO_MEMCMP`
 
 ```c
