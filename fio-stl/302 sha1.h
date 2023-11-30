@@ -226,14 +226,14 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  fio_sha1_s s FIO_ALIGN(16) = {.v = {
+  fio_sha1_s s FIO_ALIGN(64) = {.v = {
                                     0x67452301,
                                     0xEFCDAB89,
                                     0x98BADCFE,
                                     0x10325476,
                                     0xC3D2E1F0,
                                 }};
-  uint32_t vec[16] FIO_ALIGN(16);
+  uint32_t vec[16] FIO_ALIGN(64);
 
   const uint8_t *buf = (const uint8_t *)data;
 

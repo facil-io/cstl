@@ -52,7 +52,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
-} fio_u256 FIO_ALIGN(16);
+} fio_u256 FIO_ALIGN(32);
 
 /** An unsigned 512bit union type. */
 typedef union {
@@ -63,7 +63,7 @@ typedef union {
   uint8_t u8[64];
   fio_u128 u128[4];
   fio_u256 u256[2];
-} fio_u512 FIO_ALIGN(16);
+} fio_u512 FIO_ALIGN(64);
 
 /** An unsigned 1024bit union type. */
 typedef union {
@@ -75,7 +75,7 @@ typedef union {
   fio_u128 u128[8];
   fio_u256 u256[4];
   fio_u512 u512[2];
-} fio_u1024 FIO_ALIGN(16);
+} fio_u1024 FIO_ALIGN(64);
 
 /** An unsigned 2048bit union type. */
 typedef union {
@@ -88,7 +88,7 @@ typedef union {
   fio_u256 u256[8];
   fio_u512 u512[4];
   fio_u1024 u1024[2];
-} fio_u2048 FIO_ALIGN(16);
+} fio_u2048 FIO_ALIGN(64);
 
 /** An unsigned 4096bit union type. */
 typedef union {
@@ -102,7 +102,7 @@ typedef union {
   fio_u512 u512[8];
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
-} fio_u4096 FIO_ALIGN(16);
+} fio_u4096 FIO_ALIGN(64);
 
 FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 

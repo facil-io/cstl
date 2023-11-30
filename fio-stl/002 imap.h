@@ -51,8 +51,8 @@ iMap Creation Macro
  * almost-hash map, allowing for easy seeking while also enjoying an array's
  * advantages.
  *
- * The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index
- * in array and any leftover hash data (the first half being tested during the
+ * The index map uses one `imap_type` (i.e., `uint64_t`) to store both the array
+ * index and any leftover hash data (the first half being tested during the
  * random access and the leftover during comparison). The reserved value `0`
  * indicates a free slot. The reserved value `~0` indicates a freed item (a free
  * slot that was previously used).

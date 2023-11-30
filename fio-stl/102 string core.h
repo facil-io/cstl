@@ -407,6 +407,7 @@ SFUNC void fio_string_default_free_noop2(fio_str_info_s str);
 SFUNC void *fio_string_default_key_alloc(size_t len);
 /** frees a fio_keystr_s memory that was allocated with the default callback. */
 SFUNC void fio_string_default_free_key(void *, size_t);
+
 /* *****************************************************************************
 UTF-8 Support
 ***************************************************************************** */
@@ -1014,7 +1015,6 @@ FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b) {
 /* *****************************************************************************
 Key String Type - binary String container for Hash Maps and Arrays
 ***************************************************************************** */
-
 FIO_LEAK_COUNTER_DEF(fio_keystr_s)
 
 /* key string type implementation */
@@ -1572,8 +1572,8 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(16) = {0};
-  uint64_t ub[4] FIO_ALIGN(16) = {0};
+  uint64_t ua[4] FIO_ALIGN(32) = {0};
+  uint64_t ub[4] FIO_ALIGN(32) = {0};
   uint64_t flag = 0;
   if (len < 32)
     goto mini_cmp;

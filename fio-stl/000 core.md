@@ -838,6 +838,9 @@ Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `
 #ifndef FIO_STRLEN
 #define FIO_STRLEN fio_strlen
 #endif
+#ifndef FIO_STRLEN
+#define FIO_STRLEN fio_strlen
+#endif
 #endif /* FIO_MEMALT */
 ```
 
@@ -987,7 +990,7 @@ Performs the operation indicated in constant time.
 
 - `fio_ct_if_bool(bool, a_if_true, b_if_false)`
 
-    Tests if `bool == 1` (returns `a` / `b`).
+    Tests if `bool == 1` (returns `a` if `true` and `b` if `false`).
 
 - `fio_ct_if(condition, a_if_true, b_if_false)`
 

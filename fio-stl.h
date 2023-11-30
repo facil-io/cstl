@@ -1439,35 +1439,42 @@ Constant-Time Selectors
 ***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
-FIO_IFUNC uintptr_t fio_ct_true(uintptr_t cond) {
+FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
   // promise that the highest bit is set if any bits are set, than shift.
   return ((cond | (0 - cond)) >> ((sizeof(cond) << 3) - 1));
 }
 
 /** Returns 1 if the expression is false (input is zero). */
-FIO_IFUNC uintptr_t fio_ct_false(uintptr_t cond) {
+FIO_IFUNC uintmax_t fio_ct_false(uintmax_t cond) {
   // fio_ct_true returns only one bit, XOR will inverse that bit.
   return fio_ct_true(cond) ^ 1;
 }
 
 /** Returns `a` if `cond` is boolean and true, returns b otherwise. */
-FIO_IFUNC uintptr_t fio_ct_if_bool(uint8_t cond, uintptr_t a, uintptr_t b) {
+FIO_IFUNC uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
-  return (b ^ ((0 - (cond & 1)) & (a ^ b)));
+  return (b ^ (((uintmax_t)0ULL - (cond & 1)) & (a ^ b)));
 }
 
 /** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
-FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
+FIO_IFUNC uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
 /** Returns `a` if a >= `b`. */
-FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
+FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
-  const uintptr_t a = a_, b = b_;
+  const uintmax_t a = a_, b = b_;
   return (
-      intptr_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+}
+
+/** Returns absolute value. */
+FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintmax_t i = i_;
+  return (intmax_t)fio_ct_if_bool((i >> ((sizeof(i) << 3) - 1)), 0 - i, i);
 }
 
 /* *****************************************************************************
@@ -1483,8 +1490,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(16) = {0};
-    uint64_t ub[8] FIO_ALIGN(16) = {0};
+    uint64_t ua[8] FIO_ALIGN(64) = {0};
+    uint64_t ub[8] FIO_ALIGN(64) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -1516,8 +1523,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(16);
-    uint64_t ub[8] FIO_ALIGN(16);
+    uint64_t ua[8] FIO_ALIGN(64);
+    uint64_t ub[8] FIO_ALIGN(64);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -2927,7 +2934,7 @@ FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
                                         size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[8] FIO_ALIGN(16);
+  uint64_t t[8] FIO_ALIGN(64);
   while (l > 63) {
     fio_memcpy64(t, s);
     FIO_COMPILER_GUARD_INSTRUCTION;
@@ -2966,7 +2973,7 @@ FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
                                                  size_t l) {
   char *d = (char *)d_ + l;
   const char *s = (const char *)s_ + l;
-  uint64_t t[8] FIO_ALIGN(16);
+  uint64_t t[8] FIO_ALIGN(64);
   while (l > 63) {
     (s -= 64), (d -= 64), (l -= 64);
     fio_memcpy64(t, s);
@@ -3090,7 +3097,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   return memchr(buffer, token, len); /* FIXME */
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
-  uint64_t u[16] FIO_ALIGN(16) = {0};
+  uint64_t u[16] FIO_ALIGN(64) = {0};
   uint64_t flag = 0;
   size_t i;
   uint64_t umsk = ((uint64_t)((uint8_t)token));
@@ -3151,7 +3158,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
   uint64_t flag = 0;
-  uint64_t map[8] FIO_ALIGN(16);
+  uint64_t map[8] FIO_ALIGN(64);
   /* align to 8 bytes - most likely skipped */
   switch (start & 7) { // clang-format off
   case 1: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
@@ -3201,8 +3208,8 @@ fio_memcmp
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   if (a_ == b_ || !len)
     return 0;
-  uint64_t ua[8] FIO_ALIGN(16);
-  uint64_t ub[8] FIO_ALIGN(16);
+  uint64_t ua[8] FIO_ALIGN(64);
+  uint64_t ub[8] FIO_ALIGN(64);
   size_t flag = 0;
   char *a = (char *)a_;
   char *b = (char *)b_;
@@ -3937,11 +3944,8 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   if (!mant)
     goto is_zero;
   /* convert `mant` to absolute value - constant time */
-  tmp = u.u64 >> 63;
-  mant =
-      (int64_t)(uint64_t)mant ^
-      (((uint64_t)0 - tmp) & ((uint64_t)mant ^ (uint64_t)((int64_t)0 - mant)));
-  // mant = (int64_t)(((uint64_t)mant ^ ((uint64_t)0 - tmp)) + tmp); // slower
+  mant = mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
+  mant = fio_ct_abs(mant);
   /* normalize exponent */
   tmp = fio_msb_index_unsafe(mant);
   exponent += tmp + 1023;
@@ -4892,8 +4896,8 @@ iMap Creation Macro
  * almost-hash map, allowing for easy seeking while also enjoying an array's
  * advantages.
  *
- * The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index
- * in array and any leftover hash data (the first half being tested during the
+ * The index map uses one `imap_type` (i.e., `uint64_t`) to store both the array
+ * index and any leftover hash data (the first half being tested during the
  * random access and the leftover during comparison). The reserved value `0`
  * indicates a free slot. The reserved value `~0` indicates a freed item (a free
  * slot that was previously used).
@@ -5231,7 +5235,7 @@ typedef union {
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
-} fio_u256 FIO_ALIGN(16);
+} fio_u256 FIO_ALIGN(32);
 
 /** An unsigned 512bit union type. */
 typedef union {
@@ -5242,7 +5246,7 @@ typedef union {
   uint8_t u8[64];
   fio_u128 u128[4];
   fio_u256 u256[2];
-} fio_u512 FIO_ALIGN(16);
+} fio_u512 FIO_ALIGN(64);
 
 /** An unsigned 1024bit union type. */
 typedef union {
@@ -5254,7 +5258,7 @@ typedef union {
   fio_u128 u128[8];
   fio_u256 u256[4];
   fio_u512 u512[2];
-} fio_u1024 FIO_ALIGN(16);
+} fio_u1024 FIO_ALIGN(64);
 
 /** An unsigned 2048bit union type. */
 typedef union {
@@ -5267,7 +5271,7 @@ typedef union {
   fio_u256 u256[8];
   fio_u512 u512[4];
   fio_u1024 u1024[2];
-} fio_u2048 FIO_ALIGN(16);
+} fio_u2048 FIO_ALIGN(64);
 
 /** An unsigned 4096bit union type. */
 typedef union {
@@ -5281,7 +5285,7 @@ typedef union {
   fio_u512 u512[8];
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
-} fio_u4096 FIO_ALIGN(16);
+} fio_u4096 FIO_ALIGN(64);
 
 FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 
@@ -6252,8 +6256,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 
   /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
-  uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
-  uint64_t const prime[8] FIO_ALIGN(16) = {
+  uint64_t v[8] FIO_ALIGN(64), w[8] FIO_ALIGN(64) = {0};
+  uint64_t const prime[8] FIO_ALIGN(64) = {
       FIO_U64_HASH_PRIME1,
       FIO_U64_HASH_PRIME2,
       FIO_U64_HASH_PRIME3,
@@ -11048,6 +11052,9 @@ SFUNC void fio_cli_end(void);
 /** Returns the argument's value as a NUL terminated C String. */
 SFUNC char const *fio_cli_get(char const *name);
 
+/** Returns the argument's value as a NUL terminated `fio_buf_info_s`. */
+SFUNC fio_buf_info_s fio_cli_get_str(char const *name);
+
 /** Returns the argument's value as an integer. */
 SFUNC int64_t fio_cli_get_i(char const *name);
 
@@ -11100,13 +11107,10 @@ CLI Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO_LEAK_COUNTER_DEF(fio_cli_str)
-FIO_LEAK_COUNTER_DEF(fio_cli_ary)
-FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
-
 /* *****************************************************************************
 String for CLI
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_str)
 
 typedef struct {
   uint8_t em;     /* embedded? const? how long? */
@@ -11167,6 +11171,7 @@ FIO_SFUNC fio_cli_str_s fio_cli_str_tmp(fio_buf_info_s s) {
 /* *****************************************************************************
 String array for CLI
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_ary)
 
 typedef struct {
   fio_cli_str_s *ary;
@@ -11367,6 +11372,17 @@ SFUNC char const *fio_cli_get(char const *name) {
     return fio_cli_unnamed(0);
   fio_buf_info_s key = FIO_BUF_INFO1((char *)name);
   return fio___cli_data_get(key).buf;
+}
+
+/** Returns the argument's value as a NUL terminated C String. */
+SFUNC fio_buf_info_s fio_cli_get_str(char const *name) {
+  if (!name)
+    goto unnamed_zero;
+  return fio___cli_data_get(FIO_BUF_INFO1((char *)name));
+unnamed_zero:
+  if (!fio___cli_data.unnamed.w)
+    return FIO_BUF_INFO0;
+  return fio___cli_ary_get(&fio___cli_data.unnamed, 0);
 }
 
 /** Returns the argument's value as an integer. */
@@ -11761,6 +11777,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
 /* *****************************************************************************
 CLI Help Output
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
 
 FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
                                               fio_buf_info_s s,
@@ -14595,7 +14612,7 @@ Polling API
 typedef struct fio_poll_s fio_poll_s;
 
 typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
+  /** callback for when data is available in the incoming buffer. */
   void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
   void (*on_ready)(void *udata);
@@ -17092,6 +17109,7 @@ SFUNC void fio_string_default_free_noop2(fio_str_info_s str);
 SFUNC void *fio_string_default_key_alloc(size_t len);
 /** frees a fio_keystr_s memory that was allocated with the default callback. */
 SFUNC void fio_string_default_free_key(void *, size_t);
+
 /* *****************************************************************************
 UTF-8 Support
 ***************************************************************************** */
@@ -17699,7 +17717,6 @@ FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b) {
 /* *****************************************************************************
 Key String Type - binary String container for Hash Maps and Arrays
 ***************************************************************************** */
-
 FIO_LEAK_COUNTER_DEF(fio_keystr_s)
 
 /* key string type implementation */
@@ -18257,8 +18274,8 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(16) = {0};
-  uint64_t ub[4] FIO_ALIGN(16) = {0};
+  uint64_t ua[4] FIO_ALIGN(32) = {0};
+  uint64_t ub[4] FIO_ALIGN(32) = {0};
   uint64_t flag = 0;
   if (len < 32)
     goto mini_cmp;
@@ -26786,7 +26803,7 @@ typedef struct {
   uint64_t s[2];
   /* Accumulator should not exceed 131 bits at the end of every cycle. */
   uint64_t a[3];
-} FIO_ALIGN(16) fio___poly_s;
+} FIO_ALIGN(64) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   static const uint64_t defkey[4] = {0};
@@ -27544,14 +27561,14 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  fio_sha1_s s FIO_ALIGN(16) = {.v = {
+  fio_sha1_s s FIO_ALIGN(64) = {.v = {
                                     0x67452301,
                                     0xEFCDAB89,
                                     0x98BADCFE,
                                     0x10325476,
                                     0xC3D2E1F0,
                                 }};
-  uint32_t vec[16] FIO_ALIGN(16);
+  uint32_t vec[16] FIO_ALIGN(64);
 
   const uint8_t *buf = (const uint8_t *)data;
 
@@ -27726,7 +27743,7 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
     v[i] = h->u32[i];
   }
   /* read data as an array of 16 big endian 32 bit integers. */
-  uint32_t w[16] FIO_ALIGN(16);
+  uint32_t w[16] FIO_ALIGN(64);
   fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
@@ -27848,12 +27865,12 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
 
   uint64_t t1, t2; /* used often... */
   /* copy original state */
-  uint64_t v[8] FIO_ALIGN(16);
+  uint64_t v[8] FIO_ALIGN(64);
   for (size_t i = 0; i < 8; ++i)
     v[i] = h->u64[i];
 
   /* read data as an array of 16 big endian 64 bit integers. */
-  uint64_t w[16] FIO_ALIGN(16);
+  uint64_t w[16] FIO_ALIGN(64);
   fio_memcpy128(w, block);
   for (size_t i = 0; i < 16; ++i)
     w[i] = fio_lton64(w[i]); /* no-op on big endien systems */
@@ -28102,6 +28119,9 @@ Starting / Stopping the Server
 
 /** Stopping the server. */
 SFUNC void fio_srv_stop(void);
+
+/** Adds `workers` amount of workers to the root server process. */
+SFUNC void fio_srv_add_workers(int workers);
 
 /** Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_start(int workers);
@@ -29931,6 +29951,15 @@ SFUNC uint16_t fio_srv_workers(int workers) {
     workers += !workers;
   }
   return workers;
+}
+
+/** Adds `workers` amount of workers to the root server process. */
+SFUNC void fio_srv_add_workers(int workers) {
+  if (!workers || fio___srvdata.root_pid != fio___srvdata.pid)
+    return;
+  FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+  for (int i = 0; i < workers; ++i)
+    fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker);
 }
 
 /* Starts the server, using optional `workers` processes. This will BLOCK! */
@@ -31915,16 +31944,16 @@ typedef enum {
   FIO___PUBSUB_CLUSTER = (16 | 8 | 4 | 2),
   FIO___PUBSUB_REPLAY = 32, /* history replay message */
 
-  /* internal subscribe / unsubscribe messages */
-  FIO___PUBSUB_INTERNAL_MESSAGE = 128,
+  /* internal messages */
+  FIO___PUBSUB_SPECIAL = 128,
   FIO___PUBSUB_SUB = (128 | 1),
   FIO___PUBSUB_UNSUB = (128 | 2),
-  FIO___PUBSUB_IDENTIFY = (128 | 4),
-  FIO___PUBSUB_FORWARDER = (128 | 8),
+  FIO___PUBSUB_IDENTIFY = (128 | 4),  /* identify remote connection */
+  FIO___PUBSUB_FORWARDER = (128 | 8), /* forward to external engine */
   FIO___PUBSUB_PING = (128 | 16),
 
-  FIO___PUBSUB_HISTORY_START = (128 | 16),
-  FIO___PUBSUB_HISTORY_END = (128 | 32),
+  FIO___PUBSUB_HISTORY_START = (128 | 32),
+  FIO___PUBSUB_HISTORY_END = (128 | 64),
 } fio___pubsub_msg_flags_e;
 
 /** Used to publish the message exclusively to the root / master process. */
@@ -33253,7 +33282,7 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
                   fio_srv_pid(),
                   (int)m->data.is_json);
 
-  if (flags & FIO___PUBSUB_INTERNAL_MESSAGE)
+  if (flags & FIO___PUBSUB_SPECIAL)
     goto is_special_message;
 
   if ((FIO___PUBSUB_POSTOFFICE.filter.publish & flags))
@@ -33276,6 +33305,7 @@ is_special_message:
   FIO_LOG_DDEBUG2("%d (pubsub) internal subscription/ID message received",
                   fio_srv_pid());
   switch (flags) {
+  case FIO___PUBSUB_SPECIAL: /* run generic command on root */ break;
   case FIO___PUBSUB_SUB:
     fio_subscribe(.io = m->data.io,
                   .channel = m->data.channel,
@@ -38307,6 +38337,12 @@ static void fio___http_default_on_eventsource(fio_http_s *h,
                                               fio_buf_info_s data) {
   (void)h, (void)id, (void)event, (void)data;
 }
+/** Called when an EventSource event is received. */
+static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
+                                                       fio_buf_info_s id,
+                                                       fio_buf_info_s event,
+                                                       fio_buf_info_s data);
+
 /** Called when an EventSource reconnect event requests an ID. */
 static void fio___http_default_on_eventsource_reconnect(fio_http_s *h,
                                                         fio_buf_info_s id) {
@@ -38335,7 +38371,9 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
   if (!s->on_message)
     s->on_message = fio___http_default_on_message;
   if (!s->on_eventsource)
-    s->on_eventsource = fio___http_default_on_eventsource;
+    s->on_eventsource = (s->on_message == fio___http_default_on_message
+                             ? fio___http_default_on_eventsource
+                             : fio___http_default_on_eventsource_redirect);
   if (!s->on_eventsource_reconnect)
     s->on_eventsource_reconnect = fio___http_default_on_eventsource_reconnect;
   if (!s->on_ready)
@@ -38477,6 +38515,20 @@ typedef struct {
 #include FIO_INCLUDE_FILE
 
 #undef FIO___RECURSIVE_INCLUDE
+
+/* *****************************************************************************
+Revisit defaults
+***************************************************************************** */
+
+/** Called when an EventSource event is received. */
+static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
+                                                       fio_buf_info_s id,
+                                                       fio_buf_info_s event,
+                                                       fio_buf_info_s data) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  c->settings->on_message(h, data, 1);
+  (void)h, (void)id, (void)event, (void)data;
+}
 
 /* *****************************************************************************
 HTTP Request handling / handling
@@ -43049,7 +43101,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
     FIO_ASSERT(*p == stop || p == p2,                                          \
-               "float parsing didn't stop at correct possition! %x != %x",     \
+               "float parsing didn't stop at correct position! %x != %x",      \
                *p,                                                             \
                stop);                                                          \
     if ((double)d == r || r == std) {                                          \
@@ -43226,7 +43278,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     clock_t start, stop;
     fio_memcpy15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
-    size_t r = 0;
+    volatile size_t r = 0;
     start = clock();
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;
@@ -46263,7 +46315,7 @@ Playhouse hashing (next risky version)
 ***************************************************************************** */
 
 typedef union {
-  uint64_t v[4] FIO_ALIGN(16);
+  uint64_t v[4] FIO_ALIGN(32);
 #ifdef __SIZEOF_INT128__
   __uint128_t u128[2];
 #endif

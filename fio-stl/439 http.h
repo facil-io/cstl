@@ -302,6 +302,12 @@ static void fio___http_default_on_eventsource(fio_http_s *h,
                                               fio_buf_info_s data) {
   (void)h, (void)id, (void)event, (void)data;
 }
+/** Called when an EventSource event is received. */
+static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
+                                                       fio_buf_info_s id,
+                                                       fio_buf_info_s event,
+                                                       fio_buf_info_s data);
+
 /** Called when an EventSource reconnect event requests an ID. */
 static void fio___http_default_on_eventsource_reconnect(fio_http_s *h,
                                                         fio_buf_info_s id) {
@@ -330,7 +336,9 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
   if (!s->on_message)
     s->on_message = fio___http_default_on_message;
   if (!s->on_eventsource)
-    s->on_eventsource = fio___http_default_on_eventsource;
+    s->on_eventsource = (s->on_message == fio___http_default_on_message
+                             ? fio___http_default_on_eventsource
+                             : fio___http_default_on_eventsource_redirect);
   if (!s->on_eventsource_reconnect)
     s->on_eventsource_reconnect = fio___http_default_on_eventsource_reconnect;
   if (!s->on_ready)
@@ -472,6 +480,20 @@ typedef struct {
 #include FIO_INCLUDE_FILE
 
 #undef FIO___RECURSIVE_INCLUDE
+
+/* *****************************************************************************
+Revisit defaults
+***************************************************************************** */
+
+/** Called when an EventSource event is received. */
+static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
+                                                       fio_buf_info_s id,
+                                                       fio_buf_info_s event,
+                                                       fio_buf_info_s data) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  c->settings->on_message(h, data, 1);
+  (void)h, (void)id, (void)event, (void)data;
+}
 
 /* *****************************************************************************
 HTTP Request handling / handling

@@ -197,12 +197,12 @@ int main(int argc, char const *argv[]) {
                                           NULL)
                        : NULL;
   /* support -b and -p for when a URL isn't provided */
-  if (fio_cli_get("-b"))
-    fio_cli_set_unnamed(0, fio_cli_get("-b"));
+  if (!fio_cli_get("-b"))
+    fio_cli_set(fio_cli_get("-b"), fio_cli_unnamed(0));
   if (fio_cli_get("-p")) {
     fio_buf_info_s tmp;
     FIO_STR_INFO_TMP_VAR(url, 2048);
-    tmp.buf = (char *)fio_cli_unnamed(0);
+    tmp.buf = (char *)fio_cli_get("-b");
     if (!tmp.buf)
       tmp.buf = (char *)"0.0.0.0";
     tmp.len = strlen(tmp.buf);
@@ -227,7 +227,7 @@ int main(int argc, char const *argv[]) {
 
   /* listen to incoming HTTP connections */
   FIO_ASSERT(
-      fio_http_listen(fio_cli_unnamed(0),
+      fio_http_listen(fio_cli_get("-b"),
                       .on_http = http_respond,
                       .on_authenticate_sse = FIO_HTTP_AUTHENTICATE_ALLOW,
                       .on_authenticate_websocket = FIO_HTTP_AUTHENTICATE_ALLOW,

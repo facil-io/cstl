@@ -153,6 +153,9 @@ SFUNC void fio_cli_end(void);
 /** Returns the argument's value as a NUL terminated C String. */
 SFUNC char const *fio_cli_get(char const *name);
 
+/** Returns the argument's value as a NUL terminated `fio_buf_info_s`. */
+SFUNC fio_buf_info_s fio_cli_get_str(char const *name);
+
 /** Returns the argument's value as an integer. */
 SFUNC int64_t fio_cli_get_i(char const *name);
 
@@ -205,13 +208,10 @@ CLI Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO_LEAK_COUNTER_DEF(fio_cli_str)
-FIO_LEAK_COUNTER_DEF(fio_cli_ary)
-FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
-
 /* *****************************************************************************
 String for CLI
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_str)
 
 typedef struct {
   uint8_t em;     /* embedded? const? how long? */
@@ -272,6 +272,7 @@ FIO_SFUNC fio_cli_str_s fio_cli_str_tmp(fio_buf_info_s s) {
 /* *****************************************************************************
 String array for CLI
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_ary)
 
 typedef struct {
   fio_cli_str_s *ary;
@@ -472,6 +473,17 @@ SFUNC char const *fio_cli_get(char const *name) {
     return fio_cli_unnamed(0);
   fio_buf_info_s key = FIO_BUF_INFO1((char *)name);
   return fio___cli_data_get(key).buf;
+}
+
+/** Returns the argument's value as a NUL terminated C String. */
+SFUNC fio_buf_info_s fio_cli_get_str(char const *name) {
+  if (!name)
+    goto unnamed_zero;
+  return fio___cli_data_get(FIO_BUF_INFO1((char *)name));
+unnamed_zero:
+  if (!fio___cli_data.unnamed.w)
+    return FIO_BUF_INFO0;
+  return fio___cli_ary_get(&fio___cli_data.unnamed, 0);
 }
 
 /** Returns the argument's value as an integer. */
@@ -866,6 +878,7 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
 /* *****************************************************************************
 CLI Help Output
 ***************************************************************************** */
+FIO_LEAK_COUNTER_DEF(fio_cli_help_writer)
 
 FIO_IFUNC fio_str_info_s fio___cli_write2line(fio_str_info_s d,
                                               fio_buf_info_s s,

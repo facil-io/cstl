@@ -1402,35 +1402,42 @@ Constant-Time Selectors
 ***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
-FIO_IFUNC uintptr_t fio_ct_true(uintptr_t cond) {
+FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
   // promise that the highest bit is set if any bits are set, than shift.
   return ((cond | (0 - cond)) >> ((sizeof(cond) << 3) - 1));
 }
 
 /** Returns 1 if the expression is false (input is zero). */
-FIO_IFUNC uintptr_t fio_ct_false(uintptr_t cond) {
+FIO_IFUNC uintmax_t fio_ct_false(uintmax_t cond) {
   // fio_ct_true returns only one bit, XOR will inverse that bit.
   return fio_ct_true(cond) ^ 1;
 }
 
 /** Returns `a` if `cond` is boolean and true, returns b otherwise. */
-FIO_IFUNC uintptr_t fio_ct_if_bool(uint8_t cond, uintptr_t a, uintptr_t b) {
+FIO_IFUNC uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
-  return (b ^ ((0 - (cond & 1)) & (a ^ b)));
+  return (b ^ (((uintmax_t)0ULL - (cond & 1)) & (a ^ b)));
 }
 
 /** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
-FIO_IFUNC uintptr_t fio_ct_if(uintptr_t cond, uintptr_t a, uintptr_t b) {
+FIO_IFUNC uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
 /** Returns `a` if a >= `b`. */
-FIO_IFUNC intptr_t fio_ct_max(intptr_t a_, intptr_t b_) {
+FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
-  const uintptr_t a = a_, b = b_;
+  const uintmax_t a = a_, b = b_;
   return (
-      intptr_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+}
+
+/** Returns absolute value. */
+FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintmax_t i = i_;
+  return (intmax_t)fio_ct_if_bool((i >> ((sizeof(i) << 3) - 1)), 0 - i, i);
 }
 
 /* *****************************************************************************
@@ -1446,8 +1453,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(16) = {0};
-    uint64_t ub[8] FIO_ALIGN(16) = {0};
+    uint64_t ua[8] FIO_ALIGN(64) = {0};
+    uint64_t ub[8] FIO_ALIGN(64) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -1479,8 +1486,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(16);
-    uint64_t ub[8] FIO_ALIGN(16);
+    uint64_t ua[8] FIO_ALIGN(64);
+    uint64_t ub[8] FIO_ALIGN(64);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)

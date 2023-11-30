@@ -250,16 +250,16 @@ typedef enum {
   FIO___PUBSUB_CLUSTER = (16 | 8 | 4 | 2),
   FIO___PUBSUB_REPLAY = 32, /* history replay message */
 
-  /* internal subscribe / unsubscribe messages */
-  FIO___PUBSUB_INTERNAL_MESSAGE = 128,
+  /* internal messages */
+  FIO___PUBSUB_SPECIAL = 128,
   FIO___PUBSUB_SUB = (128 | 1),
   FIO___PUBSUB_UNSUB = (128 | 2),
-  FIO___PUBSUB_IDENTIFY = (128 | 4),
-  FIO___PUBSUB_FORWARDER = (128 | 8),
+  FIO___PUBSUB_IDENTIFY = (128 | 4),  /* identify remote connection */
+  FIO___PUBSUB_FORWARDER = (128 | 8), /* forward to external engine */
   FIO___PUBSUB_PING = (128 | 16),
 
-  FIO___PUBSUB_HISTORY_START = (128 | 16),
-  FIO___PUBSUB_HISTORY_END = (128 | 32),
+  FIO___PUBSUB_HISTORY_START = (128 | 32),
+  FIO___PUBSUB_HISTORY_END = (128 | 64),
 } fio___pubsub_msg_flags_e;
 
 /** Used to publish the message exclusively to the root / master process. */
@@ -1588,7 +1588,7 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
                   fio_srv_pid(),
                   (int)m->data.is_json);
 
-  if (flags & FIO___PUBSUB_INTERNAL_MESSAGE)
+  if (flags & FIO___PUBSUB_SPECIAL)
     goto is_special_message;
 
   if ((FIO___PUBSUB_POSTOFFICE.filter.publish & flags))
@@ -1611,6 +1611,7 @@ is_special_message:
   FIO_LOG_DDEBUG2("%d (pubsub) internal subscription/ID message received",
                   fio_srv_pid());
   switch (flags) {
+  case FIO___PUBSUB_SPECIAL: /* run generic command on root */ break;
   case FIO___PUBSUB_SUB:
     fio_subscribe(.io = m->data.io,
                   .channel = m->data.channel,

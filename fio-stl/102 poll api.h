@@ -82,7 +82,7 @@ Polling API
 typedef struct fio_poll_s fio_poll_s;
 
 typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
+  /** callback for when data is available in the incoming buffer. */
   void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
   void (*on_ready)(void *udata);

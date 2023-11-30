@@ -71,6 +71,9 @@ Starting / Stopping the Server
 /** Stopping the server. */
 SFUNC void fio_srv_stop(void);
 
+/** Adds `workers` amount of workers to the root server process. */
+SFUNC void fio_srv_add_workers(int workers);
+
 /** Starts the server, using optional `workers` processes. This will BLOCK! */
 SFUNC void fio_srv_start(int workers);
 
@@ -1899,6 +1902,15 @@ SFUNC uint16_t fio_srv_workers(int workers) {
     workers += !workers;
   }
   return workers;
+}
+
+/** Adds `workers` amount of workers to the root server process. */
+SFUNC void fio_srv_add_workers(int workers) {
+  if (!workers || fio___srvdata.root_pid != fio___srvdata.pid)
+    return;
+  FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+  for (int i = 0; i < workers; ++i)
+    fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker);
 }
 
 /* Starts the server, using optional `workers` processes. This will BLOCK! */

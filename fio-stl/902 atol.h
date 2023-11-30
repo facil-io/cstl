@@ -404,7 +404,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
     FIO_ASSERT(*p == stop || p == p2,                                          \
-               "float parsing didn't stop at correct possition! %x != %x",     \
+               "float parsing didn't stop at correct position! %x != %x",      \
                *p,                                                             \
                stop);                                                          \
     if ((double)d == r || r == std) {                                          \
@@ -581,7 +581,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     clock_t start, stop;
     fio_memcpy15x(buffer, "1234567890.123", 14);
     buffer[14] = 0;
-    size_t r = 0;
+    volatile size_t r = 0;
     start = clock();
     for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
       char *pos = buffer;

@@ -631,6 +631,16 @@ void fio_srv_stop(void);
 
 Stopping the server.
 
+#### `fio_srv_add_workers`
+
+```c
+void fio_srv_add_workers(int workers);
+```
+
+Adds `workers` amount of workers to the root server process.
+
+May be called by the root process during run-time to add more worker processes.
+
 #### `fio_srv_is_running`
 
 ```c
